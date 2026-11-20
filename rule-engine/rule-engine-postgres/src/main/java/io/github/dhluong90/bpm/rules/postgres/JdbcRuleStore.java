@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.postgres;
 import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
 import io.github.dhluong90.bpm.rules.api.LifecycleAction;
 import io.github.dhluong90.bpm.rules.api.RuleSetExistsException;
+import io.github.dhluong90.bpm.rules.api.RetirementRequest;
 import io.github.dhluong90.bpm.rules.api.RuleSetSummary;
 import io.github.dhluong90.bpm.rules.api.VersionSummary;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
@@ -39,7 +40,8 @@ public final class JdbcRuleStore implements RuleStore {
             v.tenant_id, v.id, v.rule_set_id, s.name, v.version_num, v.status, v.hit_policy, v.effective_from,
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
-            v.approval_comment, v.created_by, v.created_at, v.retired_at
+            v.approval_comment, v.created_by, v.created_at, v.retired_at, v.retire_requested_by,
+            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version
             """;
 
     /**
@@ -189,10 +191,17 @@ public final class JdbcRuleStore implements RuleStore {
         int updated = jdbc.sql("""
                 UPDATE rle_version SET status = :status, effective_from = :effectiveFrom, lock_version = :lock,
                   requested_by = :requestedBy, requested_at = :requestedAt, approved_by = :approvedBy,
-                  approved_at = :approvedAt, approval_comment = :comment, retired_at = :retiredAt
+                  approved_at = :approvedAt, approval_comment = :comment, retired_at = :retiredAt,
+                  retire_requested_by = :retireBy, retire_requested_at = :retireAt, retire_reason = :retireReason,
+                  retire_confirm_no_version = :retireConfirm
                 WHERE tenant_id = :tenant AND id = :id AND lock_version = :expected
                 """)
                 .param("retiredAt", timestamp(v.retiredAt()))
+                .param("retireBy", v.retirementRequest() == null ? null : v.retirementRequest().requestedBy())
+                .param("retireAt", v.retirementRequest() == null ? null : timestamp(v.retirementRequest().requestedAt()))
+                .param("retireReason", v.retirementRequest() == null ? null : v.retirementRequest().reason())
+                .param("retireConfirm", v.retirementRequest() == null ? null
+                        : v.retirementRequest().confirmNoVersionInEffect())
                 .param("status", v.status().name()).param("effectiveFrom", timestamp(v.effectiveFrom()))
                 .param("lock", v.lockVersion()).param("requestedBy", v.requestedBy())
                 .param("requestedAt", timestamp(v.requestedAt())).param("approvedBy", v.approvedBy())
@@ -306,7 +315,7 @@ public final class JdbcRuleStore implements RuleStore {
         return jdbc.sql("""
                 SELECT s.name, v.version_num, v.status, v.hit_policy, v.effective_from, v.lock_version,
                   v.canonical_hash, v.created_by, v.created_at, v.requested_by, v.requested_at, v.approved_by,
-                  v.approved_at
+                  v.approved_at, v.retire_requested_by
                 FROM rle_version v
                 JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
                 WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId
@@ -320,7 +329,8 @@ public final class JdbcRuleStore implements RuleStore {
                         VersionStatus.valueOf(rs.getString("status")), rs.getString("hit_policy"),
                         instant(rs, "effective_from"), rs.getLong("lock_version"), rs.getString("canonical_hash"),
                         rs.getString("created_by"), instant(rs, "created_at"), rs.getString("requested_by"),
-                        instant(rs, "requested_at"), rs.getString("approved_by"), instant(rs, "approved_at")))
+                        instant(rs, "requested_at"), rs.getString("approved_by"), instant(rs, "approved_at"),
+                        rs.getString("retire_requested_by")))
                 .list();
     }
 
@@ -330,10 +340,13 @@ public final class JdbcRuleStore implements RuleStore {
         jdbc.sql("""
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
                   reason, superseded_by, approval_mode, no_version_in_effect, lock_version, occurred_at,
-                  canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs)
+                  canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs,
+                  retire_requested_by)
                 VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :none,
-                  :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb))
+                  :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb),
+                  :retireRequestedBy)
                 """)
+                .param("retireRequestedBy", row.retireRequestedBy())
                 .param("supersededBy", row.supersededBy()).param("mode", row.approvalMode())
                 .param("none", row.noVersionInEffect())
                 .param("tenant", row.tenantId()).param("id", row.id()).param("versionId", row.versionId())
@@ -380,15 +393,13 @@ public final class JdbcRuleStore implements RuleStore {
 
     @Override
     public List<HistoryRow> history(String tenantId, String versionId) {
-        // Only the actions this release writes; the four-eyes retirement actions arrive with RLE-038.
         return jdbc.sql("""
                 SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
                   approval_mode, no_version_in_effect, lock_version, occurred_at, canonical_hash,
                   previous_canonical_hash, acknowledged_warnings::text AS acknowledged,
-                  masked_by_default_inputs::text AS masked_by_default
+                  masked_by_default_inputs::text AS masked_by_default, retire_requested_by
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
-                  AND action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN','DRAFT_UPDATED','RETIRED')
                 ORDER BY occurred_at, id
                 """)
                 .param("tenant", tenantId).param("versionId", versionId)
@@ -404,7 +415,7 @@ public final class JdbcRuleStore implements RuleStore {
                             rs.getString("reason"), rs.getLong("lock_version"), instant(rs, "occurred_at"), superseded,
                             rs.getString("approval_mode"), noVersionInEffect, rs.getString("canonical_hash"),
                             rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
-                            strings(rs.getString("masked_by_default")));
+                            strings(rs.getString("masked_by_default")), rs.getString("retire_requested_by"));
                 })
                 .list();
     }
@@ -445,7 +456,9 @@ public final class JdbcRuleStore implements RuleStore {
         }
         return jdbc.sql("""
                 UPDATE rle_version old
-                   SET status = 'RETIRED', retired_at = :now, lock_version = old.lock_version + 1
+                   SET status = 'RETIRED', retired_at = :now, lock_version = old.lock_version + 1,
+                       retire_requested_by = NULL, retire_requested_at = NULL, retire_reason = NULL,
+                       retire_confirm_no_version = NULL
                   FROM (SELECT o.tenant_id, o.id, s.name, max(n.version_num) AS superseded_by
                           FROM rle_version o
                           JOIN rle_version n ON n.tenant_id = o.tenant_id AND n.rule_set_id = o.rule_set_id
@@ -584,7 +597,17 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("source_document"), rs.getString("source_hash"), rs.getLong("lock_version"),
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
-                instant(rs, "created_at"), instant(rs, "retired_at"));
+                instant(rs, "created_at"), instant(rs, "retired_at"), retirementRequest(rs));
+    }
+
+    /** The pending four-eyes retirement of a version row (V17, RLE-038), or null; the columns are set together. */
+    private static RetirementRequest retirementRequest(ResultSet rs) throws SQLException {
+        String requestedBy = rs.getString("retire_requested_by");
+        if (requestedBy == null) {
+            return null;
+        }
+        return new RetirementRequest(requestedBy, instant(rs, "retire_requested_at"), rs.getString("retire_reason"),
+                rs.getBoolean("retire_confirm_no_version"));
     }
 
     /**

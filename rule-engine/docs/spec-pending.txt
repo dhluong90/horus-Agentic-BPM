@@ -9,5 +9,4 @@ RLE-031 M1
 # RLE-032: the JSON and DMN round trips keep the hash (#233); YAML export and format=xlsx are not tested yet.
 RLE-032 M1
 RLE-033 M1
-RLE-038 M3
 RLE-053 M1

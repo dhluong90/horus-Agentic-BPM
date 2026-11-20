@@ -11,5 +11,9 @@ public enum LifecycleAction {
     /** The requester took their own publication request back (PD-089, RLE-046). */
     WITHDRAWN,
     /** The author replaced the draft's document in place (RLE-047); records the old and new canonical hash. */
-    DRAFT_UPDATED
+    DRAFT_UPDATED,
+    /** In four-eyes mode, a retirement was requested; the version stays published and serving (RLE-038). */
+    RETIRE_REQUESTED,
+    /** A pending retirement request was withdrawn with a reason; the version stays published (RLE-038). */
+    RETIRE_CANCELLED
 }

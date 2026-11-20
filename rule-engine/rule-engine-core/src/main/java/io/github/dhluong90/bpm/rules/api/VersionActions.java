@@ -23,6 +23,10 @@ public final class VersionActions {
     public static final String RETIRE = "retire";
     /** {@code :withdraw}: the requester takes their own publication request back (PD-089). */
     public static final String WITHDRAW = "withdraw";
+    /** {@code :confirm-retire}: a second approver confirms a pending four-eyes retirement (RLE-038). */
+    public static final String CONFIRM_RETIRE = "confirm-retire";
+    /** {@code :cancel-retire}: an approver withdraws a pending retirement request, with a reason (RLE-038). */
+    public static final String CANCEL_RETIRE = "cancel-retire";
 
     private VersionActions() {
     }
@@ -40,6 +44,24 @@ public final class VersionActions {
      */
     public static List<String> allowed(VersionStatus status, String createdBy, String requestedBy, String caller,
             Set<String> permissions) {
+        return allowed(status, createdBy, requestedBy, null, caller, permissions);
+    }
+
+    /**
+     * Computes the allowed actions of a version that may have a pending retirement.
+     *
+     * @param status the version's status
+     * @param createdBy the version's author, or null
+     * @param requestedBy the publication requester, or null
+     * @param retireRequestedBy who requested the pending retirement, or null when none is pending
+     * @param caller the caller's id
+     * @param permissions the caller's {@code rules:*} permissions
+     * @return the actions in a fixed order: {@code request-publish}, {@code approve}, {@code reject},
+     *     {@code withdraw}, then {@code retire}, or {@code confirm-retire} and {@code cancel-retire} while a
+     *     retirement is pending
+     */
+    public static List<String> allowed(VersionStatus status, String createdBy, String requestedBy,
+            String retireRequestedBy, String caller, Set<String> permissions) {
         List<String> actions = new ArrayList<>(2);
         switch (status) {
             case DRAFT -> {
@@ -63,7 +85,15 @@ public final class VersionActions {
             }
             case PUBLISHED -> {
                 if (permissions.contains(Permissions.APPROVE)) {
-                    actions.add(RETIRE);
+                    if (retireRequestedBy == null) {
+                        actions.add(RETIRE);
+                    } else {
+                        // Four eyes on retirement: the requester never confirms their own request (RLE-038).
+                        if (caller != null && !caller.equals(retireRequestedBy)) {
+                            actions.add(CONFIRM_RETIRE);
+                        }
+                        actions.add(CANCEL_RETIRE);
+                    }
                 }
             }
             case RETIRED -> {

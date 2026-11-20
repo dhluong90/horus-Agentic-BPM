@@ -837,6 +837,17 @@ paths:
         version, or null). A version that only starts later does not count as in effect. The history
         entry and the event record `noVersionInEffect: true`. The transaction locks the rule set row first,
         so two concurrent retirements of its last versions run one after the other.
+
+        In the mode `lifecycle.retire-approval: four-eyes`, and for the last version in effect under
+        `lifecycle.retire-last-version: four-eyes`, this call only records a retirement request (PD-080,
+        `RLE-038`). The answer is `200` with the version still `PUBLISHED` and serving, `retireRequestedBy`,
+        `retireRequestedAt` and `retireReason` set and `lockVersion` incremented. One history entry
+        `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event
+        (`rule-engine/api/schema/rules.version.retire-requested.v1.schema.json`) are written. The
+        last-version rule applies to the request as above, except under `retire-last-version: four-eyes`,
+        where the second approver is the control. A second request while one is pending is
+        `409 INVALID_STATE`. Another `rules:approve` holder confirms with `:confirm-retire`; any holder
+        withdraws it with `:cancel-retire`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -851,6 +862,98 @@ paths:
               $ref: '#/components/schemas/RetireRequest'
             example:
               reason: Tet promotion ended
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:confirm-retire:
+    post:
+      tags: [rule-sets]
+      operationId: confirmRetire
+      summary: Confirm a pending retirement as the second approver
+      description: |
+        Permission `rules:approve`, checked before the body is read (PD-080, DESIGN section 3.3,
+        `RLE-038`). Only a version with a pending retirement request can be confirmed; otherwise
+        `409 INVALID_STATE`. The requester of the retirement gets `403 SELF_APPROVAL_FORBIDDEN` and
+        nothing changes.
+
+        The version becomes `RETIRED` with the same effects as `:retire` in `single` mode: `retiredAt`
+        set to the transaction's clock, older versions in effect retired as superseded, the cache epoch
+        moved, and evaluation stops selecting it on every replica. The history entry `RETIRED` and the
+        `rules.version.retired.v1` event record `approvalMode: four-eyes`, the confirmer as actor, the
+        requester (`retireRequestedBy` in the history, `requestedBy` in the event) and the reason of the
+        request.
+
+        The last-version rule (PD-101) is checked again at confirmation: when no other version would
+        remain in effect, `retire-last-version: confirm` needs `confirmNoVersionInEffect: true` on the
+        request or on this call, else `409 LAST_VERSION_IN_EFFECT`; `refuse` always answers
+        `409 LAST_VERSION_IN_EFFECT`; `four-eyes` needs nothing more. A version that a newer version in
+        effect now supersedes is `409 INVALID_STATE`.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`, and a stale
+        `If-Match` is `409 VERSION_CONFLICT`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRetireRequest'
+            example: {}
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:cancel-retire:
+    post:
+      tags: [rule-sets]
+      operationId: cancelRetire
+      summary: Withdraw a pending retirement request, with a reason
+      description: |
+        Permission `rules:approve`, checked before the body is read; any holder may cancel, the
+        requester included (DESIGN section 3.3, `RLE-038`). Only a version with a pending retirement
+        request can be cancelled; otherwise `409 INVALID_STATE`. The reason is required: blank, or
+        longer than `lifecycle.reason-max-length` (default 2,000 characters), is `400 INPUT_INVALID`.
+
+        The version stays `PUBLISHED` and serving, its request fields are cleared and `lockVersion`
+        is incremented. One history entry `RETIRE_CANCELLED` records the actor and the reason; no event
+        is written. `Idempotency-Key` and `If-Match` are required as on `:confirm-retire`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRetireRequest'
+            example:
+              reason: Promotion extended to March
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -1374,6 +1477,20 @@ components:
           type: [string, 'null']
           format: date-time
           description: When the version was retired, by hand or as superseded; null while it is not retired
+        retireRequestedBy:
+          type: [string, 'null']
+          description: |
+            Who requested the pending four-eyes retirement (`RLE-038`); null when none is pending. The
+            version is still `PUBLISHED` and serving while it is pending
+        retireRequestedAt: { type: [string, 'null'], format: date-time }
+        retireReason:
+          type: [string, 'null']
+          description: The reason of the pending retirement request; null when none is pending
+        retireConfirmsNoVersionInEffect:
+          type: boolean
+          description: |
+            True when the pending request accepted that no version may remain in effect (PD-101), so its
+            confirmation needs no `confirmNoVersionInEffect` of its own; false when none is pending
         createdBy:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
@@ -1429,11 +1546,13 @@ components:
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
         `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
         with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`;
-        `retire` on a `PUBLISHED` version with `rules:approve`.
+        `retire` on a `PUBLISHED` version with `rules:approve` and no pending retirement; while a
+        retirement is pending, `confirm-retire` for a `rules:approve` holder who is not its requester
+        and `cancel-retire` for any `rules:approve` holder (`RLE-038`).
         A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject, withdraw, retire]
+        enum: [request-publish, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -1554,6 +1673,9 @@ components:
         requestedAt: { type: [string, 'null'], format: date-time }
         approvedBy: { type: [string, 'null'] }
         approvedAt: { type: [string, 'null'], format: date-time }
+        retireRequestedBy:
+          type: [string, 'null']
+          description: Who requested the pending four-eyes retirement (`RLE-038`); null when none is pending
         allowedActions:
           $ref: '#/components/schemas/AllowedActions'
     VersionPage:
@@ -1574,7 +1696,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -1595,6 +1717,9 @@ components:
         noVersionInEffect:
           type: [boolean, 'null']
           description: Present on a `RETIRED` entry only; true when the retirement left the rule set with no version in effect (PD-101)
+        retireRequestedBy:
+          type: [string, 'null']
+          description: Present on a `RETIRED` entry only; in `four-eyes` mode the requester whose request the actor confirmed, else null (`RLE-038`)
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
         canonicalHash:
@@ -1651,6 +1776,24 @@ components:
           description: |
             True to accept that the retirement leaves the rule set with no version in effect (PD-101);
             needed when the version is the last one in effect, unless the host refuses it outright
+    ConfirmRetireRequest:
+      type: object
+      properties:
+        confirmNoVersionInEffect:
+          type: boolean
+          default: false
+          description: |
+            True to accept that the retirement leaves the rule set with no version in effect (PD-101),
+            when the request did not already accept it
+    CancelRetireRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Why the retirement request is withdrawn; stored in the history
     RejectRequest:
       type: object
       required: [reason]

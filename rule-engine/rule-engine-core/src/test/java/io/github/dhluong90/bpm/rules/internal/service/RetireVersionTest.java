@@ -405,12 +405,12 @@ class RetireVersionTest {
                 new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true))
                 .isInstanceOf(LastVersionInEffectException.class).hasMessageContaining("refuse");
         assertThat(retiredEvents()).isEmpty();
-        // and four-eyes, not built yet, stops start-up like an unknown value
-        assertThatThrownBy(() -> EngineSettings.defaults().withRetireLastVersion("four-eyes"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("horus.bpm.lifecycle.retire-last-version").hasMessageContaining("four-eyes");
+        // and four-eyes is accepted (RLE-038), while an unknown value stops start-up naming the three values
+        assertThat(EngineSettings.defaults().withRetireLastVersion("four-eyes").retireLastVersion()).isEqualTo("four-eyes");
         assertThatThrownBy(() -> EngineSettings.defaults().withRetireLastVersion("ask"))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("confirm or refuse");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
+                .hasMessageContaining("confirm, refuse or four-eyes");
         assertThatThrownBy(() -> refusing.versionService().retire("tet-fee-waiver", 1,
                 new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true))
                 .isInstanceOfSatisfying(LastVersionInEffectException.class,
@@ -558,11 +558,11 @@ class RetireVersionTest {
 
     @Test
     void RLE_026_lifecycle_settings_are_validated_at_start_up() {
-        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system:supersession", "four-eyes"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("horus.bpm.lifecycle.retire-approval").hasMessageContaining("M3");
+        assertThat(EngineSettings.defaults().withLifecycle("system:supersession", "four-eyes").retireApproval())
+                .isEqualTo("four-eyes");
         assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system:supersession", "dual"))
-                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must be single");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("horus.bpm.lifecycle.retire-approval").hasMessageContaining("must be single or four-eyes");
         assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle(" ", "single"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("horus.bpm.rules.lifecycle.system-actor");

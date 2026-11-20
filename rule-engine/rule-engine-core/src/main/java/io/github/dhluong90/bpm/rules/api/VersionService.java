@@ -135,7 +135,12 @@ public interface VersionService {
 
     /**
      * Takes a published version out of service by hand (ADR-0025, PD-080, RLE-026). In the default
-     * {@code lifecycle.retire-approval: single} mode one holder of {@code rules:approve} with a reason is enough. The
+     * {@code lifecycle.retire-approval: single} mode one holder of {@code rules:approve} with a reason is enough. In
+     * {@code four-eyes} mode, and for the last version in effect with {@code lifecycle.retire-last-version: four-eyes},
+     * this only records a retirement request: the version stays {@code PUBLISHED} and serving, one
+     * {@code RETIRE_REQUESTED} history row and one {@code rules.version.retire-requested.v1} event are written, and
+     * {@link #confirmRetire} by another approver retires it (RLE-038); a second request while one is pending is
+     * {@link InvalidStateException}. The
      * version becomes {@code RETIRED} from the transaction's clock on: evaluation stops selecting it on every replica,
      * while a clock before it still does and logged decisions still replay. Older published versions it had
      * superseded are retired with it, so a retire never brings an older version back. Writes one {@code RETIRED}
@@ -166,6 +171,43 @@ public interface VersionService {
      * @throws LastVersionInEffectException when it is the last version in effect and that is not confirmed or allowed
      */
     RuleSetVersion retire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect);
+
+    /**
+     * Confirms a pending retirement as the second approver (PD-080, RLE-038). The version becomes {@code RETIRED} with
+     * the same effects as a retirement in {@code single} mode, and the history row and the
+     * {@code rules.version.retired.v1} event record {@code approvalMode: four-eyes}, the requester, the confirmer and
+     * the reason of the request. The last-version rule (PD-101) is checked again at this moment: when no other
+     * version would remain in effect, the request or this call must carry the confirmation, and a host with
+     * {@code retire-last-version: refuse} refuses it.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key and the optimistic lock (required); a comment is not used
+     * @param confirmNoVersionInEffect true to accept that no version will be in effect afterwards
+     * @return the version, now retired
+     * @throws InvalidStateException when no retirement is pending, or a newer version in effect supersedes it
+     * @throws SelfApprovalForbiddenException when the caller requested the retirement
+     * @throws LastVersionInEffectException when it is the last version in effect and that is not confirmed or allowed
+     * @throws PreconditionRequiredException when no lock version is given
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion confirmRetire(String ruleSet, int version, WriteOptions options, boolean confirmNoVersionInEffect);
+
+    /**
+     * Withdraws a pending retirement request with a reason (RLE-038). The version stays {@code PUBLISHED} and serving;
+     * one {@code RETIRE_CANCELLED} history row records who withdrew it and why. Any holder of {@code rules:approve},
+     * the requester included, may withdraw it.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, the optimistic lock (required) and the reason in {@link WriteOptions#comment()}
+     * @return the version, still published, with no pending retirement
+     * @throws InputInvalidException when the reason is blank or longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when no retirement is pending
+     * @throws PreconditionRequiredException when no lock version is given
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion cancelRetire(String ruleSet, int version, WriteOptions options);
 
     /**
      * Takes the caller's own publication request back (PD-089, RLE-046): a pending version returns to {@code DRAFT},

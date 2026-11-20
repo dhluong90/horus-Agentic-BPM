@@ -140,9 +140,16 @@ public final class EngineDefaults {
 
     /**
      * Default of {@code horus.bpm.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
-     * reason retires a version. The other value, {@code four-eyes}, arrives in M3 (RLE-038).
+     * reason retires a version. The other value is {@link #RETIRE_APPROVAL_FOUR_EYES}.
      */
     public static final String RETIRE_APPROVAL = "single";
+
+    /**
+     * {@code horus.bpm.lifecycle.retire-approval: four-eyes} (PD-080, RLE-038): a retirement is a request that a second
+     * {@code rules:approve} holder confirms; the version serves until then. Also the approval mode recorded on a
+     * confirmed retirement.
+     */
+    public static final String RETIRE_APPROVAL_FOUR_EYES = "four-eyes";
 
     /**
      * Default of {@code horus.bpm.lifecycle.retire-last-version} (PD-101): retiring the version in effect, when no other
@@ -152,6 +159,12 @@ public final class EngineDefaults {
 
     /** {@code horus.bpm.lifecycle.retire-last-version: refuse}: the last version in effect is never retired by hand. */
     public static final String RETIRE_LAST_REFUSE = "refuse";
+
+    /**
+     * {@code horus.bpm.lifecycle.retire-last-version: four-eyes} (PD-101 option 2): retiring the last version in effect
+     * becomes a request that a second approver confirms, whatever {@code retire-approval} says.
+     */
+    public static final String RETIRE_LAST_FOUR_EYES = "four-eyes";
 
     /** Default of {@code horus.bpm.rules.lifecycle.sweep-interval}: how often superseded versions are retired. */
     public static final java.time.Duration SWEEP_INTERVAL = java.time.Duration.ofMinutes(1);

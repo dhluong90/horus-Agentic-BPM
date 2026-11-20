@@ -29,15 +29,49 @@ import java.util.List;
  * @param acknowledgedWarnings on {@code APPROVED}: the warnings the approver accepted (RLE-053), else empty
  * @param maskedByDefaultInputs on {@code APPROVED}: the inputs masked by the tenant's {@code decision-log.mask-default}
  *     rather than by their declaration at approval (PD-104), else empty
+ * @param retireRequestedBy on a {@code RETIRED} row in {@code four-eyes} mode, who requested the retirement the actor
+ *     confirmed (RLE-038, column {@code retire_requested_by}, V17); otherwise null
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
         Instant occurredAt, Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
-        String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
+        String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs,
+        String retireRequestedBy) {
 
     public HistoryRow {
         acknowledgedWarnings = acknowledgedWarnings == null ? List.of() : List.copyOf(acknowledgedWarnings);
         maskedByDefaultInputs = maskedByDefaultInputs == null ? List.of() : List.copyOf(maskedByDefaultInputs);
+    }
+
+    /**
+     * Creates a row that names no retirement requester.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param maskedByDefaultInputs see the record
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
+            Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
+            String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings,
+            List<String> maskedByDefaultInputs) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy,
+                approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings,
+                maskedByDefaultInputs, null);
     }
 
     /**
@@ -142,6 +176,6 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
     public VersionHistoryEntry toEntry() {
         return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
                 supersededBy, approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings,
-                maskedByDefaultInputs);
+                maskedByDefaultInputs, retireRequestedBy);
     }
 }
