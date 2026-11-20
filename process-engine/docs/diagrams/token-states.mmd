@@ -16,6 +16,7 @@ stateDiagram-v2
     WAITING_USER --> ACTIVE: task completed
     ACTIVE --> WAITING_ASYNC: TX1 claims async job
     WAITING_ASYNC --> ACTIVE: TX2 accepts result
+    WAITING_ASYNC --> WAITING_ASYNC: business error or memory failure, incident opened
     ACTIVE --> WAITING_TIMER: timer step
     WAITING_TIMER --> ACTIVE: timer fires
     ACTIVE --> JOINED: arrives at join, instance row locked, counted per scope token

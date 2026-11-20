@@ -43,7 +43,7 @@ final class AgentAudit {
         return out;
     }
 
-    private static String mask(String tenantId, Object value, InputMasker masker) {
+    static String mask(String tenantId, Object value, InputMasker masker) {
         if (value == null) {
             return InputMasker.REDACTED;
         }

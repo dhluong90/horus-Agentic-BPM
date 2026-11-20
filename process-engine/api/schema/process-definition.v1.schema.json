@@ -237,6 +237,30 @@
             "reviewer": { "description": "Who reviews a refused answer. The review is always four-eyes and cannot be switched off.", "$ref": "#/$defs/assignee" }
           }
         },
+        "memory": {
+          "description": "Facts from earlier agent steps of the same instance that this step's agent receives: only the listed fields of each step's recorded result (an accepted answer, or a reviewer's answer after a refusal), resolved once when the step is reached and the same on every attempt. The host bounds the entries (agents.memory.max-entries, 16) and the size (agents.memory.max-bytes, 16 KiB of canonical JSON); a larger memory fails the step with AGENT_MEMORY_TOO_LARGE, and a required entry with no recorded result fails it with AGENT_MEMORY_MISSING.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": ["from", "fields", "as"],
+            "additionalProperties": false,
+            "properties": {
+              "from": { "description": "An upstream agentTask step of this process whose output schema declares the fields.", "type": "string", "minLength": 1, "maxLength": 200 },
+              "fields": {
+                "description": "Field paths of that step's output, dot-separated for nested objects, at most four levels. Wildcards are never allowed.",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "uniqueItems": true,
+                "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}(\\.[A-Za-z_][A-Za-z0-9_]{0,63}){0,3}$" }
+              },
+              "as": { "description": "The name the fields are passed under.", "$ref": "#/$defs/identifier" },
+              "required": { "description": "Without a recorded result, true fails the step with AGENT_MEMORY_MISSING; false leaves the entry out and history lists it as missing.", "type": "boolean", "default": true },
+              "includeMasked": { "description": "Allows fields the source step's output schema marks mask: true. The agent receives them in plain text, history keeps keyed fingerprints, and the approval shows the flag.", "type": "boolean", "default": false }
+            }
+          }
+        },
         "resultVariable": { "$ref": "#/$defs/identifier" },
         "timeout": { "$ref": "#/$defs/duration" },
         "retry": { "$ref": "#/$defs/retry" },

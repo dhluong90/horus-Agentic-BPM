@@ -87,7 +87,8 @@ public interface JobStore {
     }
 
     /**
-     * @param job a new {@code DUE} job
+     * @param job a new {@code DUE} job, or a {@code FAILED} one for an agent step whose memory failed before any call
+     *     (#101): it is never claimed, and its incident is opened in the same transaction
      * @param now creation time
      */
     void insertJob(JobRow job, Instant now);

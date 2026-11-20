@@ -1188,6 +1188,7 @@ components:
         reason:
           type: string
           description: >-
-            Present on `STEP_FAILED`, for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`,
+            Present on `STEP_FAILED`, for example `DECISION_NO_MATCH`, `STEP_LIMIT`,
             `NO_PATH` (an exclusive gateway with no true condition and no default flow) or `CONDITION_ERROR`
-            (a condition that compares values of different types or currencies)
+            (a condition that compares values of different types or currencies). A handler's business error is
+            not a `STEP_FAILED`: the step waits with an incident `UNHANDLED_BUSINESS_ERROR`

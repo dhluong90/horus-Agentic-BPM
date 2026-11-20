@@ -17,6 +17,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
@@ -396,6 +397,35 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                             e.nodeId(), e.tokenId(), e.actor(), e.attemptId(), Values.write(e.details()))
                     .update();
         }
+    }
+
+    @Override
+    public void recordStepResult(StepResultRow r) {
+        jdbc.sql("INSERT INTO pre_step_result (tenant_id, instance_id, node_id, definition_id, result_json, source, "
+                        + "activity_instance_id, recorded_at) VALUES (?, ?, ?, ?, CAST(? AS jsonb), ?, ?, ?) "
+                        + "ON CONFLICT (tenant_id, instance_id, node_id) DO UPDATE SET definition_id = "
+                        + "EXCLUDED.definition_id, result_json = EXCLUDED.result_json, source = EXCLUDED.source, "
+                        + "activity_instance_id = EXCLUDED.activity_instance_id, recorded_at = EXCLUDED.recorded_at")
+                .params(r.tenantId(), r.instanceId(), r.nodeId(), r.definitionId(), r.resultJson(), r.source(),
+                        r.activityInstanceId(), ts(r.recordedAt()))
+                .update();
+    }
+
+    @Override
+    public Map<String, String> stepResults(String tenant, String instanceId, java.util.Collection<String> nodeIds) {
+        if (nodeIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> results = new java.util.LinkedHashMap<>();
+        List<Object> params = new ArrayList<>(List.of(tenant, instanceId));
+        params.addAll(nodeIds);
+        String marks = String.join(", ", java.util.Collections.nCopies(nodeIds.size(), "?"));
+        jdbc.sql("SELECT node_id, result_json::text AS result FROM pre_step_result WHERE tenant_id = ? AND "
+                        + "instance_id = ? AND node_id IN (" + marks + ")")
+                .params(params)
+                .query((rs, n) -> results.put(rs.getString("node_id"), rs.getString("result")))
+                .list();
+        return results;
     }
 
     @Override

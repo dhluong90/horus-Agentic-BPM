@@ -148,7 +148,7 @@ final class TestEngine {
                         .map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name), b.extraAdapterNames.stream())
                         .collect(Collectors.toSet()), b.agents.stream()
                         .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
-                b.outputSchemas, b.inputMasker, b.labelLimits);
+                b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
         List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();
         runners.add(new io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner(b.adapters.stream()
@@ -205,6 +205,8 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.spi.InputMasker.REDACT;
         private io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits labelLimits =
                 io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits.DEFAULTS;
+        private io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits memoryLimits =
+                io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits.DEFAULTS;
 
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
@@ -293,6 +295,11 @@ final class TestEngine {
 
         Builder labelLimits(io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits value) {
             labelLimits = value;
+            return this;
+        }
+
+        Builder memoryLimits(io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits value) {
+            memoryLimits = value;
             return this;
         }
 
@@ -402,7 +409,8 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_incident, pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
+                + "TRUNCATE pre_step_result, pre_incident, pre_timer, pre_history, pre_task, pre_token, pre_instance, "
+                + "pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();
     }

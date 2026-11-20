@@ -407,9 +407,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M2
 - **Given:** Definition `loan-disbursement` with a local `serviceTask` `check-limit` whose handler returns `HandlerResult.BusinessError("LIMIT_EXCEEDED", "Daily limit reached")`.
 - **When:** An instance reaches `check-limit`.
-- **Then:** The step transaction commits an incident with `error_code = UNHANDLED_BUSINESS_ERROR` and the business code `LIMIT_EXCEEDED` in `cause_summary`; the token stays on `check-limit`; no retry is scheduled because a business error is not retryable; `:retry` after the host fixes the data runs the handler again with a new `attemptId`.
+- **Then:** The step transaction commits an incident with `error_code = UNHANDLED_BUSINESS_ERROR` and the business code `LIMIT_EXCEEDED` in `cause_summary`, `INCIDENT_RAISED` in history with `businessCode: LIMIT_EXCEEDED`, and `processes.incident.raised.v1`. The token stays on `check-limit` in `WAITING_ASYNC`, the instance stays `RUNNING`, and the call that reached the step (here the start) succeeds. No retry is scheduled because a business error is not retryable. The handler's message ("Daily limit reached") is never stored. Variables the earlier steps of the same transaction set are kept. `:retry` after the host fixes the data runs the handler again with a new `attemptId` (#68, `PRE-078`).
 - **Example:** `BusinessError(LIMIT_EXCEEDED) -> incident UNHANDLED_BUSINESS_ERROR, token on check-limit`.
-- **Test ID:** `PRE_040_business_error_result_opens_incident`
+- **Test ID:** `PRE_040_business_error_result_opens_incident`, `PRE_040_a_business_error_keeps_the_token_on_the_step_and_asks_for_an_incident`
 
 ### PRE-041 Cancelling an instance during an adapter call discards the late result
 - **Traces to:** `TR-ASY-01`, `TR-ASY-02`, `TR-STD-12`
@@ -728,3 +728,102 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, intermediate throw event). No stage label names a sprint or a date.
 - **Example:** `5 unsupported -> 422 with stages S1, S1, S2, S3, not planned; camunda:class -> warning`.
 - **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`
+
+---
+
+## Business Errors and Late Results (#55)
+
+### PRE-111 An agent or remote step's business error fails its job on the first attempt and opens an incident, by any path
+- **Traces to:** `TR-OPS-03`, `TR-IDEM-04`, #55
+- **Milestone:** M2
+- **Given:** `loan-bureau-check` with the remote step `bureau-score` (`creditBureau.score`, `jobs.max-attempts` 3). In the first case the bureau answers `BusinessError("APPLICANT_UNKNOWN", "no file at the bureau for 079088001234")` from the executor. In the second it hands the call off, and its callback reports the same business error through `POST /async-steps/{jobId}:complete`, then repeats it.
+- **When:** Each answer is recorded.
+- **Then:**
+  - The job is `FAILED` after attempt 1 of 3: `ASYNC_ATTEMPT_FAILED` records `errorCode: APPLICANT_UNKNOWN`, `retryable: false`, `final: true`, and no retry is due.
+  - One incident is `OPEN` with `error_code = UNHANDLED_BUSINESS_ERROR`, `retry_count = 0` and `APPLICANT_UNKNOWN` in `cause_summary`. `INCIDENT_RAISED` and `processes.incident.raised.v1` carry `businessCode: APPLICANT_UNKNOWN`.
+  - The token stays on `bureau-score` in `WAITING_ASYNC`.
+  - No history row, incident or event contains the adapter's message or the national id.
+  - The repeated callback is `DISCARDED` and writes nothing.
+- **Example:** `BusinessError(APPLICANT_UNKNOWN) on attempt 1 of 3 -> job FAILED, incident UNHANDLED_BUSINESS_ERROR, no retry`.
+- **Test ID:** `PRE_111_a_business_error_fails_the_job_at_once_and_opens_one_incident`, `PRE_111_a_business_error_reported_through_the_completion_api_is_final_and_its_repeat_writes_nothing`
+
+### PRE-112 A late result after a timeout is discarded, writes nothing and never reopens the step
+- **Traces to:** `TR-ASY-02`, `TR-IDEM-04`, `TR-AGT-01`, #55
+- **Milestone:** M2
+- **Given:** `loan-agent-assessment` with the agent step `assess-documents` (`timeout PT0.2S`, `<horus:retry max="1" backoff="PT1S"/>`), the guardrail rule set published, loan `LOAN-2027-5501` for 250,000,000 VND. The assessor hands every call off (`Accepted`). Its callback keeps each attempt's completion token and answers late.
+- **When:**
+  - (a) Attempt 1's lease ends, attempt 2 is claimed, and the callback then reports `{ riskScore: 85, recommendation: APPROVE }` for attempt 1.
+  - (b) Attempt 2's answer `{ riskScore: 20, recommendation: APPROVE }` is accepted and the loan moves on to `underwrite`. The callback then reports attempt 1's answer again.
+  - (c) In a second loan, both attempts' leases end and the job fails with an incident. The callback then reports a valid answer for attempt 2, three times.
+- **Then:**
+  - Every late report is `DISCARDED`. It writes no history row, no `rle_decision` row (the guardrail is not evaluated) and no task, and the job keeps its status and attempt.
+  - (a) Attempt 2 still owns the step: its own answer is then recorded as usual.
+  - (b) The step stays completed: `assessment` keeps `riskScore: 20`, the token stays on `underwrite`, and no review task opens.
+  - (c) The job stays `FAILED`, the incident stays `OPEN`, the token stays on `assess-documents`, and the three reports have the same outcome.
+  - Late results are logged without the answer.
+- **Example:** `attempt 1 answers after attempt 2 was claimed -> DISCARDED, 0 rows; after the incident -> DISCARDED x3, incident OPEN`.
+- **Test ID:** `PRE_112_a_late_result_of_an_attempt_taken_over_is_discarded_and_the_new_attempt_keeps_the_step`, `PRE_112_a_late_result_after_the_step_completed_never_reopens_it`, `PRE_112_a_late_result_after_the_job_failed_leaves_the_incident_open_every_time`
+
+### PRE-113 Another tenant can neither report a late result nor read the incident of a business error
+- **Traces to:** `TR-TEN-01`, `TR-OPS-03`, #55
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`'s loan with the incident of `PRE-040`, and a second loan whose bureau call was handed off and then cancelled.
+- **When:** A client of tenant `bank-b`, with `processes:step:complete` and `processes:read`, reports a result for the cancelled step and reads the first loan's incidents.
+- **Then:** The report is `404 ASYNC_STEP_NOT_FOUND` and the read is `404 INSTANCE_NOT_FOUND`. No history row is written, in particular no `LATE_RESULT_DISCARDED`. The incident stays `OPEN`, and the job stays `CANCELLED`.
+- **Example:** `bank-b reports for bank-a's cancelled step -> 404, 0 rows`.
+- **Test ID:** `PRE_113_another_tenant_cannot_report_a_late_result_or_read_a_business_error_incident`
+
+---
+
+## Agent Memory (#101)
+
+### PRE-100 An agent step receives exactly the declared fields of earlier results, the same on every attempt
+- **Traces to:** `TR-AGT-01`, `TR-AGT-02`, `TR-SEC-05`, #101
+- **Milestone:** M3
+- **Given:**
+  - In `kyc-onboarding`, step `extract-id` recorded `{ fullName: "Nguyen Van A", dob: "1990-04-12", idNumber: "079090001234" (mask: true), address: "12 Le Loi, Q1" }`.
+  - `screen-sanctions` recorded `{ hits: 0, listVersion: "2026-11-15" }`.
+  - `assess-risk` declares `memory: [{ from: extract-id, fields: [fullName, dob], as: applicant }, { from: screen-sanctions, fields: [hits], as: screening }]`.
+- **When:** `assess-risk` parks and its first attempt times out, so it is claimed again.
+- **Then:**
+  - Both attempts send the adapter `memory = { applicant: { fullName, dob }, screening: { hits: 0 } }`, three fields in total. The model call key differs between the attempts and the idempotency key, the job id, does not.
+  - `address`, `idNumber` and `listVersion` are never sent.
+  - `ASYNC_STEP_SCHEDULED` and the answer's history row record the resolved memory, with masked fields as keyed hashes.
+  - In a second case, `screen-sanctions`' answer was refused and routed to a reviewer, who changed `hits` to 1. Memory then carries the reviewer's 1, never the refused agent value.
+- **Example:** `2 entries, 3 fields -> adapter gets 3 fields on attempt 1 and 2; address never sent`.
+- **Test ID:** `PRE_100_an_agent_step_receives_only_the_declared_fields_the_same_on_every_attempt`, `PRE_100_memory_carries_the_reviewers_answer_never_the_refused_one`, `PRE_100_resolution_keeps_only_declared_fields_and_masks_the_audit_copy`
+
+### PRE-101 Memory is checked at import, and limits fail the step before any call
+- **Traces to:** `TR-AGT-01`, `TR-DEF-04`, `TR-OPS-03`, #101
+- **Milestone:** M3
+- **Given:**
+  - (a) An entry names step `extract-idd`, which does not exist.
+  - (b) An entry names a step that is not upstream of `assess-risk`.
+  - (c) `fields: ["*"]`.
+  - (d) 17 entries, against `agents.memory.max-entries` 16.
+  - (e) A run where the fields resolve to more bytes than `agents.memory.max-bytes`: 20 KiB against the default 16 KiB, or 83 bytes on a host that lowered the bound to 64.
+  - (f) A run where `required: true` names a step on a branch this instance did not take.
+- **When:** Each is imported or reached.
+- **Then:**
+  - (a) to (d): `422 VALIDATION_FAILED` at import, with a problem `AGENT_MEMORY_INVALID` naming the step, the entry and the problem. Wildcards are never allowed. Nothing is written.
+  - (e): the step fails with `AGENT_MEMORY_TOO_LARGE`, not retryable, in the step transaction. The job is stored `FAILED` with attempt 0, `ASYNC_ATTEMPT_FAILED` records `final: true`, and the adapter is not called.
+  - (f): the step fails the same way with `AGENT_MEMORY_MISSING`. With `required: false` the entry is absent, and `ASYNC_STEP_SCHEDULED` lists it under `memoryMissing`.
+  - Both failures open an incident (#58), and the token stays on the step for an operator (#68).
+  - Both bounds may be lowered and never raised: a host setting above 16 or 16384 is refused at start-up.
+- **Example:** `20 KiB against 16 KiB -> AGENT_MEMORY_TOO_LARGE, 0 adapter calls`.
+- **Test ID:** `PRE_101_a_missing_required_entry_fails_and_a_missing_optional_one_is_listed`, `PRE_101_a_required_entry_without_a_recorded_result_fails_the_step_and_an_optional_one_is_listed_missing`, `PRE_101_memory_above_the_byte_limit_fails_the_step_before_any_call`, `PRE_101_memory_limits_are_bounded_by_the_engine`, `PRE_101_memory_limits_may_be_lowered_never_raised`, `PRE_101_memory_naming_an_unknown_or_non_upstream_step_or_a_wildcard_is_refused_at_import`, `PRE_101_more_entries_than_the_host_allows_are_refused_at_import`, `PRE_101_the_import_check_names_the_step_the_entry_and_the_problem`, `PRE_101_the_reader_refuses_wildcards_and_malformed_entries_naming_the_step`, `PRE_101_twenty_kib_against_the_default_limit_is_too_large`
+
+### PRE-102 Masked fields enter memory only when declared, and memory never leaves its instance
+- **Traces to:** `TR-SEC-04`, `TR-SEC-05`, `TR-TEN-01`, #101
+- **Milestone:** M3
+- **Given:**
+  - Variant A: an entry lists `idNumber`, which is `mask: true` at its source, without `includeMasked: true`.
+  - Variant B: the same entry with `includeMasked: true`.
+  - Variant C: an entry tries to read another instance or a variable outside step results (`from="${instance.customer}"`).
+- **When:** Each is imported and run.
+- **Then:**
+  - A: `422 VALIDATION_FAILED`, with a problem `AGENT_MEMORY_MASKED_FIELD` that names the field as masked.
+  - B: the adapter receives the plain value and history stores the keyed hash. The canonical form, and so the definition hash, the diff and the approval, show `includeMasked` on the step, so a second person approves sending it. The BPMN export reads back to the same hash.
+  - C: refused at import. Memory reads only the recorded results of steps in the same instance, in the instance's tenant. Two loans of the same definition each receive their own facts, and a result recorded under another tenant with the same ids is never read.
+- **Example:** `idNumber without includeMasked -> 422; with it -> sent, hashed in history, visible in the approval diff`.
+- **Test ID:** `PRE_102_a_masked_field_without_include_masked_is_refused_at_import`, `PRE_102_a_masked_field_without_include_masked_is_refused_by_the_import_check`, `PRE_102_include_masked_sends_the_plain_value_and_the_audit_copy_keeps_only_the_fingerprint`, `PRE_102_include_masked_sends_the_plain_value_hashes_it_in_history_and_shows_in_the_canonical_form`, `PRE_102_memory_is_in_the_canonical_form_and_the_export_reads_back_to_the_same_hash`, `PRE_102_memory_reads_only_the_results_of_its_own_instance_and_tenant`, `PRE_102_memory_that_reads_a_variable_or_another_instance_is_refused_at_import`

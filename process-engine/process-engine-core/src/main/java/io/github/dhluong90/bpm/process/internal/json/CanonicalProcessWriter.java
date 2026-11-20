@@ -18,6 +18,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
+import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
@@ -96,6 +97,23 @@ public final class CanonicalProcessWriter {
                     if (!masked.isEmpty()) {
                         // #59: which inputs history keeps only as keyed fingerprints is part of the hash too.
                         masked.forEach(step.putArray("maskedInputs")::add);
+                    }
+                    List<MemoryEntry> memory = t.extensions().all(MemoryEntry.class);
+                    if (!memory.isEmpty()) {
+                        // #101: what an agent step reads from earlier steps, includeMasked included, is part of the
+                        // hash, so a second person approves sending a masked field. A step without memory keeps the
+                        // hash it had.
+                        ArrayNode entries = step.putArray("memory");
+                        for (MemoryEntry m : memory) {
+                            ObjectNode entry = entries.addObject();
+                            entry.put("from", m.from());
+                            m.fields().forEach(entry.putArray("fields")::add);
+                            entry.put("as", m.as());
+                            entry.put("required", m.required());
+                            if (m.includeMasked()) {
+                                entry.put("includeMasked", true);
+                            }
+                        }
                     }
                 }
                 case ServiceTask t -> {

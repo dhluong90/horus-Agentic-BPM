@@ -127,7 +127,7 @@ class RuleAndProcessIT {
                 + "WHERE tenant_id = 'bank-a' AND key_name = 'card-fee-review'").query(String.class).list())
                 .containsExactly("1 ACTIVE BPMN_XML STARTUP");
         assertThat(jdbc.sql("SELECT version FROM pre_schema_history WHERE success ORDER BY installed_rank")
-                .query(String.class).list()).containsExactly("0", "1", "2", "3", "4", "6", "7", "8", "9", "10", "13");
+                .query(String.class).list()).containsExactly("0", "1", "2", "3", "4", "6", "7", "8", "9", "10", "13", "14");
         assertThat(jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE script LIKE '%pre_%'").query(Long.class)
                 .single()).isZero();
     }
@@ -199,25 +199,26 @@ class RuleAndProcessIT {
     }
 
     @Test
-    void a_failed_step_rolls_back_the_host_row_and_every_engine_row() throws Exception {
-        HttpResponse<String> response = send("tuan", "/api/cards/applications",
-                "{\"applicationId\":\"IT-1099\",\"customerId\":\"C-404\"}", null);
+    void PRE_040_an_unknown_customer_opens_an_incident_and_the_application_waits() throws Exception {
+        // Given customer C-404 does not exist, so the first step's handler answers BusinessError(CUSTOMER_NOT_FOUND)
+        // When the application is submitted
+        JsonNode submitted = post("tuan", "/api/cards/applications",
+                "{\"applicationId\":\"IT-1099\",\"customerId\":\"C-404\"}", 201);
 
-        assertThat(response.statusCode()).isEqualTo(422);
-        JsonNode problem = JSON.readTree(response.body());
-        assertThat(problem.get("code").stringValue()).isEqualTo("STEP_FAILED");
-        assertThat(problem.get("nodeId").stringValue()).isEqualTo("load-profile");
-        assertThat(problem.get("reason").stringValue()).isEqualTo("UNHANDLED_BUSINESS_ERROR");
+        // Then the submission and the instance commit together, the instance waits on load-profile, and one incident
+        // carries the business code without the handler's message
+        assertThat(submitted.get("instanceStatus").stringValue()).isEqualTo("RUNNING");
+        String instanceId = submitted.get("instanceId").stringValue();
         assertThat(jdbc.sql("SELECT count(*) FROM card_application WHERE application_id = 'IT-1099'").query(Long.class)
-                .single()).isZero();
-        assertThat(jdbc.sql("SELECT count(*) FROM pre_instance WHERE business_key = 'IT-1099'").query(Long.class)
-                .single()).isZero();
-        assertThat(jdbc.sql("SELECT count(*) FROM pre_token t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
-                + "AND i.id = t.instance_id WHERE i.business_key = 'IT-1099'").query(Long.class).single()).isZero();
-        assertThat(EventRecorder.EVENTS).as("an AFTER_COMMIT listener sees nothing for a rolled-back step")
-                .noneMatch(e -> "IT-1099".equals(e.payload().get("businessKey")));
-        assertThat(jdbc.sql("SELECT count(*) FROM event_outbox WHERE business_key = 'IT-1099'").query(Long.class).single())
-                .as("the in-transaction listener's outbox row rolled back with the step").isZero();
+                .single()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT current_node_id || ':' || status FROM pre_token WHERE tenant_id = 'bank-a' AND "
+                + "instance_id = ? AND token_kind = 'FLOW'").param(instanceId).query(String.class).single())
+                .isEqualTo("load-profile:WAITING_ASYNC");
+        assertThat(jdbc.sql("SELECT error_code || ' ' || cause_summary FROM pre_incident WHERE tenant_id = 'bank-a' "
+                + "AND instance_id = ? AND status = 'OPEN'").param(instanceId).query(String.class).single())
+                .startsWith("UNHANDLED_BUSINESS_ERROR ").contains("CUSTOMER_NOT_FOUND").doesNotContain("C-404");
+        assertThat(jdbc.sql("SELECT count(*) FROM pre_history WHERE tenant_id = 'bank-a' AND instance_id = ? AND "
+                + "details::text LIKE '%No customer%'").param(instanceId).query(Long.class).single()).isZero();
     }
 
     @Test

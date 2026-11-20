@@ -15,6 +15,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
+import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import java.io.IOException;
 import java.io.InputStream;
@@ -229,6 +230,70 @@ class SubsetBpmnReaderAgentTaskTest {
         assertThat(CanonicalProcessWriter.canonicalText(reader.read(writer.write(masked)))).isEqualTo(canonical);
         assertThat(problems(agentStep("horus:agent=\"documents.assess\"", spec.replace("mask=\"true\"",
                 "mask=\"yes\"")))).extracting(DefinitionProblem::code).contains("INPUT_INVALID");
+    }
+
+    // ---- PRE-101, PRE-102: memory (#101) ------------------------------------------------------------------------
+
+    private static final String BASE = "horus:agent=\"documents.assess\"";
+
+    private static String agentParts(String memory) {
+        return "<horus:outputSchema>" + SCHEMA + "</horus:outputSchema>" + GUARDRAIL + memory;
+    }
+
+    @Test
+    void PRE_101_the_reader_refuses_wildcards_and_malformed_entries_naming_the_step() {
+        String[] invalid = {
+            "<horus:memory from=\"extract-id\" fields=\"*\" as=\"applicant\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"fullName,address.*\" as=\"applicant\"/>",
+            "<horus:memory fields=\"fullName\" as=\"applicant\"/>",
+            "<horus:memory from=\"extract-id\" as=\"applicant\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"fullName\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"full name\" as=\"applicant\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"fullName,fullName\" as=\"applicant\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"fullName\" as=\"applicant\" required=\"yes\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"fullName\" as=\"applicant\"/>"
+                    + "<horus:memory from=\"screen-sanctions\" fields=\"hits\" as=\"applicant\"/>",
+            "<horus:memory from=\"${instance.customer}\" fields=\"fullName\" as=\"applicant\"/>",
+            "<horus:memory from=\"extract-id\" fields=\"a.b.c.d.e\" as=\"applicant\"/>",
+        };
+        for (String memory : invalid) {
+            assertThat(problems(agentStep(BASE, agentParts(memory)))).as(memory).isNotEmpty()
+                    .allSatisfy(p -> {
+                        assertThat(p.code()).isEqualTo("AGENT_MEMORY_INVALID");
+                        assertThat(p.elementId()).isEqualTo("assess-documents");
+                        assertThat(p.message()).startsWith("horus:memory entry ");
+                    });
+        }
+        assertThat(problems(agentStep(BASE, agentParts(invalid[0])))).singleElement()
+                .satisfies(p -> assertThat(p.message()).contains("wildcards are never allowed"));
+    }
+
+    @Test
+    void PRE_102_memory_is_in_the_canonical_form_and_the_export_reads_back_to_the_same_hash() {
+        // Given the same step without memory, with memory, and with includeMasked on its entry
+        Process plain = reader.read(agentStep(BASE, agentParts("")));
+        Process withMemory = reader.read(agentStep(BASE, agentParts(
+                "<horus:memory from=\"extract-id\" fields=\"fullName, dob\" as=\"applicant\"/>"
+                + "<horus:memory from=\"screen-sanctions\" fields=\"hits\" as=\"screening\" required=\"false\"/>")));
+        Process withMasked = reader.read(agentStep(BASE, agentParts(
+                "<horus:memory from=\"extract-id\" fields=\"fullName, dob\" as=\"applicant\" "
+                + "includeMasked=\"true\"/>"
+                + "<horus:memory from=\"screen-sanctions\" fields=\"hits\" as=\"screening\" required=\"false\"/>")));
+
+        // Then the entries are read in order, the canonical form prints them, and each change is a new hash
+        assertThat(step(withMemory).extensions().all(MemoryEntry.class)).containsExactly(
+                new MemoryEntry("extract-id", List.of("fullName", "dob"), "applicant", true, false),
+                new MemoryEntry("screen-sanctions", List.of("hits"), "screening", false, false));
+        String canonical = CanonicalProcessWriter.canonicalText(withMasked);
+        assertThat(canonical).contains("\"memory\":[{\"as\":\"applicant\",\"fields\":[\"fullName\",\"dob\"],"
+                + "\"from\":\"extract-id\",\"includeMasked\":true,\"required\":true}");
+        assertThat(CanonicalProcessWriter.canonicalText(plain)).doesNotContain("memory");
+        assertThat(List.of(plain, withMemory, withMasked).stream()
+                .map(p -> Hashes.sha256(CanonicalProcessWriter.canonicalText(p))).distinct()).hasSize(3);
+        // And the BPMN export reads back to the same canonical form
+        assertThat(CanonicalProcessWriter.canonicalText(reader.read(writer.write(withMasked)))).isEqualTo(canonical);
+        assertThat(CanonicalProcessWriter.canonicalText(reader.read(writer.write(withMemory))))
+                .isEqualTo(CanonicalProcessWriter.canonicalText(withMemory));
     }
 
     @Test

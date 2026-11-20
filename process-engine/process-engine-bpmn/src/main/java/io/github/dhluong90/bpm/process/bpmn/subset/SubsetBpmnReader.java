@@ -42,6 +42,7 @@ import io.github.dhluong90.bpm.process.internal.json.EngineJson;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
+import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
@@ -92,6 +93,16 @@ public final class SubsetBpmnReader {
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
+    /** The step id a {@code horus:memory} entry reads from: an id, never an expression or a variable path. */
+    private static final Pattern MEMORY_STEP = Pattern.compile("^[A-Za-z_][A-Za-z0-9_.-]{0,199}$");
+    /** The name a {@code horus:memory} entry is passed under. */
+    private static final Pattern MEMORY_NAME = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,63}$");
+    /** A field path of a {@code horus:memory} entry: identifiers joined by dots, at most four levels. */
+    private static final Pattern MEMORY_PATH = Pattern.compile(
+            "^[A-Za-z_][A-Za-z0-9_]{0,63}(\\.[A-Za-z_][A-Za-z0-9_]{0,63}){0,3}$");
+    /** Most fields one {@code horus:memory} entry lists. */
+    static final int MAX_MEMORY_FIELDS = 32;
+
     /** The {@code horus:type} of an agent step. */
     static final String AGENT_TASK = "agentTask";
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
@@ -608,6 +619,7 @@ public final class SubsetBpmnReader {
             String schema = parts.schema(id, line);
             GuardrailSpec guardrail = parts.guardrail(id, line);
             RetryPolicy retry = parts.retry(id);
+            List<MemoryEntry> memory = parts.memory(id);
             List<HorusExtension> ext = new ArrayList<>();
             ext.add(new AgentTaskSpec(agent, schema, timeout));
             if (guardrail != null) {
@@ -616,6 +628,7 @@ public final class SubsetBpmnReader {
             if (retry != null) {
                 ext.add(retry);
             }
+            ext.addAll(memory);
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
@@ -679,6 +692,98 @@ public final class SubsetBpmnReader {
                     return null;
                 }
                 return new RetryPolicy(max, backoff);
+            }
+
+            private final List<Map<String, String>> memoryEntries = new ArrayList<>();
+            private final List<Integer> memoryLines = new ArrayList<>();
+
+            void memory(Map<String, String> attributes, int at) {
+                memoryEntries.add(attributes);
+                memoryLines.add(at);
+            }
+
+            /**
+             * {@code <horus:memory from="extract-id" fields="fullName,dob" as="applicant" required="true"
+             * includeMasked="false"/>} (#101, PRE-101, PRE-102): the shape of each entry. Whether {@code from} is an
+             * upstream agent step, whether its output schema declares the fields, which of them are masked and how
+             * many entries the host allows are checked by the engine, which sees the whole process and the host's
+             * settings. Each fault is one {@code AGENT_MEMORY_INVALID} problem naming the step and the entry.
+             *
+             * @return the valid entries, in document order
+             */
+            List<MemoryEntry> memory(String id) {
+                List<MemoryEntry> entries = new ArrayList<>();
+                Set<String> names = new HashSet<>();
+                for (int i = 0; i < memoryEntries.size(); i++) {
+                    Map<String, String> a = memoryEntries.get(i);
+                    int at = memoryLines.get(i);
+                    String entry = "horus:memory entry " + (i + 1);
+                    boolean ok = true;
+                    String from = a.get("from");
+                    if (from == null || !MEMORY_STEP.matcher(from).matches()) {
+                        memoryProblem(entry + " needs from, the id of an earlier step of this process; memory reads "
+                                + "only the recorded results of steps in the same instance", id, at);
+                        ok = false;
+                    }
+                    String as = a.get("as");
+                    if (as == null || !MEMORY_NAME.matcher(as).matches()) {
+                        memoryProblem(entry + " needs as, the name the fields are passed under (an identifier)", id,
+                                at);
+                        ok = false;
+                    } else if (!names.add(as)) {
+                        memoryProblem(entry + " repeats as " + as, id, at);
+                        ok = false;
+                    }
+                    List<String> fields = new ArrayList<>();
+                    String list = a.get("fields");
+                    if (list == null || list.isBlank()) {
+                        memoryProblem(entry + " needs fields, a comma-separated list of field paths", id, at);
+                        ok = false;
+                    } else {
+                        for (String raw : list.split(",", -1)) {
+                            String field = raw.strip();
+                            if (field.contains("*")) {
+                                memoryProblem(entry + " names a wildcard; wildcards are never allowed, list each field",
+                                        id, at);
+                                ok = false;
+                            } else if (!MEMORY_PATH.matcher(field).matches()) {
+                                memoryProblem(entry + " has a field that is not a path of identifiers (a.b, at most "
+                                        + "4 levels)", id, at);
+                                ok = false;
+                            } else if (fields.contains(field)) {
+                                memoryProblem(entry + " repeats field " + field, id, at);
+                                ok = false;
+                            } else {
+                                fields.add(field);
+                            }
+                        }
+                        if (fields.size() > MAX_MEMORY_FIELDS) {
+                            memoryProblem(entry + " lists more than " + MAX_MEMORY_FIELDS + " fields", id, at);
+                            ok = false;
+                        }
+                    }
+                    Boolean required = flag(a.get("required"), true);
+                    Boolean includeMasked = flag(a.get("includeMasked"), false);
+                    if (required == null || includeMasked == null) {
+                        memoryProblem(entry + ": required and includeMasked are true or false", id, at);
+                        ok = false;
+                    }
+                    if (ok) {
+                        entries.add(new MemoryEntry(from, fields, as, required, includeMasked));
+                    }
+                }
+                return entries;
+            }
+
+            private static Boolean flag(String text, boolean absent) {
+                if (text == null) {
+                    return absent;
+                }
+                return "true".equals(text) ? Boolean.TRUE : "false".equals(text) ? Boolean.FALSE : null;
+            }
+
+            private void memoryProblem(String message, String id, int at) {
+                invalid.add(new DefinitionProblem("AGENT_MEMORY_INVALID", message, "serviceTask", safe(id), at));
             }
 
             private void retryProblem(String message, String id, int at) {
@@ -897,6 +1002,17 @@ public final class SubsetBpmnReader {
                         }
                     }
                     agent.guardrail(attributes, line());
+                    skip();
+                    continue;
+                }
+                if (agent != null && HORUS.equals(ns) && "memory".equals(xml.getLocalName())) {
+                    Map<String, String> attributes = new HashMap<>();
+                    for (String a : List.of("from", "fields", "as", "required", "includeMasked")) {
+                        if (attr(a) != null) {
+                            attributes.put(a, attr(a));
+                        }
+                    }
+                    agent.memory(attributes, line());
                     skip();
                     continue;
                 }

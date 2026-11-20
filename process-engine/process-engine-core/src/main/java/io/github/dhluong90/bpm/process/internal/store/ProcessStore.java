@@ -5,6 +5,7 @@ import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -101,6 +102,22 @@ public interface ProcessStore {
      * @param createdAt when it was opened
      * @param resolvedAt when it was resolved, or null
      */
+    /**
+     * The latest recorded result of a step that a later agent step reads as memory (#101, {@code pre_step_result}).
+     *
+     * @param tenantId the instance's tenant
+     * @param instanceId the instance
+     * @param nodeId the step
+     * @param definitionId the version the instance ran when the result was recorded
+     * @param resultJson the result as the step stored it: an accepted answer or a reviewer's answer
+     * @param source {@code ANSWER} or {@code REVIEW}
+     * @param activityInstanceId the attempt id of the accepted answer, or the review task id
+     * @param recordedAt engine clock
+     */
+    record StepResultRow(String tenantId, String instanceId, String nodeId, String definitionId, String resultJson,
+            String source, String activityInstanceId, Instant recordedAt) {
+    }
+
     record IncidentRow(String tenantId, String id, String instanceId, String definitionId, String tokenId,
             String nodeId, String errorCode, String causeSummary, int retryCount, String status, long lockVersion,
             Instant createdAt, Instant resolvedAt) {
@@ -213,6 +230,23 @@ public interface ProcessStore {
     List<TaskRow> tasks(String tenant, String instanceId);
 
     void appendHistory(String tenant, String instanceId, String definitionId, List<HistoryEntry> entries);
+
+    /**
+     * Keeps a step's recorded result for the memory of later agent steps (#101): inserts it, or replaces the
+     * instance's earlier result of the same step, so the latest one is read.
+     *
+     * @param row the result
+     */
+    void recordStepResult(StepResultRow row);
+
+    /**
+     * @param tenant the instance's tenant
+     * @param instanceId the instance
+     * @param nodeIds the steps
+     * @return the recorded result of each of those steps in this instance that has one, by step id; never another
+     *     instance's or another tenant's
+     */
+    Map<String, String> stepResults(String tenant, String instanceId, java.util.Collection<String> nodeIds);
 
     /** @param incident a new {@code OPEN} incident (#58) */
     void insertIncident(IncidentRow incident);
