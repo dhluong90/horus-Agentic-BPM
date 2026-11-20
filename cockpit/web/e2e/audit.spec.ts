@@ -6,7 +6,8 @@ import { auditSeed, demoSeed, type StoredVersion } from '../src/mocks/ruleEngine
 import { cspViolations, mockHost, mockRuleEngine, rememberLocale } from './mockHost';
 
 /*
- * The audit screens (CKP-071 to CKP-075, CKP-005): the decision explorer, one decision with its explanation and
+ * The audit screens (CKP-071 to CKP-075, CKP-005), in the order of the journey: sign-in, Rules, a rule set's
+ * history and evidence export, then Decisions. The decision explorer, one decision with its explanation and
  * masked inputs, a rule set's history, and the evidence export with its result, limits and refusals. Each state is
  * checked at 1440x900 and 1440x1200, light and dark, English and Vietnamese: the element the user acts on or reads
  * first is fully above the fold, axe-core finds nothing, and no raw JSON, stored hash or spec id shows.
@@ -25,11 +26,11 @@ const NOW = new Date('2026-11-21T03:00:00Z');
 const T = {
   en: {
     show: 'Show decisions', export: 'Export evidence', inputs: 'Inputs', v1: 'Version 1 · Retired', v2: 'Version 2 · Published', month: 'Month of the decisions',
-    chooseAll: 'Choose all 124', exported: 'Evidence exported', copySha: 'Copy SHA-256',
+    chooseFirst: 'Choose first 100', exported: 'Evidence exported', copySha: 'Copy SHA-256',
   },
   vi: {
     show: 'Xem quyết định', export: 'Xuất bằng chứng', inputs: 'Đầu vào', v1: 'Phiên bản 1 · Đã ngừng dùng', v2: 'Phiên bản 2 · Đã xuất bản', month: 'Tháng của các quyết định',
-    chooseAll: 'Chọn cả 124', exported: 'Đã xuất bằng chứng', copySha: 'Sao chép SHA-256',
+    chooseFirst: 'Chọn 100 quyết định đầu', exported: 'Đã xuất bằng chứng', copySha: 'Sao chép SHA-256',
   },
 } as const;
 
@@ -50,6 +51,8 @@ async function chooseNamedDecisions(page: Page, locale: Locale) {
 interface Screen {
   name: string;
   scenario: Scenario;
+  /** The screen before anyone is signed in: no session header. */
+  signedOut?: boolean;
   hash: string;
   seed?: StoredVersion[];
   audit?: AuditOptions;
@@ -58,13 +61,18 @@ interface Screen {
   prepare?: (page: Page, locale: Locale) => Promise<void>;
   /** What must be on screen and fully above the fold once the state is reached. */
   focus: (page: Page, locale: Locale) => Locator;
+  /** The action that must stay above the fold beside the focal element, such as Export beside its refusal. */
+  action?: (page: Page, locale: Locale) => Locator;
 }
 
 const SCREENS: readonly Screen[] = [
+  { name: 'journey-1-sign-in', scenario: 'signed-out', signedOut: true, hash: '#/', focus: (page, l) => page.getByRole('button', { name: l === 'en' ? 'Sign in again' : 'Đăng nhập lại' }) },
+  { name: 'journey-2-rules', scenario: 'rules-auditor', hash: '#/rules', focus: (page) => page.getByRole('link', { name: /card-fee/ }).first() },
   { name: 'explorer-start', scenario: 'rules-auditor', hash: '#/decisions', focus: (page, l) => page.getByRole('button', { name: T[l].show }) },
   { name: 'explorer-list', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=card-fee&month=2026-11', focus: (page) => page.locator('.dlog-table tbody tr').first() },
   { name: 'explorer-none', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=kyc-risk&month=2026-10', focus: (page) => page.locator('.dlog-results .empty-state') },
-  { name: 'explorer-locked', scenario: 'rules-author', hash: '#/decisions', focus: (page) => page.locator('.locked-state') },
+  { name: 'explorer-case', scenario: 'rules-auditor', hash: '#/decisions?caseRef=LN-2026-0042&month=2026-11', focus: (page) => page.locator('.dlog-table tbody tr').nth(1) },
+  { name: 'explorer-hidden', scenario: 'rules-author', hash: '#/decisions', focus: (page) => page.locator('main .empty-state') },
   {
     name: 'explorer-forbidden', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=card-fee&month=2026-11',
     override: async (page) => { await page.route('**/api/bpm/rules/v1/decisions?**', (route) => route.fulfill(problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:log:read'))); },
@@ -76,7 +84,7 @@ const SCREENS: readonly Screen[] = [
     prepare: async (page, l) => { await page.getByRole('tab', { name: T[l].inputs }).click(); },
     focus: (page) => page.locator('.dlog-inputs .masked').first(),
   },
-  { name: 'decision-failed', scenario: 'rules-auditor', hash: '#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7TC', focus: (page) => page.locator('.dlog-views__empty') },
+  { name: 'decision-failed', scenario: 'rules-auditor', hash: '#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7TC', focus: (page) => page.locator('.why--failed .why__text') },
   { name: 'decision-not-found', scenario: 'rules-auditor', hash: '#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7ZZ', focus: (page) => page.locator('.audit-error') },
   {
     name: 'decision-unprocessable', scenario: 'rules-auditor', hash: `#/decisions/${NAMED}`,
@@ -95,20 +103,22 @@ const SCREENS: readonly Screen[] = [
     focus: (page, l) => page.getByRole('region', { name: T[l].exported }).getByRole('button', { name: T[l].copySha }),
   },
   {
-    name: 'export-too-many', scenario: 'rules-auditor', hash: '#/rules/card-fee/2/history', seed: auditSeed(),
-    prepare: async (page, l) => { await page.getByLabel(T[l].month).selectOption('2026-11'); await page.getByRole('button', { name: T[l].chooseAll }).click(); },
-    focus: (page) => page.locator('.evidence__reason'),
+    name: 'export-limit', scenario: 'rules-auditor', hash: '#/rules/card-fee/2/history', seed: auditSeed(),
+    prepare: async (page, l) => { await page.getByLabel(T[l].month).selectOption('2026-11'); await page.getByRole('button', { name: T[l].chooseFirst }).click(); },
+    focus: (page, l) => page.getByRole('button', { name: T[l].export, exact: true }),
   },
   {
     name: 'export-too-large', scenario: 'rules-auditor', hash: '#/rules/card-fee/2/history', seed: auditSeed(), audit: { evidenceLimit: 200 },
     prepare: async (page, l) => { await page.getByRole('checkbox', { name: T[l].v2 }).check(); await page.getByRole('button', { name: T[l].export, exact: true }).click(); },
     focus: (page) => page.locator('.evidence .audit-error'),
+    action: (page, l) => page.getByRole('button', { name: T[l].export, exact: true }),
   },
   {
     name: 'export-forbidden', scenario: 'rules-auditor', hash: '#/rules/card-fee/2/history', seed: auditSeed(),
     override: async (page) => { await page.route('**/rule-sets/card-fee/evidence', (route) => route.fulfill(problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:log:read'))); },
     prepare: async (page, l) => { await page.getByRole('checkbox', { name: T[l].v2 }).check(); await page.getByRole('button', { name: T[l].export, exact: true }).click(); },
     focus: (page) => page.locator('.evidence .audit-error'),
+    action: (page, l) => page.getByRole('button', { name: T[l].export, exact: true }),
   },
   { name: 'export-no-log', scenario: 'rules-auditor-no-log', hash: '#/rules/card-fee/2/history', seed: auditSeed(), focus: (page) => page.locator('.evidence__locked') },
 ];
@@ -128,7 +138,7 @@ for (const screen of SCREENS) {
           await mockRuleEngine(page, screen.scenario, screen.seed ?? demoSeed(), screen.audit ?? {});
           await screen.override?.(page);
           await page.goto(`./${screen.hash}`);
-          await expect(page.getByTestId('header-user')).toBeVisible();
+          await expect(screen.signedOut === true ? page.getByRole('alert') : page.getByTestId('header-user')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await screen.prepare?.(page, locale);
           const focus = screen.focus(page, locale);
@@ -136,7 +146,11 @@ for (const screen of SCREENS) {
           const box = await focus.boundingBox();
           expect(box, 'the focal element is rendered').not.toBeNull();
           expect((box?.y ?? 0) + (box?.height ?? 0), 'visible without scrolling').toBeLessThanOrEqual(viewport.height);
-          const main = page.locator('main');
+          if (screen.action !== undefined) {
+            const action = await screen.action(page, locale).boundingBox();
+            expect((action?.y ?? viewport.height) + (action?.height ?? 0), 'the action stays above the fold').toBeLessThanOrEqual(viewport.height);
+          }
+          const main = page.locator(screen.signedOut === true ? 'body' : 'main');
           await expect(main).not.toContainText(/CKP-0|PD-0|RLE-0|hmac:|\{"/);
           await page.evaluate(async () => { await document.fonts.ready; });
           await page.screenshot({ path: `${SHOTS}/${file}`, fullPage: false });
@@ -190,6 +204,6 @@ test('CKP_074_the_saved_file_is_the_response_bytes_and_states_the_sha256_shown',
   expect(readFileSync(path).equals(bytes)).toBe(true);
   const sha = response.headers()['x-evidence-sha256'] ?? '';
   expect(bytes.toString('utf8')).toContain(`# Content SHA-256: ${sha}`);
-  await expect(page.getByTestId('evidence-sha')).toHaveText(`${sha.slice(0, 8)}…`);
+  await expect(page.getByTestId('evidence-sha')).toHaveText(sha);
   await expect(page.getByText('Evidence exported by Phạm Thu Hà: 2 versions, 3 decisions')).toBeVisible();
 });

@@ -22,7 +22,7 @@ export function HistoryEntryItem({ entry }: { entry: HistoryEntry }) {
   return (
     <li className={`history__entry history__entry--${entry.action.toLowerCase()}`}>
       <span className="history__what">
-        <span aria-hidden="true">{action?.glyph ?? '•'}</span> {t('history.by', { action: action ? t(action.key) : t('history.other'), actor: name(entry.actor) })}
+        <span className="history__glyph" aria-hidden="true">{action?.glyph ?? '•'}</span> {t('history.by', { action: action ? t(action.key) : t('history.other'), actor: name(entry.actor) })}
       </span>
       <span className="history__when tnum">{formatDateTime(entry.occurredAt, locale)}</span>
       {entry.reason !== null && entry.reason !== undefined && entry.reason !== '' ? <q className="history__reason">{entry.reason}</q> : null}

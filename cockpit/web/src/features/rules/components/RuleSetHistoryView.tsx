@@ -7,7 +7,7 @@ import { useI18n } from '../../../i18n/I18nProvider';
 import '../../../components/audit.css';
 import { useRuleSetHistory } from '../../decisions/api/useAudit';
 import { AuditError, statusOf } from '../../decisions/components/AuditParts';
-import { fileSize, shortHash } from '../../decisions/model/references';
+import { fileSize } from '../../decisions/model/references';
 import { formatDateTime } from '../model/dates';
 import { HistoryEntryItem } from './HistoryList';
 import { StatusBadge } from './StatusBadge';
@@ -15,7 +15,8 @@ import { StatusBadge } from './StatusBadge';
 /**
  * A rule set's history across its versions (CKP-072, PD-116): one line per version, newest first, with its status
  * in words, when it was in effect, who created, sent, approved or rejected it and their comments. Each line opens
- * to its events, oldest first. The rule set's evidence exports follow.
+ * to its events, oldest first, which then replace the summary so nothing is shown twice. The rule set's evidence
+ * exports follow.
  */
 export function RuleSetHistoryView({ ruleSet, openVersion }: { ruleSet: string; openVersion: number }) {
   const { t } = useI18n();
@@ -55,14 +56,13 @@ export function RuleSetHistoryView({ ruleSet, openVersion }: { ruleSet: string; 
 
 function VersionLine({ line, open, onToggle }: { line: VersionHistoryLine; open: boolean; onToggle: () => void }) {
   const { t, locale } = useI18n();
-  const name = usePersonName();
   const when = (iso: string | null | undefined) => formatDateTime(iso, locale);
   const panel = `rsh-events-${String(line.version)}`;
-  const people: { label: string; who: string | null | undefined; at: string | null | undefined; bad?: boolean }[] = [
+  const people: { label: string; who: string | null | undefined; at: string | null | undefined }[] = [
     { label: t('rsh.createdBy'), who: line.createdBy, at: line.createdAt },
     { label: t('rsh.requestedBy'), who: line.requestedBy, at: line.requestedAt },
     { label: t('rsh.approvedBy'), who: line.approvedBy, at: line.approvedAt },
-    { label: t('rsh.rejectedBy'), who: line.rejectedBy, at: line.rejectedAt, bad: true },
+    { label: t('rsh.rejectedBy'), who: line.rejectedBy, at: line.rejectedAt },
   ];
   return (
     <li className={open ? 'rsh__line rsh__line--open' : 'rsh__line'}>
@@ -77,9 +77,40 @@ function VersionLine({ line, open, onToggle }: { line: VersionHistoryLine; open:
         </span>
         <span className="sr-only">{t(open ? 'rsh.hideEvents' : 'rsh.showEvents')}</span>
       </button>
+      {open ? null : <Summary line={line} people={people} />}
+      <div id={panel} hidden={!open} className="rsh__events">
+        {open ? (
+          <ol className="history__list rsh__timeline" aria-label={t('rsh.eventsOf', { version: String(line.version) })}>
+            {uniqueEvents(line.events).map((entry) => <HistoryEntryItem key={`${entry.action}-${String(entry.lockVersion)}-${entry.occurredAt}`} entry={entry} />)}
+          </ol>
+        ) : null}
+        {open && line.eventsTruncated ? <p className="dock__hint">{t('rsh.eventsTruncated')}</p> : null}
+      </div>
+    </li>
+  );
+}
+
+/** One event per action, version step and instant: a page boundary or a retried read never shows an event twice. */
+function uniqueEvents<T extends { action: string; lockVersion: number; occurredAt: string }>(events: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return events.filter((entry) => {
+    const key = `${entry.action}-${String(entry.lockVersion)}-${entry.occurredAt}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** A closed line's summary: who created, sent, approved or rejected the version, and their comments. */
+function Summary({ line, people }: { line: VersionHistoryLine; people: { label: string; who: string | null | undefined; at: string | null | undefined }[] }) {
+  const { t, locale } = useI18n();
+  const name = usePersonName();
+  const when = (iso: string | null | undefined) => formatDateTime(iso, locale);
+  return (
+    <>
       <dl className="rsh__people">
         {people.filter((person) => person.who !== null && person.who !== undefined).map((person) => (
-          <div key={person.label} className={person.bad === true ? 'rsh__person rsh__person--bad' : 'rsh__person'}>
+          <div key={person.label} className="rsh__person">
             <dt>{person.label}</dt>
             <dd>{name(person.who ?? '')}{person.at !== null && person.at !== undefined ? <span className="muted tnum"> · {when(person.at)}</span> : null}</dd>
           </div>
@@ -91,19 +122,11 @@ function VersionLine({ line, open, onToggle }: { line: VersionHistoryLine; open:
           {line.approvalComment ? <div><dt>{t('rsh.approvalComment')}</dt><dd><q>{line.approvalComment}</q></dd></div> : null}
         </dl>
       ) : null}
-      <div id={panel} hidden={!open} className="rsh__events">
-        {open ? (
-          <ol className="history__list" aria-label={t('rsh.eventsOf', { version: String(line.version) })}>
-            {line.events.map((entry) => <HistoryEntryItem key={`${entry.action}-${String(entry.lockVersion)}-${entry.occurredAt}`} entry={entry} />)}
-          </ol>
-        ) : null}
-        {open && line.eventsTruncated ? <p className="dock__hint">{t('rsh.eventsTruncated')}</p> : null}
-      </div>
-    </li>
+    </>
   );
 }
 
-/** Each evidence export, newest first: who, what and when, and the file's SHA-256 as a short reference with Copy. */
+/** Each evidence export, newest first: who, what and when, and the file's SHA-256 in full with Copy. */
 function Exports({ events, truncated }: { events: readonly RuleSetEvent[]; truncated: boolean }) {
   const { t, locale } = useI18n();
   const name = usePersonName();
@@ -121,7 +144,7 @@ function Exports({ events, truncated }: { events: readonly RuleSetEvent[]; trunc
                 </span>
                 <span className="muted tnum">{event.evidence.format.toUpperCase()} · {t(`evidence.size.${size.unit}`, { value: size.value })} · {formatDateTime(event.occurredAt, locale)}</span>
                 <span className="rsh__export-hash">
-                  <span className="muted">{t('evidence.sha')}</span> <span className="ref-text" title={event.evidence.contentSha256}>{shortHash(event.evidence.contentSha256)}</span>
+                  <span className="muted">{t('evidence.sha')}</span> <span className="ref-text rsh__sha">{event.evidence.contentSha256}</span>
                   <CopyButton value={event.evidence.contentSha256} label={t('evidence.copySha')} copiedLabel={t('evidence.shaCopied')} />
                 </span>
               </li>

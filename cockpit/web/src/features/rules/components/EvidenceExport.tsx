@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { MAX_EVIDENCE_DECISIONS, type EvidenceRequest } from '../../../api/rules/auditSchemas';
 import type { EvidenceFile } from '../../../api/rules/rulesClient';
 import type { VersionSummary } from '../../../api/rules/schemas';
@@ -8,7 +8,7 @@ import { useI18n } from '../../../i18n/I18nProvider';
 import { useDecisionSearch, useExportEvidence } from '../../decisions/api/useAudit';
 import { AuditError, codeOf, detailOf, LockIcon, statusOf } from '../../decisions/components/AuditParts';
 import { MonthSelect } from '../../decisions/components/MonthSelect';
-import { fileSize, monthOf, shortHash, shortId } from '../../decisions/model/references';
+import { fileSize, monthOf, shortId } from '../../decisions/model/references';
 import { formatDateTime } from '../model/dates';
 import { useRulesSession } from '../api/rulesContext';
 
@@ -24,7 +24,8 @@ function blockedReason(versions: number, decisions: number): 'evidence.blocked.e
 /**
  * Export evidence (CKP-073, CKP-074, PD-116): choose versions, and decisions when the user may read the decision
  * log, then CSV or JSON. The engine writes, hashes and records the file; the cockpit saves its bytes unchanged and
- * shows what was exported with the SHA-256 the engine stated, as a short reference with Copy.
+ * shows what was exported with the SHA-256 the engine stated, in full with Copy. A refusal and the reason Export
+ * is unavailable sit just above the button, so they stay in view beside the action.
  */
 export function EvidenceExport({ ruleSet, versions }: { ruleSet: string; versions: readonly VersionSummary[] }) {
   const { t } = useI18n();
@@ -38,6 +39,12 @@ export function EvidenceExport({ ruleSet, versions }: { ruleSet: string; version
     saveFile(file.file, file.fileName);
     setDone({ file, request });
   });
+  const problem = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = problem.current;
+    // Brings a refusal into view beside Export; a browser without scrolling (a test DOM) simply shows it.
+    if (exporter.isError && element !== null && 'scrollIntoView' in element) element.scrollIntoView({ block: 'nearest' });
+  }, [exporter.isError]);
   const mayAddDecisions = can('rules:log:read');
   const reason = blockedReason(chosenVersions.size, mayAddDecisions ? chosenDecisions.size : 0);
   const flip = <T,>(set: ReadonlySet<T>, value: T): Set<T> => {
@@ -80,6 +87,8 @@ export function EvidenceExport({ ruleSet, versions }: { ruleSet: string; version
       ) : (
         <p className="evidence__locked"><LockIcon /> {t('evidence.decisionsLocked')}</p>
       )}
+      {exporter.isError ? <div ref={problem} className="evidence__problem"><EvidenceProblem error={exporter.error} chosen={[...chosenDecisions]} /></div> : null}
+      {reason !== undefined ? <p id={`${ids}-reason`} className="gate__reason evidence__reason">{t(reason)}</p> : null}
       <div className="evidence__foot">
         <div className="seg" role="group" aria-label={t('evidence.format')}>
           {(['csv', 'json'] as const).map((option) => (
@@ -91,19 +100,31 @@ export function EvidenceExport({ ruleSet, versions }: { ruleSet: string; version
           {exporter.isPending ? t('evidence.exporting') : t('evidence.export')}
         </button>
       </div>
-      {reason !== undefined ? <p id={`${ids}-reason`} className="gate__reason evidence__reason">{t(reason)}</p> : null}
-      {exporter.isError ? <EvidenceProblem error={exporter.error} chosen={[...chosenDecisions]} /> : null}
     </section>
   );
 }
 
-/** The decisions of this rule set in one month, to tick; at most 100 go into one file. */
+/**
+ * The decisions of this rule set in one month, to tick. One file holds at most MAX_EVIDENCE_DECISIONS: when the
+ * month has more, the bulk action chooses the first that fit, the count says how many are chosen and why, and the
+ * other boxes are unavailable once the limit is reached.
+ */
 function DecisionPicker({ ruleSet, chosen, onChange }: { ruleSet: string; chosen: ReadonlySet<string>; onChange: (next: ReadonlySet<string>) => void }) {
   const { t, locale } = useI18n();
   const ids = useId();
   const [month, setMonth] = useState(monthOf(new Date()));
   const found = useDecisionSearch({ ruleSet, month, pageSize: 200 });
   const shown = found.data?.pages.flatMap((page) => page.data) ?? [];
+  const full = chosen.size >= MAX_EVIDENCE_DECISIONS;
+  const fitsAll = shown.length <= MAX_EVIDENCE_DECISIONS;
+  const chooseFirst = () => {
+    const next = new Set(chosen);
+    for (const decision of shown) {
+      if (next.size >= MAX_EVIDENCE_DECISIONS) break;
+      next.add(decision.decisionId);
+    }
+    onChange(next);
+  };
   const toggle = (id: string) => {
     const next = new Set(chosen);
     if (next.has(id)) next.delete(id);
@@ -118,6 +139,7 @@ function DecisionPicker({ ruleSet, chosen, onChange }: { ruleSet: string; chosen
         <MonthSelect id={`${ids}-month`} className="field__input field__input--compact" value={month} onChange={setMonth} />
         <span className="muted tnum" role="status">{t('evidence.chosen', { count: String(chosen.size) })}</span>
       </div>
+      {!fitsAll || full ? <p className="evidence__limit">{t('evidence.limit', { limit: String(MAX_EVIDENCE_DECISIONS) })}</p> : null}
       {found.isError ? <AuditError message={statusOf(found.error) === 403 ? t('dlog.error.forbidden') : t('area.error.generic')} error={found.error} /> : null}
       {found.isPending ? <p className="muted evidence__empty" role="status">{t('area.loading')}</p> : null}
       {found.isSuccess && shown.length === 0 ? <p className="muted evidence__empty">{t('evidence.noDecisions')}</p> : null}
@@ -127,7 +149,7 @@ function DecisionPicker({ ruleSet, chosen, onChange }: { ruleSet: string; chosen
             {shown.map((decision) => (
               <li key={decision.decisionId}>
                 <label className="evidence__decision">
-                  <input type="checkbox" checked={chosen.has(decision.decisionId)} onChange={() => { toggle(decision.decisionId); }} />
+                  <input type="checkbox" checked={chosen.has(decision.decisionId)} disabled={full && !chosen.has(decision.decisionId)} onChange={() => { toggle(decision.decisionId); }} />
                   <span className="tnum">{formatDateTime(decision.evaluatedAt, locale)}</span>
                   <span className="ref-text">{shortId(decision.decisionId)}</span>
                 </label>
@@ -135,7 +157,9 @@ function DecisionPicker({ ruleSet, chosen, onChange }: { ruleSet: string; chosen
             ))}
           </ul>
           <div className="evidence__bulk">
-            <button type="button" className="linkbtn" onClick={() => { onChange(new Set([...chosen, ...shown.map((decision) => decision.decisionId)])); }}>{t('evidence.chooseAll', { count: String(shown.length) })}</button>
+            {fitsAll
+              ? <button type="button" className="linkbtn" onClick={chooseFirst}>{t('evidence.chooseAll', { count: String(shown.length) })}</button>
+              : <button type="button" className="linkbtn" disabled={full} onClick={chooseFirst}>{t('evidence.chooseFirst', { count: String(MAX_EVIDENCE_DECISIONS) })}</button>}
             {chosen.size > 0 ? <button type="button" className="linkbtn" onClick={() => { onChange(new Set()); }}>{t('evidence.clear')}</button> : null}
           </div>
         </>
@@ -162,7 +186,7 @@ function Exported({ ruleSet, done, onAgain }: { ruleSet: string; done: { file: E
         <div>
           <dt>{t('evidence.sha')}</dt>
           <dd className="evidence__hash">
-            <span className="ref-text" title={file.contentSha256} data-testid="evidence-sha">{shortHash(file.contentSha256)}</span>
+            <span className="ref-text" data-testid="evidence-sha">{file.contentSha256}</span>
             <CopyButton value={file.contentSha256} label={t('evidence.copySha')} copiedLabel={t('evidence.shaCopied')} />
           </dd>
         </div>

@@ -83,12 +83,35 @@ describe('rule set history', () => {
     expect(within(events).getAllByRole('listitem').map((item) => item.querySelector('.history__what')?.textContent)).toEqual([
       '✎ Created by lan', '◷ Sent for approval by lan', '✕ Rejected by minh', '◷ Sent for approval by lan', '✓ Approved by minh',
     ]);
+    // Open, the line shows its timeline only: the summary of people and comments is not repeated above it.
+    expect(within(v2).queryByText('Rejected by')).not.toBeInTheDocument();
+    expect(within(v2).queryByText('Approval comment')).not.toBeInTheDocument();
+    expect(within(v2).getAllByText(/Committee minutes attached/)).toHaveLength(1);
+    expect(within(v2).getAllByText(/Approved by minh/)).toHaveLength(1);
     await user.click(toggles[2] as HTMLElement);
     const v1Events = screen.getByRole('list', { name: 'Events of version 1' });
     expect(within(v1Events).getAllByRole('listitem').at(-1)?.querySelector('.history__what')).toHaveTextContent('■ Retired by minh');
     expect(screen.getByText('No evidence has been exported yet.')).toBeInTheDocument();
     // History and Export evidence side by side.
     expect(screen.getByRole('heading', { name: 'Export evidence' })).toBeInTheDocument();
+  });
+
+  it('CKP_073_an_event_sent_twice_is_shown_once', async () => {
+    const event = (action: string, toStatus: string, actor: string, lockVersion: number, occurredAt: string) => ({ action, fromStatus: null, toStatus, actor, reason: null, lockVersion, occurredAt });
+    const created = event('CREATED', 'DRAFT', 'lan', 0, '2026-11-20T03:00:00Z');
+    const requested = event('REQUESTED', 'PENDING_APPROVAL', 'lan', 1, '2026-11-20T04:00:00Z');
+    mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets/card-fee/history', () => HttpResponse.json({
+      ruleSet: 'card-fee', nextCursor: null, hasNext: false, ruleSetEvents: [],
+      data: [{
+        version: 3, status: 'PENDING_APPROVAL', effectiveFrom: null, effectiveTo: null, canonicalHash: 'a'.repeat(64),
+        createdBy: 'lan', createdAt: '2026-11-20T03:00:00Z', requestedBy: 'lan', requestedAt: '2026-11-20T04:00:00Z',
+        approvedBy: null, approvedAt: null, approvalComment: null, rejectedBy: null, rejectedAt: null, rejectionReason: null,
+        events: [created, requested, requested], eventsTruncated: false,
+      }],
+    })));
+    open('#/rules/card-fee/3/history');
+    const events = await screen.findByRole('list', { name: 'Events of version 3' });
+    expect(within(events).getAllByRole('listitem').map((item) => item.querySelector('.history__what')?.textContent)).toEqual(['✎ Created by lan', '◷ Sent for approval by lan']);
   });
 });
 
@@ -120,11 +143,12 @@ describe('evidence export', () => {
     expect(file).toContain('# Exported by: ha');
     // Masked inputs stay their keyed hash in the file.
     expect(file).toContain('hmac:k1:9f4a6c');
-    expect(screen.getByTestId('evidence-sha')).toHaveTextContent(`${sha.slice(0, 8)}…`);
+    // The SHA-256 is shown in full, and Copy copies exactly what is shown.
+    expect(screen.getByTestId('evidence-sha')).toHaveTextContent(new RegExp(`^${sha}$`));
     expect(screen.getByText('Versions 1, 2 · 3 decisions')).toBeInTheDocument();
     await user.click(within(screen.getByRole('region', { name: 'Evidence exported' })).getByRole('button', { name: 'Copy SHA-256' }));
-    // user-event provides the clipboard; the full 64 digits are copied, not the short reference.
-    expect(await navigator.clipboard.readText()).toBe(sha);
+    // user-event provides the clipboard.
+    expect(await navigator.clipboard.readText()).toBe(screen.getByTestId('evidence-sha').textContent);
     expect(await screen.findByText('SHA-256 copied')).toBeInTheDocument();
 
     // The history now records the export.
@@ -148,7 +172,7 @@ describe('evidence export', () => {
     release();
     expect(await screen.findByRole('heading', { name: /Evidence exported/ })).toBeInTheDocument();
     expect(exportCalls()).toHaveLength(1);
-    expect(screen.getByTestId('evidence-sha')).toHaveTextContent('aaaaaaaa…');
+    expect(screen.getByTestId('evidence-sha')).toHaveTextContent('a'.repeat(64));
   });
 
   it('CKP_075_export_limits_and_refusals_read_in_words', async () => {
@@ -158,13 +182,24 @@ describe('evidence export', () => {
     // Nothing chosen: unavailable, with the reason in one line.
     expect(exportButton()).toBeDisabled();
     expect(exportButton()).toHaveAccessibleDescription('Choose at least one version or decision.');
-    // More than 100 decisions: unavailable, and nothing is sent.
+    // A month of 124 decisions: the bulk action chooses the first 100, and the screen says why it stops there.
     fireEvent.change(screen.getByLabelText('Month of the decisions'), { target: { value: '2026-11' } });
-    await screen.findByRole('list', { name: '124 decisions found' });
-    await user.click(screen.getByRole('button', { name: 'Choose all 124' }));
-    expect(screen.getByText('124 chosen')).toBeInTheDocument();
-    expect(exportButton()).toBeDisabled();
-    expect(exportButton()).toHaveAccessibleDescription('Choose at most 100 decisions.');
+    const list = await screen.findByRole('list', { name: '124 decisions found' });
+    expect(screen.queryByRole('button', { name: 'Choose all 124' })).not.toBeInTheDocument();
+    expect(screen.getByText('One file holds at most 100 decisions.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Choose first 100' }));
+    expect(screen.getByText('100 chosen')).toBeInTheDocument();
+    const boxes = within(list).getAllByRole('checkbox');
+    expect(boxes.slice(0, 100).every((box) => (box as HTMLInputElement).checked)).toBe(true);
+    // The rest cannot be added, so Export stays available and is never refused for the count.
+    expect(boxes.slice(100).every((box) => (box as HTMLInputElement).disabled && !(box as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getByRole('button', { name: 'Choose first 100' })).toBeDisabled();
+    expect(exportButton()).toBeEnabled();
+    expect(exportButton()).not.toHaveAccessibleDescription();
+    // Unticking one frees a place.
+    await user.click(boxes[0] as HTMLElement);
+    expect(screen.getByText('99 chosen')).toBeInTheDocument();
+    expect(boxes[100]).toBeEnabled();
     await user.click(screen.getByRole('button', { name: 'Clear' }));
     expect(exportCalls()).toEqual([]);
   });

@@ -13,7 +13,7 @@ describe('tolerant reading of /api/bpm/me', () => {
     const reading = readMe({ ...meLan, permissions: [UNREADABLE_PERMISSION, 'rules:read'] });
     if (!reading.ok) throw new Error('expected /me to parse');
     expect(reading.me.permissions).toEqual(['rules:read']);
-    expect(availableAreas(metaRulesOnly, reading.me)).toEqual(['home', 'rules', 'approvals', 'decisions']);
+    expect(availableAreas(metaRulesOnly, reading.me)).toEqual(['home', 'rules', 'approvals']);
   });
 
   it('CKP_001_every_ill_formed_kind_of_name_is_dropped', () => {

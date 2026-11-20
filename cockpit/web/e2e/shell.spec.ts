@@ -112,8 +112,9 @@ test.describe('tolerant reading of /me', () => {
 
     await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(page.getByTestId('session-header').getByTestId('header-tenant')).toHaveText('bank-a');
-    // rules:read and rules:author still open the rule areas; the dropped name adds nothing.
-    expect(menu.map((item) => item.split('\n')[0])).toEqual(expect.arrayContaining(['Home', 'Rules', 'Approvals', 'Decisions']));
+    // rules:read and rules:author still open the rule areas; the dropped name adds nothing, Decisions included.
+    expect(menu.map((item) => item.split('\n')[0])).toEqual(expect.arrayContaining(['Home', 'Rules', 'Approvals']));
+    expect(menu.map((item) => item.split('\n')[0])).not.toContain('Decisions');
     expect(notes).toHaveLength(1);
     expect(notes[0]).toContain(UNREADABLE_PERMISSION);
   });

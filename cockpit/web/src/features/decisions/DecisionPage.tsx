@@ -83,16 +83,33 @@ function DecisionView({ decisionId }: { decisionId: string }) {
   );
 }
 
-/** The focal card: the outcome and the engine's sentence, exactly as written by the engine. */
+/**
+ * The focal card: the outcome and the engine's sentence, exactly as written by the engine. A failed decision
+ * reads in the screen's words with the error edge; the engine's message and the error code stay behind Details,
+ * since the engine's failure sentence carries the raw code.
+ */
 function Explanation({ decision, explanation }: { decision: LoggedDecision; explanation: DecisionExplanation }) {
   const { t } = useI18n();
+  const outcome = knownOutcome(decision.outcome);
+  const failed = outcome !== 'OK';
   return (
-    <article className="card why" aria-labelledby="why-title">
+    <article className={failed ? 'card why why--failed' : 'card why'} aria-labelledby="why-title">
       <div className="why__head">
         <h2 id="why-title" className="card__title">{t('dlog.why')}</h2>
-        <OutcomeBadge outcome={knownOutcome(decision.outcome)} matched={decision.matchedRuleIds} />
+        <OutcomeBadge outcome={outcome} matched={decision.matchedRuleIds} />
       </div>
-      <p className="why__text" lang={explanation.language}>{explanation.text}</p>
+      {failed ? (
+        <>
+          <p className="why__text">{t(outcome === 'UNIQUE_HIT_VIOLATION' ? 'dlog.failed.unique' : 'dlog.failed.evaluation')}</p>
+          <details className="alert__details why__details">
+            <summary>{t('area.error.details')}</summary>
+            <dl>
+              <div><dt>{t('error.code')}</dt><dd className="mono">{explanation.errorCode ?? decision.errorCode ?? decision.outcome}</dd></div>
+              {explanation.text !== '' ? <div><dt>{t('dlog.failed.engineText')}</dt><dd lang={explanation.language}>{explanation.text}</dd></div> : null}
+            </dl>
+          </details>
+        </>
+      ) : <p className="why__text" lang={explanation.language}>{explanation.text}</p>}
     </article>
   );
 }
@@ -115,7 +132,7 @@ function Facts({ decision }: { decision: LoggedDecision }) {
       <div><dt>{t('dlog.fact.clock')}</dt><dd className="tnum">{formatDateTime(decision.evalClock, locale)}{decision.clockChosen ? <span className="badge badge--warn dlog-facts__note">{t('dlog.clockChosen')}</span> : null}{decision.pinned ? <span className="badge badge--neutral dlog-facts__note">{t('dlog.pinned')}</span> : null}</dd></div>
       <div>
         <dt>{t('dlog.fact.id')}</dt>
-        <dd className="dlog-facts__ref"><span className="ref-text" title={decision.decisionId}>{shortId(decision.decisionId)}</span> <CopyButton value={decision.decisionId} label={t('dlog.copyId')} copiedLabel={t('dlog.idCopied')} /></dd>
+        <dd className="dlog-facts__ref"><span className="ref-text" data-testid="decision-id">{decision.decisionId}</span><CopyButton value={decision.decisionId} label={t('dlog.copyId')} copiedLabel={t('dlog.idCopied')} /></dd>
       </div>
     </dl>
   );

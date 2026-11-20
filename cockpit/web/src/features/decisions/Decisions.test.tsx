@@ -81,11 +81,21 @@ describe('decision explorer', () => {
     expect(window.location.hash).toBe(`#/decisions/${NAMED}`);
   });
 
-  it('CKP_071_without_the_decision_log_permission_the_page_says_so_and_asks_for_nothing', async () => {
+  it('CKP_071_without_the_decision_log_permission_decisions_is_hidden_and_asks_for_nothing', async () => {
     open('#/decisions?ruleSet=card-fee&month=2026-11', 'rules-author');
-    expect(await screen.findByText('Reading decisions needs permission to read the decision log.')).toBeInTheDocument();
+    // Not in the menu, and a link to it reads as not available.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Not available' })).toBeInTheDocument();
+    const menu = screen.getByRole('navigation', { name: 'Cockpit menu' });
+    expect(within(menu).getByRole('link', { name: 'Rules' })).toBeInTheDocument();
+    expect(within(menu).queryByRole('link', { name: /Decisions/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Show decisions' })).not.toBeInTheDocument();
     expect(decisionCalls()).toEqual([]);
+  });
+
+  it('CKP_071_with_the_decision_log_permission_decisions_is_in_the_menu', async () => {
+    open('#/rules');
+    const menu = await screen.findByRole('navigation', { name: 'Cockpit menu' });
+    expect(await within(menu).findByRole('link', { name: /Decisions/ })).toBeInTheDocument();
   });
 
   it('CKP_071_an_empty_month_says_no_decisions_were_logged', async () => {
@@ -128,8 +138,18 @@ describe('one decision', () => {
     const balance = within(conditions).getByRole('row', { name: /^Balance/ });
     expect(balance).toHaveTextContent('≥50,000,000 VND');
     expect(balance).toHaveTextContent('60,000,000 VND');
-    expect(screen.getByRole('button', { name: 'Copy id' })).toBeInTheDocument();
-    expect(screen.getByText('01KF2Q…P7T9')).toHaveAttribute('title', NAMED);
+    expect(document.body).not.toHaveTextContent(/[{}]"/);
+  });
+
+  it('CKP_072_copy_copies_exactly_the_decision_id_shown', async () => {
+    const user = userEvent.setup();
+    open(`#/decisions/${NAMED}`);
+    const shown = await screen.findByTestId('decision-id');
+    expect(shown).toHaveTextContent(new RegExp(`^${NAMED}$`));
+    await user.click(screen.getByRole('button', { name: 'Copy decision id' }));
+    // user-event provides the clipboard.
+    expect(await navigator.clipboard.readText()).toBe(shown.textContent);
+    expect(await screen.findByText('Decision id copied')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/[{}]"/);
   });
 
@@ -140,10 +160,31 @@ describe('one decision', () => {
     expect(screen.getByRole('tab', { name: 'Điều kiện' })).toBeInTheDocument();
   });
 
-  it('CKP_072_a_failed_decision_says_nothing_was_produced', async () => {
+  it('CKP_072_a_failed_decision_reads_in_words_with_the_error_edge_and_the_code_behind_details', async () => {
+    const user = userEvent.setup();
     open('#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7TC');
     expect(await screen.findByText('The decision failed, so nothing was produced.')).toBeInTheDocument();
     expect(screen.getByText('Failed', { selector: '.why .badge' })).toBeInTheDocument();
+    const why = screen.getByRole('article', { name: 'Why' });
+    expect(why).toHaveClass('why--failed');
+    expect(within(why).getByText('The rule set could not be evaluated, so no result was produced.')).toBeVisible();
+    // The raw code and the engine's sentence are one click away, not in the sentence.
+    expect(within(why).getByText('EVALUATION_ERROR')).not.toBeVisible();
+    await user.click(within(why).getByText('Details'));
+    expect(within(why).getByText('EVALUATION_ERROR')).toBeVisible();
+    expect(within(why).getByText(/failed with EVALUATION_ERROR/)).toBeVisible();
+  });
+
+  it('CKP_072_a_failed_decision_reads_in_vietnamese', async () => {
+    open('#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7TC', 'rules-auditor', 'vi');
+    expect(await screen.findByText('Không thể đánh giá bộ quy tắc nên không có kết quả.')).toBeInTheDocument();
+  });
+
+  it('CKP_072_a_successful_decision_keeps_the_accent_edge_and_the_engine_sentence', async () => {
+    open(`#/decisions/${NAMED}`);
+    const why = await screen.findByRole('article', { name: 'Why' });
+    expect(why).not.toHaveClass('why--failed');
+    expect(within(why).queryByText('Details')).not.toBeInTheDocument();
   });
 
   it('CKP_072_a_decision_of_another_tenant_or_missing_reads_as_not_found', async () => {

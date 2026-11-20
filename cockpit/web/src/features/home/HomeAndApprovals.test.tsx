@@ -241,7 +241,7 @@ describe('menu', () => {
 
     expect(within(menu).getByRole('button', { name: 'Expand menu' })).toHaveAttribute('aria-expanded', 'false');
     expect(within(menu).getByRole('link', { name: 'Rules' })).toHaveAttribute('data-tip', 'Rules');
-    expect(within(menu).getByRole('link', { name: 'Decisions (Preview)' })).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Home' })).toHaveAttribute('data-tip', 'Home');
     expect(window.localStorage.getItem('horus.cockpit.menu')).toBe('collapsed');
   });
 
@@ -253,9 +253,10 @@ describe('menu', () => {
     expect(screen.getByText('No process is deployed on this service yet.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'How to import a BPMN file' })).toHaveAttribute('href', expect.stringContaining('Process-Engine-Importing-BPMN'));
     expect(screen.queryByText(/is installed on this service/)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('link', { name: 'Decisions' }));
-    // Lan may not read the decision log: the page says so in one line and asks for nothing.
-    expect(await screen.findByText('Reading decisions needs permission to read the decision log.')).toBeInTheDocument();
+    // Lan may not read the decision log: Decisions is not in her menu, and Processes stands alone under Preview.
+    const menu = screen.getByRole('navigation', { name: 'Cockpit menu' });
+    expect(within(menu).queryByRole('link', { name: /Decisions/ })).not.toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: /Processes/ })).toBeInTheDocument();
   });
 });
 
