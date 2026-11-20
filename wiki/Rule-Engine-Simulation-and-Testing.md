@@ -39,19 +39,15 @@ Expected: `200` with `"version": 2`, `"baselineVersion": 1`, `"sampleCount": 5` 
 
 A sample is `changed` when the outcome kind, an output value or the failure code differs. A different matched row that gives the same fee is not flagged; both rule lists are shown. When nothing is in force yet, `baseline` is `null` and every sample is `changed`. The same draft, samples and clock always give the same response. Before any sample runs, the version is checked against its stored hash and compiled; a failure is `422 VALIDATION_FAILED`. In Java: `ruleEngine.simulate("card-fee", 2, samples)` returns a `SimulationResult`.
 
-One row at a time through the versioned evaluate (planned):
+Simulation is the only way to run a draft. The pinned evaluate, `POST /decisions/{ruleSet}/versions/{v}:evaluate` (`rules:pin`), logs a decision like any evaluate, so it accepts approved versions only: a draft or a version pending approval is `409 INVALID_STATE`, and so is a `RETIRED` version unless `evaluation.pin-retired` is `true`.
 
-```bash
-curl -s -X POST http://localhost:8080/api/bpm/rules/v1/decisions/card-fee/versions/3:evaluate \
-  -H 'Content-Type: application/json' \
-  -d '{ "inputs": { "tier": "GOLD", "balance": { "currency": "VND", "amount": 60000000 }, "txCount": 3 } }'
-```
+### After approval
 
-Expected: `200` with `"version": 3`, `"matchedRuleIds": ["R2"]`, `"outputs": { "fee": { "currency": "VND", "amount": 0 }, "waived": true }`. No row is added to the decision log.
+Approving v2 with an `effectiveFrom` at or before now puts it in force and retires v1 as superseded in the same transaction. From then on `:simulate` compares any version with v2, and v1 can still be simulated, because simulation reads a version in any status and logs nothing. A pinned evaluate of v1 is refused, as above.
 
 ## Simulate a future-dated version
 
-Add `"clock": "2027-01-01T00:00:00Z"` to the request body. `today()` and `now()` in the expressions use that instant, and the effective-version lookup uses it too. `clock` is accepted only with `rules:simulate`.
+`:simulate` takes no `clock`: the baseline is the version in force at the host clock. To see what a version scheduled for a later date decides on that date, add `"clock": "2027-01-01T00:00:00Z"` to an `:evaluate` request. `today()` and `now()` in the expressions use that instant, and the version lookup uses it too. `clock` needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED` without it), and that decision is logged.
 
 ## Replay history through a draft (Cockpit 0.2 target)
 

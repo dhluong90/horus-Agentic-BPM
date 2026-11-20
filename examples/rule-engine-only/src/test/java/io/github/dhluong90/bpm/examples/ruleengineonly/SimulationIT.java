@@ -50,7 +50,7 @@ class SimulationIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     @org.springframework.test.context.DynamicPropertySource
     static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
@@ -215,6 +215,10 @@ class SimulationIT {
                 .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {
             request.header("Content-Type", contentType);
+        }
+        // An approval names the lock version it was decided on; these tests approve a version just requested, at 1.
+        if (path.endsWith(":approve")) {
+            request.header("If-Match", "\"1\"");
         }
         HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""), response.body());

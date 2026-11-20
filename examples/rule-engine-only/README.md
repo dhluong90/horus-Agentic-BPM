@@ -247,7 +247,7 @@ docker exec horus-pg psql -U horus -d horus -tc 'SELECT count(*) FROM rle_decisi
 # 1   (the decision of step 5 only)
 ```
 
-The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees.
+The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees. Once Minh approves v2 (with `If-Match: "1"`), it is in force and v1 is retired as superseded: a new simulation compares with v2, and a pinned evaluate of v1 is `409 INVALID_STATE` while `evaluation.pin-retired` is off.
 
 ### Hit policies: exactly one row, or every matching row
 
