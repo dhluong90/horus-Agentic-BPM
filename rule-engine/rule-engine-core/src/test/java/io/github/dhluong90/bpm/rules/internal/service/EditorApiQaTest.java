@@ -68,7 +68,7 @@ class EditorApiQaTest {
                 return v;
             }
             caller.become("bank-a", "zed", Set.of(READ, APPROVE));
-            return versions.approve("card-fee", 1, WriteOptions.none());
+            return versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         }
     }
 
@@ -121,8 +121,8 @@ class EditorApiQaTest {
             try {
                 switch (action) {
                     case VersionActions.REQUEST_PUBLISH -> world.versions.requestPublish("card-fee", 1, WriteOptions.none());
-                    case VersionActions.APPROVE -> world.versions.approve("card-fee", 1, WriteOptions.none());
-                    default -> world.versions.reject("card-fee", 1, new WriteOptions(null, null, "qa"));
+                    case VersionActions.APPROVE -> world.versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
+                    default -> world.versions.reject("card-fee", 1, new WriteOptions(null, 1L, "qa"));
                 }
                 accepted.add(action);
             } catch (HorusBpmException refused) {
@@ -240,11 +240,11 @@ class EditorApiQaTest {
         World w = new World();
         w.build(VersionStatus.PENDING_APPROVAL, "lan", "lan");
         w.caller.become("bank-a", "minh", Set.of(READ, APPROVE));
-        w.versions.reject("card-fee", 1, new WriteOptions(null, null, "first"));
+        w.versions.reject("card-fee", 1, new WriteOptions(null, 1L, "first"));
         w.caller.become("bank-a", "lan", Set.of(READ, AUTHOR));
         w.versions.requestPublish("card-fee", 1, WriteOptions.none());
         w.caller.become("bank-a", "minh", Set.of(READ, APPROVE));
-        RuleSetVersion published = w.versions.approve("card-fee", 1, new WriteOptions(null, null, "ok"));
+        RuleSetVersion published = w.versions.approve("card-fee", 1, new WriteOptions(null, 3L, "ok"));   // created 0, requested 1, rejected 2, requested 3
 
         // When the history is read
         List<VersionHistoryEntry> rows = w.versions.history("card-fee", 1);
