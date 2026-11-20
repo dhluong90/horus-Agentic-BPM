@@ -213,7 +213,7 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 15));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 16));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
