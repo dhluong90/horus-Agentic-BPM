@@ -203,13 +203,16 @@ class GuardedAgentTaskIT {
         HttpResponse<String> claimed = send("thu", "POST", TASKS + task + ":claim", null,
                 Map.of("If-Match", "\"0\"", "Idempotency-Key", "thu-claims-" + task));
         HttpResponse<String> referred = send("thu", "POST", TASKS + task + ":complete",
-                "{\"result\":{\"riskScore\":85,\"recommendation\":\"REFER\"}}",
+                "{\"result\":{\"riskScore\":85,\"recommendation\":\"REFER\"},"
+                        + "\"reason\":\"Income documents need a second look\"}",
                 Map.of("If-Match", "\"1\"", "Idempotency-Key", "thu-refers-" + task, "Content-Type", "application/json"));
 
         // Then four eyes hold, and the reviewer's answer completes the step: the loan moves on to underwriting
         assertThat(problem(ownReview)).isEqualTo("403 SELF_APPROVAL_FORBIDDEN");
         assertThat(claimed.statusCode()).as(claimed.body()).isEqualTo(200);
         assertThat(referred.statusCode()).as(referred.body()).isEqualTo(200);
+        // And the override is in history with the reviewer's reason (PRE-012)
+        assertThat(history(loan, "HUMAN_OVERRIDE")).isEqualTo(1);
         JsonNode after = instance(loan);
         assertThat(after.at("/variables/assessment/recommendation").stringValue()).isEqualTo("REFER");
         assertThat(openTaskNodes(after)).containsExactly("underwrite");

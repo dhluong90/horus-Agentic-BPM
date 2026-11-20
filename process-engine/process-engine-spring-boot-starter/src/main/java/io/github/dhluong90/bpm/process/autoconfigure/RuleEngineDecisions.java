@@ -18,7 +18,27 @@ final class RuleEngineDecisions {
     /** The class whose presence makes decisions possible; the Rule Engine dependency is optional. */
     static final String RULE_ENGINE_CLASS = "io.github.dhluong90.bpm.rules.api.RuleEngine";
 
+    /** The Rule Engine's masking SPI, whose key makes the fingerprints of masked agent inputs (#59). */
+    static final String MASKING_POLICY_CLASS = "io.github.dhluong90.bpm.rules.spi.MaskingPolicy";
+
     private RuleEngineDecisions() {
+    }
+
+    /**
+     * The masker of agent inputs over the Rule Engine's masking policy (#59): the tenant's key, so the token equals
+     * the decision log's for the same value; {@code ***} for a tenant without a key, or without a policy bean.
+     *
+     * @param beans the host's beans
+     * @return the masker
+     */
+    static io.github.dhluong90.bpm.process.spi.InputMasker inputMasker(BeanFactory beans) {
+        io.github.dhluong90.bpm.rules.spi.MaskingPolicy policy =
+                beans.getBeanProvider(io.github.dhluong90.bpm.rules.spi.MaskingPolicy.class).getIfUnique();
+        if (policy == null) {
+            return io.github.dhluong90.bpm.process.spi.InputMasker.REDACT;
+        }
+        return (tenantId, plainText) -> policy.hmacKey(tenantId).map(key -> key.fingerprint(plainText))
+                .orElse(io.github.dhluong90.bpm.process.spi.InputMasker.REDACTED);
     }
 
     /**

@@ -78,6 +78,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
 import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
@@ -110,7 +111,8 @@ import java.util.function.Function;
  * stored as a job and run by the {@link AsyncStepExecutor} outside any transaction, and its result is recorded by
  * {@link #recordAttempt} in a fresh one (ADR-0008). Thread-safe.
  */
-public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, AsyncStepService {
+public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, AsyncStepService,
+        io.github.dhluong90.bpm.process.api.IncidentService {
 
     /**
      * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
@@ -140,6 +142,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     /** Version of the BPMN reader whose output an approval binds (DESIGN section 5.8). */
     static final String READER_VERSION = "bpmn-subset-1";
     static final String CURSOR_KEY_NAME = "cursor-hmac";
+    /** Job payload key of the audit copy of an agent step's inputs, masked inputs fingerprinted (#59). */
+    static final String AUDIT_INPUTS = "auditInputs";
+    /** Job payload key of the step's own delay before each retry, in milliseconds (#58). */
+    static final String RETRY_BACKOFF_MS = "retryBackoffMs";
+    /** History type of a reviewer's answer that replaced a refused agent answer (#59). */
+    static final String HUMAN_OVERRIDE = "HUMAN_OVERRIDE";
+    /** History type of an incident opened on a step (#58). */
+    static final String INCIDENT_RAISED = "INCIDENT_RAISED";
+    /** Incident code of a business error no path of the process catches (DN-09). */
+    static final String UNHANDLED_BUSINESS_ERROR = "UNHANDLED_BUSINESS_ERROR";
     static final List<String> INSTANCE_STATUSES = List.of("RUNNING", "COMPLETED", "CANCELLED", "COMPENSATING", "FAILED");
     private static final java.util.regex.Pattern KEY = java.util.regex.Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final int MAX_KEY_LENGTH = 200;
@@ -169,6 +181,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, ResultGuard> guards;
     /** Checks the reviewer's answer to the review task of a refused result against the step's output schema. */
     private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas;
+    /** Makes the audit copy of masked agent inputs (#59); never returns the plain value. */
+    private final io.github.dhluong90.bpm.process.spi.InputMasker inputMasker;
+    /** Bounds of agent answer labels (PD-014, #59). */
+    private final AgentLabelLimits labelLimits;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
 
@@ -375,6 +391,44 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
             java.util.Set<String> adapters, java.util.Set<String> agents,
             io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings, async, adapters, agents, outputSchemas,
+                io.github.dhluong90.bpm.process.spi.InputMasker.REDACT, AgentLabelLimits.DEFAULTS);
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     * @param async lease margin, default timeout and runner settings of async steps (ADR-0008, #363)
+     * @param adapters names of the host's {@code ServiceAdapter}s; a remote step naming another is refused at import
+     * @param agents names of the host's {@code AgentAdapter}s; an agent step naming another is refused at import (#52)
+     * @param outputSchemas checks async results against their output schema in the result transaction (#363), and
+     *     agent steps' schemas at import (#52)
+     * @param inputMasker makes the audit copy of masked agent inputs (#59)
+     * @param labelLimits bounds of agent answer labels ({@code agents.labels.*}, #59)
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
+            java.util.Set<String> adapters, java.util.Set<String> agents,
+            io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
+            io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits) {
+        this.inputMasker = Objects.requireNonNull(inputMasker, "inputMasker must not be null");
+        this.labelLimits = Objects.requireNonNull(labelLimits, "labelLimits must not be null");
         this.async = Objects.requireNonNull(async);
         // Agent results are never accepted unchecked; remote service results keep their behaviour (#363).
         this.outputSchemas = Objects.requireNonNull(outputSchemas, "outputSchemas must not be null");
@@ -1280,7 +1334,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         StepResult step = switch (result) {
             case AdapterResult.Completed c -> {
                 boundedJson(c.output(), "output");
-                yield new StepResult.Completed(c.output());
+                yield AnswerLabels.step(c);
             }
             case AdapterResult.BusinessError e -> new StepResult.BusinessError(e.code(), e.message());
             case AdapterResult.Failed f -> new StepResult.Failed(f.errorCode(), f.detail(), f.retryable());
@@ -1362,6 +1416,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 if (!jobs.release(tenant, job.id(), job.lockedBy(), job.attempt(), job.nextFireAt(), true, now)) {
                     throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
                 }
+                raiseIncident(job, String.valueOf(details.get("code")), "The answer was refused ("
+                        + details.get("code") + ") and its review task could not be created (" + failed.code + ")", now);
                 LOG.log(System.Logger.Level.WARNING, "process.async.result.refused tenant={0} job={1} attempt={2} code={3}"
                         + " route=incident routeError={4}", tenant, job.id(), job.attempt(), details.get("code"),
                         failed.code);
@@ -1376,7 +1432,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 if (!current(job, attemptId)) {
                     return StepCompletion.Outcome.DISCARDED;
                 }
-                giveBack(job, attemptId, code, true, reportedBy);
+                giveBack(job, attemptId, code, true, false, reportedBy);
                 return StepCompletion.Outcome.ACCEPTED;
             });
         }
@@ -1462,6 +1518,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         switch (result) {
             case StepResult.Completed completed -> {
+                ResultGuard kindGuard = guards.getOrDefault(job.jobKind(), ResultGuard.NONE);
+                String labelsBroken = kindGuard == ResultGuard.NONE ? null : labelLimits.violation(completed.labels());
+                if (labelsBroken != null) {
+                    // Labels above the bounds (#59): a failed attempt, retried like any other; never recorded.
+                    LOG.log(System.Logger.Level.WARNING, "process.async.labels.invalid tenant={0} job={1} attempt={2}"
+                            + " reason={3}", tenant, job.id(), job.attempt(), labelsBroken);
+                    giveBack(job, attemptId, AgentLabelLimits.LABELS_INVALID, true, false, reportedBy);
+                    return StepCompletion.Outcome.ACCEPTED;
+                }
                 // The only authoritative check of a result, whichever path reported it (#363).
                 ResultGuard.Verdict verdict = guard(row, job, attemptId, completed);
                 if (verdict instanceof ResultGuard.Verdict.Invalid invalid) {
@@ -1489,12 +1554,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     details.put("guardrailDecisionId", allow.decisionId());
                     details.put("ruleIds", allow.ruleIds());
                 }
-                ResultGuard kindGuard = guards.getOrDefault(job.jobKind(), ResultGuard.NONE);
                 if (kindGuard != ResultGuard.NONE) {
-                    // An accepted agent answer is history too: masked by the same policy as a refused one (#52).
+                    // An accepted agent answer is history too: masked by the same policy as a refused one (#52), with
+                    // the masked inputs, the latency and the labels (#59).
                     Map<String, Object> output = completed.output() == null ? Map.of() : completed.output();
                     details.put("output", kindGuard.auditOutput(Values.readMap(job.payloadJson()), output));
                     details.put("outputFields", output.size());
+                    answerFacts(job, completed, details);
                 }
                 try {
                     store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
@@ -1509,8 +1575,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
                 }
             }
-            case StepResult.BusinessError error -> giveBack(job, attemptId, error.code(), false, reportedBy);
-            case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), reportedBy);
+            case StepResult.BusinessError error -> giveBack(job, attemptId, error.code(), false, true, reportedBy);
+            case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), false,
+                    reportedBy);
         }
         return StepCompletion.Outcome.ACCEPTED;
     }
@@ -1568,6 +1635,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("output", guards.getOrDefault(job.jobKind(), ResultGuard.NONE)
                 .auditOutput(Values.readMap(job.payloadJson()), output));
         details.put("outputFields", output.size());
+        answerFacts(job, completed, details);
         store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry("ASYNC_RESULT_REFUSED",
                 job.nodeId(), job.tokenId(), attemptId, reportedBy, now, details)));
         LOG.log(System.Logger.Level.WARNING, "process.async.result.refused tenant={0} job={1} attempt={2} code={3}"
@@ -1576,7 +1644,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             try {
                 // Always four eyes: the reviewer is never the reporter of the result (participants) or the starter.
                 run(definition, row, state, new Command.RouteToReview(job.tokenId(), job.id(), refused.reviewer(),
-                        true, refused.code(), refused.reasons(), reviewContext(job, details)),
+                        true, refused.code(), refused.reasons(), reviewContext(job, attemptId, reportedBy, details)),
                         new RunAs.EngineWork(tenant, ASYNC_ACTOR));
             } catch (RuntimeException e) {
                 throw new RefusalNotRouted(e, details);
@@ -1589,21 +1657,111 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!jobs.release(tenant, job.id(), job.lockedBy(), job.attempt(), job.nextFireAt(), true, now)) {
             throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
         }
+        raiseIncident(job, refused.code(), "The answer was refused (" + refused.code() + ") and the step has no review",
+                now);
+    }
+
+    /**
+     * What the history of an agent answer keeps besides the masked output (#59): the inputs the agent saw, masked
+     * inputs as keyed fingerprints; the adapter latency, from the claim to the result on the engine clock; and the
+     * labels as the agent reported them, which the engine never acts on.
+     */
+    private void answerFacts(JobRow job, StepResult.Completed completed, Map<String, Object> details) {
+        details.put("inputs", auditInputs(job));
+        Instant claimedAt = job.lockedUntil() == null ? null : job.lockedUntil().minus(job.leaseDuration());
+        if (claimedAt != null) {
+            details.put("latencyMs", Math.max(0, Duration.between(claimedAt, clock.instant()).toMillis()));
+        }
+        if (!completed.labels().isEmpty()) {
+            details.put("labels", completed.labels());
+        }
+    }
+
+    /** The audit copy of a job's inputs; a job parked before #59 has none and declared no masks. */
+    private static Object auditInputs(JobRow job) {
+        Map<String, Object> payload = Values.readMap(job.payloadJson());
+        Object audit = payload.get(AUDIT_INPUTS);
+        if (audit instanceof Map<?, ?>) {
+            return audit;
+        }
+        Object inputs = payload.get("inputs");
+        return inputs instanceof Map<?, ?> ? inputs : Map.of();
+    }
+
+    /**
+     * Opens an incident on the step of a job that has just failed for good (#58), in the transaction that failed it:
+     * one {@code OPEN} row, an {@code INCIDENT_RAISED} history entry and {@code processes.incident.raised.v1}. The
+     * token stays on the step. The summary is built from codes only, never from an adapter's detail.
+     */
+    private void raiseIncident(JobRow job, String errorCode, String summary, Instant now) {
+        if (job.instanceId() == null) {
+            return;
+        }
+        InstanceRow row = store.findInstance(job.tenantId(), job.instanceId()).orElse(null);
+        if (row == null) {
+            return;
+        }
+        String code = errorCode == null || errorCode.isBlank() ? "STEP_FAILED" : errorCode;
+        String cause = summary.length() > 500 ? summary.substring(0, 500) : summary;
+        int retries = Math.max(0, job.attempt() - 1);
+        String id = Ulid.next(now);
+        store.insertIncident(new ProcessStore.IncidentRow(job.tenantId(), id, job.instanceId(), job.definitionId(),
+                job.tokenId(), job.nodeId(), code, cause, retries, "OPEN", 0, now, null));
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("incidentId", id);
+        details.put("jobId", job.id());
+        details.put("errorCode", code);
+        details.put("retryCount", retries);
+        store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
+                INCIDENT_RAISED, job.nodeId(), job.tokenId(), attemptId(job.id(), Math.max(1, job.attempt())),
+                ASYNC_ACTOR, now, details)));
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("incidentId", id);
+        payload.put("instanceId", row.id());
+        payload.put("nodeId", job.nodeId());
+        payload.put("errorCode", code);
+        payload.put("retryCount", retries);
+        payload.put("definitionKey", row.definitionKey());
+        payload.put("version", row.definitionVersion());
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        publish(new ProcessEventPublisher.Event(Ids.child(id, 1),
+                "processes.incident.raised.v1", job.tenantId(), now, payload), row.id());
+        LOG.log(System.Logger.Level.WARNING, "process.incident.raised tenant={0} instance={1} node={2} code={3}"
+                + " retryCount={4}", job.tenantId(), job.instanceId(), job.nodeId(), code, retries);
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.process.api.Incident> openIncidents(String instanceId) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        return transactions.inTransaction(() -> {
+            store.findInstance(tenant, instanceId).orElseThrow(() -> new InstanceNotFoundException("No instance "
+                    + instanceId));
+            return store.openIncidents(tenant, instanceId).stream().map(i -> new io.github.dhluong90.bpm.process.api
+                    .Incident(i.id(), i.instanceId(), i.nodeId(), i.tokenId(), i.errorCode(), i.causeSummary(),
+                    i.retryCount(), i.status(), i.lockVersion(), i.createdAt(), i.resolvedAt())).toList();
+        });
     }
 
     /**
      * What the reviewer of a refused result sees on the review task (#52, PRE-010): why it was refused, the inputs the
      * agent saw, and the answer as the refusal recorded it, masked by the output schema's masking policy.
      */
-    private static Map<String, Object> reviewContext(JobRow job, Map<String, Object> refusal) {
+    private static Map<String, Object> reviewContext(JobRow job, String attemptId, String reportedBy,
+            Map<String, Object> refusal) {
         Map<String, Object> context = new LinkedHashMap<>();
         for (String key : List.of("code", "reasons", "ruleIds", "guardrailDecisionId")) {
             if (refusal.get(key) != null) {
                 context.put(key, refusal.get(key));
             }
         }
-        Object inputs = Values.readMap(job.payloadJson()).get("inputs");
-        context.put("inputs", inputs instanceof Map<?, ?> ? inputs : Map.of());
+        // The refused attempt and who reported it, so the reviewer's answer is recorded against both (#59).
+        context.put("attemptId", attemptId);
+        context.put("reportedBy", reportedBy);
+        // Masked inputs only as fingerprints (#59): the reviewer never sees what history may not keep.
+        context.put("inputs", auditInputs(job));
         context.put("output", refusal.get("output"));
         context.put("outputFields", refusal.get("outputFields"));
         return context;
@@ -1637,6 +1795,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
                         "ASYNC_ATTEMPT_FAILED", job.nodeId(), job.tokenId(), attemptId(job.id(), job.attempt()),
                         "system:replica:" + replicaId, now, details)));
+                raiseIncident(job, MAX_ATTEMPTS_REACHED, "The step was claimed " + job.attempt() + " times without a"
+                        + " result (" + MAX_ATTEMPTS_REACHED + ")", now);
                 return true;
             }).orElse(false);
         });
@@ -1661,12 +1821,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * when the failure is not retryable or the attempts are used; the token stays on the step. The code, whether the
      * reporter called it retryable, and the reporter are recorded, never the detail, which may carry personal data.
      */
-    private void giveBack(JobRow job, String attemptId, String code, boolean retryable, String reportedBy) {
+    private void giveBack(JobRow job, String attemptId, String code, boolean retryable, boolean business,
+            String reportedBy) {
         Instant now = clock.instant();
         boolean last = !retryable || job.attempt() >= job.maxAttempts();
-        Duration backoff = JobStore.isAsync(job.jobKind()) ? async.runner(job.jobKind(), jobSettings).retryBackoff()
-                : jobSettings.retryBackoff();
-        Instant retryAt = now.plus(backoff.multipliedBy(Math.max(1, job.attempt())));
+        Instant retryAt = retryAt(job, now);
         if (!jobs.release(job.tenantId(), job.id(), job.lockedBy(), job.attempt(), retryAt, last, now)) {
             throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
         }
@@ -1683,6 +1842,26 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 "ASYNC_ATTEMPT_FAILED", job.nodeId(), job.tokenId(), attemptId, reportedBy, now, details)));
         LOG.log(System.Logger.Level.WARNING, "process.async.attempt.failed tenant={0} job={1} attempt={2} code={3}"
                 + " retryable={4} final={5}", job.tenantId(), job.id(), job.attempt(), code, retryable, last);
+        if (last) {
+            String failure = code == null ? "-" : code;
+            raiseIncident(job, business ? UNHANDLED_BUSINESS_ERROR : failure, business
+                    ? "Business error " + failure + " has no path in the process"
+                    : "Attempt " + job.attempt() + " of " + job.maxAttempts() + " failed with " + failure
+                            + (retryable ? "; no retry is left" : "; not retryable"), now);
+        }
+    }
+
+    /**
+     * When a failed attempt is due again: after the step's own {@code retry.backoff} (#58), the same delay before each
+     * retry, or else after the runner's {@code retry-backoff} times the attempt number.
+     */
+    private Instant retryAt(JobRow job, Instant now) {
+        if (Values.readMap(job.payloadJson()).get(RETRY_BACKOFF_MS) instanceof Number ms && ms.longValue() > 0) {
+            return now.plusMillis(ms.longValue());
+        }
+        Duration backoff = JobStore.isAsync(job.jobKind()) ? async.runner(job.jobKind(), jobSettings).retryBackoff()
+                : jobSettings.retryBackoff();
+        return now.plus(backoff.multipliedBy(Math.max(1, job.attempt())));
     }
 
     @Override
@@ -1794,14 +1973,25 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     @Override
     public ProcessInstance complete(String taskId, Map<String, Object> result, long expectedLockVersion,
             String idempotencyKey) {
+        return complete(taskId, result, null, expectedLockVersion, idempotencyKey);
+    }
+
+    @Override
+    public ProcessInstance complete(String taskId, Map<String, Object> result, String reason, long expectedLockVersion,
+            String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_TASK_WORK);
         if (idempotencyKey == null) {
             throw new PreconditionRequiredException("Completing a task needs an Idempotency-Key");
         }
         Map<String, Object> values = result == null ? Map.of() : result;
-        String requestHash = Hashes.sha256Parts("complete", caller, taskId, boundedJson(values, "result"),
-                String.valueOf(expectedLockVersion));
+        String why = boundedComment(reason, false);
+        // Without a reason the hash is the one before #59, so a replay across the upgrade still matches.
+        String requestHash = why == null
+                ? Hashes.sha256Parts("complete", caller, taskId, boundedJson(values, "result"),
+                        String.valueOf(expectedLockVersion))
+                : Hashes.sha256Parts("complete", caller, taskId, boundedJson(values, "result"),
+                        String.valueOf(expectedLockVersion), "reason", why);
         return transactions.inTransaction(() -> idempotent(tenant, "complete", idempotencyKey, requestHash, () -> {
             Locked locked = lockTask(tenant, taskId, expectedLockVersion);
             TaskRow task = locked.task();
@@ -1823,11 +2013,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new SelfApprovalForbiddenException("The identity that started this instance or completed an earlier"
                         + " task of it cannot complete this four-eyes task");
             }
-            checkReviewResult(tenant, row, taskId, values);
+            java.util.Optional<JobRow> reviewed = checkReviewResult(tenant, row, taskId, values);
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
                 throw new VersionConflictException("Task " + taskId + " changed concurrently");
             }
+            reviewed.ifPresent(job -> recordOverride(task, row, job, values, why, caller, now));
             StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
             InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
                     InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
@@ -1955,8 +2146,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void retrySchema(JobRow job, String attemptId, ResultGuard.Verdict.Invalid invalid, int retry, int allowed,
             String reportedBy) {
         Instant now = clock.instant();
-        Instant retryAt = now.plus(async.runner(job.jobKind(), jobSettings).retryBackoff()
-                .multipliedBy(Math.max(1, job.attempt())));
+        Instant retryAt = retryAt(job, now);
         if (!jobs.retrySchema(job.tenantId(), job.id(), job.lockedBy(), job.attempt(), retryAt)) {
             throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
         }
@@ -1980,10 +2170,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * The reviewer's answer to the review task of a refused async result must meet the step's output schema, like
      * the answer it replaces (#363). Nothing is checked for an ordinary user task.
      */
-    private void checkReviewResult(String tenant, InstanceRow row, String taskId, Map<String, Object> result) {
+    private java.util.Optional<JobRow> checkReviewResult(String tenant, InstanceRow row, String taskId,
+            Map<String, Object> result) {
         java.util.Optional<JobRow> reviewed = store.reviewedJob(tenant, row.id(), taskId).flatMap(id -> jobs.findJob(tenant, id));
         if (reviewed.isEmpty()) {
-            return;
+            return reviewed;
         }
         Map<String, Object> schema = AgentResultGuard.outputSchema(Values.readMap(reviewed.get().payloadJson()));
         List<String> violations = schema == null ? List.of() : outputSchemas.validate(schema, result);
@@ -1991,6 +2182,45 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new io.github.dhluong90.bpm.process.api.FormValidationException("The review result breaks the step's"
                     + " output schema", violations == null ? List.of("$: the schema check gave no answer") : violations);
         }
+        return reviewed;
+    }
+
+    /**
+     * A reviewer's answer to the review task of a refused agent answer is a person's output that replaces the agent's
+     * (#59): recorded as {@code HUMAN_OVERRIDE} with the reviewer (the actor), the identity that reported the refused
+     * answer, the refused attempt, the refusal code and guardrail decision, the reason, the reviewer's answer and the
+     * fields that changed, both answers masked by the step's output schema policy. Written in the completion's
+     * transaction, after the schema check and the four-eyes check passed.
+     */
+    private void recordOverride(TaskRow task, InstanceRow row, JobRow job, Map<String, Object> values, String reason,
+            String reviewer, Instant now) {
+        Map<String, Object> review = task.reviewJson() == null ? Map.of() : Values.readMap(task.reviewJson());
+        ResultGuard guard = guards.getOrDefault(job.jobKind(), ResultGuard.NONE);
+        Map<String, Object> answer = guard.auditOutput(Values.readMap(job.payloadJson()), values);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> refused = review.get("output") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("taskId", task.id());
+        details.put("jobId", job.id());
+        if (review.get("attemptId") != null) {
+            details.put("refusedAttemptId", review.get("attemptId"));
+        }
+        if (review.get("reportedBy") != null) {
+            details.put("refusedReportedBy", review.get("reportedBy"));
+        }
+        details.put("code", review.get("code"));
+        if (review.get("guardrailDecisionId") != null) {
+            details.put("guardrailDecisionId", review.get("guardrailDecisionId"));
+        }
+        details.put("reviewedBy", reviewer);
+        if (reason != null) {
+            details.put("reason", reason);
+        }
+        details.put("output", answer);
+        details.put("outputFields", values.size());
+        details.put("changes", AgentAudit.diff(refused, answer));
+        store.appendHistory(task.tenantId(), row.id(), row.definitionId(), List.of(new HistoryEntry(HUMAN_OVERRIDE,
+                task.nodeId(), task.tokenId(), null, reviewer, now, details)));
     }
 
     /** Serialises request values, refusing values JSON cannot hold and anything above the size limit. */
@@ -2121,11 +2351,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 payload.put("businessKey", state.businessKey());
                             }
                             payload.put("inputs", call.inputs());
+                            // History and the review task read only this copy, with masked inputs fingerprinted (#59).
+                            payload.put(AUDIT_INPUTS, AgentAudit.maskInputs(state.tenantId(), node, call.inputs(),
+                                    inputMasker));
                             payload.put("guard", AgentGuardSpecs.payload(node));
+                            // The step's own retry policy, from the approved definition, or the runner's (#58).
+                            RetryPolicy retry = node.extensions().first(RetryPolicy.class).orElse(null);
+                            int attempts = retry == null ? runner.maxAttempts() : retry.attempts();
+                            if (retry != null && retry.backoff() != null) {
+                                payload.put(RETRY_BACKOFF_MS, retry.backoff().toMillis());
+                            }
                             Duration lease = timeout.plus(async.leaseMargin());
                             newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
                                     definition.id(), call.tokenId(), kind, call.nodeId(),
-                                    clock.instant(), lease, runner.maxAttempts(), Values.write(payload)));
+                                    clock.instant(), lease, attempts, Values.write(payload)));
                             history.add(new HistoryEntry("ASYNC_STEP_SCHEDULED", call.nodeId(), call.tokenId(),
                                     call.attemptId(), null, clock.instant(), Map.of("jobId", call.attemptId(),
                                     "target", call.target(), "leaseMs", lease.toMillis(), "jobKind", kind)));
