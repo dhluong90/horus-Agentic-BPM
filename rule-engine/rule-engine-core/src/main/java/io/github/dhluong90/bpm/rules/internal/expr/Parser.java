@@ -12,10 +12,11 @@ import java.util.function.ToIntFunction;
 /**
  * Hand-written lexer and recursive-descent parser of {@code urn:horus-bpm:expr:v1} (ADR-0003). No
  * reflection, no scripting; the only calls are the constant literals {@code date('...')} and
- * {@code datetime('...')} and the bounded regular expression search {@code matches(text, 'pattern')}, whose
- * pattern is a string literal compiled here, once (TR-SEC-02). In a condition cell, {@code matches('pattern')}
- * tests the cell's own input. Identifiers are bound to input slots at parse time; an unknown identifier is a
- * parse error.
+ * {@code datetime('...')}, the clock readings {@code today()} and {@code now()}, which take no argument and are
+ * bound to the slots the resolver names {@code today()} and {@code now()} (-1 when it has none), and the bounded
+ * regular expression search {@code matches(text, 'pattern')}, whose pattern is a string literal compiled here,
+ * once (TR-SEC-02). In a condition cell, {@code matches('pattern')} tests the cell's own input. Identifiers are
+ * bound to input slots at parse time; an unknown identifier is a parse error.
  *
  * <pre>
  * or         = and { "or" and }
@@ -27,7 +28,7 @@ import java.util.function.ToIntFunction;
  * multiplicative = unary { ("*"|"/") unary }
  * unary      = "-" unary | primary
  * primary    = number [CURRENCY] | string | "true" | "false" | "null" | identifier | "(" or ")" | list
- *            | "date" "(" string ")" | "datetime" "(" string ")"
+ *            | "date" "(" string ")" | "datetime" "(" string ")" | "today" "(" ")" | "now" "(" ")"
  *            | "matches" "(" [ or "," ] string ")"
  * list       = "[" [ or { "," or } ] "]"
  * </pre>
@@ -233,6 +234,9 @@ public final class Parser {
                         if (peek().kind() == Kind.LPAREN && (token.text().equals("date") || token.text().equals("datetime"))) {
                             return temporal(token);
                         }
+                        if (peek().kind() == Kind.LPAREN && (token.text().equals("today") || token.text().equals("now"))) {
+                            return clock(token);
+                        }
                         if (peek().kind() == Kind.LPAREN && token.text().equals("matches")) {
                             return matches(token);
                         }
@@ -279,6 +283,18 @@ public final class Parser {
             throw new ExpressionException("Invalid " + function.text() + " literal '" + argument.text() + "'",
                     argument.position());
         }
+    }
+
+    /** {@code today()} or {@code now()}: no argument, bound to the clock slot the resolver gives. */
+    private Expr clock(Token function) {
+        expect(Kind.LPAREN, "(");
+        Token close = peek();
+        if (close.kind() != Kind.RPAREN) {
+            throw new ExpressionException(function.text() + "() takes no argument", close.position());
+        }
+        next();
+        Expr.ClockFunction which = function.text().equals("today") ? Expr.ClockFunction.TODAY : Expr.ClockFunction.NOW;
+        return new Expr.Clock(which, slots.applyAsInt(which.slotName()));
     }
 
     /**

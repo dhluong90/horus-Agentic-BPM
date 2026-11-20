@@ -48,8 +48,8 @@ public final class JdbcRuleStore implements RuleStore {
             SELECT s.name, lv.version_num AS latest_version, lv.status AS latest_status,
               (SELECT e.version_num FROM rle_version e
                 WHERE e.tenant_id = s.tenant_id AND e.rule_set_id = s.id
-                  AND e.status = 'PUBLISHED' AND e.effective_from <= :now
-                ORDER BY e.effective_from DESC, e.version_num DESC LIMIT 1) AS published_version,
+                  AND e.approved_at IS NOT NULL AND e.effective_from <= :now
+                ORDER BY e.version_num DESC LIMIT 1) AS published_version,
               GREATEST(
                 (SELECT max(GREATEST(v.created_at, v.requested_at, v.approved_at)) FROM rle_version v
                   WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id),
@@ -204,8 +204,9 @@ public final class JdbcRuleStore implements RuleStore {
         return jdbc.sql("SELECT " + VERSION_COLUMNS + """
                 FROM rle_version v
                 JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
-                WHERE v.tenant_id = :tenant AND s.name = :name AND v.status = 'PUBLISHED' AND v.effective_from <= :at
-                ORDER BY v.effective_from DESC, v.version_num DESC
+                WHERE v.tenant_id = :tenant AND s.name = :name
+                  AND v.approved_at IS NOT NULL AND v.effective_from <= :at
+                ORDER BY v.version_num DESC
                 LIMIT 1
                 """)
                 .param("tenant", tenantId).param("name", ruleSet).param("at", Timestamp.from(at))

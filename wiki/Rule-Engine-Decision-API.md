@@ -50,7 +50,8 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Rule | Detail |
 |---|---|
 | Tenant and caller | From the host's `TenantResolver` and `CallerResolver` (defaults read Spring Security). `DecisionRequest.tenantId` is for batch jobs that run without a security context and requires the host to grant it explicitly |
-| Clock | `DecisionRequest.clock` selects the effective version and feeds `today()` and `now()`; default is the engine `Clock` bean |
+| Clock | `DecisionRequest.withClock(at)` selects the version in force and feeds `today()` and `now()`, read in the rule set's `timeZone`; default is the engine `Clock` bean. A chosen clock needs `rules:simulate` (`CLOCK_NOT_ALLOWED`) |
+| Pin and replay | `DecisionRequest.withVersion(v)` evaluates one published version instead of selecting; it needs `rules:pin`, which no role holds by default. A decision at a chosen clock has `clockChosen()` true, and so does its log row (`eval_clock` differs from `created_at`). `RuleEngine.replay(decisionId)` evaluates a logged decision again with its version, inputs and clock, writes nothing and needs `rules:log:read` (`TR-DET-05`) |
 | Errors | `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` come back as a `Failed` outcome with `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code. Other failures throw an unchecked `HorusBpmException` subtype whose `code()` equals the REST error code (ADR-0016) |
 | Idempotency | `DecisionRequest.idempotencyKey` returns the stored decision instead of logging a second one (ADR-0006) |
 
@@ -78,6 +79,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 |---|---|---|---|
 | `POST /decisions/{ruleSet}:evaluate` | Evaluate the effective version at `clock` (default now) | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one approved version. A draft is `409 INVALID_STATE` (use `:simulate`); a retired version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true` | `rules:pin`, plus `rules:simulate` for a custom `clock` | `Idempotency-Key` optional |
+| `POST /decisions/{decisionId}:replay` | Evaluate a logged decision again with its version, inputs and clock; writes nothing. `404 DECISION_NOT_FOUND` for another tenant's id; `422 REPLAY_NOT_POSSIBLE` when a masked input had a value | `rules:log:read` | none |
 | `POST /decisions/{ruleSet}:evaluate-batch` | Up to 1 000 input sets; one decision row each; partial failures reported per item | `rules:evaluate` | `Idempotency-Key` optional |
 | `GET /rule-sets` | List rule sets with effective version and pending approvals | `rules:read` | cursor pagination |
 | `GET /rule-sets/{name}` | Rule set with its versions and states | `rules:read` | |
@@ -97,7 +99,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML, JSON or DMN 1.5 export | `rules:read` | |
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
-| `GET /decisions/{id}` | One decision as logged; masked inputs are `hmac:<keyId>:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
+| `GET /decisions/{id}` | One decision as logged, with `evalClock`, `clockChosen` and `pinned`; masked inputs are `hmac:<keyId>:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
 | `POST /decisions:find-by-masked-input` | Decisions of one rule set, in at most 31 days, whose masked input had a plain value. Body `{ "ruleSet", "input", "value", "from", "to", "limit" }`; the engine fingerprints `value` with your tenant's key, so the value is never stored or put in a URL. Answers `{ "data": [...], "truncated": false }`, newest first | `rules:masked:search` | `limit` 1 to 200, default 50; at most `masking.search.max-per-minute` (30) per caller per minute, then `429` with `Retry-After` |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
 | `GET /decisions?ruleSet=&from=&to=&outcome=&matchedRuleId=&cursor=&limit=` | Decision log, newest first. `ruleSet`, `from` and `to` are required; the range is at most 31 days | `rules:log:read` | cursor pagination |
@@ -115,9 +117,10 @@ Response `200 OK`:
 ```json
 { "decisionId": "01JD2X5K9T1Q4N8V2M7B3C6D0E", "ruleSet": "card-fee", "version": 2, "hitPolicy": "first",
   "outputs": { "fee": { "currency": "VND", "amount": 0 }, "waived": true },
-  "matchedRuleIds": ["R2"], "clock": "2026-12-01T00:00:00Z", "evaluatedAt": "2026-11-18T09:12:44Z", "durationMicros": 180 }
+  "matchedRuleIds": ["R2"], "evalClock": "2026-12-01T00:00:00Z", "evaluatedAt": "2026-11-18T09:12:44Z",
+  "clockChosen": true, "pinned": false, "durationMicros": 180 }
 ```
-`clock` is the instant the decision reasoned about; `evaluatedAt` is when it ran. Both are logged so the decision replays (`TR-DET-05`).
+`evalClock` is the instant the decision reasoned about (the request's `clock`, or the host clock); `evaluatedAt` is when it ran. Both are logged so the decision replays (`TR-DET-05`). `clockChosen` is true when the caller chose the clock, and `pinned` when the caller named the version (`rules:pin`); the engine sets both and stores them on the decision row, so a back-dated or pinned decision is visible in the log.
 
 Batch request and response wrap items in `{ "items": [ { "inputs": {}, "correlationId": "" } ] }` and `{ "results": [ { "index": 0, "decision": {} } | { "index": 1, "problem": {} } ] }`.
 

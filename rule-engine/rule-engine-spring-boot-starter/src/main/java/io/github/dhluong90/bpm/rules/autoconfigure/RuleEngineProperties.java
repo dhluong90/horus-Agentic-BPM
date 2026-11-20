@@ -154,10 +154,12 @@ public record RuleEngineProperties(
      *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
      *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
      *     Lower only
+     * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
+     *     false. Replay of a logged decision is not affected
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
-            Integer regexMaxReads, Integer regexMaxReadsPerDecision) {
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Boolean pinRetired) {
     }
 
     /**
@@ -205,7 +207,8 @@ public record RuleEngineProperties(
                         evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
                         evaluation.regexMaxReadsPerDecision() == null
                                 ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
-                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()));
+                .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
+                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired());
     }
 
     /**

@@ -79,6 +79,11 @@ public record EngineContext(
         return caller;
     }
 
+    /** Tells whether the current caller holds a permission, for a check beyond the endpoint's own. */
+    boolean holds(String permission) {
+        return callers.currentPermissions().contains(permission);
+    }
+
     String caller() {
         String caller = callers.currentCallerId();
         if (caller == null || caller.isBlank()) {
