@@ -9,6 +9,14 @@ What shipped in each release. The project has one version for every module, and 
 
 Every release note lists the database migrations it adds (TR-OPS-01) and the "should" requirements it meets ([[Technical Requirements]]).
 
+## 0.3.0 (not yet released)
+
+What `main` holds for the next release. It is still a 0.x release, so it makes no compatibility promise.
+
+- **Migrations:** Rule Engine `V18__rle_version_retire_request` (the pending four-eyes retirement on `rle_version`: who asked, when, the reason and the confirmation) and `V19__rle_decision_log_drop` (the append-only `rle_decision_log_drop` table, one row per tenant and one total row for each decision log month that retention drops).
+- **Upgrade note (PD-130): decision log retention is off unless set.** With `horus.bpm.rules.decision-log.retention` unset, every decision is kept, nothing is dropped, start-up is not stopped, and a WARN is logged at every start-up. Set it to `keep-forever` to keep everything without the warning, or to whole months of at least 12, such as `P12M`; a shorter period, a period in days or an unknown value stops start-up naming the property. A later release will require the setting.
+- **Breaking change: the host security handlers moved to a public package.** `BpmProblemAuthenticationEntryPoint` and `BpmProblemAccessDeniedHandler` are now in `io.github.dhluong90.bpm.host.security` (were `io.github.dhluong90.bpm.host.autoconfigure`). Change the imports. The module also registers one bean of each, built from `horus.bpm.security.challenge`; inject them into the host's filter chain instead of calling the constructors, so the chain and the engine endpoints send the same `WWW-Authenticate` challenge.
+
 ## 0.2.0
 
 Released 21 Nov 2026. Still a 0.x release, so it makes no compatibility promise; the changes below need a code change in a host that uses the moved types.
