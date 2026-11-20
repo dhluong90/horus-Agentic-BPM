@@ -40,6 +40,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
+| 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | both | 0.2.0 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
@@ -81,7 +82,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `422`. The `Idempotency-Key` was used before with a different request body. Use a new key for a new request.
 
 ### VERSION_CONFLICT
-`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again.
+`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
@@ -98,7 +99,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve.
 
 ### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
+`428`. A command that must be conditional was sent without `If-Match`, for example `PUT` of a rule set draft, `:approve` or `:reject`. An approval must name the lock version of the content the approver reviewed. Read the version, then send its `ETag` as `If-Match: "<lockVersion>"`, so the command cannot overwrite a change you have not seen.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -113,6 +114,12 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 
 ### PAYLOAD_TOO_LARGE
 `413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+
+### LAST_VERSION_IN_EFFECT
+`409`. The retirement would leave no version of the rule set or definition key in effect. After it, evaluations or new starts would fail until a new version is approved (PD-101).
+- **Body.** Besides `detail`, the body carries the rule set or definition key, `version`, `setting` and `nextEffectiveFrom`. `setting` is the value of `lifecycle.retire-last-version`; `nextEffectiveFrom` is the start of a later approved version, or null.
+- **What to do under `confirm`, the default.** If stopping it is intended, send the retire again with `"confirmNoVersionInEffect": true`.
+- **What to do under `refuse`.** Approve a replacement first, then retire.
 
 ### VERSION_SUPERSEDED
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.

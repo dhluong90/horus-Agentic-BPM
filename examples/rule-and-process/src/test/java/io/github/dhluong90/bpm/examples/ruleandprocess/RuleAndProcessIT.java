@@ -419,8 +419,11 @@ class RuleAndProcessIT {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body));
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         if (path.endsWith(":complete")) {
             request.header("Idempotency-Key", "it-" + java.util.UUID.randomUUID());

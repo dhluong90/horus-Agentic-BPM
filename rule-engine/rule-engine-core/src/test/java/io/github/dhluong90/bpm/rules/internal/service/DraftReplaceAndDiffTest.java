@@ -64,7 +64,7 @@ class DraftReplaceAndDiffTest {
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob", APPROVER);
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "lan", AUTHOR);
         return versions.importVersion("card-fee", ImportRequest.yaml(CardFee.yaml()));
     }
@@ -119,9 +119,9 @@ class DraftReplaceAndDiffTest {
         assertThat(stores.outbox).hasSize(events + 1);
 
         // And once requested and approved, R2 charges 0 VND
-        versions.requestPublish("card-fee", 2, WriteOptions.none());
+        RuleSetVersion requested = versions.requestPublish("card-fee", 2, WriteOptions.none());
         caller.become("bank-a", "bob", Set.of("rules:approve", "rules:evaluate"));
-        versions.approve("card-fee", 2, WriteOptions.none());
+        versions.approve("card-fee", 2, new WriteOptions(null, requested.lockVersion(), null));
         DecisionResult result = engines(true).ruleEngine().evaluate("card-fee",
                 DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)));
         assertThat(result.version()).isEqualTo(2);
@@ -166,7 +166,7 @@ class DraftReplaceAndDiffTest {
         assertThatThrownBy(() -> versions.replaceDraft("card-fee", 2, ImportRequest.yaml(CardFee.yaml()),
                 new WriteOptions("k-506", current.lockVersion(), null)))
                 .isInstanceOfSatisfying(PermissionDeniedException.class,
-                        e -> assertThat(e.getMessage()).contains("Only the author", "?copyOf=2"));
+                        e -> assertThat(e.getMessage()).contains("Only the author", "POST .../rule-sets/card-fee/versions"));
         // dan only reads
         caller.become("bank-a", "dan", READER);
         assertThatThrownBy(() -> versions.replaceDraft("card-fee", 2, ImportRequest.yaml(CardFee.yaml()),
@@ -191,6 +191,54 @@ class DraftReplaceAndDiffTest {
         assertThat(stores.idempotency).hasSize(keys);
         assertThat(stores.history).hasSize(history);
         assertThat(stores.outbox).hasSize(events);
+    }
+
+    /**
+     * Security review of #234 (#275): one version number can carry other content over time. An approver who reviewed
+     * the first request must not be able to publish what replaced it. Sequence: request, sent back, replaced in place,
+     * requested again, then approved with the lock version the approver saw.
+     */
+    @Test
+    void RLE_047_an_approval_based_on_content_that_was_replaced_since_is_refused() {
+        // Given lan's draft v2 (R2 at 10000 VND) requested; minh, the approver, reads it at lockVersion 1
+        RuleSetVersion draft = lansDraftV2();
+        RuleSetVersion requested = versions.requestPublish("card-fee", 2, new WriteOptions(null, draft.lockVersion(), null));
+        caller.become("bank-a", "minh", APPROVER);
+        RuleSetVersion reviewed = versions.find("card-fee", 2, false).orElseThrow();
+        assertThat(reviewed.lockVersion()).isEqualTo(requested.lockVersion());
+
+        // When the request goes back to draft, lan replaces R2 with 0 VND and requests publication again
+        caller.become("bank-a", "bob", APPROVER);
+        versions.reject("card-fee", 2, new WriteOptions(null, reviewed.lockVersion(), "Please double-check R2"));
+        caller.become("bank-a", "lan", AUTHOR);
+        RuleSetVersion afterReject = versions.find("card-fee", 2, false).orElseThrow();
+        RuleSetVersion replaced = versions.replaceDraft("card-fee", 2, ImportRequest.yaml(r2Zero()),
+                new WriteOptions("k-701", afterReject.lockVersion(), null));
+        RuleSetVersion again = versions.requestPublish("card-fee", 2, new WriteOptions(null, replaced.lockVersion(), null));
+        assertThat(again.canonicalHash()).isNotEqualTo(reviewed.canonicalHash());
+        int events = stores.outbox.size();
+        int history = stores.history.size();
+
+        // Then minh's approval with the lock version he reviewed is refused, and so is one with no lock version
+        caller.become("bank-a", "minh", APPROVER);
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, new WriteOptions(null, reviewed.lockVersion(), null)))
+                .isInstanceOf(VersionConflictException.class);
+        assertThatThrownBy(() -> versions.approve("card-fee", 2, WriteOptions.none()))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.rules.api.PreconditionRequiredException.class,
+                        e -> assertThat(e.code()).isEqualTo("PRECONDITION_REQUIRED"));
+        assertThatThrownBy(() -> versions.reject("card-fee", 2, new WriteOptions(null, null, "no lock")))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.rules.api.PreconditionRequiredException.class,
+                        e -> assertThat(e.code()).isEqualTo("PRECONDITION_REQUIRED"));
+        // and nothing was published, recorded or emitted
+        RuleSetVersion still = versions.find("card-fee", 2, false).orElseThrow();
+        assertThat(still.status()).isEqualTo(VersionStatus.PENDING_APPROVAL);
+        assertThat(still.lockVersion()).isEqualTo(again.lockVersion());
+        assertThat(stores.outbox).hasSize(events);
+        assertThat(stores.history).hasSize(history);
+
+        // When minh reviews the new content and approves with its lock version, it publishes
+        assertThat(versions.approve("card-fee", 2, new WriteOptions(null, still.lockVersion(), null)).status())
+                .isEqualTo(VersionStatus.PUBLISHED);
     }
 
     // ---------------------------------------------------------------- RLE-028 diff
@@ -224,7 +272,7 @@ class DraftReplaceAndDiffTest {
         versions.importRuleSet(ImportRequest.yaml(cardFeeDoc("v1", null, R1, R2_30000, R3)));
         versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob", APPROVER);
-        versions.approve("card-fee", 1, WriteOptions.none());
+        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
         caller.become("bank-a", "lan", AUTHOR);
         versions.importVersion("card-fee", ImportRequest.yaml(cardFeeDoc("v2: R2 waived, PLATINUM added", null,
                 R1, R2_0, R6, R3)));

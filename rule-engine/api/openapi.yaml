@@ -241,7 +241,7 @@ paths:
       description: |
         Permission `rules:author`, checked before the body is read; only the draft's author
         (`createdBy`) may replace it. Anyone else gets `403 PERMISSION_DENIED`, with a detail pointing
-        to `POST .../versions?copyOf={v}`, which starts their own draft; so the four-eyes check on
+        to importing their own document as a new version (`POST .../rule-sets/{name}/versions`); so the four-eyes check on
         `createdBy` keeps holding. When the host sets
         `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
         `403 DRAFT_AUTHORING_DISABLED` (DESIGN section 4.4).
@@ -482,11 +482,19 @@ paths:
         `403 SELF_APPROVAL_FORBIDDEN`, and the version stays `PENDING_APPROVAL`. Without an
         `effectiveFrom` in the document the version takes effect at approval. A body over
         16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+
+        `If-Match` is required and must be the `lockVersion` of the version the approver reviewed:
+        without it the answer is `428 PRECONDITION_REQUIRED`, and a stale value is
+        `409 VERSION_CONFLICT`, with nothing published. A version can be sent back, replaced in place
+        and requested again under the same number, so the lock version is what ties an approval to
+        the content reviewed (#275). A client that receives `409 VERSION_CONFLICT` here must show the
+        approver the current version (its content and diff) again and let them decide; it must never
+        retry automatically with the new `ETag`, because that would approve content nobody reviewed.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: false
         content:
@@ -509,6 +517,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:reject:
     post:
       tags: [rule-sets]
@@ -523,11 +532,14 @@ paths:
         DESIGN section 3.3, `RLE-025`).
         A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
         characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+        `If-Match` is required, as for `:approve`: `428 PRECONDITION_REQUIRED` without it,
+        `409 VERSION_CONFLICT` when stale. On `409 VERSION_CONFLICT` a client shows the current
+        version again and never retries automatically with the new `ETag`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
         required: true
         content:
@@ -546,6 +558,7 @@ paths:
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]

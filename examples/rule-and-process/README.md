@@ -70,7 +70,7 @@ docker run -d --name horus-pe-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
 
 mvn -B -pl examples/rule-and-process -am package -DskipTests      # from the repository root
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-and-process/target/example-rule-and-process-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-and-process/target/example-rule-and-process-0.1.0.jar
 ```
 
 | Variable | Default | Meaning |
@@ -181,9 +181,9 @@ curl -s -u lan:$P -H 'Content-Type: application/yaml' --data-binary @/tmp/card-f
 # {"ruleSet":"card-fee","version":2,"status":"DRAFT","createdBy":"lan",...}
 curl -s -u lan:$P -X POST $R/versions/2:request-publish
 # {"version":2,"status":"PENDING_APPROVAL","requestedBy":"lan",...}
-curl -s -u lan:$P -X POST $R/versions/2:approve
+curl -s -u lan:$P -X POST $R/versions/2:approve -H 'If-Match: "1"'
 # {"status":403,"code":"PERMISSION_DENIED","detail":"The caller lacks permission rules:approve",...}
-curl -s -u minh:$P -X POST $R/versions/2:approve
+curl -s -u minh:$P -X POST $R/versions/2:approve -H 'If-Match: "1"'
 # {"version":2,"status":"PUBLISHED","requestedBy":"lan","approvedBy":"minh",...}
 
 curl -s -u tuan:$P -H 'Content-Type: application/json' \

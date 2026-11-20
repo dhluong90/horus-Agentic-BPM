@@ -32,7 +32,7 @@ docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
 mvn -B -pl examples/rule-engine-only -am package -DskipTests      # from the repository root
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 ```
 
 Check it (health is public; everything else needs a caller):
@@ -78,7 +78,7 @@ On the `dev` profile the host has two demo users, Lan (role `PRICING_AUTHOR`) an
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=choose-one HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 
 # sign in as lan with the form, keeping the session cookie in ./jar
 CSRF=$(curl -s -c jar -b jar localhost:8080/login | sed -n 's/.*name="_csrf" type="hidden" value="\([^"]*\)".*/\1/p')
@@ -88,7 +88,7 @@ curl -s -b jar localhost:8080/api/bpm/me
 # {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 
 curl -s -b jar localhost:8080/api/bpm/meta
-# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0-SNAPSHOT","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
+# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 
 curl -s -i localhost:8080/api/bpm/meta
 # HTTP/1.1 401
@@ -117,7 +117,7 @@ Start PostgreSQL as above, then start the host on the `dev` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 H=localhost:8080/api/bpm/rules/v1
 ```
 
@@ -142,14 +142,14 @@ H=localhost:8080/api/bpm/rules/v1
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve
+   curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
    # 403 {"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester of card-fee v1 cannot approve it",...}
    ```
 
-4. Minh approves; the version is published and takes effect now:
+4. Minh approves; the version is published and takes effect now. `If-Match` names the lock version he reviewed (the `ETag` of the version he read); without it the answer is `428 PRECONDITION_REQUIRED`, and if the version changed since, `409 VERSION_CONFLICT`:
 
    ```bash
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve \
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
      -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
    # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
@@ -284,7 +284,7 @@ curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: applicati
 
 curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
-curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -X POST \
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
 # {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
 
@@ -316,6 +316,8 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the two demo users. Never in a shared environment |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users `lan` and `minh` on the `dev` profile. Without it nobody can sign in |
 
+The two passwords can also come as files: with `SPRING_CONFIG_IMPORT=configtree:/run/secrets/`, a file `/run/secrets/HORUS_DB_PASSWORD` or `/run/secrets/HORUS_DEMO_PASSWORD` sets the property of the same name. The docker compose deployment does this, so no password is in the container environment ([docs/DEPLOYING.md](../../docs/DEPLOYING.md#configuration)).
+
 ## Open the cockpit
 
 The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`HostSecurityConfiguration`), on the `dev` profile with the demo users. Build the cockpit bundle before packaging:
@@ -324,7 +326,7 @@ The host serves the cockpit at `/bpm/cockpit` behind its own form sign-in (`Host
 npm --prefix cockpit/web ci && npm --prefix cockpit/web run build      # from the repository root
 mvn -B -pl examples/rule-engine-only -am package -DskipTests
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar
 ```
 
 Open `http://localhost:8080/bpm/cockpit` and sign in as `lan` (role `PRICING_AUTHOR`) or `minh` (role `PRICING_APPROVER`). The header shows the service `Loan origination` (`horus.bpm.cockpit.host-label`), the tenant `bank-a` and the user. The cockpit sends the `XSRF-TOKEN` cookie back as `X-XSRF-TOKEN` on calls that change data.
@@ -356,7 +358,7 @@ Draft editing in the cockpit is off by default in 0.1.0 (PD-094); this example t
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=choose-one \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0-SNAPSHOT.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:evaluate'
 ```

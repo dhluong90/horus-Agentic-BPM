@@ -70,8 +70,11 @@ class DraftAuthoringDisabledIT {
         if (key != null) {
             request.header("Idempotency-Key", key);
         }
-        if (ifMatch != null) {
-            request.header("If-Match", ifMatch);
+        // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
+        // just requested, at lock version 1, unless they pass their own If-Match.
+        String lock = ifMatch == null && path.matches(".*:(approve|reject)$") ? "\"1\"" : ifMatch;
+        if (lock != null) {
+            request.header("If-Match", lock);
         }
         return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }

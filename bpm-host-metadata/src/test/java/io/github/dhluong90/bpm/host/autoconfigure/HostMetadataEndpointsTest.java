@@ -5,12 +5,16 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.JwtRequestPostProcessor;
@@ -221,6 +225,12 @@ class HostMetadataEndpointsTest {
         String ruleSets() {
             return "[]";
         }
+
+        /** A host endpoint outside the engine API, with its own caching policy. */
+        @GetMapping("/host/branches")
+        ResponseEntity<String> branches() {
+            return ResponseEntity.ok().cacheControl(CacheControl.maxAge(Duration.ofSeconds(30))).body("[]");
+        }
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -235,21 +245,46 @@ class HostMetadataEndpointsTest {
     void TR_SEC_09_engine_api_responses_are_no_store_and_meta_keeps_its_own_policy() {
         TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, WithStandInEngineEndpoint.class)
                 .run(context -> {
-                    @SuppressWarnings("unchecked")
-                    FilterRegistrationBean<EngineApiCacheControlFilter> registration =
-                            context.getBean("horusBpmEngineApiCacheControl", FilterRegistrationBean.class);
-                    MockMvc mvc = MockMvcBuilders.webAppContextSetup((WebApplicationContext) context)
-                            .addFilter(registration.getFilter(), "/api/bpm/rules/*", "/api/bpm/processes/*")
-                            .apply(springSecurity()).build();
+                    MockMvc mvc = mockMvcWithCacheFilter(context);
 
                     MvcResult engine = call(mvc, get("/api/bpm/rules/v1/rule-sets").with(lan()));
+                    MvcResult unmapped = call(mvc, get("/api/bpm/rules/v1/no-such-endpoint").with(lan()));
+                    MvcResult otherPrefix = call(mvc, get("/api/bpm/tasks/v1/inbox").with(lan()));
                     MvcResult meta = call(mvc, get("/api/bpm/meta").with(lan()));
+                    MvcResult me = call(mvc, get("/api/bpm/me").with(lan()));
 
-                    assertThat(registration.getUrlPatterns()).containsExactly("/api/bpm/rules/*", "/api/bpm/processes/*");
                     assertThat(engine.getResponse().getStatus()).isEqualTo(200);
                     assertThat(engine.getResponse().getHeaders("Cache-Control")).containsExactly("no-store");
+                    assertThat(unmapped.getResponse().getStatus()).isEqualTo(404);
+                    assertThat(unmapped.getResponse().getHeaders("Cache-Control")).containsExactly("no-store");
+                    assertThat(otherPrefix.getResponse().getHeaders("Cache-Control")).containsExactly("no-store");
                     assertThat(meta.getResponse().getHeaders("Cache-Control")).containsExactly("private, max-age=60");
+                    assertThat(me.getResponse().getHeaders("Cache-Control")).containsExactly("private, no-cache");
                 });
+    }
+
+    @Test
+    void TR_SEC_09_host_endpoints_outside_the_engine_api_keep_their_own_caching() {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, WithStandInEngineEndpoint.class)
+                .run(context -> {
+                    MockMvc mvc = mockMvcWithCacheFilter(context);
+
+                    MvcResult host = call(mvc, get("/host/branches").with(lan()));
+
+                    assertThat(host.getResponse().getStatus()).isEqualTo(200);
+                    assertThat(host.getResponse().getHeaders("Cache-Control")).containsExactly("max-age=30");
+                });
+    }
+
+    /** MockMvc with the engine API cache filter on the URL patterns of its registration, as a container applies it. */
+    private static MockMvc mockMvcWithCacheFilter(ApplicationContext context) {
+        @SuppressWarnings("unchecked")
+        FilterRegistrationBean<EngineApiCacheControlFilter> registration =
+                context.getBean("horusBpmEngineApiCacheControl", FilterRegistrationBean.class);
+        assertThat(registration.getUrlPatterns()).containsExactly("/api/bpm/*");
+        return MockMvcBuilders.webAppContextSetup((WebApplicationContext) context)
+                .addFilter(registration.getFilter(), registration.getUrlPatterns().toArray(String[]::new))
+                .apply(springSecurity()).build();
     }
 
     static JwtRequestPostProcessor lan() {
