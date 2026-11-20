@@ -84,15 +84,15 @@ jobs:
         with:
           context: .
           file: deploy/docker/Dockerfile
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           build-args: EXAMPLE=rule-engine-only
           tags: ${{ env.IMAGE }}
           load: true
           push: false
           provenance: false
           no-cache: ${{ inputs.no-cache == true }}
-          cache-from: type=gha,scope=deploy-rule-engine-only
-          cache-to: type=gha,scope=deploy-rule-engine-only,mode=max
+          cache-from: type=gha,scope=deploy-rule-engine-only-${{ matrix.arch }}
+          cache-to: type=gha,scope=deploy-rule-engine-only-${{ matrix.arch }},mode=max
 
       # The engine jars in BOOT-INF/lib carry their build time in zip entry timestamps, so their bytes
       # differ between any two builds. The digest covers what they contain: the name and SHA-256 of every
