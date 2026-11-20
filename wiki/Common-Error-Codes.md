@@ -40,6 +40,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
+| 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | both | 0.2.0 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
@@ -109,6 +110,12 @@ For rule sets every entry is `{ "ruleId", "column", "message" }`: `ruleId` is th
 
 ### PAYLOAD_TOO_LARGE
 `413`. The request body is larger than the endpoint reads: 16,384 bytes for `:approve` and `:reject`, 1,048,576 bytes for `:evaluate` and for imports. A declared `Content-Length` over the limit is refused before the body is read. Shorten the comment or reason, or split the inputs.
+
+### LAST_VERSION_IN_EFFECT
+`409`. The retirement would leave no version of the rule set or definition key in effect. After it, evaluations or new starts would fail until a new version is approved (PD-101).
+- **Body.** Besides `detail`, the body carries the rule set or definition key, `version`, `setting` and `nextEffectiveFrom`. `setting` is the value of `lifecycle.retire-last-version`; `nextEffectiveFrom` is the start of a later approved version, or null.
+- **What to do under `confirm`, the default.** If stopping it is intended, send the retire again with `"confirmNoVersionInEffect": true`.
+- **What to do under `refuse`.** Approve a replacement first, then retire.
 
 ### VERSION_SUPERSEDED
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.
