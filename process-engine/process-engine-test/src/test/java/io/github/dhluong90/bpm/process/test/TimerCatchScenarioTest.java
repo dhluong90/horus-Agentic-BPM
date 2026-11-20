@@ -78,4 +78,18 @@ class TimerCatchScenarioTest {
                 .as("a second firing of the same job").isInstanceOf(ExecutionException.class)
                 .satisfies(e -> assertThat(((ExecutionException) e).code()).isEqualTo("INVALID_STATE"));
     }
+
+    @Test
+    void PRE_006_cancelling_the_instance_cancels_its_pending_timer_at_once() {
+        ScenarioRunner run = reminder().start(Map.of());
+        Effect.ScheduleJob job = scheduled(run);
+
+        run.apply(new Command.Cancel("Customer closed the card", "officer-lan"));
+
+        assertThat(run.effects()).contains(new Effect.CancelJob(job.jobId()));
+        clock.advance(Duration.ofDays(3));
+        assertThatThrownBy(() -> run.apply(new Command.JobDue(job.jobId(), job.tokenId(), "TIMER")))
+                .as("the cancelled timer never fires").isInstanceOf(ExecutionException.class);
+        assertThat(run.history()).filteredOn(h -> h.type().equals("TIMER_FIRED")).isEmpty();
+    }
 }

@@ -279,6 +279,10 @@ final class WorkingContext implements ExecutionContext {
                 if (child.status() == TokenStatus.WAITING_USER && child.activityInstanceId() != null) {
                     effect(new Effect.CancelUserTask(child.activityInstanceId()));
                 }
+                if (child.status() == TokenStatus.WAITING_TIMER && child.activityInstanceId() != null) {
+                    // The waiting token's activity instance is its timer job; cancel it now (ADR-0020).
+                    effect(new Effect.CancelJob(child.activityInstanceId()));
+                }
                 history("TOKEN_CANCELLED", child, Map.of());
             }
         }
