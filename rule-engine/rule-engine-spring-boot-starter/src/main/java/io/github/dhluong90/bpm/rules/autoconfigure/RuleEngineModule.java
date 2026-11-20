@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,7 +43,11 @@ final class RuleEngineModule {
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts) {
         // Always published, false unless the host turns it on (PD-094), so clients never guess.
-        Map<String, Object> settings = Map.of(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+        // The approver rule is always makers here, whatever the host sets (#273): V2 rle_version_four_eyes refuses
+        // an approval by the author in the database.
+        Map<String, Object> settings = Map.of(
+                COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts),
+                ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.MAKERS.value());
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
 
