@@ -34,7 +34,8 @@ class AcknowledgeWarningsSettingTest {
             assertThat(properties.toSettings().acknowledgeWarnings()).containsExactly("UNMASKED_PERSONAL_DATA");
             assertThat(RuleEngineServicesConfiguration.warnIfApprovalsSkipPersonalDataAcknowledgement(
                     properties.toSettings())).isFalse();
-            assertThat(RuleEngineModule.descriptor(Map.of(), null, properties.toSettings().acknowledgeWarnings())
+            assertThat(RuleEngineModule.descriptor(Map.of(), null, "single", "confirm",
+                    properties.toSettings().acknowledgeWarnings())
                     .settings()).containsEntry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA");
         });
         assertThat(output.getAll()).doesNotContain("acknowledge-warnings");
@@ -48,7 +49,7 @@ class AcknowledgeWarningsSettingTest {
             assertThat(codes).isEmpty();
             assertThat(RuleEngineServicesConfiguration.warnIfApprovalsSkipPersonalDataAcknowledgement(
                     properties.toSettings())).isTrue();
-            assertThat(RuleEngineModule.descriptor(Map.of(), null, codes).settings())
+            assertThat(RuleEngineModule.descriptor(Map.of(), null, "single", "confirm", codes).settings())
                     .containsEntry("lifecycle.acknowledge-warnings", "");
         });
         assertThat(output.getAll()).contains("WARN")

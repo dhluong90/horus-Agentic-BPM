@@ -46,7 +46,7 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 
 ## No code execution
 
-Expressions are parsed by a hand-written recursive-descent parser into a sealed, typed tree; there is no scripting engine, reflection, class loading or deserialisation of arbitrary types (`TR-SEC-01`, ADR-0003). Host-registered pure functions are the only extension point and are listed in the cockpit. Regex matching is bounded by input length (4 096 characters) and time (50 ms); nested quantifiers are rejected at publish time (`TR-SEC-02`, `RLE-007`).
+Expressions are parsed by a hand-written recursive-descent parser into a sealed, typed tree; there is no scripting engine, reflection, class loading or deserialisation of arbitrary types (`TR-SEC-01`, ADR-0003). Host-registered pure functions are the only extension point and are listed in the cockpit. Regex matching is bounded by a deterministic read budget per match (`evaluation.regex-max-reads`, 1 000 000 characters read) and per decision across all its matches (`evaluation.regex-max-reads-per-decision`, 5 000 000), input length (`evaluation.regex-max-input-length`, 4 096 characters) and time (`evaluation.regex-timeout-ms`, 50 ms, the backstop): the matcher reads its text through a counting, deadline-checking view, so a runaway pattern stops on the calling thread and fails one decision with `REGEX_TIMEOUT` instead of holding the thread and its connection. Back-references, look-around, inline flags and possessive quantifiers are refused at import, and deep backtracking that would overflow the stack fails the decision with `REGEX_TOO_DEEP` (`TR-SEC-02`, `RLE-007`).
 
 ## Data protection
 
@@ -74,7 +74,7 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | Path | `Cache-Control` |
 |---|---|
 | `/api/bpm/rules/**`, `/api/bpm/processes/**` and any other path under `/api/bpm/**`: success, problem and `304` answers | `no-store` |
-| `/api/bpm/meta` | `private, max-age=60` (errors: `no-store`) |
+| `/api/bpm/meta` | `private, max-age=60`; `private, no-cache` when an engine publishes settings of the caller's tenant, as the Rule Engine does from 0.2.0 (errors: `no-store`) |
 | `/api/bpm/me` | `private, no-cache`, so a revoked role is never shown from cache (errors: `no-store`) |
 | Host endpoints outside `/api/bpm/**` | Unchanged: the host's own policy |
 
@@ -84,7 +84,7 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 |---|---|---|---|---|
 | Spoofing | Tenant boundary | Caller sends `tenantId: "tenant-b"` in the body, or forges `X-Tenant-Id` from outside the gateway | Body tenant ignored; no header-based resolver ships; the tenant comes from the authenticated principal; `X-Tenant-Id` only switches to a tenant in the caller's allowed list | `RLE-011`, `RLE-037`; REST test with forged body and header |
 | Spoofing | Approvals | Compromised author token approves its own version | Service-layer identity check plus distinct permission | `RLE-009` at service and REST level |
-| Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; bounded regex; publish-time rejection | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
+| Tampering | Rule definitions | Expression such as `T(java.lang.Runtime).getRuntime()` or a regex bomb in a draft | Closed grammar, no reflection; regex bounded in length and time at evaluation, back-references and look-around refused at import | `RLE-004`, `RLE-007`; ArchUnit on `javax.script`, `java.lang.reflect.Method` |
 | Tampering | Task state | Two completions of one task, or a replayed approval | `lock_version` predicate; status guard in the same `UPDATE` | `PRE-003`; concurrency test with two threads |
 | Tampering | Idempotency | Replay of a key with a changed payload to smuggle a different start | `request_hash` compared; `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` | `RLE-014`, `TR-IDEM-05` |
 | Repudiation | Decisions and process history | Operator claims a decision never happened or was different | Append-only rows with version, clock, caller, correlation id; no update path | `TR-OBS-01`; SQL capture test shows only `INSERT` |
@@ -92,13 +92,21 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | Information disclosure | Personal data in logs | National id readable in `rle_decision` or the cockpit | Keyed HMAC masking; cockpit renders `*** (hmac)` | `RLE-012`; UI test |
 | Information disclosure | Cross-tenant reads | Guessable ULID of another tenant's decision | Every query filters `tenant_id`; `404` for other tenants | `RLE-011`; two-tenant integration test |
 | Information disclosure | Error bodies | Stack trace reveals class names and SQL | Problem Details only; `INTERNAL_ERROR` with `correlationId` | WebMvc test on an injected failure |
-| Denial of service | Evaluation threads | Adversarial regex input stalls a request thread | 50 ms bounded matcher, 4 096-character input limit | `RLE-007` |
+| Denial of service | Evaluation threads | Adversarial regex input stalls a request thread | Read budgets per match and per decision, with a 50 ms backstop (`REGEX_TIMEOUT`), 4 096-character input limit (`REGEX_INPUT_TOO_LONG`), both host settings that can only be tightened | `RLE-007` |
 | Denial of service | Connection pool | 20 slow agent calls inside transactions exhaust a 20-connection pool | Async Wait-State: no connection during adapter calls (ADR-0008) | `PRE-009`: 10 concurrent 2 s calls on a 2-connection pool |
 | Denial of service | Batch endpoint | 1 000 000-item batch | `evaluation.max-batch` 1 000; `limit` max 200 | REST tests |
 | Denial of service | Scheduler | Poison job retried forever | `max_attempts` then incident; lease prevents hot loops | `PRE-011` |
 | Elevation of privilege | Approval endpoint | Missing `@PreAuthorize` lets an author call `:approve` | Permission per endpoint; service check independent of the controller | REST test with an author token |
 | Elevation of privilege | Time travel | Caller sets `clock` to pick a future fee version | `clock` requires `rules:simulate`; `403 CLOCK_NOT_ALLOWED` | REST test |
 | Elevation of privilege | Agent output | Agent returns an output that skips approval | Guardrail rule set runs in-process after schema validation; `route-to-human` creates a task the triggering identity cannot approve | `PRE-010` |
+
+## Residual risks
+
+Known risks that are accepted for a limited time, each with a deadline and an issue that fixes it.
+
+| Risk | Exploit scenario | Interim control | Acceptance | Fix |
+|---|---|---|---|---|
+| Host code can reach the Rule Engine's tenant-scoped decision entry point | Host code that imports `io.github.dhluong90.bpm.rules.internal.service` injects the `RuleEngines` bean and calls `forEmbeddedEngine("system:process-engine")`, or calls `RuleEngines.create(...)`. The entry point it gets accepts any tenant id with no permission check, and the decision log records the Process Engine as the caller. A host controller that passes a tenant taken from a path parameter would let a user of tenant A read tenant B's rule outputs and write a decision row in tenant B. | Hosts must not import `rules.internal..` packages. Only the Process Engine wiring calls `forEmbeddedEngine`. | Interim only: accepted by the maintainer on 2026-11-20, must be fixed before 0.2.0. No release ships with it. | [#336](https://github.com/dhluong90/horus-Agentic-BPM/issues/336) |
 
 ## Supply chain
 

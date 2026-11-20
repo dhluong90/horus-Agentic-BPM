@@ -89,7 +89,7 @@ class AcknowledgeWarningsTest {
     }
 
     static WriteOptions approval(RuleSetVersion pending, String key, AcknowledgedWarning... acknowledged) {
-        return new WriteOptions(key, pending.lockVersion(), "ok", List.of(acknowledged));
+        return new WriteOptions(key, pending.lockVersion(), "ok").acknowledging(List.of(acknowledged));
     }
 
     VersionHistoryEntry approvalRow(VersionService versions) {
@@ -202,7 +202,7 @@ class AcknowledgeWarningsTest {
             many.add(new AcknowledgedWarning(UNMASKED, "input" + i));
         }
         assertThatThrownBy(() -> versions.approve("kyc-routing", 1,
-                new WriteOptions(null, pending.lockVersion(), null, many)))
+                new WriteOptions(null, pending.lockVersion(), null).acknowledging(many)))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("at most 100");
         // Nothing is written by any of them
         assertNothingWritten(versions, pending, history, events);

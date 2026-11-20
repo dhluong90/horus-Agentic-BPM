@@ -116,4 +116,39 @@ class ExpressionSemanticsTest {
         assertThatThrownBy(() -> Parser.parse(deep, name -> -1)).isInstanceOf(ExpressionException.class)
                 .hasMessageContaining("nested deeper");
     }
+
+    @Test
+    void matches_is_an_unanchored_search_and_null_text_gives_null() {
+        assertThat(eval("matches('ab12', '[0-9]+')")).isEqualTo(true);
+        assertThat(eval("matches('ab12', '^[0-9]+$')")).isEqualTo(false);
+        assertThat(eval("matches(tier, 'GOLD')", null, "PLATINUM-GOLD")).isEqualTo(true);
+        assertThat(eval("matches(tier, 'GOLD')", null, null)).isNull();
+        assertThat(eval("not(matches(tier, 'GOLD'))", null, null)).isNull();
+        assertThat(Parser.parse("matches(tier, 'G')", name -> SLOTS.getOrDefault(name, -1)))
+                .isEqualTo(Parser.parse("matches(tier, 'G')", name -> SLOTS.getOrDefault(name, -1)));
+    }
+
+    @Test
+    void matches_with_one_argument_needs_a_condition_cell() {
+        assertThatThrownBy(() -> Parser.parse("matches('GOLD')", name -> SLOTS.getOrDefault(name, -1)))
+                .isInstanceOf(ExpressionException.class).hasMessageContaining("matches(input, 'pattern')");
+        assertThat(evaluator.evaluate(Parser.parse("matches('^GO')", name -> SLOTS.getOrDefault(name, -1), "tier"),
+                new Object[] {null, "GOLD", null, null})).isEqualTo(true);
+    }
+
+    /** The fixed cases of RLE-021 for {@code matches}, shared with the FEEL alignment slice (#19). */
+    @ParameterizedTest(name = "{0} -> {1}")
+    @CsvSource(delimiter = '|', value = {
+        "matches('ab12', '[0-9]+')        | true",
+        "matches('xaby', 'ab')            | true",
+        "matches('AB', '^a')              | false",
+        "matches('VN-001', '^VN-[0-9]{3}$') | true",
+        "matches('a.b', 'a\\\\.b')        | true",
+        "matches('axb', 'a\\\\.b')        | false",
+        "matches('12 34', '\\\\d+\\\\s\\\\d+') | true",
+        "matches('', 'a*')                | true"
+    })
+    void matches_is_an_unanchored_search_in_the_fixed_cases_shared_with_the_feel_slice(String expression, boolean expected) {
+        assertThat(eval(expression.strip())).isEqualTo(expected);
+    }
 }

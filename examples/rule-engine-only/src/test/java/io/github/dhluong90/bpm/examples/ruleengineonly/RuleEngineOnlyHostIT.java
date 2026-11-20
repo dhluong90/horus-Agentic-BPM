@@ -67,7 +67,7 @@ class RuleEngineOnlyHostIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
     @DynamicPropertySource
@@ -200,11 +200,12 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V14 and V15.
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10, V11, V14 and V15.
         assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
                 "2 V2__rle_version_created_by.sql", "3 V3__rle_version_history.sql",
                 "4 V4__rle_version_history_append_only.sql", "5 V5__rle_engine_key.sql",
-                "6 V6__rle_version_history_draft_updated.sql", "14 V14__rle_setting_seen.sql",
+                "6 V6__rle_version_history_draft_updated.sql", "10 V10__rle_decision_pinned.sql",
+                "11 V11__rle_version_retired_at.sql", "14 V14__rle_setting_seen.sql",
                 "15 V15__rle_version_history_acknowledged_warnings.sql");
     }
 

@@ -20,16 +20,20 @@ import java.util.List;
  * @param reason the rejection reason or approval comment, or null
  * @param lockVersion the lock version after the transition
  * @param occurredAt when it happened
- * @param canonicalHash on {@code DRAFT_UPDATED}: the canonical hash after the replacement, else null
- * @param previousCanonicalHash on {@code DRAFT_UPDATED}: the canonical hash before it, else null
+ * @param supersededBy on a {@code RETIRED} row of a superseded version, the version that took over; otherwise null
+ * @param approvalMode on a {@code RETIRED} row, {@code single}, {@code four-eyes} or {@code system}; otherwise null
+ * @param noVersionInEffect on a {@code RETIRED} row, whether the retirement left no version in effect (PD-101);
+ *     otherwise null
+ * @param canonicalHash on a {@code DRAFT_UPDATED} row, the canonical hash after the replacement; otherwise null
+ * @param previousCanonicalHash on a {@code DRAFT_UPDATED} row, the canonical hash before it; otherwise null
  * @param acknowledgedWarnings on {@code APPROVED}: the warnings the approver accepted (RLE-053), else empty
  * @param maskedByDefaultInputs on {@code APPROVED}: the inputs masked by the tenant's {@code decision-log.mask-default}
  *     rather than by their declaration at approval (PD-104), else empty
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
-        Instant occurredAt, String canonicalHash, String previousCanonicalHash,
-        List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
+        Instant occurredAt, Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
+        String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
 
     public HistoryRow {
         acknowledgedWarnings = acknowledgedWarnings == null ? List.of() : List.copyOf(acknowledgedWarnings);
@@ -39,43 +43,95 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
     /**
      * Creates a row without an acknowledgement.
      *
-     * @param tenantId the tenant
-     * @param id the row id
-     * @param versionId the version id
-     * @param action the action
-     * @param fromStatus the status before, or null
-     * @param toStatus the status after
-     * @param actor who did it
-     * @param reason the reason or comment, or null
-     * @param lockVersion the lock version after
-     * @param occurredAt when
-     * @param canonicalHash the canonical hash after, or null
-     * @param previousCanonicalHash the canonical hash before, or null
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
+            Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
+            String previousCanonicalHash) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy,
+                approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, List.of(), List.of());
+    }
+
+    /**
+     * Creates the row of a retirement.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
+            Integer supersededBy, String approvalMode, Boolean noVersionInEffect) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy,
+                approvalMode, noVersionInEffect, null, null);
+    }
+
+    /**
+     * Creates the row of a {@code DRAFT_UPDATED} transition, with its content hashes.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
      */
     public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
             VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
             String canonicalHash, String previousCanonicalHash) {
-        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
-                canonicalHash, previousCanonicalHash, List.of(), List.of());
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null,
+                null, canonicalHash, previousCanonicalHash);
     }
 
     /**
-     * Creates a row without content hashes, for every action except {@code DRAFT_UPDATED}.
+     * Creates a row of any other transition.
      *
-     * @param tenantId the tenant
-     * @param id the row id
-     * @param versionId the version id
-     * @param action the action
-     * @param fromStatus the status before, or null
-     * @param toStatus the status after
-     * @param actor who did it
-     * @param reason the reason or comment, or null
-     * @param lockVersion the lock version after
-     * @param occurredAt when
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
      */
     public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
             VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt) {
-        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null);
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, null, null,
+                null, null, null);
     }
 
     /**
@@ -85,6 +141,7 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
      */
     public VersionHistoryEntry toEntry() {
         return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
-                canonicalHash, previousCanonicalHash, acknowledgedWarnings, maskedByDefaultInputs);
+                supersededBy, approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings,
+                maskedByDefaultInputs);
     }
 }

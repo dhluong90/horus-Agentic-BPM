@@ -1,0 +1,18 @@
+flowchart TD
+  A["Import: cell matches('^FT[0-9]{8}$')"] --> B{"String literal, at most 1,000 characters, inside the XPath subset: no back-reference, look-around, inline flag or possessive quantifier?"}
+  B -- no --> C["422 VALIDATION_FAILED naming the rule and column; nothing stored"]
+  B -- yes --> D["Compiled once with the version"]
+  D --> E["Evaluate: text of the input"]
+  E --> F{"Text null?"}
+  F -- yes --> G["null, the condition does not match"]
+  F -- no --> H{"Longer than evaluation.regex-max-input-length?"}
+  H -- yes --> I["EVALUATION_ERROR, error_code REGEX_INPUT_TOO_LONG; the match never runs"]
+  H -- no --> J["Matcher reads the text through a counting CharSequence; budget = the lower of evaluation.regex-max-reads and the reads left to the decision"]
+  J --> K{"Finished within that budget, deterministic, and evaluation.regex-timeout-ms, the backstop?"}
+  K -- yes --> P["Reads charged to the decision's evaluation.regex-max-reads-per-decision"]
+  P --> L["true or false; evaluation continues with the next cell or row"]
+  K -- no --> M["EVALUATION_ERROR, error_code REGEX_TIMEOUT, no outputs; the thread returns at once"]
+  J -- stack overflow --> O["EVALUATION_ERROR, error_code REGEX_TOO_DEEP"]
+  O --> N
+  I --> N["One decision row in the host transaction, 422 over REST"]
+  M --> N

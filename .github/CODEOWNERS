@@ -8,10 +8,17 @@
 /examples/pom.xml               @dhluong90
 /tools/licence-policy/          @dhluong90
 /tools/fixtures/                @dhluong90
+/tools/check-migration-order.py  @dhluong90
+/tools/test_check_migration_order.py @dhluong90
+/tools/migration-retired-versions.txt @dhluong90
 /tools/check-dependency-policy.py @dhluong90
 /tools/check-jackson-coexistence.py @dhluong90
+/tools/check-image-pins.py       @dhluong90
+/tools/test_check_image_pins.py  @dhluong90
 /tools/architecture/          @dhluong90
 /tools/scan-dependencies.sh     @dhluong90
+/tools/mvn-retry.sh             @dhluong90
+/tools/test-mvn-retry.sh        @dhluong90
 /tools/spec-coverage.py         @dhluong90
 /tools/spec-coverage.ini        @dhluong90
 /tools/test_spec_coverage.py    @dhluong90

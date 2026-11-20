@@ -185,12 +185,11 @@ public final class DefaultDecisionLogService implements DecisionLogService {
     private void audit(String tenant, String caller, MaskedInputQuery query, List<MaskingKey> keys, int matches,
             boolean truncated, String correlationId, String outcome) {
         Instant now = context.clock().instant();
-        ObjectNode payload = EngineJson.NODES.objectNode()
-                .put("eventType", EVENT_MASKED_SEARCH)
+        String eventId = Ulid.next(now);
+        // The full event envelope (DESIGN section 3.3); without a caller's correlation id the event starts its chain.
+        ObjectNode payload = EventEnvelope.start(eventId, EVENT_MASKED_SEARCH, tenant, now, correlationId, null)
                 .put("outcome", outcome)
-                .put("tenantId", tenant)
                 .put("actor", caller)
-                .put("occurredAt", now.toString())
                 .put("ruleSet", query.ruleSet())
                 .put("input", query.input())
                 .put("from", query.from().toString())
@@ -199,8 +198,7 @@ public final class DefaultDecisionLogService implements DecisionLogService {
                 .put("truncated", truncated);
         ArrayNode keyIds = payload.putArray("keyIds");
         keys.forEach(key -> keyIds.add(key.keyId()));
-        payload.put("correlationId", correlationId);
-        outbox.append(tenant, Ulid.next(now), EngineValues.write(payload), now);
+        outbox.append(tenant, eventId, EngineValues.write(payload), now);
     }
 
     private static String fingerprint(MaskingKey key, Object value) {
@@ -218,6 +216,6 @@ public final class DefaultDecisionLogService implements DecisionLogService {
         ids.forEach(id -> matched.add(id.stringValue()));
         return new LoggedDecision(row.id(), row.ruleSet(), row.version(), row.hitPolicy(), row.outcome(),
                 row.errorCode(), row.maskedInputsJson(), row.outputsJson(), matched, row.callerId(),
-                row.correlationId(), row.createdAt(), row.durationMicros());
+                row.correlationId(), row.evalClock(), row.createdAt(), row.durationMicros(), row.pinned());
     }
 }

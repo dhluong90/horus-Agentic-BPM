@@ -47,7 +47,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 class MaskedInputsPostgresIT {
 
     @Container
-    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
+    static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final Instant NOW = Instant.parse("2027-01-15T02:00:00Z");
     static final String NATIONAL_ID = "079090001234";
@@ -226,7 +226,7 @@ class MaskedInputsPostgresIT {
         assertThatThrownBy(() -> engines.versionService().approve("kyc-routing", 1, new WriteOptions(null, 1L, null)))
                 .isInstanceOf(io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException.class);
         engines.versionService().approve("kyc-routing", 1,
-                new WriteOptions(null, 1L, "ok", List.of(new io.github.dhluong90.bpm.rules.api.AcknowledgedWarning(
+                new WriteOptions(null, 1L, "ok").acknowledging(List.of(new io.github.dhluong90.bpm.rules.api.AcknowledgedWarning(
                         "UNMASKED_PERSONAL_DATA", "nationalId"))));
 
         // Then exactly one APPROVED row stores the acknowledgement and an empty masked-by-default list
@@ -328,9 +328,9 @@ class MaskedInputsPostgresIT {
     void publish(String tenant) {
         caller.as(tenant, "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(MINOR_REVIEW.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish("minor-review", 1, WriteOptions.none());
+        long lock = engines.versionService().requestPublish("minor-review", 1, WriteOptions.none()).lockVersion();
         caller.as(tenant, "bob");
-        engines.versionService().approve("minor-review", 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve("minor-review", 1, new WriteOptions(null, lock, null));
     }
 
     String evaluate(String tenant, int age) {

@@ -35,7 +35,7 @@ class UnmaskedPersonalDataHostIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final HttpClient HTTP = HttpClient.newHttpClient();

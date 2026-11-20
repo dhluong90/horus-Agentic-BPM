@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.rules.internal.expr.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import java.time.Duration;
@@ -25,6 +26,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param authoring how rule changes may be made on this host
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
  * @param decisionLog what the decision log records
+ * @param simulation limits of {@code :simulate}
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -38,7 +40,17 @@ public record RuleEngineProperties(
         @DefaultValue Security security,
         @DefaultValue Authoring authoring,
         @DefaultValue Masking masking,
-        @DefaultValue DecisionLog decisionLog) {
+        @DefaultValue DecisionLog decisionLog,
+        @DefaultValue Simulation simulation) {
+
+    /**
+     * Limits of {@code POST .../versions/{v}:simulate} (RLE-016).
+     *
+     * @param maxInputs the most sample input sets one simulation accepts, 1 to 1000; default 1000. May be lowered,
+     *     never raised
+     */
+    public record Simulation(Integer maxInputs) {
+    }
 
     /**
      * Keys of the keyed fingerprints (HMAC-SHA256) of masked inputs (RLE-012, RLE-035). Supply every key from an
@@ -160,9 +172,22 @@ public record RuleEngineProperties(
      * @param maxOutputBytes estimated JSON size of one decision's outputs, 1 to 1048576; default 1048576. Lower only
      * @param maxStringLength longest string input or string built by {@code +}, 1 to 65536; default 65536. Lower only
      * @param maxRows most rules a version may contain, checked at import, 1 to 5000; default 5000. Lower only
+     * @param regexTimeoutMs longest time one {@code matches()} may run, in milliseconds, 1 to 1000; default 50. A
+     *     match past it fails the decision with {@code EVALUATION_ERROR}, reason {@code REGEX_TIMEOUT}
+     * @param regexMaxInputLength longest text {@code matches()} looks at, 1 to {@code max-string-length}; default
+     *     4096. A longer text fails the decision without running the match, reason {@code REGEX_INPUT_TOO_LONG}
+     * @param regexMaxReads characters one {@code matches()} may read, 1 to 1000000; default 1000000. The deterministic
+     *     primary bound, the same on every machine; past it the decision fails with {@code REGEX_TIMEOUT}. Lower only
+     * @param regexMaxReadsPerDecision characters all the {@code matches()} of one decision may read together, 1 to
+     *     5000000; default 5000000. Counted the same deterministic way as {@code regex-max-reads}, so a rule set of
+     *     many {@code matches()} rows stops at this total; past it the decision fails with {@code REGEX_TIMEOUT}.
+     *     Lower only
+     * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
+     *     false. Replay of a logged decision is not affected
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
-            Integer maxStringLength, Integer maxRows) {
+            Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Boolean pinRetired) {
     }
 
     /**
@@ -175,20 +200,62 @@ public record RuleEngineProperties(
     }
 
     /**
-     * Version lifecycle commands.
+     * Version lifecycle commands and the automatic retirement of superseded versions (ADR-0025).
      *
-     * @param reasonMaxLength the longest reason of {@code :reject}, in characters, 1 to 2000; default 2000. May be
-     *     lowered, never raised
+     * @param reasonMaxLength the longest reason of {@code :reject} and {@code :retire}, in characters, 1 to 2000;
+     *     default 2000. May be lowered, never raised
+     * @param sweepInterval how often the lifecycle sweep retires versions a newer version in effect has superseded,
+     *     {@code PT1S} to {@code PT1H}; default {@code PT1M}. Status only: selection follows the effective date
+     * @param systemActor the actor recorded on the history row and event of a superseded version; it must start with
+     *     {@code system:}, a namespace no caller id may use; default {@code system:supersession}
      * @param acknowledgeWarnings warning codes an approver must accept with acknowledgedWarnings before a version is
      *     published, else 409 WARNINGS_NOT_ACKNOWLEDGED; default [UNMASKED_PERSONAL_DATA]. A list without
      *     UNMASKED_PERSONAL_DATA relaxes a control: it is accepted, logged at WARN at start-up and shown in
      *     /api/bpm/meta. A code this release never raises stops start-up
      */
-    public record Lifecycle(Integer reasonMaxLength, List<String> acknowledgeWarnings) {
+    public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor,
+            List<String> acknowledgeWarnings) {
+
+        /** Shortest accepted {@code sweep-interval}. */
+        static final Duration SWEEP_MIN = Duration.ofSeconds(1);
+
+        /** Longest accepted {@code sweep-interval}: the status of a superseded version lags at most this long. */
+        static final Duration SWEEP_MAX = Duration.ofHours(1);
+
+        /**
+         * Returns the validated sweep interval.
+         *
+         * @return the interval, the default when unset
+         * @throws IllegalArgumentException when it is outside {@code PT1S} to {@code PT1H}, naming the property
+         */
+        public Duration sweepIntervalOrDefault() {
+            Duration interval = sweepInterval == null ? EngineDefaults.SWEEP_INTERVAL : sweepInterval;
+            if (interval.compareTo(SWEEP_MIN) < 0 || interval.compareTo(SWEEP_MAX) > 0) {
+                throw new IllegalArgumentException("horus.bpm.rules.lifecycle.sweep-interval must be PT1S to PT1H,"
+                        + " was " + interval);
+            }
+            return interval;
+        }
     }
 
     /**
-     * Returns the validated settings; an out-of-range value fails start-up naming the property.
+     * Returns the validated settings, with the retirement settings shared by both engines read from the host
+     * (PD-101, PD-102: {@code horus.bpm.lifecycle.retire-approval} and {@code horus.bpm.lifecycle.retire-last-version},
+     * through bpm-host-metadata); an out-of-range value fails start-up naming the property.
+     *
+     * @param environment the host environment
+     * @return the engine settings
+     */
+    public EngineSettings toSettings(org.springframework.core.env.Environment environment) {
+        EngineSettings settings = toSettings();
+        return settings.withLifecycle(settings.systemActor(),
+                        io.github.dhluong90.bpm.host.autoconfigure.RetireApproval.from(environment).value())
+                .withRetireLastVersion(io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion.from(environment)
+                        .value());
+    }
+
+    /**
+     * Returns the validated settings with the shared retirement settings at their defaults.
      *
      * @return the engine settings
      */
@@ -203,8 +270,24 @@ public record RuleEngineProperties(
                 lifecycle.reasonMaxLength() == null ? EngineDefaults.REASON_MAX_LENGTH : lifecycle.reasonMaxLength(),
                 evaluation.maxOutputBytes() == null ? EngineDefaults.OUTPUT_MAX_BYTES : evaluation.maxOutputBytes(),
                 evaluation.maxStringLength() == null ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength(),
-                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows())
+                evaluation.maxRows() == null ? EngineDefaults.RULES_MAX : evaluation.maxRows(),
+                new RegexLimits(
+                        evaluation.regexTimeoutMs() == null ? RegexLimits.TIMEOUT_MILLIS : evaluation.regexTimeoutMs(),
+                        evaluation.regexMaxInputLength() != null ? evaluation.regexMaxInputLength()
+                                // A host that lowers max-string-length lowers the default regex length with it;
+                                // an invalid max-string-length is reported by the settings, naming that property.
+                                : Math.max(1, Math.min(RegexLimits.MAX_INPUT_LENGTH, evaluation.maxStringLength() == null
+                                        ? EngineDefaults.STRING_MAX_LENGTH : evaluation.maxStringLength())),
+                        evaluation.regexMaxReads() == null ? RegexLimits.MAX_READS : evaluation.regexMaxReads(),
+                        evaluation.regexMaxReadsPerDecision() == null
+                                ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision()))
                 .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
+                .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
+                .withLifecycle(
+                        lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
+                        EngineDefaults.RETIRE_APPROVAL)
+                .withSimulationMaxInputs(
+                        simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs())
                 .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
                         ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings());
     }

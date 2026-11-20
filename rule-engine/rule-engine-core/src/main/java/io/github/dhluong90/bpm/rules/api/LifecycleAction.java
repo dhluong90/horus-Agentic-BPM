@@ -6,6 +6,10 @@ public enum LifecycleAction {
     REQUESTED,
     APPROVED,
     REJECTED,
+    /** Taken out of service: by hand ({@code :retire}) or when a newer approved version is in effect (ADR-0025). */
+    RETIRED,
+    /** The requester took their own publication request back (PD-089, RLE-046). */
+    WITHDRAWN,
     /** The author replaced the draft's document in place (RLE-047); records the old and new canonical hash. */
     DRAFT_UPDATED
 }

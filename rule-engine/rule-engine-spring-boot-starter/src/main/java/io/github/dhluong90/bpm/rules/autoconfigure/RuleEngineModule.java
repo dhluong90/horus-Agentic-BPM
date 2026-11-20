@@ -1,7 +1,8 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
+import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
-import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,14 +14,14 @@ import java.util.Properties;
 
 /**
  * The Rule Engine's entry in the host contract: {@code rules}, REST API {@code v1}, the engine version of
- * this build and the six permissions of ADR-0010.
+ * this build and the permissions of ADR-0010, with {@code rules:pin} (pinned evaluation, held by no role by default).
  */
 final class RuleEngineModule {
 
     /** Every permission the Rule Engine checks, in the order clients show them (ADR-0010). */
     static final List<String> PERMISSIONS = List.of(
             "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
-            "rules:masked:search");
+            "rules:masked:search", "rules:pin");
 
     /**
      * Feature flags turned on in this build. None yet: a flag is added with the feature it announces, so a
@@ -39,6 +40,11 @@ final class RuleEngineModule {
 
     /** Strict mode in force for the caller's tenant (PD-099 mitigation 2, RLE-050). */
     static final String REQUIRE_EXPLICIT_MASK = "decision-log.require-explicit-mask";
+    /** The rules setting clients read to show how a retirement is approved (PD-080, ADR-0025). */
+    static final String RETIRE_APPROVAL = io.github.dhluong90.bpm.host.autoconfigure.RetireApproval.META_SETTING;
+
+    /** The rules setting clients read before retiring the last version in effect (PD-101). */
+    static final String RETIRE_LAST_VERSION = io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion.META_SETTING;
 
     private static final String VERSION_RESOURCE = "rule-engine.properties";
 
@@ -50,11 +56,14 @@ final class RuleEngineModule {
      *
      * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
      * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
-    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts) {
-        return descriptor(rolePermissions, cockpitDrafts, io.github.dhluong90.bpm.rules.internal.service.EngineDefaults
-                .ACKNOWLEDGE_WARNINGS);
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            String retireApproval, String retireLastVersion) {
+        return descriptor(rolePermissions, cockpitDrafts, retireApproval, retireLastVersion,
+                io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.ACKNOWLEDGE_WARNINGS);
     }
 
     /**
@@ -62,15 +71,22 @@ final class RuleEngineModule {
      *
      * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
      * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
      * @param acknowledgeWarnings the validated {@code lifecycle.acknowledge-warnings}, published comma-separated
      *     because {@code /meta} settings hold scalars only
      * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
-            List<String> acknowledgeWarnings) {
-        // Always published, false unless the host turns it on (PD-094), so clients never guess.
+            String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings) {
+        // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
+        // the retirement mode in force (PD-080). The approver rule is always makers here, whatever the host sets
+        // (#273): V2 rle_version_four_eyes refuses an approval by the author in the database.
         Map<String, Object> settings = new LinkedHashMap<>();
         settings.put(COCKPIT_DRAFTS, Boolean.TRUE.equals(cockpitDrafts));
+        settings.put(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.MAKERS.value());
+        settings.put(RETIRE_APPROVAL, retireApproval);
+        settings.put(RETIRE_LAST_VERSION, retireLastVersion);
         settings.put(ACKNOWLEDGE_WARNINGS, String.join(",", acknowledgeWarnings));
         return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
     }
@@ -82,11 +98,16 @@ final class RuleEngineModule {
      * @param policy the host's masking policy
      * @return the tenant settings of the {@code rules} module
      */
-    static TenantModuleSettings tenantSettings(MaskingPolicy policy) {
-        return new TenantModuleSettings() {
+    static ModuleTenantSettings tenantSettings(MaskingPolicy policy) {
+        return new ModuleTenantSettings() {
             @Override
             public String module() {
                 return "rules";
+            }
+
+            @Override
+            public List<String> names() {
+                return List.of(MASK_DEFAULT, REQUIRE_EXPLICIT_MASK);
             }
 
             @Override

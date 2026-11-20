@@ -13,16 +13,50 @@ import java.util.Objects;
  * @param decisionId id of the decision row in {@code rle_decision}
  * @param ruleSet the rule set name
  * @param version the version number that was evaluated
- * @param evaluatedAt the evaluation clock instant
+ * @param clock the instant the decision reasoned about: it selected the version and fed {@code today()} and
+ *     {@code now()}; logged, so a replay uses it again (TR-DET-05)
+ * @param evaluatedAt when the evaluation ran; equals {@code clock} unless the caller chose a clock
+ * @param pinned true when the caller named the version ({@code rules:pin}) instead of letting the clock select the
+ *     version in force; set by the engine and stored on the decision row, never taken from the request body
  * @param outcome what happened; switch over it exhaustively
  */
-public record DecisionResult(String decisionId, String ruleSet, int version, Instant evaluatedAt, Outcome outcome) {
+public record DecisionResult(String decisionId, String ruleSet, int version, Instant clock, Instant evaluatedAt,
+        boolean pinned, Outcome outcome) {
 
     public DecisionResult {
         Objects.requireNonNull(decisionId, "decisionId must not be null");
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
+        Objects.requireNonNull(clock, "clock must not be null");
         Objects.requireNonNull(evaluatedAt, "evaluatedAt must not be null");
         Objects.requireNonNull(outcome, "outcome must not be null");
+    }
+
+    /**
+     * Creates a result of the version in force, not pinned.
+     *
+     * @param decisionId the decision id
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param clock the instant the decision reasoned about
+     * @param evaluatedAt when it ran
+     * @param outcome the outcome
+     */
+    public DecisionResult(String decisionId, String ruleSet, int version, Instant clock, Instant evaluatedAt,
+            Outcome outcome) {
+        this(decisionId, ruleSet, version, clock, evaluatedAt, false, outcome);
+    }
+
+    /**
+     * Creates a result whose clock is the instant it ran at.
+     *
+     * @param decisionId the decision id
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param evaluatedAt the clock and run instant
+     * @param outcome the outcome
+     */
+    public DecisionResult(String decisionId, String ruleSet, int version, Instant evaluatedAt, Outcome outcome) {
+        this(decisionId, ruleSet, version, evaluatedAt, evaluatedAt, false, outcome);
     }
 
     /**
@@ -51,6 +85,17 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
             case NoMatch noMatch -> noMatch.outputs();
             case Failed ignored -> Map.of();
         };
+    }
+
+    /**
+     * Tells whether the decision reasoned about another instant than the one it ran at: the caller chose the clock
+     * ({@code rules:simulate}). The decision row records it the same way, as an {@code eval_clock} different from
+     * {@code created_at}, so a back-dated decision is visible in the log.
+     *
+     * @return true when {@code clock} differs from {@code evaluatedAt}
+     */
+    public boolean clockChosen() {
+        return !clock.equals(evaluatedAt);
     }
 
     /**

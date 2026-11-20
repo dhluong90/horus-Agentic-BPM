@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Appends decision rows in the current transaction: one insert per decision, never an update (RLE-013). Reads are
- * always inside one tenant.
+ * Appends decision rows in the current transaction: one insert per decision, never an update (RLE-013), and reads one
+ * back by id for replay and the log read. Reads are always inside one tenant.
  */
 public interface DecisionLog {
 
@@ -21,10 +21,10 @@ public interface DecisionLog {
      * Reads one decision of a tenant.
      *
      * @param tenantId the tenant
-     * @param id the decision id
-     * @return the row, or empty
+     * @param decisionId the decision id (ULID)
+     * @return the row, or empty when the tenant has no such decision
      */
-    Optional<DecisionRecord> find(String tenantId, String id);
+    Optional<DecisionRecord> find(String tenantId, String decisionId);
 
     /**
      * Reads the decisions of one rule set in a period whose logged input has exactly one of the given texts, newest

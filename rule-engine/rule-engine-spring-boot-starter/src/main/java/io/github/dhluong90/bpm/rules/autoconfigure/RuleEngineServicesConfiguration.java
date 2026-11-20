@@ -1,7 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
-import io.github.dhluong90.bpm.host.spi.TenantModuleSettings;
+import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionService;
@@ -14,6 +14,7 @@ import io.github.dhluong90.bpm.rules.rest.DecisionController;
 import io.github.dhluong90.bpm.rules.rest.DecisionLogController;
 import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
+import io.github.dhluong90.bpm.rules.rest.SimulationController;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -67,8 +68,8 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngines ruleEngines(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
-            MaskingPolicy masking) {
-        EngineSettings settings = properties.toSettings();
+            MaskingPolicy masking, Environment environment) {
+        EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         return PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                 RuleEngineAutoConfiguration.engineClock(clock), settings, masking);
@@ -104,7 +105,7 @@ class RuleEngineServicesConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(name = "ruleEngineTenantSettings")
-    TenantModuleSettings ruleEngineTenantSettings(MaskingPolicy masking) {
+    ModuleTenantSettings ruleEngineTenantSettings(MaskingPolicy masking) {
         return RuleEngineModule.tenantSettings(masking);
     }
 
@@ -118,6 +119,13 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngines engines) {
         return new RuleEngineCursorKeyInitializer(engines.cursorKeys());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineLifecycleSweeper ruleEngineLifecycleSweeper(RuleEngines engines, RuleEngineProperties properties) {
+        return new RuleEngineLifecycleSweeper(engines.lifecycleSweep()::run,
+                properties.lifecycle().sweepIntervalOrDefault());
     }
 
     @Bean
@@ -187,6 +195,12 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean
         DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
             return new DecisionLogController(decisions, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        SimulationController ruleEngineSimulationController(RuleEngine engine, CallerResolver callers) {
+            return new SimulationController(engine, callers);
         }
 
         @Bean

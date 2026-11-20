@@ -50,7 +50,7 @@ class CockpitEmbeddedIT {
 
     @Container
     static final PostgreSQLContainer POSTGRES =
-            new PostgreSQLContainer(System.getProperty("bpm.test.postgres.image", "postgres:16-alpine"));
+            new PostgreSQLContainer(TestImages.postgres());
 
     // Plain properties, not @ServiceConnection: the same test runs on both Spring Boot lines (TR-EMB-02).
     @DynamicPropertySource
@@ -150,7 +150,8 @@ class CockpitEmbeddedIT {
             assertThat(body.path("user").path("id").asString()).isEqualTo(user);
             assertThat(body.path("tenant").path("current").asString()).isEqualTo("bank-a");
             assertThat(body.path("permissions").toString()).isEqualTo(
-                    user.equals("lan") ? "[\"rules:read\",\"rules:author\"]" : "[\"rules:read\",\"rules:approve\"]");
+                    user.equals("lan") ? "[\"rules:read\",\"rules:author\"]"
+                            : "[\"rules:read\",\"rules:approve\",\"rules:simulate\"]");
         }
     }
 
