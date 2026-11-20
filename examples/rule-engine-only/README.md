@@ -95,7 +95,7 @@ curl -s -b jar localhost:8080/api/bpm/me
 # {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 
 curl -s -b jar localhost:8080/api/bpm/meta
-# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
+# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.2.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 
 curl -s -i localhost:8080/api/bpm/meta
 # HTTP/1.1 401
@@ -376,7 +376,7 @@ Banks run several copies of a service. Each copy keeps compiled rule versions in
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar --server.port=8081 &
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.2.0.jar --server.port=8081 &
 B=localhost:8081/api/bpm/rules/v1
 curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
   -d '{"inputs":{"tier":"SILVER","txCount":1}}'
@@ -414,7 +414,7 @@ The decision log keeps one table section per calendar month, created ahead of th
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.2.0.jar \
   --horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:read,rules:approve,rules:log:read
 FROM=$(date -u +%Y-%m-01T00:00:00Z)
 TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-01T00:00:00Z)
@@ -464,7 +464,7 @@ TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.2.0.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:log:read'
 H=localhost:8080/api/bpm/rules/v1

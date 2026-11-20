@@ -1,6 +1,6 @@
 # Cockpit
 
-Code: `CKP` · Version: 0.1.0 · Status: pre-alpha
+Code: `CKP` · Version: 0.2.0 · Status: pre-alpha
 
 Operations dashboard for both engines, embeddable in a host admin UI.
 
