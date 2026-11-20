@@ -106,7 +106,7 @@ The workflow's job "Release tag guard tests" proves each refusal on every pull r
 
 ## GitHub Release
 
-On a tag run that passed the release build, the job `github-release` publishes the GitHub Release for the tag. It uses the archive `release-dry-run-success` of the same run and rebuilds nothing. It is the only job with a write token (`contents: write`). It has no checkout, no Maven and no npm, and uses one action, `actions/download-artifact`, pinned by commit SHA. Pull request and dispatch runs skip it.
+On a tag run that passed the release build and the full CI matrix (the job `full-matrix` calls `ci.yml` on the tagged commit), the job `github-release` publishes the GitHub Release for the tag. It uses the archive `release-dry-run-success` of the same run and rebuilds nothing. It is the only job with a write token (`contents: write`). It has no checkout, no Maven and no npm, and uses one action, `actions/download-artifact`, pinned by commit SHA. Pull request and dispatch runs skip it.
 
 | Step | What happens | Fails when, and what is left |
 |---|---|---|

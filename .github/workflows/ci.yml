@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # The release workflow calls this one on a tag, so a release publishes only after the full matrix passed.
+  workflow_call:
   # Nightly, so a vulnerability published against a merged dependency fails main within a day.
   # GitHub notifies the workflow's owner when a scheduled run fails.
   schedule:
@@ -38,26 +40,42 @@ jobs:
       - name: Tests of the Maven retry script (stub mvn, no network)
         run: tools/test-mvn-retry.sh
 
+  plan:
+    # Pull requests run one leg of the matrix; pushes to main, the nightly run, manual runs and the
+    # release workflow's tag run (workflow_call) run all five.
+    name: Plan the Java matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT" == "pull_request" ]]; then
+            matrix='[{"java":"21","boot":"4.x","postgres":"16"}]'
+          else
+            matrix='[{"java":"21","boot":"4.x","postgres":"18"},{"java":"21","boot":"3.5.x","postgres":"14"},{"java":"25","boot":"4.x","postgres":"14"},{"java":"25","boot":"3.5.x","postgres":"18"},{"java":"21","boot":"4.0.x","postgres":"16"}]'
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
     # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
-    # Boot 4.0.x has one leg while it is in open-source support.
+    # Boot 4.0.x has one leg while it is in open-source support. The full list is in the plan job; ADR-0011
+    # tests every 4.x minor in open-source support. Remove the 4.0.x leg, and the spring-boot-4.0 profile in
+    # pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
     # The 3.5.x legs test the jars built on the 4.x baseline, as an adopter receives them: the same
     # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
     name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: plan
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { java: "21", boot: "4.x", postgres: "18" }
-          - { java: "21", boot: "3.5.x", postgres: "14" }
-          - { java: "25", boot: "4.x", postgres: "14" }
-          - { java: "25", boot: "3.5.x", postgres: "18" }
-          # ADR-0011 tests every 4.x minor in open-source support. Remove this leg, and the
-          # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
-          - { java: "21", boot: "4.0.x", postgres: "16" }
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       POSTGRES_IMAGE: postgres:${{ matrix.postgres }}-alpine
     steps:
@@ -74,7 +92,9 @@ jobs:
       # POMs changed, restore-keys fall back to the newest cache of the same line, then of any line; a
       # pull request can restore caches saved on main, so a branch never starts from an empty repository.
       # The last prefix reads the caches setup-java saved on main before this change.
+      # Not on a tag run (called by the release workflow): a release restores no dependency cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref_type != 'tag'
         with:
           # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
           # saved on main have the same cache version and match the last restore key.
@@ -188,7 +208,9 @@ jobs:
 
       # Maven repository cache (#171), as in the verify job: exact key, then the newest cache of this job,
       # then of any job, including those saved on main.
+      # Not on a tag run (called by the release workflow): a release restores no dependency cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.ref_type != 'tag'
         with:
           # Written as setup-java writes it (os.homedir() on the hosted runner), so the caches setup-java
           # saved on main have the same cache version and match the last restore key.

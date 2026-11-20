@@ -1,29 +1,16 @@
 name: Deploy
 
 # Builds the example host image and runs the docker compose smoke test (docs/DEPLOYING.md), then the
-# image gates: no secrets in the layers, no high or critical vulnerability. Runs only when the
-# deployment files or the example hosts change; the CI workflow covers the engines.
+# image gates: no secrets in the layers, no high or critical vulnerability. Runs on every push to main, on release tags, nightly and on request;
+# the CI workflow covers the engines.
 on:
-  pull_request:
-    paths:
-      - "deploy/**"
-      - "docker-compose.yml"
-      - ".dockerignore"
-      - ".env.example"
-      - "docs/DEPLOYING.md"
-      - "examples/**"
-      - ".github/workflows/deploy.yml"
   push:
     branches: [main]
-    paths:
-      - "deploy/**"
-      - "docker-compose.yml"
-      - ".dockerignore"
-      - ".env.example"
-      - "docs/DEPLOYING.md"
-      - "examples/**"
-      - ".github/workflows/deploy.yml"
+    tags: ["v*"]
   workflow_dispatch:
+  # Nightly, so a vulnerability published against the base image fails main within a day.
+  schedule:
+    - cron: "30 2 * * *"
 
 # Actions are pinned by commit SHA; the comment names the release. Update both together.
 permissions:
@@ -43,6 +30,9 @@ jobs:
       # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
       GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
       IMAGE: horus-bpm/rule-engine-only:local
+      # The build stage's image in deploy/docker/Dockerfile, used only to carry the Maven repository in and out.
+      MAVEN_IMAGE: maven:3.9.16-eclipse-temurin-21@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320
+      M2_DIR: /home/runner/.cache/horus-bpm-m2
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -56,8 +46,43 @@ jobs:
           git check-ignore -q .env
           git check-ignore -q secrets/db_password
 
+      # Maven repository for the image build (#171). The Dockerfile keeps it in a BuildKit cache mount, which a
+      # fresh runner does not have: restore the last saved copy, load it into the mount, build, save it again.
+      # Not on a tag run: a release build restores no dependency cache.
+      - name: Restore the Maven repository of the image build
+        id: m2
+        if: github.ref_type != 'tag'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.M2_DIR }}
+          key: maven-docker-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-docker-${{ runner.os }}-
+
+      - name: Load it into the BuildKit cache mount
+        if: github.ref_type != 'tag' && steps.m2.outputs.cache-hit != ''
+        run: |
+          find "$M2_DIR" -name '*.lastUpdated' -delete
+          printf 'FROM %s\nRUN --mount=type=cache,id=horus-bpm-m2,target=/m2 --mount=type=bind,source=.,target=/seed cp -a /seed/. /m2/\n' "$MAVEN_IMAGE" \
+            | docker build -f - "$M2_DIR"
+
       - name: Build the image
         run: docker compose build
+
+      - name: Take the Maven repository out of the BuildKit cache mount
+        if: github.ref_type != 'tag' && steps.m2.outputs.cache-hit != 'true'
+        run: |
+          rm -rf "$M2_DIR"; mkdir -p "$M2_DIR"
+          printf 'FROM %s AS x\nRUN --mount=type=cache,id=horus-bpm-m2,target=/m2 mkdir /out && cp -a /m2/. /out/ && find /out -name "*.lastUpdated" -delete\nFROM scratch\nCOPY --from=x /out/ /\n' "$MAVEN_IMAGE" \
+            | docker build -f - --output "type=local,dest=$M2_DIR" "$(mktemp -d)"
+          du -sh "$M2_DIR"
+
+      - name: Save the Maven repository of the image build
+        if: github.ref_type != 'tag' && steps.m2.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.M2_DIR }}
+          key: maven-docker-${{ runner.os }}-${{ hashFiles('**/pom.xml') }}
 
       - name: Start PostgreSQL and the host, wait for healthy
         run: docker compose up --wait --wait-timeout 180
