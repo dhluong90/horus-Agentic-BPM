@@ -98,7 +98,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions/{v}:validate` | Parse and type-check without saving | `rules:author` | |
 | `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]). Replay over logged decisions is M3 | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
+| `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester. A version with an unmasked personal-data warning needs `"acknowledgedWarnings"` with exactly the `{ code, input }` pairs shown, else `409 WARNINGS_NOT_ACKNOWLEDGED` (PD-104) | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:withdraw` | The requester takes their own request back; back to draft, reason optional | `rules:author` (requester only) | `Idempotency-Key`, `If-Match` (both required) |
 | `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. For the last version in effect, add `"confirmNoVersionInEffect": true` or get `409 LAST_VERSION_IN_EFFECT` (PD-101). In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
@@ -196,6 +196,7 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 | 404 | `DECISION_NOT_FOUND` | Unknown or other-tenant decision id | `/decisions/{id}` |
 | 409 | `VERSION_CONFLICT` | `If-Match` or `version` is stale | `PUT`, lifecycle actions |
 | 409 | `INVALID_STATE` | Action not allowed in the current state, for example `:approve` on a `DRAFT` | lifecycle actions |
+| 409 | `WARNINGS_NOT_ACKNOWLEDGED` | A warning in `lifecycle.acknowledge-warnings` was not accepted in `acknowledgedWarnings` (PD-104) | `:approve` |
 | 409 | `IDEMPOTENCY_IN_FLIGHT` | Same key, first request still running; `Retry-After: 1` | all with `Idempotency-Key` |
 | 409 | `RULE_SET_EXISTS` | Name already used in this tenant | `POST /rule-sets` |
 | 413 | `PAYLOAD_TOO_LARGE` | Body over the endpoint's limit: 16,384 bytes for `:approve`, `:reject` and `:withdraw`, 1,048,576 bytes for `:evaluate` and imports | `:approve`, `:reject`, `:withdraw`, `:evaluate`, imports |

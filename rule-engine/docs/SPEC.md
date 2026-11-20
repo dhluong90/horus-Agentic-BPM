@@ -427,6 +427,36 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ---
 
+### RLE-053 Approving a version with an unmasked personal-data warning needs an acknowledgement on the record
+- **Traces to:** `TR-SEC-04`, `TR-SEC-05`, `TR-OBS-04`, PD-099 (mitigation 1), PD-104
+- **Milestone:** M1
+- **Given:**
+  - Tenant `bank-a`, at its default `decision-log.mask-default: false`.
+  - `kyc-routing` v1 is `PENDING_APPROVAL` with `lockVersion 2`, requested by `lan`. Its inputs `nationalId` and `contactNote` declare no `mask`, and `age` declares `mask: false`. With the built-in names, the version carries `UNMASKED_PERSONAL_DATA` for `nationalId` only (`RLE-049`).
+  - `bob` holds `rules:approve`.
+  - `lifecycle.acknowledge-warnings` is `[UNMASKED_PERSONAL_DATA]`, the default.
+  - Second case: tenant `bank-c` with `decision-log.mask-default: true` and the same version.
+- **When:**
+  1. `bob` sends `POST /api/bpm/rules/v1/rule-sets/kyc-routing/versions/1:approve` with `Idempotency-Key`, `If-Match: "2"` and `{ "comment": "ok" }`.
+  2. He sends it again with `"acknowledgedWarnings": [{ "code": "UNMASKED_PERSONAL_DATA", "input": "nationalId" }]` and a new key.
+     - Before he does, the host adds `contact note` to `bank-a`'s personal-data names, so the version now also warns on `contactNote`. He sends the `nationalId` pair only.
+     - He then sends both pairs.
+  3. He replays the request with both pairs.
+  4. In `bank-c`, `bob` approves without `acknowledgedWarnings`.
+  - **Failure cases:** an extra pair `{ UNMASKED_PERSONAL_DATA, age }`, which `age` does not need because it declares `mask: false`; an unknown code `{ FOO, nationalId }`.
+- **Then:**
+  - **Step 1** returns `409 WARNINGS_NOT_ACKNOWLEDGED`. Its body carries `warnings: [{ code: UNMASKED_PERSONAL_DATA, input: nationalId, matchedName: "national id" }]` and `setting: [UNMASKED_PERSONAL_DATA]`. v1 stays `PENDING_APPROVAL` at `lockVersion 2`, and no history row or event is written.
+  - **Step 2.**
+    - The `nationalId`-only request returns `409 WARNINGS_NOT_ACKNOWLEDGED`, whose `warnings` list both `nationalId` and `contactNote`, and nothing is written. One acknowledged code never covers an input the approver was not shown.
+    - The request with both pairs returns `200`, and v1 is `PUBLISHED`.
+    - The history row `APPROVED` stores `acknowledged_warnings = [{ code: UNMASKED_PERSONAL_DATA, input: nationalId }, { code: UNMASKED_PERSONAL_DATA, input: contactNote }]` and `masked_by_default_inputs = []`.
+    - `rules.version.published.v1` carries `acknowledgedWarnings` with the same two entries and `maskedByDefaultInputs: []`.
+  - **Step 3** returns the same answer and writes nothing.
+  - **Failure cases:** the extra pair gets `409 WARNINGS_NOT_ACKNOWLEDGED` with the current set; the unknown code gets `400 INPUT_INVALID`. Neither writes anything.
+  - **Step 4** returns `200`, because both undeclared inputs are masked by `bank-c`'s default. The history row and the event carry `acknowledgedWarnings: []` and `maskedByDefaultInputs: [contactNote, nationalId]`, so an auditor sees why no acknowledgement was asked.
+- **Example:** `approve with a nationalId warning -> 409 WARNINGS_NOT_ACKNOWLEDGED, nothing written; only the nationalId pair after contact note was added -> 409 listing both; both pairs -> PUBLISHED, acknowledgement on the history row and the event; masked by default -> no acknowledgement needed`.
+- **Test ID:** `RLE_053_approval_with_an_unmasked_personal_data_warning_needs_an_acknowledgement`
+
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 
 ### RLE-034 The compiled cache holds at most `cache.max-entries` versions and heap stays flat

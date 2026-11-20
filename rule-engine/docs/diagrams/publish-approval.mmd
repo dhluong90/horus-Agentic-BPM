@@ -12,13 +12,16 @@ sequenceDiagram
   box rgb(224,242,241) Host replica B
     participant B as Listener and epoch sweep
   end
-  K->>V: POST :approve, If-Match "3", Idempotency-Key
+  K->>V: POST :approve, If-Match "3", Idempotency-Key, acknowledgedWarnings
   alt approver is the requester
     V-->>K: 403 SELF_APPROVAL_FORBIDDEN, nothing written
-  else another identity
+  else a required warning is not acknowledged (PD-104)
+    V-->>K: 409 WARNINGS_NOT_ACKNOWLEDGED with the warnings, nothing written
+  else another identity, warnings acknowledged
     rect rgb(255,248,225)
       Note over V,DB: One transaction, sync
       V->>DB: UPDATE rle_version SET status PUBLISHED WHERE lock_version 3
+      V->>DB: INSERT history APPROVED with acknowledged_warnings
       V->>DB: UPDATE rle_rule_set SET cache_epoch = cache_epoch + 1
       V->>DB: rules.version.published.v1 through the host publisher
       V->>DB: SELECT pg_notify('horus_rle_cache', tenant and rule set)

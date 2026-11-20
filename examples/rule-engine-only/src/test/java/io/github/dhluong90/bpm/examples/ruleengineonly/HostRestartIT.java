@@ -43,7 +43,7 @@ class HostRestartIT {
         try (ConfigurableApplicationContext second = start(db)) {
             JdbcClient jdbc = second.getBean(JdbcClient.class);
             assertThat(history(jdbc, "flyway_schema_history")).isEqualTo(hostBefore).hasSize(1);
-            assertThat(history(jdbc, "rle_schema_history")).isEqualTo(engineBefore).hasSize(11);   // baseline 0, V1 to V6, V10, V11, V14 and V15
+            assertThat(history(jdbc, "rle_schema_history")).isEqualTo(engineBefore).hasSize(12);   // baseline 0, V1 to V6, V10, V11, V12, V14 and V15
         }
     }
 
