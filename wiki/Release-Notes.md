@@ -4,7 +4,7 @@ What shipped in each release. The project has one version for every module, and 
 
 | Release | Tag | Date | Modules | Notes |
 |---|---|---|---|---|
-| 0.1.0 | `v0.1.0` | 22 Nov 2026 (planned) | The modules pinned by `bpm-bom` on the tagged commit, all at `0.1.0`: today `bpm-host-metadata`, `rule-engine-core`, `rule-engine-postgres`, `rule-engine-rest`, `rule-engine-spring-boot-starter`, `cockpit-spring-boot-starter`, and `bpm-bom` itself | First release, published as a GitHub Release with its bill of materials and checksums |
+| 0.1.0 | `v0.1.0` | 20 Nov 2026 | The 13 artifacts pinned by `bpm-bom` 0.1.0, all at `0.1.0`: `bpm-host-metadata`, the Rule Engine (`rule-engine-core`, `-postgres`, `-rest`, `-spring-boot-starter`), the Process Engine preview (`process-engine-core`, `-bpmn`, `-test`, `-postgres`, `-rest`, `-spring-boot-starter`), `cockpit-spring-boot-starter`, and `bpm-bom` itself | First release, published as a GitHub Release with its bill of materials and checksums |
 
 Every release note lists the database migrations it adds (TR-OPS-01) and the "should" requirements it meets ([[Technical Requirements]]).
 
@@ -89,6 +89,7 @@ All migrations are forward-only Flyway scripts in each engine's own history tabl
 | Engine | History table | Scripts |
 |---|---|---|
 | Rule Engine | `rle_schema_history` | `V1__rle_baseline.sql`, `V2__rle_version_created_by.sql`, `V3__rle_version_history.sql`, `V4__rle_version_history_append_only.sql`, `V5__rle_engine_key.sql` |
+| Process Engine | `pre_schema_history` | `V1__pre_baseline.sql`, `V2__pre_idempotency_claim.sql` |
 
 `V4` adds triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE` on `rle_version_history`. If your host separates the migration role from the runtime role, also revoke those rights from the runtime role. `V5` creates the list-cursor key table; the runtime role needs `SELECT` and `INSERT` on `rle_engine_key`.
 
