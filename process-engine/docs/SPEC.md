@@ -71,9 +71,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-007 Four-eyes approval blocks requester or previous actor from completing approval task
 - **Traces to:** `TR-SEC-04`
 - **Milestone:** M2
-- **Given:** Process started or prior `submit-application` step completed by `alice`; next `userTask` has `fourEyes: true` (or lists `alice` in `forbidden_users`).
-- **When:** `alice` tries to claim or complete the approval task via Java API or REST.
-- **Then:** Engine rejects with `403 SELF_APPROVAL_FORBIDDEN`; only another authorized user (`bob`) can complete it.
+- **Given:** Process started or prior `submit-application` step completed by `alice`; next `userTask` has `fourEyes: true`. The refused identities are the starter of the instance and everyone who completed an earlier task of it; an explicit per-task list of refused users is not part of the model.
+- **When:** `alice` tries to claim or complete the approval task via Java API or REST. Further cases: `carol` claims the approval, then completes a task on a parallel branch of the same instance, then completes the approval; a caller of another tenant claims or completes it.
+- **Then:** Engine rejects with `403 SELF_APPROVAL_FORBIDDEN`; only another authorized user (`bob`) can complete it. `carol`'s completion is refused the same way, because the check runs again at completion under the instance lock. The other tenant gets `404 TASK_NOT_FOUND`. No refusal writes a history entry, an event, a stored answer or a change to the task.
 - **Example:** `submit=alice, approve=alice -> 403; approve=bob -> 200`.
 - **Test ID:** `PRE_007_four_eyes_blocks_same_actor_approval`
 
@@ -544,7 +544,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - **Failure cases:**
     - `lan` retires v1;
     - `bob` retires v1 with a blank reason;
-    - on a host with `lifecycle.retire-last-version: refuse`, the confirmed retire.
+    - on a host with `lifecycle.retire-last-version: refuse`, the confirmed retire;
+    - a second key `kyc-onboarding` with v1 and v2 `ACTIVE`, v2 effective since `2027-04-20T08:00:00Z` and its `DEFINITION_EFFECTIVE` job not yet run, so v1 is still `ACTIVE`: `bob` retires v1, with or without the confirmation.
 - **Then:**
   - **Step 1** returns `200`. v2 is `RETIRED`, and its job is `CANCELLED` in the same transaction. The history row `RETIRED` and `processes.definition.retired.v1` carry the reason, `approvalMode: single` and `noVersionInEffect: false`, because v1 is still in effect.
   - **Step 2** returns `409 LAST_VERSION_IN_EFFECT` with `definitionKey: loan-review`, `version: 1`, `setting: confirm` and `nextEffectiveFrom: null`. Nothing changes.
@@ -555,8 +556,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - **Failure cases:**
     - `lan` gets `403 PERMISSION_DENIED`;
     - the blank reason gets `400 INPUT_INVALID`;
-    - under `refuse`, the confirmed retire gets `409 LAST_VERSION_IN_EFFECT` with `setting: refuse`.
-    - None of them changes anything.
+    - under `refuse`, the confirmed retire gets `409 LAST_VERSION_IN_EFFECT` with `setting: refuse`;
+    - retiring the superseded `kyc-onboarding` v1 gets `409 INVALID_STATE` with a detail naming v2 (PD-102, as `RLE-026`); when the job runs, v1 is `RETIRED` with `retired_by = system:effective-date` and `superseded_by = 2`. Retiring v2, the version in effect, behaves as steps 2 and 3.
+    - None of them changes anything: no history row, no event, no stored answer.
 - **Example:** `retire v2 (future) -> RETIRED, job cancelled; retire v1 -> 409 LAST_VERSION_IN_EFFECT; with confirmation -> RETIRED, noVersionInEffect true; running instances continue; new start -> 404`.
 - **Test ID:** `PRE_053_retire_stops_new_starts_keeps_running_instances_and_confirms_last_version`
 
