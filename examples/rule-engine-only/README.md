@@ -25,7 +25,7 @@ sequenceDiagram
 
 ## Run locally
 
-Needs JDK 21 or later and Docker.
+Needs JDK 21 or later and Docker. To run the host as a container beside PostgreSQL instead, with one command, see [docs/DEPLOYING.md](../../docs/DEPLOYING.md); its image build reuses a dependency layer until a `pom.xml` changes.
 
 ```bash
 docker run -d --name horus-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
