@@ -77,7 +77,7 @@ describe('readings of a version', () => {
     expect(first).toHaveTextContent('National ID is masked; its test is not shown');
     expect(first).toHaveTextContent('Masked data is named here, never shown.');
     expect(second).not.toHaveTextContent('Masked data');
-    expect(list).not.toHaveTextContent('079123456789');
+    expect(list).not.toHaveTextContent('SEG-4471');
   });
 
   it('CKP_079_too_many_rows_reads_calmly_and_offers_the_table', async () => {
@@ -188,13 +188,13 @@ describe('readings of a simulation', () => {
     const user = userEvent.setup();
     open('#/rules/kyc-routing/1');
     await user.click(await screen.findByRole('tab', { name: 'Simulate' }));
-    await user.type(screen.getByLabelText('National ID'), '079123456789');
+    await user.type(screen.getByLabelText('National ID'), 'SEG-4471');
     await user.click(screen.getByRole('button', { name: 'Simulate' }));
     expect(await screen.findByText('Same result')).toBeVisible();
     const status = screen.getByText('Same result').closest('.sim__result');
     expect(status).toHaveTextContent('National ID is masked; its test is not shown');
     expect(status).toHaveTextContent('Masked data is named here, never shown.');
-    expect(status).not.toHaveTextContent('079123456789');
+    expect(status).not.toHaveTextContent('SEG-4471');
   });
 
   it('CKP_079_a_simulation_too_large_or_refused_reads_in_words', async () => {

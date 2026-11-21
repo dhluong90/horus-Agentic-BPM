@@ -85,7 +85,7 @@ const SCREENS: readonly Screen[] = [
   { name: 'simulate-disabled', scenario: 'rules-author', hash: '#/rules/card-fee/2/table', prepare: tab(SIMULATE),
     ready: async (page) => { await expect(page.locator('.sim__reason')).toBeVisible(); await expect(page.locator('.sim__run')).toBeDisabled(); } },
   { name: 'simulate-masked', scenario: 'rules-approver', hash: '#/rules/kyc-routing/1/table', result: '.sim__result',
-    prepare: (page, locale) => simulate(page, locale, async (p) => { await p.locator('.sim input').first().fill('079123456789'); }),
+    prepare: (page, locale) => simulate(page, locale, async (p) => { await p.locator('.sim input').first().fill('SEG-4471'); }),
     ready: async (page) => { await expect(page.locator('.sim__result .reading__note')).toBeVisible(); } },
 ];
 
@@ -123,7 +123,7 @@ for (const screen of SCREENS) {
           else await expect(main).not.toContainText(/Quy tắc R\d|Câu đầy đủ|Rút gọn/);
           await expect(main).not.toContainText(/==|'GOLD'/);
           // A masked input's test is never written in a reading (the table itself shows the rule as authored).
-          for (const reading of await page.locator('.readings__list, .sim__result').all()) await expect(reading).not.toContainText('079123456789');
+          for (const reading of await page.locator('.readings__list, .sim__result').all()) await expect(reading).not.toContainText('SEG-4471');
           await page.evaluate(async () => { await document.fonts.ready; });
           await page.screenshot({ path: `e2e/screenshots/${file}`, fullPage: false });
           expect(violations).toEqual([]);

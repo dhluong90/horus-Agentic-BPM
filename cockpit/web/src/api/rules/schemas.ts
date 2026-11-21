@@ -326,7 +326,7 @@ export const simulationReadings = z
     version: z.number().int(),
     baselineVersion: z.number().int().nullable(),
     languages: z.array(z.string()),
-    results: z.array(z.object({ index: z.number().int(), changed: z.boolean(), simulated: outcomeReading, baseline: outcomeReading.nullable() }).loose()),
+    results: z.array(z.object({ index: z.number().int(), reference: z.string().optional(), label: z.string().nullable().optional(), changed: z.boolean(), simulated: outcomeReading, baseline: outcomeReading.nullable() }).loose()),
   })
   .loose();
 export type SimulationReadings = z.infer<typeof simulationReadings>;

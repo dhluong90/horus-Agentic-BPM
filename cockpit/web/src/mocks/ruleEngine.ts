@@ -579,7 +579,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       const baseline = effective ? outcome(effective, sample.inputs) : null;
       const changed = baseline === null || simulated.kind !== baseline.kind || JSON.stringify(simulated.then) !== JSON.stringify(baseline.then);
       const strip = (o: ReturnType<typeof outcome>) => ({ kind: o.kind, ruleIds: o.ruleIds, readings: o.readings });
-      return { index, changed, simulated: strip(simulated), baseline: baseline ? strip(baseline) : null };
+      return { index, reference: `S${index + 1}`, label: null, changed, simulated: strip(simulated), baseline: baseline ? strip(baseline) : null };
     });
     return json({ ruleSet: name, version: v.version, baselineVersion: effective?.version ?? null, languages: LANGUAGES, results });
   }
@@ -724,7 +724,7 @@ const KYC_ROUTING_V1: Definition = {
   inputs: [{ name: 'nationalId', type: 'string', mask: true, description: 'National ID' }, { name: 'segment', type: 'string', allowed: ['MASS', 'VIP'] }],
   outputs: [{ name: 'route', type: 'string' }],
   rules: [
-    { id: 'K1', when: { nationalId: "== '079123456789'" }, then: { route: "'MANUAL'" } },
+    { id: 'K1', when: { nationalId: "== 'SEG-4471'" }, then: { route: "'MANUAL'" } },
     { id: 'K2', when: { segment: "== 'VIP'" }, then: { route: "'PRIORITY'" } },
     { id: 'K3', when: {}, then: { route: "'STANDARD'" } },
   ],
