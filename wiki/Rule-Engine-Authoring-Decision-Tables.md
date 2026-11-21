@@ -27,6 +27,8 @@ timeZone: Asia/Ho_Chi_Minh      # optional IANA zone of today(); default UTC
 | `unique` | At most one row may match; several matches fail the decision with `UNIQUE_HIT_VIOLATION`; zero matches is no match, as with `first` | Pricing tables that must be complete and non-overlapping |
 | `collect` | Every matching row contributes; each output becomes a list or an aggregate (`collect: sum`, `min`, `max`, `count`) | Accumulating fees, collecting reason codes or risk flags |
 
+The names `any`, `priority`, `ruleOrder` and `outputOrder` are reserved for the other DMN hit policies. Until stage S1 adds them, a table that uses one is refused with a message that names the policy and the stage. The same applies to `expressionLanguage: feel` and `errorMode: spec`, and a `schemaVersion` above 1 is refused as written for a later release. `errorMode: strict` may be written; it is what every schema version 1 table uses, and it does not change the table's hash.
+
 ## 2. Declare inputs and outputs
 
 ```yaml
@@ -170,3 +172,4 @@ Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 | `422 UNIQUE_HIT_VIOLATION` at run time | A `unique` table had several matches for real inputs | Remove the overlap, or switch to `first` if order is intended |
 | Default row never matches | It is not the last row under `first` | Move `when: {}` to the end |
 | Validation warns about an unreachable row | An earlier row under `first` already covers it | Delete the row or reorder |
+| `422 VALIDATION_FAILED`, "hitPolicy priority is added in stage S1" | The table uses a DMN name that this release reserves but does not run yet | Use `first`, `unique` or `collect`; the same holds for `expressionLanguage: feel` and `errorMode: spec` |
