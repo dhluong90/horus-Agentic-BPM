@@ -161,7 +161,6 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
 | [PD-138](#pd-138-a-built-in-shadow-mode-for-agent-steps-is-planned-for-11-the-documented-pattern-covers-10) | A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0 | Decided (product manager, delegated, PD-073); revisits PD-015 |
 | [PD-139](#pd-139-approvals-require-the-reviewed-content-hash-for-rules-and-process-definitions) | Approvals require the reviewed content hash, for rules and process definitions | Decided (product manager, delegated, PD-073) |
-||||||| 0e068be
 
 ---
 
@@ -3901,4 +3900,3 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 - Configurable: only the `dev` relaxation.
 
 **Follow-ups.** Product manager: the issue "Process Engine: Approve Only the Reviewed Definition". Architect: the SPEC and OpenAPI change for both. Cockpit: send the hash on every approval (#246 follow-up). If the process side misses 1.0, definition approval does not ship without the hash.
-||||||| 0e068be
