@@ -89,6 +89,31 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
     }
 
     /**
+     * Returns one output as a given type, for tests and callers that know the output's declared type: {@code Money}
+     * for money, {@code java.math.BigDecimal} or {@code Long} as the engine maps numbers, {@code String},
+     * {@code Boolean}, {@code java.time.LocalDate} or {@code java.time.Instant}.
+     *
+     * @param name the output name
+     * @param type the expected type
+     * @param <T> the expected type
+     * @return the value, or null when the output has none or the decision has no outputs
+     * @throws IllegalArgumentException when the value is of another type, naming the output and both types
+     */
+    public <T> T output(String name, Class<T> type) {
+        Objects.requireNonNull(name, "name must not be null");
+        Objects.requireNonNull(type, "type must not be null");
+        Object value = outputs().get(name);
+        if (value == null) {
+            return null;
+        }
+        if (!type.isInstance(value)) {
+            throw new IllegalArgumentException("Output " + name + " is a " + value.getClass().getSimpleName()
+                    + ", not a " + type.getSimpleName());
+        }
+        return type.cast(value);
+    }
+
+    /**
      * Tells whether the decision reasoned about another instant than the one it ran at: the caller chose the clock
      * ({@code rules:simulate}). The decision row records it the same way, as an {@code eval_clock} different from
      * {@code created_at}, so a back-dated decision is visible in the log.

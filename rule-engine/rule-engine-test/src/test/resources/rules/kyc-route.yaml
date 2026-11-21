@@ -1,0 +1,19 @@
+# Which KYC route an applicant takes. unique: exactly one row may match, so overlapping rows are a defect.
+schemaVersion: 1
+ruleSet: kyc-route
+hitPolicy: unique
+
+inputs:
+  - { name: age,     type: integer }
+  - { name: country, type: string }
+
+outputs:
+  - { name: route, type: string }
+
+rules:
+  - id: K1                  # adults
+    when: { age: ">= 18" }
+    then: { route: "'ADULT'" }
+  - id: K2                  # applicants at home
+    when: { country: "== 'VN'" }
+    then: { route: "'DOMESTIC'" }

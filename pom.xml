@@ -52,6 +52,8 @@
   </modules>
 
   <properties>
+    <!-- The licence gate's artifact exclusion (PD-053, TR-LIC-01): none unless a *-test artifact sets it. -->
+    <bpm.licence.excluded-artifacts>^$</bpm.licence.excluded-artifacts>
     <java.release>21</java.release>
     <maven.compiler.release>${java.release}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -367,6 +369,8 @@
               <skipAddThirdParty>${maven.deploy.skip}</skipAddThirdParty>
               <excludedScopes>test,system</excludedScopes>
               <excludedGroups>io\.github\.dhluong90\.bpm</excludedGroups>
+              <!-- PD-053: empty here; only a *-test artifact sets it, for the JUnit Jupiter API as provided. -->
+              <excludedArtifacts>${bpm.licence.excluded-artifacts}</excludedArtifacts>
               <failOnMissing>true</failOnMissing>
               <failOnBlacklist>true</failOnBlacklist>
               <includedLicenses>${bpm.licence-policy}/allowed-licences.txt</includedLicenses>

@@ -1,0 +1,22 @@
+# Same-day transfer cut-off in Ho Chi Minh City time (RLE-022). today() is the date of the decision's clock in
+# timeZone, so at 2027-01-15T18:30:00Z (01:30 on 16 January in Ho Chi Minh City) a transfer dated 16 January is
+# same-day. Without timeZone the rule set would use UTC, where it is still 15 January.
+schemaVersion: 1
+ruleSet: same-day-cutoff
+description: Is the transfer dated today, in the bank's time zone?
+timeZone: Asia/Ho_Chi_Minh
+hitPolicy: first
+
+inputs:
+  - { name: txDate, type: date, description: value date of the transfer }
+
+outputs:
+  - { name: sameDay, type: boolean }
+
+rules:
+  - id: R1                  # dated today in Ho Chi Minh City
+    when: { txDate: "== today()" }
+    then: { sameDay: true }
+  - id: R2                  # any other date
+    when: {}
+    then: { sameDay: false }

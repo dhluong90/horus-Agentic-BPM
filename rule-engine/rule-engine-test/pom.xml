@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.dhluong90.bpm</groupId>
+    <artifactId>rule-engine-parent</artifactId>
+    <version>0.3.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>rule-engine-test</artifactId>
+  <name>HORUS Rule Engine Test Support</name>
+  <description>JUnit 5 extension that evaluates a rule set file in memory, with the engine's own reader, compiler and evaluator and a fixed clock, and writes a row coverage report. Test scope only: no database, no Spring context, never auto-configured.</description>
+
+  <properties>
+    <!--
+      TR-LIC-01 names one exception for a *-test artifact (PD-053): the JUnit Jupiter API as provided, with its
+      Platform Commons (also EPL-2.0). The licence gate in the root pom reads this property, so the exception applies to
+      this artifact only; no other module sets it, and no other dependency passes.
+    -->
+    <bpm.licence.excluded-artifacts>junit-jupiter-api|junit-platform-commons</bpm.licence.excluded-artifacts>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!--
+      The extension API (EPL-2.0). PD-053 and TR-LIC-01 allow it in a *-test artifact as provided and nowhere else: the
+      project that uses this module has JUnit 5 already, so the jar never carries it.
+    -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Test only: the specification tests run fixture classes through the launcher, as a build does. -->
+    <dependency>
+      <groupId>org.junit.platform</groupId>
+      <artifactId>junit-platform-launcher</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

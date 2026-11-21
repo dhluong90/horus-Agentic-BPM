@@ -77,7 +77,7 @@ The Java API is `ruleEngine.simulateHistory("card-fee", 2, HistorySimulation.bet
 
 ## Unit-test a rule set
 
-`rule-engine-test` loads a YAML file in memory. No database, no Spring context.
+`rule-engine-test` loads a rule set file (YAML, JSON or DMN, by its extension) in memory and evaluates it with the engine's own reader, compiler and evaluator. No database, no Spring context, no masking key, no events; the tenant is a fixed `test`. A file that fails import fails the test class before any test runs, with the same violations (rule id, column, code, message) as the `422 VALIDATION_FAILED` answer.
 
 ```java
 @RuleSetTest("rules/card-fee.yaml")
@@ -92,15 +92,35 @@ class CardFeeRulesTest {
 }
 ```
 
-Name each test after the row or behaviour it proves so the coverage report can map tests to rows. The test extension runs with a fixed clock, so tests of future-dated rules are repeatable (see `*-test` in [[Architecture]]).
+`rules.evaluate(...)` returns the same `DecisionResult` the engine gives for version 1 of the file. An input the rule set does not declare fails with `INPUT_INVALID` naming it, as `evaluation.reject-undeclared-inputs` does by default. Name each test after the row or behaviour it proves so the coverage report can map tests to rows (see `*-test` in [[Architecture]]).
+
+The clock is fixed, so tests of rules that read `today()` or `now()` repeat on every machine. The default is `2027-01-01T00:00:00Z`. Change it for a class with `@RuleSetTest(value = "rules/card-fee.yaml", clock = "2027-06-30T17:00:00Z")`, or for one test with `@RuleSetClock("2027-06-30T17:00:00Z")`. `today()` is that instant's date in the rule set's `timeZone`.
 
 ## Report row coverage in CI
 
+There is no extra command. The same test run writes the report when it ends, to `target/horus-rules-coverage/rules-coverage.json` and `rules-coverage.md`, and prints one line per rule set:
+
 ```bash
-./mvnw rules:coverage
+mvn test
+# Rule coverage card-fee: 2 of 3 rows covered; R3 not covered
+# Rule coverage kyc-route: 0 of 2 rows covered; K1, K2 not covered
 ```
 
-Expected output lists each rule set with rows never matched by any test, for example `card-fee: R4 not covered`. An uncovered row is a warning; in a `unique` table it fails the build.
+A row counts as covered only when a test evaluation matched it, so a test that fails the evaluation (`UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`) covers nothing. The report lists each rule set by name and canonical hash with its rows in document order and the tests that matched each. It never shows an input value, and the same tests give the same bytes, so a CI job can keep it as an artifact. A rule set that no test loaded is not in it. Change the folder with `horus.rules.coverage.report-dir`.
+
+By default coverage only reports (PD-120). To make the build fail, set `horus.rules.coverage.fail-on` in `src/test/resources/junit-platform.properties`:
+
+| Value | The build fails when |
+|---|---|
+| `none` (default) | Never. The report is written and one line per rule set is printed |
+| `unique` | A row of a `unique` rule set was not matched by any test |
+| `any` | Any row of any rule set was not matched by any test |
+
+An unknown value fails the run, naming the setting. The report is written in every case. A bank that must prove every row is tested sets `any` in its rule set repository:
+
+```properties
+horus.rules.coverage.fail-on=any
+```
 
 ## Rely on determinism
 
@@ -116,7 +136,8 @@ Given the same version, inputs and clock, outputs and matched rule ids are ident
 | `409 INVALID_STATE` on `/decisions/{ruleSet}/versions/{v}:evaluate` for a draft | A pinned evaluation is logged, so it accepts only approved versions (`PUBLISHED` or `RETIRED`); a draft never enters the decision log | Simulate the draft with `POST /rule-sets/{name}/versions/{v}:simulate`, which writes no decision row |
 | `403 CLOCK_NOT_ALLOWED` when sending `clock` | `clock` requires `rules:simulate`, on `:evaluate` and on `/versions/{v}:evaluate` alike | Grant the permission to the simulation role, or leave `clock` out to use the host clock |
 | Simulation rows appear in the Decisions screen | The call went to an `:evaluate` endpoint, which logs every decision | Use `:simulate` for drafts and what-if runs; it writes no decision row |
-| `rules:coverage` reports a row you believe is tested | The test matches a different row first under `first` | Check `matchedRuleIds` in the test; reorder rows or adjust inputs |
+| The coverage report lists a row you believe is tested | The test matches a different row first under `first`, or the evaluation failed (`unique` overlap, `EVALUATION_ERROR`), which covers nothing | Check `matchedRuleIds` in the test; reorder rows or adjust inputs |
+| The build fails after the tests pass, with a message naming `horus.rules.coverage.fail-on` | The setting asks for more coverage than the tests give, or its value is not `none`, `unique` or `any` | Add tests for the rows the message names, or relax the setting |
 | Replay shows 0 changed outcomes for a changed row | The period contains no decisions that reach that row | Choose a longer period (up to 31 days) or add sample inputs that hit the row |
 | `403 PERMISSION_DENIED` on `:simulate-history` | Replay needs both `rules:simulate` and `rules:log:read` | Grant `rules:log:read` to the role that replays, or replay with sample inputs instead |
 | `notReplayableCount` above 0 | Those decisions had a masked input with a value; the log holds only its fingerprint | Expected for masked inputs; cover those cases with sample inputs |

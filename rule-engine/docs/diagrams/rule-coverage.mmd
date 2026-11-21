@@ -1,0 +1,16 @@
+flowchart TD
+  A["JUnit run starts: a class with @RuleSetTest(rules/card-fee.yaml)"] --> B{"File reads, compiles and fits the step budget?"}
+  B -- no --> C["Class fails before any test runs, with the import violations"]
+  B -- yes --> D["Test calls rules.evaluate(inputs) at the fixed clock"]
+  D --> E{"Undeclared or ill-typed input?"}
+  E -- yes --> F["INPUT_INVALID naming the input"]
+  E -- no --> G{"Outcome is Matched?"}
+  G -- yes --> H["Rows in matchedRuleIds are covered by this test"]
+  G -- no --> I["NoMatch, UNIQUE_HIT_VIOLATION or EVALUATION_ERROR: nothing is covered"]
+  H --> J["Run ends: write rules-coverage.json and rules-coverage.md, print one line per rule set"]
+  I --> J
+  J --> K{"horus.rules.coverage.fail-on"}
+  K -- none --> L["Build passes"]
+  K -- unique --> M["Fail naming uncovered rows of unique tables"]
+  K -- any --> N["Fail naming every uncovered row"]
+  K -- other --> O["Fail naming the setting"]
