@@ -8,7 +8,7 @@ import { useCallback, useSyncExternalStore } from 'react';
  */
 
 /** `edit` is the grid editor of a draft; on any other version it opens the table, read only. */
-export const LENSES = ['table', 'changes', 'history', 'source', 'edit'] as const;
+export const LENSES = ['table', 'readings', 'changes', 'history', 'source', 'edit'] as const;
 export type Lens = (typeof LENSES)[number];
 
 /**

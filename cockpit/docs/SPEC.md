@@ -468,3 +468,39 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 - **Then:** With nothing chosen, Export is unavailable with "Choose at least one version or decision." In the first case the decision picker is not shown, one line says adding decisions needs permission to read the decision log, and a versions-only export sends no `decisionIds`. In the second case the picker says "One file holds at most 100 decisions." and offers "Choose first 100" instead of choosing all; it ticks the first 100, the count reads "100 chosen", the other boxes are unavailable until one is unticked, and Export stays available. The third case reads "The file would be larger than 8 MB. Choose fewer decisions.", the fourth "You may not export this evidence on this service.", the fifth "Decision 01KF2Q…P7TA belongs to another rule set and cannot be exported here.", the sixth "This rule set was not found on this service."; each keeps the choices, and the code and reference sit behind Details with Copy.
 - **Example:** `124 listed -> "Choose first 100" -> "100 chosen", the rest unavailable; 422 EVIDENCE_TOO_LARGE -> "The file would be larger than 8 MB. Choose fewer decisions."`.
 - **Test ID:** `CKP_075_export_limits_and_refusals_read_in_words`
+
+### CKP-076 Each row of a version reads as the engine's sentence, in the user's language and the viewer's style
+- **Traces to:** `TR-UI-02`, `TR-UI-04`, `RLE-091`, PD-027, PD-077
+- **Milestone:** M2
+- **Given:** `card-fee` v1 `PUBLISHED` with rows `R1` to `R5`. Lan holds `rules:read`. The host's `rules.readings.style` is unset (sentence).
+- **When:** Lan opens the Readings tab of v1 in English, then in Vietnamese, then chooses Short and reloads.
+- **Then:** One `GET .../versions/1/readings` is sent. Each row shows its id and the engine's `full` text in the user's language, unchanged: `R2` reads "Rule R2 applies when tier is GOLD and balance is at least 50,000,000 VND. Then fee is 0 VND; waived is Yes." in English and "Quy tắc R2 áp dụng khi tier là GOLD và balance ít nhất là 50.000.000 VND. Khi đó fee là 0 VND; waived là Có." in Vietnamese, with no English on the Vietnamese screen. Sentence / Short switches every reading on screen to the `short` text without a new request; the choice is stored in the browser as a display preference (no user data) and survives a reload. Until the viewer chooses, the host's setting decides (`shorthand` gives Short). The cockpit never builds or edits a sentence.
+- **Example:** `R2 -> "Rule R2 applies when tier is GOLD and balance is at least 50,000,000 VND. ..."; Short -> "tier = GOLD, balance >= 50,000,000 VND -> fee = 0 VND; waived = Yes"`.
+- **Test ID:** `CKP_076_each_row_shows_the_engine_sentence_in_the_chosen_language`
+
+### CKP-077 A change reads row by row with the old reading struck and the new one added
+- **Traces to:** `TR-UI-02`, `TR-UI-04`, `RLE-092`, PD-027
+- **Milestone:** M2
+- **Given:** `card-fee` v2 `PENDING_APPROVAL` against v1: `R3` fee raised from 30,000 to 35,000 VND, `R6` added, `R4` removed. Minh holds `rules:approve`.
+- **When:** Minh opens Changes and chooses Readings.
+- **Then:** One `GET .../versions/2/diff/readings?base=1` is sent and the side-by-side table is replaced, one view at a time. `R3` shows the v1 reading struck and the v2 reading added; `R6` reads "Added" with its reading only; `R4` reads "Removed" with its reading struck; a row whose `readingChanged` is false shows its reading once and says the wording did not change. "3 rows read the same." closes the list. Approve and Reject stay docked and visible at 1440x900.
+- **Example:** `R3 -> struck "... fee is 30,000 VND ...", added "... fee is 35,000 VND ..."`.
+- **Test ID:** `CKP_077_the_old_reading_is_struck_and_the_new_one_added_for_each_changed_row`
+
+### CKP-078 A simulation reads both outcomes and says whether the result changes
+- **Traces to:** `TR-UI-02`, `TR-UI-04`, `RLE-093`, PD-027
+- **Milestone:** M2
+- **Given:** `card-fee` v2 and v1 in effect. Minh holds `rules:simulate` and `rules:read`; Lan does not hold `rules:simulate`.
+- **When:** Minh opens Simulate in the inspector, chooses Tier Gold and presses Simulate; Lan opens Simulate.
+- **Then:** One `POST .../versions/2:simulate-readings` is sent with `{ "samples": [{ "inputs": { "tier": "GOLD" } }] }` and no `Idempotency-Key`; no decision is evaluated or logged. The result replaces the form, so it shows above the fold at 1440x900: "The result changes", the v2 reading and the v1 reading under "In effect: version 1", in the chosen style. "Change the sample" brings the form back with the sample kept. For Lan, Simulate is shown disabled with "You need permission to simulate rules." beside it.
+- **Example:** `Gold -> "The result changes"; Version 2 "... fee is 35,000 VND ..."; In effect: version 1 "... fee is 30,000 VND ..."`.
+- **Test ID:** `CKP_078_a_simulation_reads_both_sides_and_says_whether_the_result_changes`
+
+### CKP-079 Readings show loading, empty, refused, too large, failed and masked states in words
+- **Traces to:** `TR-SEC-05`, `TR-UI-02`, `TR-UI-04`, `RLE-091`, `RLE-092`, `RLE-093`
+- **Milestone:** M2
+- **Given:** `new-fees` v1 with no rows; `branch-fees` v1 with 501 rows; `kyc-routing` v1 whose `nationalId` is masked and tested by `K1`. The engine may answer `403 PERMISSION_DENIED`, `422 READINGS_TOO_LARGE` or `500`.
+- **When:** The readings, the change readings and the simulation are opened in each case.
+- **Then:** While loading, skeleton rows show at the height of real rows. No rows reads "This version has no rows yet." A 403 reads "You cannot read rows in plain words on this service." with no retry. `READINGS_TOO_LARGE` is a calm information note, not an error, without a number: "Too many rows to read at once", with "Open the table" (version) or "Compare in the table" (change), or "Run fewer samples." (simulation). Any other failure reads "The service could not answer. Try again." with Try again, the code and reference behind Details. A row that tests a masked input carries "Masked data is named here, never shown."; the masked value appears in no reading.
+- **Example:** `branch-fees -> "Too many rows to read at once" + Open the table; kyc-routing K1 -> "National ID is masked; its test is not shown"`.
+- **Test ID:** `CKP_079_too_many_rows_reads_calmly_and_offers_the_table`

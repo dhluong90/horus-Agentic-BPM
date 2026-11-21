@@ -20,6 +20,8 @@ import { useI18n } from '../i18n/I18nProvider';
 import { PeopleProvider } from '../app/people';
 import { usePendingRequests, useEveryRuleSet } from '../features/overview/useRuleOverview';
 import { NavRail } from './NavRail';
+import { hostReadingStyle } from '../preferences/readingStyle';
+import type { ReadingStyle } from '../preferences/storage';
 import '../components/frame.css';
 
 /**
@@ -34,6 +36,11 @@ export function cockpitDraftsOn(meta: BpmMetaV1): boolean {
   return value === true || value === 'true';
 }
 
+/** The host's reading style for rule readings, from the rules module of /meta (PD-077). */
+export function readingStyleOf(meta: BpmMetaV1): ReadingStyle {
+  return hostReadingStyle(meta.modules.find((module) => module.module === 'rules')?.settings ?? {});
+}
+
 export interface FrameProps {
   host: RegistryHost;
   meta: BpmMetaV1;
@@ -44,7 +51,7 @@ export interface FrameProps {
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
 export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
   return (
-    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} fetchImpl={fetchImpl}>
+    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
           <Frame meta={meta} me={me} />
