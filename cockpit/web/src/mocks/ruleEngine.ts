@@ -10,6 +10,10 @@
  */
 
 import { createAuditRoutes, type AuditOptions } from './auditEngine';
+import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from './ruleReadings';
+
+/** The most rows or samples one readings request covers, as the engine's limit. */
+const READINGS_MAX = 500;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
@@ -533,6 +537,53 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     };
   }
 
+  /** Plain-language readings (RLE-091 to RLE-093): every row, the changed rows of a diff, a simulation. */
+  function readings(name: string, number: number, tail: string, url: URL, request: FakeRequest): FakeResponse {
+    const simulating = tail === ':simulate-readings';
+    if (!request.permissions.includes('rules:read') || (simulating && !request.permissions.includes('rules:simulate'))) return problem(403, 'PERMISSION_DENIED', 'The caller lacks the permission for readings');
+    if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+    const v = find(name, number);
+    if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(number)} of rule set ${name} not found`);
+    const tooLarge = (what: string, count: number) => problem(422, 'READINGS_TOO_LARGE', `One request reads at most ${String(READINGS_MAX)} ${what}, this one covers ${String(count)}; read fewer at a time`);
+    if (tail === '/readings') {
+      if (v.definition.rules.length > READINGS_MAX) return tooLarge('rows', v.definition.rules.length);
+      return json({ ruleSet: name, version: v.version, languages: LANGUAGES, rows: v.definition.rules.map((rule, index) => ({ ruleId: rule.id, position: index + 1, readings: readRule(rule, v.definition) })) });
+    }
+    if (tail === '/diff/readings') {
+      const baseNumber = Number(url.searchParams.get('base') ?? Number.NaN);
+      if (!Number.isInteger(baseNumber) || baseNumber < 1 || baseNumber === v.version) return problem(400, 'INPUT_INVALID', 'base is required and must name another version');
+      const base = find(name, baseNumber);
+      if (!base) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${name} not found`);
+      const diff = diffDefinitions(v, base);
+      if (diff.rows.length > READINGS_MAX) return tooLarge('rows', diff.rows.length);
+      const read = (definition: Definition, id: Json | undefined): Readings | null => {
+        const rule = definition.rules.find((r) => r.id === id);
+        return rule ? readRule(rule, definition) : null;
+      };
+      const rows = diff.rows.map((row) => {
+        const previous = row['change'] === 'ADDED' ? null : read(base.definition, row['ruleId']);
+        const current = row['change'] === 'REMOVED' ? null : read(v.definition, row['ruleId']);
+        return { ruleId: row['ruleId'], change: row['change'], position: row['position'], basePosition: row['basePosition'], readingChanged: !sameReadings(previous, current), previous, current };
+      });
+      return json({ ruleSet: name, version: v.version, base: base.version, languages: LANGUAGES, rows, unchangedCount: diff.unchangedCount });
+    }
+    const samples = (JSON.parse(request.body || '{}') as { samples?: { inputs: Record<string, Json> }[] }).samples ?? [];
+    if (samples.length > READINGS_MAX) return tooLarge('samples', samples.length);
+    const effective = [...versionsOf(name)].reverse().find((candidate) => candidate.status === 'PUBLISHED');
+    const outcome = (version: StoredVersion, inputs: Record<string, Json>) => {
+      const rule = version.definition.rules.find((r) => Object.entries(r.when).every(([input, cell]) => matches(cell, inputs[input])));
+      return rule ? { kind: 'MATCHED', ruleIds: [rule.id], readings: readRule(rule, version.definition, true), then: rule.then } : { kind: 'NO_MATCH', ruleIds: [], readings: readNoMatch(name, version.version), then: null };
+    };
+    const results = samples.map((sample, index) => {
+      const simulated = outcome(v, sample.inputs);
+      const baseline = effective ? outcome(effective, sample.inputs) : null;
+      const changed = baseline === null || simulated.kind !== baseline.kind || JSON.stringify(simulated.then) !== JSON.stringify(baseline.then);
+      const strip = (o: ReturnType<typeof outcome>) => ({ kind: o.kind, ruleIds: o.ruleIds, readings: o.readings });
+      return { index, changed, simulated: strip(simulated), baseline: baseline ? strip(baseline) : null };
+    });
+    return json({ ruleSet: name, version: v.version, baselineVersion: effective?.version ?? null, languages: LANGUAGES, results });
+  }
+
   function handle(request: FakeRequest): FakeResponse {
     const key = request.headers['idempotency-key'];
     if (request.method !== 'POST' || key === undefined) return route(request);
@@ -554,6 +605,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/readings|\/diff\/readings|:simulate-readings)$/.exec(path))) return readings(m[1] ?? '', Number(m[2]), m[3] ?? '', url, request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject)?$/.exec(path))) {
       const name = m[1] ?? '';
       if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
@@ -664,4 +716,29 @@ export function auditSeed(): StoredVersion[] {
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-20T02:00:00Z' }] },
     { ruleSet: 'kyc-risk', version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(KYC_RISK_V1, null, 2), definition: KYC_RISK_V1, ...base },
   ];
+}
+
+/** KYC routing with a masked national id, for the masked readings (RLE-091). */
+const KYC_ROUTING_V1: Definition = {
+  schemaVersion: 1, ruleSet: 'kyc-routing', hitPolicy: 'first',
+  inputs: [{ name: 'nationalId', type: 'string', mask: true, description: 'National ID' }, { name: 'segment', type: 'string', allowed: ['MASS', 'VIP'] }],
+  outputs: [{ name: 'route', type: 'string' }],
+  rules: [
+    { id: 'K1', when: { nationalId: "== '079123456789'" }, then: { route: "'MANUAL'" } },
+    { id: 'K2', when: { segment: "== 'VIP'" }, then: { route: "'PRIORITY'" } },
+    { id: 'K3', when: {}, then: { route: "'STANDARD'" } },
+  ],
+};
+
+/** A fee table of 501 rows: more than one readings request covers, so the engine answers 422 READINGS_TOO_LARGE. */
+function bigTable(): Definition {
+  const rules: Rule[] = Array.from({ length: 501 }, (_, index) => ({ id: `B${String(index + 1)}`, when: { txCount: `>= ${String(500 - index)}` }, then: { fee: `${String(1000 + index * 100)} VND` } }));
+  return { schemaVersion: 1, ruleSet: 'branch-fees', hitPolicy: 'first', inputs: [{ name: 'txCount', type: 'integer' }], outputs: [{ name: 'fee', type: 'money' }], rules };
+}
+
+/** The demo data plus the rule sets the readings states need: masked inputs, a table too large to read, no rows. */
+export function readingsSeed(): StoredVersion[] {
+  const published = (definition: Definition): StoredVersion => ({ ruleSet: definition.ruleSet, version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(definition, null, 2), definition, ...base });
+  const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [] };
+  return [...demoSeed(), published(KYC_ROUTING_V1), published(bigTable()), { ...published(empty), status: 'DRAFT', approvedBy: null, approvedAt: null, effectiveFrom: null, requestedBy: null, requestedAt: null, lockVersion: 0 }];
 }

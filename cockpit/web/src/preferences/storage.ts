@@ -52,3 +52,17 @@ export function readMenuCollapsed(): boolean {
 export function storeMenuCollapsed(collapsed: boolean): void {
   write(MENU_KEY, collapsed ? 'collapsed' : 'expanded');
 }
+
+const READING_STYLE_KEY = 'horus.cockpit.readingStyle';
+
+/** How rule readings show: the engine's full sentence or its short form. A display preference only. */
+export type ReadingStyle = 'full' | 'short';
+
+export function readStoredReadingStyle(): ReadingStyle | undefined {
+  const value = read(READING_STYLE_KEY);
+  return value === 'full' || value === 'short' ? value : undefined;
+}
+
+export function storeReadingStyle(style: ReadingStyle): void {
+  write(READING_STYLE_KEY, style);
+}

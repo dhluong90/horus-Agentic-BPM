@@ -22,6 +22,10 @@ import { StatusBadge } from './components/StatusBadge';
 import { Tabs } from './components/Tabs';
 import { Toast } from './components/Toast';
 import { TryItPanel } from './components/TryItPanel';
+import { ReadingsView } from './components/ReadingsView';
+import { ReadingsDiffView } from './components/ReadingsDiffView';
+import { ReadingStyleSwitch } from './components/ReadingParts';
+import { SimulatePanel } from './components/SimulatePanel';
 import { diffRules } from './model/diff';
 import { formatDateTime } from './model/dates';
 import { draftReducer, initialDraft } from './model/draft';
@@ -61,11 +65,16 @@ function Subtitle({ version, editing }: { version: RuleSetVersion; editing: bool
 
 function Inspector({ version, importedFrom, onMatched }: { version: RuleSetVersion; importedFrom: string | undefined; onMatched: (ids: string[]) => void }) {
   const { t } = useI18n();
-  const [tab, setTab] = useState<'details' | 'try'>('details');
+  const [tab, setTab] = useState<'details' | 'try' | 'simulate'>('details');
+  const items = [{ id: 'details', label: t('inspector.details') }, { id: 'try', label: t('inspector.tryIt') }, { id: 'simulate', label: t('inspector.simulate') }] as const;
+  let panel: ReactNode;
+  if (tab === 'details') panel = <DetailsPanel version={version} importedFrom={importedFrom} />;
+  else if (tab === 'try') panel = <TryItPanel version={version} onMatched={onMatched} />;
+  else panel = <SimulatePanel version={version} />;
   return (
     <section className="card inspector" aria-label={t('inspector.label')}>
-      <Tabs label={t('inspector.label')} items={[{ id: 'details', label: t('inspector.details') }, { id: 'try', label: t('inspector.tryIt') }]} selected={tab} onSelect={setTab}>
-        {tab === 'details' ? <DetailsPanel version={version} importedFrom={importedFrom} /> : <TryItPanel version={version} onMatched={onMatched} />}
+      <Tabs label={t('inspector.label')} items={items} selected={tab} onSelect={setTab}>
+        {panel}
       </Tabs>
     </section>
   );
@@ -77,8 +86,9 @@ function Inspector({ version, importedFrom, onMatched }: { version: RuleSetVersi
  */
 function ChangesLens({ version, base }: { version: RuleSetVersion; base: VersionSummary | undefined }) {
   const { t } = useI18n();
+  const [view, setView] = useState<'table' | 'readings'>('table');
   const baseVersion = useVersion(version.ruleSet, base?.version);
-  const diff = useVersionDiff(version, base?.version);
+  const diff = useVersionDiff(version, view === 'table' ? base?.version : undefined);
   if (!base) {
     return (
       <div className="changes">
@@ -87,16 +97,34 @@ function ChangesLens({ version, base }: { version: RuleSetVersion; base: Version
       </div>
     );
   }
-  if (baseVersion.isError) return <ProblemNotice error={baseVersion.error} />;
-  if (diff.isError) return <ProblemNotice error={diff.error} />;
-  if (baseVersion.isPending || diff.isPending) return <p className="empty" role="status">{t('ruleSets.loading')}</p>;
-  return <ChangesView diff={diff.data} base={baseVersion.data} next={version} />;
+  // Table or readings: one view of the change at a time.
+  const switcher = (
+    <div className="changes__switch">
+      <div className="seg" role="group" aria-label={t('changes.view')}>
+        {(['table', 'readings'] as const).map((option) => (
+          <button key={option} type="button" className="hit" aria-pressed={view === option} onClick={() => { setView(option); }}>
+            {t(option === 'table' ? 'changes.view.table' : 'changes.view.readings')}
+          </button>
+        ))}
+      </div>
+      {view === 'readings' ? <ReadingStyleSwitch /> : null}
+    </div>
+  );
+  let body: ReactNode;
+  if (baseVersion.isError) body = <ProblemNotice error={baseVersion.error} />;
+  else if (view === 'table' && diff.isError) body = <ProblemNotice error={diff.error} />;
+  else if (baseVersion.isPending || (view === 'table' && diff.isPending)) body = <p className="empty" role="status">{t('ruleSets.loading')}</p>;
+  else if (view === 'readings') body = <div className="changes readings"><ReadingsDiffView base={baseVersion.data} next={version} onCompareTable={() => { setView('table'); }} /></div>;
+  else if (diff.data !== undefined) body = <ChangesView diff={diff.data} base={baseVersion.data} next={version} />;
+  return <>{switcher}{body}</>;
 }
 
-function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
+function LensContent({ lens, version, base, matched, onOpenTable }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string>; onOpenTable: () => void }) {
   switch (lens) {
     case 'table':
       return <DecisionTable definition={version.definition} version={version.version} matched={matched} />;
+    case 'readings':
+      return <ReadingsView version={version} matched={matched} onOpenTable={onOpenTable} />;
     case 'changes':
       return <ChangesLens version={version} base={base} />;
     case 'history':
@@ -170,7 +198,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
     // JSON text is valid YAML 1.2; this engine release imports YAML only, so the document is sent as YAML.
     save.start({ contentType: 'application/yaml', text: JSON.stringify(document, null, 2) });
   };
-  const tabLens: 'table' | 'changes' | 'history' = lens === 'source' ? 'table' : lens;
+  const tabLens: 'table' | 'readings' | 'changes' | 'history' = lens === 'source' ? 'table' : lens;
   // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
   const comparing = !editing && lens === 'changes';
   // Approve only what is on screen: the diff shown must be of this version's content, and the content must be what
@@ -203,7 +231,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
   } else {
     main = (
       <div className="card workbench__main">
-        <LensContent lens={lens} version={version} base={base} matched={matched} />
+        <LensContent lens={lens} version={version} base={base} matched={matched} onOpenTable={() => { go({ lens: 'table' }); }} />
       </div>
     );
   }
@@ -236,7 +264,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
         {!editing ? (
           <div className="rs-head__tabs">
             <Tabs label={t('lens.label')} className="rs-tabs" selected={tabLens} onSelect={(id) => { go({ lens: id }); }}
-              items={[{ id: 'table', label: t('lens.table') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') }]}>
+              items={[{ id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') }]}>
               {null}
             </Tabs>
             <div className="rs-head__files">
@@ -273,7 +301,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
             <Inspector version={version} importedFrom={importedFrom[version.version]} onMatched={(ids) => {
               setMatched(new Set(ids));
               // The matched row is marked in the table, so the table is what the user sees next.
-              if (lens !== 'table' && ids.length > 0) go({ lens: 'table' });
+              if (lens !== 'table' && lens !== 'readings' && ids.length > 0) go({ lens: 'table' });
             }} />
           ) : null}
         </aside>}

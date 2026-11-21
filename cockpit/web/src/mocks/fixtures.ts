@@ -153,7 +153,7 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
     case 'rules-author':
       return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }) };
     case 'rules-approver':
-      return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate'] }) };
+      return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate', 'rules:simulate'] }) };
     case 'rules-author-drafts-default':
       // A host that does not report authoring.cockpit-drafts at all: off by default in 0.1.0 (PD-094).
       return {

@@ -17,6 +17,12 @@ import {
   type VersionSummary,
   versionDiff,
   type VersionDiff,
+  readingsDiff,
+  ruleSetReadings,
+  simulationReadings,
+  type ReadingsDiff,
+  type RuleSetReadings,
+  type SimulationReadings,
 } from './schemas';
 import {
   decisionExplanation,
@@ -114,6 +120,12 @@ export interface RulesClient {
   getRuleSetHistory(name: string, request?: PageRequest): Promise<RuleSetHistory>;
   /** exportEvidence: the engine writes, hashes and records the file; the bytes are kept as sent (PD-116) */
   exportEvidence(name: string, request: EvidenceRequest, idempotencyKey: string): Promise<EvidenceFile>;
+  /** readVersion: every row of a version in plain language, per language and style (RLE-091); writes nothing */
+  readVersion(name: string, version: number, signal?: AbortSignal): Promise<RuleSetReadings>;
+  /** readDiff: the changed rows of a diff, each read in both versions (RLE-092); writes nothing */
+  readDiff(name: string, version: number, base: number, signal?: AbortSignal): Promise<ReadingsDiff>;
+  /** simulateReadings: runs the samples beside the version in effect and reads each outcome (RLE-093); logs nothing */
+  simulateReadings(name: string, version: number, samples: readonly Readonly<Record<string, unknown>>[], signal?: AbortSignal): Promise<SimulationReadings>;
   /** evaluate: runs the version in effect at the host clock and logs one decision */
   evaluate(ruleSet: string, inputs: Readonly<Record<string, unknown>>, idempotencyKey: string): Promise<DecisionResult>;
 }
@@ -291,6 +303,27 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
         contentDigest: answer.header('Content-Digest'),
         bytes: answer.file.size,
       };
+    },
+    async readVersion(name, version, signal) {
+      const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/readings`, ...(signal ? { signal } : {}) }, ruleSetReadings);
+      return answer.data;
+    },
+    async readDiff(name, version, base, signal) {
+      const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/diff/readings?base=${String(base)}`, ...(signal ? { signal } : {}) }, readingsDiff);
+      return answer.data;
+    },
+    async simulateReadings(name, version, samples, signal) {
+      // A read: the engine writes nothing, so no Idempotency-Key (RLE-093).
+      const answer = await call(
+        {
+          method: 'POST',
+          path: `${versionPath(name, version)}:simulate-readings`,
+          body: { contentType: 'application/json', text: JSON.stringify({ samples: samples.map((inputs) => ({ inputs })) }) },
+          ...(signal ? { signal } : {}),
+        },
+        simulationReadings,
+      );
+      return answer.data;
     },
     async evaluate(ruleSet, inputs, idempotencyKey) {
       const answer = await call(
