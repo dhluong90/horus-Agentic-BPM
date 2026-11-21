@@ -23,6 +23,8 @@ public final class VersionActions {
     public static final String RETIRE = "retire";
     /** {@code :withdraw}: the requester takes their own publication request back (PD-089). */
     public static final String WITHDRAW = "withdraw";
+    /** {@code :discard}: the author throws away a draft that is no longer wanted (RLE-091). */
+    public static final String DISCARD = "discard";
     /** {@code :confirm-retire}: a second approver confirms a pending four-eyes retirement (RLE-038). */
     public static final String CONFIRM_RETIRE = "confirm-retire";
     /** {@code :cancel-retire}: an approver withdraws a pending retirement request, with a reason (RLE-038). */
@@ -57,7 +59,7 @@ public final class VersionActions {
      * @param caller the caller's id
      * @param permissions the caller's {@code rules:*} permissions
      * @return the actions in a fixed order: {@code request-publish}, {@code approve}, {@code reject},
-     *     {@code withdraw}, then {@code retire}, or {@code confirm-retire} and {@code cancel-retire} while a
+     *     {@code withdraw}, {@code discard} for the author of a draft, then {@code retire}, or {@code confirm-retire} and {@code cancel-retire} while a
      *     retirement is pending
      */
     public static List<String> allowed(VersionStatus status, String createdBy, String requestedBy,
@@ -67,6 +69,10 @@ public final class VersionActions {
             case DRAFT -> {
                 if (permissions.contains(Permissions.AUTHOR)) {
                     actions.add(REQUEST_PUBLISH);
+                    // Only the author discards, as only the author replaces (RLE-047, RLE-091).
+                    if (caller != null && caller.equals(createdBy)) {
+                        actions.add(DISCARD);
+                    }
                 }
             }
             case PENDING_APPROVAL -> {
@@ -96,8 +102,9 @@ public final class VersionActions {
                     }
                 }
             }
-            case RETIRED -> {
-                // A retired version never changes state again; a rollback is a new version (DESIGN section 3.3).
+            case RETIRED, DISCARDED -> {
+                // A retired or discarded version never changes state again; a rollback is a new version (DESIGN
+                // section 3.3).
             }
         }
         return List.copyOf(actions);

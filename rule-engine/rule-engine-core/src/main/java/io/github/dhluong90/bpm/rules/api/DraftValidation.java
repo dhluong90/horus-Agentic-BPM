@@ -34,13 +34,30 @@ public record DraftValidation(String ruleSet, int version, boolean valid, List<P
      * @param position the zero-based character position in the cell text, or null
      * @param message the readable message by language code, written from the message catalogue and the code only, so
      *     it never repeats text of the cell
+     * @param expected for a {@code SYNTAX_ERROR} that has a known kind: the token or form the engine expected at
+     *     {@code position}, by language code; empty for any other problem (#419)
+     * @param example for the same problem, a short correct expression from the message catalogue, or null
      */
-    public record Problem(String ruleId, String column, String code, Integer position, Map<String, String> message)
-            implements Serializable {
+    public record Problem(String ruleId, String column, String code, Integer position, Map<String, String> message,
+            Map<String, String> expected, String example) implements Serializable {
 
         public Problem {
             Objects.requireNonNull(code, "code must not be null");
             message = Map.copyOf(message);
+            expected = Map.copyOf(expected);
+        }
+
+        /**
+         * Creates a problem with no expected token and no example.
+         *
+         * @param ruleId the rule (row), or null
+         * @param column the input or output name (column), or null
+         * @param code the code
+         * @param position the position in the cell, or null
+         * @param message the message by language code
+         */
+        public Problem(String ruleId, String column, String code, Integer position, Map<String, String> message) {
+            this(ruleId, column, code, position, message, Map.of(), null);
         }
     }
 

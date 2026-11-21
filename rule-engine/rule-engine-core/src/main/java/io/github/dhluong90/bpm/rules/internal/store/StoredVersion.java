@@ -287,6 +287,18 @@ public record StoredVersion(
     }
 
     /**
+     * Returns a copy moved to {@code DISCARDED} (RLE-091). Nothing is deleted: the content, hashes and author stay.
+     *
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion discarded() {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.DISCARDED, hitPolicy,
+                effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
+                requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt,
+                copiedFrom);
+    }
+
+    /**
      * Returns a copy sent back to {@code DRAFT} by its requester's withdrawal (PD-089); like a rejection, the request
      * is cleared so the author can edit and request again.
      *

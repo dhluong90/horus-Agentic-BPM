@@ -118,14 +118,15 @@ class EditorApiQaTest {
 
         // When each command is tried on a fresh copy of the same state
         List<String> accepted = new ArrayList<>();
-        for (String action : List.of(VersionActions.REQUEST_PUBLISH, VersionActions.APPROVE, VersionActions.REJECT,
-                VersionActions.RETIRE, VersionActions.WITHDRAW)) {
+        for (String action : List.of(VersionActions.REQUEST_PUBLISH, VersionActions.DISCARD, VersionActions.APPROVE,
+                VersionActions.REJECT, VersionActions.RETIRE, VersionActions.WITHDRAW)) {
             World world = new World();
             world.build(status, author, requester);
             world.caller.become("bank-a", caller, permissions);
             try {
                 switch (action) {
                     case VersionActions.REQUEST_PUBLISH -> world.versions.requestPublish("card-fee", 1, WriteOptions.none());
+                    case VersionActions.DISCARD -> world.versions.discard("card-fee", 1, WriteOptions.none());
                     case VersionActions.APPROVE -> world.versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
                     case VersionActions.REJECT -> world.versions.reject("card-fee", 1, new WriteOptions(null, 1L, "qa"));
                     case VersionActions.RETIRE -> world.versions.retire("card-fee", 1, new WriteOptions(null, null, "qa"), true);

@@ -198,6 +198,80 @@ class ValidateDraftTest {
         assertThat(result.toString()).doesNotContain("079123456789");
     }
 
+    @Test
+    void RLE_092_a_syntax_error_names_the_expected_token_the_position_and_an_example_in_both_languages() {
+        // Given lan's draft v2
+        lansDraftV2();
+        int history = stores.history.size();
+
+        // When R2 writes a condition with an opening parenthesis that is never closed
+        DraftValidation open = versions.validateDraft("card-fee", 2,
+                yaml(cardFeeWith("txCount: \">= 3\"", "txCount: \">= (3 + 1\"")));
+
+        // Then the problem is a SYNTAX_ERROR at the end of the cell, expecting a closing parenthesis, with an example
+        assertThat(open.valid()).isFalse();
+        assertThat(open.problems()).singleElement().satisfies(p -> {
+            assertThat(p.ruleId()).isEqualTo("R2");
+            assertThat(p.column()).isEqualTo("txCount");
+            assertThat(p.code()).isEqualTo("SYNTAX_ERROR");
+            assertThat(p.position()).isEqualTo(9);
+            assertThat(p.expected().get("en")).isEqualTo("A closing parenthesis ) to match the opening one.");
+            assertThat(p.expected().get("vi")).isEqualTo("Dấu đóng ngoặc ) khớp với dấu mở ngoặc.");
+            assertThat(p.example()).isEqualTo("(balance + 100) > 0");
+            assertThat(p.message().get("en")).isEqualTo("The cell is not a valid expression.");
+        });
+
+        // and a single = is answered with the equality operator, at its position
+        DraftValidation equals = versions.validateDraft("card-fee", 2,
+                yaml(cardFeeWith("tier: \"== 'GOLD'\"", "tier: \"= 'GOLD'\"")));
+        assertThat(equals.problems()).singleElement().satisfies(p -> {
+            assertThat(p.code()).isEqualTo("SYNTAX_ERROR");
+            assertThat(p.position()).isEqualTo(0);
+            assertThat(p.expected().get("en")).isEqualTo("Two equals signs == to compare for equality.");
+            assertThat(p.example()).isEqualTo("tier == 'GOLD'");
+        });
+
+        // and a problem that is not a syntax error carries no expected token and no example
+        DraftValidation unknown = versions.validateDraft("card-fee", 2,
+                yaml(cardFeeWith("txCount: \">= 3\"", "txCount: \">= tierX\"")));
+        assertThat(unknown.problems()).singleElement().satisfies(p -> {
+            assertThat(p.expected()).isEmpty();
+            assertThat(p.example()).isNull();
+        });
+        assertThat(stores.history).hasSize(history);
+    }
+
+    @Test
+    void RLE_092_a_syntax_error_in_a_masked_cell_never_echoes_its_value() {
+        // Given a draft whose nationalId declares mask: true
+        caller.become("bank-a", "lan", AUTHOR);
+        versions.importRuleSet(yaml(KYC));
+
+        // When the cell is edited with an unterminated text that starts with the masked number
+        DraftValidation result = versions.validateDraft("kyc-routing", 1,
+                yaml(KYC.replace("== '079123456789'", "== '079123456789")));
+
+        // Then the problem expects a closing quote and the number is nowhere in the answer
+        assertThat(result.problems()).singleElement().satisfies(p -> {
+            assertThat(p.code()).isEqualTo("SYNTAX_ERROR");
+            assertThat(p.expected().get("en")).isEqualTo("A closing single quote to end the text.");
+        });
+        assertThat(result.toString()).doesNotContain("079123456789");
+    }
+
+    @Test
+    void RLE_092_every_syntax_kind_has_an_expected_token_and_an_example_in_every_shipped_language() {
+        CatalogueExplainer catalogue = CatalogueExplainer.bundled();
+        for (io.github.dhluong90.bpm.expr.internal.SyntaxHint hint
+                : io.github.dhluong90.bpm.expr.internal.SyntaxHint.values()) {
+            DraftValidation.Problem problem = catalogue.problem(new io.github.dhluong90.bpm.rules.api.Violation("R1",
+                    "tier", "x", "SYNTAX_ERROR", 0, hint.name()));
+            assertThat(problem.expected()).as(hint.name()).containsKeys("en", "vi");
+            assertThat(problem.expected().values()).as(hint.name()).allMatch(text -> !text.isBlank());
+            assertThat(problem.example()).as(hint.name()).isNotBlank();
+        }
+    }
+
     static final String KYC = """
             schemaVersion: 1
             ruleSet: kyc-routing

@@ -42,7 +42,7 @@ final class RuleListQueries {
                   WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id)) AS last_changed_at
             FROM rle_rule_set s
             JOIN LATERAL (SELECT v.version_num, v.status FROM rle_version v
-                           WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id
+                           WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id AND v.status <> 'DISCARDED'
                            ORDER BY v.version_num DESC LIMIT 1) lv ON TRUE
             """;
 
@@ -60,7 +60,7 @@ final class RuleListQueries {
 
     /** The lifecycle actions a version's history shows; the others belong to the rule set. */
     private static final String VERSION_ACTIONS = "('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN',"
-            + "'DRAFT_UPDATED','RETIRE_REQUESTED','RETIRE_CANCELLED','RETIRED')";
+            + "'DRAFT_UPDATED','RETIRE_REQUESTED','RETIRE_CANCELLED','RETIRED','DISCARDED')";
 
     /** The epoch of each named rule set of one tenant, for a replica's cache check. */
     static final ListQuery CACHE_EPOCHS = new ListQuery("cache-epochs",
@@ -86,7 +86,7 @@ final class RuleListQueries {
                       v.approved_at, v.retire_requested_by
                     FROM rle_version v
                     JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
-                    WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId
+                    WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId AND v.status <> 'DISCARDED'
                       AND (CAST(:before AS INT) IS NULL OR v.version_num < CAST(:before AS INT))
                     ORDER BY v.version_num DESC
                     LIMIT :limit

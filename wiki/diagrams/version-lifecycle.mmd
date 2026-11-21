@@ -6,15 +6,17 @@ stateDiagram-v2
   [*] --> DRAFT: create, import, or copy from a retired version
   DRAFT --> DRAFT: edit (lock version), validate, simulate
   DRAFT --> PENDING_APPROVAL: request-publish (zero validation errors)
+  DRAFT --> DISCARDED: discard by its author (kept in the history)
   PENDING_APPROVAL --> DRAFT: reject with a reason (the requester may withdraw)
   PENDING_APPROVAL --> PUBLISHED: approve by a different identity
   PUBLISHED --> RETIRED: superseded (system, once), or retire with a reason
   PUBLISHED --> [*]
   RETIRED --> [*]
+  DISCARDED --> [*]
   note right of RETIRED
     Immutable. Still readable for
     explain and replay of old decisions.
   end note
   class DRAFT host
   class PENDING_APPROVAL,PUBLISHED engine
-  class RETIRED obs
+  class RETIRED,DISCARDED obs
