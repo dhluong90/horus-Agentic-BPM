@@ -24,6 +24,8 @@ import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.ContentChangedException;
+import io.github.dhluong90.bpm.rules.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.rules.api.VersionConflictException;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
@@ -346,6 +348,7 @@ public final class DefaultVersionService implements VersionService {
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":approve");
         requireCommentLength(opts.comment());
+        requireContentHash(opts);
         requireHashShape(opts.expectedCanonicalHash());
         java.util.Set<AcknowledgedWarning> acknowledged = acknowledgedPairs(opts.acknowledgedWarnings());
         // The hash joins the request hash only when named, so a request stored before this field existed still replays.
@@ -413,6 +416,7 @@ public final class DefaultVersionService implements VersionService {
         String actor = context.callerWith(PERMISSION_APPROVE);
         requireLockVersion(opts, ":reject");
         String reason = requireReason(opts.comment());
+        requireContentHash(opts);
         requireHashShape(opts.expectedCanonicalHash());
         String requestHash = opts.expectedCanonicalHash() == null
                 ? Hashes.sha256Parts("reject", actor, ruleSet, Integer.toString(version),
@@ -872,10 +876,20 @@ public final class DefaultVersionService implements VersionService {
     private static void checkContent(StoredVersion current, WriteOptions options) {
         String expected = options.expectedCanonicalHash();
         if (expected != null && !expected.equals(current.canonicalHash())) {
-            throw new VersionConflictException("The content of " + current.ruleSet() + " v" + current.version()
+            throw new ContentChangedException("The content of " + current.ruleSet() + " v" + current.version()
                     + " changed since it was reviewed: expected canonical hash " + expected + " but it is now "
                     + current.canonicalHash() + ", at lock version " + current.lockVersion(),
                     current.canonicalHash(), current.lockVersion());
+        }
+    }
+
+    /**
+     * With {@code approval.require-content-hash} on (the default), a decision that names no hash is refused before
+     * anything is read, so an approval can never be bound to whatever happens to be stored (RLE-084, #275).
+     */
+    private void requireContentHash(WriteOptions options) {
+        if (options.expectedCanonicalHash() == null && context.settings().requireContentHash()) {
+            throw new ContentHashRequiredException();
         }
     }
 

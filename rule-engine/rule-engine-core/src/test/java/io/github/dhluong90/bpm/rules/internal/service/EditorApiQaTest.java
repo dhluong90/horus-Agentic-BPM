@@ -48,7 +48,7 @@ class EditorApiQaTest {
         final InMemoryStores stores = new InMemoryStores();
         final TestCaller caller = new TestCaller("bank-a", "lan");
         final RuleEngines engines = RuleEngines.create(
-                new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()),
+                new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
                 stores, stores, stores);
         final VersionService versions = engines.versionService();
 

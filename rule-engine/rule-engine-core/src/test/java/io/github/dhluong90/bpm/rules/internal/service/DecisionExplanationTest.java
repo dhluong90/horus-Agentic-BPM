@@ -108,7 +108,7 @@ class DecisionExplanationTest {
     RuleEngines engines(io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer) {
         MaskingPolicy masking = MaskingPolicy.withKey(MaskingKey.of(MaskedInputsTest.KEY_A));
         return RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(CLOCK, ZoneOffset.UTC), stores, stores,
-                EngineSettings.defaults(), masking), stores, stores, stores, DecisionQuerySettings.defaults(), explainer);
+                EngineSettings.defaults().withRequireContentHash(false), masking), stores, stores, stores, DecisionQuerySettings.defaults(), explainer);
     }
 
     void publish(RuleEngines engines, String yaml, String name, int version) {

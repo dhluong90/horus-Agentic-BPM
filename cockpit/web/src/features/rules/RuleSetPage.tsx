@@ -182,8 +182,8 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
   const decision = (docked: boolean) => (
     <DecisionCard version={version} docked={docked} review={review} onReload={() => { window.location.reload(); }}
       onReviewAgain={() => { onReviewAgain(); go({ lens: 'changes' }); }}
-      approve={{ start: ({ comment, acknowledgedWarnings }) => { approve.start({ version, comment, acknowledgedWarnings }); }, isPending: approve.isPending, error: approve.error }}
-      reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
+      approve={{ start: ({ comment, acknowledgedWarnings }) => { approve.start({ version, reviewedHash: openedHash, comment, acknowledgedWarnings }); }, isPending: approve.isPending, error: approve.error }}
+      reject={{ start: (reason) => { reject.start({ version, reviewedHash: openedHash, reason }); }, isPending: reject.isPending, error: reject.error }} />
   );
   // The breadcrumb names what is on screen: "New draft" while editing, "Version N draft" for a draft.
   const crumb = editing ? t('crumb.newDraft') : version.status === 'DRAFT' ? t('crumb.versionDraft', { version: String(version.version) }) : undefined;

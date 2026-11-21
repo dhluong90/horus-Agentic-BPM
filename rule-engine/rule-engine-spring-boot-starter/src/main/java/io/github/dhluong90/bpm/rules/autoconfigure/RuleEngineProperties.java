@@ -26,6 +26,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param lifecycle version lifecycle commands
  * @param security how host authorities map to engine permissions
  * @param authoring how rule changes may be made on this host
+ * @param approval whether an approval or a rejection must name the content it reviewed
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
  * @param decisionLog what the decision log records and how far ahead its partitions are created
  * @param simulation limits of {@code :simulate}
@@ -42,6 +43,7 @@ public record RuleEngineProperties(
         @DefaultValue Lifecycle lifecycle,
         @DefaultValue Security security,
         @DefaultValue Authoring authoring,
+        @DefaultValue Approval approval,
         @DefaultValue Masking masking,
         @DefaultValue DecisionLog decisionLog,
         @DefaultValue Simulation simulation,
@@ -221,6 +223,28 @@ public record RuleEngineProperties(
      *     {@code 403 DRAFT_AUTHORING_DISABLED}. Import from a file is not affected
      */
     public record Authoring(Boolean cockpitDrafts) {
+    }
+
+    /**
+     * How an approval or a rejection is bound to the content the reviewer saw (RLE-084, #275).
+     *
+     * @param requireContentHash whether {@code :approve} and {@code :reject} must send {@code expectedCanonicalHash},
+     *     the {@code canonicalHash} of the version the reviewer saw; default true. A request without it is refused
+     *     with {@code 400 CONTENT_HASH_REQUIRED}. false is a dev-only relaxation (PD-139), refused at start-up unless
+     *     the dev profile is active on its own: a client may leave the hash out and approve whatever is stored; it
+     *     is logged at WARN at start-up and shown in {@code /api/bpm/meta}. A hash that no
+     *     longer matches is always refused with {@code 409 CONTENT_CHANGED}
+     */
+    public record Approval(@DefaultValue("true") Boolean requireContentHash) {
+
+        /**
+         * Returns the effective value.
+         *
+         * @return the setting, or the default when unset
+         */
+        boolean requireContentHashOrDefault() {
+            return requireContentHash == null ? EngineDefaults.REQUIRE_CONTENT_HASH : requireContentHash;
+        }
     }
 
     /**
@@ -415,6 +439,7 @@ public record RuleEngineProperties(
                         evaluation.stepBudget() == null ? EvaluationLimits.STEP_BUDGET : evaluation.stepBudget(),
                         evaluation.timeoutMs() == null ? EvaluationLimits.TIMEOUT_MILLIS : evaluation.timeoutMs()))
                 .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
+                .withRequireContentHash(approval.requireContentHashOrDefault())
                 .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
                 .withLifecycle(
                         lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),

@@ -113,7 +113,7 @@ class HistoryComparisonTest {
     @Test
     void RLE_075_two_versions_are_compared_over_a_period_with_totals_side_by_side() {
         // Given card-fee v1 published, v2 a draft equal except R3 at 30,000 VND, and 10,000 logged January decisions
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         versions(engines, "bank-a", CardFee.yaml(), cardFee("30000 VND"));
         januaryOfCardFee(10_000);
         long before = writes();
@@ -158,7 +158,7 @@ class HistoryComparisonTest {
     @Test
     void RLE_075_a_draft_is_compared_with_the_version_in_force_and_transitions_are_the_twenty_most_common() {
         // Given a version 2 that changes R1 and R2 as well, so more than one output change is counted
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         String changed = new String(cardFee("30000 VND"), StandardCharsets.UTF_8)
                 .replace("then: { fee: \"0 VND\" }", "then: { fee: \"5000 VND\" }")
                 .replace("then: { fee: \"10000 VND\" }", "then: { fee: \"12000 VND\" }");
@@ -214,7 +214,7 @@ class HistoryComparisonTest {
     @Test
     void RLE_076_decisions_that_cannot_be_reevaluated_are_counted_not_guessed() {
         // Given kyc-route v2 reads the masked nationalId and v1 does not; January holds 900 fingerprints and 300 nulls
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         kycRouteVersions(engines);
         januaryOfKycRoute();
         caller.become("bank-a", "thu", COMMITTEE);
@@ -243,7 +243,7 @@ class HistoryComparisonTest {
     @Test
     void RLE_076_an_input_a_version_reads_that_an_older_decision_does_not_hold_is_counted_as_missing() {
         // Given kyc-route v2 reads nationalId, and 200 logged decisions that never held it (the input was added later)
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         kycRouteVersions(engines);
         for (int i = 0; i < 200; i++) {
             stores.append(logged("bank-a", "kyc-route", JAN_01.plus(Duration.ofHours(i)), "{\"country\":\"VN\"}"));
@@ -264,7 +264,7 @@ class HistoryComparisonTest {
     @Test
     void RLE_077_comparison_is_bounded_permission_checked_and_tenant_scoped() {
         // Given card-fee v1 and v2 at bank-a, 10,000 January decisions, and a host that lowered the cap to 5,000
-        RuleEngines engines = engines(EngineSettings.defaults().withSimulationMaxHistoryDecisions(5_000));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxHistoryDecisions(5_000));
         versions(engines, "bank-a", CardFee.yaml(), cardFee("30000 VND"));
         januaryOfCardFee(10_000);
         long before = writes();
@@ -315,7 +315,7 @@ class HistoryComparisonTest {
     @Test
     void RLE_077_a_version_that_no_longer_matches_its_hash_is_refused_before_any_decision_is_read() {
         // Given v2's stored canonical document altered after it was imported
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         versions(engines, "bank-a", CardFee.yaml(), cardFee("30000 VND"));
         januaryOfCardFee(100);
         var stored = stores.versions.get(1);
@@ -342,7 +342,7 @@ class HistoryComparisonTest {
         long perRow = RegexBoundsTest.readsOf("[0-9]*K1", RegexBoundsTest.LONG_REFERENCE);
         RegexLimits limits = new RegexLimits(1000, 4096, RegexLimits.MAX_READS, RegexLimits.MAX_READS_PER_DECISION,
                 40 * 3 * perRow + perRow);
-        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(limits));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withRegexLimits(limits));
         versions(engines, "bank-a", RegexBoundsTest.screening(2).getBytes(StandardCharsets.UTF_8),
                 RegexBoundsTest.screening(1).getBytes(StandardCharsets.UTF_8));
         for (int i = 0; i < 100; i++) {
@@ -363,16 +363,16 @@ class HistoryComparisonTest {
 
     @Test
     void RLE_077_the_cap_is_a_setting_from_one_to_200000_that_may_be_raised_and_lowered() {
-        assertThat(EngineSettings.defaults().simulationMaxHistoryDecisions()).isEqualTo(50_000);
-        assertThat(EngineSettings.defaults().withSimulationMaxHistoryDecisions(200_000).simulationMaxHistoryDecisions())
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).simulationMaxHistoryDecisions()).isEqualTo(50_000);
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxHistoryDecisions(200_000).simulationMaxHistoryDecisions())
                 .isEqualTo(200_000);
-        assertThat(EngineSettings.defaults().withSimulationMaxHistoryDecisions(1).simulationMaxHistoryDecisions()).isEqualTo(1);
-        assertThatThrownBy(() -> EngineSettings.defaults().withSimulationMaxHistoryDecisions(0))
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxHistoryDecisions(1).simulationMaxHistoryDecisions()).isEqualTo(1);
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxHistoryDecisions(0))
                 .hasMessageContaining("horus.bpm.rules.simulation.max-history-decisions must be 1 to 200000, was 0");
-        assertThatThrownBy(() -> EngineSettings.defaults().withSimulationMaxHistoryDecisions(200_001))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxHistoryDecisions(200_001))
                 .hasMessageContaining("horus.bpm.rules.simulation.max-history-decisions must be 1 to 200000, was 200001");
         // The settings survive every other wither
-        assertThat(EngineSettings.defaults().withSimulationMaxHistoryDecisions(7).withMaxBatch(10).withDraftAuthoring(true)
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxHistoryDecisions(7).withMaxBatch(10).withDraftAuthoring(true)
                 .simulationMaxHistoryDecisions()).isEqualTo(7);
     }
 }

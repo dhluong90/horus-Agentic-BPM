@@ -83,10 +83,11 @@ class MaskedInputsHostIT {
             int port = port(host);
             bodies.add(send(port, TestTokens.bearer("alice"), "POST", "/rule-sets", MINOR_REVIEW, "application/yaml")
                     .body());
-            bodies.add(send(port, TestTokens.bearer("alice"), "POST",
-                    "/rule-sets/minor-review/versions/1:request-publish", null, null).body());
-            bodies.add(send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/minor-review/versions/1:approve", null,
-                    null).body());
+            Reply requested = send(port, TestTokens.bearer("alice"), "POST",
+                    "/rule-sets/minor-review/versions/1:request-publish", null, null);
+            bodies.add(requested.body());
+            bodies.add(send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/minor-review/versions/1:approve",
+                    reviewed(requested), "application/json").body());
             Reply evaluated = send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
                     "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 16}}", "application/json");
             bodies.add(evaluated.body());
@@ -207,9 +208,10 @@ class MaskedInputsHostIT {
         try (ConfigurableApplicationContext host = start(db, KEY_SETTING + "=" + K32_BASE64)) {
             int port = port(host);
             send(port, TestTokens.bearer("alice"), "POST", "/rule-sets", MINOR_REVIEW, "application/yaml");
-            send(port, TestTokens.bearer("alice"), "POST", "/rule-sets/minor-review/versions/1:request-publish", null,
-                    null);
-            send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/minor-review/versions/1:approve", null, null);
+            Reply requested = send(port, TestTokens.bearer("alice"), "POST",
+                    "/rule-sets/minor-review/versions/1:request-publish", null, null);
+            send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/minor-review/versions/1:approve",
+                    reviewed(requested), "application/json");
             before = send(port, TestTokens.bearer("teller"), "POST", "/decisions/minor-review:evaluate",
                     "{\"inputs\": {\"nationalId\": \"" + NATIONAL_ID + "\", \"age\": 16}}", "application/json")
                     .json().path("decisionId").asString();
@@ -302,6 +304,13 @@ class MaskedInputsHostIT {
         TestTokens.properties().forEach((name, value) -> args.add("--" + name + "=" + value));
         Arrays.stream(extraProperties).forEach(property -> args.add("--" + property));
         return new SpringApplicationBuilder(RuleEngineOnlyApplication.class).run(args.toArray(String[]::new));
+    }
+
+    /** The body of an approval that names the content it reviewed: the hash the request answered with (RLE-084). */
+    private static String reviewed(Reply requested) {
+        return "{\"expectedCanonicalHash\":\""
+                + tools.jackson.databind.json.JsonMapper.builder().build().readTree(requested.body()).path("canonicalHash")
+                        .asString() + "\"}";
     }
 
     private static int port(ConfigurableApplicationContext host) {

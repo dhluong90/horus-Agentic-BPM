@@ -41,7 +41,7 @@ class EventEnvelopeTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
     final VersionService versions = RuleEngines.create(
-            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()),
+            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores).versionService();
 
     void asLan() {

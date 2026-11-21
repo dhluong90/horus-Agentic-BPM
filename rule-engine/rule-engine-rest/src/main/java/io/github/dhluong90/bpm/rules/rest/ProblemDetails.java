@@ -50,7 +50,9 @@ public class ProblemDetails {
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("VERSION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
+            Map.entry("CONTENT_HASH_REQUIRED", HttpStatus.BAD_REQUEST),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
+            Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("RULE_SET_EXISTS", HttpStatus.CONFLICT),
@@ -132,6 +134,11 @@ public class ProblemDetails {
             // RLE-084: what is stored now, so a client can say "changed since you opened it" and offer the new content
             body.put("currentCanonicalHash", conflict.currentCanonicalHash());
             body.put("currentLockVersion", conflict.currentLockVersion());
+        }
+        if (e instanceof io.github.dhluong90.bpm.rules.api.ContentChangedException changed) {
+            // RLE-084: the reviewer sees the content now stored and decides again; a client never retries on its own
+            body.put("currentCanonicalHash", changed.currentCanonicalHash());
+            body.put("currentLockVersion", changed.currentLockVersion());
         }
         if (e instanceof io.github.dhluong90.bpm.rules.api.WarningsNotAcknowledgedException unacknowledged) {
             // RLE-053: the client shows these again and the approver resends with the codes; never retried on its own.

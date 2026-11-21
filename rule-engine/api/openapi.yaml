@@ -841,17 +841,22 @@ paths:
         and requested again under the same number, and a client that refreshes the version can send the
         new lock version with a decision made on older content. So the body can also name the content
         itself: `expectedCanonicalHash` is the `canonicalHash` of the version the approver reviewed
-        (`RLE-084`, #275). When it is present and differs from the `canonicalHash` of the version now
-        stored, the answer is `409 VERSION_CONFLICT`, even when `If-Match` carries the current lock
+        (`RLE-084`, #275). It is required: with `horus.bpm.rules.approval.require-content-hash` on, the
+        default (PD-139), a body without it is `400 CONTENT_HASH_REQUIRED`, answered before anything is
+        read. Only a host on the `dev` profile may set it to false, and then the field is optional. When
+        it differs from the `canonicalHash` of the version now stored, the answer is
+        `409 CONTENT_CHANGED`, not `VERSION_CONFLICT`, even when `If-Match` carries the current lock
         version. It is checked right after the lock version, before strict mode and the acknowledgement.
         Nothing is written: no status change, no history row, no event, and no idempotency record that a
         retry could replay. The problem carries `currentCanonicalHash` and `currentLockVersion`, so a
         client can say "changed since you opened it" and offer the current content. A value that is not
         64 lower-case hexadecimal characters is `400 INPUT_INVALID`. The field is part of the
-        idempotency request hash. A client that receives `409 VERSION_CONFLICT` here must show the
-        approver the current version (its content and diff) again and let them decide; it must never
-        retry automatically with the new `ETag` and hash, because that would approve content nobody
-        reviewed.
+        idempotency request hash. A client that receives `409 CONTENT_CHANGED` must show the approver
+        the current version (its content and diff) again and let them decide; it must never retry with
+        the new hash on its own, because that would approve content nobody reviewed. It must send the
+        hash of the content the approver saw when they opened the version, never one read again at
+        approval time. A client that refreshes and retries on `409 VERSION_CONFLICT` therefore cannot
+        re-bind a decision to new content.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -859,11 +864,12 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [expectedCanonicalHash]
               properties:
                 comment:
                   type: string
@@ -909,11 +915,11 @@ paths:
         A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
         characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
         `If-Match` is required, as for `:approve`: `428 PRECONDITION_REQUIRED` without it,
-        `409 VERSION_CONFLICT` when stale. The body can also carry `expectedCanonicalHash`, as for
-        `:approve` (`RLE-084`): a value that differs from the `canonicalHash` of the version now stored
-        is `409 VERSION_CONFLICT`, checked after the lock version, with nothing written. On
-        `409 VERSION_CONFLICT` a client shows the current version again and never retries automatically
-        with the new `ETag` and hash.
+        `409 VERSION_CONFLICT` when stale. The body must also carry `expectedCanonicalHash`, as for
+        `:approve` (`RLE-084`): without it the answer is `400 CONTENT_HASH_REQUIRED`, and a value that
+        differs from the `canonicalHash` of the version now stored is `409 CONTENT_CHANGED`, checked
+        after the lock version, with nothing written. On `409 CONTENT_CHANGED` a client shows the
+        current version again and never retries automatically with the new hash.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -2175,8 +2181,10 @@ components:
       type: string
       pattern: '^[0-9a-f]{64}$'
       description: >-
-        The `canonicalHash` of the version the caller reviewed. Optional. A decision on a version whose stored
-        content has another hash is `409 VERSION_CONFLICT` with nothing written (`RLE-084`)
+        The `canonicalHash` of the version the caller reviewed, as it was shown when the reviewer opened it. Required
+        on `:approve` and `:reject` unless the host turned `approval.require-content-hash` off (dev profile only,
+        PD-139): a missing value is `400 CONTENT_HASH_REQUIRED`. A decision on a version whose stored content has
+        another hash is `409 CONTENT_CHANGED` with nothing written (`RLE-084`)
     ComparisonRequest:
       type: object
       required: [base, candidate, from, to]
@@ -2981,7 +2989,7 @@ components:
           type: string
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
-            VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
+            VERSION_CONFLICT, CONTENT_CHANGED, CONTENT_HASH_REQUIRED, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
@@ -2991,11 +2999,11 @@ components:
         correlationId: { type: string }
         currentCanonicalHash:
           type: string
-          description: Present on `VERSION_CONFLICT` of a decision on a version, the `canonicalHash` of the version now stored (`RLE-084`)
+          description: Present on `VERSION_CONFLICT` or `CONTENT_CHANGED` of a decision on a version, the `canonicalHash` of the version now stored (`RLE-084`)
         currentLockVersion:
           type: integer
           format: int64
-          description: Present on `VERSION_CONFLICT` of a decision on a version, the `lockVersion` now stored (`RLE-084`)
+          description: Present on `VERSION_CONFLICT` or `CONTENT_CHANGED` of a decision on a version, the `lockVersion` now stored (`RLE-084`)
         found:
           type: integer
           format: int64

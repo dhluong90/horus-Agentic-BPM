@@ -260,6 +260,42 @@ describe('four eyes', () => {
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
   });
 
+  it('RLE_084_approve_and_reject_send_the_hash_of_the_content_the_reviewer_opened_without_reading_it_again', async () => {
+    const user = userEvent.setup();
+    const opened = (JSON.parse(createFakeEngine(demoSeed()).handle({ method: 'GET', path: '/api/bpm/rules/v1/rule-sets/card-fee/versions/2', headers: {}, body: '', user: 'minh', permissions: ['rules:read'] }).body) as { canonicalHash: string }).canonicalHash;
+    const bodies: Record<string, unknown>[] = [];
+    mockHost.events.on('request:start', ({ request }) => {
+      if (request.method === 'POST' && /:(approve|reject)$/.test(new URL(request.url).pathname)) void request.clone().text().then((text) => { bodies.push(JSON.parse(text) as Record<string, unknown>); });
+    });
+    open('#/rules/card-fee/2', 'rules-approver');
+    await screen.findByText('1 added, 1 changed, 1 removed, 3 unchanged');
+    const approve = screen.getByRole('button', { name: 'Approve and publish' });
+    await waitFor(() => { expect(approve).toBeEnabled(); });
+    const before = calls.length;
+    await user.click(approve);
+    expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
+    // The first call after the click is the approval itself: no read of the version stands between review and decision.
+    expect(calls[before]).toMatchObject({ method: 'POST', path: '/rule-sets/card-fee/versions/2:approve' });
+    await waitFor(() => { expect(bodies).toHaveLength(1); });
+    expect(bodies[0]).toMatchObject({ expectedCanonicalHash: opened });
+  });
+
+  it('RLE_084_a_stale_hash_is_answered_CONTENT_CHANGED_and_the_reviewer_is_told_to_review_again', async () => {
+    const user = userEvent.setup();
+    const engine = createFakeEngine(demoSeed());
+    // The content the reviewer opened is not what is stored when the decision arrives.
+    mockHost.use(http.post('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2\\:approve', ({ request }) => {
+      const answer = engine.handle({ method: 'POST', path: request.url, headers: { 'if-match': '"1"' }, body: JSON.stringify({ expectedCanonicalHash: 'e'.repeat(64) }), user: 'minh', permissions: ['rules:read', 'rules:approve'] });
+      return new HttpResponse(answer.body, { status: answer.status, headers: answer.headers });
+    }));
+    open('#/rules/card-fee/2', 'rules-approver');
+    await screen.findByText('1 added, 1 changed, 1 removed, 3 unchanged');
+    await waitFor(() => { expect(screen.getByRole('button', { name: 'Approve and publish' })).toBeEnabled(); });
+    await user.click(screen.getByRole('button', { name: 'Approve and publish' }));
+    expect(await screen.findByText('The rules changed after you opened this version. Review it again before you decide.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+  });
+
   it('RLE_025_approver_rejects_with_a_reason_and_the_history_shows_it', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2', 'rules-approver');

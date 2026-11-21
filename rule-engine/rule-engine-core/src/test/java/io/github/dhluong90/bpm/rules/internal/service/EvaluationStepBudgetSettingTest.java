@@ -48,7 +48,7 @@ class EvaluationStepBudgetSettingTest {
     }
 
     void publishWithDefaults() {
-        RuleEngines authoring = engines(EngineSettings.defaults());
+        RuleEngines authoring = engines(EngineSettings.defaults().withRequireContentHash(false));
         caller.become("bank-a", "alice");
         authoring.versionService().importRuleSet(ImportRequest.yaml(LOYALTY_SCORE.getBytes(StandardCharsets.UTF_8)));
         authoring.versionService().requestPublish("loyalty-score", 1, WriteOptions.none());
@@ -64,9 +64,9 @@ class EvaluationStepBudgetSettingTest {
         DecisionInput input = DecisionInput.of(Map.of("tier", "GOLD"));
 
         // When the host serves it with evaluation.step-budget 10, and with the default
-        DecisionResult tight = engines(EngineSettings.defaults().withEvaluationLimits(new EvaluationLimits(10, 10_000)))
+        DecisionResult tight = engines(EngineSettings.defaults().withRequireContentHash(false).withEvaluationLimits(new EvaluationLimits(10, 10_000)))
                 .ruleEngine().evaluate("loyalty-score", input);
-        DecisionResult roomy = engines(EngineSettings.defaults()).ruleEngine().evaluate("loyalty-score", input);
+        DecisionResult roomy = engines(EngineSettings.defaults().withRequireContentHash(false)).ruleEngine().evaluate("loyalty-score", input);
 
         // Then the tight host fails with EVALUATION_ERROR, reason EVALUATION_BUDGET_EXCEEDED on STEPS, logged with
         // that error_code, and the default host passes with 12 points
@@ -85,7 +85,7 @@ class EvaluationStepBudgetSettingTest {
     @Test
     void RLE_082_a_host_that_lowers_the_budget_also_refuses_such_a_table_at_import() {
         // Given a host with evaluation.step-budget 10
-        RuleEngines tight = engines(EngineSettings.defaults().withEvaluationLimits(new EvaluationLimits(10, 10_000)));
+        RuleEngines tight = engines(EngineSettings.defaults().withRequireContentHash(false).withEvaluationLimits(new EvaluationLimits(10, 10_000)));
         caller.become("bank-a", "alice");
 
         // When alice imports the same table

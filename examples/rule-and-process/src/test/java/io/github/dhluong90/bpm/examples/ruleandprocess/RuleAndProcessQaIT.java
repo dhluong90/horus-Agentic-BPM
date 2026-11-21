@@ -227,9 +227,14 @@ class RuleAndProcessQaIT {
         HttpResponse<String> draft = send("lan", "POST", rules + "/versions", v2, null, null, "application/yaml");
         assertThat(draft.statusCode()).as(draft.body()).isEqualTo(201);
         int version = JSON.readTree(draft.body()).get("version").intValue();
-        assertThat(send("lan", "POST", rules + "/versions/" + version + ":request-publish", "", null, null).statusCode())
-                .isEqualTo(200);
-        HttpResponse<String> approved = send("minh", "POST", rules + "/versions/" + version + ":approve", "", null, null);
+        HttpResponse<String> requested = send("lan", "POST", rules + "/versions/" + version + ":request-publish", "", null,
+                null);
+        assertThat(requested.statusCode()).isEqualTo(200);
+        // The approval names the content reviewed (RLE-084): the hash the request answered with
+        String reviewed = "{\"expectedCanonicalHash\":\"" + JSON.readTree(requested.body()).get("canonicalHash").asString()
+                + "\"}";
+        HttpResponse<String> approved = send("minh", "POST", rules + "/versions/" + version + ":approve", reviewed, null,
+                null, "application/json");
         assertThat(approved.statusCode()).as(approved.body()).isEqualTo(200);
 
         // Then a new instance is priced by v2, and the earlier one keeps v1 in its variables and in rle_decision

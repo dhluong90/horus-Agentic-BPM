@@ -31,7 +31,7 @@ class VersionServiceTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final VersionService versions = RuleEngines.create(
-            new EngineContext(caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), stores, stores, EngineSettings.defaults()),
+            new EngineContext(caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores).versionService();
 
     @Test

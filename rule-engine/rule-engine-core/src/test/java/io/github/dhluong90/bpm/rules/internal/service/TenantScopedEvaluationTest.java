@@ -30,7 +30,7 @@ class TenantScopedEvaluationTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults()),
+                    stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores);
     /**
      * Claimed as the starter's claimant would, through a grant that registers this test as the claimant and skips the

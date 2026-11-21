@@ -57,7 +57,7 @@ class EditorApiTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
     final RuleEngines engines = RuleEngines.create(
-            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()), stores, stores, stores);
+            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults().withRequireContentHash(false)), stores, stores, stores);
     final VersionService versions = engines.versionService();
 
     {
@@ -296,7 +296,7 @@ class EditorApiTest {
 
         // When alice withdraws it, replaces R2 in place and requests publication again (draft editing on)
         VersionService editing = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults().withDraftAuthoring(true)), stores, stores, stores).versionService();
+                EngineSettings.defaults().withRequireContentHash(false).withDraftAuthoring(true)), stores, stores, stores).versionService();
         caller.become("bank-a", "alice", AUTHOR);
         RuleSetVersion withdrawn = editing.withdraw("card-fee", 2, new WriteOptions("k-w", reviewed.lockVersion(), null));
         RuleSetVersion replaced = editing.replaceDraft("card-fee", 2, ImportRequest.yaml(cardFee("50000 VND", "card-fee")),
@@ -499,7 +499,7 @@ class EditorApiTest {
     @Test
     void RLE_039_the_maximum_page_size_is_a_setting() {
         RuleEngines small = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                new EngineSettings(1000, java.time.Duration.ofHours(24), 34, true, 1, 2000)), stores, stores, stores);
+                new EngineSettings(1000, java.time.Duration.ofHours(24), 34, true, 1, 2000).withRequireContentHash(false)), stores, stores, stores);
         small.cursorKeys().load();
         publishedCardFee();
         caller.become("bank-a", "lan", AUTHOR_APPROVER);
@@ -798,7 +798,7 @@ class EditorApiTest {
     void RLE_039_without_a_loaded_key_lists_are_schema_not_ready_naming_the_schema_state() {
         InMemoryStores fresh = new InMemoryStores();
         RuleEngines unloaded = RuleEngines.create(
-                new EngineContext(caller, caller, clock, fresh, fresh, EngineSettings.defaults()), fresh, fresh, fresh);
+                new EngineContext(caller, caller, clock, fresh, fresh, EngineSettings.defaults().withRequireContentHash(false)), fresh, fresh, fresh);
         unloaded.cursorKeys().notReady("schema at version 4, 1 migration(s) pending, migrate-on-start=false");
         caller.become("bank-a", "dan", READER);
 

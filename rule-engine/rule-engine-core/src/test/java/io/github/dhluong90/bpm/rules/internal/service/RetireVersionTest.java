@@ -45,8 +45,8 @@ class RetireVersionTest {
     final EditorApiTest.MovableClock clock = new EditorApiTest.MovableClock(Instant.parse("2027-01-10T00:00:00Z"));
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
-    final RuleEngines podA = engines(EngineSettings.defaults());
-    final RuleEngines podB = engines(EngineSettings.defaults());
+    final RuleEngines podA = engines(EngineSettings.defaults().withRequireContentHash(false));
+    final RuleEngines podB = engines(EngineSettings.defaults().withRequireContentHash(false));
     final VersionService versions = podA.versionService();
 
     RuleEngines engines(EngineSettings settings) {
@@ -394,7 +394,7 @@ class RetireVersionTest {
     @Test
     void RLE_026_a_host_that_refuses_never_retires_the_last_version_in_effect() {
         // Given horus.bpm.lifecycle.retire-last-version: refuse
-        RuleEngines refusing = engines(EngineSettings.defaults().withRetireLastVersion("refuse"));
+        RuleEngines refusing = engines(EngineSettings.defaults().withRequireContentHash(false).withRetireLastVersion("refuse"));
         RuleSetVersion v1 = publish("bank-a", "tet-fee-waiver", tetFeeWaiver("2027-01-20T00:00:00Z"),
                 Instant.parse("2027-01-15T00:00:00Z"));
         clock.set(Instant.parse("2027-02-17T08:00:00Z"));
@@ -406,16 +406,16 @@ class RetireVersionTest {
                 .isInstanceOf(LastVersionInEffectException.class).hasMessageContaining("refuse");
         assertThat(retiredEvents()).isEmpty();
         // and four-eyes, not built yet, stops start-up like an unknown value
-        assertThatThrownBy(() -> EngineSettings.defaults().withRetireLastVersion("four-eyes"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withRetireLastVersion("four-eyes"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("horus.bpm.lifecycle.retire-last-version").hasMessageContaining("four-eyes");
-        assertThatThrownBy(() -> EngineSettings.defaults().withRetireLastVersion("ask"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withRetireLastVersion("ask"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("confirm or refuse");
         assertThatThrownBy(() -> refusing.versionService().retire("tet-fee-waiver", 1,
                 new WriteOptions(null, v1.lockVersion(), "Tet promotion ended"), true))
                 .isInstanceOfSatisfying(LastVersionInEffectException.class,
                         e -> assertThat(e.setting()).isEqualTo("refuse"));
-        assertThat(EngineSettings.defaults().retireLastVersion()).isEqualTo("confirm");
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).retireLastVersion()).isEqualTo("confirm");
     }
 
     @Test
@@ -544,7 +544,7 @@ class RetireVersionTest {
 
     @Test
     void RLE_027_the_system_actor_is_configurable() {
-        RuleEngines pod = engines(EngineSettings.defaults().withLifecycle("system:pricing-sweeper", "single"));
+        RuleEngines pod = engines(EngineSettings.defaults().withRequireContentHash(false).withLifecycle("system:pricing-sweeper", "single"));
         publish("bank-a", "card-fee", cardFee("card-fee", "2026-11-01T00:00:00Z", "50000 VND"),
                 Instant.parse("2026-10-20T00:00:00Z"));
         publish("bank-a", "card-fee", cardFee("card-fee", "2026-12-01T00:00:00Z", "30000 VND"),
@@ -558,19 +558,19 @@ class RetireVersionTest {
 
     @Test
     void RLE_026_lifecycle_settings_are_validated_at_start_up() {
-        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system:supersession", "four-eyes"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withLifecycle("system:supersession", "four-eyes"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("horus.bpm.lifecycle.retire-approval").hasMessageContaining("M3");
-        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle("system:supersession", "dual"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withLifecycle("system:supersession", "dual"))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("must be single");
-        assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle(" ", "single"))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withLifecycle(" ", "single"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("horus.bpm.rules.lifecycle.system-actor");
-        assertThat(EngineSettings.defaults().retireApproval()).isEqualTo("single");
-        assertThat(EngineSettings.defaults().systemActor()).isEqualTo("system:supersession");
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).retireApproval()).isEqualTo("single");
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).systemActor()).isEqualTo("system:supersession");
         // the actor lives in the reserved system: namespace, which no caller id may use
         for (String actor : new String[] {"system", "sweeper", "system:", "SYSTEM:x"}) {
-            assertThatThrownBy(() -> EngineSettings.defaults().withLifecycle(actor, "single"))
+            assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withLifecycle(actor, "single"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("horus.bpm.rules.lifecycle.system-actor must start with system:");
         }

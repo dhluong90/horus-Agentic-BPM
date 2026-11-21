@@ -132,6 +132,7 @@ class RuleLifecycleIT {
     /** #241: a lifecycle command's X-Correlation-Id is the correlationId of the event it writes. */
     @Test
     void TR_OBS_06_x_correlation_id_of_a_command_is_carried_by_its_event() throws Exception {
+        String[] reviewed = {null};
         for (String[] step : new String[][] {
                 {"alice", "/rule-sets", "req-import-41"},
                 {"alice", "/rule-sets/card-fee-corr/versions/1:request-publish", "req-request-41"},
@@ -143,10 +144,15 @@ class RuleLifecycleIT {
                             .POST(HttpRequest.BodyPublishers.ofByteArray(renamed("card-fee-corr")))
                     : request.POST(HttpRequest.BodyPublishers.noBody());
             if (step[1].endsWith(":approve")) {
-                // The approver names the lock version reviewed: the version is at 1 after the request.
-                request = request.header("If-Match", "\"1\"");
+                // The approver names the lock version and the content reviewed: the version is at 1 after the request.
+                request = request.header("If-Match", "\"1\"").header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString("{\"expectedCanonicalHash\":\"" + reviewed[0] + "\"}"));
             }
-            assertThat(HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString()).statusCode()).isBetween(200, 201);
+            HttpResponse<String> answer = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(answer.statusCode()).isBetween(200, 201);
+            if (step[1].endsWith(":request-publish")) {
+                reviewed[0] = JSON.readTree(answer.body()).path("canonicalHash").asString();
+            }
         }
         assertThat(jdbc.sql("""
                 SELECT (payload->>'eventType') || ' ' || (payload->>'correlationId') || ' '
@@ -384,14 +390,16 @@ class RuleLifecycleIT {
         // Given minh holds only the host role PRICING_APPROVER, mapped in application.yml
         String minh = TestTokens.bearerWithRoles("minh", "bank-a", List.of("PRICING_APPROVER"));
         send("alice", "POST", "/rule-sets", renamed("card-fee-roles"), "application/yaml", null);
-        send("alice", "POST", "/rule-sets/card-fee-roles/versions/1:request-publish", null, null, null);
+        String reviewed = send("alice", "POST", "/rule-sets/card-fee-roles/versions/1:request-publish", null, null, null)
+                .json().path("canonicalHash").asString();
 
         // When
         HttpResponse<String> me = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:"
                 + environment.getProperty("local.server.port") + "/api/bpm/me")).header("Authorization", minh).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> approve = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee-roles/versions/1:approve"))
-                .header("Authorization", minh).header("If-Match", "\"1\"").POST(HttpRequest.BodyPublishers.noBody()).build(),
+                .header("Authorization", minh).header("If-Match", "\"1\"").header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"expectedCanonicalHash\":\"" + reviewed + "\"}")).build(),
                 HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> importAttempt = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets"))
                 .header("Authorization", minh).header("Content-Type", "application/yaml")
@@ -440,6 +448,13 @@ class RuleLifecycleIT {
 
     Reply send(String user, String method, String path, byte[] body, String contentType, String idempotencyKey)
             throws Exception {
+        if (ReviewedContent.decides(path)) {
+            byte[] bound = ReviewedContent.withHash(path, body, p -> send(user, "GET", p, null, null, null).body());
+            if (bound != body && contentType == null) {
+                contentType = "application/json";
+            }
+            body = bound;
+        }
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(path))
                 .header("Authorization", TestTokens.bearer(user))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));

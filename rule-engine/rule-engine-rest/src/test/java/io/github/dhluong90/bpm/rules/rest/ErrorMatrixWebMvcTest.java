@@ -162,6 +162,19 @@ class ErrorMatrixWebMvcTest {
                 new Case("VERSION_CONFLICT", 409,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish").header("If-Match", "\"1\""),
                         s -> s.thrown = new VersionConflictException("Expected lock version 1, found 2")),
+                new Case("CONTENT_HASH_REQUIRED", 400,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"1\""),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.ContentHashRequiredException();
+                        }),
+                new Case("CONTENT_CHANGED", 409,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"3\""),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.ContentChangedException(
+                                    "changed since it was reviewed", "a".repeat(64), 3L);
+                        }),
                 new Case("INVALID_STATE", 409,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"1\""),
                         s -> {

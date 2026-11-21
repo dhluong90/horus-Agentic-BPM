@@ -140,7 +140,7 @@ final class TestEngine {
             migrateRuleEngine(ds, transactionManager, b.clock.instant());
             this.rules = io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines.create(ds,
                     new io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions(transactionManager), ruleIdentity,
-                    ruleIdentity, b.clock, io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
+                    ruleIdentity, b.clock, io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults().withRequireContentHash(false));
         } else {
             this.rules = null;
         }

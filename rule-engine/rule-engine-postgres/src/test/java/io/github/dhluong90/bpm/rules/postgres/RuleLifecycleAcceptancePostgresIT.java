@@ -59,7 +59,7 @@ class RuleLifecycleAcceptancePostgresIT {
         host = new TransactionTemplate(transactionManager);
         jdbc = JdbcClient.create(db);
         engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
+                io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults().withRequireContentHash(false));
     }
 
     @Test

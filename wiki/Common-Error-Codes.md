@@ -22,6 +22,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 |---|---|---|---|
 | 400 | [INPUT_INVALID](#input_invalid) | both | M1 |
 | 400 | [QUERY_INVALID](#query_invalid) | both | M1 |
+| 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | rules | 0.2.0 |
 | 401 | [UNAUTHENTICATED](#unauthenticated) | both | M1 |
 | 403 | [PERMISSION_DENIED](#permission_denied) | both | M1 |
 | 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
@@ -37,6 +38,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
+| 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.2.0 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
@@ -91,8 +93,14 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ### IDEMPOTENCY_KEY_REUSE_MISMATCH
 `422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
 
+### CONTENT_HASH_REQUIRED
+`400`. `:approve` or `:reject` did not send `expectedCanonicalHash`, the `canonicalHash` of the content the reviewer saw, and `horus.bpm.rules.approval.require-content-hash` is on (the default, `RLE-084`, PD-139). Send the hash the reviewer's screen showed when they opened the version. Nothing is written. A host on the `dev` profile can turn the requirement off; any other profile refuses to start with it off.
+
+### CONTENT_CHANGED
+`409`. The `expectedCanonicalHash` on `:approve` or `:reject` is not the hash of the content now stored: the version was withdrawn, replaced and requested again under the same number, even though `If-Match` may carry the current lock version. Nothing is written, and the problem carries `currentCanonicalHash` and `currentLockVersion`. Show the reviewer the current content and diff and let them decide again; never retry on your own with the new hash, because that would approve content nobody reviewed (`RLE-084`).
+
 ### VERSION_CONFLICT
-`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. On `:approve` and `:reject` the body can also carry `expectedCanonicalHash`, the hash of the content the approver reviewed; a version that was withdrawn, replaced and requested again under the same number has another hash, so the decision is refused even with the new lock version, and the problem carries `currentCanonicalHash` and `currentLockVersion`. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
+`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A stale lock version on `:approve` or `:reject` is refused with this code too, and the problem names the version now stored in `currentCanonicalHash` and `currentLockVersion`. A changed content hash is a different code, [CONTENT_CHANGED](#content_changed), so a client that refreshes and retries on `VERSION_CONFLICT` cannot re-bind a decision to content nobody reviewed.
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.

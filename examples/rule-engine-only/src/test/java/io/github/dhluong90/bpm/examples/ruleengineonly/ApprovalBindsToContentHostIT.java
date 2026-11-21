@@ -102,11 +102,12 @@ class ApprovalBindsToContentHostIT {
                 body("{\"reason\":\"R2 waiver needs minutes\",\"expectedCanonicalHash\":\"" + reviewedHash + "\"}"),
                 "application/json", "rj-1", changed.etag());
 
-        // Then both are 409 VERSION_CONFLICT naming the current hash and lock version, and nothing is written
+        // Then both are 409 CONTENT_CHANGED (not VERSION_CONFLICT, which a client retries after a refresh) naming the
+        // current hash and lock version, and nothing is written
         for (Reply refused : List.of(approval, rejection)) {
             assertThat(refused.status()).as(refused.body()).isEqualTo(409);
             assertThat(refused.contentType()).startsWith("application/problem+json");
-            assertThat(refused.json().path("code").asString()).isEqualTo("VERSION_CONFLICT");
+            assertThat(refused.json().path("code").asString()).isEqualTo("CONTENT_CHANGED");
             assertThat(refused.json().path("currentCanonicalHash").asString()).isEqualTo(currentHash);
             assertThat("\"" + refused.json().path("currentLockVersion").asLong() + "\"").isEqualTo(changed.etag());
         }
@@ -132,16 +133,32 @@ class ApprovalBindsToContentHostIT {
     }
 
     @Test
-    void RLE_084_an_approval_that_names_no_hash_works_as_before() throws Exception {
+    void RLE_084_an_approval_or_rejection_that_names_no_hash_is_400_content_hash_required_and_writes_nothing()
+            throws Exception {
         // Given card-fee v1 pending at bank-bound-b
         String t = "bank-bound-b";
         send(t, "lan", "POST", "/rule-sets", cardFee("10000 VND"), "application/yaml", null, null);
         Reply pending = send(t, "lan", "POST", "/rule-sets/card-fee/versions/1:request-publish", null, null, "rp-1", null);
+        long before = rows(t);
 
-        // When bob approves with the lock version only
-        Reply approved = send(t, "bob", "POST", "/rule-sets/card-fee/versions/1:approve", null, null, "ap-1", pending.etag());
+        // When bob approves, or rejects, with the lock version only
+        Reply approval = send(t, "bob", "POST", "/rule-sets/card-fee/versions/1:approve", null, null, "ap-1", pending.etag());
+        Reply rejection = send(t, "bob", "POST", "/rule-sets/card-fee/versions/1:reject",
+                body("{\"reason\":\"R2 waiver needs minutes\"}"), "application/json", "rj-1", pending.etag());
 
-        // Then it publishes
+        // Then both are 400 CONTENT_HASH_REQUIRED naming the field, and nothing is written
+        for (Reply refused : List.of(approval, rejection)) {
+            assertThat(refused.status()).as(refused.body()).isEqualTo(400);
+            assertThat(refused.contentType()).startsWith("application/problem+json");
+            assertThat(refused.json().path("code").asString()).isEqualTo("CONTENT_HASH_REQUIRED");
+            assertThat(refused.json().path("detail").asString()).contains("expectedCanonicalHash");
+        }
+        assertThat(rows(t)).isEqualTo(before);
+
+        // And with the hash he read, the same approval publishes
+        String reviewed = pending.json().path("canonicalHash").asString();
+        Reply approved = send(t, "bob", "POST", "/rule-sets/card-fee/versions/1:approve",
+                body("{\"expectedCanonicalHash\":\"" + reviewed + "\"}"), "application/json", "ap-2", pending.etag());
         assertThat(approved.status()).as(approved.body()).isEqualTo(200);
         assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
     }

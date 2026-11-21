@@ -126,6 +126,12 @@ public final class EngineDefaults {
      */
     public static final int SIMULATION_MAX_HISTORY_DECISIONS = 50_000;
 
+    /**
+     * Default of {@code approval.require-content-hash}: an approval or a rejection must name the content it reviewed
+     * (RLE-084, #275). Required from the first release, because making a field required later breaks clients.
+     */
+    public static final boolean REQUIRE_CONTENT_HASH = true;
+
     /** Ceiling of {@code simulation.max-history-decisions}: it may be raised to this, never above. */
     public static final int SIMULATION_MAX_HISTORY_DECISIONS_CEILING = 200_000;
 

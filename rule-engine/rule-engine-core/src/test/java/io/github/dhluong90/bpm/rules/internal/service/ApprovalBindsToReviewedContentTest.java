@@ -3,6 +3,8 @@ package io.github.dhluong90.bpm.rules.internal.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.dhluong90.bpm.rules.api.ContentChangedException;
+import io.github.dhluong90.bpm.rules.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
@@ -86,11 +88,35 @@ class ApprovalBindsToReviewedContentTest {
     }
 
     @Test
-    void RLE_084_an_approval_without_a_hash_keeps_the_lock_version_check_only() {
-        // When bob approves without naming content, as clients did before this field
-        RuleSetVersion published = versions.approve("card-fee", 1, new WriteOptions("ap-1", reviewed.lockVersion(), null));
+    void RLE_084_a_decision_without_a_hash_is_refused_by_default_and_writes_nothing() {
+        int history = stores.history.size();
+        int events = stores.outbox.size();
+        int idempotency = stores.idempotency.size();
 
-        // Then it publishes
+        // When bob approves, or rejects, without naming the content he reviewed
+        assertThatThrownBy(() -> versions.approve("card-fee", 1, new WriteOptions("ap-1", reviewed.lockVersion(), null)))
+                // Then it is 400 CONTENT_HASH_REQUIRED and nothing is written
+                .isInstanceOfSatisfying(ContentHashRequiredException.class, e -> {
+                    assertThat(e.code()).isEqualTo("CONTENT_HASH_REQUIRED");
+                    assertThat(e.getMessage()).contains("expectedCanonicalHash");
+                });
+        assertThatThrownBy(() -> versions.reject("card-fee", 1,
+                new WriteOptions("rj-1", reviewed.lockVersion(), "R2 waiver needs minutes")))
+                .isInstanceOf(ContentHashRequiredException.class);
+        assertNothingWritten(reviewed, history, events, idempotency);
+    }
+
+    @Test
+    void RLE_084_a_decision_without_a_hash_is_allowed_when_the_requirement_is_off() {
+        // Given a host that turned approval.require-content-hash off (dev only, PD-139)
+        VersionService relaxed = RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(JAN_15, ZoneOffset.UTC),
+                stores, stores, EngineSettings.defaults().withDraftAuthoring(true).withRequireContentHash(false)),
+                stores, stores, stores).versionService();
+
+        // When bob approves without naming content
+        RuleSetVersion published = relaxed.approve("card-fee", 1, new WriteOptions("ap-1", reviewed.lockVersion(), null));
+
+        // Then it publishes on the lock version alone
         assertThat(published.status()).isEqualTo(VersionStatus.PUBLISHED);
     }
 
@@ -107,9 +133,10 @@ class ApprovalBindsToReviewedContentTest {
         // When bob approves with the new lock version and the hash of the content he read
         assertThatThrownBy(() -> versions.approve("card-fee", 1,
                 new WriteOptions("ap-2", changed.lockVersion(), "ok").expectingContent(reviewed.canonicalHash())))
-                // Then it is 409 VERSION_CONFLICT naming the current hash and lock version, and nothing is written
-                .isInstanceOfSatisfying(VersionConflictException.class, e -> {
-                    assertThat(e.code()).isEqualTo("VERSION_CONFLICT");
+                // Then it is 409 CONTENT_CHANGED, never VERSION_CONFLICT (a client would refresh and retry that),
+                // naming the current hash and lock version, and nothing is written
+                .isInstanceOfSatisfying(ContentChangedException.class, e -> {
+                    assertThat(e.code()).isEqualTo("CONTENT_CHANGED");
                     assertThat(e.currentCanonicalHash()).isEqualTo(changed.canonicalHash());
                     assertThat(e.currentLockVersion()).isEqualTo(changed.lockVersion());
                     assertThat(e.getMessage()).contains("changed since it was reviewed");
@@ -135,7 +162,7 @@ class ApprovalBindsToReviewedContentTest {
                 new WriteOptions("rj-1", changed.lockVersion(), "R2 waiver needs minutes")
                         .expectingContent(reviewed.canonicalHash())))
                 // Then the same refusal, with nothing written
-                .isInstanceOfSatisfying(VersionConflictException.class,
+                .isInstanceOfSatisfying(ContentChangedException.class,
                         e -> assertThat(e.currentCanonicalHash()).isEqualTo(changed.canonicalHash()));
         assertNothingWritten(changed, history, events, idempotency);
 
@@ -182,7 +209,7 @@ class ApprovalBindsToReviewedContentTest {
         RuleSetVersion changed = changedAfterReview();
         assertThatThrownBy(() -> versions.approve("card-fee", 1,
                 new WriteOptions("ap-6", changed.lockVersion(), null).expectingContent(reviewed.canonicalHash())))
-                .isInstanceOf(VersionConflictException.class);
+                .isInstanceOf(ContentChangedException.class);
 
         // When bob retries the same key with the hash of the current content, the refusal was never recorded
         RuleSetVersion published = versions.approve("card-fee", 1,

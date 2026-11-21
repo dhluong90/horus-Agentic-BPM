@@ -85,7 +85,7 @@ class RegexBoundsTest {
 
     @Test
     void RLE_007_regex_timeout_aborts_adversarial_input() {
-        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(50, 4096));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withRegexLimits(50, 4096));
         publish(engines, REFERENCE_CHECK, "reference-check");
 
         long started = System.nanoTime();
@@ -247,7 +247,7 @@ class RegexBoundsTest {
 
     @Test
     void RLE_007_a_decision_past_its_read_budget_is_logged_with_regex_timeout_and_no_outputs() {
-        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withRegexLimits(
                 new RegexLimits(1000, 4096, RegexLimits.MAX_READS, RegexLimits.MAX_READS_PER_DECISION)));
         publish(engines, screening(200), "remittance-screening");
 
@@ -270,7 +270,7 @@ class RegexBoundsTest {
     @Test
     void TR_SEC_02_text_longer_than_the_limit_fails_without_running_the_match() {
         // A budget of one read: had the match run, it would have stopped with REGEX_TIMEOUT instead.
-        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(new RegexLimits(50, 16, 1)));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withRegexLimits(new RegexLimits(50, 16, 1)));
         publish(engines, REFERENCE_CHECK, "reference-check");
 
         DecisionResult result = engines.ruleEngine().evaluate("reference-check",
@@ -353,7 +353,7 @@ class RegexBoundsTest {
 
     @Test
     void TR_SEC_02_back_references_and_look_around_are_refused_at_import() {
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         caller.become("bank-a", "alice");
         for (String[] bad : new String[][] {
             // v1 strings escape a backslash as \\, and YAML double quotes escape it again.
@@ -383,7 +383,7 @@ class RegexBoundsTest {
 
     @Test
     void TR_SEC_02_matches_needs_text_and_a_character_class_is_not_look_around() {
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         caller.become("bank-a", "alice");
         String amountCheck = """
                 schemaVersion: 1
@@ -417,9 +417,9 @@ class RegexBoundsTest {
         assertThatThrownBy(() -> new RegexLimits(50, 10, 1000, 5_000_001))
                 .hasMessageContaining("regex-max-reads-per-decision").hasMessageContaining("never raised");
         assertThat(RegexLimits.defaults().maxReadsPerDecision()).isEqualTo(5_000_000);
-        assertThatThrownBy(() -> EngineSettings.defaults().withSizeLimits(EngineDefaults.OUTPUT_MAX_BYTES, 100,
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withSizeLimits(EngineDefaults.OUTPUT_MAX_BYTES, 100,
                 EngineDefaults.RULES_MAX).withRegexLimits(50, 101))
                 .hasMessageContaining("regex-max-input-length").hasMessageContaining("max-string-length");
-        assertThat(EngineSettings.defaults().regexLimits()).isEqualTo(new RegexLimits(50, 4096));
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).regexLimits()).isEqualTo(new RegexLimits(50, 4096));
     }
 }

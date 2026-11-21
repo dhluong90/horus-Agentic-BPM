@@ -26,6 +26,10 @@ New in the same artifact: `expr.spi.ExpressionLanguage`, `CompiledExpression`, `
 
 **A host with the Process Engine alone.** The process starter declares `rule-engine-core` as optional. Without it, gateway conditions still run, and activating a definition with a business rule task is refused with `422 VALIDATION_FAILED` and the problem `BPMN_NOT_EXECUTABLE`, naming the step (was `RULE_ENGINE_MISSING`).
 
+### Approval binds to the content reviewed
+
+`:approve` and `:reject` now require `expectedCanonicalHash`, the `canonicalHash` of the content the reviewer saw (#275, `RLE-084`, PD-139). A request without it is `400 CONTENT_HASH_REQUIRED`. A hash that no longer matches is `409 CONTENT_CHANGED` (it was `VERSION_CONFLICT` in a pre-release build), carrying `currentCanonicalHash` and `currentLockVersion`, so a client that refreshes and retries on `VERSION_CONFLICT` cannot re-bind a decision to content nobody reviewed. New setting `horus.bpm.rules.approval.require-content-hash` (default `true`); `false` is accepted on the `dev` profile only. The cockpit sends the hash of the content the reviewer opened. **Upgrade note:** a client that approves or rejects through the API must send the hash.
+
 ### Decision steps of a process
 
 A business rule task is evaluated as the engine identity `system:process-engine`, on behalf of the user who triggered the step (none after a timer), in the instance's tenant, at the engine clock of the step, with an idempotency key derived from the instance, the step and the attempt. The task worker needs no `rules:evaluate`. A retried step replays the logged decision and writes no second row. The decision log shows the user as `onBehalfOf` (Java `DecisionLogEntry` and `LoggedDecision`, and the REST decision log). Migration `V17__rle_decision_on_behalf_of` adds the nullable column `rle_decision.on_behalf_of`.

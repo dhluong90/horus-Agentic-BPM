@@ -72,7 +72,7 @@ class RegexBoundsPostgresIT {
         new DecisionLogPartitions(db, transactions).ensureCurrentAndNextMonth(NOW);
         host = new TransactionTemplate(transactionManager);
         engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                EngineSettings.defaults());
+                EngineSettings.defaults().withRequireContentHash(false));
     }
 
     @Test

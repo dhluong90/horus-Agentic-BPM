@@ -283,6 +283,13 @@ class RetireVersionIT {
 
     Reply send(String tenant, String user, String method, String path, byte[] body, String contentType,
             String idempotencyKey, String ifMatch) throws Exception {
+        if (ReviewedContent.decides(path)) {
+            byte[] bound = ReviewedContent.withHash(path, body, p -> send(tenant, user, "GET", p, null, null, null, null).body());
+            if (bound != body && contentType == null) {
+                contentType = "application/json";
+            }
+            body = bound;
+        }
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearerFor(user, tenant, PERMISSIONS.get(user)))

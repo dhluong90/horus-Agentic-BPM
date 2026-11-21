@@ -74,7 +74,7 @@ class DecisionLogSearchPostgresIT {
                 Duration.ofDays(7));
         host = new TransactionTemplate(manager);
         engines = PostgresRuleEngines.create(db, transactions, auditor, auditor,
-                Clock.fixed(Instant.parse("2027-02-10T00:00:00Z"), ZoneOffset.UTC), EngineSettings.defaults());
+                Clock.fixed(Instant.parse("2027-02-10T00:00:00Z"), ZoneOffset.UTC), EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();
         log = new JdbcDecisionLog(plain);
     }
