@@ -5,6 +5,7 @@ import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Period;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -19,7 +20,11 @@ import org.springframework.beans.factory.DisposableBean;
  * TR-OPS-04). {@link #runOnce()} creates every missing month up to {@code now + decision-log.partitions-ahead};
  * {@link RuleEngineSchemaInitializer} calls it at start-up and then {@link #start()}s a daemon thread that repeats
  * it daily. Replicas serialise on the advisory lock of {@link DecisionLogPartitions}; a run that waits longer than
- * the 5 s lock timeout logs a warning and the next run retries, so no run fails the host (TR-OPS-05). A host may
+ * the 5 s lock timeout logs a warning and the next run retries, so no run fails the host (TR-OPS-05).
+ *
+ * <p>When the host set {@code decision-log.retention}, the same run then drops the monthly partitions that lie wholly
+ * before the clock minus the retention ({@link DecisionLogPartitions#dropExpired}), records each drop in
+ * {@code rle_decision_log_drop} and logs it at WARN with its counts. Without a retention nothing is dropped. A host may
  * replace this bean.
  */
 public final class RuleEnginePartitionMaintenance implements DisposableBean, RuleEngineBackgroundJob {
@@ -30,6 +35,7 @@ public final class RuleEnginePartitionMaintenance implements DisposableBean, Rul
     private final Clock clock;
     private final Duration ahead;
     private final Duration interval;
+    private final Period retention;
     private ScheduledExecutorService scheduler;
     private volatile Instant lastSuccess;
     private volatile boolean stopped;
@@ -39,24 +45,43 @@ public final class RuleEnginePartitionMaintenance implements DisposableBean, Rul
     }
 
     RuleEnginePartitionMaintenance(DecisionLogPartitions partitions, Clock clock, Duration ahead, Duration interval) {
+        this(partitions, clock, ahead, interval, null);
+    }
+
+    /**
+     * Creates the job.
+     *
+     * @param retention {@code decision-log.retention}, or null when the host set none: then nothing is dropped
+     */
+    RuleEnginePartitionMaintenance(DecisionLogPartitions partitions, Clock clock, Duration ahead, Duration interval,
+            Period retention) {
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.ahead = Objects.requireNonNull(ahead, "ahead must not be null");
         this.interval = Objects.requireNonNull(interval, "interval must not be null");
+        this.retention = retention;
     }
 
     /**
-     * Creates the missing months now, on the calling thread.
+     * Creates the missing months now, on the calling thread, then drops the expired ones when a retention is set.
      *
      * @return the partitions created
      * @throws RuntimeException when the database refuses; start-up reports it, the scheduled run logs it
      */
     List<String> runOnce() {
         List<String> created = partitions.ensureAhead(clock.instant(), ahead);
-        lastSuccess = clock.instant();
         if (!created.isEmpty()) {
             LOG.info("Rule Engine created decision log partitions " + created);
         }
+        if (retention != null) {
+            for (DecisionLogPartitions.Dropped dropped : partitions.dropExpired(clock.instant(), retention)) {
+                LOG.warn("Rule Engine dropped decision log partition " + dropped.partition() + " [" + dropped.from()
+                        + ", " + dropped.to() + ") under horus.bpm.rules.decision-log.retention=" + retention + ": "
+                        + dropped.total() + " decisions " + dropped.decisionsByTenant()
+                        + ", recorded in rle_decision_log_drop");
+            }
+        }
+        lastSuccess = clock.instant();
         return created;
     }
 
@@ -96,7 +121,8 @@ public final class RuleEnginePartitionMaintenance implements DisposableBean, Rul
             }
         } catch (Throwable e) {
             LOG.warn("Rule Engine could not create decision log partitions up to " + ahead + " ahead of "
-                    + clock.instant() + "; the next run in " + interval + " retries", e);
+                    + clock.instant() + (retention == null ? "" : " or drop those older than " + retention)
+                    + "; the next run in " + interval + " retries", e);
         }
     }
 

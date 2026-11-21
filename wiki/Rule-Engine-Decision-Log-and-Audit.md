@@ -87,6 +87,28 @@ Every search writes one audit entry, the event `rules.decision-log.masked-input-
 
 Two banks on one host always store different tokens for the same id: a tenant with its own key uses it as it is, and every other tenant uses its own subkey derived from the host key (see [Masking keys](Rule-Engine-Configuration#masking-keys)), never the host key itself. Neither bank finds the other's decisions. To mask every input that declares nothing, set `decision-log.mask-default: true` for the host or `masking.tenants.<tenant>.mask-default: true` for one tenant; `mask: false` keeps an input in plain text.
 
+## Find decisions by case reference or by a plain input
+
+Complaints arrive with a case number, not a decision id. Send your own reference as `X-Correlation-Id` (or the `correlationId` of a batch item) when you evaluate, and an auditor holding `rules:log:read` finds every decision of that case across all rule sets of the tenant:
+
+```bash
+curl -s "$HOST/api/bpm/rules/v1/decisions?correlationId=LA-2027-000123&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z" \
+  -H "Authorization: Bearer $AUDITOR_TOKEN"
+```
+
+Add `ruleSet=card-fee` to narrow it. The period is at most 31 days, newest first, 200 a page. A reference is 1 to 128 characters of `A-Z a-z 0-9 . _ : -`. A call without `X-Correlation-Id` gets a generated id, so a host that wants case search must send its reference. A correlation id may appear in a URL and in access logs: never use a national id as one.
+
+To find decisions by the exact value of an input that is stored in plain text, post the value, which never sits in a URL:
+
+```bash
+curl -s -X POST "$HOST/api/bpm/rules/v1/decisions:find-by-input" \
+  -H "Authorization: Bearer $AUDITOR_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"ruleSet": "loan-pricing", "input": "productCode", "value": "HOME-30Y",
+       "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z"}'
+```
+
+Values compare by canonical form: money by currency and minor units, a number by exact value (`30000` equals `30000.00`), a string by code point, with no case folding or trimming. An input that is masked, by `mask: true` or by `decision-log.mask-default`, is refused with `400 QUERY_INVALID` and a pointer to the masked search above, never answered with no rows, so this search cannot be used to test a masked value. Neither search writes to the decision log.
+
 ## Choose transactional or async logging
 
 ![Decision log modes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/decision-log-modes.svg)
@@ -100,7 +122,30 @@ Set `horus.bpm.rules.decision-log.mode`. To turn logging off entirely, set `deci
 
 ## Keep the log within retention
 
-Retention is the host's decision; no product default deletes audit data. The table `rle_decision` is partitioned by calendar month in every install (ADR-0010). From M3 you set `horus.bpm.rules.decision-log.retention` in whole months, at least `P12M`, and the engine's scheduler drops whole monthly partitions older than that period. Outside the `dev` profile the engine then refuses to start until the period is set. Before M3 the engine deletes nothing. Details: [[Rule Engine Configuration]].
+Retention is the host's decision; no product default deletes audit data. The table `rle_decision` is partitioned by calendar month in every install (ADR-0010). Set `horus.bpm.rules.decision-log.retention` in whole months, at least `P12M`:
+
+```yaml
+horus:
+  bpm:
+    rules:
+      decision-log:
+        retention: P120M   # keep decisions for 10 years
+```
+
+- **Off by default.** Left out, every decision is kept, nothing is dropped and the host starts as before, but a WARN at every start-up says the setting is unset, that everything is kept, roughly how the log grows per row (1 to 3 KB a decision) and names the setting. Set `keep-forever` to say it on purpose; that logs INFO. Only a period of at least `P12M` turns drops on.
+- **Upgrade note.** A host that upgrades without setting retention starts and keeps every decision, as before, and now sees the WARN. Before 1.0 nothing refuses start-up. At 1.0 the setting becomes required (PD-050, PD-130), so choose `keep-forever` or a period before then.
+- **Whole months only.** The daily partition job drops each monthly partition that ends at or before the host clock minus the retention. With `P12M` on 3 February 2028, `rle_decision_2027_01` (up to 1 February 2027) is dropped and `rle_decision_2027_02` stays. No row is ever deleted.
+- **Every drop is recorded.** In the transaction that drops a month, the engine writes to `rle_decision_log_drop` one row per tenant with its decision count, and one row with tenant `*` for the total. The rows also hold the partition, its range, the retention and the cutoff, and `dropped_at`. The table is append-only: the database refuses `UPDATE`, `DELETE` and `TRUNCATE` on it. Each drop is also logged at WARN.
+- **A floor of your own.** `decision-log.retention-floor` (default `P12M`) is the shortest retention accepted. Raise it to your policy, for example `P84M`, so that a shorter value set by mistake stops start-up.
+
+To see what was dropped:
+
+```sql
+SELECT partition_name, tenant_id, decision_count, retention, cutoff, dropped_at
+FROM rle_decision_log_drop ORDER BY dropped_at, partition_name, tenant_id;
+```
+
+Details: [[Rule Engine Configuration]].
 
 ## React to events
 

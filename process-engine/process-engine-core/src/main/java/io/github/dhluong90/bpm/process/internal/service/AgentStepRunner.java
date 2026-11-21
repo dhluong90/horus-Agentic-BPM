@@ -32,15 +32,36 @@ public final class AgentStepRunner implements AsyncStepRunner {
         if (agent == null) {
             return new AdapterResult.Failed("AGENT_NOT_REGISTERED", "No AgentAdapter named " + target, false);
         }
-        return agent.execute(invocation(call));
+        return agent.execute(invocation(call, Map.of()));
+    }
+
+    /** Passes the step's output schema, from the job's guard spec, on to the adapter without its mask annotations. */
+    @Override
+    public AdapterResult run(String target, AdapterCall call, Map<String, Object> payload) {
+        AgentAdapter agent = agents.get(target);
+        if (agent == null) {
+            return new AdapterResult.Failed("AGENT_NOT_REGISTERED", "No AgentAdapter named " + target, false);
+        }
+        return agent.execute(invocation(call, outputSchema(payload)));
     }
 
     /**
      * @param call the executor's call for this attempt
-     * @return the agent's view of it
+     * @param outputSchema the step's output schema, or empty
+     * @return the agent's view of it; the invocation removes the {@code mask} annotations
      */
-    static AgentInvocation invocation(AdapterCall call) {
+    static AgentInvocation invocation(AdapterCall call, Map<String, Object> outputSchema) {
         return new AgentInvocation(call.tenantId(), call.instanceId(), call.nodeId(), call.businessKey(), call.jobId(),
-                call.attemptId(), call.completionToken(), call.attempt(), call.deadline(), call.inputs());
+                call.attemptId(), call.completionToken(), call.attempt(), call.deadline(), call.inputs(),
+                outputSchema);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> outputSchema(Map<String, Object> payload) {
+        if (payload != null && payload.get("guard") instanceof Map<?, ?> guard
+                && guard.get("outputSchema") instanceof Map<?, ?> schema) {
+            return (Map<String, Object>) schema;
+        }
+        return Map.of();
     }
 }

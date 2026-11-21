@@ -159,7 +159,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-135](#pd-135-the-1.0-api-freeze-date-is-5-february-2027) | The 1.0 API freeze date is 5 February 2027 | Decided (maintainer, 2026-11-21) |
 | [PD-136](#pd-136-isc-licence-is-allowed-for-the-diagram-library-dependencies) | ISC licence is allowed for the diagram library dependencies | Decided (maintainer, 2026-11-21) |
 | [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
-| [PD-138](#pd-138-approvals-require-the-reviewed-content-hash-for-rules-and-process-definitions) | Approvals require the reviewed content hash, for rules and process definitions | Decided (product manager, delegated, PD-073) |
+| [PD-138](#pd-138-a-built-in-shadow-mode-for-agent-steps-is-planned-for-11-the-documented-pattern-covers-10) | A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0 | Decided (product manager, delegated, PD-073); revisits PD-015 |
+| [PD-139](#pd-139-approvals-require-the-reviewed-content-hash-for-rules-and-process-definitions) | Approvals require the reviewed content hash, for rules and process definitions | Decided (product manager, delegated, PD-073) |
+||||||| 0e068be
 
 ---
 
@@ -3841,7 +3843,35 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Consequences.** None beyond the release itself.
 
-### PD-138 Approvals require the reviewed content hash, for rules and process definitions
+### PD-138 A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Does 1.0 need a built-in shadow mode, where the agent runs beside the person without blocking the case, agreement is recorded and sampling is available? Or is the documented pattern (an allow-all guardrail version followed by a human task) enough for 1.0? |
+| Raised by | Documentation of issue #214 (PR #399) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 2; revisits option 2 of PD-015 |
+
+**Options considered**
+
+1. Build shadow mode for 1.0. Consequence: the agent step stops blocking the case, the engine compares the agent's answer with the person's, and sampling is built in. About 70 issues remain before the API freeze on 5 Feb 2027; this adds an engine change, a history change and cockpit views to the most loaded stretch.
+2. Document the pattern for 1.0 and build shadow mode in 1.1 (chosen). Consequence: banks that want shadow evaluation before an agent acts have a working route today, with four stated gaps, and the engine keeps its freeze date.
+3. Neither: leave shadow evaluation to the host. Consequence: no guide and no plan; the first bank that asks meets the gaps alone.
+
+**Recommendation and decision.** Option 2. Three reasons.
+- Safety before action is already covered in 1.0 in two ways: the documented pattern, and offline replay of recorded traces against a changed guardrail or output schema (PD-128). A bank can measure an agent without letting it act.
+- The four gaps cost the bank effort, not safety. The agent step still blocks the case, comparison and sampling are done by the host from history, and the reviewer-override flag in replay covers only corrected refusals. None of them lets an agent act without a rule a person can audit.
+- A built-in mode adds a new step behaviour and new history fields. Both can be added after the freeze without breaking the contract if designed as optional and off by default, so waiting does not close the door.
+
+**Consequences.**
+- 1.0: the guide for issue #214 ships as written and states the four gaps plainly. No engine change.
+- 1.1: a built-in shadow mode is planned, with these outcomes: the case does not wait for the agent step; the agent's answer and the person's decision are recorded side by side with an agreement result; a configurable share of cases is sampled; replay reports agreement. Everything is additive and off by default, so existing models and the frozen contract do not change.
+- The 1.1 design must be compatible with the guardrail rules, masking and four-eyes approval of guardrail versions already decided (PD-015, PD-128). Shadow output never reaches a case.
+- Pull forward to 1.0 if two named pilot banks ask for it before the 23 Apr 2027 checkpoint and the freeze review confirms the change is additive. Otherwise it stays in 1.1.
+- Configurable: yes, in 1.1 (per step, off by default).
+
+**Follow-ups.** Documentation: #214 states the gaps and links this decision. Product manager: add shadow mode to the 1.1 roadmap and the feature map, with the reference to PD-015. Architect: confirm at the freeze review that the later additions are additive.
+### PD-139 Approvals require the reviewed content hash, for rules and process definitions
 
 | Field | Value |
 |---|---|
@@ -3871,3 +3901,4 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 - Configurable: only the `dev` relaxation.
 
 **Follow-ups.** Product manager: the issue "Process Engine: Approve Only the Reviewed Definition". Architect: the SPEC and OpenAPI change for both. Cockpit: send the hash on every approval (#246 follow-up). If the process side misses 1.0, definition approval does not ship without the hash.
+||||||| 0e068be

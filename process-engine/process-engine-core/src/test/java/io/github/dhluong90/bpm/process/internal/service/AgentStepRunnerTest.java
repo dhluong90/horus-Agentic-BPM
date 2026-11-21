@@ -60,4 +60,55 @@ class AgentStepRunnerTest {
         assertThat(result).isEqualTo(new AdapterResult.Failed("AGENT_NOT_REGISTERED",
                 "No AgentAdapter named documents.assess", false));
     }
+
+    @Test
+    void the_adapter_receives_the_output_schema_without_its_mask_annotations_and_never_the_guardrail() {
+        List<AgentInvocation> seen = new ArrayList<>();
+        AgentAdapter assessor = new AgentAdapter() {
+            @Override
+            public String name() {
+                return "documents.assess";
+            }
+
+            @Override
+            public AdapterResult execute(AgentInvocation invocation) {
+                seen.add(invocation);
+                return AdapterResult.completed(Map.of("riskScore", 20, "recommendation", "APPROVE"),
+                        Map.of(AdapterResult.Completed.MODEL, "scoring-2026-10",
+                                AdapterResult.Completed.INPUT_TOKENS, "1200"));
+            }
+        };
+        Map<String, Object> schema = Map.of("type", "object", "required", List.of("riskScore"),
+                "properties", Map.of("riskScore", Map.of("type", "integer"),
+                        "summary", Map.of("type", "string", "mask", true),
+                        "notes", Map.of("type", "array", "items", Map.of("type", "string", "mask", true))));
+        Map<String, Object> payload = Map.of("target", "documents.assess", "guard", Map.of("outputSchema", schema,
+                "decision", "agent-output-guardrails", "onViolation", "route-to-human", "fourEyes", true));
+
+        AdapterResult result = new AgentStepRunner(Map.of("documents.assess", assessor))
+                .run("documents.assess", call(1), payload);
+
+        AgentInvocation invocation = seen.get(0);
+        assertThat(invocation.outputSchema()).containsKeys("type", "required", "properties")
+                .doesNotContainKeys("decision", "onViolation", "fourEyes");
+        assertThat(invocation.outputSchema().toString()).doesNotContain("mask")
+                .doesNotContain("agent-output-guardrails").contains("summary");
+        assertThat(result).isInstanceOfSatisfying(AdapterResult.Completed.class, c -> assertThat(c.labels())
+                .containsEntry("model", "scoring-2026-10").containsEntry("usage.inputTokens", "1200"));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> invocation.outputSchema().put("x", 1))
+                .isInstanceOf(UnsupportedOperationException.class);
+        // Without a payload, as on the two-argument path, the adapter gets an empty schema
+        new AgentStepRunner(Map.of("documents.assess", assessor)).run("documents.assess", call(2));
+        assertThat(seen.get(1).outputSchema()).isEmpty();
+    }
+
+    @Test
+    void a_completed_result_without_labels_has_none_and_equals_the_one_argument_form() {
+        Map<String, Object> output = Map.of("riskScore", 20);
+
+        assertThat(new AdapterResult.Completed(output).labels()).isEmpty();
+        assertThat(AdapterResult.completed(output)).isEqualTo(new AdapterResult.Completed(output, null));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> AdapterResult.completed(output,
+                java.util.Collections.singletonMap("model", null))).isInstanceOf(NullPointerException.class);
+    }
 }

@@ -84,6 +84,28 @@ public interface ProcessStore {
             Instant startedAt, Instant endedAt) {
     }
 
+    /**
+     * Incident row ({@code pre_incident}, #58): a step whose job failed for good.
+     *
+     * @param tenantId tenant
+     * @param id ULID
+     * @param instanceId instance
+     * @param definitionId definition version
+     * @param tokenId the token left on the step, or null
+     * @param nodeId the step
+     * @param errorCode the error code
+     * @param causeSummary built from codes only, never from an adapter's detail
+     * @param retryCount attempts after the first
+     * @param status {@code OPEN} or {@code RESOLVED}
+     * @param lockVersion optimistic lock version
+     * @param createdAt when it was opened
+     * @param resolvedAt when it was resolved, or null
+     */
+    record IncidentRow(String tenantId, String id, String instanceId, String definitionId, String tokenId,
+            String nodeId, String errorCode, String causeSummary, int retryCount, String status, long lockVersion,
+            Instant createdAt, Instant resolvedAt) {
+    }
+
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
             String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
@@ -191,6 +213,16 @@ public interface ProcessStore {
     List<TaskRow> tasks(String tenant, String instanceId);
 
     void appendHistory(String tenant, String instanceId, String definitionId, List<HistoryEntry> entries);
+
+    /** @param incident a new {@code OPEN} incident (#58) */
+    void insertIncident(IncidentRow incident);
+
+    /**
+     * @param tenant tenant
+     * @param instanceId instance
+     * @return the instance's open incidents, oldest first
+     */
+    List<IncidentRow> openIncidents(String tenant, String instanceId);
 
     /**
      * @param tenant tenant

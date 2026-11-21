@@ -74,4 +74,25 @@ public interface TaskService {
      */
     ProcessInstance complete(String taskId, Map<String, Object> result, long expectedLockVersion,
             String idempotencyKey);
+
+    /**
+     * Completes a task with a reason (#59). On the review task of a refused agent answer the reason is recorded with
+     * the reviewer's answer in the {@code HUMAN_OVERRIDE} history entry; on any other task it is ignored. Otherwise as
+     * {@link #complete(String, Map, long, String)}.
+     *
+     * @param taskId the task id
+     * @param result values stored in the task's result variable
+     * @param reason why the reviewer answered as they did, or null; at most {@code reason-max-length} characters
+     * @param expectedLockVersion the task's lock version, sent as {@code If-Match}; required
+     * @param idempotencyKey required; a replay with the same key and request returns the original result
+     * @return the instance after the following synchronous steps ran
+     * @throws InputInvalidException when the reason is too long
+     */
+    default ProcessInstance complete(String taskId, Map<String, Object> result, String reason,
+            long expectedLockVersion, String idempotencyKey) {
+        if (reason != null) {
+            throw new UnsupportedOperationException("This task service does not record a reason");
+        }
+        return complete(taskId, result, expectedLockVersion, idempotencyKey);
+    }
 }

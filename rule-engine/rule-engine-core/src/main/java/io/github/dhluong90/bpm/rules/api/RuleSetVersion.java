@@ -28,6 +28,8 @@ import java.util.Objects;
  *     it, while a clock before it still does. Null while it is not retired
  * @param warnings what the author and the approver should see before publication, such as an undeclared input that
  *     looks like personal data (RLE-049); empty when none, never null
+ * @param retirementRequest the pending retirement waiting for a second approver (RLE-038); null when none. The
+ *     version is still {@code PUBLISHED} and serving while it is pending
  */
 public record RuleSetVersion(
         String ruleSet,
@@ -48,7 +50,8 @@ public record RuleSetVersion(
         String createdBy,
         Instant createdAt,
         Instant retiredAt,
-        List<VersionWarning> warnings) {
+        List<VersionWarning> warnings,
+        RetirementRequest retirementRequest) {
 
     public RuleSetVersion {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -71,7 +74,39 @@ public record RuleSetVersion(
     public RuleSetVersion withWarnings(List<VersionWarning> newWarnings) {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy,
-                approvedAt, createdBy, createdAt, retiredAt, newWarnings);
+                approvedAt, createdBy, createdAt, retiredAt, newWarnings, retirementRequest);
+    }
+
+    /**
+     * Creates a version without a pending retirement.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param lockVersion see the record
+     * @param canonicalDocument see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceHash see the record
+     * @param sourceDocument see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     * @param retiredAt see the record
+     * @param warnings see the record
+     */
+    public RuleSetVersion(String ruleSet, int version, VersionStatus status, String hitPolicy, Instant effectiveFrom,
+            long lockVersion, String canonicalDocument, String canonicalHash, SourceFormat sourceFormat,
+            String sourceHash, String sourceDocument, String requestedBy, Instant requestedAt, String approvedBy,
+            Instant approvedAt, String createdBy, Instant createdAt, Instant retiredAt, List<VersionWarning> warnings) {
+        this(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument, canonicalHash,
+                sourceFormat, sourceHash, sourceDocument, requestedBy, requestedAt, approvedBy, approvedAt, createdBy,
+                createdAt, retiredAt, warnings, null);
     }
 
     /**
@@ -143,6 +178,6 @@ public record RuleSetVersion(
     public RuleSetVersion withoutSource() {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalDocument,
                 canonicalHash, sourceFormat, sourceHash, null, requestedBy, requestedAt, approvedBy, approvedAt,
-                createdBy, createdAt, retiredAt, warnings);
+                createdBy, createdAt, retiredAt, warnings, retirementRequest);
     }
 }

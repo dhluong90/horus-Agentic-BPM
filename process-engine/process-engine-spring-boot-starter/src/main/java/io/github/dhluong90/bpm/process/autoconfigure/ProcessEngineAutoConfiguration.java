@@ -26,6 +26,7 @@ import io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner;
 import io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator;
 import io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner;
 import io.github.dhluong90.bpm.process.spi.AgentAdapter;
+import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
@@ -168,6 +169,21 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
+     * Makes the audit copy of masked agent inputs (#59): with the Rule Engine and its masking key for the tenant, the
+     * keyed fingerprint the decision log keeps for the same value ({@code hmac:<keyId>:<hex>}); otherwise
+     * {@code ***}. A host may register its own.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    InputMasker processEngineInputMasker(BeanFactory beans) {
+        ClassLoader loader = ProcessEngineAutoConfiguration.class.getClassLoader();
+        if (!org.springframework.util.ClassUtils.isPresent(RuleEngineDecisions.MASKING_POLICY_CLASS, loader)) {
+            return InputMasker.REDACT;
+        }
+        return RuleEngineDecisions.inputMasker(beans);
+    }
+
+    /**
      * Runs async steps outside any transaction, one runner per job kind with its own slots (#363): remote service
      * steps through the host's {@code ServiceAdapter}s and agent steps through its {@code AgentAdapter}s (#52). The pool has as many daemon threads as all runners have
      * slots, so no claimed call waits for a thread; one daemon thread abandons calls at their timeout. Closed with the
@@ -280,7 +296,7 @@ public class ProcessEngineAutoConfiguration {
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
             ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
-            OutputSchemaValidator outputSchemas) {
+            OutputSchemaValidator outputSchemas, InputMasker inputMasker) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -303,7 +319,8 @@ public class ProcessEngineAutoConfiguration {
                         EngineSettings.RetireLastVersionRule.valueOf(RetireLastVersion.from(environment).name())),
                 BehaviorCatalog.registry(),
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
-                adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas);
+                adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas, inputMasker,
+                properties.agents().labels().toLimits());
     }
 
     /**
@@ -416,11 +433,13 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "processEngineModuleDescriptor")
     ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties, Environment environment) {
-        return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
-                Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
+        return ModuleDescriptor.builder("processes", ProcessEngineModule.engineVersion(), "v1")
+                .settings(Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
                         RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
-                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()),
-                PERMISSIONS, properties.security().rolePermissions());
+                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()))
+                .permissions(PERMISSIONS)
+                .rolePermissions(properties.security().rolePermissions())
+                .build();
     }
 
     /**

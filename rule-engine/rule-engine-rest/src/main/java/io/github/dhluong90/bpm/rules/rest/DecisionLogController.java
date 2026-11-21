@@ -1,10 +1,13 @@
 package io.github.dhluong90.bpm.rules.rest;
 
+import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.DecisionSearchResult;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.InputSearch;
 import io.github.dhluong90.bpm.rules.api.LoggedDecision;
 import io.github.dhluong90.bpm.rules.api.MaskedInputQuery;
+import io.github.dhluong90.bpm.rules.api.PageRequest;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
@@ -42,16 +45,19 @@ public class DecisionLogController {
     private static final Set<String> SEARCH_KEYS = Set.of("ruleSet", "input", "value", "from", "to", "limit");
 
     private final DecisionLogService decisions;
+    private final DecisionLogQuery log;
     private final CallerResolver callers;
 
     /**
      * Creates the controller.
      *
      * @param decisions the decision log reads
+     * @param log the decision log searches
      * @param callers resolves the caller and its permissions
      */
-    public DecisionLogController(DecisionLogService decisions, CallerResolver callers) {
+    public DecisionLogController(DecisionLogService decisions, DecisionLogQuery log, CallerResolver callers) {
         this.decisions = Objects.requireNonNull(decisions, "decisions must not be null");
+        this.log = Objects.requireNonNull(log, "log must not be null");
         this.callers = Objects.requireNonNull(callers, "callers must not be null");
     }
 
@@ -105,6 +111,59 @@ public class DecisionLogController {
         result.items().forEach(item -> data.add(decision(item)));
         json.put("truncated", result.truncated());
         return RestSupport.json(HttpStatus.OK, json);
+    }
+
+    private static final Set<String> INPUT_SEARCH_KEYS =
+            Set.of("ruleSet", "input", "value", "from", "to", "limit", "cursor");
+
+    /**
+     * {@code POST /decisions:find-by-input}: the decisions of one rule set in a period whose input, stored in plain
+     * text, had exactly the value in the body, which never sits in a URL (RLE-071). A masked input is
+     * {@code 400 QUERY_INVALID}. Needs {@code rules:log:read}; writes nothing.
+     */
+    @PostMapping("/decisions:find-by-input")
+    public ResponseEntity<byte[]> findByInput(
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength)
+            throws IOException {
+        RestSupport.require(callers, "rules:log:read");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        JsonNode request = EngineValues.readRequest(body);
+        if (!request.isObject()) {
+            throw new InputInvalidException("Request body must be a JSON object");
+        }
+        for (String key : request.propertyNames()) {
+            if (!INPUT_SEARCH_KEYS.contains(key)) {
+                throw new QueryInvalidException("Unknown member " + key + "; expected ruleSet, input, value, from, to,"
+                        + " limit and cursor");
+            }
+        }
+        JsonNode valueNode = request.get("value");
+        if (valueNode == null || valueNode.isNull() || valueNode.isArray()) {
+            throw new QueryInvalidException("value is required and must be a single value");
+        }
+        ObjectNode wrapped = EngineJson.NODES.objectNode();
+        wrapped.set("value", valueNode);
+        Object value;
+        try {
+            value = EngineValues.inputsFromJson(wrapped).get("value");
+        } catch (InputInvalidException e) {
+            throw new QueryInvalidException("value must be a string, number, boolean or money");
+        }
+        JsonNode limit = request.get("limit");
+        if (limit != null && !limit.isNull() && !limit.isIntegralNumber()) {
+            throw new QueryInvalidException("limit must be an integer");
+        }
+        JsonNode cursor = request.get("cursor");
+        if (cursor != null && !cursor.isNull() && !cursor.isString()) {
+            throw new QueryInvalidException("cursor must be a string");
+        }
+        InputSearch search = new InputSearch(text(request, "ruleSet"), text(request, "input"), value,
+                instant(request, "from"), instant(request, "to"));
+        PageRequest page = new PageRequest(limit == null || limit.isNull() ? null : limit.asInt(),
+                cursor == null || cursor.isNull() ? null : cursor.stringValue());
+        return RestSupport.json(HttpStatus.OK, RestSupport.page(log.searchByInput(search, page),
+                EngineValues::decisionLogEntry));
     }
 
     private static String text(JsonNode request, String key) {

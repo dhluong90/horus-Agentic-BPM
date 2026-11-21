@@ -18,6 +18,9 @@ These operations are built and tested; their contract file is [`rule-engine/api/
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | `VersionService.requestPublish(...)` | `rules:author` | `If-Match` optional |
 | `POST /rule-sets/{name}/versions/{v}:approve` | `VersionService.approve(...)` | `rules:approve` | `If-Match` required: the `lockVersion` of the version reviewed (`428 PRECONDITION_REQUIRED` without it, `409 VERSION_CONFLICT` when the version changed since, for example sent back, replaced and requested again; #275). On `409 VERSION_CONFLICT` the client shows the current version again and never retries automatically with the new `ETag`. Optional body `{ "comment": "..." }`; the requester gets `403 SELF_APPROVAL_FORBIDDEN` |
 | `POST /decisions/{ruleSet}:evaluate` | `RuleEngine.evaluate(...)` | `rules:evaluate` | Body `{ "inputs": { ... } }`; hit policies `first`, `unique` and `collect`; one `rle_decision` row in the request's transaction. `unique` with several matches is `422 UNIQUE_HIT_VIOLATION` with `decisionId` and `matchedRuleIds` and no outputs; no match is `200` with outcome `NO_MATCH` |
+| `POST /decisions/{ruleSet}:evaluate-batch` | `RuleEngine.evaluateBatch(...)` | `rules:evaluate` | Built (#93). 1 to 1,000 items, one version at one clock, one logged decision per item in one transaction; a failing item does not stop the others. See [Batch evaluation](#batch-evaluation) |
+| `GET /decisions?correlationId=` | `DecisionLogQuery.searchByCorrelationId(...)` | `rules:log:read` | Built (#94). The host's case reference across the tenant's rule sets, at most 31 days |
+| `POST /decisions:find-by-input` | `DecisionLogQuery.searchByInput(...)` | `rules:log:read` | Built (#94). The exact value of a plain input in one rule set; a masked input is refused |
 | `POST /rule-sets/{name}/versions/{v}:reject` | `VersionService.reject(...)` | `rules:approve` | `If-Match` required, as for `:approve`. Body `{ "reason": "..." }`, required, at most `lifecycle.reason-max-length` (2,000) characters. A `PENDING_APPROVAL` version goes back to `DRAFT` with the request cleared, a `REJECTED` history row and `rules.version.rejected.v1`. The requester gets `403 SELF_APPROVAL_FORBIDDEN` pointing to `:withdraw` (PD-089) |
 | `POST /rule-sets/{name}/versions/{v}:withdraw` | `VersionService.withdraw(...)` | `rules:author`, and only the requester | `Idempotency-Key` and `If-Match` required (`400 INPUT_INVALID` without the key, `428 PRECONDITION_REQUIRED` without `If-Match`). Optional body `{ "reason": "..." }`, at most 2,000 characters. A `PENDING_APPROVAL` version goes back to `DRAFT` with the request cleared, a `WITHDRAWN` history row and `rules.version.withdrawn.v1`; nothing is published. Anyone but the requester, an approver included, gets `403 PERMISSION_DENIED` (PD-089, `RLE-046`) |
 | `PUT /rule-sets/{name}/versions/{v}` | `VersionService.replaceDraft(...)` | `rules:author`, and only the draft's author | Replaces a `DRAFT`'s document in place with the import checks; same version number, new hashes, `lockVersion` + 1; one `DRAFT_UPDATED` history row with both canonical hashes and one `rules.version.draft-updated.v1` event. `Idempotency-Key` and `If-Match` required. `403 DRAFT_AUTHORING_DISABLED` when `authoring.cockpit-drafts` is `false` (`RLE-047`) |
@@ -34,6 +37,7 @@ public interface RuleEngine {
   DecisionResult evaluate(String ruleSet, DecisionInput input);
   DecisionResult evaluate(String ruleSet, int version, DecisionInput input);   // pin a version
   DecisionResult evaluate(DecisionRequest request);                            // tenant, clock, correlation id, caller, idempotency key
+  BatchResult evaluateBatch(BatchRequest request);                             // 1 to 1,000 items, one version, one transaction
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType);  // map outputs onto a record
 }
 
@@ -105,7 +109,7 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /decisions/{ruleSet}:evaluate` | Evaluate the effective version at `clock` (default now) | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional |
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | Evaluate one approved version. A draft is `409 INVALID_STATE` (use `:simulate`); a retired version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true` | `rules:pin`, plus `rules:simulate` for a custom `clock` | `Idempotency-Key` optional |
 | `POST /decisions/{decisionId}:replay` | Evaluate a logged decision again with its version, inputs and clock; writes nothing. `404 DECISION_NOT_FOUND` for another tenant's id; `422 REPLAY_NOT_POSSIBLE` when a masked input had a value | `rules:log:read` | none |
-| `POST /decisions/{ruleSet}:evaluate-batch` | Up to 1 000 input sets; one decision row each; partial failures reported per item | `rules:evaluate` | `Idempotency-Key` optional |
+| `POST /decisions/{ruleSet}:evaluate-batch` | 1 to 1 000 items (`evaluation.max-batch`), evaluated in order against one version selected at `clock`; one logged decision each, in one transaction; an item that fails does not stop the others. See [Batch evaluation](#batch-evaluation) | `rules:evaluate`; `rules:simulate` when `clock` is set | `Idempotency-Key` optional; body at most 4 194 304 bytes |
 | `GET /rule-sets` | List rule sets with effective version and pending approvals | `rules:read` | cursor pagination |
 | `GET /rule-sets/{name}` | Rule set with its versions and states | `rules:read` | |
 | `GET /rule-sets/{name}/versions/{v}` | One version, canonical JSON, validation report | `rules:read` | `ETag` |
@@ -114,19 +118,22 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions` | New draft, empty or copied from a version | `rules:author` | `Idempotency-Key` |
 | `PUT /rule-sets/{name}/versions/{v}` | Replace a draft's content in place; the draft's author only | `rules:author` | `Idempotency-Key`, `If-Match` (both required) |
 | `POST /rule-sets/{name}/versions/{v}:validate` | Parse and type-check without saving | `rules:author` | |
-| `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]). Replay over logged decisions is M3 | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]) | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions/{v}:simulate-history` | Replay the logged decisions of a period (at most 31 days, at most 1,000 decisions, newest first) through the logged version and this version, both at each logged clock, flagging changed outcomes; writes nothing. `400 QUERY_INVALID` outside the bounds, `404 VERSION_NOT_FOUND` for another tenant's version | `rules:simulate` and `rules:log:read` | None: nothing is written, so no `Idempotency-Key` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester. A version with an unmasked personal-data warning needs `"acknowledgedWarnings"` with exactly the `{ code, input }` pairs shown, else `409 WARNINGS_NOT_ACKNOWLEDGED` (PD-104) | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:withdraw` | The requester takes their own request back; back to draft, reason optional | `rules:author` (requester only) | `Idempotency-Key`, `If-Match` (both required) |
-| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. For the last version in effect, add `"confirmNoVersionInEffect": true` or get `409 LAST_VERSION_IN_EFFECT` (PD-101). In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:confirm-retire` | M3, `four-eyes` mode: retire the version a retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN` | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. For the last version in effect, add `"confirmNoVersionInEffect": true` or get `409 LAST_VERSION_IN_EFFECT` (PD-101). In `four-eyes` mode it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:confirm-retire` | Retire the version a pending retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN`. Body `{ "confirmNoVersionInEffect": true }` when the last version in effect needs it | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:cancel-retire` | Withdraw a pending retirement request, with a reason; the version stays published | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML, JSON or DMN 1.5 export | `rules:read` | |
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision as logged, with `evalClock`, `clockChosen` and `pinned`; masked inputs are `hmac:<keyId>:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
 | `POST /decisions:find-by-masked-input` | Decisions of one rule set, in at most 31 days, whose masked input had a plain value. Body `{ "ruleSet", "input", "value", "from", "to", "limit" }`; the engine fingerprints `value` with your tenant's key, so the value is never stored or put in a URL. Answers `{ "data": [...], "truncated": false }`, newest first | `rules:masked:search` | `limit` 1 to 200, default 50; at most `masking.search.max-per-minute` (30) per caller per minute, then `429` with `Retry-After` |
 | `GET /decisions/{id}/explain` | Plain-language explanation | `rules:log:read` | |
+| `POST /decisions:find-by-input` | Decisions of one rule set, in at most 31 days, whose plain input held exactly a value. Body `{ "ruleSet", "input", "value", "from", "to", "limit", "cursor" }`, at most 16 384 bytes. Money compares by currency and minor units, a number by exact value (`30000` equals `30000.00`), a string by code point (no case folding, no trimming). A masked input, whether `mask: true` or masked by `decision-log.mask-default`, is `400 QUERY_INVALID` pointing to `find-by-masked-input`, never an empty answer. Answers a page like `GET /decisions` | `rules:log:read` | `limit` 1 to 200, default 200; cursor bound to the value and period |
+| `GET /decisions?correlationId=&from=&to=&ruleSet=` | Decisions that carry the host's case reference (a loan application number, say) across all rule sets of your tenant, newest first; `ruleSet` narrows it. `correlationId` is 1 to 128 characters of `A-Z a-z 0-9 . _ : -`; `from` and `to` are required and at most 31 days apart. Send your reference as `X-Correlation-Id` or the item `correlationId` when you evaluate: a call without one gets a generated id. Do not use a national id as a case reference, because a URL is logged | `rules:log:read` | cursor pagination; the cursor is bound to the reference and period |
 | `GET /decisions?ruleSet=&from=&to=&cursor=&limit=` | Decision log of one rule set, newest first, `from` inclusive and `to` exclusive. `ruleSet`, `from` and `to` are required; the range is at most 31 days (`query.max-range`); a page holds up to 200 decisions (`query.max-page-size`, also the default). Masked inputs stay hashed. Built in 0.2; the `outcome` and `matchedRuleId` filters come later | `rules:log:read` | cursor pagination; the cursor is bound to the rule set and period |
 
 Permission strings match [[Rule Engine Configuration]].
@@ -180,6 +187,34 @@ On `:evaluate` the key is optional. Evaluation is pure, so a retry without a key
 
 Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT` and lifecycle actions require `If-Match` (or `version` in the body). The update runs as `UPDATE ... WHERE lock_version = :expected`; zero rows updated gives `409 VERSION_CONFLICT` with the current version in `detail`. Approvals also carry the lock, so a second approval of the same version is rejected rather than replayed.
 
+
+## Batch evaluation
+
+`POST /decisions/{ruleSet}:evaluate-batch` prices many items in one call, for an end-of-day job. The body is `{ "items": [ { "inputs": {...}, "correlationId": "..." } ], "clock": "..." }` with 1 to 1 000 items (`evaluation.max-batch`, which a host may lower and never raise). One version is selected for the whole batch at `clock` (default now), items run in order, and every evaluated item is a logged decision with its own `decisionId` and its own `correlationId`. The rows commit together in one transaction: all or none.
+
+```bash
+curl -s -X POST "$HOST/api/bpm/rules/v1/decisions/card-fee:evaluate-batch" \
+  -H "Authorization: Bearer $SERVICE_TOKEN" -H 'Content-Type: application/json' -H 'Idempotency-Key: k-701' \
+  -d '{"items": [
+        {"inputs": {"tier": "GOLD", "txCount": 5}, "correlationId": "eod-2027-01-31-0000"},
+        {"inputs": {"tier": "SILVER", "txCount": "four"}, "correlationId": "eod-2027-01-31-0001"}]}'
+```
+
+```json
+{ "ruleSet": "card-fee", "version": 1, "evalClock": "2027-01-31T22:00:00Z", "succeeded": 1, "failed": 1,
+  "results": [
+    { "index": 0, "decision": { "decisionId": "01KF8ZQ3M5T7V9X1B3D5F7H9K2", "outcome": "MATCHED",
+                                "matchedRuleIds": ["R1"], "outputs": { "fee": { "currency": "VND", "amount": 0 } } } },
+    { "index": 1, "problem": { "code": "INPUT_INVALID", "status": 400, "detail": "Input txCount must be an integer" } } ] }
+```
+
+The answer is `200` whenever the batch was accepted. An item that fails has a `problem` instead of a `decision`: `INPUT_INVALID` (not a decision, so no row is written), `UNIQUE_HIT_VIOLATION` or `EVALUATION_ERROR` (logged, with the `decisionId`). Results never echo the inputs, so a batch over a thousand customers carries no national ids.
+
+- **Limits.** No items is `400 INPUT_INVALID`, more than `evaluation.max-batch` is `422 BATCH_TOO_LARGE`, a body over 4 194 304 bytes is `413 PAYLOAD_TOO_LARGE` (refused before it is read when `Content-Length` says so). The step budget applies to each item. The regex budget `evaluation.regex-max-reads-per-request` is shared by the batch: the item that spends it fails with `REGEX_TIMEOUT`, and every item after it is reported failed with a `detail` starting `REGEX_TIMEOUT: not evaluated` and writes no row.
+- **Idempotency.** Repeat a batch with the same `Idempotency-Key` and body and you get the same answer, decision ids included, and no row is written. The same key with a changed item is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The correlation id of an item is not part of the request that the key protects.
+- **Java hosts.** `RuleEngine.evaluateBatch(...)` joins the caller's transaction; if it rolls back, no row remains.
+- **Not offered.** A batch across several rule sets, a pinned version, asynchronous jobs and parallel evaluation.
+
 ## Error shape
 
 ```json
@@ -201,7 +236,7 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 | HTTP | `code` | When | Endpoints |
 |---|---|---|---|
 | 400 | `INPUT_INVALID` | Missing or mistyped input, malformed JSON | all |
-| 400 | `QUERY_INVALID` | `limit` below 1 or above 200, a cursor the list did not issue, a decision log query without `ruleSet`, `from` and `to`, or a range longer than 31 days (ADR-0015) | `GET /decisions`, every list |
+| 400 | `QUERY_INVALID` | `limit` below 1 or above 200, a cursor the list did not issue, a decision log query without `ruleSet` (or `correlationId`), `from` and `to`, a `correlationId` that is empty or outside `A-Z a-z 0-9 . _ : -`, a plain-input search on a masked, unknown or wrongly typed input, or a range longer than 31 days (ADR-0015) | `GET /decisions`, every list |
 | 401 | `UNAUTHENTICATED` | No principal | all |
 | 403 | `PERMISSION_DENIED` | Principal lacks the permission | all |
 | 403 | `SELF_APPROVAL_FORBIDDEN` | Approver equals requester (`TR-SEC-04`) | `:approve` |
@@ -222,7 +257,7 @@ Every draft response carries `version` in the body and `ETag: "<version>"`. `PUT
 | 422 | `UNIQUE_HIT_VIOLATION` | `unique` table matched several rows (`TR-DET-04`). An authoring defect, so retrying does not help (ADR-0010) | `:evaluate`, item error in `:evaluate-batch` |
 | 422 | `EVALUATION_ERROR` | Currency mismatch, division by zero, regex timeout; `detail` names the reason (`CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED`, `FUNCTION_ERROR`) | `:evaluate` |
 | 422 | `IDEMPOTENCY_KEY_REUSE_MISMATCH` | Same key, different payload | all with `Idempotency-Key` |
-| 422 | `BATCH_TOO_LARGE` | More than 1 000 items | `:evaluate-batch` |
+| 422 | `BATCH_TOO_LARGE` | More than `evaluation.max-batch` items (1 000 at most) | `:evaluate-batch` |
 | 428 | `PRECONDITION_REQUIRED` | A command that must be conditional was sent without `If-Match` | `PUT`, `:approve`, `:reject`, `:withdraw` |
 | 429 | `RATE_LIMITED` | Host rate limiter, if configured; `Retry-After` | all |
 | 500 | `INTERNAL_ERROR` | Unexpected failure, or an engine code outside this matrix (for example one a host extension raised); no details beyond `correlationId`, which is also in the server log | all |
@@ -240,7 +275,7 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 | `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy` |
 | `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
 | `rules.version.withdrawn.v1` | `:withdraw` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given) |
-| `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
+| `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode | `ruleSet`, `version`, `requestedBy`, `reason` |
 | `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system:supersession`, the `lifecycle.system-actor`, when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt`, `noVersionInEffect` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 

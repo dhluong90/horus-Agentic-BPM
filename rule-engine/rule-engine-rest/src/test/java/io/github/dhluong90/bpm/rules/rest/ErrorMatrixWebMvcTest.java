@@ -116,7 +116,8 @@ class ErrorMatrixWebMvcTest {
         mvc = MockMvcBuilders.standaloneSetup(
                         new RuleSetController(standIn(VersionService.class), callers),
                         new DecisionController(standIn(RuleEngine.class), standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
-                        new DecisionLogController(standIn(DecisionLogService.class), callers))
+                        new DecisionLogController(standIn(DecisionLogService.class),
+                        standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers))
                 .setControllerAdvice(new ProblemDetails())
                 .build();
     }
@@ -214,10 +215,27 @@ class ErrorMatrixWebMvcTest {
                             s.permissions = Set.of("rules:masked:search");
                             s.thrown = new RateLimitedException("At most 30 masked-input searches per minute", 30);
                         }),
+                new Case("BATCH_TOO_LARGE", 422,
+                        post("/api/bpm/rules/v1/decisions/card-fee:evaluate-batch").contentType("application/json")
+                                .content("{\"items\":[{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5}}]}"),
+                        s -> s.thrown = new io.github.dhluong90.bpm.rules.api.BatchTooLargeException(1001, 1000)),
                 new Case("VALIDATION_FAILED", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new ValidationFailedException(List.of(new Violation("R3", "fee",
                                 "output fee is money and needs a currency")))),
+                new Case("CMMN_UNSUPPORTED", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/xml").content(yaml),
+                        s -> s.thrown = io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.cmmn(
+                                "http://www.omg.org/spec/CMMN/20151109/MODEL", 1)),
+                new Case("DMN_UNSUPPORTED_ELEMENT", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/xml").content(yaml),
+                        s -> s.thrown = io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.dmnElements(List.of(
+                                new io.github.dhluong90.bpm.rules.api.UnsupportedElement("decisionService", "ds-1", 70, "S2")))),
+                new Case("EXPRESSION_LANGUAGE_UNSUPPORTED", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/xml").content(yaml),
+                        s -> s.thrown = io.github.dhluong90.bpm.rules.api.UnsupportedStandardException.expressionLanguage(
+                                "urn:groovy", new io.github.dhluong90.bpm.rules.api.UnsupportedElement("inputExpression",
+                                        null, 12, "not planned"))),
                 new Case("IDEMPOTENCY_KEY_REUSE_MISMATCH", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish")
                                 .header("Idempotency-Key", "k-101"),

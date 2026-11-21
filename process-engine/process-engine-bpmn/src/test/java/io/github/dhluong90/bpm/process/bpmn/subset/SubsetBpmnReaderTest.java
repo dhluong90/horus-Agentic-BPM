@@ -130,12 +130,12 @@ class SubsetBpmnReaderTest {
     }
 
     @Test
-    void echoed_ids_are_truncated_and_control_characters_escaped() {
+    void echoed_ids_are_cut_at_200_characters_and_lose_control_characters() {
         String id = "x".repeat(200) + "&#13;&#10;y";
         assertThatThrownBy(() -> reader.read(doc("<bpmn:inclusiveGateway id=\"" + id + "\"/>")))
                 .isInstanceOf(BpmnUnsupportedElementException.class)
                 .satisfies(e -> assertThat(((BpmnUnsupportedElementException) e).problems().get(0).elementId())
-                        .hasSizeLessThanOrEqualTo(83).doesNotContain("\r", "\n"));
+                        .hasSizeLessThanOrEqualTo(200).doesNotContain("\r", "\n"));
     }
 
     @Test

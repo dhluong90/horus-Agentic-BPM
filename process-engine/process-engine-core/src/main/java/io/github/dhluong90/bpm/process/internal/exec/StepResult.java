@@ -13,10 +13,18 @@ public sealed interface StepResult permits StepResult.Completed, StepResult.Busi
      * The call succeeded.
      *
      * @param output values for the result variable
+     * @param labels what the agent reported about its answer, such as {@code model} and {@code promptVersion}
+     *     (PD-014, #59): recorded in history as they are and never acted on; empty for every other step
      */
-    record Completed(Map<String, Object> output) implements StepResult {
+    record Completed(Map<String, Object> output, Map<String, String> labels) implements StepResult {
         public Completed {
             output = output == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(output));
+            labels = labels == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(labels));
+        }
+
+        /** @param output values for the result variable */
+        public Completed(Map<String, Object> output) {
+            this(output, Map.of());
         }
     }
 

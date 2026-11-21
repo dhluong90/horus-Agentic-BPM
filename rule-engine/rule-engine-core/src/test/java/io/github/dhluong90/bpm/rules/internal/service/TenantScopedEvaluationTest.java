@@ -185,4 +185,37 @@ class TenantScopedEvaluationTest {
         assertThatThrownBy(() -> scoped.evaluate("bank-a", gold.withClock(Instant.parse("2026-12-15T02:00:00Z"))))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void PRE_016_the_signature_of_the_effective_version_names_hit_policy_inputs_and_outputs_and_writes_nothing() {
+        // Given card-fee published in bank-a, and a thread with no security context
+        publishCardFee("bank-a");
+        caller.become(null, null, Set.of());
+
+        // When
+        io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signature =
+                scoped.signature("bank-a", "card-fee", Instant.parse("2026-12-15T02:00:00Z"));
+
+        // Then
+        assertThat(signature.ruleSet()).isEqualTo("card-fee");
+        assertThat(signature.version()).isEqualTo(1);
+        assertThat(signature.hitPolicy()).isEqualTo("FIRST");
+        assertThat(signature.inputs()).containsKeys("tier", "txCount");
+        assertThat(signature.outputs()).containsEntry("fee", "money");
+        assertThat(stores.decisions).isEmpty();
+    }
+
+    @Test
+    void PRE_016_a_signature_is_read_in_the_given_tenant_only() {
+        // Given card-fee in bank-a only
+        publishCardFee("bank-a");
+
+        // When bank-b asks, then its own (missing) rule set is the one looked up
+        assertThatThrownBy(() -> scoped.signature("bank-b", "card-fee", Instant.parse("2026-12-15T02:00:00Z")))
+                .isInstanceOf(RuleSetNotFoundException.class);
+        assertThatThrownBy(() -> scoped.signature(" ", "card-fee", Instant.parse("2026-12-15T02:00:00Z")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> scoped.signature("bank-a", "NOT A NAME", Instant.parse("2026-12-15T02:00:00Z")))
+                .isInstanceOf(RuleSetNotFoundException.class);
+    }
 }

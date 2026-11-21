@@ -67,7 +67,7 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
    - `matches(s, p)` is an unanchored search with the XPath `fn:matches` regex dialect: no back-references, no look-around; bounded as `TR-SEC-02`.
    - Strings compare by Unicode code point. `datetime` is a FEEL `date and time` with offset `Z` (Java `Instant`).
    - Null (PD-058, from M1, `RLE-006`): FEEL three-valued logic. `<`, `<=`, `>`, `>=`, arithmetic and functions with a `null` operand give `null`, except `coalesce`, which exists to handle `null`. `x between a and b` is `x >= a and x <= b` (DMN 1.5), evaluated as `and` is: a null target gives `null`, and a null bound gives `false` when the other comparison is already `false`. `==` and `!=` are two-valued: `null == null` is `true`, `null == 'GOLD'` is `false`, `null != 'GOLD'` is `true`. `x in [...]` is `true` only when an element equals `x` (FEEL `list contains`), so it is `false` for a null `x` unless the list holds `null`, and `x not in [...]` (FEEL `not(x in [...])`) is its negation. `is null` and `is not null` are always `true` or `false`. `and`, `or` and `not` follow the FEEL truth tables: `false and null` is `false`, `true and null` is `null`, `true or null` is `true`, `false or null` is `null`, `not(null)` is `null`. A `when` cell or a gateway condition matches only when it evaluates to `true`; `null` never matches. The type checker reports a warning, not an error, when an input that may be null is used with `!=` or `not in`, because those now match a missing value.
-   - Regex evaluation wraps input in a bounded `InterruptibleCharSequence` enforcing `evaluation.regex-timeout-ms` (`50 ms` default, `TR-SEC-02`). Built as `BoundedRegex` (#20): the pattern of `matches(text, 'pattern')` must be a string literal of at most 1,000 characters in the subset of the XPath dialect that Java reads the same way, compiled once at import. Refused: back-references, look-around, inline flags and every `(?` group except `(?:`, possessive quantifiers, character class nesting and intersection, Unicode block names (only general categories such as `\p{L}`) and Java-only escapes. At evaluation a text over `evaluation.regex-max-input-length` is refused before matching. The matcher reads its text through a `CharSequence` that counts every character read: the primary bound is `evaluation.regex-max-reads` (1,000,000, lower only), deterministic, so a logged `REGEX_TIMEOUT` replays the same on any machine (`TR-DET-05`); the clock, checked every 1,024 reads against `evaluation.regex-timeout-ms`, is the backstop. The same reads are charged to the decision (#290): each evaluation of a compiled rule set runs on an evaluator scoped to one counter of `evaluation.regex-max-reads-per-decision` (5,000,000, lower only), confined to the evaluating thread, while the compiled tree stays shared and immutable. A match may read the lower of `regex-max-reads` and what is left to the decision, so the cost of one decision is bounded whatever the number of `matches` rows, and the stop is deterministic too; when the decision's remainder is what ran out, the `detail` names `evaluation.regex-max-reads-per-decision`. The same reads are charged a third time to the request (#309): a request that evaluates many decisions (`:simulate` now, `:evaluate-batch` when it is built) shares one counter of `evaluation.regex-max-reads-per-request` (50,000,000; 1 to 5,000,000,000, the old worst case of 1,000 items times 5,000,000, so a host may raise it up to there) between its decisions. A match may read the lowest of the three remainders; when the request's ran out, the item fails with `REGEX_TIMEOUT`, the `detail` names `evaluation.regex-max-reads-per-request`, and the request evaluates no further item. Each item after it is reported `EVALUATION_ERROR` with a `detail` beginning `REGEX_TIMEOUT: not evaluated`; items before it keep their results. The count is the same deterministic one, so the same request stops at the same item on every replay, and one WARN line names the rule set, tenant and item where it stopped. A `StackOverflowError` from deep backtracking (for example `(a|b)*c` on a few thousand characters on a small stack) is caught and fails the decision with `REGEX_TOO_DEEP`. The match stops on the calling thread without interrupts, and the thread and its connection are free at once. In a condition cell `matches('pattern')` tests the cell's own input. The decision row's `error_code` is the reason (`REGEX_TIMEOUT`, `REGEX_INPUT_TOO_LONG`, `REGEX_TOO_DEEP`) and `outcome` stays `EVALUATION_ERROR`. A `matches` cell has no DMN unary-test form yet, so DMN export refuses such a table, as it does other compound cells.
+   - Regex evaluation wraps input in a bounded `InterruptibleCharSequence` enforcing `evaluation.regex-timeout-ms` (`50 ms` default, `TR-SEC-02`). Built as `BoundedRegex` (#20): the pattern of `matches(text, 'pattern')` must be a string literal of at most 1,000 characters in the subset of the XPath dialect that Java reads the same way, compiled once at import. Refused: back-references, look-around, inline flags and every `(?` group except `(?:`, possessive quantifiers, character class nesting and intersection, Unicode block names (only general categories such as `\p{L}`) and Java-only escapes. At evaluation a text over `evaluation.regex-max-input-length` is refused before matching. The matcher reads its text through a `CharSequence` that counts every character read: the primary bound is `evaluation.regex-max-reads` (1,000,000, lower only), deterministic, so a logged `REGEX_TIMEOUT` replays the same on any machine (`TR-DET-05`); the clock, checked every 1,024 reads against `evaluation.regex-timeout-ms`, is the backstop. The same reads are charged to the decision (#290): each evaluation of a compiled rule set runs on an evaluator scoped to one counter of `evaluation.regex-max-reads-per-decision` (5,000,000, lower only), confined to the evaluating thread, while the compiled tree stays shared and immutable. A match may read the lower of `regex-max-reads` and what is left to the decision, so the cost of one decision is bounded whatever the number of `matches` rows, and the stop is deterministic too; when the decision's remainder is what ran out, the `detail` names `evaluation.regex-max-reads-per-decision`. The same reads are charged a third time to the request (#309): a request that evaluates many decisions (`:simulate` and `:evaluate-batch`) shares one counter of `evaluation.regex-max-reads-per-request` (50,000,000; 1 to 5,000,000,000, the old worst case of 1,000 items times 5,000,000, so a host may raise it up to there) between its decisions. A match may read the lowest of the three remainders; when the request's ran out, the item fails with `REGEX_TIMEOUT`, the `detail` names `evaluation.regex-max-reads-per-request`, and the request evaluates no further item. Each item after it is reported `EVALUATION_ERROR` with a `detail` beginning `REGEX_TIMEOUT: not evaluated`; items before it keep their results. The count is the same deterministic one, so the same request stops at the same item on every replay, and one WARN line names the rule set, tenant and item where it stopped. A `StackOverflowError` from deep backtracking (for example `(a|b)*c` on a few thousand characters on a small stack) is caught and fails the decision with `REGEX_TOO_DEEP`. The match stops on the calling thread without interrupts, and the thread and its connection are free at once. In a condition cell `matches('pattern')` tests the cell's own input. The decision row's `error_code` is the reason (`REGEX_TIMEOUT`, `REGEX_INPUT_TOO_LONG`, `REGEX_TOO_DEEP`) and `outcome` stays `EVALUATION_ERROR`. A `matches` cell has no DMN unary-test form yet, so DMN export refuses such a table, as it does other compound cells.
 
      ![Bounded regular expressions](images/regex-bounds.svg)
 
@@ -105,7 +105,7 @@ Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` 
 | `rules.version.published.v1` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy`, `acknowledgedWarnings` (list of `{ code, input }`, empty when none) and `maskedByDefaultInputs` (inputs masked only by the tenant default at approval, empty when none) (PD-104, additive; both lists on every publication); schema `rule-engine/api/schema/rules.version.published.v1.schema.json` |
 | `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason`; schema `rule-engine/api/schema/rules.version.rejected.v1.schema.json` |
 | `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given); schema `rule-engine/api/schema/rules.version.withdrawn.v1.schema.json` |
-| `rules.version.retire-requested.v1` (M3, `four-eyes` mode) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt` |
+| `rules.version.retire-requested.v1` (`four-eyes` mode, #213) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt`; schema `rule-engine/api/schema/rules.version.retire-requested.v1.schema.json` |
 | `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null); schema `rule-engine/api/schema/rules.version.retired.v1.schema.json` |
 | `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` (`MATCHED`, `NO_MATCH` or `FAILED`); no inputs or outputs, which stay in the decision log; schema `rule-engine/api/schema/rules.decision.evaluated.v1.schema.json` |
 
@@ -284,6 +284,7 @@ public interface RuleEngine {
   DecisionResult replay(String decisionId);         // the logged version, inputs and clock; writes nothing (#22)
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType); // throws instead of returning Failed
   SimulationResult simulate(String ruleSet, int version, List<DecisionInput> samples); // rules:simulate; logs nothing (RLE-016)
+  HistorySimulationResult simulateHistory(String ruleSet, int version, HistorySimulation period); // rules:simulate and rules:log:read; logs nothing (RLE-015)
 }
 
 // package io.github.dhluong90.bpm.rules.embedded: engine to engine, not for hosts
@@ -313,7 +314,8 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /decisions/{ruleSet}:evaluate` | `rules:evaluate`; a body `clock` also needs `rules:simulate` | Optional `Idempotency-Key`; body at most 1,048,576 bytes (`RLE-044`); optional `clock` (ISO 8601 instant) selects the version in force and feeds `today()` and `now()` (`RLE-008`, `RLE-022`) | `400 INPUT_INVALID`, `403 CLOCK_NOT_ALLOWED`, `404 NO_EFFECTIVE_VERSION`, `413 PAYLOAD_TOO_LARGE`, `422 UNIQUE_HIT_VIOLATION`, `422 EVALUATION_ERROR` |
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | `rules:pin`, plus `rules:simulate` when the body sets `clock` | Optional `Idempotency-Key`. Only approved versions: a `DRAFT` is `409 INVALID_STATE` and is tried with `:simulate`; a `RETIRED` version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true`. A decision evaluated with a chosen clock carries `clockChosen: true` in the response and keeps `eval_clock` apart from `created_at` in the log, so a back-dated decision is visible | `403 PERMISSION_DENIED`, `403 CLOCK_NOT_ALLOWED`, `404 VERSION_NOT_FOUND`, `409 INVALID_STATE`, `422 UNIQUE_HIT_VIOLATION`, `422 EVALUATION_ERROR` |
 | `POST /decisions/{decisionId}:replay` | `rules:log:read` | No body; writes nothing; the logged version, inputs and clock (`TR-DET-05`, section 4.1) | `404 DECISION_NOT_FOUND`, `422 REPLAY_NOT_POSSIBLE` (a masked input had a value), `422 UNIQUE_HIT_VIOLATION` and `422 EVALUATION_ERROR` when the logged decision failed |
-| `POST /decisions/{ruleSet}:evaluate-batch` | `rules:evaluate` | At most 1,000 items; `Idempotency-Key`; per-item outcome in a `207`-style body with `200` status | `400 INPUT_INVALID`, `404 NO_EFFECTIVE_VERSION`; item errors `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR` |
+| `POST /decisions/{ruleSet}:evaluate-batch` (`RLE-067` to `RLE-069`) | `rules:evaluate`; a body `clock` also needs `rules:simulate` | Body `{ "items": [ { "inputs": {...}, "correlationId": "..." } ], "clock"? }`, 1 to `evaluation.max-batch` items (default and ceiling 1,000), at most 4,194,304 bytes, refused before it is read when `Content-Length` declares more. Optional `Idempotency-Key`; a repeat returns the same body, decision ids included, and writes nothing. One version is selected for the batch at the request clock; items run in order, each a logged decision with its own id; the rows commit in the request's transaction, all or none, and with the host's transaction on the Java API. Answer `200` with `{ ruleSet, version, evalClock, succeeded, failed, results: [ { index, decision } \| { index, problem } ] }`; results never echo inputs. The step budget is per item; `evaluation.regex-max-reads-per-request` is shared by the batch, and the item that spends it and every later item fail (later items with no row). A pinned version is not offered | `400 INPUT_INVALID` (no items, malformed body), `403 PERMISSION_DENIED`, `403 CLOCK_NOT_ALLOWED`, `404 RULE_SET_NOT_FOUND`, `404 NO_EFFECTIVE_VERSION`, `413 PAYLOAD_TOO_LARGE`, `422 BATCH_TOO_LARGE`, `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`, `409 IDEMPOTENCY_IN_FLIGHT`; per item `INPUT_INVALID`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR` (`REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED`, `MASKED_INPUT_IN_OUTPUT`) |
+| `POST /rule-sets/{name}/versions/{v}:simulate-history` | `rules:simulate` and `rules:log:read`, checked before the body is read | Body `{ "from", "to", "limit" }`, at most 16,384 bytes. Replays the caller's tenant's decisions of `[from, to)` through the logged version and this version, both at each logged clock; writes nothing, so no `Idempotency-Key`. The period is at most `query.max-range` and the run at most `simulation.max-inputs` decisions, newest first, with `truncated` when there were more. See section 4.2.2 | `400 QUERY_INVALID` (period missing, reversed or too long, limit out of range, malformed instant), `404 VERSION_NOT_FOUND` (also for another tenant's version, before any decision is read), `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` |
 | `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate`, checked before the body is read | Body `{ "samples": [{ "inputs": {...} }] }`, 1 to `simulation.max-inputs` sets (default and ceiling 1,000), at most 1,048,576 bytes. Runs the version in any status and the version effective at the host clock in memory; writes nothing (no decision row, idempotency record or event), so no `Idempotency-Key`; no generated id in the response, so the same version, samples and clock give the same body (`RLE-016`, `TR-DET-01`). See section 4.2.1 | `400 INPUT_INVALID` (no samples, too many, or a sample invalid, named `samples[i]`), `404 VERSION_NOT_FOUND` (also for another tenant's version and an unknown rule set), `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Signed keyset cursor by name (byte order), `limit` 1 to `query.max-page-size` (default 50, at most 200); each item: `ruleSet`, `latestVersion`, `latestStatus`, `publishedVersion` (the version selected at the host clock, section 3.3.1, or null), `lastChangedAt` (latest version timestamp or history row) (`RLE-039`) | `400 QUERY_INVALID` (limit or cursor), `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions` | `rules:read` | Keyset cursor by version number, newest first, same `limit`; items carry the lifecycle fields and `allowedActions`, never the definition (`RLE-040`) | `400 QUERY_INVALID`, `404 RULE_SET_NOT_FOUND` |
@@ -328,7 +330,8 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /rule-sets/{name}/versions/{v}:cancel-retire` (M3) | `rules:approve` | `Idempotency-Key`; `If-Match`; body `{ "reason": "..." }` | `400 INPUT_INVALID`, `409 INVALID_STATE`, `409 VERSION_CONFLICT` |
 | `POST /rule-sets/{name}/versions/{v}:reject`, `:retire` | `rules:approve` | `Idempotency-Key`; `If-Match` (required on `:reject`: `428 PRECONDITION_REQUIRED` without it); body `{ "reason": "..." }` required, at most 16,384 bytes; `:retire` also takes `"confirmNoVersionInEffect": true` for the last version in effect (PD-101, section 3.3.4); the requester gets `403 SELF_APPROVAL_FORBIDDEN` and withdraws instead (PD-089, section 3.3). `:reject` ships in #147; `:retire` with its feature | `400 INPUT_INVALID` (blank or longer than `lifecycle.reason-max-length`), `409 INVALID_STATE`, `409 LAST_VERSION_IN_EFFECT` (`:retire`), `409 VERSION_CONFLICT`, `413 PAYLOAD_TOO_LARGE` |
 | `POST /rule-sets/{name}/versions/{v}:withdraw` (PD-089, `RLE-046`) | `rules:author`, and the caller is the version's requester | `Idempotency-Key` and `If-Match` both required (`400 INPUT_INVALID` without the key, `428 PRECONDITION_REQUIRED` without `If-Match`); optional body `{ "reason": "..." }`, at most 16,384 bytes and `lifecycle.reason-max-length` characters; the permission is checked before the body is read | `400 INPUT_INVALID`, `403 PERMISSION_DENIED` (not the requester, an approver included), `404 VERSION_NOT_FOUND`, `409 INVALID_STATE`, `409 VERSION_CONFLICT`, `413 PAYLOAD_TOO_LARGE`, `428 PRECONDITION_REQUIRED` |
-| `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /decisions` | `rules:log:read` | Cursor; `GET /decisions` requires a rule set and a time range of at most 31 days (ADR-0015); masked inputs stay hashed; explain is built from the row and the stored version only (section 4.7) | `400 QUERY_INVALID`, `404 DECISION_NOT_FOUND` |
+| `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /decisions` | `rules:log:read` | Cursor; `GET /decisions` requires a rule set, or a `correlationId`, and a time range of at most 31 days (ADR-0015). With `correlationId` (`RLE-070`) it finds the host's case reference across every rule set of the tenant, `ruleSet` optional, through `idx_rle_decision_correlation` (migration `V20`: tenant, correlation id, time) inside at most two monthly partitions; the cursor is bound to tenant, reference and period; masked inputs stay hashed; explain is built from the row and the stored version only (section 4.7) | `400 QUERY_INVALID`, `404 DECISION_NOT_FOUND` |
+| `POST /decisions:find-by-input` (`RLE-071`) | `rules:log:read` | Body `{ ruleSet, input, value, from, to, limit?, cursor? }`, at most 16,384 bytes; the value travels in the body. Finds the decisions of one rule set whose plain input held exactly `value`: `masked_inputs -> input = value` as JSONB inside tenant, rule set and period, so money compares by currency and minor units, a number by exact value (`30000` equals `30000.00`) and a string by code point. The input must be declared by a version of the rule set and `value` must have its type. A masked input, by `mask: true` or by the tenant's `decision-log.mask-default`, is refused (never answered with no rows, so it is no oracle) with a pointer to `find-by-masked-input`. Same period, page and cursor rules as `GET /decisions`; the cursor is bound to a hash of the value. Writes nothing | `400 QUERY_INVALID` (period, limit, cursor, unknown or masked input, wrong value type, list input), `403 PERMISSION_DENIED`, `413 PAYLOAD_TOO_LARGE` |
 | `POST /decisions:find-by-masked-input` | `rules:masked:search` | Body `{ ruleSet, input, value, from, to, limit? }`, at most 16,384 bytes; the plain `value` travels in the body so it never sits in a URL or an access log. The engine fingerprints it with the caller's tenant key (section 4.4, `masking.*`) and compares fingerprints only, `masked_inputs ->> input = 'hmac:<keyId>:<hex>'` inside tenant, rule set and period on `idx_rle_decision_lookup`; period at most 31 days, `limit` 1 to `query.max-page-size` (default 50), newest first, `truncated: true` when more match (RLE-012). The value is fingerprinted with every key the tenant holds (`MaskingPolicy.searchKeys`), so rows written before a key rotation are found. Writes nothing to the decision log; writes one audit entry `rules.decision-log.masked-input-searched.v1` to the outbox in the same transaction (actor, tenant, rule set, input, period, matches, key ids, correlation id; never the value or a fingerprint) | `400 QUERY_INVALID` (period, limit, unknown member, tenant without a key), `413 PAYLOAD_TOO_LARGE`, `429 RATE_LIMITED` with `Retry-After` past `masking.search.max-per-minute` (audited with `outcome = RATE_LIMITED`) |
 | Every endpoint | | An unexpected failure | `500 INTERNAL_ERROR` with `correlationId` only: no stack trace, class name, SQL or table name; the same `correlationId` is in the server log (`TR-SEC-08`, `RLE-036`) |
 
@@ -373,6 +376,46 @@ sequenceDiagram
     E-->>C: 200 results with changed flags, nothing written
 ```
 
+#### 4.2.2 Replay of logged decisions through a draft (`RLE-015`)
+
+Sample customers miss edge cases. `:simulate-history` answers the approver's question with real decisions: of the decisions made last month, which would the draft decide differently?
+
+- **Both sides at the logged clock.** Each decision is evaluated with the version it was made with, loaded by number as `replay` does (never selected, so a version superseded or retired since still runs), and with the simulated version, both at the decision's `eval_clock`, so `today()` and `now()` are those of the decision. The logged side is what was decided (`TR-DET-05`); it is evaluated again rather than read from the stored JSON, so both sides compare as typed values with the rule of section 4.2.1.
+- **Inputs.** The logged inputs, as stored. Inputs the simulated version does not declare are left out of its side; inputs it declares that the decision did not have are missing, as in an evaluation.
+- **Masked inputs.** A decision whose masked input had a value holds only its fingerprint and cannot be evaluated again. It is listed with `maskedInputs` (names only, never values), both sides null and `changed` false, and counted in `notReplayableCount`; the run goes on.
+- **Bounds.** The period is at most `query.max-range` (31 days) and the run at most `simulation.max-inputs` (1,000) decisions, newest first; both are host settings that may be lowered (PD-018). One read, through the same statement as `GET /decisions`: tenant and rule set first and the period on the partition key, under `query.statement-timeout`; one row more than the limit sets `truncated`. All the decisions of the run read from one `evaluation.regex-max-reads-per-request` counter, so a run stops at the same decision every time.
+- **Permissions and tenancy.** `rules:simulate` and `rules:log:read`, because the answer is built from logged inputs, the reason replay needs `rules:log:read`. The tenant comes from the resolver only; a version of another tenant is `404 VERSION_NOT_FOUND` before any decision is read, and decisions of another tenant are never read.
+- **No side effects.** The read and every evaluation run in one transaction that writes nothing: no decision row, idempotency record, event or history row, and the response holds no logged input. The cockpit screen is a later slice.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Approver (rules:simulate, rules:log:read)
+    participant R as SimulationController
+    participant E as RuleEngine.simulateHistory
+    participant S as rle_version (read only)
+    participant L as rle_decision (read only)
+    C->>R: POST .../card-fee/versions/2:simulate-history {from, to, limit}
+    R->>R: both permissions, bounded body, instants parsed
+    R->>E: simulateHistory("card-fee", 2, period)
+    E->>E: period within query.max-range, limit within simulation.max-inputs (else 400 QUERY_INVALID)
+    E->>S: find v2 in the caller's tenant
+    alt not in this tenant
+        E-->>C: 404 VERSION_NOT_FOUND, no decision read
+    end
+    E->>E: integrity check and compile v2 (else 422 VALIDATION_FAILED)
+    E->>L: SELECT tenant, rule set, created_at in [from, to), newest first, limit + 1
+    loop each logged decision
+        alt a masked input had a value
+            E->>E: not replayable, inputs named, never values
+        else
+            E->>S: logged version by number (once per version)
+            E->>E: evaluate logged version and v2 at eval_clock, one regex budget for the run
+        end
+    end
+    E-->>C: 200 counts and items with changed flags, nothing written
+```
+
 ### 4.3 Host metadata
 
 The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version, API version `v1`, feature flags such as `rules.simulation`, `rules.replay`, `rules.grid-editor`) and the `rules:*` permissions the caller holds to `GET /api/bpm/me`. Both endpoints and their contract are owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6 and ship in M1 (X-F-22, `RLE-019`). Settings whose value depends on the tenant are added to the `rules` settings for the caller's tenant through the host metadata module's `TenantModuleSettings` seam: `decision-log.mask-default` and `decision-log.require-explicit-mask` in force, both always present and boolean (`RLE-050`, `RLE-052`). Because `/meta` now differs per tenant, it is sent like `/me`: `Vary: Authorization, Cookie, X-Tenant-Id`, and a weak ETag over the caller's tenant and the body, so a cached body or a `304` of one tenant is never served in another, even when both bodies are equal. It stays `private, max-age=60`. `TenantModuleSettings` implementations read settings held in memory, with no database query per request.
@@ -389,12 +432,12 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `readings.style` | `sentence` | Style of plain-language readings of rules and of explanation `text` (CK-F-44, PD-077): `sentence` (patterns from the message catalogue) or `shorthand` (`tier: GOLD, PLATINUM`). If sentences miss the M1 checkpoint of 8 Jan 2027, M1 ships with `shorthand` only and the property accepts only that value until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `explain.default-language` | `en` | Language of `text` when the request names none available (PD-027, PD-077) |
 | `publication.require-simulation-report` | `false` | From M3 (RE-F-23, PD-022): when `true`, per host or per rule set (`publication.require-simulation-report.rule-sets`), `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Off by default; in M1 the approver runs the simulation herself |
-| `decision-log.retention` | none; required outside `dev` from M3 | Whole months, ISO 8601 (`P12M`, `P120M`). The scheduler drops whole monthly partitions of `rle_decision` that lie entirely before `now() - retention` (ADR-0010). From M3, outside the `dev` profile, start-up is refused until it is set, and a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). The `dev` profile needs no value and drops nothing. Before M3 nothing is deleted and the property is ignored with a start-up note |
+| `decision-log.retention` | none: unset keeps everything and warns | `keep-forever`, or whole months in ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs a WARN at every start-up saying the setting is unset, that everything is kept, the rough growth per row and the setting name (PD-130). `keep-forever` says the same choice explicitly and logs INFO. Only an explicit period enables drops. PD-050 stays the 1.0 rule: a later release requires the setting (#104) |
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
 | `evaluation.regex-max-reads` | `1000000` | Characters one `matches()` may read, `1` to `1000000`, lower only: the deterministic primary bound (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
 | `evaluation.regex-max-reads-per-decision` | `5000000` | Characters all the `matches()` of one decision may read together, `1` to `5000000`, lower only, counted the same deterministic way as `regex-max-reads` (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). Bounds a rule set of many `matches` rows, whose cost would otherwise be rows times `regex-max-reads`. Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT`, no partial outputs |
-| `evaluation.regex-max-reads-per-request` | `50000000` | Characters all the `matches()` of one request of many decisions may read together (`:simulate` now, `:evaluate-batch` when built), `1` to `5000000000`, counted the same deterministic way (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). May be raised up to the ceiling, which is 1,000 items times the per-decision ceiling. Past it the item fails with `EVALUATION_ERROR`, `REGEX_TIMEOUT`, and no later item is evaluated |
+| `evaluation.regex-max-reads-per-request` | `50000000` | Characters all the `matches()` of one request of many decisions may read together (`:simulate` and `:evaluate-batch`), `1` to `5000000000`, counted the same deterministic way (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). May be raised up to the ceiling, which is 1,000 items times the per-decision ceiling. Past it the item fails with `EVALUATION_ERROR`, `REGEX_TIMEOUT`, and no later item is evaluated |
 | `evaluation.regex-timeout-ms` | `50` | Longest time one `matches()` may run, `1` to `1000`: the backstop of the read budget on a slow machine. Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
 | `evaluation.regex-max-input-length` | `4096` | Longest text `matches()` looks at, `1` to `evaluation.max-string-length` (and lowered with it by default). A longer text fails the decision with `EVALUATION_ERROR`, `error_code = REGEX_INPUT_TOO_LONG`, without running the match |
 | `evaluation.max-input-scale` | `34` | Absolute scale bound of number inputs, `0` to `34`, lower only; precision is always at most 34 digits (`EngineDefaults`, ADR-0024) |
@@ -404,14 +447,14 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `evaluation.max-output-bytes` | `1048576` | Estimated JSON size of one decision's outputs, checked as `collect` values accumulate; a breach is a logged `EVALUATION_ERROR`; lower only |
 | `evaluation.max-string-length` | `65536` | String inputs (`INPUT_INVALID`) and strings built by `+` (`EVALUATION_ERROR`); lower only. The three limits bound the heap one decision can use, which every tenant of the host shares |
 | `idempotency.retention` | `PT24H` | Lifetime of idempotency records, `PT1M` to `P30D` |
-| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised. `simulation.max-inputs` is built (RLE-016) |
+| `evaluation.max-batch`, `simulation.max-inputs` | `1000`, `1000` | Items per `:evaluate-batch` and per `:simulate`; may be lowered, never raised. Both are built (`RLE-068`, `RLE-016`) |
 | `query.max-range`, `query.max-page-size`, `query.statement-timeout` | `P31D`, `200`, `PT2S` | Bounds of `GET /decisions` and list reads (ADR-0015); range and page size may be lowered only |
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `tenancy.claim` | `tenant_id` | Attribute of the session principal, or claim of a validated token, that the default `TenantResolver` reads (PD-079, ADR-0014 decision 6). No header-based resolver is shipped; a host replaces the resolver with its own bean |
 | `tenancy.dev-tenant` | unset | Fixed tenant in the `dev` profile only; start-up is refused when set outside `dev` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | Reason on `:reject` and `:retire`; a host may make it optional for reject only, never for retire (a retire must say why, ADR-0025) |
 | `lifecycle.system-actor` | `system:supersession` | Actor recorded for automatic supersession. It must start with `system:`, a namespace reserved for the engine's own actors: a caller whose id starts with `system:` is refused with `403 PERMISSION_DENIED` on every operation, so no host user can act or be recorded under an engine actor's name (security review of #269) |
-| `decision-log.retention-floor` | `P12M` | Shortest `decision-log.retention` accepted (PD-050); a host may raise it to its own policy, never set it below `P12M` (`TR-EXT-05`) |
+| `decision-log.retention-floor` | `P12M` | Shortest `decision-log.retention` accepted (PD-050), in whole months; a host may raise it to its own policy, so a shorter retention set by mistake stops start-up, and never set it below `P12M` (`TR-EXT-05`) |
 | `lifecycle.retire-approval` (host property `horus.bpm.lifecycle.retire-approval`, shared with the Process Engine, PD-102) | `single` | Approval mode of manual retirement (PD-080, ADR-0025): `single` (one `rules:approve` holder with a reason) or `four-eyes` (a second holder confirms; from M3). Shown in `/api/bpm/meta` settings and recorded on each retirement event and history row. Independent of the PD-012 emergency publication path |
 | `lifecycle.retire-last-version` (host property `horus.bpm.lifecycle.retire-last-version`, shared with the Process Engine) | `confirm` | Retiring the last version in effect (PD-101, section 3.3.4): `confirm` needs `confirmNoVersionInEffect: true`, else `409 LAST_VERSION_IN_EFFECT`; `four-eyes` makes it a retirement request a second `rules:approve` holder confirms; `refuse` always answers `409 LAST_VERSION_IN_EFFECT`. Shown in `/api/bpm/meta` settings. `four-eyes` fails start-up until four-eyes retirement ships (RE-F-49) |
 | `lifecycle.approver-must-differ-from` (host property `horus.bpm.lifecycle.approver-must-differ-from`) | `makers` | Shared by both engines: host property `horus.bpm.lifecycle.approver-must-differ-from` (PD-096), published as `lifecycle.approver-must-differ-from` in each engine module's `/api/bpm/meta` settings. `makers` (default): the approver differs from every maker of the version, that is the importer or creator, every editor of the draft and the requester. `requester`: the approver differs from the requester only; this relaxes a control, so it is never the default, it is logged at WARN at start-up and recorded on every approval history row. The requester can never approve under either value (`403 SELF_APPROVAL_FORBIDDEN`, with a detail naming why) |
@@ -509,7 +552,11 @@ Micrometer names, exported to Prometheus with the usual suffixes; no tenant, rul
 | `horus.rle.cache.size` | Gauge | `horus_rle_cache_size` | none |
 | `horus.rle.cache.evictions` | Counter | `horus_rle_cache_evictions_total` | `cause` (`size`, `epoch`, `notify`) |
 | `horus.rle.partition.default.rows` | Gauge | `horus_rle_partition_default_rows` | none |
-| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`) |
+| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`), counted after commit |
+| `horus.rle.evaluations` | Timer | `horus_rle_evaluations_seconds_count`, `_sum`, `_max` | `outcome` (`matched`, `no_match`, `failed`, `refused`) |
+| `horus.rle.evaluation.errors` | Counter | `horus_rle_evaluation_errors_total` | `code` (an engine error code; anything else is `OTHER`) |
+
+The core records evaluations and retirements without a metrics library: `EngineMeters` hands each record (an outcome, an error code, a reason, a duration) to the recorders bound to it, and the starter binds one per meter registry when Micrometer is present. Every evaluation call is timed once, from the permission check to the decision log write, including a refusal (`refused`) and an idempotent replay. Percentile histograms are the host's choice (`management.metrics.distribution.percentiles-histogram.horus.rle.evaluations`).
 
 ## 5. Storage model (`rule-engine-postgres`)
 
@@ -552,6 +599,8 @@ CREATE TABLE rle_version (
   retire_requested_by TEXT,                      -- four-eyes retirement request (M3, PD-080); selection never reads it
   retire_requested_at TIMESTAMPTZ,
   retire_reason     TEXT,
+  retire_confirm_no_version BOOLEAN,             -- V18: the request accepted that no version may remain in effect (PD-101)
+                                                 -- V18 checks: the four retire_* columns are set together, only while PUBLISHED
   created_at        TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, rule_set_id, version_num),
@@ -577,6 +626,7 @@ CREATE TABLE rle_version_history (
   approval_mode     TEXT        CHECK (approval_mode IN ('single','four-eyes','system')),  -- RETIRED rows: mode in force (PD-080)
   acknowledged_warnings JSONB,                   -- APPROVED rows: [{code, input}] accepted by the approver, [] when none (PD-104, additive migration)
   masked_by_default_inputs JSONB,                -- APPROVED rows: inputs masked only by the tenant default, [] when none (PD-104)
+  retire_requested_by TEXT,                      -- V18: RETIRED rows in four-eyes mode, the requester; CHECK it differs from actor
   -- V15: CHECK (action = 'APPROVED' OR both columns null); CHECK both are JSON arrays when set
   no_version_in_effect BOOLEAN,                  -- RETIRED rows: true when no version remained in effect (PD-101, additive migration)
   lock_version      BIGINT      NOT NULL,        -- after the transition
@@ -640,6 +690,17 @@ ALTER TABLE rle_decision ATTACH PARTITION rle_decision_2027_01
 CREATE INDEX idx_rle_decision_lookup
   ON rle_decision (tenant_id, rule_set_name, created_at DESC, outcome);
 
+-- Migration V20 (RLE-070, #379): the search by the host's case reference, led by tenant, partial on a set reference.
+-- A Java migration outside a transaction, so no partition is locked against writes (TR-OPS-02): the parent index is
+-- created ON ONLY (instant, invalid), then each partition, the default one included, gets its index built
+-- CONCURRENTLY and attached; the parent turns valid when the last one is attached. Attached partitions are skipped
+-- and an invalid leftover is rebuilt, so a re-run is safe. Later partitions inherit the index at ATTACH.
+CREATE INDEX IF NOT EXISTS idx_rle_decision_correlation
+  ON ONLY rle_decision (tenant_id, correlation_id, created_at DESC, id DESC)
+  WHERE correlation_id IS NOT NULL;
+-- per partition p: CREATE INDEX CONCURRENTLY IF NOT EXISTS p_correlation_idx ON p (same columns and predicate);
+--                  ALTER INDEX idx_rle_decision_correlation ATTACH PARTITION p_correlation_idx;
+
 CREATE TABLE rle_decision_outbox (
   tenant_id       TEXT        NOT NULL,
   id              VARCHAR(26) NOT NULL,
@@ -699,7 +760,26 @@ CREATE TABLE rle_masking_key_check (
   first_seen_at  TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, key_id)
 );
+
+-- Record of every decision log partition dropped by retention (V19, #104, PD-050): one row per tenant with decisions
+-- in the month and one with tenant_id '*' for the total, written in the transaction that drops it. Append-only:
+-- triggers refuse UPDATE, DELETE and TRUNCATE (SQLSTATE 55000). Counts only, never decision data.
+CREATE TABLE rle_decision_log_drop (
+  tenant_id       TEXT        NOT NULL CHECK (tenant_id <> ''),
+  partition_name  TEXT        NOT NULL CHECK (partition_name ~ '^rle_decision_[0-9]{4}_[0-9]{2}$'),
+  range_from      TIMESTAMPTZ NOT NULL,
+  range_to        TIMESTAMPTZ NOT NULL,
+  decision_count  BIGINT      NOT NULL CHECK (decision_count >= 0),
+  retention       TEXT        NOT NULL CHECK (retention ~ '^P[0-9]+M$'),
+  cutoff          TIMESTAMPTZ NOT NULL,
+  dropped_at      TIMESTAMPTZ NOT NULL,
+  CHECK (range_from < range_to AND range_to <= cutoff),
+  PRIMARY KEY (tenant_id, partition_name)
+);
 ```
+
+Migrations must run on a direct database connection, not through PgBouncer or another pooler in transaction mode (the one exception to `TR-OPS-05`, which covers the running engine): the migrator takes Flyway's migration lock as a session advisory lock (`flyway.postgresql.transactional.lock=false`), because a `CONCURRENTLY` build such as V20 waits for every open transaction and would otherwise wait on Flyway's own lock transaction. The lock still lets one replica migrate at a time; V1 to V19 still run each in its own transaction. During a long V20 build on a large decision log, a replica waiting for the lock can run out of Flyway's lock retries (50, one second apart), fail to start and be restarted by its orchestrator; it starts normally once the build ends. On large logs, run the migration from one replica or a job before rolling out the others.
+
 
 Partition maintenance (`TR-OPS-04`, `RLE-017`):
 
@@ -707,12 +787,45 @@ Partition maintenance (`TR-OPS-04`, `RLE-017`):
 
 Source: [`diagrams/partition-maintenance.mmd`](diagrams/partition-maintenance.mmd).
 
+Retention, the second step of the same daily run (#104, PD-050):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant J as Partition job (horus-rle-partitions)
+    participant P as DecisionLogPartitions
+    participant DB as Host PostgreSQL
+    Note over J: Start-up warns when decision-log.retention is unset; nothing is dropped
+    J->>P: ensureAhead(now, partitions-ahead)
+    alt decision-log.retention is set
+        J->>P: dropExpired(now, retention)
+        P->>DB: BEGIN, SET LOCAL lock_timeout = 2s, pg_advisory_xact_lock
+        P->>DB: list attached rle_decision_YYYY_MM, keep those with upper bound at or before now - retention
+        loop each expired month
+            P->>DB: LOCK TABLE rle_decision_YYYY_MM IN SHARE MODE
+            P->>DB: SELECT tenant_id, count(*) GROUP BY tenant_id
+            P->>DB: INSERT rle_decision_log_drop, one row per tenant and one for '*'
+            P->>DB: DROP TABLE rle_decision_YYYY_MM
+        end
+        alt a lock waits past 2 s
+            DB-->>P: lock timeout, ROLLBACK: nothing dropped or recorded
+            P-->>J: logged at WARN, the next daily run retries
+        else
+            P->>DB: COMMIT
+            P-->>J: dropped months and counts, logged at WARN
+        end
+    else no retention (dev only)
+        Note over J: nothing is ever dropped
+    end
+```
+
 | Rule | Detail |
 |---|---|
 | Boundaries | Calendar months in UTC, half-open `[first day, first day of next month)`; names `rle_decision_YYYY_MM` |
 | Creation | Daily and at start-up, months up to `now() + decision-log.partitions-ahead` (7 days), and always the current and the next month; one replica at a time through a transaction-scoped advisory lock (no session state, `TR-OPS-05`); `lock_timeout = 5s`, retried on the next run. Runs on the starter's daemon thread `horus-rle-partitions` (`DecisionLogPartitions.ensureAhead`) |
 | Default partition | Should stay empty. If it holds rows of a month being created, they are copied into the new partition and removed from the default in the same transaction before `ATTACH`; this moves rows without losing any, and the bounded `DELETE` names `rle_decision_default` only, never `rle_decision`. Gauge `horus_rle_partition_default_rows` alerts above 0; it is read from `rle_decision_default` when the registry asks and is bound only when the host has Micrometer |
-| Retention | From M3 (PD-050): partitions whose upper bound is before `now() - decision-log.retention` are dropped with `lock_timeout = 2s`; the period is required outside `dev`, in whole months, at least `P12M`. In `dev`, and before M3, nothing is dropped. No row is ever deleted by date (`TR-OBS-01`) |
+| Retention | PD-050, #104: after creating the months ahead, the same job drops each monthly partition whose upper bound is at or before the cutoff, the host clock minus `decision-log.retention` in UTC calendar months (`P12M` at `2028-02-03` is `2027-02-03`, so `rle_decision_2027_01` goes and `2027_02` stays). One transaction under the same advisory lock, `lock_timeout = 2s`: per expired month, `LOCK` the partition in `SHARE` mode, count its rows per tenant, insert the record into `rle_decision_log_drop`, then `DROP TABLE`. Either every expired month is dropped and recorded, or none is and the next run retries. The default partition is never dropped. Each drop is logged at WARN with its counts. The period is required outside `dev`, in whole months, at least `decision-log.retention-floor` (`P12M`); without it nothing is ever dropped. No row is ever deleted by date (`TR-OBS-01`) |
+| Drop record | `rle_decision_log_drop` (V19), append-only: triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` (SQLSTATE `55000`). One row per tenant that had decisions in the month, with its count, and one row with `tenant_id = '*'` holding the total, so an empty month is recorded too; each row carries the partition, its range, the retention and the cutoff in force and `dropped_at`. It holds counts only, never decision data, and no API returns it |
 | Lock impact | `ATTACH` takes `SHARE UPDATE EXCLUSIVE` on the parent and does not block inserts. `DROP TABLE` of a partition takes `ACCESS EXCLUSIVE` on the parent; inserts queue behind it for at most the 2 s `lock_timeout`, once a month |
 
 ## 6. Runtime mechanics and capacity math
@@ -748,6 +861,9 @@ Targets, not measurements, on the reference shape (one replica, 20-connection po
 | Lifecycle sweep | 1,000 published versions across all tenants, every `PT1M` | One index-only scan of `idx_rle_version_published` (about 1,000 entries, under 5 ms) and normally zero rows updated | 10,000 published versions: about 20 ms a minute, 0.03 percent of one connection | None needed; the interval can be raised |
 | Epoch sweep | 50 cached tenants, every 5 s | 10 indexed reads/s per replica | 500 tenants x 10 replicas: 1,000 reads/s | Sweep only tenants evaluated since the last sweep |
 | `GET /decisions` | One rule set, at most 31 days, page 200 | `idx_rle_decision_lookup` range in at most 2 partitions | Same per request | ADR-0015 bounds |
+| `GET /decisions?correlationId=` | One case reference, at most 31 days, page 200 | `idx_rle_decision_correlation` range in at most 2 partitions, one tenant's few rows for one reference | Same per request | ADR-0015 bounds; the statement timeout (2 s) |
+| `POST /decisions:find-by-input` | One rule set, at most 31 days, page 200 | Tenant and rule set range as `GET /decisions`, then a JSONB equality filter on the period's rows | A busy rule set (millions a month) reads the period's rows until a page fills | The statement timeout (2 s) refuses the rest; narrow the period. A GIN index is not added until a measured need |
+| `:evaluate-batch` | 1,000 items, one transaction | One version read, 1,000 inserts in the caller's transaction, one regex counter | Same per request | `evaluation.max-batch`, 4 MiB body, `regex-max-reads-per-request` |
 | Partition `DROP` | Once a month | Inserts wait at most 2 s | Same | Run in the host's quiet hours with `decision-log.retention-window` if needed (open question 7.4) |
 
 ## 7. Open questions

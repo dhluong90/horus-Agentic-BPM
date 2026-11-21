@@ -23,7 +23,9 @@ class RuleEngineModuleDescriptorTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(RuleEngineAutoConfiguration.class))
-            .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class);
+            .withUserConfiguration(RuleEngineAutoConfigurationTest.HostWithEngineStandIns.class)
+            // Outside the dev profile a host sets how long decisions are kept (PD-050).
+            .withPropertyValues(RuleEngineAutoConfigurationTest.RETENTION);
 
     @Test
     void RLE_019_rules_entry_has_api_v1_the_build_version_and_the_seven_permissions() {
@@ -68,15 +70,15 @@ class RuleEngineModuleDescriptorTest {
     }
 
     @Test
-    void RLE_026_the_shared_last_version_setting_is_published_and_four_eyes_is_refused_until_it_ships() {
+    void RLE_026_the_shared_last_version_setting_is_published_with_every_value() {
         // PD-101: one host property for both engines, shown in the rules settings
         runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=refuse")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsEntry("lifecycle.retire-last-version", "refuse"));
+        // RLE-038: four-eyes for the last version in effect is built and published as set
         runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=four-eyes")
-                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
-                        .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
-                        .hasMessageContaining("four-eyes is not built in this release"));
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.retire-last-version", "four-eyes"));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-last-version=sometimes")
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageContaining("horus.bpm.lifecycle.retire-last-version")
@@ -84,7 +86,7 @@ class RuleEngineModuleDescriptorTest {
     }
 
     @Test
-    void RLE_026_the_retirement_mode_is_published_and_four_eyes_is_refused_until_it_ships() {
+    void RLE_038_the_retirement_mode_is_published_single_by_default_or_four_eyes() {
         // PD-080: the mode in force is always in /api/bpm/meta, after the draft-editing setting
         runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                 .containsExactly(Map.entry("authoring.cockpit-drafts", false),
@@ -96,9 +98,11 @@ class RuleEngineModuleDescriptorTest {
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsEntry("lifecycle.retire-approval", "single"));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=four-eyes")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.retire-approval", "four-eyes"));
+        runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=dual")
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
-                        .hasMessageContaining("horus.bpm.lifecycle.retire-approval")
-                        .hasMessageContaining("four-eyes arrives in M3"));
+                        .hasMessageContaining("horus.bpm.lifecycle.retire-approval"));
     }
 
     @Test

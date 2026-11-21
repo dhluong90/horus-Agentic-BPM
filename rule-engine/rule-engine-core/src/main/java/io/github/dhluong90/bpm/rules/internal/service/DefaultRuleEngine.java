@@ -1,14 +1,20 @@
 package io.github.dhluong90.bpm.rules.internal.service;
 
+import io.github.dhluong90.bpm.rules.api.BatchRequest;
+import io.github.dhluong90.bpm.rules.api.BatchResult;
+import io.github.dhluong90.bpm.rules.api.BatchTooLargeException;
 import io.github.dhluong90.bpm.rules.api.ClockNotAllowedException;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
+import io.github.dhluong90.bpm.rules.api.HistorySimulation;
+import io.github.dhluong90.bpm.rules.api.HistorySimulationResult;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
+import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
@@ -31,8 +37,10 @@ import io.github.dhluong90.bpm.rules.internal.store.DecisionLog;
 import io.github.dhluong90.bpm.rules.internal.store.DecisionRecord;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,11 +51,12 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Evaluates the version in force at the decision's clock, or a pinned approved version, and logs one decision row in
  * the caller's transaction (RLE-013); replays a logged decision without writing; simulates a stored version over
- * sample inputs without logging anything (RLE-016). Compiled versions are cached by version id and canonical hash, so
+ * sample inputs (RLE-016) or over the logged decisions of a period (RLE-015) without logging anything. Compiled versions are cached by version id and canonical hash, so
  * a cached entry is never served for other content and that map needs no invalidation; its size is bounded by
  * {@code cache.max-entries} and a full map is cleared. The selection of the version in force is served from the
  * {@link CompiledCache} while the evaluation instant lies inside the entry's window and its epoch holds, so a cached
@@ -78,6 +87,8 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final DecisionLog log;
     private final Map<String, CompiledRuleSet> compiled = new ConcurrentHashMap<>();
     private final CompiledCache cache;
+    private final DecisionQuerySettings querySettings;
+    private final EngineMeters meters;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
 
     /**
@@ -92,10 +103,27 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache) {
+        this(context, store, log, cache, DecisionQuerySettings.defaults(), new EngineMeters());
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            DecisionQuerySettings querySettings) {
+        this(context, store, log, cache, querySettings, new EngineMeters());
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            EngineMeters meters) {
+        this(context, store, log, cache, DecisionQuerySettings.defaults(), meters);
+    }
+
+    DefaultRuleEngine(EngineContext context, RuleStore store, DecisionLog log, CompiledCache cache,
+            DecisionQuerySettings querySettings, EngineMeters meters) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.log = Objects.requireNonNull(log, "log must not be null");
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
+        this.querySettings = Objects.requireNonNull(querySettings, "querySettings must not be null");
+        this.meters = Objects.requireNonNull(meters, "meters must not be null");
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -111,14 +139,33 @@ public final class DefaultRuleEngine implements RuleEngine {
     @Override
     public DecisionResult evaluate(DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
-        String tenant = context.tenant();
-        // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
-        String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
-        if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
-            // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
-            throw new ClockNotAllowedException();
+        return measured(() -> {
+            String tenant = context.tenant();
+            // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
+            String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
+            if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
+                // A chosen instant reaches versions and dates the caller would not get at the host clock (DESIGN 4.2).
+                throw new ClockNotAllowedException();
+            }
+            return evaluateUnmeasured(tenant, caller, null, null, request);
+        });
+    }
+
+    /**
+     * Times one evaluation call and records how it ended (DESIGN 4.8): a refusal is recorded with its error code,
+     * then thrown on unchanged.
+     */
+    private DecisionResult measured(java.util.function.Supplier<DecisionResult> call) {
+        long started = System.nanoTime();
+        DecisionResult result;
+        try {
+            result = call.get();
+        } catch (RuntimeException failure) {
+            meters.refused(failure, System.nanoTime() - started);
+            throw failure;
         }
-        return evaluateAs(tenant, caller, request);
+        meters.evaluated(result, System.nanoTime() - started);
+        return result;
     }
 
     /**
@@ -133,7 +180,8 @@ public final class DefaultRuleEngine implements RuleEngine {
     /**
      * Evaluates for an embedded engine (ADR-0027): as {@code caller}, on behalf of {@code onBehalfOf}, at the calling
      * engine's clock {@code engineTime}. Neither the time nor {@code onBehalfOf} is part of the request hash: a retried
-     * step comes later on the clock and must replay the logged decision, with its original evaluation time.
+     * step comes later on the clock and must replay the logged decision, with its original evaluation time. Timed and
+     * recorded as one evaluation call (DESIGN 4.8).
      *
      * @param tenant the tenant
      * @param caller the caller identity written to the log
@@ -143,6 +191,11 @@ public final class DefaultRuleEngine implements RuleEngine {
      * @return the logged result
      */
     DecisionResult evaluateAs(String tenant, String caller, String onBehalfOf, Instant engineTime,
+            DecisionRequest request) {
+        return measured(() -> evaluateUnmeasured(tenant, caller, onBehalfOf, engineTime, request));
+    }
+
+    private DecisionResult evaluateUnmeasured(String tenant, String caller, String onBehalfOf, Instant engineTime,
             DecisionRequest request) {
         if (request.correlationId() != null && !CorrelationIds.isValid(request.correlationId())) {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
@@ -159,6 +212,126 @@ public final class DefaultRuleEngine implements RuleEngine {
                 () -> doEvaluate(tenant, caller, onBehalfOf, engineTime == null ? request : request.withClock(engineTime)),
                 result -> EngineValues.write(EngineValues.decision(result)),
                 json -> typed(tenant, EngineValues.decisionFromJson(json)));
+    }
+
+    @Override
+    public BatchResult evaluateBatch(BatchRequest request) {
+        Objects.requireNonNull(request, "request must not be null");
+        String tenant = context.tenant();
+        String caller = context.callerWith(PERMISSION_EVALUATE);
+        if (request.clock() != null && !context.holds(PERMISSION_SIMULATE)) {
+            throw new ClockNotAllowedException();
+        }
+        // Whole-batch bounds first: nothing is read, evaluated or written for a batch that is refused (RLE-068).
+        int limit = context.settings().maxBatch();
+        int count = request.items().size();
+        if (count == 0) {
+            throw new InputInvalidException("items must hold 1 to " + limit + " items (evaluation.max-batch)");
+        }
+        if (count > limit) {
+            throw new BatchTooLargeException(count, limit);
+        }
+        List<String> parts = new ArrayList<>(count + 5);
+        parts.add("evaluate-batch");
+        parts.add(caller);
+        parts.add(request.ruleSet());
+        parts.add(String.valueOf(request.clock()));
+        for (BatchRequest.Item item : request.items()) {
+            // A correlation id is not part of the idempotent request, as on :evaluate.
+            parts.add(item.input() == null ? null : ExactForm.of(item.input()));
+        }
+        String requestHash = Hashes.sha256Parts(parts.toArray(String[]::new));
+        return context.idempotent(tenant, "evaluate-batch", request.idempotencyKey(), requestHash, 200,
+                () -> doBatch(tenant, caller, request),
+                result -> EngineValues.write(batchJson(result)),
+                json -> typedBatch(tenant, batchFromJson(json)));
+    }
+
+    private BatchResult doBatch(String tenant, String caller, BatchRequest request) {
+        Instant now = context.clock().instant();
+        Instant at = request.clock() == null ? now : request.clock();
+        // One version for the whole batch, selected once at the request clock (RLE-067).
+        Selected selected = select(tenant, request.ruleSet(), null, at);
+        // One regex read budget for every decision of the batch (evaluation.regex-max-reads-per-request, RLE-007):
+        // once it stops a match, no later item is evaluated, and the same batch stops at the same item on replay.
+        RequestReads reads = context.settings().regexLimits().newRequest();
+        List<BatchResult.Item> items = new ArrayList<>(request.items().size());
+        int stoppedAt = -1;
+        for (int i = 0; i < request.items().size(); i++) {
+            BatchRequest.Item item = request.items().get(i);
+            if (reads.spent()) {
+                DecisionResult.Failed notRun = notRun(reads);
+                items.add(BatchResult.Item.refused(i, notRun.code(), notRun.detail()));
+                continue;
+            }
+            try {
+                if (item.correlationId() != null && !CorrelationIds.isValid(item.correlationId())) {
+                    throw new InputInvalidException("correlationId must be 1 to "
+                            + EngineDefaults.CORRELATION_ID_MAX_LENGTH
+                            + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");
+                }
+                InputLimits.check(item.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale(),
+                        context.settings().maxStringLength());
+                DecisionRequest single = DecisionRequest.of(request.ruleSet(), item.input())
+                        .withCorrelationId(item.correlationId());
+                items.add(BatchResult.Item.decided(i,
+                        decide(tenant, caller, null, single, selected, now, at, reads)));
+            } catch (InputInvalidException e) {
+                // An input that fails validation is not a decision: no row, and the other items go on.
+                items.add(BatchResult.Item.refused(i, e.code(), e.getMessage()));
+            }
+            if (reads.spent() && stoppedAt < 0) {
+                stoppedAt = i;
+                System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.WARNING,
+                        "Batch of " + request.ruleSet() + " for tenant " + tenant + " stopped at item " + i + " of "
+                                + request.items().size() + ": evaluation.regex-max-reads-per-request ("
+                                + reads.budget() + ") spent");
+            }
+        }
+        return new BatchResult(selected.version().ruleSet(), selected.version().version(), at, items);
+    }
+
+    /** The stored form of a batch: the version and clock, and per item a decision as on {@code :evaluate} or a problem. */
+    private static ObjectNode batchJson(BatchResult result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("clock", result.clock().toString());
+        ArrayNode items = node.putArray("items");
+        for (BatchResult.Item item : result.items()) {
+            ObjectNode entry = items.addObject().put("index", item.index());
+            if (item.decision() != null) {
+                entry.set("decision", EngineValues.decision(item.decision()));
+            } else {
+                entry.put("code", item.code()).put("detail", item.detail());
+            }
+        }
+        return node;
+    }
+
+    private static BatchResult batchFromJson(String json) {
+        JsonNode node = EngineValues.read(json);
+        List<BatchResult.Item> items = new ArrayList<>();
+        for (JsonNode entry : node.get("items")) {
+            int index = entry.get("index").asInt();
+            items.add(entry.has("decision")
+                    ? BatchResult.Item.decided(index, EngineValues.decisionFromJson(EngineValues.write(entry.get("decision"))))
+                    : BatchResult.Item.refused(index, entry.get("code").stringValue(), entry.get("detail").stringValue()));
+        }
+        return new BatchResult(node.get("ruleSet").stringValue(), node.get("version").asInt(),
+                Instant.parse(node.get("clock").stringValue()), items);
+    }
+
+    /** Gives a replayed batch the output types of a fresh one, item by item, as a replayed {@code :evaluate} gets. */
+    private BatchResult typedBatch(String tenant, BatchResult stored) {
+        List<BatchResult.Item> items = new ArrayList<>(stored.items().size());
+        // One version for the whole batch, so one read, not one per item.
+        CompiledRuleSet rules = versionRules(tenant, stored.ruleSet(), stored.version());
+        for (BatchResult.Item item : stored.items()) {
+            items.add(item.decision() == null ? item
+                    : BatchResult.Item.decided(item.index(), typed(item.decision(), rules)));
+        }
+        return new BatchResult(stored.ruleSet(), stored.version(), stored.clock(), items);
     }
 
     @Override
@@ -223,6 +396,112 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
         return new SimulationResult(simulated.ruleSet(), simulated.version(), simulated.status(),
                 effective == null ? null : effective.version(), now, results);
+    }
+
+    @Override
+    public HistorySimulationResult simulateHistory(String ruleSet, int version, HistorySimulation request) {
+        String tenant = context.tenant();
+        // Permissions first: without both, the engine reads and evaluates nothing (DESIGN 4.2.2).
+        context.callerWith(PERMISSION_SIMULATE);
+        context.callerWith(PERMISSION_LOG_READ);
+        int limit = historyLimit(request);
+        return context.withoutDooming(() -> doSimulateHistory(tenant, ruleSet, version, request, limit));
+    }
+
+    /** The period and the limit of a history simulation, checked before any read (RLE-015). */
+    private int historyLimit(HistorySimulation request) {
+        if (request == null || request.from() == null || request.to() == null) {
+            throw new QueryInvalidException("from and to are required");
+        }
+        if (!request.to().isAfter(request.from())) {
+            throw new QueryInvalidException("to must be after from");
+        }
+        Duration range = Duration.between(request.from(), request.to());
+        if (range.compareTo(querySettings.maxRange()) > 0) {
+            throw new QueryInvalidException("from and to may be at most " + querySettings.maxRange().toDays()
+                    + " days apart (query.max-range " + querySettings.maxRange() + "), were " + range);
+        }
+        int max = context.settings().simulationMaxInputs();
+        if (request.limit() == null) {
+            return max;
+        }
+        if (request.limit() < 1 || request.limit() > max) {
+            throw new QueryInvalidException("limit must be 1 to " + max + " (simulation.max-inputs), was "
+                    + request.limit());
+        }
+        return request.limit();
+    }
+
+    private HistorySimulationResult doSimulateHistory(String tenant, String ruleSet, int number,
+            HistorySimulation period, int limit) {
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new VersionNotFoundException("(invalid name)", number);
+        }
+        // Any tenant but the caller's has no such version: the same answer whether or not the rule set exists, and
+        // no decision is read.
+        StoredVersion simulated = store.findVersion(tenant, ruleSet, number, false)
+                .orElseThrow(() -> new VersionNotFoundException(ruleSet, number));
+        CompiledRuleSet draftRules = validated(simulated);
+        Set<String> draftInputs = new HashSet<>();
+        draftRules.inputs().forEach(clause -> draftInputs.add(clause.name()));
+        // One read, tenant and rule set first and the period on the partition key, newest first; one row more than
+        // the limit tells whether the period held more.
+        List<DecisionRecord> rows = log.search(tenant, ruleSet, period.from(), period.to(), null, limit + 1,
+                querySettings.statementTimeout());
+        boolean truncated = rows.size() > limit;
+        Map<Integer, CompiledRuleSet> loggedVersions = new HashMap<>();
+        RequestReads request = context.settings().regexLimits().newRequest();
+        List<HistorySimulationResult.Item> items = new ArrayList<>(Math.min(rows.size(), limit));
+        boolean warned = false;
+        for (DecisionRecord row : rows.subList(0, Math.min(rows.size(), limit))) {
+            CompiledRuleSet loggedRules = loggedVersions.computeIfAbsent(row.version(),
+                    v -> loggedRules(tenant, ruleSet, v));
+            if (loggedRules == null) {
+                // The logged version no longer compiles or hashes: what was decided cannot be evaluated again.
+                DecisionResult.Outcome failed = new DecisionResult.Failed("EVALUATION_ERROR", "Logged version "
+                        + row.version() + " of " + ruleSet + " cannot be evaluated again");
+                items.add(new HistorySimulationResult.Item(row.id(), row.version(), row.evalClock(), null, failed,
+                        false, List.of()));
+                continue;
+            }
+            List<String> masked = maskedWithValue(row, loggedRules.inputs());
+            if (!masked.isEmpty()) {
+                items.add(new HistorySimulationResult.Item(row.id(), row.version(), row.evalClock(), null, null,
+                        false, masked));
+                continue;
+            }
+            DecisionInput input = EngineValues.inputsFromJson(EngineValues.read(row.maskedInputsJson()));
+            DecisionResult.Outcome logged = request.spent() ? notRun(request)
+                    : loggedRules.evaluateWithReason(input, row.evalClock(), request).outcome();
+            DecisionResult.Outcome draft = request.spent() ? notRun(request)
+                    : draftRules.evaluateWithReason(only(input, draftInputs), row.evalClock(), request).outcome();
+            if (request.spent() && !warned) {
+                warned = true;
+                System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.WARNING,
+                        "History simulation of " + ruleSet + " v" + number + " for tenant " + tenant + " stopped at "
+                                + "decision " + row.id() + ": evaluation.regex-max-reads-per-request ("
+                                + request.budget() + ") spent");
+            }
+            items.add(new HistorySimulationResult.Item(row.id(), row.version(), row.evalClock(), draft, logged,
+                    changed(draft, logged), List.of()));
+        }
+        return new HistorySimulationResult(simulated.ruleSet(), simulated.version(), simulated.status(),
+                period.from(), period.to(), truncated, items);
+    }
+
+    /** A logged version by number, never selected, as replay loads it; null when it cannot be evaluated again. */
+    private CompiledRuleSet loggedRules(String tenant, String ruleSet, int number) {
+        StoredVersion version = store.findVersion(tenant, ruleSet, number, false).orElse(null);
+        if (version == null) {
+            return null;
+        }
+        try {
+            return compiled(version);
+        } catch (IntegrityFailure failure) {
+            System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
+                    "ALERT rule set integrity: tenant " + tenant + ", " + failure.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -295,18 +574,28 @@ public final class DefaultRuleEngine implements RuleEngine {
         if (!text || stored.outcome() instanceof DecisionResult.Failed) {
             return stored;
         }
-        StoredVersion version = store.findVersion(tenant, stored.ruleSet(), stored.version(), false).orElse(null);
-        if (version == null) {
-            return stored;
+        return typed(stored, versionRules(tenant, stored.ruleSet(), stored.version()));
+    }
+
+    /** The compiled version a stored decision was made with, or null when it cannot be read back. */
+    private CompiledRuleSet versionRules(String tenant, String ruleSet, int version) {
+        StoredVersion stored = store.findVersion(tenant, ruleSet, version, false).orElse(null);
+        if (stored == null) {
+            return null;
         }
-        CompiledRuleSet rules;
         try {
-            rules = compiled(version);
+            return compiled(stored);
         } catch (IntegrityFailure failure) {
+            return null;
+        }
+    }
+
+    private static DecisionResult typed(DecisionResult stored, CompiledRuleSet rules) {
+        if (rules == null || stored.outcome() instanceof DecisionResult.Failed) {
             return stored;
         }
         Map<String, Object> typed = new java.util.LinkedHashMap<>();
-        for (Map.Entry<String, Object> output : outputs.entrySet()) {
+        for (Map.Entry<String, Object> output : stored.outputs().entrySet()) {
             io.github.dhluong90.bpm.rules.internal.model.ValueType.Kind kind = rules.outputs().stream()
                     .filter(clause -> clause.name().equals(output.getKey())).findFirst()
                     .map(clause -> clause.type().kind()).orElse(null);
@@ -334,37 +623,85 @@ public final class DefaultRuleEngine implements RuleEngine {
         return value;
     }
 
+    /**
+     * The hit policy and declared inputs and outputs of the version effective at {@code at}; only
+     * {@link EngineScopedRuleEngine} calls it. Reads only.
+     *
+     * @param tenant the tenant
+     * @param ruleSet the rule set name
+     * @param at the instant that selects the version
+     * @return the signature
+     */
+    io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signatureAs(String tenant, String ruleSet, Instant at) {
+        if (!io.github.dhluong90.bpm.rules.internal.read.RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new RuleSetNotFoundException("(invalid name)");
+        }
+        return context.withoutDooming(() -> {
+            StoredVersion version = effective(tenant, ruleSet, at).version();
+            CompiledRuleSet rules = validated(version);
+            Map<String, String> inputs = new java.util.LinkedHashMap<>();
+            rules.inputs().forEach(clause -> inputs.put(clause.name(), clause.type().toString()));
+            Map<String, String> outputs = new java.util.LinkedHashMap<>();
+            rules.outputs().forEach(clause -> outputs.put(clause.name(), clause.type().toString()));
+            return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(version.ruleSet(), version.version(),
+                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs());
+        });
+    }
+
     private DecisionResult doEvaluate(String tenant, String caller, String onBehalfOf, DecisionRequest request) {
         Instant now = context.clock().instant();
         Instant at = request.clock() == null ? now : request.clock();
-        if (!io.github.dhluong90.bpm.rules.internal.read.RuleSetReader.isRuleSetName(request.ruleSet())) {
+        Selected selected = select(tenant, request.ruleSet(), request.version(), at);
+        return decide(tenant, caller, onBehalfOf, request, selected, now, at, null);
+    }
+
+    /** The version an evaluation uses, compiled, or the integrity failure that stops it. */
+    private record Selected(StoredVersion version, CompiledRuleSet rules, IntegrityFailure failure) {
+    }
+
+    /**
+     * Selects the version in force at {@code at}, or the pinned one, and compiles it. A selection that cannot be
+     * served is not found or has no effective version; a version whose stored hash no longer matches is returned
+     * with its failure, so each decision on it is refused and logged.
+     */
+    private Selected select(String tenant, String ruleSet, Integer pin, Instant at) {
+        if (!io.github.dhluong90.bpm.rules.internal.read.RuleSetReader.isRuleSetName(ruleSet)) {
             // Not a possible name (a NUL byte, upper case): not found, without a query the driver would refuse.
             throw new RuleSetNotFoundException("(invalid name)");
         }
-        StoredVersion version;
-        CompiledRuleSet rules;
-        if (request.version() == null) {
-            CompiledCache.Entry entry = cache.get(tenant, request.ruleSet(), at);
+        if (pin == null) {
+            CompiledCache.Entry entry = cache.get(tenant, ruleSet, at);
             if (entry == null) {
-                RuleStore.EffectiveVersion effective = effective(tenant, request.ruleSet(), at);
+                RuleStore.EffectiveVersion effective = effective(tenant, ruleSet, at);
                 try {
                     entry = new CompiledCache.Entry(effective.version(), compiled(effective.version()),
                             effective.cacheEpoch(), effective.validFrom(), effective.nextEffectiveFrom());
                 } catch (IntegrityFailure failure) {
-                    return refuseTampered(tenant, caller, onBehalfOf, request, effective.version(), now, at, failure);
+                    return new Selected(effective.version(), null, failure);
                 }
                 cache.put(entry);
             }
-            version = entry.version();
-            rules = entry.compiled();
-        } else {
-            version = pinned(tenant, request.ruleSet(), request.version());
-            try {
-                rules = compiled(version);
-            } catch (IntegrityFailure failure) {
-                return refuseTampered(tenant, caller, onBehalfOf, request, version, now, at, failure);
-            }
+            return new Selected(entry.version(), entry.compiled(), null);
         }
+        StoredVersion version = pinned(tenant, ruleSet, pin);
+        try {
+            return new Selected(version, compiled(version), null);
+        } catch (IntegrityFailure failure) {
+            return new Selected(version, null, failure);
+        }
+    }
+
+    /**
+     * Evaluates one request on a selected version and logs exactly one decision row. {@code requestReads}, when not
+     * null, is the regex budget of the batch the item belongs to (RLE-007).
+     */
+    private DecisionResult decide(String tenant, String caller, String onBehalfOf, DecisionRequest request,
+            Selected selected, Instant now, Instant at, RequestReads requestReads) {
+        StoredVersion version = selected.version();
+        if (selected.failure() != null) {
+            return refuseTampered(tenant, caller, onBehalfOf, request, version, now, at, selected.failure());
+        }
+        CompiledRuleSet rules = selected.rules();
         if (context.settings().rejectUndeclaredInputs()) {
             rules.requireOnlyDeclared(request.input());
         }
@@ -389,7 +726,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                     + " so the plain value is not logged");
         }
         long started = System.nanoTime();
-        CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(request.input(), at);
+        CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(request.input(), at, requestReads);
         DecisionResult.Outcome outcome = evaluation.outcome();
         long micros = (System.nanoTime() - started) / 1_000;
         boolean pinned = request.version() != null;
@@ -482,6 +819,15 @@ public final class DefaultRuleEngine implements RuleEngine {
      * tenant's default, which the version does not declare, is recognised by its fingerprint form.
      */
     private static DecisionInput loggedInput(String decisionId, DecisionRecord logged, List<InputClause> declared) {
+        List<String> masked = maskedWithValue(logged, declared);
+        if (!masked.isEmpty()) {
+            throw new ReplayNotPossibleException(decisionId, masked);
+        }
+        return EngineValues.inputsFromJson(EngineValues.read(logged.maskedInputsJson()));
+    }
+
+    /** The declared inputs a decision logged only as a fingerprint, so it cannot be evaluated again; names only. */
+    private static List<String> maskedWithValue(DecisionRecord logged, List<InputClause> declared) {
         JsonNode inputs = EngineValues.read(logged.maskedInputsJson());
         List<String> masked = new ArrayList<>();
         for (InputClause clause : declared) {
@@ -491,10 +837,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                 masked.add(clause.name());
             }
         }
-        if (!masked.isEmpty()) {
-            throw new ReplayNotPossibleException(decisionId, masked);
-        }
-        return EngineValues.inputsFromJson(inputs);
+        return masked;
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {

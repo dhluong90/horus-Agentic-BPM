@@ -10,6 +10,10 @@ import java.util.Objects;
  * What a {@link ServiceAdapter} receives for one attempt of a remote step: only the declared inputs, never the whole
  * variable set.
  *
+ * <p>Evolution: the engine builds this record; a host only reads it. New components may be added in a minor release,
+ * so read it through its accessors and do not construct or deconstruct it in production code. Tests build one with
+ * {@code AdapterCalls.builder()} from the test-support module, which keeps compiling when a component is added.
+ *
  * @param tenantId the instance's tenant
  * @param instanceId the instance id
  * @param nodeId the step id

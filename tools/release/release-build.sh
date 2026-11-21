@@ -35,7 +35,8 @@
 #   4. Publishing guard, then mvn deploy into target/release/maven-repo with every test and gate.
 #   5. The staged starter jar must carry exactly the bundle recorded in step 3.
 #   6. npm SBOM, after the jar is sealed: every bundled package must be a production dependency with an
-#      allowed licence; the SBOMs are merged and validated against CycloneDX 1.6.
+#      allowed licence; the SBOMs are merged and validated against CycloneDX 1.6. The release SBOM must
+#      hold none of the test-only FEEL oracle artifacts (tools/licence-policy/test-oracle-allow-list.txt).
 #   7. SHA256SUMS over target/release.
 # Without cockpit sources (cockpit/web/package.json absent) the cockpit parts of steps 2, 3, 5 and 6 are
 # skipped and the release is Java only; the log says so.
@@ -156,6 +157,8 @@ else
   python3 "$SBOM_PY" merge "$OUT/bom.json" - "$OUT/bom-release.json" --build-info "$OUT/BUILD-INFO.json"
 fi
 (cd "$TOOLS" && node ../validate-sbom.mjs "$OUT/bom-release.json")
+# PD-098: the reference FEEL engine and its runtime are test scope only and never ship.
+python3 "$ROOT/tools/check-test-oracle.py" sbom "$OUT/bom-release.json"
 
 step "7. SHA256SUMS over target/release"
 python3 "$SBOM_PY" manifest "$OUT" "$OUT/SHA256SUMS" --exclude SHA256SUMS

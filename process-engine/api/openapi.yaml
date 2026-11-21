@@ -52,12 +52,17 @@ paths:
         (`horus:mode="remote"`, optional `horus:timeout`, run as an Async Wait-State), `businessRuleTask`,
         `userTask` with `horus:resultVariable`, `exclusiveGateway` with conditions and a default flow, and an
         intermediate timer catch event with `timeDuration` or `timeDate`) from a UTF-8
-        document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), every element outside the subset is named with
-        its id and line (`BPMN_UNSUPPORTED_ELEMENT`), and a condition in another expression language is
-        `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
+        document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), a CMMN root element is
+        `422 CMMN_UNSUPPORTED` before any other check (`PRE-107`), every element or behaviour attribute outside
+        the subset is named with its id, line and stage in `BPMN_UNSUPPORTED_ELEMENT` (`PRE-108`), and a condition
+        in another expression language has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. Vendor
+        attributes and extensions are kept in the stored source and listed as `warnings`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
         document identical to the latest version of its key returns that version, also with `201`. A draft is never
-        the effective version: instances keep starting on the active one until the draft is approved. Permission
-        `processes:deploy`.
+        the effective version: instances keep starting on the active one until the draft is approved. An `agentTask`
+        whose guardrail rule set breaks the guardrail contract (missing in the tenant or without a version in effect,
+        hit policy other than `first` or `unique`, no `allow: boolean` output, `reasons` other than a string, or an
+        input the output schema does not declare) is `422 GUARDRAIL_CONTRACT_INVALID`, with `problems` naming the
+        step and the failed check; nothing is written. Permission `processes:deploy`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -168,7 +173,9 @@ paths:
         `DRAFT` to `PENDING_APPROVAL`; the caller is recorded as requester and can never approve this version.
         `effectiveFrom` is when the version should take effect once approved; omitted means at approval; a time in
         the past is `400 INPUT_INVALID`. A version that is not a draft is `409 INVALID_STATE`. Publishes
-        `processes.definition.publish-requested.v1`. Permission `processes:author` or `processes:deploy`.
+        `processes.definition.publish-requested.v1`. The guardrail contract of every `agentTask` is checked again
+        against the rule set version in effect now (`422 GUARDRAIL_CONTRACT_INVALID`, nothing written). Permission
+        `processes:author` or `processes:deploy`.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -203,7 +210,9 @@ paths:
         makers` also the importer, is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written. A newer version of the key already active is `409 VERSION_SUPERSEDED`, and the version stays
         pending. The version is the effective one from its `effectiveFrom` (or now); at that time every older active
         version of the key is retired, once, with `processes.definition.retired.v1` and `supersededBy`. Running
-        instances keep their version. Publishes `processes.definition.approved.v1`. Permission `processes:approve`.
+        instances keep their version. Publishes `processes.definition.approved.v1`. The guardrail contract of every
+        `agentTask` is checked again, as at import (`422 GUARDRAIL_CONTRACT_INVALID`; the version stays pending).
+        Permission `processes:approve`.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -713,7 +722,14 @@ paths:
                 result:
                   type: object
                   additionalProperties: true
-            example: { result: { approved: true } }
+                reason:
+                  type: string
+                  maxLength: 2000
+                  description: >-
+                    Why the reviewer answered as they did. On the review task of a refused agent answer it is
+                    recorded with the reviewer's answer in the `HUMAN_OVERRIDE` history entry; ignored on other
+                    tasks. Longer than `lifecycle.reason-max-length` is `400 INPUT_INVALID`.
+            example: { result: { riskScore: 85, recommendation: REJECT }, reason: Salary slips do not match the declared income }
       responses:
         '200':
           $ref: '#/components/responses/Instance'
@@ -832,7 +848,7 @@ components:
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
         `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
-        `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
+        `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` or `FORM_VALIDATION_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
         back), with a correlation id only.
@@ -953,9 +969,11 @@ components:
         reasons: { type: array, items: { type: string } }
         ruleIds: { type: array, items: { type: string }, description: The matched guardrail rules }
         guardrailDecisionId: { type: string, description: 'The guardrail decision in the Rule Engine log, when one was logged' }
-        inputs: { type: object, additionalProperties: true, description: The bounded inputs the agent received }
+        inputs: { type: object, additionalProperties: true, description: 'The bounded inputs the agent received; an input the step marks mask="true" is its keyed fingerprint (hmac:<keyId>:<hex>) or ***, never the plain value' }
         output: { type: object, additionalProperties: true, description: The refused answer, masked }
         outputFields: { type: integer, description: Number of top-level fields in the answer }
+        attemptId: { type: string, description: The refused attempt }
+        reportedBy: { type: string, description: 'Who reported the refused answer: the engine replica, or the caller of the completion API. Never the reviewer (four eyes)' }
     DefinitionSummary:
       type: object
       required: [key, latestVersion, latestStatus, lastChangedAt]
@@ -1110,8 +1128,14 @@ components:
         code: { type: string }
         message: { type: string }
         element: { type: [string, 'null'] }
-        elementId: { type: [string, 'null'], description: At most 80 characters, control characters escaped }
+        elementId: { type: [string, 'null'], description: 'At most 200 characters, control characters removed' }
         line: { type: integer }
+        stage:
+          type: string
+          enum: [S1, S2, S3, not planned, S0]
+          description: >-
+            Present on a refusal of a standard: the stage of the coverage table that adds the element, or
+            `not planned`; `S0` is an element of the current stage that this release has not finished
     Problem:
       type: object
       required: [type, title, status, code, correlationId]
@@ -1124,15 +1148,26 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
-            IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, BPMN_UNSUPPORTED_ELEMENT,
-            BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
+            IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
+            CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:
           type: array
-          description: Present on `VALIDATION_FAILED` and `BPMN_UNSUPPORTED_ELEMENT`
+          description: Present on `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID` and `BPMN_UNSUPPORTED_ELEMENT`, at most 100 entries
           items: { $ref: '#/components/schemas/DefinitionProblemItem' }
+        violationsTruncated:
+          type: boolean
+          description: Present, and true, on `BPMN_UNSUPPORTED_ELEMENT` when more than 100 problems were found
+        warnings:
+          type: array
+          description: >-
+            Present on `BPMN_UNSUPPORTED_ELEMENT` when the file also has vendor attributes or extensions, listed as
+            `FOREIGN_EXTENSION_IGNORED` with the namespace in `message` and the line; the stored source keeps them
+          items: { $ref: '#/components/schemas/DefinitionProblemItem' }
+        namespace: { type: string, description: 'Present on `CMMN_UNSUPPORTED`, the namespace of the root element' }
+        line: { type: integer, description: 'Present on `CMMN_UNSUPPORTED`, the line of the root element' }
         nodeId: { type: string, description: Present on `STEP_FAILED` }
         violations:
           type: array

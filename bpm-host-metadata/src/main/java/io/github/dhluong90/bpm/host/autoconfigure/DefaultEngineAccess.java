@@ -1,9 +1,10 @@
 package io.github.dhluong90.bpm.host.autoconfigure;
 
+import io.github.dhluong90.bpm.host.internal.CorrelationIds;
 import io.github.dhluong90.bpm.host.spi.CallerContext;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
-import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException.Reason;
+import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.host.spi.TenantResolver;
@@ -70,14 +71,18 @@ final class DefaultEngineAccess implements EngineAccess {
     private final String tenantClaim;
     private final Function<Authentication, Map<String, Object>> claims;
     private final String challenge;
+    private final String groupsClaim;
+    private final List<String> displayNameClaims;
     private final List<ModuleDescriptor> modules;
 
     DefaultEngineAccess(TenantResolver resolver, String tenantClaim, Function<Authentication, Map<String, Object>> claims,
-            String challenge, List<ModuleDescriptor> modules) {
+            HostMetadataProperties.Security security, List<ModuleDescriptor> modules) {
         this.resolver = resolver;
         this.tenantClaim = tenantClaim;
         this.claims = claims;
-        this.challenge = challenge;
+        this.challenge = security.challenge();
+        this.groupsClaim = security.groupsClaim();
+        this.displayNameClaims = security.displayNameClaims();
         this.modules = List.copyOf(modules);
     }
 
@@ -153,7 +158,7 @@ final class DefaultEngineAccess implements EngineAccess {
             throw refused(request, authentication, tokenTenant, requested, "switching-off");
         }
         return new EngineCaller(authentication.getName(), displayName(context), tenant, authorities,
-                stringList(tokenClaims.get("groups")));
+                stringList(context.attributes().get(groupsClaim)));
     }
 
     /**
@@ -222,8 +227,15 @@ final class DefaultEngineAccess implements EngineAccess {
                 .collect(Collectors.toCollection(TreeSet::new));
     }
 
-    private static @Nullable String displayName(CallerContext context) {
-        return context.stringAttribute("name").or(() -> context.stringAttribute("preferred_username")).orElse(null);
+    /** The first of {@code security.display-name-claims} the principal carries as a non-blank string. */
+    private @Nullable String displayName(CallerContext context) {
+        for (String claim : displayNameClaims) {
+            Optional<String> value = context.stringAttribute(claim);
+            if (value.isPresent()) {
+                return value.get();
+            }
+        }
+        return null;
     }
 
     private static List<String> stringList(@Nullable Object claim) {

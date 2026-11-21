@@ -242,6 +242,45 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public List<String> declaredInputs(String tenantId, String ruleSet) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSet().equals(ruleSet))
+                .sorted(Comparator.comparingInt(StoredVersion::version).reversed())
+                .map(v -> io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(v.canonicalJson()).get("inputs").toString())
+                .toList();
+    }
+
+    @Override
+    public List<DecisionRecord> searchByCorrelationId(String tenantId, String correlationId, String ruleSet,
+            Instant from, Instant to, DecisionLog.Position after, int limit, java.time.Duration statementTimeout) {
+        return decisions.stream()
+                .filter(d -> d.tenantId().equals(tenantId) && correlationId.equals(d.correlationId())
+                        && (ruleSet == null || d.ruleSet().equals(ruleSet))
+                        && !d.createdAt().isBefore(from) && d.createdAt().isBefore(to))
+                .filter(r -> after == null || r.createdAt().isBefore(after.createdAt())
+                        || (r.createdAt().equals(after.createdAt()) && r.id().compareTo(after.id()) < 0))
+                .sorted(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed())
+                .limit(limit).toList();
+    }
+
+    @Override
+    public List<DecisionRecord> searchByPlainInput(String tenantId, String ruleSet, String input, String valueJson,
+            Instant from, Instant to, DecisionLog.Position after, int limit, java.time.Duration statementTimeout) {
+        var wanted = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(valueJson);
+        return decisions.stream()
+                .filter(d -> d.tenantId().equals(tenantId) && d.ruleSet().equals(ruleSet)
+                        && !d.createdAt().isBefore(from) && d.createdAt().isBefore(to))
+                .filter(d -> {
+                    var logged = io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(d.maskedInputsJson()).get(input);
+                    return logged != null && (logged.isNumber() && wanted.isNumber()
+                            ? logged.decimalValue().compareTo(wanted.decimalValue()) == 0 : logged.equals(wanted));
+                })
+                .filter(r -> after == null || r.createdAt().isBefore(after.createdAt())
+                        || (r.createdAt().equals(after.createdAt()) && r.id().compareTo(after.id()) < 0))
+                .sorted(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed())
+                .limit(limit).toList();
+    }
+
+    @Override
     public List<VersionInputs> liveVersionInputs() {
         return versions.stream().filter(v -> v.status() != VersionStatus.RETIRED)
                 .map(v -> new VersionInputs(v.tenantId(), v.ruleSet(), v.version(),

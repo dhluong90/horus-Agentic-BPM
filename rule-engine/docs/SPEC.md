@@ -161,6 +161,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Caller with `rules:simulate` runs historical simulation of `v2` over those 100 decisions.
 - **Then:** Engine returns diff summary (e.g. `18 outcomes changed`) and writes `0` rows to `rle_decision`. Attaching the simulation report to a publication request is M3 and is not part of this statement.
 - **Example:** `Simulate v2 on 100 past decisions -> diff summary returned, 0 rle_decision inserts`.
+- **Delivery:** `POST /rule-sets/{name}/versions/{v}:simulate-history` and `RuleEngine.simulateHistory` (#95). The caller needs `rules:simulate` and `rules:log:read`, because the answer is built from logged inputs. The period is at most `query.max-range` and the run at most `simulation.max-inputs` decisions. A decision whose masked input had a value is counted as not replayable, naming the inputs only (DESIGN 4.2.2).
 - **Test ID:** `RLE_015_simulation_leaves_decision_log_untouched`
 
 ### RLE-016 Simulation of a draft over sample inputs returns outputs without writing decision rows
@@ -183,7 +184,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
 - **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
 - **Example:** `retention P12M at 2028-02-03 -> drop rle_decision_2027_01 only; 0 DELETE statements`.
-- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`; the retention run lands with the retention slice (RE-F-31), and until then nothing is dropped.
+- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`. The retention run ships with #104 (RE-F-31, PD-050): each drop is recorded in the append-only `rle_decision_log_drop` (V19), and retention is off unless the host sets `decision-log.retention` to whole months of at least `decision-log.retention-floor` (`P12M`); unset, nothing is dropped, start-up is unaffected on every profile and a WARN is logged at every start-up (PD-130). `keep-forever` is the explicit keep-everything value. PD-050 stays the 1.0 rule.
 - **Test ID:** `RLE_017_decision_log_monthly_partitions_and_retention_by_drop`
 
 ### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
@@ -340,6 +341,76 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** `D11`: the condition on `nationalId` shows the recorded value as `hmac:<keyId>:<hex>` with `masked: true`, reason `VALUE_MASKED` and the word "masked" in `text`, the condition on `age` shows `16` against `< 18`, and `079090001234` appears in no response field and no log line. `D12`: "No rule of card-fee version 1 matched. No output was produced." `D13`: the `R2` condition has `missing: true`, reason `VALUE_MISSING` and reads "income has no value", and no row is reported as matched through a condition whose result was `null`. No row that did not match is explained, and no expression is evaluated. `D14`: outcome `UNIQUE_HIT_VIOLATION`, `matched` lists `R1` and `R2` from the stored `matched_rule_ids`, "Rules R1 and R2 of loan-pricing version 1 both matched; this table allows one. No output was produced."
 - **Example:** `explain D11 -> nationalId shown as hmac:k1:9f4a... (masked), age 16 < 18, route MANUAL; plain value in 0 fields and 0 log lines`.
 - **Test ID:** `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure`
+
+### RLE-070 Decisions are found by the host's case reference across the tenant's rule sets
+- **Traces to:** `TR-OBS-01`, `TR-TEN-01`, `TR-SEC-05`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`. Loan application `LA-2027-000123` was decided on 2027-01-10 by `kyc-risk` (1 decision), `loan-pricing` (1) and `card-fee` (2), all with `correlation_id = LA-2027-000123`, and with input `nationalId` (`mask: true`) on `kyc-risk`. 500 other `bank-a` decisions in January have other correlation ids. Tenant `bank-b` has one decision with the same correlation id. Caller `dan` holds `rules:log:read`.
+- **When:** `dan` sends `GET /api/bpm/rules/v1/decisions?correlationId=LA-2027-000123&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z`. Failure cases: no `from`/`to`; a 32-day period; an empty `correlationId`; one outside the stored format `[A-Za-z0-9._:-]{1,128}` (for example `LA 2027/123`); a caller without `rules:log:read`; the same query by a `bank-b` caller.
+- **Then:**
+  - `200` with the 4 `bank-a` decisions, newest first, each with `decisionId`, `ruleSet`, `version`, `outcome`, `matchedRuleIds`, `evalClock`, `clockChosen` and `pinned`. `nationalId` shows as `hmac:<keyId>:<hex>`. No other decision and no `bank-b` row appears.
+  - The query reads at most the 2 monthly partitions of the period through an index led by tenant and correlation id (migration `V20`), within `query.statement-timeout` (2 s).
+  - The missing period, the 32-day period and the bad ids are `400 QUERY_INVALID` naming the parameter. The caller without the permission gets `403 PERMISSION_DENIED`. The `bank-b` caller gets only its own decision.
+  - Adding `ruleSet=card-fee` narrows the result to the 2 `card-fee` decisions. The search writes nothing.
+  - The search covers all rule sets of the caller's tenant, because one application touches several. A REST call without `X-Correlation-Id` gets a generated id, so a host that wants case search sends its own reference. A correlation id is a business reference and may appear in a URL; a host must not use a national id as one. Paging is as in `RLE-029`; the cursor is signed and bound to tenant, reference and period (`RLE-039`).
+- **Example:** `correlationId=LA-2027-000123, January 2027 -> 4 decisions across 3 rule sets; 32 days -> 400 QUERY_INVALID; bank-b -> its own 1 decision`.
+- **Test ID:** `RLE_070_decisions_are_found_by_correlation_id_across_rule_sets`
+
+### RLE-071 Decisions are found by the exact value of a plain input, never of a masked one
+- **Traces to:** `TR-SEC-05`, `TR-OBS-01`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; `loan-pricing` declares `productCode` (string, `mask: false`), `amount` (money) and `nationalId` (`mask: true`). In January 2027 it has 30 decisions with `productCode = "HOME-30Y"`, 2 of them with `amount = 2500000000 VND`.
+- **When:** `dan` posts `POST /api/bpm/rules/v1/decisions:find-by-input` with `{ "ruleSet": "loan-pricing", "input": "productCode", "value": "HOME-30Y", "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z" }`, then with `"input": "amount", "value": { "currency": "VND", "amount": 2500000000 }`. Failure cases: `"input": "nationalId"`; an input no version of `loan-pricing` declares; an input that a tenant default masks (`decision-log.mask-default: true`, `RLE-052`); a value of the wrong type; a body over 16,384 bytes.
+- **Then:**
+  - `200` with the 30 decisions, then with the 2 decisions. Values compare by their canonical form: money by currency and minor units, a number by exact value (`30000` equals `30000.00`), a string by code point, with no case folding or trimming.
+  - `nationalId` and the input masked by the tenant default are `400 QUERY_INVALID` with a detail pointing to `POST /decisions:find-by-masked-input` and the `rules:masked:search` permission, so a plain-value search can never be used to test a masked value.
+  - The unknown input and the wrong type are `400 QUERY_INVALID` naming `input` or `value`. The large body is `413 PAYLOAD_TOO_LARGE`.
+  - Paging and the 31-day bound are as in `RLE-070`. The search writes nothing to the decision log. It needs `rules:log:read`; the masked search keeps its own permission and rate limit (`RLE-012`).
+- **Example:** `productCode = HOME-30Y -> 30 decisions; amount = 2500000000 VND -> 2; nationalId -> 400 QUERY_INVALID, use find-by-masked-input`.
+- **Test ID:** `RLE_071_decisions_are_found_by_a_plain_input_value_and_never_by_a_masked_one`
+
+---
+
+## Batch Evaluation (RE-F-26)
+
+### RLE-067 A batch returns one result per item in order, and a failing item does not stop the rest
+- **Traces to:** `TR-DET-01`, `TR-OBS-01`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; `card-fee` v1 (`first`) published as in `RLE-001`; `loan-pricing` v1 (`unique`, overlapping rows) as in `RLE-002`; caller `svc-eod` holds `rules:evaluate`.
+- **When:** `svc-eod` posts `POST /api/bpm/rules/v1/decisions/card-fee:evaluate-batch` with four items: (0) `{ tier: GOLD, txCount: 5 }`, (1) `{ tier: SILVER, txCount: 4 }`, (2) `{ tier: SILVER, txCount: "four" }`, (3) `{ tier: STANDARD, txCount: 0 }`, each with `correlationId` `eod-2027-01-31-000<n>`. Then it posts two `loan-pricing` items: one matching `R1` only, and one matching `R1` and `R2`.
+- **Then:**
+  - The `card-fee` call answers `200` with `results` in index order. Item 0 is `R1`, fee 0 VND. Item 1 is `R2`, fee 10000 VND. Item 2 is a `problem` with `code: INPUT_INVALID` naming `txCount`. Item 3 is `R3`, fee 50000 VND. Every result carries `version: 1` and the same `evalClock`.
+  - Items 0, 1 and 3 each have their own `decisionId` and one `rle_decision` row carrying that item's `correlation_id`. Item 2 writes no row, because an input that fails validation is not a decision, as on `:evaluate`.
+  - The `loan-pricing` call answers `200`: the first item is `Matched`, and the second is a `problem` with `code: UNIQUE_HIT_VIOLATION` and `matchedRuleIds [R1, R2]`, which is logged as a decision row with that outcome (`RLE-002`).
+  - The response carries `succeeded: 3, failed: 1` and `succeeded: 1, failed: 1`.
+  - One version is selected for the whole batch, at the request clock, and items run in order. A `correlationId` outside `[A-Za-z0-9._:-]{1,128}` fails its own item with `INPUT_INVALID`.
+- **Example:** `4 card-fee items -> [R1 0 VND, R2 10000 VND, INPUT_INVALID txCount, R3 50000 VND]; succeeded 3, failed 1; 3 rows`.
+- **Test ID:** `RLE_067_batch_returns_one_result_per_item_and_a_failing_item_does_not_stop_the_rest`
+
+### RLE-068 A batch is bounded as a whole and per item
+- **Traces to:** `TR-SEC-02`, `TR-SEC-07`
+- **Milestone:** M2
+- **Given:** `evaluation.max-batch` at 1,000, and `evaluation.regex-max-reads-per-request` lowered in a test so that it runs out at item 3 of 5.
+- **When:** Posting 0 items; 1,001 items; a body over the batch limit (4,194,304 bytes); a batch for a rule set with no version in effect; a batch whose item 3 trips the request regex budget; a batch whose item 1 exceeds the step budget.
+- **Then:**
+  - 0 items is `400 INPUT_INVALID`. 1,001 items is `422 BATCH_TOO_LARGE` (`evaluation.max-batch` may be lowered, never raised). The oversized body is `413 PAYLOAD_TOO_LARGE`, refused before the body is read when `Content-Length` declares it. No effective version is `404 NO_EFFECTIVE_VERSION`, an unknown rule set `404 RULE_SET_NOT_FOUND`. In these cases nothing is evaluated or written.
+  - The regex case follows `RLE-007`: items 0 to 2 keep their results, item 3 fails with `EVALUATION_ERROR` / `REGEX_TIMEOUT` naming `evaluation.regex-max-reads-per-request`, and item 4 is reported failed and "not evaluated", with no decision row.
+  - The step budget is per item: item 1 fails with `EVALUATION_BUDGET_EXCEEDED`, and the others succeed.
+- **Example:** `1,001 items -> 422 BATCH_TOO_LARGE; 5 long references, budget for 3 -> 3 results, 1 REGEX_TIMEOUT, 1 not evaluated, 4 rows`.
+- **Test ID:** `RLE_068_a_batch_is_bounded_as_a_whole_and_per_item`
+
+### RLE-069 A batch is idempotent, commits with its transaction and stays in the caller's tenant
+- **Traces to:** `TR-IDEM-01`, `TR-EMB-04`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** The batch of `RLE-067` with `Idempotency-Key: k-701`.
+- **When:** It is repeated with `k-701` and the same body, then sent with `k-701` and a changed item. A Java host calls `evaluateBatch` inside `@Transactional` and rolls back. A caller of `bank-b` posts the batch with `"tenantId": "bank-a"` in the body. A caller sends `"clock"` without `rules:simulate`.
+- **Then:**
+  - The repeat returns the same `200` body, decision ids included, and writes no row. The changed body is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The stored response holds outputs and ids only, never inputs.
+  - The rolled-back host transaction leaves 0 rows. Over REST the batch's rows commit in one transaction: all of them or none.
+  - The `bank-b` caller is served from `bank-b` (`404 RULE_SET_NOT_FOUND` if `bank-b` has no `card-fee`), and the body tenant is ignored.
+  - The clock without the permission is `403 CLOCK_NOT_ALLOWED`. Masked inputs are fingerprinted per item exactly as on `:evaluate` (`RLE-012`), and results never echo inputs.
+- **Example:** `repeat with k-701 -> same body, 0 new rows; changed item -> 422; host rollback -> 0 rows; bank-b -> 404`.
+- **Test ID:** `RLE_069_batch_is_idempotent_transactional_and_tenant_scoped`
 
 ---
 
@@ -527,8 +598,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-05`
 - **Milestone:** M3
 - **Given:** `lifecycle.retire-approval = four-eyes`; tenant `bank-a`; `tet-fee-waiver` v1 `PUBLISHED`, `lockVersion 1`, the only version; `bob` and `carol` hold `rules:approve`; `/api/bpm/meta` lists the setting `lifecycle.retire-approval: four-eyes`.
-- **When:** `bob` sends `POST .../rule-sets/tet-fee-waiver/versions/1:retire` with `If-Match: "1"` and `{ "reason": "Tet promotion ended" }`; the host evaluates `tet-fee-waiver`; `bob` sends `POST .../versions/1:confirm-retire`; `carol` sends `POST .../versions/1:confirm-retire`. Failure cases: a retire request with `{ "reason": "" }`; a second retire request while one is pending; `:confirm-retire` with no pending request.
-- **Then:** The request returns `200` with v1 still `PUBLISHED` and a pending retirement (`retireRequestedBy: bob`), one history row `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event; the evaluation still selects v1. `bob`'s confirmation returns `403 SELF_APPROVAL_FORBIDDEN` and changes nothing. `carol`'s confirmation returns `200`: v1 is `RETIRED` with the same effects as `RLE-026` (retired event, cache epoch, `404 NO_EFFECTIVE_VERSION` on every replica within 5 s), and the event and the history row record `approvalMode: four-eyes`, requester `bob`, confirmer `carol` and the reason. The empty reason returns `400 INPUT_INVALID`; the second request and the confirmation without a request return `409 INVALID_STATE`; none changes anything.
+- **When:** `bob` sends `POST .../rule-sets/tet-fee-waiver/versions/1:retire` with `If-Match: "1"` and `{ "reason": "Tet promotion ended", "confirmNoVersionInEffect": true }` (v1 is the last version in effect, PD-101); the host evaluates `tet-fee-waiver`; `bob` sends `POST .../versions/1:confirm-retire`; `carol` sends `POST .../versions/1:confirm-retire`. Failure cases: a retire request with `{ "reason": "" }`; a second retire request while one is pending; `:confirm-retire` with no pending request. Then `:cancel-retire` with a reason on a new request.
+- **Then:** The request returns `200` with v1 still `PUBLISHED` and a pending retirement (`retireRequestedBy: bob`), one history row `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event; the evaluation still selects v1. `bob`'s confirmation returns `403 SELF_APPROVAL_FORBIDDEN` and changes nothing. `carol`'s confirmation returns `200`: v1 is `RETIRED` with the same effects as `RLE-026` (retired event, cache epoch, `404 NO_EFFECTIVE_VERSION` on every replica within 5 s), and the event and the history row record `approvalMode: four-eyes`, requester `bob`, confirmer `carol` and the reason. The empty reason returns `400 INPUT_INVALID`; the second request and the confirmation without a request return `409 INVALID_STATE`; none changes anything. A cancellation leaves v1 `PUBLISHED` with no pending request and one history row `RETIRE_CANCELLED`.
 - **Example:** `bob requests -> still serving; bob confirms -> 403 SELF_APPROVAL_FORBIDDEN; carol confirms -> RETIRED, approvalMode four-eyes`.
 - **Test ID:** `RLE_038_four_eyes_retirement_needs_second_approver`
 
@@ -620,3 +691,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - A stored version whose `canonical_json` is altered in the database so that it no longer hashes to `canonical_hash` is not served. Evaluation returns `EVALUATION_ERROR` with a detail naming the integrity check, and one audit entry and one alert are written.
 - **Example:** `x >= 3 (YAML) == >= 3 (YAML) == >= 3 (DMN) -> one canonical_hash; 0.1 vs 0.1000000000000000055511151231257827 -> 422 as numbers, two hashes as strings; y >= 3 stays y >= 3; Cyrillic V -> different hash, marked in the diff`.
 - **Test ID:** `RLE_045_one_hash_per_behaviour_in_any_style_and_never_for_different_behaviour`
+
+### RLE-060 A CMMN file is refused by name at the rule set import, before any other check
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
+- **Milestone:** M3
+- **Given:** `claim-case.cmmn`, whose root is `definitions` in namespace `http://www.omg.org/spec/CMMN/20151109/MODEL` (CMMN 1.1), with a `casePlanModel` on line 4.
+- **When:** It is posted to `POST /api/bpm/rules/v1/rule-sets/{name}/versions` with `Content-Type: application/xml`.
+- **Then:**
+  - It answers `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line` of the root element (1).
+  - The reader stops at the root element: no other check runs, no transaction is opened, and nothing is written.
+  - A root element in another unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` naming the namespace, as before. A DTD or an entity is refused before the namespace is looked at.
+- **Example:** `claim-case.cmmn -> 422 CMMN_UNSUPPORTED, 0 rows`.
+- **Test ID:** `RLE_060_a_cmmn_file_is_refused_by_name_with_its_namespace_and_line`, `RLE_060_the_reader_stops_at_the_root_so_no_other_check_runs`, `RLE_060_a_root_in_another_unknown_namespace_is_a_validation_failure_naming_it`, `RLE_060_a_dtd_is_refused_before_the_namespace_is_looked_at`, `RLE_060_cmmn_is_422_with_the_detail_the_namespace_and_the_line`, `RLE_060_a_cmmn_file_is_422_cmmn_unsupported_at_the_rule_set_import_and_writes_nothing`
+
+### RLE-061 A DMN element outside the current stage is refused by name with its id, line and stage
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
+- **Milestone:** M3
+- **Given:** `fees.dmn` contains a decision table `fee-table` (supported), a second `decision` `risk-adj` with an `informationRequirement` that names a required decision on line 40 (`S1`), a `businessKnowledgeModel` `bkm-1` on line 55 (`S2`), a `decisionService` `ds-1` on line 70 (`S2`), and a `context` boxed expression on line 81 (`S2`).
+- **When:** It is imported as a rule set version.
+- **Then:**
+  - The answer is `422 DMN_UNSUPPORTED_ELEMENT` with 4 entries `{ element, id, line, stage }` in `elements`, in document order. An element with no `id` of its own is named by the `id` of the decision that holds it. Nothing is written.
+  - A wire to input data (`requiredInput`), documentation, vendor extensions and elements in other namespaces are not refused.
+  - At most 100 entries are returned, with `violationsTruncated: true` beyond that; ids lose control characters and are cut at 200 characters.
+  - An unknown `expressionLanguage` or `typeLanguage` is `422 EXPRESSION_LANGUAGE_UNSUPPORTED` with the element, its line and its stage (`not planned`).
+- **Example:** `fees.dmn with BKM and decision service -> 422 DMN_UNSUPPORTED_ELEMENT, 4 entries`.
+- **Test ID:** `RLE_061_dmn_elements_outside_the_stage_are_listed_with_id_line_and_stage_in_document_order`, `RLE_061_a_wire_to_input_data_is_not_a_refusal`, `RLE_061_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `RLE_061_ids_lose_control_characters_and_are_cut_at_200_characters`, `RLE_061_an_unknown_expression_language_is_refused_with_its_line_and_stage`, `RLE_061_each_entry_carries_element_id_line_and_stage`, `RLE_061_a_list_over_100_entries_is_cut_and_says_so`, `RLE_061_dmn_elements_outside_the_stage_are_listed_and_nothing_is_stored`

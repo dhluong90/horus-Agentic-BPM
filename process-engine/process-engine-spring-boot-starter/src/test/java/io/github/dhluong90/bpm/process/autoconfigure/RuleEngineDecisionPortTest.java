@@ -59,6 +59,17 @@ class RuleEngineDecisionPortTest {
             return new DecisionResult("01JDDECISION00000000000000", request.ruleSet(), 1, evaluationTime,
                     new DecisionResult.Matched(List.of("R2"), Map.of("fee", Money.ofMinor("VND", 20_000))));
         }
+
+        @Override
+        public io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signature(String tenantId, String ruleSet,
+                Instant at) {
+            calls.add(new Object[] {tenantId, ruleSet, at});
+            if (!tenantId.equals("bank-a")) {
+                throw new RuleSetNotFoundException(ruleSet);
+            }
+            return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(ruleSet, 3, "FIRST",
+                    Map.of("riskScore", "integer"), Map.of("allow", "boolean"), false);
+        }
     }
 
     /** A grant that hands out one entry point and remembers who claimed it. */
@@ -198,5 +209,28 @@ class RuleEngineDecisionPortTest {
         assertThatThrownBy(() -> RuleEngineDecisions.requireEngineWorkClaimed(unclaimed))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("did not claim");
         RuleEngineDecisions.requireEngineWorkClaimed(null);
+    }
+
+    @Test
+    void PRE_016_the_port_reads_the_guardrail_signature_in_the_given_tenant_and_fails_closed_otherwise() {
+        RecordingEntryPoint entryPoint = new RecordingEntryPoint();
+        RuleEngineDecisionPort port = port(entryPoint);
+
+        assertThat(port.signature("bank-a", "agent-output-guardrails", STEP_CLOCK))
+                .isInstanceOfSatisfying(io.github.dhluong90.bpm.process.internal.service.DecisionSignature.Found.class,
+                        f -> {
+                            assertThat(f.version()).isEqualTo(3);
+                            assertThat(f.hitPolicy()).isEqualTo("FIRST");
+                            assertThat(f.outputs()).containsEntry("allow", "boolean");
+                        });
+        assertThat(port.signature("bank-other", "agent-output-guardrails", STEP_CLOCK))
+                .isInstanceOfSatisfying(
+                        io.github.dhluong90.bpm.process.internal.service.DecisionSignature.Unavailable.class,
+                        u -> assertThat(u.code()).isEqualTo("RULE_SET_NOT_FOUND"));
+        assertThat(entryPoint.calls).extracting(call -> call[0]).containsExactly("bank-a", "bank-other");
+        assertThat(new RuleEngineDecisionPort(Optional.empty()).signature("bank-a", "agent-output-guardrails",
+                STEP_CLOCK)).isInstanceOfSatisfying(
+                        io.github.dhluong90.bpm.process.internal.service.DecisionSignature.Unavailable.class,
+                        u -> assertThat(u.code()).isEqualTo("TENANT_NOT_ALLOWED"));
     }
 }

@@ -64,8 +64,9 @@ import tools.jackson.databind.json.JsonMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
     "HORUS_DEMO_PASSWORD=it-pass",
     "horus.bpm.processes.jobs.enabled=false",
-    "horus.bpm.processes.definitions.locations=classpath:processes/card-fee-review.bpmn,"
-            + "classpath:processes/loan-document-assessment.bpmn",
+    // The loan process is deployed by the test once its guardrail rule set is published: a deploy before that is
+    // refused (PRE-016), so it is not a start-up definition here.
+    "horus.bpm.processes.definitions.locations=classpath:processes/card-fee-review.bpmn",
     "horus.bpm.processes.security.role-permissions.ROLE_COMPLIANCE_REVIEWER=processes:read,processes:task:work"
 })
 @ActiveProfiles("dev")
@@ -125,10 +126,47 @@ class GuardedAgentTaskIT {
     private static boolean published;
 
     @BeforeEach
-    void reviewersAndGuardrails() {
+    void reviewersAndGuardrails() throws Exception {
         user("kim", "ROLE_TELLER", "ROLE_COMPLIANCE_REVIEWER");
         user("thu", "ROLE_COMPLIANCE_REVIEWER");
+        user("pia", "ROLE_PROCESS_DEPLOYER");
         publishGuardrailsOnce();
+    }
+
+    @Test
+    void PRE_016_a_deploy_naming_a_guardrail_without_allow_is_refused_naming_the_missing_output() throws Exception {
+        // Given a rule set that answers with a decision string instead of allow, published through maker-checker
+        publish("assessment-decision", """
+                schemaVersion: 1
+                ruleSet: assessment-decision
+                description: Answers a decision string instead of allow
+                hitPolicy: first
+                inputs:
+                  - { name: riskScore, type: integer }
+                outputs:
+                  - { name: decision, type: string }
+                rules:
+                  - id: R1
+                    when: { riskScore: ">= 70" }
+                    then: { decision: "'REFER'" }
+                  - id: R2
+                    when: {}
+                    then: { decision: "'OK'" }
+                """.getBytes(StandardCharsets.UTF_8));
+        String bpmn = loanProcess().replace("id=\"loan-document-assessment\"", "id=\"loan-decision-guardrail\"")
+                .replace("decision=\"agent-output-guardrails\"", "decision=\"assessment-decision\"");
+
+        // When the deployer imports a process whose agent step names it
+        HttpResponse<String> refused = deploy("pia", bpmn, "deploy-decision-guardrail");
+
+        // Then the deploy is refused, naming the step and the missing output, and nothing is written
+        assertThat(problem(refused)).isEqualTo("422 GUARDRAIL_CONTRACT_INVALID");
+        JsonNode body = JSON.readTree(refused.body());
+        assertThat(body.get("detail").stringValue()).contains("step assess-documents")
+                .contains("declares no output allow: boolean (outputs decision: string)");
+        assertThat(body.at("/problems/0/elementId").stringValue()).isEqualTo("assess-documents");
+        assertThat(jdbc.sql("SELECT count(*) FROM pre_definition WHERE key_name = 'loan-decision-guardrail'")
+                .query(Long.class).single()).isZero();
     }
 
     @Test
@@ -165,13 +203,16 @@ class GuardedAgentTaskIT {
         HttpResponse<String> claimed = send("thu", "POST", TASKS + task + ":claim", null,
                 Map.of("If-Match", "\"0\"", "Idempotency-Key", "thu-claims-" + task));
         HttpResponse<String> referred = send("thu", "POST", TASKS + task + ":complete",
-                "{\"result\":{\"riskScore\":85,\"recommendation\":\"REFER\"}}",
+                "{\"result\":{\"riskScore\":85,\"recommendation\":\"REFER\"},"
+                        + "\"reason\":\"Income documents need a second look\"}",
                 Map.of("If-Match", "\"1\"", "Idempotency-Key", "thu-refers-" + task, "Content-Type", "application/json"));
 
         // Then four eyes hold, and the reviewer's answer completes the step: the loan moves on to underwriting
         assertThat(problem(ownReview)).isEqualTo("403 SELF_APPROVAL_FORBIDDEN");
         assertThat(claimed.statusCode()).as(claimed.body()).isEqualTo(200);
         assertThat(referred.statusCode()).as(referred.body()).isEqualTo(200);
+        // And the override is in history with the reviewer's reason (PRE-012)
+        assertThat(history(loan, "HUMAN_OVERRIDE")).isEqualTo(1);
         JsonNode after = instance(loan);
         assertThat(after.at("/variables/assessment/recommendation").stringValue()).isEqualTo("REFER");
         assertThat(openTaskNodes(after)).containsExactly("underwrite");
@@ -240,27 +281,47 @@ class GuardedAgentTaskIT {
         }
     }
 
-    /** Publishes the guardrail rule set through maker-checker: one identity requests, another approves. */
-    private void publishGuardrailsOnce() {
+    /**
+     * Publishes the guardrail rule set through maker-checker (one identity requests, another approves), then deploys
+     * the loan process, which the dev profile approves on import.
+     */
+    private void publishGuardrailsOnce() throws Exception {
         if (published) {
             return;
         }
-        byte[] source;
-        try (InputStream in = new ClassPathResource("rules/agent-output-guardrails.yaml").getInputStream()) {
-            source = in.readAllBytes();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        publish("agent-output-guardrails", resource("rules/agent-output-guardrails.yaml"));
+        HttpResponse<String> deployed = deploy("pia", loanProcess(), "deploy-loan-document-assessment");
+        assertThat(deployed.statusCode()).as(deployed.body()).isEqualTo(201);
+        published = true;
+    }
+
+    private void publish(String ruleSet, byte[] source) {
         try {
             RuleSetVersion draft = as("risk-author", "rules:author", () -> ruleSets.importRuleSet(ImportRequest.yaml(source)));
             RuleSetVersion requested = as("risk-author", "rules:author",
-                    () -> ruleSets.requestPublish("agent-output-guardrails", draft.version(), WriteOptions.none()));
-            as("risk-approver", "rules:approve", () -> ruleSets.approve("agent-output-guardrails", draft.version(),
+                    () -> ruleSets.requestPublish(ruleSet, draft.version(), WriteOptions.none()));
+            as("risk-approver", "rules:approve", () -> ruleSets.approve(ruleSet, draft.version(),
                     new WriteOptions(null, requested.lockVersion(), null)));
         } catch (RuleSetExistsException e) {
             // published by an earlier test in this context
         }
-        published = true;
+    }
+
+    private HttpResponse<String> deploy(String user, String bpmn, String idempotencyKey) throws Exception {
+        return send(user, "POST", "/api/bpm/processes/v1/definitions", bpmn,
+                Map.of("Content-Type", "application/bpmn+xml", "Idempotency-Key", idempotencyKey));
+    }
+
+    private static String loanProcess() {
+        return new String(resource("processes/loan-document-assessment.bpmn"), StandardCharsets.UTF_8);
+    }
+
+    private static byte[] resource(String path) {
+        try (InputStream in = new ClassPathResource(path).getInputStream()) {
+            return in.readAllBytes();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static <T> T as(String user, String permission, Supplier<T> work) {

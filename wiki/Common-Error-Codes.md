@@ -54,7 +54,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
 | 422 | [FORM_VALIDATION_FAILED](#form_validation_failed) | processes | M2 |
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | M3 |
+| 422 | [CMMN_UNSUPPORTED](#cmmn_unsupported) | both | 0.2.0 |
 | 422 | [BPMN_UNSUPPORTED_ELEMENT](#bpmn_unsupported_element) | processes | M3 |
+| 422 | [DMN_UNSUPPORTED_ELEMENT](#dmn_unsupported_element) | rules | 0.2.0 |
+| 422 | [EXPRESSION_LANGUAGE_UNSUPPORTED](#expression_language_unsupported) | rules | 0.2.0 |
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
 | 428 | [PRECONDITION_REQUIRED](#precondition_required) | both | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
@@ -67,7 +70,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `400`. The body is malformed JSON, an input is missing or has the wrong type, or a money amount is a float, a string or outside plus or minus 2^53 - 1. Fix the request; `detail` names the field.
 
 ### QUERY_INVALID
-`400`. A list query breaks a read limit (ADR-0015): `limit` below 1 or above `query.max-page-size` (200 by default), a `cursor` the list did not issue to this tenant (cursors are signed, so an edited, forged or replayed cursor is refused), a time range longer than 31 days (`GET /instances` with `startedFrom` and `startedTo`), a `status` that is not an instance status, a cursor sent with other filters than the page it came from, or `GET /decisions` without `ruleSet`, `from` and `to`. Narrow the query and page with the cursor, passing `nextCursor` back unchanged.
+`400`. A list query breaks a read limit (ADR-0015): `limit` below 1 or above `query.max-page-size` (200 by default), a `cursor` the list did not issue to this tenant (cursors are signed, so an edited, forged or replayed cursor is refused), a time range longer than 31 days (`GET /instances` with `startedFrom` and `startedTo`), a `status` that is not an instance status, a cursor sent with other filters than the page it came from, `GET /decisions` without `ruleSet`, `from` and `to`, or a `:simulate-history` request whose period is missing, reversed, longer than `query.max-range` or not ISO 8601 instants, or whose `limit` is outside 1 to `simulation.max-inputs`. Narrow the query and page with the cursor, passing `nextCursor` back unchanged.
 
 ### UNAUTHENTICATED
 `401`. No principal, a token whose audience is another host, or a principal with no tenant the `TenantResolver` can read (for example no `tenant_id` attribute). Sign in again, request a token for this host, or give the user a tenant in your identity provider. Every `401` carries `WWW-Authenticate`; when the challenge says `error="invalid_token"`, the account has no tenant on this host, so sign in again at most once. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).
@@ -110,7 +113,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `409`. The pending rule set version has no recorded author, so four eyes cannot tell whether the approver made it (PD-105). Only versions written before the author was recorded (schema V2) have none. Nobody can approve it, and the engine never assigns an author. Import the change again, which records you as its author, and have someone else approve that version; reject or withdraw the old one.
 
 ### SELF_APPROVAL_FORBIDDEN
-`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089).
+`403`. The approver is the identity that requested the change, or a task's four-eyes rule forbids the caller. Enforced in the service layer whatever the caller's permissions (`TR-SEC-04`). Ask a different identity to approve. A requester who rejects their own rule set request gets this code too, with a detail pointing to `:withdraw`: take the request back with `POST .../versions/{v}:withdraw` instead (PD-089). The requester of a four-eyes retirement who confirms it gets this code too: another holder of `rules:approve` confirms (`:confirm-retire`), or the request is cancelled with `:cancel-retire`.
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
@@ -188,7 +191,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 - `REGEX_TOO_DEEP`: the pattern's backtracking ran out of thread stack, typically an alternation under `*` or `+` such as `(a|b)*c` on a long text. Simplify the pattern or lower `evaluation.regex-max-input-length`.
 
 ### BATCH_TOO_LARGE
-`422`. `:evaluate-batch` with more than 1,000 items. Split the batch.
+`422`. `:evaluate-batch` with more than `evaluation.max-batch` items (1,000 at most). Split the batch; nothing was evaluated or written.
 
 ## Process Engine
 
@@ -205,7 +208,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `422`. The definition has more than 500 steps or is larger than 1 MB, or exceeds the lower limit the host set in `horus.bpm.processes.definitions.max-nodes` or `definitions.max-bytes` (`TR-DEF-05`). The body names the limit and the value, for example `{ "limit": "max-nodes", "value": 501 }`. Nothing is written. Split the process with `callProcess`.
 
 ### GUARDRAIL_CONTRACT_INVALID
-`422`. An `agentTask` names a guardrail rule set that does not meet the contract: hit policy `first` or `unique`, output `allow: boolean`, optional `reasons: list<string>`. Checked at import, at request-approval and at approval. `detail` names the step id and the failed check.
+`422`. An `agentTask` names a guardrail rule set that does not meet the contract: it exists in your tenant with a version in effect, has hit policy `first` or `unique`, declares the output `allow: boolean`, may declare `reasons: string`, and reads only inputs the step's `outputSchema` declares with a compatible type. Checked at import, at request-approval and at approval, against the version in effect then; nothing is written. `detail` and each entry of `problems` name the step id and the failed check, for example `step assess-documents: guardrail rule set agent-output-guardrails v1 declares no output allow: boolean (outputs decision: string)`. Publish a compliant version of the rule set, then deploy again.
 
 ### FORM_VALIDATION_FAILED
 `422`. A task completion does not match the task's form schema. The body carries a JSON Pointer to each failing field, for example `/reason`. Correct the field and complete again. Since 0.2.0 the review task of a refused agent result checks the reviewer's answer against the step's output schema; its body carries `violations`, each a path and a rule such as `$.riskScore: expected integer`, and the task stays claimed.
@@ -213,8 +216,17 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### LAYOUT_INVALID
 `422`. A layout save names a node id that is not in the definition, or exceeds 256 KB. Remove the unknown node or reduce the layout. Layout saves need no approval.
 
+### CMMN_UNSUPPORTED
+`422`. The file is a CMMN case model: its root element is in a CMMN namespace such as `http://www.omg.org/spec/CMMN/20151109/MODEL`. CMMN is not supported and not planned. The body has `detail` "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line` of the root element. The reader stops at the root: nothing else in the file is checked and nothing is stored. Model the case as a BPMN process and import that. Both engines answer it, at the BPMN import of the Process Engine and at the rule set import of the Rule Engine (`Content-Type: application/xml`). A root element in another unknown namespace, such as XPDL or BPEL, is `VALIDATION_FAILED` naming the namespace.
+
 ### BPMN_UNSUPPORTED_ELEMENT
-`422`. A BPMN import contains an element outside the supported subset, such as a boundary event or an inclusive gateway. The body lists each element with its `id` and line, for example `boundaryEvent be-timeout line 42`. Remove or replace the element and import again.
+`422`. A BPMN import contains an element, an attribute that changes how a step runs, or an expression language outside what the release executes. `problems` lists each one in document order as `{ code, message, element, elementId, line, stage }`, up to 100 (`violationsTruncated: true` when there were more). `stage` is the stage of the [standards coverage table](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md) that adds it: `S1`, `S2`, `S3`, or `not planned`; `S0` marks an element the table lists for the current stage that this release has not finished. A condition in a language other than `urn:horus-bpm:expr:v1` has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` (XPath and the other languages are `not planned`). Vendor attributes and extension elements are not refused: `warnings` lists them as `FOREIGN_EXTENSION_IGNORED` with the namespace and line, and the stored source keeps them. Ids are printed without control characters and cut at 200 characters. Remove or replace each element and import again. See [[Process Engine Importing BPMN|Process-Engine-Importing-BPMN]].
+
+### DMN_UNSUPPORTED_ELEMENT
+`422`. A DMN import contains elements outside the current stage, such as a business knowledge model, a decision service, a boxed expression other than a decision table, or a wire from one decision to another. `elements` lists each one in document order as `{ element, id, line, stage }`, up to 100 (`violationsTruncated: true` when there were more); `stage` is `S1`, `S2`, `S3` or `not planned`, from the DMN coverage table. Nothing is stored. Remove the elements, or keep one decision table per file.
+
+### EXPRESSION_LANGUAGE_UNSUPPORTED
+`422`. A DMN file names an `expressionLanguage` or `typeLanguage` other than FEEL, for example JUEL or Groovy. `elements` holds the element that names it with its `line` and `stage` (`not planned`). Nothing is stored.
 
 ### BPMN_UNSAFE_XML
 `422`. A BPMN import contains a `DOCTYPE`, or exceeds 1 MB, nesting depth 32 or 5,000 elements. The file is refused before any transaction opens. Export the file again without a document type declaration.

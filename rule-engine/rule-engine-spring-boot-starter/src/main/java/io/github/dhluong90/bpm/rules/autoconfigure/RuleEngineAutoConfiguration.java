@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 import io.github.dhluong90.bpm.host.autoconfigure.ApproverMustDifferFrom;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
+import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
@@ -80,10 +81,11 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(
-            DecisionLogPartitions partitions, RuleEngineProperties properties, ObjectProvider<Clock> clock) {
+    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions partitions,
+            RuleEngineProperties properties, ObjectProvider<Clock> clock) {
         return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
-                properties.decisionLog().partitionsAheadOrDefault());
+                properties.decisionLog().partitionsAheadOrDefault(), EngineDefaults.PARTITION_MAINTENANCE_INTERVAL,
+                DecisionLogRetention.resolve(properties.decisionLog()));
     }
 
     @Bean

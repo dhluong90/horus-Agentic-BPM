@@ -81,4 +81,63 @@ public interface RuleEngine {
     default SimulationResult simulate(String ruleSet, int version, java.util.List<DecisionInput> samples) {
         throw new UnsupportedOperationException("simulate is not supported by " + getClass().getName());
     }
+
+    /**
+     * Evaluates up to {@code evaluation.max-batch} items of one rule set in one call (RLE-067). One version is
+     * selected for the whole batch at the request clock. Every evaluated item is a logged decision with its own id; an
+     * item that fails does not stop the others. The rows commit or roll back with the caller's transaction, or all
+     * together in the call's own.
+     *
+     * @param request the rule set and items
+     * @return one entry per item, in order
+     * @throws InputInvalidException when there are no items
+     * @throws BatchTooLargeException when there are more items than {@code evaluation.max-batch}
+     * @throws ClockNotAllowedException when the request sets a clock and the caller lacks {@code rules:simulate}
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws NoEffectiveVersionException when no published version is effective at the clock
+     * @throws IdempotencyKeyReuseException when the key was used with a different batch
+     * @throws IdempotencyInFlightException when a request with the same key is still running
+     * @throws UnsupportedOperationException from an implementation other than the engine's
+     */
+    default BatchResult evaluateBatch(BatchRequest request) {
+        throw new UnsupportedOperationException("evaluateBatch is not supported by " + getClass().getName());
+    }
+
+    /**
+     * Evaluates a batch at the engine clock with no correlation ids or idempotency key.
+     *
+     * @param ruleSet the rule set name
+     * @param inputs the items' inputs
+     * @return one entry per item, in order
+     */
+    default BatchResult evaluateBatch(String ruleSet, java.util.List<DecisionInput> inputs) {
+        return evaluateBatch(BatchRequest.of(ruleSet, inputs.stream().map(BatchRequest.Item::of).toList()));
+    }
+
+    /**
+     * Replays real logged decisions of a rule set through a stored version, without logging anything (RLE-015). Each
+     * decision the caller's tenant made in the period is evaluated twice at its logged clock: with the version it was
+     * made with, loaded by number as {@link #replay(String)} does, and with the simulated version. The result counts
+     * and flags the decisions whose outcome would change. A decision whose masked input had a value cannot be
+     * evaluated again and is counted as not replayable, naming the inputs and never their values. All the decisions
+     * of one run share one regular expression read budget ({@code evaluation.regex-max-reads-per-request}).
+     *
+     * <p>Needs {@code rules:simulate} and {@code rules:log:read}, because the answer is built from logged inputs. The
+     * period is at most {@code query.max-range} (31 days) and the run at most {@code simulation.max-inputs} (1,000)
+     * decisions, the newest first; both may be lowered by the host.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version to simulate, in any status
+     * @param request the period and the most decisions to replay
+     * @return one item per logged decision, newest first
+     * @throws VersionNotFoundException when the caller's tenant has no such version ({@code VERSION_NOT_FOUND})
+     * @throws ValidationFailedException when the stored version does not compile ({@code VALIDATION_FAILED})
+     * @throws QueryInvalidException when the period or the limit is missing or out of bounds ({@code QUERY_INVALID})
+     * @throws PermissionDeniedException when the caller lacks {@code rules:simulate} or {@code rules:log:read}
+     * @throws UnsupportedOperationException from an implementation other than the engine's, such as a host's test
+     *     double written before this method existed; the engine's own implementation always supports it
+     */
+    default HistorySimulationResult simulateHistory(String ruleSet, int version, HistorySimulation request) {
+        throw new UnsupportedOperationException("simulateHistory is not supported by " + getClass().getName());
+    }
 }

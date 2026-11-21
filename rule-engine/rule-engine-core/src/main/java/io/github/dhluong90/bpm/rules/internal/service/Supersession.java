@@ -27,11 +27,16 @@ final class Supersession {
     private final RuleStore store;
     private final EventOutbox outbox;
     private final EngineSettings settings;
+    private final io.github.dhluong90.bpm.rules.internal.store.TransactionRunner transactions;
+    private final EngineMeters meters;
 
-    Supersession(RuleStore store, EventOutbox outbox, EngineSettings settings) {
+    Supersession(RuleStore store, EventOutbox outbox, EngineSettings settings,
+            io.github.dhluong90.bpm.rules.internal.store.TransactionRunner transactions, EngineMeters meters) {
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.transactions = Objects.requireNonNull(transactions, "transactions must not be null");
+        this.meters = Objects.requireNonNull(meters, "meters must not be null");
     }
 
     /**
@@ -66,6 +71,10 @@ final class Supersession {
             outbox.append(row.tenantId(), eventId, EngineValues.write(retiredEvent(eventId, correlationId,
                     row.tenantId(), row.ruleSet(), row.version(), actor, EngineDefaults.REASON_SUPERSEDED,
                     row.supersededBy(), now, MODE_SYSTEM, false)), now);
+        }
+        if (!retired.isEmpty()) {
+            int count = retired.size();
+            transactions.afterCommit(() -> meters.retired(EngineMeters.RetireReason.SUPERSEDED, count));
         }
         // ADR-0009: a retirement moves the rule set's epoch and every replica is notified after commit. The approve and
         // retire commands move it themselves, once per command; the sweep (no tenant) moves it here, once per rule set.

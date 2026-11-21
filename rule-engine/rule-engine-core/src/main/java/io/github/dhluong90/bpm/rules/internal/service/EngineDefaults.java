@@ -89,6 +89,12 @@ public final class EngineDefaults {
     /** Largest {@code decision-log.partitions-ahead}: one year of months. */
     public static final Duration PARTITIONS_AHEAD_MAX = Duration.ofDays(366);
 
+    /**
+     * Lowest {@code decision-log.retention-floor}, and its default, in months (PD-050): no host keeps decisions for
+     * less than a year.
+     */
+    public static final int DECISION_LOG_RETENTION_FLOOR_MONTHS = 12;
+
     /** How often partition maintenance runs after start-up: daily. */
     public static final Duration PARTITION_MAINTENANCE_INTERVAL = Duration.ofDays(1);
 
@@ -120,6 +126,19 @@ public final class EngineDefaults {
     public static final int SIMULATION_MAX_SAMPLES = 1_000;
 
     /**
+     * Default and ceiling of {@code evaluation.max-batch}: the most items one {@code :evaluate-batch} accepts
+     * (RLE-068). May be lowered, never raised.
+     */
+    public static final int BATCH_MAX_ITEMS = 1_000;
+
+    /**
+     * Largest {@code :evaluate-batch} body, in bytes (4 MiB, RLE-068). A safety bound of the REST layer, not a
+     * setting; a larger body is {@code 413 PAYLOAD_TOO_LARGE}, refused before it is read when the declared length
+     * says so.
+     */
+    public static final int BATCH_BODY_MAX_BYTES = 4_194_304;
+
+    /**
      * How long a replica keeps the cursor key before reading it again from {@code rle_engine_key}. Deleting the row
      * rotates the key; every replica uses the new key within this time, and one that meets a cursor it cannot
      * verify re-reads at once. A bound of the engine, not a setting.
@@ -140,9 +159,16 @@ public final class EngineDefaults {
 
     /**
      * Default of {@code horus.bpm.lifecycle.retire-approval} (PD-080): one {@code rules:approve} holder with a
-     * reason retires a version. The other value, {@code four-eyes}, arrives in M3 (RLE-038).
+     * reason retires a version. The other value is {@link #RETIRE_APPROVAL_FOUR_EYES}.
      */
     public static final String RETIRE_APPROVAL = "single";
+
+    /**
+     * {@code horus.bpm.lifecycle.retire-approval: four-eyes} (PD-080, RLE-038): a retirement is a request that a second
+     * {@code rules:approve} holder confirms; the version serves until then. Also the approval mode recorded on a
+     * confirmed retirement.
+     */
+    public static final String RETIRE_APPROVAL_FOUR_EYES = "four-eyes";
 
     /**
      * Default of {@code horus.bpm.lifecycle.retire-last-version} (PD-101): retiring the version in effect, when no other
@@ -152,6 +178,12 @@ public final class EngineDefaults {
 
     /** {@code horus.bpm.lifecycle.retire-last-version: refuse}: the last version in effect is never retired by hand. */
     public static final String RETIRE_LAST_REFUSE = "refuse";
+
+    /**
+     * {@code horus.bpm.lifecycle.retire-last-version: four-eyes} (PD-101 option 2): retiring the last version in effect
+     * becomes a request that a second approver confirms, whatever {@code retire-approval} says.
+     */
+    public static final String RETIRE_LAST_FOUR_EYES = "four-eyes";
 
     /** Default of {@code horus.bpm.rules.lifecycle.sweep-interval}: how often superseded versions are retired. */
     public static final java.time.Duration SWEEP_INTERVAL = java.time.Duration.ofMinutes(1);

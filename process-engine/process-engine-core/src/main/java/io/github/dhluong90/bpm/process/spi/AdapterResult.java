@@ -22,13 +22,53 @@ public sealed interface AdapterResult permits AdapterResult.Completed, AdapterRe
     }
 
     /**
+     * @param output values for the step's result variable
+     * @param labels what produced the answer, for example the model id and the token usage; see {@link Completed}
+     * @return a completed result with labels
+     */
+    static AdapterResult completed(Map<String, ?> output, Map<String, String> labels) {
+        return new Completed(new LinkedHashMap<>(output), labels);
+    }
+
+    /**
      * The call succeeded; the process moves on.
      *
+     * <p>Labels describe how the answer was produced, never what it says: they are kept with the step's history for
+     * evaluation and offline replay, and the engine takes no decision from them. Reserved keys, all optional:
+     * {@value #MODEL} (the model id or version), {@value #PROMPT_VERSION}, {@value #INPUT_TOKENS} and
+     * {@value #OUTPUT_TOKENS} (token usage as a decimal integer). A host may add keys of its own. Labels must not carry
+     * personal data. A remote service result has none. Bounds and recording are part of the agent history.
+     *
      * @param output values for the result variable
+     * @param labels string labels of the answer; empty when none, never null
      */
-    record Completed(Map<String, Object> output) implements AdapterResult {
+    record Completed(Map<String, Object> output, Map<String, String> labels) implements AdapterResult {
+
+        /** Label key of the model id or version that produced the answer. */
+        public static final String MODEL = "model";
+        /** Label key of the prompt version. */
+        public static final String PROMPT_VERSION = "promptVersion";
+        /** Label key of the number of input tokens. */
+        public static final String INPUT_TOKENS = "usage.inputTokens";
+        /** Label key of the number of output tokens. */
+        public static final String OUTPUT_TOKENS = "usage.outputTokens";
+
         public Completed {
             output = Collections.unmodifiableMap(new LinkedHashMap<>(Objects.requireNonNull(output, "output")));
+            Map<String, String> copy = new LinkedHashMap<>();
+            (labels == null ? Map.<String, String>of() : labels).forEach((key, value) -> copy.put(
+                    Objects.requireNonNull(key, "label key must not be null"),
+                    Objects.requireNonNull(value, "label value must not be null")));
+            labels = Collections.unmodifiableMap(copy);
+        }
+
+        /**
+         * A completed result without labels.
+         *
+         * @param output values for the result variable
+         */
+        public Completed(Map<String, Object> output) {
+            this(output, Map.of());
         }
     }
 

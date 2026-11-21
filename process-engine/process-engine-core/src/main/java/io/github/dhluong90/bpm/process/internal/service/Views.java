@@ -159,6 +159,9 @@ public final class Views {
             if (p.line() > 0) {
                 o.put("line", p.line());
             }
+            if (p.stage() != null) {
+                o.put("stage", p.stage());
+            }
         }
         return a;
     }

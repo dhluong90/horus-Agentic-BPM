@@ -79,6 +79,14 @@ class RuleEngineSettingsTest {
     }
 
     @Test
+    void RLE_068_batch_max_items_defaults_to_1000_and_may_be_lowered() {
+        runner.withPropertyValues("horus.bpm.rules.evaluation.max-batch=250")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).maxBatch()).isEqualTo(250));
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).maxBatch())
+                .isEqualTo(EngineDefaults.BATCH_MAX_ITEMS).isEqualTo(1000));
+    }
+
+    @Test
     void RLE_047_cockpit_drafts_setting_reaches_the_engine_and_is_off_by_default() {
         runner.run(context -> assertThat(context.getBean(EngineSettings.class).draftAuthoring()).isFalse());
         runner.withPropertyValues("horus.bpm.rules.authoring.cockpit-drafts=true")
@@ -147,7 +155,9 @@ class RuleEngineSettingsTest {
         "horus.bpm.rules.evaluation.regex-max-reads-per-decision=0, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
         "horus.bpm.rules.evaluation.regex-max-reads-per-decision=5000001, horus.bpm.rules.evaluation.regex-max-reads-per-decision",
         "horus.bpm.rules.simulation.max-inputs=0, horus.bpm.rules.simulation.max-inputs",
-        "horus.bpm.rules.simulation.max-inputs=1001, horus.bpm.rules.simulation.max-inputs"
+        "horus.bpm.rules.simulation.max-inputs=1001, horus.bpm.rules.simulation.max-inputs",
+        "horus.bpm.rules.evaluation.max-batch=0, horus.bpm.rules.evaluation.max-batch",
+        "horus.bpm.rules.evaluation.max-batch=1001, horus.bpm.rules.evaluation.max-batch"
     })
     void TR_EXT_03_an_invalid_value_fails_start_up_naming_the_property(String property, String name) {
         runner.withPropertyValues(property).run(context -> assertThat(context).hasFailed()

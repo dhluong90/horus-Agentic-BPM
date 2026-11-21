@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:rules.version.retire-requested.v1",
+  "title": "rules.version.retire-requested.v1",
+  "description": "Written to the Rule Engine outbox in the transaction where a retirement of a published version is requested in four-eyes mode (POST .../versions/{v}:retire with horus.bpm.lifecycle.retire-approval: four-eyes, or for the last version in effect with retire-last-version: four-eyes; PD-080, RLE-038). The version stays PUBLISHED and keeps serving until another rules:approve holder confirms with :confirm-retire, which writes rules.version.retired.v1. The request instant is occurredAt. The outbox row id is the event id. Carries the full event envelope. Additive changes only within v1 (DESIGN section 3.3).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
+    "ruleSet",
+    "version",
+    "actor",
+    "requestedBy",
+    "reason"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventId": {
+      "description": "The event id, a ULID; equal to the outbox row id. Consumers de-duplicate by it.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "eventType": {
+      "const": "rules.version.retire-requested.v1"
+    },
+    "occurredAt": {
+      "description": "When the state change committed, ISO 8601 UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "correlationId": {
+      "description": "The caller's correlation id (X-Correlation-Id, or the one passed to the Java API). When the caller gave none, the event id: the event starts its own chain.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "description": "The id of the command or event that caused this one, or null when a caller's command caused it directly.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "producer": {
+      "description": "rule-engine, a slash and the engine version that wrote the event.",
+      "type": "string",
+      "pattern": "^rule-engine/[0-9A-Za-z.+-]+$"
+    },
+    "schemaVersion": {
+      "description": "Version of the envelope layout; 1 for every .v1 type.",
+      "const": 1,
+      "type": "integer"
+    },
+    "ruleSet": {
+      "description": "Rule set name, kebab-case.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "Version number of the version to retire, not the lock version.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "actor": {
+      "description": "Who sent the command; always equal to requestedBy.",
+      "type": "string"
+    },
+    "requestedBy": {
+      "description": "Who requested the retirement; never the identity that confirms it.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Why the version is to be taken out of service; recorded again on the retirement. At most lifecycle.reason-max-length characters.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  },
+  "examples": [
+    {
+      "eventId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B5",
+      "eventType": "rules.version.retire-requested.v1",
+      "occurredAt": "2027-02-17T08:00:00Z",
+      "tenantId": "bank-a",
+      "correlationId": "req-7f3a",
+      "causationId": null,
+      "producer": "rule-engine/0.3.0",
+      "schemaVersion": 1,
+      "ruleSet": "tet-fee-waiver",
+      "version": 1,
+      "actor": "bob",
+      "requestedBy": "bob",
+      "reason": "Tet promotion ended"
+    }
+  ]
+}

@@ -30,4 +30,17 @@ public final class SelfApprovalForbiddenException extends HorusBpmException {
         return new SelfApprovalForbiddenException("The requester of " + ruleSet + " v" + version
                 + " cannot reject it; take the request back with :withdraw");
     }
+
+    /**
+     * The requester of a four-eyes retirement tried to confirm it (RLE-038).
+     *
+     * @param ruleSet the rule set
+     * @param version the version
+     * @return the exception
+     */
+    public static SelfApprovalForbiddenException selfConfirmRetire(String ruleSet, int version) {
+        return new SelfApprovalForbiddenException("The requester of the retirement of " + ruleSet + " v" + version
+                + " cannot confirm it; another holder of rules:approve confirms, or the request is cancelled with"
+                + " :cancel-retire");
+    }
 }

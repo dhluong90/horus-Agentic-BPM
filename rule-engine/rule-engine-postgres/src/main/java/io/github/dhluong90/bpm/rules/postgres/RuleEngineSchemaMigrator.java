@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.postgres;
 
 import io.github.dhluong90.bpm.rules.api.RuleEngineSchema;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import javax.sql.DataSource;
@@ -82,8 +83,17 @@ public final class RuleEngineSchemaMigrator {
         return Optional.of(current.getVersion().getVersion());
     }
 
+    /**
+     * The migration lock is a session advisory lock, not a transactional one. A migration that runs outside a
+     * transaction ({@code CREATE INDEX CONCURRENTLY}, TR-OPS-02, V20) waits for every open transaction to end, so with
+     * a transactional lock it would wait on Flyway's own lock transaction until {@code lock_timeout}. Concurrent
+     * migrators are still serialised by the session lock.
+     */
+    static final Map<String, String> LOCKING = Map.of("flyway.postgresql.transactional.lock", "false");
+
     private Flyway flyway() {
         return Flyway.configure(RuleEngineSchemaMigrator.class.getClassLoader())
+                .configuration(LOCKING)
                 .dataSource(dataSource)
                 .table(RuleEngineSchema.HISTORY_TABLE)
                 .locations(MIGRATION_LOCATION)

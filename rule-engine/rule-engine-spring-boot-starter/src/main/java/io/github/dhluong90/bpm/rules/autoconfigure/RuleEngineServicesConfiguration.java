@@ -154,7 +154,7 @@ class RuleEngineServicesConfiguration {
                 properties.cache().epochCheckIntervalOrDefault(), properties.cache().listenNotifyOrDefault()));
     }
 
-    /** The compiled-cache meters, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
+    /** The compiled-cache, evaluation and retirement meters, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "io.micrometer.core.instrument.binder.MeterBinder")
     static class CacheMetricsConfiguration {
@@ -163,6 +163,13 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean(name = "ruleEngineCacheMetrics")
         RuleEngineCacheMetrics ruleEngineCacheMetrics(RuleEngineInternals internals) {
             return new RuleEngineCacheMetrics(internals.engines().cache());
+        }
+
+        /** The evaluation and retirement meters (DESIGN 4.8, TR-OBS-02). */
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineEvaluationMetrics")
+        RuleEngineEvaluationMetrics ruleEngineEvaluationMetrics(RuleEngineInternals internals) {
+            return new RuleEngineEvaluationMetrics(internals.engines().meters());
         }
     }
 
@@ -288,8 +295,9 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions, CallerResolver callers) {
-            return new DecisionLogController(decisions, callers);
+        DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions,
+                io.github.dhluong90.bpm.rules.api.DecisionLogQuery log, CallerResolver callers) {
+            return new DecisionLogController(decisions, log, callers);
         }
 
         @Bean
