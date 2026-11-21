@@ -50,9 +50,27 @@ public final class CanonicalCells {
         ToIntFunction<String> slots = inputs::indexOf;
         // Descriptions do not change behaviour, but approvers read them: no bidirectional controls there either.
         refuseBidiIn(document, "description", "Description");
-        document.get("inputs").forEach(n -> refuseBidiIn(n, "description", "Input " + n.get("name").stringValue()));
-        document.get("outputs").forEach(n -> refuseBidiIn(n, "description", "Output " + n.get("name").stringValue()));
-        document.get("rules").forEach(n -> refuseBidiIn(n, "description", "Rule " + n.get("id").stringValue()));
+        document.get("inputs").forEach(n -> {
+            refuseBidiIn(n, "description", "Input " + n.get("name").stringValue());
+            refuseBidiIn(n, "label", "Input " + n.get("name").stringValue());
+        });
+        document.get("outputs").forEach(n -> {
+            refuseBidiIn(n, "description", "Output " + n.get("name").stringValue());
+            refuseBidiIn(n, "label", "Output " + n.get("name").stringValue());
+        });
+        document.get("rules").forEach(n -> {
+            refuseBidiIn(n, "description", "Rule " + n.get("id").stringValue());
+            // Explanation sentences are read by customers and approvers: no bidirectional controls either.
+            JsonNode explain = n.get("explain");
+            if (explain != null && explain.isObject()) {
+                explain.properties().forEach(e -> refuseBidiIn(explain, e.getKey(),
+                        "Rule " + n.get("id").stringValue() + ", explain"));
+            }
+        });
+        JsonNode noMatch = document.path("explanations").path("noMatch");
+        if (noMatch.isObject()) {
+            noMatch.properties().forEach(e -> refuseBidiIn(noMatch, e.getKey(), "explanations.noMatch"));
+        }
         for (JsonNode input : document.get("inputs")) {
             JsonNode allowed = input.get("allowed");
             if (allowed != null) {

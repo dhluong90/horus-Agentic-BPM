@@ -25,10 +25,21 @@ import java.util.Objects;
  * @param reasons the reason codes with their named parameters, in order
  * @param language the language of {@code text}, for example {@code en}; null before rendering
  * @param text the explanation in that language; null before rendering
+ * @param textSource {@link #TEMPLATE} when {@code text} is the author's sentence, {@link #GENERATED} when it is the
+ *     catalogue sentence; null before rendering
+ * @param wording what a renderer needs beyond the contract: the declared labels, the author's templates and the
+ *     recorded input values; never part of the response
  */
 public record DecisionExplanation(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, Instant clock, List<MatchedRow> matched, String outputsJson, List<Reason> reasons,
-        String language, String text) {
+        String language, String text, String textSource, Wording wording) {
+
+    /** The outcome of a decision that ran to the end, matched or not. */
+    public static final String OK_OUTCOME = "OK";
+    /** {@code textSource}: the author's sentence for the requested language (RLE-072). */
+    public static final String TEMPLATE = "TEMPLATE";
+    /** {@code textSource}: the sentence generated from the message catalogue. */
+    public static final String GENERATED = "GENERATED";
 
     /** {@code RULE_MATCHED}: a row matched; params {@code ruleId}, {@code version}. */
     public static final String RULE_MATCHED = "RULE_MATCHED";
@@ -50,6 +61,30 @@ public record DecisionExplanation(String decisionId, String ruleSet, int version
         Objects.requireNonNull(clock, "clock must not be null");
         matched = List.copyOf(matched);
         reasons = List.copyOf(reasons);
+        wording = wording == null ? Wording.NONE : wording;
+    }
+
+    /**
+     * Creates an explanation with no wording data: names are written in words and no template exists.
+     *
+     * @param decisionId the decision id
+     * @param ruleSet the rule set name
+     * @param version the version
+     * @param hitPolicy the hit policy
+     * @param outcome the outcome
+     * @param errorCode the error code, or null
+     * @param clock the evaluation clock
+     * @param matched the matched rows
+     * @param outputsJson the logged outputs, or null
+     * @param reasons the reasons
+     * @param language the language of the text, or null
+     * @param text the text, or null
+     */
+    public DecisionExplanation(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
+            String errorCode, Instant clock, List<MatchedRow> matched, String outputsJson, List<Reason> reasons,
+            String language, String text) {
+        this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched, outputsJson, reasons,
+                language, text, text == null ? null : GENERATED, Wording.NONE);
     }
 
     /**
@@ -60,9 +95,63 @@ public record DecisionExplanation(String decisionId, String ruleSet, int version
      * @return a copy with both set
      */
     public DecisionExplanation withText(String language, String text) {
+        return withText(language, text, GENERATED);
+    }
+
+    /**
+     * Returns this explanation with its text and where the text came from.
+     *
+     * @param language the language the text is written in
+     * @param text the text
+     * @param textSource {@link #TEMPLATE} or {@link #GENERATED}
+     * @return a copy with all three set
+     */
+    public DecisionExplanation withText(String language, String text, String textSource) {
         return new DecisionExplanation(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched,
                 outputsJson, reasons, Objects.requireNonNull(language, "language must not be null"),
-                Objects.requireNonNull(text, "text must not be null"));
+                Objects.requireNonNull(text, "text must not be null"),
+                Objects.requireNonNull(textSource, "textSource must not be null"), wording);
+    }
+
+    /**
+     * Returns this explanation with its wording data.
+     *
+     * @param wording the labels, templates and recorded values
+     * @return a copy with the wording set
+     */
+    public DecisionExplanation withWording(Wording wording) {
+        return new DecisionExplanation(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched,
+                outputsJson, reasons, language, text, textSource, wording);
+    }
+
+    /**
+     * What a renderer needs besides the contract (DESIGN section 4.7): the labels the rule set declares, the
+     * sentences its author wrote (PD-123) and the recorded input values. Read from the stored version and the
+     * decision row, so a later version never changes it. Never serialised into the response.
+     *
+     * @param inputLabels declared {@code label} by input name; an input without one is written in words
+     * @param outputLabels declared {@code label} by output name
+     * @param rowTemplates the author's sentences by rule id, then by language
+     * @param noMatchTemplates the author's sentence for a decision in which no row matched, by language
+     * @param inputsJson the recorded input values by name, each as JSON text; a masked input is its fingerprint
+     * @param maskedInputs the inputs whose recorded value is a masked fingerprint
+     */
+    public record Wording(Map<String, String> inputLabels, Map<String, String> outputLabels,
+            Map<String, Map<String, String>> rowTemplates, Map<String, String> noMatchTemplates,
+            Map<String, String> inputsJson, java.util.Set<String> maskedInputs) {
+
+        /** No labels, no templates and no recorded values. */
+        public static final Wording NONE = new Wording(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                java.util.Set.of());
+
+        public Wording {
+            inputLabels = Map.copyOf(inputLabels);
+            outputLabels = Map.copyOf(outputLabels);
+            rowTemplates = Map.copyOf(rowTemplates);
+            noMatchTemplates = Map.copyOf(noMatchTemplates);
+            inputsJson = Map.copyOf(inputsJson);
+            maskedInputs = java.util.Set.copyOf(maskedInputs);
+        }
     }
 
     /**

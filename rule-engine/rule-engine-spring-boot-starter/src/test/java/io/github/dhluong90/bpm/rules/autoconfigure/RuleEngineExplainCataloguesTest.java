@@ -35,9 +35,9 @@ class RuleEngineExplainCataloguesTest {
         assertThat(explainer.languages()).contains("en", "vi", "fr");
         assertThat(explainer.defaultLanguage()).isEqualTo("en");
         assertThat(explainer.text(D7, "fr")).isEqualTo(
-                "La règle R2 de card-fee version 1 s'applique car txCount is 5, which is at least 3. Résultat : fee 10000 VND.");
+                "La règle R2 de card-fee version 1 s'applique car tx count is 5, which is at least 3. Résultat : fee 10,000 VND.");
         assertThat(explainer.text(D7, "en")).isEqualTo(
-                "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND.");
+                "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND.");
     }
 
     @Test

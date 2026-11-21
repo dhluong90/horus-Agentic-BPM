@@ -55,6 +55,7 @@ public final class DmnWriter {
         if (doc.has("description")) {
             out.element(2, "description", doc.get("description").stringValue());
         }
+        writeExplain(out, 2, "noMatch", doc.path("explanations").path("noMatch"));
         for (JsonNode input : inputs) {
             String inputName = input.get("name").stringValue();
             out.line(2, "<informationRequirement id=\"requirement_" + inputName + "\">");
@@ -93,7 +94,8 @@ public final class DmnWriter {
     private static void writeInput(Xml out, JsonNode input) {
         String name = input.get("name").stringValue();
         String type = input.get("type").stringValue();
-        StringBuilder start = new StringBuilder("<input id=\"input_" + name + "\" label=\"" + name + "\"");
+        StringBuilder start = new StringBuilder("<input id=\"input_" + name + "\" label=\""
+                + Xml.escape(label(input, name)) + "\"");
         horusType(start, type);
         if (input.has("mask")) {
             start.append(" horus:mask=\"").append(input.get("mask").booleanValue()).append('"');
@@ -134,7 +136,7 @@ public final class DmnWriter {
                     + "; per-output aggregates are exported from stage S1 (release 1.1)");
         }
         StringBuilder start = new StringBuilder("<output id=\"output_" + name + "\" name=\"" + name + "\" label=\""
-                + name + "\" typeRef=\"" + Xml.escape(typeRef(type, "output " + name)) + "\"");
+                + Xml.escape(label(output, name)) + "\" typeRef=\"" + Xml.escape(typeRef(type, "output " + name)) + "\"");
         horusType(start, type);
         if (output.has("description")) {
             out.line(3, start + ">");
@@ -157,6 +159,7 @@ public final class DmnWriter {
         if (rule.has("description")) {
             out.element(4, "description", rule.get("description").stringValue());
         }
+        writeExplain(out, 4, "explain", rule.path("explain"));
         for (JsonNode input : inputs) {
             String inputName = input.get("name").stringValue();
             String feel;
@@ -198,6 +201,23 @@ public final class DmnWriter {
             out.line(4, "</outputEntry>");
         }
         out.line(3, "</rule>");
+    }
+
+    private static String label(JsonNode column, String name) {
+        return column.has("label") ? column.get("label").stringValue() : name;
+    }
+
+    /** One {@code <horus:...>} element per language, in the extension namespace, inside {@code extensionElements}. */
+    private static void writeExplain(Xml out, int depth, String element, JsonNode texts) {
+        if (!texts.isObject() || texts.isEmpty()) {
+            return;
+        }
+        out.line(depth, "<extensionElements>");
+        for (var entry : texts.properties()) {
+            out.line(depth + 1, "<horus:" + element + " horus:lang=\"" + Xml.escape(entry.getKey()) + "\">"
+                    + Xml.escapeText(entry.getValue().stringValue()) + "</horus:" + element + ">");
+        }
+        out.line(depth, "</extensionElements>");
     }
 
     private static void horusType(StringBuilder start, String type) {

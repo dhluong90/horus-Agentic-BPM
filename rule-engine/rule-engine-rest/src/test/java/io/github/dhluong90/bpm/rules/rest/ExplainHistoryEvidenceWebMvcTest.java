@@ -126,8 +126,8 @@ class ExplainHistoryEvidenceWebMvcTest {
                 "{\"fee\":{\"currency\":\"VND\",\"amount\":10000}}",
                 List.of(new DecisionExplanation.Reason("RULE_MATCHED", ordered("ruleId", "R2", "version", 1))), null, null);
         return e.withText(language, "en".equals(language)
-                ? "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND."
-                : "Quy tắc R2 của card-fee phiên bản 1 khớp vì txCount là 5, tức là ít nhất 3. Kết quả: fee 10000 VND.");
+                ? "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND."
+                : "Quy tắc R2 của card-fee phiên bản 1 khớp vì tx count là 5, tức là ít nhất 3. Kết quả: fee 10.000 VND.");
     }
 
     /** Parameters in a fixed order, as the engine builds them. */

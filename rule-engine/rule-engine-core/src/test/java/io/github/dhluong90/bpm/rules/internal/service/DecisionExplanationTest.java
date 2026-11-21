@@ -163,7 +163,7 @@ class DecisionExplanationTest {
         assertThat(first.reasons()).containsExactly(new Reason("RULE_MATCHED", Map.of("ruleId", "R2", "version", 1)));
         assertThat(first.language()).isEqualTo("en");
         assertThat(first.text()).isEqualTo(
-                "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND.");
+                "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND.");
         assertThat(again).isEqualTo(first);
         assertThat(stores.decisions).hasSize(decisionsBefore);
 
@@ -171,8 +171,8 @@ class DecisionExplanationTest {
         assertThat(collect.matched().get(0).outputsJson()).isEqualTo("{\"flags\":\"HIGH_VELOCITY\"}");
         assertThat(collect.matched().get(1).outputsJson()).isEqualTo("{\"flags\":\"NEW_DEVICE\"}");
         assertThat(collect.outputsJson()).contains("\"flags\":[\"HIGH_VELOCITY\",\"NEW_DEVICE\"]").contains("\"penalty\":15");
-        assertThat(collect.text()).isEqualTo("Rule R1 of risk-flags version 1 matched because txPerHour is 12, which is"
-                + " at least 10. Rule R3 of risk-flags version 1 matched because newDevice is true, which equals true."
+        assertThat(collect.text()).isEqualTo("Rule R1 of risk-flags version 1 matched because tx per hour is 12, which is"
+                + " at least 10. Rule R3 of risk-flags version 1 matched because new device is Yes, which equals Yes."
                 + " Result: flags [HIGH_VELOCITY, NEW_DEVICE]; penalty 15.");
 
         // An unknown id and a caller of another tenant get DECISION_NOT_FOUND
@@ -195,7 +195,7 @@ class DecisionExplanationTest {
 
         assertThat(vietnamese.language()).isEqualTo("vi");
         assertThat(vietnamese.text()).isEqualTo(
-                "Quy tắc R2 của card-fee phiên bản 1 khớp vì txCount là 5, tức là ít nhất 3. Kết quả: fee 10000 VND.");
+                "Quy tắc R2 của card-fee phiên bản 1 khớp vì tx count là 5, tức là ít nhất 3. Kết quả: fee 10.000 VND.");
         assertThat(vietnamese.reasons()).isEqualTo(english.reasons());
         assertThat(vietnamese.matched()).isEqualTo(english.matched());
         assertThat(unknown.language()).isEqualTo("en");
@@ -211,10 +211,10 @@ class DecisionExplanationTest {
         String d7 = decide(engines, "card-fee", Map.of("tier", "SILVER", "txCount", 5));
 
         assertThat(explain(engines, d7, "en").text()).isEqualTo(
-                "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Charged: fee 10000 VND.");
+                "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Charged: fee 10,000 VND.");
         // A host language falls back to English entry by entry
         assertThat(explain(engines, d7, "fr").text()).isEqualTo("La règle R2 de card-fee version 1 s'applique car"
-                + " txCount is 5, which is at least 3. Charged: fee 10000 VND.");
+                + " tx count is 5, which is at least 3. Charged: fee 10,000 VND.");
         // No preference: the configured default language
         assertThat(explain(engines, d7).language()).isEqualTo("vi");
         assertThatThrownBy(() -> CatalogueExplainer.of("de", Map.of()))
@@ -253,10 +253,10 @@ class DecisionExplanationTest {
         assertThat(d11Conditions.get(0).valueJson()).matches("\"hmac:k1:[0-9a-f]{64}\"");
         assertThat(d11Conditions.get(1)).isEqualTo(new Condition("age", "/when/age", "< 18", "16", false, false, true));
         assertThat(masked.reasons()).contains(new Reason("VALUE_MASKED", Map.of("ruleId", "R1", "input", "nationalId")));
-        assertThat(masked.text()).isEqualTo("Rule R1 of minor-review version 1 matched because nationalId is masked,"
+        assertThat(masked.text()).isEqualTo("Rule R1 of minor-review version 1 matched because national id is masked,"
                 + " which has a value, and age is 16, which is less than 18. Result: route MANUAL.");
         assertThat(masked.toString()).doesNotContain(NATIONAL_ID);
-        assertThat(explain(engines, d11, "vi").text()).contains("nationalId đã được che").doesNotContain(NATIONAL_ID);
+        assertThat(explain(engines, d11, "vi").text()).contains("national id đã được che").doesNotContain(NATIONAL_ID);
 
         // D12: no match
         assertThat(noMatch.matched()).isEmpty();
@@ -321,9 +321,9 @@ class DecisionExplanationTest {
                 "{\"rate\":0.015,\"limit\":{\"currency\":\"VND\",\"amount\":10000000}}", List.of(), null, null);
 
         assertThat(explainer.text(e, "en")).isEqualTo("Rule R9 of pricing version 3 matched because amount is 12.50 USD,"
-                + " which is at least 50000000 VND, and country is SG, which is one of VN, SG, and opened is 2026-06-01,"
+                + " which is at least 50,000,000 VND, and country is SG, which is one of VN, SG, and opened is 2026-06-01,"
                 + " which is between 2026-01-01 and 2026-12-31, and code is VIP-7, which satisfies"
                 + " matches(x, '^VIP-[0-9]+'), and name is it's, which equals it's."
-                + " Result: rate 0.015; limit 10000000 VND.");
+                + " Result: rate 0.015; limit 10,000,000 VND.");
     }
 }
