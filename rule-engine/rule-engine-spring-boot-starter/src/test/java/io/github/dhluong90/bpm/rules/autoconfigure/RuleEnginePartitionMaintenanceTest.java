@@ -2,7 +2,9 @@ package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,8 +14,10 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Period;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -25,7 +29,8 @@ import org.springframework.dao.CannotAcquireLockException;
 
 /**
  * The running host's side of RLE-017: the period ahead from configuration, the repeated run, a lock timeout that
- * waits for the next run, and the default-partition gauge.
+ * waits for the next run, the default-partition gauge, and retention: whole months, at least the floor, required
+ * outside {@code dev}, and never a drop without a setting (PD-050).
  */
 @ExtendWith(OutputCaptureExtension.class)
 class RuleEnginePartitionMaintenanceTest {
@@ -53,6 +58,87 @@ class RuleEnginePartitionMaintenanceTest {
                         .hasStackTraceContaining("horus.bpm.rules.decision-log.partitions-ahead"));
         properties.withPropertyValues("horus.bpm.rules.decision-log.partitions-ahead=-P1D")
                 .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
+    void RLE_017_retention_has_no_default_is_whole_months_and_at_least_the_floor() {
+        properties.run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retentionPeriod())
+                .isNull());
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P12M")
+                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retentionPeriod())
+                        .isEqualTo(Period.ofMonths(12)));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P10Y")
+                .run(context -> assertThat(context.getBean(RuleEngineProperties.class).decisionLog().retentionPeriod()
+                        .toTotalMonths()).isEqualTo(120));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=keep-forever")
+                .run(context -> {
+                    RuleEngineProperties.DecisionLog log = context.getBean(RuleEngineProperties.class).decisionLog();
+                    assertThat(log.retentionPeriod()).isNull();
+                    assertThat(log.keepForeverChosen()).isTrue();
+                });
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=forever")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("keep-forever"));
+        // Below the floor of 12 months, in days, or a floor lowered below 12 months: start-up stops naming the property
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P11M")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("horus.bpm.rules.decision-log.retention must be at least"));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention=P400D")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("whole months"));
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention-floor=P6M")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("horus.bpm.rules.decision-log.retention-floor must be at least P12M"));
+        // A host that raises the floor to its own policy refuses a shorter retention set by mistake
+        properties.withPropertyValues("horus.bpm.rules.decision-log.retention-floor=P84M",
+                        "horus.bpm.rules.decision-log.retention=P60M")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("retention-floor (P84M)"));
+    }
+
+    @Test
+    void RLE_017_unset_retention_warns_every_start_up_and_keep_forever_is_explicit(CapturedOutput output) {
+        RuleEngineProperties.DecisionLog unset = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, null, null);
+        assertThat(DecisionLogRetention.resolve(unset)).isNull();
+        assertThat(DecisionLogRetention.resolve(unset)).isNull();
+        assertThat(output.getAll().split("WARN", -1)).hasSize(3);
+        assertThat(output).contains("horus.bpm.rules.decision-log.retention", "every decision is kept", "KB");
+
+        RuleEngineProperties.DecisionLog explicit = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, "keep-forever", null);
+        assertThat(DecisionLogRetention.resolve(explicit)).isNull();
+        assertThat(output.getAll().split("WARN", -1)).hasSize(3);
+
+        RuleEngineProperties.DecisionLog months = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, "P120M", null);
+        assertThat(DecisionLogRetention.resolve(months)).isEqualTo(Period.ofMonths(120));
+    }
+
+    @Test
+    void RLE_017_without_a_retention_the_job_never_drops_a_partition() {
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenReturn(List.of());
+
+        new RuleEnginePartitionMaintenance(partitions, clock, Duration.ofDays(7), Duration.ofDays(1), null).runOnce();
+
+        verify(partitions, never()).dropExpired(any(), any());
+    }
+
+    @Test
+    void RLE_017_with_a_retention_each_run_drops_expired_months_and_logs_each_drop(CapturedOutput output) {
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenReturn(List.of());
+        when(partitions.dropExpired(JAN_26_2027, Period.ofMonths(12))).thenReturn(List.of(
+                new DecisionLogPartitions.Dropped("rle_decision_2025_12", Instant.parse("2025-12-01T00:00:00Z"),
+                        Instant.parse("2026-01-01T00:00:00Z"), Map.of("bank-a", 3L), 3L)));
+
+        new RuleEnginePartitionMaintenance(partitions, clock, Duration.ofDays(7), Duration.ofDays(1),
+                Period.ofMonths(12)).runOnce();
+
+        verify(partitions).dropExpired(JAN_26_2027, Period.ofMonths(12));
+        assertThat(output).contains("dropped decision log partition rle_decision_2025_12",
+                "decision-log.retention=P12M", "3 decisions {bank-a=3}", "recorded in rle_decision_log_drop");
     }
 
     @Test
@@ -120,6 +206,25 @@ class RuleEnginePartitionMaintenanceTest {
         assertThat(gauge.value()).isEqualTo(1.0);
         assertThat(gauge.value()).isZero();
         assertThat(gauge.value()).isNaN();
+    }
+
+    @Test
+    void RLE_017_default_rows_gauge_survives_a_garbage_collection_after_binding() {
+        // Given a gauge whose binder nothing but the registry references
+        DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
+        when(partitions.defaultRows()).thenReturn(1L);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        new RuleEngineMetrics(partitions).bindTo(registry);
+
+        // When a garbage collection has run: a weakly reachable sentinel is cleared only by one
+        java.lang.ref.WeakReference<Object> sentinel = new java.lang.ref.WeakReference<>(new Object());
+        for (int i = 0; i < 50 && sentinel.get() != null; i++) {
+            System.gc();
+        }
+        assertThat(sentinel.get()).as("a garbage collection ran").isNull();
+
+        // Then the gauge still reads the default partition instead of NaN
+        assertThat(registry.get("horus.rle.partition.default.rows").gauge().value()).isEqualTo(1.0);
     }
 
     @Test

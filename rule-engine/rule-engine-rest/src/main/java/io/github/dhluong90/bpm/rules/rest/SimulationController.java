@@ -1,13 +1,17 @@
 package io.github.dhluong90.bpm.rules.rest;
 
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
+import io.github.dhluong90.bpm.rules.api.HistorySimulation;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -22,9 +26,10 @@ import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Simulation of a stored version over sample inputs, beside the version effective now (RLE-016). Writes nothing:
- * no decision row, idempotency record or event, so it takes no {@code Idempotency-Key}. Members of the body other
- * than {@code samples} and their {@code inputs} are ignored, a {@code tenantId} included.
+ * Simulation of a stored version over sample inputs, beside the version effective now (RLE-016), and over the logged
+ * decisions of a period, beside what was decided (RLE-015). Writes nothing: no decision row, idempotency record or
+ * event, so neither takes an {@code Idempotency-Key}. Members of the body other than those named are ignored, a
+ * {@code tenantId} included.
  */
 @RestController
 @RequestMapping(RestSupport.BASE + "/rule-sets")
@@ -86,5 +91,57 @@ public class SimulationController {
             }
         }
         return RestSupport.json(HttpStatus.OK, EngineValues.simulation(engine.simulate(name, version, inputs)));
+    }
+
+    /**
+     * {@code POST /rule-sets/{name}/versions/{v}:simulate-history}, body {@code {"from": ..., "to": ..., "limit": n}}.
+     *
+     * @param name the rule set name
+     * @param version the version to simulate
+     * @param requestBody the body, read up to {@link EngineDefaults#COMMAND_BODY_MAX_BYTES}
+     * @param contentLength the declared length, or null
+     * @return one item per logged decision, newest first, with the changed ones flagged
+     * @throws IOException when the body cannot be read
+     */
+    @PostMapping("/{name}/versions/{version:\\d+}:simulate-history")
+    public ResponseEntity<byte[]> simulateHistory(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
+        // Both permissions first, then a bounded read: the answer is built from logged inputs (RLE-015).
+        RestSupport.require(callers, "rules:simulate");
+        RestSupport.require(callers, "rules:log:read");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        JsonNode request = EngineValues.readRequest(body);
+        if (!request.isObject()) {
+            throw new QueryInvalidException("Request body must be a JSON object with from and to");
+        }
+        Integer limit = null;
+        JsonNode limitNode = request.get("limit");
+        if (limitNode != null && !limitNode.isNull()) {
+            if (!limitNode.isIntegralNumber() || !limitNode.canConvertToInt()) {
+                throw new QueryInvalidException("limit must be a whole number");
+            }
+            limit = limitNode.intValue();
+        }
+        HistorySimulation period = new HistorySimulation(instant(request, "from"), instant(request, "to"), limit);
+        return RestSupport.json(HttpStatus.OK,
+                EngineValues.historySimulation(engine.simulateHistory(name, version, period)));
+    }
+
+    private static Instant instant(JsonNode request, String member) {
+        JsonNode node = request.get(member);
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        if (!node.isString()) {
+            throw new QueryInvalidException(member + " must be an ISO 8601 instant");
+        }
+        try {
+            return Instant.parse(node.stringValue());
+        } catch (DateTimeParseException e) {
+            throw new QueryInvalidException(member + " must be an ISO 8601 instant, such as 2026-11-01T00:00:00Z");
+        }
     }
 }

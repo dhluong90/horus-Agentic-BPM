@@ -2,11 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { licenceViolations } from './licences.mjs';
 
 describe('licence rule', () => {
-  it('TR_LIC_01_mit_apache_and_bsd_pass_and_dual_licences_pass_on_one_allowed_branch', () => {
+  it('TR_LIC_01_mit_apache_bsd_and_isc_pass_and_dual_licences_pass_on_one_allowed_branch', () => {
     expect(licenceViolations([
       { name: 'react', version: '18.3.1', license: 'MIT' },
       { name: 'oidc-client-ts', version: '3.0.0', license: 'Apache-2.0' },
       { name: 'x', version: '1.0.0', license: 'BSD-3-Clause' },
+      { name: 'd3-color', version: '3.1.0', license: 'ISC' },
       { name: 'y', version: '1.0.0', license: '(MIT OR GPL-3.0)' },
     ])).toEqual([]);
   });

@@ -279,6 +279,12 @@ public final class EngineValues {
         if (version.copiedFrom() != null) {
             node.put("copiedFrom", version.copiedFrom());
         }
+        // RLE-038: the pending four-eyes retirement, all null when none is pending.
+        io.github.dhluong90.bpm.rules.api.RetirementRequest retirement = version.retirementRequest();
+        node.set("retireRequestedBy", value(retirement == null ? null : retirement.requestedBy()));
+        node.set("retireRequestedAt", value(retirement == null ? null : retirement.requestedAt()));
+        node.set("retireReason", value(retirement == null ? null : retirement.reason()));
+        node.put("retireConfirmsNoVersionInEffect", retirement != null && retirement.confirmNoVersionInEffect());
         node.set("definition", read(version.canonicalDocument()));
         ArrayNode warnings = node.putArray("warnings");
         for (VersionWarning warning : version.warnings()) {
@@ -320,7 +326,18 @@ public final class EngineValues {
                 Instant.parse(node.get("createdAt").stringValue()),
                 instant(node.get("retiredAt")),
                 node.has("copiedFrom") && !node.get("copiedFrom").isNull() ? node.get("copiedFrom").asInt() : null,
-                warnings(node.get("warnings")));
+                warnings(node.get("warnings")),
+                retirementRequest(node));
+    }
+
+    /** The pending retirement of a stored version result; absent in results recorded before four-eyes retirement. */
+    private static io.github.dhluong90.bpm.rules.api.RetirementRequest retirementRequest(JsonNode node) {
+        String requestedBy = text(node.get("retireRequestedBy"));
+        if (requestedBy == null) {
+            return null;
+        }
+        return new io.github.dhluong90.bpm.rules.api.RetirementRequest(requestedBy, instant(node.get("retireRequestedAt")),
+                text(node.get("retireReason")), node.path("retireConfirmsNoVersionInEffect").asBoolean(false));
     }
 
     /** The warnings of a stored version result; absent in results recorded before warnings existed. */
@@ -430,6 +447,8 @@ public final class EngineValues {
             node.set("approvalMode", value(entry.approvalMode()));
             node.set("noVersionInEffect", entry.noVersionInEffect() == null
                     ? EngineJson.NODES.nullNode() : EngineJson.NODES.booleanNode(entry.noVersionInEffect()));
+            // RLE-038: in four-eyes mode the actor confirmed a request made by this identity; null otherwise.
+            node.set("retireRequestedBy", value(entry.retireRequestedBy()));
         }
         if (entry.copiedFrom() != null) {
             node.put("copiedFrom", entry.copiedFrom());
@@ -502,6 +521,40 @@ public final class EngineValues {
             item.put("changed", sample.changed());
             item.set("simulated", outcome(sample.simulated()));
             item.set("baseline", sample.baseline() == null ? EngineJson.NODES.nullNode() : outcome(sample.baseline()));
+        }
+        return node;
+    }
+
+    /**
+     * Writes a history simulation as the REST body of {@code :simulate-history} (RLE-015). Holds no logged input:
+     * a decision that cannot be replayed is named by its masked inputs only.
+     *
+     * @param result the result
+     * @return the body
+     */
+    public static ObjectNode historySimulation(io.github.dhluong90.bpm.rules.api.HistorySimulationResult result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("status", result.status().name());
+        node.put("from", result.from().toString());
+        node.put("to", result.to().toString());
+        node.put("decisionCount", result.items().size());
+        node.put("replayedCount", result.replayedCount());
+        node.put("changedCount", result.changedCount());
+        node.put("notReplayableCount", result.notReplayableCount());
+        node.put("truncated", result.truncated());
+        var items = node.putArray("results");
+        for (var decision : result.items()) {
+            ObjectNode item = items.addObject();
+            item.put("decisionId", decision.decisionId());
+            item.put("loggedVersion", decision.loggedVersion());
+            item.put("evalClock", decision.evalClock().toString());
+            item.put("changed", decision.changed());
+            item.set("maskedInputs", value(decision.maskedInputs()));
+            item.set("simulated", decision.simulated() == null ? EngineJson.NODES.nullNode()
+                    : outcome(decision.simulated()));
+            item.set("logged", decision.logged() == null ? EngineJson.NODES.nullNode() : outcome(decision.logged()));
         }
         return node;
     }

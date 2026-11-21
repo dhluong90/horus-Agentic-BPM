@@ -3,12 +3,17 @@ package io.github.dhluong90.bpm.rules.postgres;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Period;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -22,8 +27,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  *
  * <p>{@link #ensureAhead} is the maintenance step (RLE-017): the starter runs it at start-up and daily, and it
  * creates every month from the current one up to {@code now + decision-log.partitions-ahead}, and always the next
- * month. {@link #defaultRows()} feeds the {@code horus_rle_partition_default_rows} gauge. Retention by dropping whole
- * partitions arrives with its own slice; nothing here drops a partition or deletes a row by date (TR-OBS-01).
+ * month. {@link #defaultRows()} feeds the {@code horus_rle_partition_default_rows} gauge. {@link #dropExpired} is
+ * retention: it drops whole monthly partitions older than the host's {@code decision-log.retention} and records each
+ * drop in the append-only {@code rle_decision_log_drop}. It is called only when the host set a retention, and nothing
+ * here deletes a row by date (TR-OBS-01). The default partition is never dropped.
  *
  * <p>Each partition is created standalone with a CHECK constraint and then attached, so
  * {@code ATTACH} skips the validation scan and takes {@code SHARE UPDATE EXCLUSIVE} on the parent.
@@ -37,6 +44,26 @@ public final class DecisionLogPartitions {
     static final long ADVISORY_LOCK_KEY = 0x726C655F70617274L;
 
     private static final DateTimeFormatter SUFFIX = DateTimeFormatter.ofPattern("yyyy_MM");
+    private static final Pattern MONTH_PARTITION = Pattern.compile("^rle_decision_(\\d{4})_(\\d{2})$");
+
+    /** The {@code tenant_id} of the record row holding a dropped partition's total over every tenant. */
+    public static final String ALL_TENANTS = "*";
+
+    /**
+     * One partition dropped by retention, as recorded in {@code rle_decision_log_drop}.
+     *
+     * @param partition the partition name, for example {@code rle_decision_2027_01}
+     * @param from the first instant of the month, inclusive
+     * @param to the first instant of the next month, exclusive
+     * @param decisionsByTenant how many decisions each tenant had in it, by tenant id in order
+     * @param total the decisions of every tenant
+     */
+    public record Dropped(String partition, Instant from, Instant to, Map<String, Long> decisionsByTenant, long total) {
+
+        public Dropped {
+            decisionsByTenant = java.util.Collections.unmodifiableMap(new LinkedHashMap<>(decisionsByTenant));
+        }
+    }
 
     private final JdbcClient jdbc;
     private final RuleEngineTransactions transactions;
@@ -135,6 +162,132 @@ public final class DecisionLogPartitions {
             months.add(month);
         }
         return List.copyOf(months);
+    }
+
+    /**
+     * Returns the cutoff of a retention: the instant {@code retention} before {@code now}, in UTC calendar months, so
+     * {@code P12M} at {@code 2028-02-03T00:00:00Z} is {@code 2027-02-03T00:00:00Z}.
+     *
+     * @param now the current instant from the host's clock
+     * @param retention the retention, whole months only
+     * @return the cutoff; a partition whose upper bound is at or before it holds only older rows
+     */
+    public static Instant cutoff(Instant now, Period retention) {
+        return now.atZone(ZoneOffset.UTC).minusMonths(wholeMonths(retention)).toInstant();
+    }
+
+    /**
+     * Returns the months whose partitions retention drops: those present whose upper bound is at or before the cutoff.
+     *
+     * @param present the months whose partitions exist
+     * @param cutoff the cutoff, see {@link #cutoff}
+     * @return the expired months, in month order
+     */
+    public static List<YearMonth> expired(List<YearMonth> present, Instant cutoff) {
+        return present.stream()
+                .filter(month -> !month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant().isAfter(cutoff))
+                .sorted()
+                .toList();
+    }
+
+    /**
+     * Drops every monthly partition of {@code rle_decision} that lies wholly before {@code now - retention}, and
+     * records each drop (RLE-017, TR-OPS-04, PD-050). Never deletes a row and never touches the default partition.
+     *
+     * <p>One transaction, with {@code lock_timeout = 2s}, under the advisory lock of {@link #ensureAhead}. For each
+     * expired partition: {@code LOCK} it in {@code SHARE} mode, so no row can arrive in it while it is counted; count
+     * its rows per tenant; insert the record rows into {@code rle_decision_log_drop} (one per tenant and one for
+     * {@value #ALL_TENANTS}); then {@code DROP TABLE}. The drop holds the parent's lock from that statement to the
+     * commit only, so inserts wait at most the lock timeout. Either every expired month is dropped and recorded, or
+     * none is and the next run retries.
+     *
+     * @param now the current instant from the host's clock
+     * @param retention the host's {@code decision-log.retention}, whole months only
+     * @return what was dropped, in month order; empty when nothing had expired
+     * @throws IllegalArgumentException when the retention is not a positive number of whole months
+     * @throws org.springframework.dao.DataAccessException when a lock waits longer than {@code lock_timeout}; nothing
+     *     is dropped and the next run retries
+     */
+    public List<Dropped> dropExpired(Instant now, Period retention) {
+        Objects.requireNonNull(now, "now must not be null");
+        long months = wholeMonths(retention);
+        Instant cutoff = cutoff(now, retention);
+        String recorded = "P" + months + "M";
+        return transactions.inNewTransaction(status -> {
+            jdbc.sql("SET LOCAL lock_timeout = '2s'").update();
+            jdbc.sql("SELECT pg_advisory_xact_lock(:key)").param("key", ADVISORY_LOCK_KEY)
+                    .query((rs, rowNum) -> rowNum).list();
+            List<Dropped> dropped = new ArrayList<>();
+            for (YearMonth month : expired(presentMonths(), cutoff)) {
+                dropped.add(drop(month, recorded, cutoff, now));
+            }
+            return List.copyOf(dropped);
+        });
+    }
+
+    /**
+     * Returns the months whose partitions are attached to {@code rle_decision}; the default partition is not a month.
+     *
+     * @return the months in order
+     */
+    public List<YearMonth> presentMonths() {
+        List<String> names = jdbc.sql("""
+                SELECT child.relname FROM pg_inherits i
+                JOIN pg_class child ON child.oid = i.inhrelid
+                WHERE i.inhparent = 'rle_decision'::regclass
+                """).query(String.class).list();
+        List<YearMonth> months = new ArrayList<>();
+        for (String name : names) {
+            Matcher matcher = MONTH_PARTITION.matcher(name);
+            if (matcher.matches()) {
+                months.add(YearMonth.of(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))));
+            }
+        }
+        months.sort(null);
+        return List.copyOf(months);
+    }
+
+    private Dropped drop(YearMonth month, String retention, Instant cutoff, Instant now) {
+        // DDL takes no bind parameters. The name is built from a YearMonth (digits only), so no caller text reaches
+        // these statements.
+        String name = partitionName(month);
+        Instant lower = month.atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant upper = month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        jdbc.sql("LOCK TABLE " + name + " IN SHARE MODE").update();
+        Map<String, Long> byTenant = new LinkedHashMap<>();
+        jdbc.sql("SELECT tenant_id, count(*) AS n FROM " + name + " GROUP BY tenant_id ORDER BY tenant_id")
+                .query(rs -> {
+                    byTenant.put(rs.getString("tenant_id"), rs.getLong("n"));
+                });
+        long total = byTenant.values().stream().mapToLong(Long::longValue).sum();
+        Map<String, Long> rows = new LinkedHashMap<>(byTenant);
+        rows.put(ALL_TENANTS, total);
+        for (Map.Entry<String, Long> row : rows.entrySet()) {
+            jdbc.sql("""
+                    INSERT INTO rle_decision_log_drop
+                      (tenant_id, partition_name, range_from, range_to, decision_count, retention, cutoff, dropped_at)
+                    VALUES (:tenant, :name, :lower, :upper, :count, :retention, :cutoff, :now)
+                    """)
+                    .param("tenant", row.getKey())
+                    .param("name", name)
+                    .param("lower", Timestamp.from(lower))
+                    .param("upper", Timestamp.from(upper))
+                    .param("count", row.getValue())
+                    .param("retention", retention)
+                    .param("cutoff", Timestamp.from(cutoff))
+                    .param("now", Timestamp.from(now))
+                    .update();
+        }
+        jdbc.sql("DROP TABLE " + name).update();
+        return new Dropped(name, lower, upper, byTenant, total);
+    }
+
+    private static long wholeMonths(Period retention) {
+        Objects.requireNonNull(retention, "retention must not be null");
+        if (retention.getDays() != 0 || retention.toTotalMonths() <= 0) {
+            throw new IllegalArgumentException("retention must be a positive number of whole months, was " + retention);
+        }
+        return retention.toTotalMonths();
     }
 
     /**

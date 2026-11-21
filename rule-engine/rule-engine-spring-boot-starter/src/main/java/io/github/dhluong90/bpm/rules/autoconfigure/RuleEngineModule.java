@@ -88,7 +88,12 @@ final class RuleEngineModule {
         settings.put(RETIRE_APPROVAL, retireApproval);
         settings.put(RETIRE_LAST_VERSION, retireLastVersion);
         settings.put(ACKNOWLEDGE_WARNINGS, String.join(",", acknowledgeWarnings));
-        return new ModuleDescriptor("rules", engineVersion(), "v1", FEATURES, settings, PERMISSIONS, rolePermissions);
+        return ModuleDescriptor.builder("rules", engineVersion(), "v1")
+                .features(FEATURES)
+                .settings(settings)
+                .permissions(PERMISSIONS)
+                .rolePermissions(rolePermissions)
+                .build();
     }
 
     /**

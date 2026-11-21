@@ -32,15 +32,10 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
     private static final String RUN_COLUMNS = "tenant_id, id, status, definition_key, node_id, period_from, period_to, "
             + "candidate_rule_set, candidate_version, candidate_schema::text AS candidate_schema, idempotency_key, "
             + "request_hash, cursor_at, cursor_id, cases, unchanged, newly_allowed, newly_refused, newly_reviewed, "
-            + "overridden, not_replayed, with_masked_fields, failure_code, created_by, created_at, completed_at, "
+            + "overridden, not_replayed, with_masked_fields, masked_input_required, failure_code, created_by, created_at, completed_at, "
             + "expires_at";
 
-    /** The recorded answers of one agent step: the result rows of its jobs, which carry the answer's output. */
-    private static final String ANSWERS_WHERE = "FROM pre_history h "
-            + "JOIN pre_definition d ON d.tenant_id = h.tenant_id AND d.id = h.definition_id "
-            + "WHERE h.tenant_id = ? AND d.key_name = ? AND h.node_id = ? "
-            + "AND h.event_type IN ('ASYNC_RESULT_ACCEPTED','ASYNC_RESULT_REFUSED') AND h.details->'outputFields' IS NOT NULL "
-            + "AND h.occurred_at >= ? AND h.occurred_at < ? ";
+    private static final String ANSWERS_WHERE = ProcessListQueries.ANSWERS_WHERE;
 
     private final JdbcClient jdbc;
 
@@ -68,30 +63,25 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
     @Override
     public List<RecordedAnswer> answers(String tenant, String definitionKey, String nodeId, Instant from, Instant to,
             Instant afterAt, String afterId, int limit) {
-        String sql = "SELECT h.occurred_at, h.id, h.instance_id, h.event_type, h.attempt_id, h.details::text AS details, "
-                + "j.payload::text AS payload " + ANSWERS_WHERE.replace("WHERE",
-                        "LEFT JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' "
-                                + "AND j.job_kind = 'ASYNC_AGENT' WHERE")
-                + (afterAt == null ? "" : "AND (h.occurred_at, h.id) > (?, ?) ")
-                + "ORDER BY h.occurred_at, h.id LIMIT ?";
-        JdbcClient.StatementSpec statement = jdbc.sql(sql).params(tenant, definitionKey, nodeId, ts(from), ts(to));
+        List<Object> params = new java.util.ArrayList<>(List.of(tenant, definitionKey, nodeId, ts(from), ts(to)));
         if (afterAt != null) {
-            statement = statement.param(ts(afterAt)).param(afterId);
+            params.add(ts(afterAt));
+            params.add(afterId);
         }
-        return statement.param(limit).query((rs, n) -> new RecordedAnswer(instant(rs, "occurred_at"), rs.getString("id"),
+        params.add(limit);
+        ListQuery query = afterAt == null ? ProcessListQueries.RECORDED_ANSWERS : ProcessListQueries.RECORDED_ANSWERS_AFTER;
+        return query.list(jdbc, params, (rs, n) -> new RecordedAnswer(instant(rs, "occurred_at"), rs.getString("id"),
                 rs.getString("instance_id"), rs.getString("event_type"), rs.getString("attempt_id"),
                 Values.readMap(rs.getString("details")), rs.getString("payload") == null ? null
-                        : Values.readMap(rs.getString("payload")))).list();
+                        : Values.readMap(rs.getString("payload"))));
     }
 
     @Override
     public Set<String> overriddenAttempts(String tenant, Collection<String> instanceIds, Collection<String> attemptIds) {
-        return jdbc.sql("SELECT details->>'refusedAttemptId' FROM pre_history WHERE tenant_id = ? "
-                        + "AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
-                        + "AND details->>'refusedAttemptId' = ANY (?) AND EXISTS (SELECT 1 FROM jsonb_each(details->'changes') c "
-                        + "WHERE c.value->>'from' IS DISTINCT FROM '***')")
-                .params(tenant, instanceIds.toArray(String[]::new), attemptIds.toArray(String[]::new))
-                .query(String.class).set().stream().collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        return ProcessListQueries.OVERRIDDEN_ATTEMPTS.list(jdbc,
+                List.of(tenant, instanceIds.toArray(String[]::new), attemptIds.toArray(String[]::new)),
+                (rs, n) -> rs.getString("attempt_id")).stream()
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
     }
 
     @Override
@@ -153,10 +143,10 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
             AgentReplayRun.Summary s, Instant completedAt) {
         jdbc.sql("UPDATE pre_agent_replay SET status = ?, cursor_at = ?, cursor_id = ?, cases = ?, unchanged = ?, "
                         + "newly_allowed = ?, newly_refused = ?, newly_reviewed = ?, overridden = ?, not_replayed = ?, "
-                        + "with_masked_fields = ?, completed_at = ? WHERE tenant_id = ? AND id = ?")
+                        + "with_masked_fields = ?, masked_input_required = ?, completed_at = ? WHERE tenant_id = ? AND id = ?")
                 .params(status, ts(cursorAt), cursorId, s.cases(), s.unchanged(), s.newlyAllowed(), s.newlyRefused(),
                         s.newlyRoutedToReview(), s.overriddenByReviewer(), s.notReplayed(), s.withMaskedFields(),
-                        ts(completedAt), tenant, runId)
+                        s.maskedInputRequired(), ts(completedAt), tenant, runId)
                 .update();
     }
 
@@ -169,12 +159,8 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
 
     @Override
     public List<CaseRow> cases(String tenant, String runId, int afterSeq, int limit) {
-        return jdbc.sql("SELECT seq, attempt_id, instance_id, recorded_at, recorded_outcome, candidate_outcome, change, "
-                        + "recorded_rule_ids::text AS recorded_rule_ids, candidate_rule_ids::text AS candidate_rule_ids, "
-                        + "code, overridden, masked_fields FROM pre_agent_replay_case "
-                        + "WHERE tenant_id = ? AND replay_id = ? AND seq > ? ORDER BY seq LIMIT ?")
-                .params(tenant, runId, afterSeq, limit)
-                .query((rs, n) -> new CaseRow(rs.getInt("seq"), line(rs))).list();
+        return ProcessListQueries.REPLAY_CASES.list(jdbc, List.of(tenant, runId, afterSeq, limit),
+                (rs, n) -> new CaseRow(rs.getInt("seq"), line(rs)));
     }
 
     @Override
@@ -196,7 +182,8 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
     private static StoredRun run(ResultSet rs, int n) throws SQLException {
         AgentReplayRun.Summary summary = new AgentReplayRun.Summary(rs.getInt("cases"), rs.getInt("unchanged"),
                 rs.getInt("newly_allowed"), rs.getInt("newly_refused"), rs.getInt("newly_reviewed"),
-                rs.getInt("overridden"), rs.getInt("not_replayed"), rs.getInt("with_masked_fields"));
+                rs.getInt("overridden"), rs.getInt("not_replayed"), rs.getInt("with_masked_fields"),
+                rs.getInt("masked_input_required"));
         String schema = rs.getString("candidate_schema");
         AgentReplayRun view = new AgentReplayRun(rs.getString("id"), rs.getString("status"),
                 rs.getString("definition_key"), rs.getString("node_id"), rs.getDate("period_from").toLocalDate(),

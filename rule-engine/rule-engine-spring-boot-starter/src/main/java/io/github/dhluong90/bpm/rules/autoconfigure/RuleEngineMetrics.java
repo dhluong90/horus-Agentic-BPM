@@ -30,6 +30,9 @@ final class RuleEngineMetrics implements MeterBinder {
     public void bindTo(MeterRegistry registry) {
         Gauge.builder(DEFAULT_ROWS, this, RuleEngineMetrics::defaultRows)
                 .description("Rows of rle_decision outside every monthly partition; should be 0")
+                // A gauge holds its state weakly by default: once nothing else references this binder, a garbage
+                // collection turns the gauge into NaN. The registry keeps it, whoever created it.
+                .strongReference(true)
                 .register(registry);
     }
 

@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference (decision record) |
 | Owner area | Product |
-| Last reviewed | 2026-11-20 |
+| Last reviewed | 2026-11-21 |
 
 This log records every product decision about the engines: scope, milestones, priorities, product rules and the acceptance of architecture decisions that change what ships. The product manager writes the question and a recommendation first; the product owner decides (PD-001). Since 2026-11-19 the product manager also decides business and use-case questions under delegated authority, while the product owner keeps release dates, licensing and commercial terms and can overrule any entry (PD-073). Every decision follows the principle "generic by design" (PD-074). A decision is never applied to the roadmap, the feature map, a PRD or a SPEC before its status here is Decided.
 
@@ -153,6 +153,14 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-129](#pd-129-the-example-model-adapters-are-openai-compatible-and-anthropic-messages) | The example model adapters are OpenAI-compatible and Anthropic Messages | Decided (product manager, delegated, PD-073) |
 | [PD-130](#pd-130-decision-log-retention-is-required-from-10-0x-warns-and-keeps-everything) | Decision log retention is required from 1.0; 0.x warns and keeps everything | Decided (product manager, delegated, PD-073) |
 | [PD-131](#pd-131-migrating-running-instances-and-editing-business-calendars-are-four-eyes-by-default) | Migrating running instances and editing business calendars are four-eyes by default | Decided (product manager, delegated, PD-073); amends PD-114 and PD-118 |
+| [PD-132](#pd-132-masking-stays-not-masked-unless-declared) | Masking stays not masked unless declared | Decided (maintainer, 2026-11-21) |
+| [PD-133](#pd-133-issues-#44-and-#212-are-delivered-by-release-0.1.0) | Issues #44 and #212 are delivered by release 0.1.0 | Decided (maintainer, 2026-11-21) |
+| [PD-134](#pd-134-interim-0.x-tags-are-kept-before-1.0) | Interim 0.x tags are kept before 1.0 | Decided (maintainer, 2026-11-21) |
+| [PD-135](#pd-135-the-1.0-api-freeze-date-is-5-february-2027) | The 1.0 API freeze date is 5 February 2027 | Decided (maintainer, 2026-11-21) |
+| [PD-136](#pd-136-isc-licence-is-allowed-for-the-diagram-library-dependencies) | ISC licence is allowed for the diagram library dependencies | Decided (maintainer, 2026-11-21) |
+| [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
+| [PD-138](#pd-138-a-built-in-shadow-mode-for-agent-steps-is-planned-for-11-the-documented-pattern-covers-10) | A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0 | Decided (product manager, delegated, PD-073); revisits PD-015 |
+| [PD-139](#pd-139-approvals-require-the-reviewed-content-hash-for-rules-and-process-definitions) | Approvals require the reviewed content hash, for rules and process definitions | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3756,3 +3764,139 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Follow-ups.** Architect: the process engine SPEC and OpenAPI change for both proposals. Maintainers (engineering): #106 and #107 (migration), #125 (calendars). If four-eyes for migration misses its milestone, migration execution does not ship; it never ships with one person outside `dev`. Product manager: the roadmap and feature map notes for CK-F-18 and CK-F-19.
 
+### PD-132 Masking stays not masked unless declared
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | The question of making strict masking the default outside `dev` (issue #311) is open after PD-099, whose kill criterion has not fired. |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Keep the default off (option 1 of #311); guidance and the publish-time warning stay as the mitigation. `decision-log.require-explicit-mask` stays `false` outside `dev` until a pilot bank finds unmasked personal data in the decision log; that finding reopens this decision.
+
+**Consequences.** Issue #311 closes with a comment pointing here. No change to DESIGN 4.4.
+
+### PD-133 Issues #44 and #212 are delivered by release 0.1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issues #44 and #212 asked for the Rule Engine and Cockpit 0.1 release and for the release review with the 0.1.0 tag. Are they done? |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Yes. Release v0.1.0 (published 2026-11-20) delivers both. Each issue is closed as completed with a pointer to the release.
+
+**Consequences.** None.
+
+### PD-134 Interim 0.x tags are kept before 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #89 asked whether tags between 0.1.0 and 1.0 are kept, or whether only 1.0 is tagged. |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Interim 0.x tags are kept. Each milestone release before 1.0 is tagged and published; 0.x versions may change contracts, as the release notes of each state.
+
+**Consequences.** Issue #89 comment records it.
+
+### PD-135 The 1.0 API freeze date is 5 February 2027
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #115 needs a date for the 1.0 API freeze and deprecation policy. |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** The API freeze date is 5 February 2027, signed by the architect. After it, changes to the frozen APIs follow the deprecation policy.
+
+**Consequences.** Issue #115 comment records it.
+
+### PD-136 ISC licence is allowed for the diagram library dependencies
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | React Flow, the diagram library, pulls in ISC-licensed d3 packages. Is ISC acceptable? |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Allowed. ISC is a permissive licence equivalent to MIT. The dependency licence check accepts ISC alongside the other permissive licences.
+
+**Consequences.** The licence allow-list in the dependency check includes ISC.
+
+### PD-137 Tag 0.2.0 for the Process Engine and Cockpit 0.2 release
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Does the Process Engine and Cockpit 0.2 release get its own 0.2.0 tag? |
+| Raised by | Product manager |
+| Decision | Decided (maintainer, 2026-11-21) |
+
+**Decision.** Yes. The release is tagged 0.2.0, following PD-134.
+
+**Consequences.** None beyond the release itself.
+
+### PD-138 A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Does 1.0 need a built-in shadow mode, where the agent runs beside the person without blocking the case, agreement is recorded and sampling is available? Or is the documented pattern (an allow-all guardrail version followed by a human task) enough for 1.0? |
+| Raised by | Documentation of issue #214 (PR #399) |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 2; revisits option 2 of PD-015 |
+
+**Options considered**
+
+1. Build shadow mode for 1.0. Consequence: the agent step stops blocking the case, the engine compares the agent's answer with the person's, and sampling is built in. About 70 issues remain before the API freeze on 5 Feb 2027; this adds an engine change, a history change and cockpit views to the most loaded stretch.
+2. Document the pattern for 1.0 and build shadow mode in 1.1 (chosen). Consequence: banks that want shadow evaluation before an agent acts have a working route today, with four stated gaps, and the engine keeps its freeze date.
+3. Neither: leave shadow evaluation to the host. Consequence: no guide and no plan; the first bank that asks meets the gaps alone.
+
+**Recommendation and decision.** Option 2. Three reasons.
+- Safety before action is already covered in 1.0 in two ways: the documented pattern, and offline replay of recorded traces against a changed guardrail or output schema (PD-128). A bank can measure an agent without letting it act.
+- The four gaps cost the bank effort, not safety. The agent step still blocks the case, comparison and sampling are done by the host from history, and the reviewer-override flag in replay covers only corrected refusals. None of them lets an agent act without a rule a person can audit.
+- A built-in mode adds a new step behaviour and new history fields. Both can be added after the freeze without breaking the contract if designed as optional and off by default, so waiting does not close the door.
+
+**Consequences.**
+- 1.0: the guide for issue #214 ships as written and states the four gaps plainly. No engine change.
+- 1.1: a built-in shadow mode is planned, with these outcomes: the case does not wait for the agent step; the agent's answer and the person's decision are recorded side by side with an agreement result; a configurable share of cases is sampled; replay reports agreement. Everything is additive and off by default, so existing models and the frozen contract do not change.
+- The 1.1 design must be compatible with the guardrail rules, masking and four-eyes approval of guardrail versions already decided (PD-015, PD-128). Shadow output never reaches a case.
+- Pull forward to 1.0 if two named pilot banks ask for it before the 23 Apr 2027 checkpoint and the freeze review confirms the change is additive. Otherwise it stays in 1.1.
+- Configurable: yes, in 1.1 (per step, off by default).
+
+**Follow-ups.** Documentation: #214 states the gaps and links this decision. Product manager: add shadow mode to the 1.1 roadmap and the feature map, with the reference to PD-015. Architect: confirm at the freeze review that the later additions are additive.
+### PD-139 Approvals require the reviewed content hash, for rules and process definitions
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | #275 makes an approval name the exact content the approver reviewed. What is the default of `horus.bpm.rules.approval.require-content-hash`, and does the Process Engine follow-up from the #401 review (approval bound to the diffed hash) ship in 1.0? |
+| Raised by | Architect, #275; follow-up from the #401 review |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21; options 1 and 1 |
+
+**Options considered: the default**
+
+1. Required (`true`) by default (chosen). Consequence: an approval without `expectedCanonicalHash` is refused. Host API clients written against 0.x must send the hash before they upgrade. Maker-checker holds from the first release that has the field.
+2. Optional by default, required from 1.0. Consequence: 0.x clients keep working, but making the field required after the 1.0 freeze is a breaking change (PD-135), and until then an approval can still bind to content nobody saw.
+3. Optional with a warning. Consequence: the same gap as option 2, with no date on which it closes.
+
+**Options considered: the Process Engine follow-up**
+
+1. In 1.0 (chosen). Consequence: a process definition is approved against the hash of the content the approver reviewed, the same control as rules. One more small issue before the freeze.
+2. After 1.0. Consequence: the rule side is bound and the process side is not, and the change is breaking once the contract is frozen.
+
+**Recommendation and decision.** Required by default, and the Process Engine follow-up is in 1.0. Maker-checker is a non-negotiable control (PD-126), the cockpit already sends the hash, and 0.x is the last time a required field costs nothing in compatibility. The cost, host clients that must start sending the hash, is stated in the release notes. A diff that is cut off at 1,000 changes is not the content the approver reviewed, so it must never be approvable as if complete.
+
+**Consequences.**
+- Setting `horus.bpm.rules.approval.require-content-hash`: `true` by default. `false` is accepted only in the `dev` profile; start-up is refused with it in any other profile, as in PD-126 and PD-131.
+- Rules: `:approve` and `:reject` need `expectedCanonicalHash` next to the `If-Match` lock version; a mismatch is refused and nothing is written (#275).
+- Process Engine: approving a definition version needs the hash of the content reviewed. A diff cut off at 1,000 changes carries no approvable hash; the complete change set is read, page by page, before Approve is offered, and an approval against a cut-off diff is refused.
+- Release notes for 0.2.0 name the new required field and the client change.
+- Configurable: only the `dev` relaxation.
+
+**Follow-ups.** Product manager: the issue "Process Engine: Approve Only the Reviewed Definition". Architect: the SPEC and OpenAPI change for both. Cockpit: send the hash on every approval (#246 follow-up). If the process side misses 1.0, definition approval does not ship without the hash.

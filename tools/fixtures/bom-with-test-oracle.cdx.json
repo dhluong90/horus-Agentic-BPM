@@ -1,0 +1,24 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": { "type": "library", "group": "io.github.dhluong90.bpm", "name": "fixture-release", "version": "0.0.0" }
+  },
+  "components": [
+    {
+      "type": "library",
+      "group": "com.fasterxml.jackson.core",
+      "name": "jackson-annotations",
+      "version": "2.21",
+      "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-annotations@2.21?type=jar"
+    },
+    {
+      "type": "library",
+      "group": "org.scala-lang",
+      "name": "scala-library",
+      "version": "2.13.18",
+      "purl": "pkg:maven/org.scala-lang/scala-library@2.13.18?type=jar"
+    }
+  ]
+}

@@ -269,7 +269,7 @@ class AgentReplayIT {
         assertThat(polls).isEqualTo(3);
         assertThat(run.status()).isEqualTo("COMPLETED");
         // And the report shows 1,104 unchanged and 96 newly allowed, 7 of them answers a reviewer corrected
-        assertThat(run.summary()).isEqualTo(new AgentReplayRun.Summary(1_200, 1_104, 96, 0, 0, 7, 0, 1_200));
+        assertThat(run.summary()).isEqualTo(new AgentReplayRun.Summary(1_200, 1_104, 96, 0, 0, 7, 0, 1_200, 0));
         assertThat(cases).hasSize(1_200);
         assertThat(cases).filteredOn(c -> c.change().equals("NEWLY_ALLOWED")).hasSize(96).allSatisfy(c -> {
             assertThat(c.recordedOutcome()).isEqualTo("REVIEW");
@@ -290,6 +290,41 @@ class AgentReplayIT {
         assertThat(count("SELECT count(*) FROM pre_history WHERE tenant_id = ?")).isEqualTo(history);
         assertThat(count("SELECT count(*) FROM rle_decision WHERE tenant_id = ?")).isEqualTo(decisions);
         assertThat(instancesFingerprint()).isEqualTo(live);
+    }
+
+    @Test
+    void PRE_092_a_candidate_that_reads_a_masked_field_is_not_replayed_and_counted_apart() {
+        // Given three November answers whose summary history keeps masked, and v4 whose rule R3 reads the summary
+        publishGuardrails();
+        deploy();
+        pod.ruleIdentity.as(tenant, "lan");
+        pod.rules.versionService().importVersion(GUARDRAILS, io.github.dhluong90.bpm.rules.api.ImportRequest.yaml(
+                TestEngine.resource("/rules/kyc-document-guardrails-v4.yaml")));
+        pod.ruleIdentity.as(null, null);
+        clock.advance(Duration.ofDays(1));
+        record(List.of(answer("PASSPORT", "0.95", "2031-06-30"), answer("ID_CARD", "0.93", "2030-01-01"),
+                answer("PASSPORT", "0.97", "2032-02-02")), Duration.ofDays(1));
+
+        // When the same answers are replayed against v3, which does not read the summary, and against v4
+        replayer();
+        AgentReplays replays = pod.agentReplays(ReplaySettings.defaults());
+        String unread = replays.start(AgentReplayRequest.of(KYC, STEP, FROM, TO, GUARDRAILS, 3)).id();
+        replayUntilDone(replays, unread);
+        String read = replays.start(AgentReplayRequest.of(KYC, STEP, FROM, TO, GUARDRAILS, 4)).id();
+        replayUntilDone(replays, read);
+
+        // Then v3 reports them unchanged, because the check never needed the masked field
+        assertThat(replays.run(unread).summary()).isEqualTo(new AgentReplayRun.Summary(3, 3, 0, 0, 0, 0, 0, 3, 0));
+        // And v4 reports none as unchanged: each is not replayed with MASKED_INPUT_REQUIRED, counted apart
+        assertThat(replays.run(read).summary()).isEqualTo(new AgentReplayRun.Summary(3, 0, 0, 0, 0, 0, 0, 3, 3));
+        assertThat(allCases(replays, read)).hasSize(3).allSatisfy(c -> {
+            assertThat(c.change()).isEqualTo("NOT_REPLAYED");
+            assertThat(c.candidateOutcome()).isEqualTo("NOT_REPLAYED");
+            assertThat(c.code()).isEqualTo("MASKED_INPUT_REQUIRED");
+            assertThat(c.maskedFields()).isEqualTo(1);
+        });
+        assertThat(count("SELECT masked_input_required FROM pre_agent_replay WHERE tenant_id = ? AND id = '" + read
+                + "'")).isEqualTo(3);
     }
 
     private static boolean lowConfidence(Map<String, Object> answer) {
@@ -334,7 +369,7 @@ class AgentReplayIT {
         // And the two reports are identical apart from the run id and times
         assertThat(allCases(replays, second)).isEqualTo(lines);
         assertThat(replays.run(second).summary()).isEqualTo(replays.run(first).summary())
-                .isEqualTo(new AgentReplayRun.Summary(3, 2, 1, 0, 0, 0, 0, 3));
+                .isEqualTo(new AgentReplayRun.Summary(3, 2, 1, 0, 0, 0, 0, 3, 0));
     }
 
     // ---- PRE-094 ----------------------------------------------------------------------------------------------

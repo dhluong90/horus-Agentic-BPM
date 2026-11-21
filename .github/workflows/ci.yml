@@ -46,8 +46,10 @@ jobs:
       - name: Tests of the Maven retry script (stub mvn, no network)
         run: tools/test-mvn-retry.sh
 
-      - name: Tests of the image pin check
-        run: python3 tools/test_check_image_pins.py -v
+      - name: Tests of the image pin check and of the weekly test-image rescan
+        run: |
+          python3 tools/test_check_image_pins.py -v
+          python3 tools/test_rescan_test_images.py -v
 
       # PD-100: every container image in tests, workflows, POMs and tool scripts is pinned by digest.
       - name: Container images pinned by digest
@@ -55,8 +57,9 @@ jobs:
 
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
-    # each Spring Boot line on both PostgreSQL versions (14 and the newest release), pairwise; Spring
-    # Boot 4.0.x has one leg while it is in open-source support.
+    # each Spring Boot line on PostgreSQL 14, 16 and 18, pairwise; Spring Boot 4.0.x has one leg while it
+    # is in open-source support. Pull requests run the first five legs; pushes to main, the nightly run
+    # and manual runs add the two PostgreSQL 16 legs, so a pull request is no heavier.
     # The 3.5.x legs test the jars built on the 4.x baseline, as an adopter receives them: the same
     # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
     name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
@@ -64,15 +67,19 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # ADR-0011 tests every 4.x minor in open-source support. Remove the 4.0.x leg, and the
+      # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
       matrix:
-        include:
-          - { java: "21", boot: "4.x", postgres: "18" }
-          - { java: "21", boot: "3.5.x", postgres: "14" }
-          - { java: "25", boot: "4.x", postgres: "14" }
-          - { java: "25", boot: "3.5.x", postgres: "18" }
-          # ADR-0011 tests every 4.x minor in open-source support. Remove this leg, and the
-          # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
-          - { java: "21", boot: "4.0.x", postgres: "16" }
+        include: >-
+          ${{ fromJSON(format('[{0},{1},{2},{3},{4}{5}]',
+          '{"java":"21","boot":"4.x","postgres":"18"}',
+          '{"java":"21","boot":"3.5.x","postgres":"14"}',
+          '{"java":"25","boot":"4.x","postgres":"14"}',
+          '{"java":"25","boot":"3.5.x","postgres":"18"}',
+          '{"java":"21","boot":"4.0.x","postgres":"16"}',
+          github.event_name != 'pull_request'
+          && ',{"java":"25","boot":"4.x","postgres":"16"},{"java":"21","boot":"3.5.x","postgres":"16"}'
+          || '')) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -305,6 +312,19 @@ jobs:
       - name: Licence gate (TR-LIC-01) and CycloneDX SBOMs (TR-SEC-06)
         run: tools/mvn-retry.sh -B -ntp verify -DskipTests
 
+      # PD-098: the reference FEEL engine and its runtime are allowed in test scope only, at the versions in
+      # tools/licence-policy/test-oracle-allow-list.txt. The licence gate above skips test scope, so this
+      # compares the resolved feel-engine subtree with the file: a changed version, an unlisted artifact or
+      # a listed one no longer resolved fails, naming the artifact.
+      - name: Test-scope FEEL oracle matches its allow-list file (TR-LIC-01)
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          python3 tools/test_check_test_oracle.py -v
+          tools/mvn-retry.sh -B -ntp -q dependency:tree -Dscope=test -pl rule-engine/rule-engine-core \
+            -DoutputFile="$RUNNER_TEMP/oracle-tree.txt"
+          python3 tools/check-test-oracle.py tree "$RUNNER_TEMP/oracle-tree.txt"
+
       - name: Licence files and manifest entries in every engine jar (TR-LIC-02)
         if: ${{ !cancelled() && hashFiles('target/bom.json') != '' }}
         run: python3 tools/check-dependency-policy.py jar-notices
@@ -371,6 +391,114 @@ jobs:
             target/bom-build.json
             target/grype-*.json
             **/target/generated-sources/license/THIRD-PARTY.txt
+          if-no-files-found: warn
+          retention-days: 90
+
+  pooler:
+    # TR-OPS-05: the engine's tests tagged "pooler" run through PgBouncer in transaction mode (pinned in the root
+    # POM): the full rule set lifecycle with every statement checked for session state, partition maintenance from
+    # two replicas at once, and two example hosts whose caches refresh by the epoch check alone.
+    name: Rule Engine behind PgBouncer (transaction mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-boot-4.x-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-boot-4.x-
+            maven-${{ runner.os }}-
+
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
+      # The cockpit bundle is not needed: only the tests tagged "pooler" run, and none of them serves the cockpit.
+      - name: Tests through PgBouncer in transaction mode, PostgreSQL 16
+        run: >-
+          tools/mvn-retry.sh -B -ntp verify -Dcockpit.bundle.skip=true -Dgroups=pooler
+          -pl rule-engine/rule-engine-postgres,examples/rule-engine-only -am
+          -Dbpm.test.postgres.image="$POSTGRES_16_IMAGE"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-pooler
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  benchmark:
+    # TR-PERF-01 and TR-PERF-02 on every build: JMH (examples/rule-engine-benchmarks, never published) on the
+    # hosted runner, JDK 21. tools/benchmark-report.py writes the report to the job summary and fails when the p99
+    # of one evaluation of the 200-row first table reaches 100 us; the 1,000-row compile time is reported only.
+    # The JSON result is kept 90 days, so the trend can be read from the artifacts.
+    name: Rule Engine benchmarks (JMH)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-boot-4.x-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-boot-4.x-
+            maven-${{ runner.os }}-
+
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
+      - name: Tests of the report script
+        run: python3 tools/test_benchmark_report.py -v
+
+      - name: Build the benchmarks
+        run: |
+          tools/mvn-retry.sh -B -ntp install -pl examples/rule-engine-benchmarks -am -Dcockpit.bundle.skip=true
+          tools/mvn-retry.sh -B -ntp -q -pl examples/rule-engine-benchmarks \
+            org.apache.maven.plugins:maven-dependency-plugin:3.11.0:build-classpath \
+            -Dmdep.includeScope=runtime -Dmdep.outputFile=target/classpath.txt
+
+      - name: Run JMH
+        working-directory: examples/rule-engine-benchmarks
+        run: java -cp "target/classes:$(cat target/classpath.txt)" org.openjdk.jmh.Main -rf json -rff target/jmh-result.json
+
+      - name: Report and budget (TR-PERF-01 gating, TR-PERF-02 reported)
+        run: |
+          status=0
+          python3 tools/benchmark-report.py examples/rule-engine-benchmarks/target/jmh-result.json \
+            --out examples/rule-engine-benchmarks/target/benchmark-report.md || status=$?
+          cat examples/rule-engine-benchmarks/target/benchmark-report.md >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      - name: Upload the result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rule-engine-benchmarks
+          path: |
+            examples/rule-engine-benchmarks/target/jmh-result.json
+            examples/rule-engine-benchmarks/target/benchmark-report.md
           if-no-files-found: warn
           retention-days: 90
 

@@ -43,8 +43,8 @@ curl -s localhost:8080/actuator/health
 
 docker exec horus-pg psql -U horus -d horus -c '\dt'
 # flyway_schema_history, loan_application, rle_decision (partitioned), rle_decision_YYYY_MM (this month and next),
-# rle_decision_default, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set, rle_schema_history, rle_version,
-# rle_version_history, rle_engine_key, rle_setting_seen
+# rle_decision_default, rle_decision_log_drop, rle_decision_outbox, rle_idempotency, rle_rule, rle_rule_set,
+# rle_schema_history, rle_version, rle_version_history, rle_engine_key, rle_setting_seen, rle_masking_key_check
 
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
@@ -59,7 +59,19 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  12      | V12__rle_version_four_eyes_no_exemption.sql
 #  14      | V14__rle_setting_seen.sql
 #  15      | V15__rle_version_history_acknowledged_warnings.sql
+#  16      | V16__rle_masking_key_check.sql
+#  19      | V19__rle_decision_log_drop.sql
 ```
+
+Decision log retention is off by default: with `HORUS_DECISION_LOG_RETENTION` unset, every decision is kept, nothing is dropped, and every start-up logs a WARN saying so (set `keep-forever` to choose it on purpose; the warning then becomes an INFO):
+
+```bash
+HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
+# WARN  DecisionLogRetention: Rule Engine decision log retention is unset (horus.bpm.rules.decision-log.retention), so
+# every decision is kept and none is dropped. The log grows by one row per decision, roughly 1 to 3 KB each ...
+```
+
+Only an explicit ISO period in whole months, such as `P12M` (at least `decision-log.retention-floor`), turns drops on; `keep-forever` keeps everything explicitly.
 
 ### The cursor key
 
@@ -73,7 +85,10 @@ The engine also records, in `rle_setting_seen`, the masking default (`decision-l
 
 ```sql
 REVOKE UPDATE, DELETE, TRUNCATE ON rle_version_history FROM horus_app;   -- your runtime role
+REVOKE UPDATE, DELETE, TRUNCATE ON rle_decision_log_drop FROM horus_app;
 ```
+
+`rle_decision_log_drop`, the record of every decision log month dropped by retention, is append-only in the same way (migration `V19`).
 
 ### Upgrading to the release with lifecycle history
 
@@ -95,7 +110,7 @@ curl -s -b jar localhost:8080/api/bpm/me
 # {"schemaVersion":1,"user":{"id":"lan"},"tenant":{"current":"bank-a","allowed":["bank-a"]},"permissions":["rules:read","rules:author"],"roles":["ROLE_PRICING_AUTHOR"],"groups":[]}
 
 curl -s -b jar localhost:8080/api/bpm/meta
-# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.1.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
+# {"schemaVersion":1,"hostId":"rule-engine-only","modules":[{"module":"rules","engineVersion":"0.2.0","apiVersion":"v1","features":[]}],"tenancy":{"switching":false},"limits":{"maxPageSize":200}}
 
 curl -s -i localhost:8080/api/bpm/meta
 # HTTP/1.1 401
@@ -282,6 +297,26 @@ docker exec horus-pg psql -U horus -d horus -tc 'SELECT count(*) FROM rle_decisi
 
 The approver role has `rules:simulate` in [`application.yml`](src/main/resources/application.yml); Tuan, a teller, gets `403 PERMISSION_DENIED`. `SimulationIT` runs the same steps with bearer tokens and prints each sample with its two fees. Once Minh approves v2 (with `If-Match: "1"`), it is in force and v1 is retired as superseded: a new simulation compares with v2, and a pinned evaluate of v1 is `409 INVALID_STATE` while `evaluation.pin-retired` is off.
 
+### Replay last month's decisions through the draft
+
+Five sample customers miss edge cases. Before approving v2, Minh replays the real card fee decisions of a period through it and sees how many outcomes would change. Nothing is logged. Replay needs `rules:simulate` and `rules:log:read`, because the answer is built from logged inputs; the demo approver has no `rules:log:read` by default. Start the host as in [the decision log demo](#demo-the-decision-log-by-month), with `--horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:read,rules:approve,rules:simulate,rules:log:read`, and set `FROM` and `TO` as shown there. The output below is after 100 teller decisions, 18 of them STANDARD customers on the default fee:
+
+```bash
+curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:simulate-history -H 'Content-Type: application/json' \
+  -d "{\"from\":\"$FROM\",\"to\":\"$TO\",\"limit\":100}"
+# 200 {"ruleSet":"card-fee","version":2,"status":"DRAFT","from":"...","to":"...","decisionCount":100,
+#      "replayedCount":100,"changedCount":18,"notReplayableCount":0,"truncated":false,"results":[
+#      {"decisionId":"...","loggedVersion":1,"evalClock":"...","changed":true,"maskedInputs":[],
+#       "simulated":{"outcome":"MATCHED","matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":30000}}},
+#       "logged":{"outcome":"MATCHED","matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":50000}}}},...]}
+```
+
+Each decision runs twice at its own logged clock: with the version it was made with and with the draft. A period is at most 31 days and a run at most 1,000 decisions, newest first (`truncated` says there were more). A decision whose masked input had a value is listed with `maskedInputs` naming the input, never its value. `HistorySimulationIT` runs the steps with 100 teller decisions and prints:
+
+```
+RLE-015 replay of card-fee-hist v2 over its logged decisions: 100 replayed, 18 changed; decision rows before 100, after 100
+```
+
 ### Hit policies: exactly one row, or every matching row
 
 Two more rule sets ship with the example. [`loan-pricing.yaml`](src/main/resources/rules/loan-pricing.yaml) uses `hitPolicy: unique`, and its rows `R1` (score 700 or more) and `R2` (income 20,000,000 VND or more) overlap on purpose. [`risk-flags.yaml`](src/main/resources/rules/risk-flags.yaml) uses `hitPolicy: collect`: every matching row adds a flag and a penalty. Import, request and approve each one as in steps 1 to 4, then:
@@ -376,7 +411,7 @@ Banks run several copies of a service. Each copy keeps compiled rule versions in
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar --server.port=8081 &
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.2.0.jar --server.port=8081 &
 B=localhost:8081/api/bpm/rules/v1
 curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Type: application/json' \
   -d '{"inputs":{"tier":"SILVER","txCount":1}}'
@@ -414,7 +449,7 @@ The decision log keeps one table section per calendar month, created ahead of th
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.2.0.jar \
   --horus.bpm.rules.security.role-permissions.ROLE_PRICING_APPROVER=rules:read,rules:approve,rules:log:read
 FROM=$(date -u +%Y-%m-01T00:00:00Z)
 TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-%m-01) +1 month" +%Y-%m-01T00:00:00Z)
@@ -458,13 +493,42 @@ TO=$(date -u -v+1m +%Y-%m-01T00:00:00Z 2>/dev/null || date -u -d "$(date -u +%Y-
 
    In a host with Actuator's metrics endpoint exposed, `GET /actuator/metrics/horus.rle.partition.default.rows` shows the same gauge; this example exposes only `health`.
 
+5. Retention drops whole months older than `decision-log.retention` and records each drop. To see it without waiting a year, add an old month by hand with three decisions of two banks, then restart the host with `P12M`:
+
+   ```bash
+   docker exec horus-pg psql -U horus -d horus \
+     -c "CREATE TABLE rle_decision_2024_01 PARTITION OF rle_decision FOR VALUES FROM ('2024-01-01 00:00:00+00') TO ('2024-02-01 00:00:00+00')" \
+     -c "INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome, masked_inputs,
+           matched_rule_ids, eval_clock, duration_micros, log_mode) VALUES
+         ('bank-a','2024-01-15T09:30:00Z','01HM4Z0000000000000000A001','card-fee',1,'FIRST','OK','{}','[]','2024-01-15T09:30:00Z',12,'TRANSACTIONAL'),
+         ('bank-a','2024-01-16T09:30:00Z','01HM4Z0000000000000000A002','card-fee',1,'FIRST','OK','{}','[]','2024-01-16T09:30:00Z',12,'TRANSACTIONAL'),
+         ('bank-b','2024-01-17T09:30:00Z','01HM4Z0000000000000000B001','card-fee',1,'FIRST','OK','{}','[]','2024-01-17T09:30:00Z',12,'TRANSACTIONAL')"
+   HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar \
+     --horus.bpm.rules.decision-log.retention=P12M
+   # INFO  DecisionLogRetention: Rule Engine keeps decisions for P12M (horus.bpm.rules.decision-log.retention); older
+   #       monthly partitions are dropped and each drop is recorded in rle_decision_log_drop
+   # WARN  RuleEnginePartitionMaintenance: Rule Engine dropped decision log partition rle_decision_2024_01
+   #       [2024-01-01T00:00:00Z, 2024-02-01T00:00:00Z) under horus.bpm.rules.decision-log.retention=P12M:
+   #       3 decisions {bank-a=2, bank-b=1}, recorded in rle_decision_log_drop
+   docker exec horus-pg psql -U horus -d horus \
+     -c "SELECT partition_name, tenant_id, decision_count, retention, cutoff, dropped_at FROM rle_decision_log_drop ORDER BY tenant_id" \
+     -c "DELETE FROM rle_decision_log_drop"
+   #     partition_name    | tenant_id | decision_count | retention |            cutoff             |          dropped_at
+   #  rle_decision_2024_01 | *         |              3 | P12M      | 2025-11-20 15:29:51.929092+00 | 2026-11-20 15:29:51.929092+00
+   #  rle_decision_2024_01 | bank-a    |              2 | P12M      | 2025-11-20 15:29:51.929092+00 | 2026-11-20 15:29:51.929092+00
+   #  rle_decision_2024_01 | bank-b    |              1 | P12M      | 2025-11-20 15:29:51.929092+00 | 2026-11-20 15:29:51.929092+00
+   # ERROR:  rle_decision_log_drop is append-only: DELETE is not allowed
+   ```
+
+   The month is gone with one `DROP TABLE`, no row was deleted, and the record cannot be removed. The rules are in `DecisionLogPartitionMaintenanceIT` (`RLE_017_*`): `P12M` on 3 February 2028 drops `rle_decision_2027_01` only.
+
 ## Demo: a fee change on a date, replay and the bank's time zone
 
 `card-fee` v1 charges a default of 50,000 VND. [`rules/card-fee-december.yaml`](src/main/resources/rules/card-fee-december.yaml) is the same table with a default of 30,000 VND and `effectiveFrom: "2026-12-01T00:00:00Z"`, so it is approved now and takes over on that instant. Choosing the evaluation clock needs `rules:simulate` and replay needs `rules:log:read`, which the demo roles do not hold by default. Start the host with two extra mappings, then run steps 1 to 4 of the demo above for v1:
 
 ```bash
 SPRING_PROFILES_ACTIVE=dev HORUS_DB_PASSWORD=change-me HORUS_DEMO_PASSWORD=demo-only \
-  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.1.0.jar \
+  java -jar examples/rule-engine-only/target/example-rule-engine-only-0.2.0.jar \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_AUTHOR]=rules:read,rules:author,rules:evaluate,rules:simulate' \
   '--horus.bpm.rules.security.role-permissions[ROLE_PRICING_APPROVER]=rules:read,rules:approve,rules:log:read'
 H=localhost:8080/api/bpm/rules/v1
@@ -676,6 +740,7 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
+| `HORUS_DECISION_LOG_RETENTION` | unset: keeps everything, warns | `keep-forever`, or an ISO period in whole months of at least `P12M`, such as `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. Unset, nothing is dropped and the host starts normally |
 | `HORUS_BPM_RULES_MASKING_HMAC_KEY` | none | Base64 key, at least 32 bytes after decoding, for the fingerprints of inputs a rule set declares `mask: true`. Needed only once such a rule set is imported: without it the host refuses to start and names the setting. Create one with `openssl rand -base64 32` and keep it in a secret store |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` | none | Issuer of the bearer tokens the host accepts. Unset: no bearer tokens, so only health answers outside `dev` |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |
@@ -751,12 +816,13 @@ The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=htt
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
 | `horus.bpm.rules.query.max-page-size` | `200` | Largest `limit` of `GET /rule-sets` and `GET .../versions`, 1 to 200; may be lowered, never raised |
 | `horus.bpm.rules.lifecycle.reason-max-length` | `2000` | Longest `:reject` reason in characters, 1 to 2000; may be lowered, never raised |
+| `horus.bpm.rules.decision-log.retention` | none: keeps everything, warns | `keep-forever`, or how long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Unset, nothing is dropped and start-up is unaffected |
 
 The full list of properties is on the wiki page Rule Engine Configuration. The starter adds them with the features that use them.
 
 ## Run in CI
 
-`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18 (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs five Testcontainers suites on the image in `bpm.test.postgres.image` (PostgreSQL 16 locally, pinned by digest in the root `pom.xml`; CI pins 14 and 18 the same way). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
+`.github/workflows/ci.yml` runs these tests on every pull request on Java 21 and 25, Spring Boot 4.x and 3.5.x, and PostgreSQL 14 and 18, adding PostgreSQL 16 on `main` and nightly (see [Technical Requirements](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Technical-Requirements) on the wiki). In this module, Surefire runs `HostSecurityConfigurationTest` (start-up guards) and Failsafe runs five Testcontainers suites on the image in `bpm.test.postgres.image` (PostgreSQL 16 locally, pinned by digest in the root `pom.xml`; CI pins 14, 16 and 18 the same way). On Spring Boot 3.5 the host uses `spring-boot-starter-web` and `flyway-core` (profile `host-spring-boot-3.5`); the code is the same. To run that leg locally: `mvn -B install -DskipTests`, then `mvn -B -Dspring-boot.line=3.5 surefire:test failsafe:integration-test failsafe:verify`. `RuleEngineOnlyHostIT` fixes the host's clock at 26 January 2027.
 
 | Test | Proves |
 |---|---|

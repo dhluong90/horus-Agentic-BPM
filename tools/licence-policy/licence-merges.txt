@@ -3,3 +3,4 @@ MIT|MIT License|The MIT License|The MIT License (MIT)
 MIT-0|MIT No Attribution|MIT-0 License
 BSD-2-Clause|BSD 2-Clause License|The BSD 2-Clause License|BSD-2-Clause License|BSD 2-Clause|BSD License 2
 BSD-3-Clause|BSD 3-Clause License|The BSD 3-Clause License|New BSD License|Revised BSD License|BSD License 3|BSD 3-Clause|Eclipse Distribution License - v 1.0|EDL 1.0
+ISC|ISC License|The ISC License

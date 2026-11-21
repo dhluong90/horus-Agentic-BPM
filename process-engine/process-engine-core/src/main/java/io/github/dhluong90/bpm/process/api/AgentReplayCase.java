@@ -18,7 +18,8 @@ import java.util.Objects;
  * @param recordedRuleIds the guardrail rules that matched when the answer was recorded
  * @param candidateRuleIds the candidate rules that matched
  * @param code the candidate's refusal code ({@code GUARDRAIL_VIOLATION}, {@code GUARDRAIL_EVALUATION_ERROR},
- *     {@code AGENT_SCHEMA_INVALID}) or why the case was not replayed ({@code GUARD_SPEC_INVALID}); null when allowed
+ *     {@code AGENT_SCHEMA_INVALID}) or why the case was not replayed ({@code GUARD_SPEC_INVALID}, or {@code MASKED_INPUT_REQUIRED} when
+ *     the candidate guardrail or schema needs a field history keeps only masked); null when allowed
  * @param overriddenByReviewer whether a reviewer changed this answer
  * @param maskedFields how many masked fields were left out of the check
  */

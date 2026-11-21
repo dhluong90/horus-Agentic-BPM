@@ -44,14 +44,18 @@ public record AgentReplayRun(String id, String status, String definitionKey, Str
      * @param newlyRoutedToReview cases the candidate would send to a reviewer, and the recorded check did not
      * @param overriddenByReviewer newly allowed cases whose answer a reviewer corrected: the candidate would have let
      *     through an answer a person changed
-     * @param notReplayed cases that could not be replayed, for example without a guard spec
+     * @param notReplayed cases that could not be replayed, for example without a guard spec; not counted again in
+     *     {@code maskedInputRequired}
      * @param withMaskedFields cases with at least one masked field, left out of the check because its value was never
      *     kept
+     * @param maskedInputRequired cases not replayed because the candidate guardrail or schema needs the value of a
+     *     masked field ({@code MASKED_INPUT_REQUIRED}); counted apart from {@code notReplayed}
      */
     public record Summary(int cases, int unchanged, int newlyAllowed, int newlyRefused, int newlyRoutedToReview,
-            int overriddenByReviewer, int notReplayed, int withMaskedFields) {
+            int overriddenByReviewer, int notReplayed, int withMaskedFields,
+            int maskedInputRequired) {
 
         /** An empty summary. */
-        public static final Summary EMPTY = new Summary(0, 0, 0, 0, 0, 0, 0, 0);
+        public static final Summary EMPTY = new Summary(0, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 }

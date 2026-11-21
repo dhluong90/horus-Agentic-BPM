@@ -9,19 +9,23 @@ Nothing beyond the engine starter and its own security. The starter brings the s
 The host owns its security chain, so it adds one call that makes engine errors RFC 9457 problem details. Every other path keeps the host's own behaviour, for example a redirect to its sign-in page:
 
 ```java
+import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
+import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
+
 @Bean
-SecurityFilterChain hostSecurity(HttpSecurity http) {
+SecurityFilterChain hostSecurity(HttpSecurity http, BpmProblemAuthenticationEntryPoint problemEntryPoint,
+        BpmProblemAccessDeniedHandler problemAccessDenied) {
     var bpm = PathPatternRequestMatcher.withDefaults().matcher("/api/bpm/**");
     http.authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
-        .oauth2ResourceServer(server -> server.jwt(Customizer.withDefaults()))
+        .oauth2ResourceServer(server -> server.jwt(Customizer.withDefaults()).authenticationEntryPoint(problemEntryPoint))
         .exceptionHandling(exceptions -> exceptions
-            .defaultAuthenticationEntryPointFor(new BpmProblemAuthenticationEntryPoint(), bpm)
-            .defaultAccessDeniedHandlerFor(new BpmProblemAccessDeniedHandler(), bpm));
+            .defaultAuthenticationEntryPointFor(problemEntryPoint, bpm)
+            .defaultAccessDeniedHandlerFor(problemAccessDenied, bpm));
     return http.build();
 }
 ```
 
-Both classes are in `io.github.dhluong90.bpm.host.autoconfigure`, and the module also registers one bean of each, built from `horus.bpm.security.challenge`, so a chain can inject them and send the same challenge as the endpoints. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
+Both classes are in the public package `io.github.dhluong90.bpm.host.security`, under the same compatibility promise as the `spi` package. Since 0.2.0 they are no longer in `io.github.dhluong90.bpm.host.autoconfigure`, which carries no promise; change the two imports. The module registers one bean of each, built from `horus.bpm.security.challenge`. Inject them, as above, so the chain and the endpoints send the same `WWW-Authenticate` value; a host bean of either type replaces the default. Without them the host's own handlers answer, usually with an empty `401` body or a redirect. Even a chain that lets every request through never exposes data: the endpoints check the caller themselves and answer `401` as a problem.
 
 ## How a client uses the two endpoints
 
@@ -68,7 +72,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
   "schemaVersion": 1,
   "hostId": "rule-engine-only",
   "modules": [
-    { "module": "rules", "engineVersion": "0.1.0", "apiVersion": "v1", "features": [] }
+    { "module": "rules", "engineVersion": "0.2.0", "apiVersion": "v1", "features": [] }
   ],
   "tenancy": { "switching": false },
   "limits": { "maxPageSize": 200 }
@@ -83,7 +87,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `features` | Empty: a flag such as `rules.simulation` is added with the feature it announces, so a client never offers a screen whose endpoints are missing |
 | `settings` | Omitted when the engine has none. The Rule Engine always sends `authoring.cockpit-drafts`, and `decision-log.mask-default` and `decision-log.require-explicit-mask` as in force for the caller's tenant |
 | `tenancy.switching` | `false`: tenant switching arrives in M2 |
-| `limits.maxPageSize` | `200`, the largest page of any engine list |
+| `limits.maxPageSize` | `horus.bpm.limits.max-page-size`, `200` by default, the largest page of any engine list. A host that lowers the engines' `query.max-page-size` lowers this to match |
 
 ## `GET /api/bpm/me`
 
@@ -103,12 +107,12 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | Field | Source |
 |---|---|
 | `user.id` | The principal name; for a JWT, the `sub` claim unless the host's converter says otherwise |
-| `user.displayName` | Claim `name`, else `preferred_username`; omitted when neither is present |
+| `user.displayName` | The first claim of `horus.bpm.security.display-name-claims` the principal carries (default `name`, then `preferred_username`); omitted when none is present |
 | `tenant.current` | The tenant the request resolved to; see [Tenant](#tenant) |
 | `tenant.allowed` | The current tenant only, until tenant switching arrives in M2 |
 | `permissions` | Engine permissions the caller holds, in each engine's order; see [Permissions](#permissions) |
 | `roles` | The caller's host roles that an engine role mapping names, sorted. Other host roles are left out, so the host's role model does not reach the browser |
-| `groups` | Claim `groups` when the token has one, otherwise empty |
+| `groups` | The claim of `horus.bpm.security.groups-claim` (default `groups`) when the principal has one, otherwise empty |
 
 A caller with no engine permission gets `200` with `"permissions": []`, not an error.
 
@@ -223,7 +227,7 @@ tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank
 | `ETag` | A weak validator of the body; send it back as `If-None-Match` to get `304` |
 | `Vary` | On `/me`, and on `/meta` when it holds settings of the caller's tenant: `Authorization, Cookie, X-Tenant-Id`, so a cached `/meta` of one tenant is never used in another |
 | `X-Correlation-Id` | A ULID issued by the host for every request, also in every problem body. A caller's own `X-Correlation-Id` is never adopted; it is logged as `clientCorrelationId` |
-| `WWW-Authenticate` | On every `401`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
+| `WWW-Authenticate` | On every `401`, from the endpoints and from a chain that injects `BpmProblemAuthenticationEntryPoint`. `Bearer` by default (`horus.bpm.security.challenge`); for a caller without a tenant a bearer challenge adds `error="invalid_token"` |
 
 Every other response under `/api/bpm/**` gets `Cache-Control: no-store` from the same module: the rule engine and process engine APIs, their problem answers, and any unmapped `/api/bpm/...` path. The header is set before the endpoint runs, so success, problem and `304` answers all carry it, and it stays on when the metadata endpoints are switched off. Host endpoints outside `/api/bpm/**` keep whatever caching the host gives them (`TR-SEC-09`).
 
@@ -255,7 +259,10 @@ A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `e
 | `horus.bpm.host-metadata.enabled` | `true` | `false` turns off `/api/bpm/meta` and `/api/bpm/me` only, for hosts that already serve them another way. The `no-store` header, the tenant resolver, `EngineAccess` and the problem responses stay on |
 | `horus.bpm.tenancy.claim` | `tenant_id` | Attribute of the authenticated principal, token claim or session attribute, that carries the tenant; always compared with the resolved tenant |
 | `horus.bpm.tenancy.dev-tenant` | unset | Fixed tenant for principals that carry none; `dev` profile only |
-| `horus.bpm.security.challenge` | `Bearer` | `WWW-Authenticate` value of a `401` the endpoints raise themselves |
+| `horus.bpm.security.challenge` | `Bearer` | `WWW-Authenticate` value of every `401`: the endpoints' own and those of the registered `BpmProblemAuthenticationEntryPoint` |
+| `horus.bpm.security.groups-claim` | `groups` | Claim or principal attribute with the caller's groups, for example `http://schemas.xmlsoap.org/claims/Group` on ADFS. 1 to 128 printable characters, no spaces |
+| `horus.bpm.security.display-name-claims` | `name`, `preferred_username` | Claims tried in order for the display name, for example `name`, `upn` on Entra ID. At least one; same format |
+| `horus.bpm.limits.max-page-size` | `200` | The `limits.maxPageSize` of `/api/bpm/meta`, 1 to 200; may lower the engines' maximum, never raise it |
 | `horus.bpm.rules.security.role-permissions` | empty | Host authority to `rules:*` permissions |
 
 ## Try it

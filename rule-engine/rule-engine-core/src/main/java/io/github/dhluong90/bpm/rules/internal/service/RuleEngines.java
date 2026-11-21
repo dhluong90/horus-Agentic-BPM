@@ -22,11 +22,12 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  * @param cache the compiled versions of this replica, shared by evaluation and approval; the host's scheduler runs
  *     {@link CompiledCache#checkEpochs()} and its notification listener calls {@link CompiledCache#evict}
  * @param ruleSetHistory a rule set's history across its versions and the evidence export (PD-116)
+ * @param meters evaluation and retirement records; the starter binds them to the host's meter registry (DESIGN 4.8)
  */
 public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
         DecisionLogService decisionLog, MaskingStartupCheck maskingCheck, LifecycleSweep lifecycleSweep,
         DecisionLogQuery decisionLogQuery, CompiledCache cache,
-        io.github.dhluong90.bpm.rules.api.RuleSetHistoryService ruleSetHistory) {
+        io.github.dhluong90.bpm.rules.api.RuleSetHistoryService ruleSetHistory, EngineMeters meters) {
 
     /**
      * Builds the entry points with the default search bounds.
@@ -73,13 +74,14 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         java.util.Objects.requireNonNull(explainer, "explainer must not be null");
         CursorKeys keys = new CursorKeys(store, context.transactions(), context.clock());
         CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
-        Supersession supersession = new Supersession(store, outbox, context.settings());
-        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache),
-                new DefaultVersionService(context, store, outbox, keys, supersession, cache), keys,
+        EngineMeters meters = new EngineMeters();
+        Supersession supersession = new Supersession(store, outbox, context.settings(), context.transactions(), meters);
+        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache, querySettings, meters),
+                new DefaultVersionService(context, store, outbox, keys, supersession, cache, meters), keys,
                 new DefaultDecisionLogService(context, log, outbox, store, explainer), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, store, keys, querySettings),
-                cache, new DefaultRuleSetHistoryService(context, store, log, outbox, keys));
+                cache, new DefaultRuleSetHistoryService(context, store, log, outbox, keys), meters);
     }
 
     /**

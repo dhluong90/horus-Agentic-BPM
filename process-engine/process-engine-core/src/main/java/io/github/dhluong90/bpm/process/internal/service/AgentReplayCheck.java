@@ -21,7 +21,11 @@ import java.util.Optional;
  *
  * <p>The recorded answer is the masked copy history keeps. A top-level field whose recorded value is the mask
  * ({@code ***}) was never kept in plain text: it is left out of the check, out of the schema's {@code required} list,
- * and counted on the line. A rule that reads such a field sees no value.
+ * and counted on the line. A rule that reads such a field sees no value, and neither does a schema keyword that
+ * tests it. So a line whose candidate guardrail reads a masked field, or whose candidate schema differs from the
+ * recorded one anywhere a masked field could be tested, or whose recorded refusal came from the schema, is
+ * {@code NOT_REPLAYED} with {@code MASKED_INPUT_REQUIRED} (PRE-092): only a check that never touches a masked field
+ * may report {@code UNCHANGED} or a change.
  */
 final class AgentReplayCheck {
 
@@ -33,6 +37,8 @@ final class AgentReplayCheck {
     static final String NEWLY_ALLOWED = "NEWLY_ALLOWED";
     static final String NEWLY_REFUSED = "NEWLY_REFUSED";
     static final String NEWLY_ROUTED_TO_REVIEW = "NEWLY_ROUTED_TO_REVIEW";
+    /** Why a line is {@code NOT_REPLAYED}: the candidate check needs the value of a field history keeps only masked. */
+    static final String MASKED_INPUT_REQUIRED = "MASKED_INPUT_REQUIRED";
     /**
      * Who the replay's simulated decisions are attributed to; the simulating port ignores it and nothing is logged.
      * Not engine work: a replay is requested by a person and never reaches the engine-scoped evaluation.
@@ -46,6 +52,7 @@ final class AgentReplayCheck {
     private final String candidateRuleSet;
     private final int candidateVersion;
     private final Map<String, Object> candidateSchema;
+    private DecisionSignature candidateSignature;
 
     /**
      * @param schemas the output schema validator of the result transaction
@@ -82,7 +89,15 @@ final class AgentReplayCheck {
         Map<String, Object> schema = candidateSchema != null ? copy(candidateSchema)
                 : guard.get("outputSchema") instanceof Map<?, ?> s ? copy(s) : null;
         Map<String, Object> output = details.get("output") instanceof Map<?, ?> o ? copy(o) : new LinkedHashMap<>();
-        int masked = dropMasked(output, schema);
+        List<String> maskedNames = maskedFields(output);
+        List<String> needed = needed(tenant, maskedNames,
+                guard.get("outputSchema") instanceof Map<?, ?> r ? copy(r) : null, String.valueOf(details.get("code")));
+        if (!needed.isEmpty()) {
+            return new AgentReplayCase(answer.attemptId(), answer.instanceId(), answer.occurredAt(), recorded,
+                    NOT_REPLAYED, NOT_REPLAYED, recordedRules, List.of(), MASKED_INPUT_REQUIRED, overridden,
+                    maskedNames.size());
+        }
+        int masked = dropMasked(output, schema, maskedNames);
         if (schema != null) {
             guard.put("outputSchema", schema);
         }
@@ -146,14 +161,63 @@ final class AgentReplayCheck {
         };
     }
 
-    /** Leaves out top-level fields recorded as the mask, and their {@code required} entries; returns how many. */
-    private static int dropMasked(Map<String, Object> output, Map<String, Object> schema) {
+    /** The top-level fields recorded as the mask. */
+    private static List<String> maskedFields(Map<String, Object> output) {
         List<String> masked = new ArrayList<>();
         output.forEach((field, value) -> {
             if (ResultGuard.MASKED.equals(value)) {
                 masked.add(field);
             }
         });
+        return masked;
+    }
+
+    /**
+     * The masked fields the candidate check would not have seen: read by a rule of the candidate rule set version, or
+     * possibly tested by the schema. The schema part fails closed: with any masked field, the line is blocked when the
+     * answer was recorded as refused by the schema (the failing field is unknown), or when the candidate schema differs
+     * from the recorded one anywhere but in the definitions of unmasked properties. Any keyword, combinator,
+     * conditional, pattern or name rule, {@code required} list or {@code type} difference blocks it. A rule set that
+     * cannot be described reads none here; its evaluation reports its own error.
+     */
+    private List<String> needed(String tenant, List<String> masked, Map<String, Object> recorded, String recordedCode) {
+        if (masked.isEmpty()) {
+            return List.of();
+        }
+        if (candidateSignature == null) {
+            candidateSignature = decisions.signature(tenant, candidateRuleSet, candidateVersion);
+        }
+        boolean bySchema = AgentResultGuard.SCHEMA_INVALID.equals(recordedCode) || (candidateSchema != null
+                && !withoutUnmaskedProperties(recorded, masked).equals(withoutUnmaskedProperties(candidateSchema,
+                        masked)));
+        List<String> out = new ArrayList<>();
+        for (String field : masked) {
+            boolean byRule = candidateSignature instanceof DecisionSignature.Found found
+                    && found.readInputs().contains(field);
+            if (byRule || bySchema) {
+                out.add(field);
+            }
+        }
+        return out;
+    }
+
+    /** A copy of the schema whose top-level {@code properties} keep only the masked fields' definitions. */
+    private static Map<String, Object> withoutUnmaskedProperties(Map<String, Object> schema, List<String> masked) {
+        Map<String, Object> out = new LinkedHashMap<>(schema == null ? Map.of() : schema);
+        if (out.get("properties") instanceof Map<?, ?> properties) {
+            Map<String, Object> kept = new LinkedHashMap<>();
+            properties.forEach((k, v) -> {
+                if (masked.contains(String.valueOf(k))) {
+                    kept.put(String.valueOf(k), v);
+                }
+            });
+            out.put("properties", kept);
+        }
+        return out;
+    }
+
+    /** Leaves out the masked fields and their {@code required} entries; returns how many. */
+    private static int dropMasked(Map<String, Object> output, Map<String, Object> schema, List<String> masked) {
         masked.forEach(output::remove);
         if (schema != null && !masked.isEmpty() && schema.get("required") instanceof Collection<?> required) {
             List<Object> kept = new ArrayList<>(required);

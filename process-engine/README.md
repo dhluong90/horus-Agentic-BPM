@@ -1,6 +1,6 @@
 # Process Engine
 
-Code: `PRE` · Version: 0.1.0 · Status: pre-alpha
+Code: `PRE` · Version: 0.2.0 · Status: pre-alpha
 
 Embeddable workflow library: process definitions, human tasks, gateways, timers, maker-checker, history.
 
