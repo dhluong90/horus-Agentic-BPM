@@ -166,7 +166,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-142](#pd-142-the-spreadsheet-round-trip-stays-a-csv-format-of-the-engine-for-10) | The spreadsheet round-trip stays a CSV format of the engine for 1.0 | Decided (product manager, delegated, PD-073); confirms PD-107 |
 | [PD-143](#pd-143-imported-dmn-tables-keep-the-strict-error-mode-through-10) | Imported DMN tables keep the strict error mode through 1.0 | Decided (product manager, delegated, PD-073); confirms PD-125 |
 | [PD-144](#pd-144-seven-items-move-to-11-calling-a-child-process-stays-in-10) | Seven items move to 1.1; calling a child process stays in 1.0 | Decided (product manager, delegated, PD-073) |
-| [PD-145](#pd-145-recommendation-strict-masking-by-default-outside-dev-before-the-freeze) | Recommendation: strict masking by default outside `dev`, before the freeze | Pending product owner |
+| [PD-145](#pd-145-recommendation-strict-masking-by-default-outside-dev-before-the-freeze) | Recommendation: strict masking by default outside `dev`, before the freeze | Not adopted (product owner, PD-146) |
+| [PD-146](#pd-146-masking-stays-opt-in-the-engine-warns-about-unclassified-fields) | Masking stays opt-in; the engine warns about unclassified fields | Decided (product owner, 2026-11-22); supersedes PD-145, confirms PD-132 |
 
 ---
 
@@ -4046,7 +4047,7 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 | Date | 2026-11-21 |
 | Question | Issue #311: should `decision-log.require-explicit-mask` default to `true` outside the `dev` profile? PD-132 kept it `false` until a pilot bank finds unmasked personal data. |
 | Raised by | Product manager, on the compatibility rule of PD-140 |
-| Decision | Pending product owner. This entry is a recommendation; PD-132 stands until the product owner decides |
+| Decision | Not adopted. The product owner kept PD-132 on 2026-11-22 (PD-146) |
 
 **Options considered**
 
@@ -4062,3 +4063,28 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences if accepted.** The default changes outside `dev`, with `false` still allowed as an explicit setting per host or tenant; the rule engine DESIGN 4.4, the wiki configuration page and the release notes change; PD-132 is superseded. If not accepted, PD-132 stands and the default stays `false` through 1.x.
 
 **Follow-ups.** Product owner: decide before the freeze. Architect: the default change, if accepted.
+
+### PD-146 Masking stays opt-in; the engine warns about unclassified fields
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-22 |
+| Question | Issue #311: should `decision-log.require-explicit-mask` default to `true` outside `dev`, as PD-145 recommended? |
+| Raised by | Product manager |
+| Decision | Product owner decision (2026-11-22). PD-145's recommendation is not adopted. PD-132 stands. |
+
+**Decision.** Masking stays opt-in. A field is masked only when its author declares it sensitive, and classifying fields stays the developer's job. The engine never guesses: a wrong guess is worse than none, because a field wrongly judged harmless is logged in clear into the append-only decision log, and a field wrongly judged sensitive hides data that operators need. To help developers remember, the engine warns about fields that have no classification. The warnings never change behaviour.
+
+1. **At approval and validation.** When a rule set version or process definition is submitted for approval, and on `:validate`, the response lists the input and output fields that have no classification. This is a warning only and never blocks submission or approval.
+2. **In the cockpit.** The review screen shows these fields calmly, for example as "not classified", without alarm colours or blocking dialogs.
+3. **At start-up.** Outside `dev`, the engine logs one summary WARN with the count of unclassified fields per approved version. It never logs field values.
+4. **Silencing.** A property turns the warnings off per deployment, so a bank that classifies elsewhere is not nagged.
+5. **No inference.** The engine never infers sensitivity from field names or values.
+
+**Consequences.**
+- Issue #311 is answered; `decision-log.require-explicit-mask` stays `false` outside `dev`. No change to the default, so no compatibility break under PD-140.
+- PD-145 is not adopted; PD-132 is confirmed. The reopening condition in PD-132 still applies: a pilot bank finding unmasked personal data in the decision log reopens it.
+- New issue "Platform: Warn About Unclassified Fields" delivers the warnings.
+- Configurable: yes, the warning property per deployment; the warnings are on by default.
+
+**Follow-ups.** Architect: the warning property name and the response field. Documentation: the configuration page explains classification and the warnings.
