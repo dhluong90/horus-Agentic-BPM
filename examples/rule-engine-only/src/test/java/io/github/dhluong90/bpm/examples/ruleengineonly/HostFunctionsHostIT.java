@@ -115,9 +115,7 @@ class HostFunctionsHostIT {
 
             assertThat(send(port, TestTokens.bearer("alice"), "POST", "/rule-sets", CARD_FEE, "application/yaml")
                     .status()).isEqualTo(201);
-            send(port, TestTokens.bearer("alice"), "POST", "/rule-sets/card-fee/versions/1:request-publish", null, null);
-            assertThat(send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/card-fee/versions/1:approve", null, null)
-                    .status()).isEqualTo(200);
+            assertThat(requestAndApprove(port).status()).isEqualTo(200);
 
             Reply priority = send(port, TestTokens.bearer("teller"), "POST", "/decisions/card-fee:evaluate",
                     "{\"inputs\": {\"balance\": {\"currency\": \"VND\", \"amount\": 600000000}, \"tenureMonths\": 36}}",
@@ -145,8 +143,7 @@ class HostFunctionsHostIT {
         try (ConfigurableApplicationContext host = start(db, V1.class)) {
             int port = port(host);
             send(port, TestTokens.bearer("alice"), "POST", "/rule-sets", CARD_FEE, "application/yaml");
-            send(port, TestTokens.bearer("alice"), "POST", "/rule-sets/card-fee/versions/1:request-publish", null, null);
-            send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/card-fee/versions/1:approve", null, null);
+            requestAndApprove(port);
         }
 
         try (ConfigurableApplicationContext host = start(db, V2.class)) {
@@ -214,6 +211,14 @@ class HostFunctionsHostIT {
 
     private static int port(ConfigurableApplicationContext host) {
         return Integer.parseInt(host.getEnvironment().getProperty("local.server.port"));
+    }
+
+    /** Alice requests card-fee v1 and bob approves it naming the canonical hash he reviewed (PD-139). */
+    private static Reply requestAndApprove(int port) throws Exception {
+        String reviewed = send(port, TestTokens.bearer("alice"), "POST", "/rule-sets/card-fee/versions/1:request-publish",
+                null, null).json().path("canonicalHash").asString();
+        return send(port, TestTokens.bearer("bob"), "POST", "/rule-sets/card-fee/versions/1:approve",
+                "{\"expectedCanonicalHash\":\"" + reviewed + "\"}", "application/json");
     }
 
     private static Reply send(int port, String bearer, String method, String path, String body, String contentType)

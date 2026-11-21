@@ -156,10 +156,11 @@ class ModelAdaptersIT {
                 identity.caller = "lan";
                 ruleSets.importRuleSet(io.github.dhluong90.bpm.rules.api.ImportRequest.yaml(
                         resource("rules/kyc-document-guardrails.yaml")));
-                long requested = ruleSets.requestPublish("kyc-document-guardrails", 1, WriteOptions.none())
-                        .lockVersion();
+                io.github.dhluong90.bpm.rules.api.RuleSetVersion requested = ruleSets.requestPublish(
+                        "kyc-document-guardrails", 1, WriteOptions.none());
                 identity.caller = "minh";
-                ruleSets.approve("kyc-document-guardrails", 1, new WriteOptions(null, requested, null));
+                ruleSets.approve("kyc-document-guardrails", 1, new WriteOptions(null, requested.lockVersion(), null)
+                        .expectingContent(requested.canonicalHash()));
                 identity.caller = "pia";
                 for (String process : List.of(OPENAI_PROCESS, ANTHROPIC_PROCESS)) {
                     definitions.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,

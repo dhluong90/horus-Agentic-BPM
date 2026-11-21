@@ -391,7 +391,8 @@ class ServiceStepModesTest {
         approver.identity.as("bank-a", "bob", "processes:approve", "processes:read");
 
         // Then approval is refused with the step and adapter named, and the version stays pending
-        assertThatThrownBy(() -> approver.services.approve(pending.ref(), pending.lockVersion(), "checked", null))
+        assertThatThrownBy(() -> approver.services.approve(pending.ref(), pending.lockVersion(),
+                pending.definitionHash(), "checked", null))
                 .isInstanceOfSatisfying(ValidationFailedException.class, e -> assertThat(e.problems())
                         .singleElement().satisfies(p -> {
                             assertThat(p.code()).isEqualTo("ADAPTER_NOT_REGISTERED");

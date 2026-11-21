@@ -50,10 +50,10 @@ class IncidentMigrationTest {
 
     @Test
     void TR_OPS_01_V29_adds_the_proposal_state_to_existing_incidents_and_V30_builds_both_indexes_concurrently() {
-        // Given a database at V18 with incidents written by the last release
+        // Given a database at V27 with incidents written by the last release
         DataSource ds = TestEngine.emptySchema("mig_v29_fresh");
         JdbcClient jdbc = JdbcClient.create(ds);
-        flyway(ds, "18").migrate();
+        flyway(ds, "27").migrate();
         incidentsOfTheLastRelease(jdbc);
 
         // When V29 and V30 run with the migrator's settings

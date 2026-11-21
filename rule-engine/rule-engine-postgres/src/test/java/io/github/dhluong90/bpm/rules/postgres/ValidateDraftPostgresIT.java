@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
@@ -78,9 +79,10 @@ class ValidateDraftPostgresIT {
         // Given card-fee v1 published and lan's draft v2
         who.set("bank-a", "lan");
         versions.importRuleSet(ImportRequest.yaml(RuleEnginePostgresIT.cardFee()));
-        versions.requestPublish("card-fee", 1, WriteOptions.none());
+        RuleSetVersion requested = versions.requestPublish("card-fee", 1, WriteOptions.none());
         who.set("bank-a", "bob");
-        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        versions.approve("card-fee", 1, new WriteOptions(null, requested.lockVersion(), null)
+                .expectingContent(requested.canonicalHash()));
         who.set("bank-a", "lan");
         versions.importVersion("card-fee", ImportRequest.yaml(RuleEnginePostgresIT.cardFee()));
         List<String> before = snapshot();

@@ -11,6 +11,7 @@ import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.service.CatalogueExplainer;
 import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
@@ -104,9 +105,11 @@ class HostFunctionsPostgresIT {
     void publish(RuleEngines engines, String tenant) {
         caller.as(tenant, "lan", AUTHOR);
         engines.versionService().importRuleSet(ImportRequest.yaml(CARD_FEE.getBytes(StandardCharsets.UTF_8)));
-        long reviewed = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        long reviewed = requested.lockVersion();
         caller.as(tenant, "bao", APPROVER);
-        engines.versionService().approve("card-fee", 1, new WriteOptions(null, reviewed, null));
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, reviewed, null)
+                .expectingContent(requested.canonicalHash()));
     }
 
     DecisionResult evaluate(RuleEngines engines, String tenant) {
@@ -162,11 +165,13 @@ class HostFunctionsPostgresIT {
         RuleEngines registered = engines(HostFunctions.VersionChange.WARN, segmentOf("2027.1"));
         caller.as("bank-a", "lan", AUTHOR);
         registered.versionService().importRuleSet(ImportRequest.yaml(CARD_FEE.getBytes(StandardCharsets.UTF_8)));
-        long reviewed = registered.versionService().requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = registered.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        long reviewed = requested.lockVersion();
         RuleEngines removed = engines(HostFunctions.VersionChange.WARN);
 
         caller.as("bank-a", "bao", APPROVER);
-        assertThatThrownBy(() -> removed.versionService().approve("card-fee", 1, new WriteOptions(null, reviewed, null)))
+        assertThatThrownBy(() -> removed.versionService().approve("card-fee", 1, new WriteOptions(null, reviewed, null)
+                .expectingContent(requested.canonicalHash())))
                 .isInstanceOf(ValidationFailedException.class);
         assertThat(jdbc.sql("SELECT count(*) FROM rle_version_function").query(Long.class).single()).isZero();
         assertThat(jdbc.sql("SELECT status FROM rle_version").query(String.class).single()).isEqualTo("PENDING_APPROVAL");
@@ -187,9 +192,11 @@ class HostFunctionsPostgresIT {
                 rules:
                   - { id: R1, when: {}, then: { fee: "10000 VND" } }
                 """).getBytes(StandardCharsets.UTF_8)));
-        long reviewed = engines.versionService().requestPublish("flat-fee", 1, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = engines.versionService().requestPublish("flat-fee", 1, WriteOptions.none());
+        long reviewed = requested.lockVersion();
         caller.as("bank-a", "bao", APPROVER);
-        engines.versionService().approve("flat-fee", 1, new WriteOptions(null, reviewed, null));
+        engines.versionService().approve("flat-fee", 1, new WriteOptions(null, reviewed, null)
+                .expectingContent(requested.canonicalHash()));
 
         caller.as("bank-a", "teller-01", TELLER);
         DecisionResult result = engines.ruleEngine().evaluate("flat-fee", DecisionInput.of(Map.of("tier", "GOLD")));
