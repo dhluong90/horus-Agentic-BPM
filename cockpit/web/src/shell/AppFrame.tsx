@@ -14,6 +14,7 @@ import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
+import { TasksPage } from '../features/tasks/TasksPage';
 import { RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
@@ -47,26 +48,29 @@ export interface FrameProps {
   meta: BpmMetaV1;
   me: BpmMeV1;
   fetchImpl?: typeof fetch | undefined;
+  /** The registry's `refresh.inboxSeconds`: how often the task queue is read again (30 by default). */
+  inboxSeconds?: number | undefined;
 }
 
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
-export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
+export function AppFrame({ host, meta, me, fetchImpl, inboxSeconds = 30 }: FrameProps) {
   return (
     <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
-          <Frame meta={meta} me={me} />
+          <Frame meta={meta} me={me} inboxSeconds={inboxSeconds} />
         </PeopleProvider>
       </ProcessesProvider>
     </RulesProvider>
   );
 }
 
-function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
+function Frame({ meta, me, inboxSeconds }: { meta: BpmMetaV1; me: BpmMeV1; inboxSeconds: number }) {
   const areas = availableAreas(meta, me);
   const [route] = useRoute(areaRoute(landingArea(meta, areas)));
   const area = areaOf(route);
-  const main = useFocusOnNavigation(formatRoute(route));
+  // Choosing a task in the queue keeps the focus on the list; moving to another screen or tab sends it to main.
+  const main = useFocusOnNavigation(formatRoute(route.name === 'tasks' ? { ...route, taskId: undefined } : route));
   const engines = areas.includes('approvals') ? queueEngines(meta, me) : NO_ENGINES;
   const review = useReviewCount(engines, meta.limits.maxPageSize);
   const note = landingNote(meta);
@@ -78,13 +82,13 @@ function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
     <div className="frame">
       <NavRail areas={areas} current={area} reviewCount={review.count} reviewMore={review.more} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} inboxSeconds={inboxSeconds} /> : <NotAvailable />}
       </main>
     </div>
   );
 }
 
-function AreaContent({ route, meta, me, areas, engines }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[] }) {
+function AreaContent({ route, meta, me, areas, engines, inboxSeconds }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[]; inboxSeconds: number }) {
   const pageLimit = meta.limits.maxPageSize;
   switch (route.name) {
     case 'home':
@@ -104,6 +108,8 @@ function AreaContent({ route, meta, me, areas, engines }: { route: Route; meta: 
       return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} pageLimit={pageLimit} />;
     case 'instance':
       return <InstancePage instanceId={route.instanceId} />;
+    case 'tasks':
+      return <TasksPage view={route.view} taskId={route.taskId} refreshSeconds={inboxSeconds} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
   }

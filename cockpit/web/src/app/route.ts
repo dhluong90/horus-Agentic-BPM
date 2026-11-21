@@ -35,10 +35,15 @@ export type Route =
   | { name: 'processes' }
   | { name: 'process'; key: string; version: number; lens?: ProcessLens | undefined }
   | { name: 'instance'; instanceId: string }
+  | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined }
   | { name: 'task'; taskId: string };
 
+/** The tabs of the task queue, kept in the URL so a reload or a link opens the same tab and task. */
+export const QUEUE_TABS = ['mine', 'candidate', 'all'] as const;
+export type QueueTab = (typeof QUEUE_TABS)[number];
+
 /** The menu areas. Every route belongs to exactly one. */
-export const AREAS = ['home', 'rules', 'approvals', 'decisions', 'processes'] as const;
+export const AREAS = ['home', 'rules', 'approvals', 'decisions', 'processes', 'tasks'] as const;
 export type Area = (typeof AREAS)[number];
 
 export function isArea(value: unknown): value is Area {
@@ -52,8 +57,9 @@ export function areaOf(route: Route): Area {
       return 'rules';
     case 'process':
     case 'instance':
-    case 'task':
       return 'processes';
+    case 'task':
+      return 'tasks';
     case 'decision':
       return 'decisions';
     default:
@@ -100,8 +106,22 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
   }
   if (area === 'instances' && ruleSet !== undefined) return { name: 'instance', instanceId: ruleSet };
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
+  if (area === 'tasks') return queueRoute(new URLSearchParams(search));
   if (area === 'home' || area === 'approvals' || area === 'decisions' || area === 'processes') return { name: area };
   return { name: 'home' };
+}
+
+/** A task id is 26 upper-case letters and digits; anything else in the link is ignored, never requested. */
+const TASK_ID = /^[0-9A-Z]{26}$/;
+
+function queueRoute(params: URLSearchParams): Route {
+  const view = params.get('view') ?? undefined;
+  const task = params.get('task') ?? undefined;
+  return {
+    name: 'tasks',
+    ...(view !== undefined && (QUEUE_TABS as readonly string[]).includes(view) ? { view: view as QueueTab } : {}),
+    ...(task !== undefined && TASK_ID.test(task) ? { taskId: task } : {}),
+  };
 }
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -139,6 +159,13 @@ export function formatRoute(route: Route): string {
       return `#/instances/${encodeURIComponent(route.instanceId)}`;
     case 'task':
       return `#/tasks/${encodeURIComponent(route.taskId)}`;
+    case 'tasks': {
+      const params = new URLSearchParams();
+      if (route.view !== undefined) params.set('view', route.view);
+      if (route.taskId !== undefined) params.set('task', route.taskId);
+      const text = params.toString();
+      return text === '' ? '#/tasks' : `#/tasks?${text}`;
+    }
     case 'decisions': {
       const params = new URLSearchParams();
       const query = route.query ?? {};
