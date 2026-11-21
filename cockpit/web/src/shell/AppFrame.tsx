@@ -11,6 +11,7 @@ import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
+import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
 import { RulesProvider } from '../features/rules/api/rulesContext';
@@ -91,7 +92,9 @@ function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1
     case 'processes':
       return <ProcessesPage pageLimit={pageLimit} />;
     case 'process':
-      return <DefinitionPage definitionKey={route.key} version={route.version} />;
+      return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} pageLimit={pageLimit} />;
+    case 'instance':
+      return <InstancePage instanceId={route.instanceId} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
   }

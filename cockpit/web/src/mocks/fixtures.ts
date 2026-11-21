@@ -9,7 +9,7 @@ import type { BpmMetaV1 } from '../api/generated/bpm-meta.v1';
 export const registryEmbedded = {
   schemaVersion: 1,
   auth: { mode: 'host-session' },
-  hosts: [{ id: 'loans', label: { en: 'Loan origination', vi: 'Khởi tạo khoản vay' }, baseUrl: '', environment: 'demo' }],
+  hosts: [{ id: 'loans', label: { en: 'Retail banking', vi: 'Ngân hàng bán lẻ' }, baseUrl: '', environment: 'demo' }],
 } as const;
 
 export const metaRulesOnly: BpmMetaV1 = {
