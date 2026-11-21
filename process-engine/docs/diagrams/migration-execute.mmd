@@ -1,0 +1,42 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant P as Proposer (processes:migration:manage)
+    participant A as Second holder (processes:migration:manage)
+  end
+  box rgb(224,242,241) Host service
+    participant X as MigrationExecutionService
+    participant W as MigrationRunner (job poller, every replica)
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_migration, pre_migration_instance, pre_instance, pre_token
+  end
+  P->>X: POST /migrations/{id}:execute, reason, Idempotency-Key
+  rect rgb(255,248,225)
+    Note over X,DB: TX, sync: lock the plan row, dry run on the server, write the proposal
+    X->>DB: dry run (reads only), conflicts give 409 DRY_RUN_REQUIRED
+    X->>DB: status PROPOSED, PROPOSED history row, processes.migration.proposed.v1, COMMIT
+  end
+  X-->>P: 202 proposal, lockVersion 1
+  W->>DB: claim APPROVED or RUNNING plans: none, a proposal is not runnable
+  A->>X: POST /migrations/{id}:approve, If-Match "1"
+  rect rgb(255,248,225)
+    Note over X,DB: TX, sync: the proposer is refused with 403, dry run repeated and still fresh
+    X->>DB: status APPROVED (approver is not the proposer, checked by the table), APPROVED history row, COMMIT
+  end
+  X-->>A: 200 execution APPROVED
+  W->>DB: claim the plan FOR UPDATE SKIP LOCKED, lease for migration.lease
+  loop batches of migration.batch-size, each instance in its own transaction
+    W->>DB: next running instances after the cursor (idx_pre_instance_running_definition)
+    rect rgb(255,248,225)
+      Note over W,DB: TX per instance, sync
+      W->>DB: lock the instance row NOWAIT, check live tokens against the target steps
+      alt step kept with the same type
+        W->>DB: repoint instance, tokens, tasks, jobs, results, incidents to v2, MIGRATED history, outcome row
+        W->>DB: pass the cursor, count it, extend the lease only while this replica holds it
+      else cannot move
+        W->>DB: roll back this instance, second TX: incident MIGRATION_FAILED, outcome FAILED, count it
+      end
+    end
+  end
+  W->>DB: no instance left: COMPLETED or COMPLETED_WITH_FAILURES, processes.migration.completed.v1

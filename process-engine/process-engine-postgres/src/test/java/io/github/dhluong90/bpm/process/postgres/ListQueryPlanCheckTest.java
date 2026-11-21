@@ -194,6 +194,12 @@ class ListQueryPlanCheckTest {
         samples.put("migration-live-nodes", List.of("bank-a", DEFINITION));
         samples.put("migration-instances-at-node", List.of("bank-a", DEFINITION, "credit-review", 100));
         samples.put("migration-movable-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-review"}, 100));
+        samples.put("migration-batch", List.of("bank-a", DEFINITION, "AIN" + "%023d".formatted(1000), 100));
+        samples.put("migration-instance-tokens", List.of("bank-a", INSTANCE));
+        samples.put("migration-outcomes", List.of("bank-a", "AMG" + "%023d".formatted(1), "", 100));
+        samples.put("migration-outcomes-of", List.of("bank-a", "AMG" + "%023d".formatted(1), "", "FAILED", 100));
+        samples.put("migration-failures-without-incident", List.of("bank-a", "AMG" + "%023d".formatted(1), "", 100));
+        samples.put("layout-revisions", List.of("bank-a", DEFINITION, 0, 100));
         Timestamp sliceFrom = Timestamp.from(NOW.minusSeconds(3600));
         Timestamp sliceTo = Timestamp.from(NOW.minusSeconds(3540));
         samples.put("instance-token-entered-at", List.of("bank-a", INSTANCE));

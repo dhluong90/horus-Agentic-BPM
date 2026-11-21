@@ -50,7 +50,7 @@ tags:
   - name: agent-replays
     description: Replay recorded agent answers against a candidate guardrail or output schema
   - name: migrations
-    description: Plan moving running instances to another version, and check the plan with a dry run
+    description: Plan moving running instances to another version, check it with a dry run, and run it with a second person's approval
   - name: incidents
     description: List incidents, retry a failed step, and resolve one with a second person's approval
 paths:
@@ -557,6 +557,123 @@ paths:
           headers:
             ETag:
               schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/layout:
+    get:
+      tags: [definitions]
+      operationId: getDefinitionLayout
+      summary: Read the diagram layout of a version
+      description: |
+        The latest layout revision of a version of any status in the caller's tenant, or revision `revision` when it
+        is named (PRE-026). The layout is stored apart from the definition and never part of its hash. The `ETag` is
+        the revision, quoted; a version that has no layout answers `204` with `ETag: "0"`, so the first save sends
+        `If-Match: "0"` and a client draws the version with automatic layout. A revision that does not exist is
+        `404 LAYOUT_NOT_FOUND`; another tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - name: revision
+          in: query
+          required: false
+          description: A revision number, from 1. Absent means the latest. Anything else is `400 QUERY_INVALID`.
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The revision with its layout document
+          headers:
+            ETag: { schema: { type: string }, description: 'The revision, quoted' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutRevision' }
+        '204':
+          description: The version has no saved layout
+          headers:
+            ETag: { schema: { type: string, example: '"0"' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [definitions]
+      operationId: saveDefinitionLayout
+      summary: Save a new layout revision
+      description: |
+        Appends a revision to the layout of a version of any status (PRE-026, ADR-0013). It needs no approval and it
+        never writes the definition: the version's status, `definitionHash` and `lockVersion` are unchanged. It is
+        allowed while `authoring.cockpit-drafts` is `false`, because a layout is not a draft. The body is the layout
+        document (`definition-layout.v1`, at most 256 KB). It may list a subset of the steps. A step id that is not in
+        the definition, or a document that breaks the schema, is `422 LAYOUT_INVALID` with each problem in `paths`
+        (never a value) and nothing is written. `If-Match` is the revision the client saw, quoted, `"0"` when none:
+        a stale value, or a save that lost a race, is `409 VERSION_CONFLICT`; missing is `428 PRECONDITION_REQUIRED`.
+        A repeat with the same `Idempotency-Key` returns the first answer. The revision records who saved it and
+        when; revisions are never changed or deleted. Publishes `processes.definition.layout-saved.v1`. Another
+        tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:author`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - name: If-Match
+          in: header
+          required: true
+          description: The latest revision the client saw, quoted; `"0"` for a version without a layout.
+          schema: { type: string, example: '"3"' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DefinitionLayout' }
+            example:
+              schemaVersion: 1
+              direction: LR
+              nodes:
+                start: { x: 40, y: 120 }
+                verify-docs: { x: 200, y: 100, width: 140, height: 80 }
+      responses:
+        '200':
+          description: The saved revision
+          headers:
+            ETag: { schema: { type: string }, description: 'The new revision, quoted' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutRevision' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/layout/revisions:
+    get:
+      tags: [definitions]
+      operationId: listDefinitionLayoutRevisions
+      summary: List the layout revisions of a version
+      description: |
+        Every revision with its author and time, oldest first, without the layout documents; read one with
+        `GET .../layout?revision=n`. Keyset-paged by revision: pass `nextAfter` as `after`. Another tenant's version is
+        `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - name: after
+          in: query
+          required: false
+          description: List the revisions after this one; 0 when absent.
+          schema: { type: integer, minimum: 0 }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of revisions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutRevisionPage' }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -1152,7 +1269,7 @@ paths:
         The plan records the approval its execution needs, fixed when it is created (PRE-174): `four-eyes`, so a
         second holder of `processes:migration:manage`, never the proposer, approves the execution. `single` is
         recorded only when the host sets `migration.approval=single`, which start-up accepts only on the `dev`
-        profile alone. Executing a plan follows in a later release.
+        profile alone. `POST /migrations/{id}:execute` proposes the execution.
 
         The target must be `ACTIVE` and the source `ACTIVE` or `RETIRED`, otherwise `409 INVALID_STATE`; the same
         version twice is `400 INPUT_INVALID`; a version the caller's tenant does not have is
@@ -1228,6 +1345,183 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/MigrationDryRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:execute:
+    post:
+      tags: [migrations]
+      operationId: proposeMigrationExecution
+      summary: Propose moving the running instances, with a reason
+      description: |
+        Proposes the execution of a plan (PRE-195, PD-114, PD-131). The engine runs the dry run of the plan itself
+        and the plan must have no conflict, otherwise `409 DRY_RUN_REQUIRED`; a plan that is not `PLANNED` or
+        `REJECTED` (or a proposal whose dry run has expired) is `409 INVALID_STATE`. The proposal moves nothing: a
+        second holder of `processes:migration:manage`, never the proposer, approves it with `:approve`. Only the
+        approval lets the runner move instances. With `migration.approval=single` (accepted on the `dev` profile
+        only) the proposal is approved by the proposer at once and recorded as `single`. Writes the proposal, one
+        history row and `processes.migration.proposed.v1` in one transaction. A repeat with the same
+        `Idempotency-Key` returns the first answer. Another tenant's plan is `404 MIGRATION_NOT_FOUND`. Permission
+        `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+            example: { reason: 'Retire the legacy committee step, ticket CHG-2041' }
+      responses:
+        '202':
+          description: The proposal, `PROPOSED` (or `APPROVED` in the single mode)
+          headers:
+            ETag: { schema: { type: string }, description: 'The proposal lockVersion, quoted' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:approve:
+    post:
+      tags: [migrations]
+      operationId: approveMigrationExecution
+      summary: Approve a proposed execution as a second person
+      description: |
+        The proposer is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written (PRE-195). The engine runs
+        the dry run again: the proposal's dry run must be no older than `migration.dry-run-validity` and the plan must
+        still have no conflict, otherwise `409 DRY_RUN_REQUIRED`. `If-Match` is the proposal's `lockVersion`; stale is
+        `409 VERSION_CONFLICT`, missing `428 PRECONDITION_REQUIRED`. The plan becomes `APPROVED`; the runner moves the
+        instances in batches of `migration.batch-size`, and `GET /migrations/{id}/execution` shows the progress.
+        Publishes `processes.migration.approved.v1` with both people. Permission `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - name: If-Match
+          in: header
+          required: true
+          description: The proposal's `lockVersion`, quoted.
+          schema: { type: string, example: '"1"' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The execution, `APPROVED`
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:reject:
+    post:
+      tags: [migrations]
+      operationId: rejectMigrationExecution
+      summary: Reject a proposed execution
+      description: |
+        A second holder rejects the proposal with a reason; the plan becomes `REJECTED` and may be proposed again.
+        The proposer is refused with `403 SELF_APPROVAL_FORBIDDEN`. `If-Match` is the proposal's `lockVersion`.
+        Publishes `processes.migration.rejected.v1`. Permission `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - name: If-Match
+          in: header
+          required: true
+          description: The proposal's `lockVersion`, quoted.
+          schema: { type: string, example: '"1"' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '200':
+          description: The execution, `REJECTED`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}/execution:
+    get:
+      tags: [migrations]
+      operationId: getMigrationExecution
+      summary: Progress of a migration
+      description: |
+        The proposal, the approval and the progress of the plan: how many instances were moved, failed or skipped
+        (PRE-015, PRE-196). The counts are exact. `RUNNING` shows a runner at work; `COMPLETED_WITH_FAILURES` means
+        every failed instance has an incident. The `ETag` is the proposal's `lockVersion`. Permission
+        `processes:migration:manage` or `processes:read`; another tenant's plan is `404 MIGRATION_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+      responses:
+        '200':
+          description: The execution
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}/instances:
+    get:
+      tags: [migrations]
+      operationId: listMigrationInstances
+      summary: What happened to each instance
+      description: |
+        The per-instance outcomes in instance id order, one bounded page; pass `nextAfter` as `after`. `outcome` keeps
+        one of `MIGRATED`, `FAILED` and `SKIPPED`. A failure carries its `code`, a detail built from codes and step ids
+        only, and the id of its incident. Permission `processes:migration:manage` or `processes:read`; another
+        tenant's plan is `404 MIGRATION_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - name: outcome
+          in: query
+          required: false
+          schema: { type: string, enum: [MIGRATED, FAILED, SKIPPED] }
+        - name: after
+          in: query
+          required: false
+          description: List the instances after this id.
+          schema: { type: string, minLength: 1, maxLength: 26 }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of outcomes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationOutcomePage' }
+        '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
@@ -2175,7 +2469,9 @@ components:
         definitionKey: { type: string }
         sourceVersion: { type: integer, minimum: 1 }
         targetVersion: { type: integer, minimum: 1 }
-        status: { type: string, enum: [PLANNED] }
+        status:
+          type: string
+          enum: [PLANNED, PROPOSED, REJECTED, APPROVED, RUNNING, COMPLETED, COMPLETED_WITH_FAILURES]
         planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         approval: { $ref: '#/components/schemas/MigrationApproval' }
         createdBy: { type: string }
@@ -2233,6 +2529,121 @@ components:
               name: { type: [string, 'null'] }
               instances: { $ref: '#/components/schemas/MigrationInstanceSample' }
         movable: { $ref: '#/components/schemas/MigrationInstanceSample' }
+    DefinitionLayout:
+      type: object
+      description: >-
+        The layout document, `definition-layout.v1` (api/schema/definition-layout.v1.schema.json): box positions, link
+        waypoints and lanes of one version. Step ids must exist in the definition.
+      required: [schemaVersion, nodes]
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        direction: { type: string, enum: [LR, TB] }
+        nodes:
+          type: object
+          maxProperties: 500
+          additionalProperties:
+            type: object
+            required: [x, y]
+            additionalProperties: false
+            properties:
+              x: { type: number, minimum: -100000, maximum: 100000 }
+              y: { type: number, minimum: -100000, maximum: 100000 }
+              width: { type: number, exclusiveMinimum: 0, maximum: 2000 }
+              height: { type: number, exclusiveMinimum: 0, maximum: 2000 }
+        edges:
+          type: object
+          maxProperties: 2000
+          description: 'Waypoints keyed by `from->to`'
+          additionalProperties:
+            type: array
+            maxItems: 50
+            items:
+              type: object
+              required: [x, y]
+              additionalProperties: false
+              properties:
+                x: { type: number, minimum: -100000, maximum: 100000 }
+                y: { type: number, minimum: -100000, maximum: 100000 }
+        lanes:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [id, label, nodes]
+            additionalProperties: false
+            properties:
+              id: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+              label: { type: string, maxLength: 200 }
+              nodes: { type: array, uniqueItems: true, items: { type: string } }
+    LayoutRevision:
+      type: object
+      required: [revision, layoutHash, definitionHash, source, createdBy, createdAt]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        layout:
+          description: The layout document; absent in a revision list.
+          allOf: [{ $ref: '#/components/schemas/DefinitionLayout' }]
+        layoutHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        definitionHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The hash of the definition the layout was drawn for; it never changes with a save.
+        source: { type: string, enum: [IMPORT, BPMN, COCKPIT, API] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    LayoutRevisionPage:
+      type: object
+      required: [items, nextAfter]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/LayoutRevision' } }
+        nextAfter: { type: [integer, 'null'], description: 'Pass as `after` for the next page; null on the last page' }
+    MigrationExecution:
+      type: object
+      required: [migrationId, status, approval, lockVersion, progress]
+      properties:
+        migrationId: { type: string }
+        status:
+          type: string
+          enum: [PLANNED, PROPOSED, REJECTED, APPROVED, RUNNING, COMPLETED, COMPLETED_WITH_FAILURES]
+        approval: { $ref: '#/components/schemas/MigrationApproval' }
+        lockVersion: { type: integer, minimum: 0, description: 'The `ETag`; send it in `If-Match` to approve or reject' }
+        proposedBy: { type: [string, 'null'] }
+        proposedAt: { type: [string, 'null'], format: date-time }
+        reason: { type: [string, 'null'] }
+        approvedBy: { type: [string, 'null'], description: 'The proposer in the single mode' }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        rejectedBy: { type: [string, 'null'] }
+        rejectedAt: { type: [string, 'null'], format: date-time }
+        rejectionReason: { type: [string, 'null'] }
+        progress:
+          type: object
+          required: [total, migrated, failed, skipped]
+          properties:
+            total: { type: integer, minimum: 0, description: 'Running instances of the source version when the execution was proposed or approved' }
+            migrated: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0, description: 'Each has an incident' }
+            skipped: { type: integer, minimum: 0, description: 'Ended or moved on before the runner reached them' }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+    MigrationOutcome:
+      type: object
+      required: [instanceId, outcome, code, detail, occurredAt]
+      properties:
+        instanceId: { type: string }
+        outcome: { type: string, enum: [MIGRATED, FAILED, SKIPPED] }
+        code:
+          type: string
+          description: '`MOVED`; for a failure `STEP_NOT_IN_TARGET`, `STEP_TYPE_CHANGED` or `LOCK_CONFLICT`; for a skip `NOT_RUNNING`, `NOT_ON_SOURCE` or `INSTANCE_GONE`'
+        detail: { type: string, maxLength: 500 }
+        incidentId: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+    MigrationOutcomePage:
+      type: object
+      required: [items, nextAfter]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MigrationOutcome' } }
+        nextAfter: { type: [string, 'null'] }
     Problem:
       type: object
       required: [type, title, status, code, correlationId]
@@ -2249,7 +2660,7 @@ components:
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
-            INCIDENT_NOT_FOUND,
+            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND,
             OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
@@ -2281,7 +2692,7 @@ components:
         currentLockVersion: { type: integer, description: 'Present on `CONTENT_CHANGED`, the lock version stored now' }
         paths:
           type: array
-          description: 'Present on `OUTPUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required`, never a value'
+          description: 'Present on `OUTPUT_INVALID` and `LAYOUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required` or `$.nodes.ghost-step names a step that is not in the definition`, never a value'
           items: { type: string }
         definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
         version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }

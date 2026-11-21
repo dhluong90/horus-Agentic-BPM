@@ -151,6 +151,51 @@ final class ProcessListQueries {
                     + "AND t.instance_id = i.id AND t.status IN " + LIVE_STATUSES + " "
                     + "AND t.current_node_id = ANY (?::text[])) ORDER BY i.id LIMIT ?");
 
+    /**
+     * The next running instances of the source version of an approved migration, after the plan's cursor, in id order,
+     * on {@code idx_pre_instance_running_definition} (V25). Parameters: tenant, definition id, cursor, limit (#90).
+     */
+    static final ListQuery MIGRATION_BATCH = new ListQuery("migration-batch",
+            new Bound.Page("keyset on id of idx_pre_instance_running_definition (V25), one batch"),
+            "SELECT id FROM pre_instance WHERE tenant_id = ? AND definition_id = ? AND status = 'RUNNING' "
+                    + "AND id > ? ORDER BY id LIMIT ?");
+
+    /** The live tokens of one instance that a migration moves, on {@code idx_pre_token_instance}. Parameters: tenant, instance. */
+    static final ListQuery MIGRATION_INSTANCE_TOKENS = new ListQuery("migration-instance-tokens",
+            new Bound.ParentKey("instance_id", "the live tokens of one instance, at most a few per node of its definition"),
+            "SELECT id, current_node_id FROM pre_token WHERE tenant_id = ? AND instance_id = ? AND status IN "
+                    + LIVE_STATUSES + " ORDER BY id");
+
+    /** The per-instance outcomes of a migration after an instance id, on the primary key (V34). Parameters: tenant, migration, after, limit. */
+    static final ListQuery MIGRATION_OUTCOMES = new ListQuery("migration-outcomes",
+            new Bound.Page("keyset on instance_id of the primary key of pre_migration_instance (V34)"),
+            "SELECT instance_id, outcome, code, detail, incident_id, occurred_at FROM pre_migration_instance "
+                    + "WHERE tenant_id = ? AND migration_id = ? AND instance_id > ? ORDER BY instance_id LIMIT ?");
+
+    /** As {@link #MIGRATION_OUTCOMES}, of one outcome. Parameters: tenant, migration, after, outcome, limit. */
+    static final ListQuery MIGRATION_OUTCOMES_OF = new ListQuery("migration-outcomes-of",
+            new Bound.Page("keyset on instance_id of the primary key of pre_migration_instance (V34)"),
+            "SELECT instance_id, outcome, code, detail, incident_id, occurred_at FROM pre_migration_instance "
+                    + "WHERE tenant_id = ? AND migration_id = ? AND instance_id > ? AND outcome = ? "
+                    + "ORDER BY instance_id LIMIT ?");
+
+    /**
+     * The failed instances of a migration that have no incident yet, in id order, on the partial index
+     * {@code idx_pre_migration_instance_failed} (V34). Parameters: tenant, migration, after, limit.
+     */
+    static final ListQuery MIGRATION_FAILURES_WITHOUT_INCIDENT = new ListQuery("migration-failures-without-incident",
+            new Bound.Page("keyset on instance_id of idx_pre_migration_instance_failed (V34)"),
+            "SELECT instance_id, outcome, code, detail, incident_id, occurred_at FROM pre_migration_instance "
+                    + "WHERE tenant_id = ? AND migration_id = ? AND instance_id > ? AND outcome = 'FAILED' "
+                    + "AND incident_id IS NULL ORDER BY instance_id LIMIT ?");
+
+    /** The revisions of the layout of one definition version after a revision (#102). Parameters: tenant, definition, after, limit. */
+    static final ListQuery LAYOUT_REVISIONS = new ListQuery("layout-revisions",
+            new Bound.Page("keyset on revision of the primary key of pre_definition_layout (V33)"),
+            "SELECT revision, layout_hash, definition_hash, source, created_by, created_at FROM "
+                    + "pre_definition_layout WHERE tenant_id = ? AND definition_id = ? AND revision > ? "
+                    + "ORDER BY revision LIMIT ?");
+
     /** The entry time of each token of one instance (#110), for the duration of a completed step. */
     static final ListQuery TOKEN_ENTERED_AT = new ListQuery("instance-token-entered-at",
             new Bound.ParentKey("instance_id", "the tokens of one instance, at most a few per node of its definition"),
@@ -325,6 +370,7 @@ final class ProcessListQueries {
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
+                MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB,
                 instances(1, false, false, false, false),
