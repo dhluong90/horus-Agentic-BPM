@@ -21,6 +21,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
+import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.util.List;
@@ -149,6 +150,14 @@ public final class CanonicalProcessWriter {
                         if (sla.calendar() != null) {
                             spec.put("calendar", sla.calendar());
                         }
+                    });
+                    // Likewise only when declared (PRE-178).
+                    t.extensions().first(EscalationSpec.class).ifPresent(escalation -> {
+                        ObjectNode spec = step.putObject("escalation");
+                        ArrayNode levels = spec.putArray("levels");
+                        escalation.levels().forEach(l -> levels.addObject().put("after", l.after().toString())
+                                .put("to", l.to()));
+                        spec.put("onClaimed", escalation.releaseClaim() ? "release" : "keep");
                     });
                 }
                 case ExclusiveGateway g -> {

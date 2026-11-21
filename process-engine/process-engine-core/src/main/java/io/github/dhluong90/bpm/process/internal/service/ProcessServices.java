@@ -2878,7 +2878,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             if (!caller.equals(task.claimedBy())) {
                 throw new TaskNotAssignedException("Task " + taskId + " is claimed by another user");
             }
-            if (!assigned(task.assignee(), caller)) {
+            // A claimant who kept the claim through an escalation (onClaimed: keep) still completes the task.
+            if (!assigned(task.assignee(), caller) && store.escalation(tenant, taskId)
+                    .map(e -> e.level() == 0).orElse(true)) {
                 throw new TaskNotAssignedException("The caller is not an assignee of task " + taskId);
             }
             java.util.Set<String> participants = participants(tenant, row);
@@ -3007,6 +3009,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * instance and duration only, never the payload. A listener exception rolls the transaction back and is reported
      * as {@code EVENT_LISTENER_FAILED}.
      */
+    private static final String ESCALATION_ACTOR = "system:timer";
+    private static final String ESCALATION_TARGET_FORBIDDEN = "ESCALATION_TARGET_FORBIDDEN";
+
     private void publish(ProcessEventPublisher.Event event, String instanceId) {
         long started = System.nanoTime();
         try {
@@ -3228,6 +3233,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         InstanceState state = initial;
         List<HistoryEntry> history = new ArrayList<>();
         List<TaskRow> newTasks = new ArrayList<>();
+        Map<String, EscalationPlan> escalations = new LinkedHashMap<>();
         List<String> cancelledTasks = new ArrayList<>();
         List<JobRow> newJobs = new ArrayList<>();
         List<String> cancelledJobs = new ArrayList<>();
@@ -3262,11 +3268,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     switch (effect) {
                         case Effect.CreateUserTask task -> {
                             Instant created = clock.instant();
+                            Instant due = dueAt(state.tenantId(), task, created);
                             newTasks.add(new TaskRow(state.tenantId(), task.taskId(), state.instanceId(),
                                     task.tokenId(), definition.id(), task.nodeId(), task.name(), task.assignee(),
                                     task.fourEyes(), "OPEN", 0, null, null, null, created, null,
-                                    task.context().isEmpty() ? null : Values.write(task.context()),
-                                    dueAt(state.tenantId(), task, created)));
+                                    task.context().isEmpty() ? null : Values.write(task.context()), due));
+                            if (task.escalation() != null && due != null) {
+                                escalations.put(task.taskId(), escalationPlan(state.tenantId(), task, due));
+                            }
                         }
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
                         case Effect.ScheduleJob job -> newJobs.add(JobRow.due(state.tenantId(), job.jobId(),
@@ -3472,7 +3481,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 state.sequence(), row.lockVersion(), row.startedBy(), row.startedAt(),
                 state.status() == InstanceStatus.RUNNING ? null : now));
         String tenant = state.tenantId();
-        newTasks.forEach(store::insertTask);
+        newTasks.forEach(task -> {
+            store.insertTask(task);
+            EscalationPlan plan = escalations.get(task.id());
+            if (plan != null) {
+                store.scheduleEscalation(tenant, task.id(), plan.toJson(), plan.firstAt());
+            }
+        });
         cancelledTasks.forEach(id -> store.cancelTask(tenant, id));
         newJobs.forEach(job -> jobs.insertJob(job, now));
         cancelledJobs.forEach(id -> jobs.cancelJob(tenant, id, now));
@@ -3500,6 +3515,109 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new StepFailedException(task.nodeId(), "CALENDAR_NO_WORKING_TIME", "the task's calendar "
                     + task.sla().calendar() + " has no working time ahead");
         }
+    }
+
+    /** The fire times of a new task's escalation levels (PRE-178), computed once like its due time. */
+    private EscalationPlan escalationPlan(String tenant, Effect.CreateUserTask task, Instant dueAt) {
+        try {
+            return EscalationPlan.resolve(tenant, task.escalation(), task.sla(), dueAt, calendar);
+        } catch (io.github.dhluong90.bpm.process.api.CalendarNotFoundException e) {
+            throw new StepFailedException(task.nodeId(), e.code(), "the task's calendar " + task.sla().calendar()
+                    + " does not exist in this tenant");
+        } catch (IllegalStateException e) {
+            throw new StepFailedException(task.nodeId(), "CALENDAR_NO_WORKING_TIME", "the task's calendar "
+                    + task.sla().calendar() + " has no working time ahead");
+        }
+    }
+
+    /**
+     * Applies every escalation level that has come due on the engine clock (PRE-178 to PRE-180). The read is the
+     * bounded sweep {@code escalations-due}, at most {@code jobs.batch-size} tasks across tenants; each task is then
+     * escalated in a transaction of its own as {@code system:timer}, under its instance row lock and after a reread, so
+     * two replicas that read the same task apply the level once and a task completed or cancelled meanwhile is left
+     * alone. One task that fails does not hold back the others.
+     *
+     * @return the number of levels applied or refused by this call
+     */
+    public int escalateOverdue() {
+        List<ProcessStore.EscalationRow> due = transactions.inTransaction(() -> store.dueEscalations(clock.instant(),
+                jobSettings.batchSize()));
+        int handled = 0;
+        for (ProcessStore.EscalationRow candidate : due) {
+            try {
+                if (transactions.inTransaction(() -> escalate(candidate))) {
+                    handled++;
+                }
+            } catch (RuntimeException e) {
+                LOG.log(System.Logger.Level.WARNING, "process.task.escalation.failed tenant={0} task={1} "
+                        + "exception={2}", candidate.tenantId(), candidate.taskId(), e.getClass().getName());
+            }
+        }
+        return handled;
+    }
+
+    private boolean escalate(ProcessStore.EscalationRow candidate) {
+        String tenant = candidate.tenantId();
+        InstanceRow row = store.lockInstance(tenant, candidate.instanceId()).orElse(null);
+        TaskRow task = store.findTask(tenant, candidate.taskId()).orElse(null);
+        ProcessStore.EscalationRow state = store.escalation(tenant, candidate.taskId()).orElse(null);
+        Instant now = clock.instant();
+        if (row == null || task == null || state == null || state.nextAt() == null || state.nextAt().isAfter(now)
+                || !"RUNNING".equals(row.status()) || !("OPEN".equals(task.status()) || "CLAIMED".equals(task.status()))) {
+            return false;
+        }
+        EscalationPlan plan = EscalationPlan.fromJson(state.json());
+        int level = state.level() + 1;
+        if (level > plan.levels().size()) {
+            return false;
+        }
+        String to = plan.levels().get(level - 1).to();
+        Instant nextAt = level < plan.levels().size() ? plan.levels().get(level).at() : null;
+        String from = task.assignee();
+        boolean forbidden = task.fourEyes() && to.startsWith("user:") && participants(tenant, row)
+                .contains(to.substring("user:".length()));
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("taskId", task.id());
+        details.put("level", level);
+        details.put("from", from);
+        details.put("to", to);
+        if (forbidden) {
+            // PRE-180: four eyes holds after any number of levels, so the level is not applied. It is counted, so the
+            // sweep does not retry it, and recorded, with an incident for someone to act on.
+            if (store.escalateTask(tenant, task.id(), task.lockVersion(), null, false, level, nextAt) != 1) {
+                throw new VersionConflictException("Task " + task.id() + " changed concurrently");
+            }
+            details.put("code", ESCALATION_TARGET_FORBIDDEN);
+            store.appendHistory(tenant, row.id(), row.definitionId(), List.of(new HistoryEntry("ESCALATION_REFUSED",
+                    task.nodeId(), task.tokenId(), null, ESCALATION_ACTOR, now, details)));
+            raiseIncident(new IncidentSite(tenant, row.id(), row.definitionId(), task.tokenId(), task.nodeId(), null,
+                    null, 0, ESCALATION_TARGET_FORBIDDEN, null, "Level " + level + " of the escalation of task "
+                            + task.id() + " targets a user who made this case"), now);
+            return true;
+        }
+        String releasedClaimant = plan.releaseClaim() && "CLAIMED".equals(task.status()) ? task.claimedBy() : null;
+        if (store.escalateTask(tenant, task.id(), task.lockVersion(), to, plan.releaseClaim(), level, nextAt) != 1) {
+            throw new VersionConflictException("Task " + task.id() + " changed concurrently");
+        }
+        if (task.dueAt() != null) {
+            details.put("dueAt", task.dueAt().toString());
+        }
+        if (releasedClaimant != null) {
+            details.put("releasedClaimant", releasedClaimant);
+        }
+        store.appendHistory(tenant, row.id(), row.definitionId(), List.of(new HistoryEntry("TASK_ESCALATED",
+                task.nodeId(), task.tokenId(), null, ESCALATION_ACTOR, now, details)));
+        Map<String, Object> payload = new LinkedHashMap<>(details);
+        payload.put("instanceId", row.id());
+        payload.put("nodeId", task.nodeId());
+        payload.put("definitionKey", row.definitionKey());
+        payload.put("version", row.definitionVersion());
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        publish(new ProcessEventPublisher.Event(Ids.child(task.id(), task.lockVersion() + 1),
+                "processes.task.escalated.v1", tenant, now, payload), row.id());
+        return true;
     }
 
     /**

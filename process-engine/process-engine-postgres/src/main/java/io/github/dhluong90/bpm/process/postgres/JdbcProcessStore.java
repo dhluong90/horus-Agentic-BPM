@@ -333,6 +333,57 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public void scheduleEscalation(String tenant, String taskId, String json, Instant firstAt) {
+        jdbc.sql("UPDATE pre_task SET escalation_json = ?::jsonb, escalation_level = 0, next_escalation_at = ? "
+                        + "WHERE tenant_id = ? AND id = ?")
+                .params(json, ts(firstAt), tenant, taskId).update();
+    }
+
+    @Override
+    public List<EscalationRow> dueEscalations(Instant now, int limit) {
+        return ProcessListQueries.ESCALATIONS_DUE.list(jdbc, List.of(ts(now), limit),
+                (rs, n) -> new EscalationRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("instance_id"), 0, null, null));
+    }
+
+    @Override
+    public Optional<EscalationRow> escalation(String tenant, String taskId) {
+        return jdbc.sql("SELECT tenant_id, id, instance_id, COALESCE(escalation_level, 0) AS escalation_level, "
+                        + "next_escalation_at, escalation_json::text AS escalation_json FROM pre_task "
+                        + "WHERE tenant_id = ? AND id = ? AND escalation_json IS NOT NULL")
+                .params(tenant, taskId)
+                .query((rs, n) -> new EscalationRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("instance_id"), rs.getInt("escalation_level"), instant(rs, "next_escalation_at"),
+                        rs.getString("escalation_json")))
+                .optional();
+    }
+
+    @Override
+    public int escalateTask(String tenant, String id, long expectedLockVersion, String assignee, boolean releaseClaim,
+            int level, Instant nextAt) {
+        String kind = assignee == null ? null : assignee.substring(0, assignee.indexOf(':'));
+        String value = assignee == null ? null : assignee.substring(assignee.indexOf(':') + 1);
+        String move = assignee == null ? "" : "assignee_user = ?, assignee_role = ?, assignee_group = ?, ";
+        String release = releaseClaim && assignee != null
+                ? "status = 'OPEN', claimed_by = NULL, claimed_at = NULL, " : "";
+        List<Object> params = new ArrayList<>();
+        if (assignee != null) {
+            params.add("user".equals(kind) ? value : null);
+            params.add("role".equals(kind) ? value : null);
+            params.add("group".equals(kind) ? value : null);
+        }
+        params.add(level);
+        params.add(nextAt == null ? null : ts(nextAt));
+        params.add(tenant);
+        params.add(id);
+        params.add(expectedLockVersion);
+        return jdbc.sql("UPDATE pre_task SET " + move + release + "escalation_level = ?, next_escalation_at = ?, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
+                        + "AND status IN ('OPEN','CLAIMED')")
+                .params(params).update();
+    }
+
+    @Override
     public List<TaskRow> tasks(String tenant, String instanceId) {
         return ProcessListQueries.TASKS.list(jdbc, List.of(tenant, instanceId), JdbcProcessStore::task);
     }

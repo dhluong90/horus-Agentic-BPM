@@ -65,10 +65,12 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param context masked context for the task
      * @param sla the step's {@code horus:sla} and {@code horus:calendar}, or null for a task without a due time; the
      *     shell turns it into the task's due time once, with the engine clock (PRE-008)
+     * @param escalation the step's {@code horus:escalation}, or null; the shell turns it into the fire times of its
+     *     levels once, when the task is created (PRE-178)
      */
     record CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee, boolean fourEyes,
-            Map<String, Object> context, io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec sla)
-            implements Effect {
+            Map<String, Object> context, io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec sla,
+            io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec escalation) implements Effect {
         public CreateUserTask {
             context = context == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(context));
         }
@@ -76,7 +78,14 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
         /** A task without a due time. */
         public CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee,
                 boolean fourEyes, Map<String, Object> context) {
-            this(taskId, tokenId, nodeId, name, assignee, fourEyes, context, null);
+            this(taskId, tokenId, nodeId, name, assignee, fourEyes, context, null, null);
+        }
+
+        /** A task with a due time and no escalation. */
+        public CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee,
+                boolean fourEyes, Map<String, Object> context,
+                io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec sla) {
+            this(taskId, tokenId, nodeId, name, assignee, fourEyes, context, sla, null);
         }
     }
 

@@ -200,6 +200,20 @@ public interface ProcessStore {
         }
     }
 
+    /**
+     * The escalation of one user task (PRE-178): the levels resolved at creation, how many were applied, and when the
+     * next one is due.
+     *
+     * @param tenantId tenant
+     * @param taskId task
+     * @param instanceId the task's instance
+     * @param level levels already applied, 0 when none
+     * @param nextAt when the next level is due, or null when none is left
+     * @param json the resolved levels and the claim rule
+     */
+    record EscalationRow(String tenantId, String taskId, String instanceId, int level, Instant nextAt, String json) {
+    }
+
     /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */
     record IdempotencyRecord(String tenantId, String operation, String key, String requestHash, String responseJson,
             Instant expiresAt) {
@@ -299,6 +313,51 @@ public interface ProcessStore {
     int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant);
 
     void cancelTask(String tenant, String id);
+
+    /**
+     * Keeps the resolved escalation of a task just inserted (PRE-178).
+     *
+     * @param tenant tenant
+     * @param taskId the task
+     * @param json the resolved levels and the claim rule
+     * @param firstAt when the first level fires
+     */
+    default void scheduleEscalation(String tenant, String taskId, String json, Instant firstAt) {
+        throw new UnsupportedOperationException("escalation is not supported by this store");
+    }
+
+    /**
+     * The sweep's read (PRE-178): open or claimed tasks of every tenant whose next level has come due, oldest first.
+     *
+     * @param now the engine clock
+     * @param limit the most rows; the sweep's batch size
+     * @return task keys only: the sweep locks the instance and rereads each task before it changes anything
+     */
+    default List<EscalationRow> dueEscalations(Instant now, int limit) {
+        return List.of();
+    }
+
+    /**
+     * @param tenant tenant
+     * @param taskId the task
+     * @return the task's escalation, or empty when it declared none
+     */
+    default Optional<EscalationRow> escalation(String tenant, String taskId) {
+        return Optional.empty();
+    }
+
+    /**
+     * Applies one level: moves the task to {@code assignee}, releases the claim when asked, counts the level, sets the
+     * time of the next one and moves the lock version. Only while the task is open or claimed, at the version read.
+     *
+     * @param assignee {@code user:}, {@code role:} or {@code group:}; null leaves the assignment as it is (a refused
+     *     level, which is only counted)
+     * @return rows updated: 1, or 0 when the task is no longer open or claimed or its lock version moved
+     */
+    default int escalateTask(String tenant, String id, long expectedLockVersion, String assignee, boolean releaseClaim,
+            int level, Instant nextAt) {
+        throw new UnsupportedOperationException("escalation is not supported by this store");
+    }
 
     List<TaskRow> tasks(String tenant, String instanceId);
 

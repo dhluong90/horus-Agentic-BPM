@@ -201,6 +201,27 @@ final class ProcessListQueries {
             new Bound.EngineSweep(null, "the first entry of idx_pre_timer_poll_kind for one kind, LIMIT 1"),
             "SELECT next_fire_at FROM pre_timer WHERE job_kind = ? AND status = 'DUE' ORDER BY next_fire_at, id LIMIT 1");
 
+    /**
+     * The tasks whose next escalation level is due, for every tenant (#73, PRE-178): at most the sweep's batch size,
+     * oldest first, read through {@code idx_pre_task_escalation_due} (V32), whose predicate this one repeats exactly.
+     * Parameters: now, limit.
+     */
+    static final ListQuery ESCALATIONS_DUE = new ListQuery("escalations-due",
+            new Bound.EngineSweep(null, "the first sweep.batch-size entries of idx_pre_task_escalation_due (V32), "
+                    + "oldest first"),
+            "SELECT tenant_id, id, instance_id FROM pre_task WHERE status IN ('OPEN','CLAIMED') "
+                    + "AND next_escalation_at IS NOT NULL AND next_escalation_at <= ? "
+                    + "ORDER BY next_escalation_at, tenant_id, id LIMIT ?");
+
+    /** The first page of the tenant's calendars: no holidays, a summary each (PRE-181). Parameters: tenant, limit. */
+    static final ListQuery CALENDARS = calendars(false);
+    /** A later page of calendars, after the last key of the previous page. */
+    static final ListQuery CALENDARS_AFTER = calendars(true);
+    /** The first page of calendar changes of one status, newest first (PRE-181). */
+    static final ListQuery CALENDAR_CHANGES = calendarChanges(false);
+    /** A later page of calendar changes, after the last change of the previous page. */
+    static final ListQuery CALENDAR_CHANGES_AFTER = calendarChanges(true);
+
     /** The first page of definition keys. */
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
@@ -318,7 +339,8 @@ final class ProcessListQueries {
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
-                GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB,
+                GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,
+                CALENDAR_CHANGES_AFTER,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true)));
         all.addAll(DATED.values());
@@ -351,6 +373,37 @@ final class ProcessListQueries {
                         + (after ? "AND (h.occurred_at, h.id) > (?, ?) " : "")
                         + "ORDER BY h.occurred_at, h.id LIMIT ?");
     }
+
+    /**
+     * The calendars of one tenant by key, on the {@code (tenant_id, calendar_key)} unique index of {@code
+     * pre_calendar}; keyset on the key. Parameters: tenant, [after key], limit.
+     */
+    private static ListQuery calendars(boolean after) {
+        return new ListQuery(after ? "calendars-after" : "calendars",
+                new Bound.Page("keyset on calendar_key of the (tenant_id, calendar_key) unique index"),
+                "SELECT id, calendar_key, timezone, lock_version, updated_by, approved_by, updated_at FROM pre_calendar "
+                        + "WHERE tenant_id = ? " + (after ? "AND calendar_key > ? " : "")
+                        + "ORDER BY calendar_key LIMIT ?");
+    }
+
+    /**
+     * The calendar changes of one status, newest first on {@code idx_pre_calendar_change_status (tenant_id, status,
+     * proposed_at DESC, id DESC)} (V32); keyset on {@code (proposed_at, id)}. Parameters: tenant, status,
+     * [after proposed at, after id], limit.
+     */
+    private static ListQuery calendarChanges(boolean after) {
+        return new ListQuery(after ? "calendar-changes-after" : "calendar-changes",
+                new Bound.Page("newest first on idx_pre_calendar_change_status (tenant_id, status, proposed_at DESC, "
+                        + "id DESC)"),
+                "SELECT " + CALENDAR_CHANGE_COLUMNS + " FROM pre_calendar_change WHERE tenant_id = ? AND status = ? "
+                        + (after ? "AND (proposed_at, id) < (?, ?) " : "")
+                        + "ORDER BY proposed_at DESC, id DESC LIMIT ?");
+    }
+
+    /** The columns of a calendar change, as {@link JdbcCalendarStore} reads them. */
+    static final String CALENDAR_CHANGE_COLUMNS = "tenant_id, id, calendar_key, status, approval, base_version, "
+            + "previous_value::text AS previous_value, proposed_value::text AS proposed_value, reason, proposed_by, "
+            + "proposed_at, decided_by, decided_at, decision_comment";
 
     /**
      * The incidents of one status, newest first on {@code idx_pre_incident_status (tenant_id, status, created_at DESC,

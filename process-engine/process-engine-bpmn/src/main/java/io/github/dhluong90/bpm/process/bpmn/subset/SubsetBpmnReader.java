@@ -45,6 +45,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
+import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.io.StringReader;
@@ -898,6 +899,76 @@ public final class SubsetBpmnReader {
             return ok ? java.util.Optional.of(new SlaSpec(duration, calendar, null)) : java.util.Optional.empty();
         }
 
+        /**
+         * {@code horus:escalation}: one to {@link EscalationSpec#MAX_LEVELS} levels, each {@code <target>} or
+         * {@code <target>|<duration>}, separated by semicolons, and {@code horus:onClaimed} ({@code release}, the
+         * default, or {@code keep}). A level targets {@code user:}, {@code role:} or {@code group:}, never the
+         * assignment it replaces (PRE-179). The task needs {@code horus:sla}: the first level fires at its due time.
+         */
+        private java.util.Optional<EscalationSpec> escalation(String id, int line, String assignee, boolean hasSla) {
+            String text = horus("escalation");
+            String onClaimed = horus("onClaimed");
+            if (text == null) {
+                if (onClaimed != null) {
+                    escalationProblem("horus:onClaimed needs horus:escalation", id, line);
+                }
+                return java.util.Optional.empty();
+            }
+            boolean ok = true;
+            if (!hasSla) {
+                escalationProblem("horus:escalation needs horus:sla: the first level fires at the due time", id, line);
+                ok = false;
+            }
+            if (onClaimed != null && !"release".equals(onClaimed) && !"keep".equals(onClaimed)) {
+                escalationProblem("horus:onClaimed is release or keep", id, line);
+                ok = false;
+            }
+            String[] parts = text.split(";", -1);
+            if (parts.length > EscalationSpec.MAX_LEVELS) {
+                escalationProblem("A task declares at most " + EscalationSpec.MAX_LEVELS + " escalation levels", id,
+                        line);
+                return java.util.Optional.empty();
+            }
+            java.util.List<EscalationSpec.Level> levels = new ArrayList<>();
+            String current = assignee;
+            for (int i = 0; i < parts.length; i++) {
+                String part = parts[i].strip();
+                int split = part.indexOf('|');
+                String target = split < 0 ? part : part.substring(0, split).strip();
+                java.time.Duration after = java.time.Duration.ZERO;
+                if (split >= 0) {
+                    try {
+                        after = java.time.Duration.parse(part.substring(split + 1).strip());
+                    } catch (java.time.format.DateTimeParseException e) {
+                        after = null;
+                    }
+                }
+                if (!ASSIGNEE.matcher(target).matches()) {
+                    escalationProblem("Level " + (i + 1) + " of horus:escalation is user:<id>, role:<role> or "
+                            + "group:<group>, optionally followed by |<duration>", id, line);
+                    ok = false;
+                } else if (after == null || after.isNegative() || after.compareTo(MAX_SLA) > 0
+                        || (i > 0 && after.isZero())) {
+                    escalationProblem("Level " + (i + 1) + " of horus:escalation waits a positive ISO 8601 duration"
+                            + " of working time up to " + MAX_SLA + " (the first level may wait PT0S)", id, line);
+                    ok = false;
+                } else if (target.equals(current)) {
+                    escalationProblem("Level " + (i + 1) + " of horus:escalation is the assignment it replaces", id,
+                            line);
+                    ok = false;
+                } else {
+                    levels.add(new EscalationSpec.Level(after, target));
+                    current = target;
+                }
+            }
+            return ok ? java.util.Optional.of(new EscalationSpec(levels, !"keep".equals(onClaimed)))
+                    : java.util.Optional.empty();
+        }
+
+        private void escalationProblem(String message, String id, int line) {
+            invalid.add(new DefinitionProblem("ESCALATION_INVALID", message, "userTask", safe(id), line));
+        }
+
         private java.time.Duration positiveDuration(String text) {
             try {
                 java.time.Duration value = java.time.Duration.parse(text.strip());
@@ -948,7 +1019,9 @@ public final class SubsetBpmnReader {
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
-            sla(id, line).ifPresent(ext::add);
+            java.util.Optional<SlaSpec> sla = sla(id, line);
+            sla.ifPresent(ext::add);
+            escalation(id, line, assignee, sla.isPresent()).ifPresent(ext::add);
             Node children = children("userTask", id, false);
             return new UserTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
                     info(ext, children.foreign()));
