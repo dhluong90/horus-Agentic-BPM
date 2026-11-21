@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("20");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("24");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -200,7 +200,7 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12 and V14 to V20.
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12, V14 to V21 and V24.
         assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
                 "2 V2__rle_version_created_by.sql", "3 V3__rle_version_history.sql",
                 "4 V4__rle_version_history_append_only.sql", "5 V5__rle_engine_key.sql",
@@ -210,7 +210,9 @@ class RuleEngineOnlyHostIT {
                 "15 V15__rle_version_history_acknowledged_warnings.sql", "16 V16__rle_masking_key_check.sql",
                 "17 V17__rle_decision_on_behalf_of.sql", "18 V18__rle_version_retire_request.sql",
                 "19 V19__rle_decision_log_drop.sql",
-                "20 io.github.dhluong90.bpm.rules.postgres.migration.V20__rle_decision_correlation_index");
+                "20 io.github.dhluong90.bpm.rules.postgres.migration.V20__rle_decision_correlation_index",
+                "21 V21__rle_version_copied_from.sql",
+                "24 io.github.dhluong90.bpm.rules.postgres.migration.V24__rle_version_history_rule_set_events");
     }
 
     @Test

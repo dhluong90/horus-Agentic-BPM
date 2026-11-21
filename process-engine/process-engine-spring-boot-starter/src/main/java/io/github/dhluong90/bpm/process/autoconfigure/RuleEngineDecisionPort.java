@@ -117,9 +117,61 @@ final class RuleEngineDecisionPort implements DecisionPort {
         try {
             RuleSetSignature found = engineWork.get().signature(tenantId, decisionRef, at);
             return new DecisionSignature.Found(found.ruleSet(), found.version(), found.hitPolicy(), found.inputs(),
-                    found.outputs(), found.rejectsUndeclaredInputs());
+                    found.outputs(), found.rejectsUndeclaredInputs(), found.readInputs());
         } catch (HorusBpmException e) {
             return new DecisionSignature.Unavailable(e.code(), e.getMessage());
         }
+    }
+
+    /**
+     * PRE-094: the signature of a candidate guardrail version by number, in any status, through the tenant-scoped entry
+     * point in the caller's tenant. Reads only.
+     */
+    @Override
+    public DecisionSignature signature(String tenantId, String decisionRef, int version) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        if (engineWork.isEmpty()) {
+            return new DecisionSignature.Unavailable("TENANT_NOT_ALLOWED", "The host's Rule Engine has no "
+                    + "tenant-scoped entry point for the Process Engine");
+        }
+        try {
+            RuleSetSignature found = engineWork.get().signature(tenantId, decisionRef, version);
+            return new DecisionSignature.Found(found.ruleSet(), found.version(), found.hitPolicy(), found.inputs(),
+                    found.outputs(), found.rejectsUndeclaredInputs(), found.readInputs());
+        } catch (HorusBpmException e) {
+            return new DecisionSignature.Unavailable(e.code(), e.getMessage());
+        }
+    }
+
+    /**
+     * PRE-092: a candidate guardrail version over recorded answers through the Rule Engine's simulation path, each at
+     * its recorded time; writes no decision row. A refusal of the whole call (version missing, does not compile) is a
+     * failed outcome for every case.
+     */
+    @Override
+    public java.util.List<DecisionOutcome> simulate(String tenantId, String decisionRef, int version,
+            java.util.List<SimulatedCase> cases) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        if (cases.isEmpty()) {
+            return java.util.List.of();
+        }
+        if (engineWork.isEmpty()) {
+            return cases.stream().<DecisionOutcome>map(c -> new DecisionOutcome.Failed("TENANT_NOT_ALLOWED",
+                    "The host's Rule Engine has no tenant-scoped entry point for the Process Engine")).toList();
+        }
+        java.util.List<DecisionResult.Outcome> outcomes;
+        try {
+            outcomes = engineWork.get().simulate(tenantId, decisionRef, version, cases.stream()
+                    .map(c -> new io.github.dhluong90.bpm.rules.embedded.TimedInput(DecisionInput.of(c.inputs()),
+                            c.evaluationTime())).toList());
+        } catch (HorusBpmException e) {
+            return cases.stream().<DecisionOutcome>map(c -> new DecisionOutcome.Failed(e.code(), e.getMessage()))
+                    .toList();
+        }
+        return outcomes.stream().<DecisionOutcome>map(outcome -> switch (outcome) {
+            case DecisionResult.Matched m -> new DecisionOutcome.Matched(null, m.outputs(), m.ruleIds());
+            case DecisionResult.NoMatch n -> new DecisionOutcome.NoMatch(null);
+            case DecisionResult.Failed f -> new DecisionOutcome.Failed(f.code(), f.detail());
+        }).toList();
     }
 }

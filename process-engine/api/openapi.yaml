@@ -41,6 +41,8 @@ tags:
     description: Read, claim, unclaim and complete user tasks
   - name: async-steps
     description: Report the result of a remote step whose adapter handed the call off
+  - name: agent-replays
+    description: Replay recorded agent answers against a candidate guardrail or output schema
 paths:
   /definitions:
     post:
@@ -742,6 +744,131 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /agent-replays:
+    post:
+      tags: [agent-replays]
+      operationId: startAgentReplay
+      summary: Replay an agent step's recorded answers against a candidate guardrail
+      description: |
+        Tests a changed guardrail, and optionally a changed output schema, against the answers an agent step recorded
+        over a period, before it goes live (PD-128). The run re-checks each recorded answer (output schema, then the
+        candidate rule set version, usually a draft) at the answer's recorded time, so `today()` is the day it was
+        checked. It never calls a model or any adapter, writes no history or decision row, and moves no instance.
+        Prompt or model changes are replayed by a host harness outside the engine, because masked inputs are kept only
+        as keyed hashes.
+
+        The run is created at once (`202`) and replayed by the job poller in pages of `replay.page-size` (500); read
+        it with `GET /agent-replays/{id}`. The period is whole UTC days, `from` and `to` inclusive, at most
+        `query.max-range` (31 days), otherwise `400 QUERY_INVALID`. More recorded answers than `replay.max-cases`
+        (50,000) is `422 REPLAY_TOO_LARGE` with `cases` and `limit`. A candidate that breaks the guardrail contract
+        (output `allow: boolean`, hit policy `first` or `unique`, inputs the output schema declares) is
+        `422 GUARDRAIL_CONTRACT_INVALID` and no run is created; a candidate the caller's tenant does not have is
+        `404 RULE_SET_NOT_FOUND`. Permission `processes:agent:replay`. Runs and reports are deleted
+        `replay.retention` (30 days) after they were created; they are not audit records.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentReplayRequest' }
+            example: { definitionKey: kyc-onboarding, nodeId: assess-documents, from: '2026-11-01', to: '2026-11-30', candidate: { ruleSet: kyc-document-guardrails, version: 3 } }
+      responses:
+        '202':
+          description: The queued run
+          headers:
+            Location: { schema: { type: string }, description: The run's address }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentReplayRun' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /agent-replays/{id}:
+    get:
+      tags: [agent-replays]
+      operationId: getAgentReplay
+      summary: Read a replay run and its summary
+      description: |
+        The run's status (`QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`) and its counts so far: cases unchanged, newly
+        allowed, newly refused, newly routed to review, newly allowed cases a reviewer had corrected, cases that could
+        not be replayed, and cases with masked fields. Permission `processes:agent:replay`; another tenant's run is
+        `404 REPLAY_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/ReplayId'
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentReplayRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /agent-replays/{id}/cases:
+    get:
+      tags: [agent-replays]
+      operationId: listAgentReplayCases
+      summary: Read a replay report, one line per recorded answer
+      description: |
+        Lines in recorded order: the attempt id (the key of the model call), the instance, the recorded and the
+        candidate outcome, the change, the matched rule ids, the candidate's code and the `OVERRIDDEN_BY_REVIEWER`
+        flag. Never an output value. `limit` 1 to 500, 50 when absent. Permission `processes:agent:replay`.
+      parameters:
+        - $ref: '#/components/parameters/ReplayId'
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of lines
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentReplayCasePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /agent-replays/{id}/cases/{attemptId}/answer:
+    get:
+      tags: [agent-replays]
+      operationId: getAgentReplayCaseAnswer
+      summary: Open one case's recorded answer as history keeps it
+      description: |
+        The recorded `output` and `inputs` of one case: output fields the schema masks are `***`, and masked inputs
+        are their keyed hashes (`hmac:<keyId>:<hex>`). Permission `processes:agent:replay`; a case the run does not
+        have, or another tenant's run, is `404 REPLAY_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/ReplayId'
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 26 }
+      responses:
+        '200':
+          description: The recorded answer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attemptId, instanceId, output, inputs]
+                properties:
+                  attemptId: { type: string }
+                  instanceId: { type: string }
+                  output: { type: object, additionalProperties: true }
+                  inputs: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -792,6 +919,11 @@ components:
       required: false
       description: Items per page, 1 to `query.max-page-size` (200); 50 when absent. Outside the range is `400 QUERY_INVALID`.
       schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    ReplayId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 26 }
     Cursor:
       name: cursor
       in: query
@@ -1121,6 +1253,79 @@ components:
           additionalProperties:
             type: object
             additionalProperties: { type: integer, minimum: 1 }
+    AgentReplayRequest:
+      type: object
+      required: [definitionKey, nodeId, from, to, candidate]
+      properties:
+        definitionKey: { type: string }
+        nodeId: { type: string, description: The agent step }
+        from: { type: string, format: date, description: First UTC day, inclusive }
+        to: { type: string, format: date, description: Last UTC day, inclusive }
+        candidate:
+          type: object
+          required: [ruleSet, version]
+          properties:
+            ruleSet: { type: string }
+            version: { type: integer, minimum: 1, description: Any status, usually a draft }
+            outputSchema:
+              type: object
+              additionalProperties: true
+              description: A candidate output schema; without one each answer is checked against its recorded schema
+    AgentReplayRun:
+      type: object
+      required: [id, status, definitionKey, nodeId, from, to, candidate, summary, createdBy, createdAt, expiresAt]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED] }
+        definitionKey: { type: string }
+        nodeId: { type: string }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        candidate:
+          type: object
+          properties:
+            ruleSet: { type: string }
+            version: { type: integer }
+            outputSchema: { type: boolean, description: Whether a candidate output schema replaces the recorded ones }
+        summary:
+          type: object
+          properties:
+            cases: { type: integer }
+            unchanged: { type: integer }
+            newlyAllowed: { type: integer }
+            newlyRefused: { type: integer }
+            newlyRoutedToReview: { type: integer }
+            overriddenByReviewer: { type: integer, description: Newly allowed cases whose answer a reviewer corrected }
+            notReplayed: { type: integer, description: Cases not replayed for another reason, such as GUARD_SPEC_INVALID; masked-input cases are counted apart }
+            withMaskedFields: { type: integer, description: Cases with a masked field, left out of the check }
+            maskedInputRequired: { type: integer, description: Cases not replayed because the candidate guardrail or schema needs the value of a masked field (MASKED_INPUT_REQUIRED) }
+        failureCode: { type: [string, 'null'] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+        expiresAt: { type: string, format: date-time }
+    AgentReplayCase:
+      type: object
+      required: [attemptId, instanceId, recordedAt, recordedOutcome, candidateOutcome, change, recordedRuleIds, candidateRuleIds, flags, maskedFields]
+      properties:
+        attemptId: { type: string }
+        instanceId: { type: string }
+        recordedAt: { type: string, format: date-time }
+        recordedOutcome: { type: string, enum: [ALLOWED, REVIEW, REFUSED] }
+        candidateOutcome: { type: string, enum: [ALLOWED, REVIEW, REFUSED, NOT_REPLAYED] }
+        change: { type: string, enum: [UNCHANGED, NEWLY_ALLOWED, NEWLY_REFUSED, NEWLY_ROUTED_TO_REVIEW, NOT_REPLAYED] }
+        recordedRuleIds: { type: array, items: { type: string } }
+        candidateRuleIds: { type: array, items: { type: string } }
+        code: { type: [string, 'null'], description: 'The candidate refusal code; when not replayed, GUARD_SPEC_INVALID, or MASKED_INPUT_REQUIRED when the candidate guardrail or schema needs a field history keeps only masked' }
+        flags: { type: array, items: { type: string, enum: [OVERRIDDEN_BY_REVIEWER] } }
+        maskedFields: { type: integer }
+    AgentReplayCasePage:
+      type: object
+      required: [data, hasNext]
+      properties:
+        data: { type: array, items: { $ref: '#/components/schemas/AgentReplayCase' } }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     DefinitionProblemItem:
       type: object
       required: [code, message]
@@ -1150,7 +1355,8 @@ components:
             TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
-            PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, INTERNAL]
+            PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
+            REPLAY_TOO_LARGE, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:
@@ -1169,6 +1375,8 @@ components:
         namespace: { type: string, description: 'Present on `CMMN_UNSUPPORTED`, the namespace of the root element' }
         line: { type: integer, description: 'Present on `CMMN_UNSUPPORTED`, the line of the root element' }
         nodeId: { type: string, description: Present on `STEP_FAILED` }
+        cases: { type: integer, description: 'Present on `REPLAY_TOO_LARGE`, the recorded answers in the period' }
+        limit: { type: integer, description: 'Present on `REPLAY_TOO_LARGE`, `replay.max-cases`' }
         violations:
           type: array
           description: >-
@@ -1188,6 +1396,7 @@ components:
         reason:
           type: string
           description: >-
-            Present on `STEP_FAILED`, for example `UNHANDLED_BUSINESS_ERROR`, `DECISION_NO_MATCH`, `STEP_LIMIT`,
+            Present on `STEP_FAILED`, for example `DECISION_NO_MATCH`, `STEP_LIMIT`,
             `NO_PATH` (an exclusive gateway with no true condition and no default flow) or `CONDITION_ERROR`
-            (a condition that compares values of different types or currencies)
+            (a condition that compares values of different types or currencies). A handler's business error is
+            not a `STEP_FAILED`: the step waits with an incident `UNHANDLED_BUSINESS_ERROR`

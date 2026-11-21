@@ -15,6 +15,9 @@ import java.util.Map;
 /** Shared enter and trigger of steps that invoke something and wait for its result. */
 final class InvocationSupport {
 
+    /** Incident code of a business error that no path of the process handles (PRE-040, PRE-111). */
+    static final String UNHANDLED_BUSINESS_ERROR = "UNHANDLED_BUSINESS_ERROR";
+
     private InvocationSupport() {
     }
 
@@ -55,13 +58,20 @@ final class InvocationSupport {
         switch (result.result()) {
             case StepResult.Completed completed -> {
                 StepSupport.storeResult(node, completed.output(), ctx);
+                ctx.effect(new Effect.RecordResult(token.id(), node.id(), result.attemptId(), completed.output(),
+                        false));
                 Token active = token.withStatus(TokenStatus.ACTIVE);
                 ctx.update(active);
                 ctx.history("NODE_COMPLETED", token, Map.of());
                 ctx.takeOutgoing(active, node);
             }
-            case StepResult.BusinessError error -> throw new ExecutionException("UNHANDLED_BUSINESS_ERROR", node.id(),
-                    error.code() + ": " + error.message());
+            case StepResult.BusinessError error -> {
+                // PRE-040: a business error the process has no path for is not lost and not rolled back. The token
+                // stays on the step and the shell opens an incident in this transaction; nothing is retried, because
+                // a business error is not technical. Error events (S1) will catch it before this point. The
+                // handler's message never leaves the engine log: it may carry personal data.
+                ctx.effect(new Effect.RaiseIncident(token.id(), node.id(), UNHANDLED_BUSINESS_ERROR, error.code()));
+            }
             case StepResult.Failed failed -> throw new ExecutionException(failed.errorCode(), node.id(), failed.detail());
         }
     }
@@ -87,6 +97,7 @@ final class InvocationSupport {
                     + " is not the open review task of this token");
         }
         StepSupport.storeResult(node, complete.result(), ctx);
+        ctx.effect(new Effect.RecordResult(token.id(), node.id(), complete.taskId(), complete.result(), true));
         Token active = token.withStatus(TokenStatus.ACTIVE);
         ctx.update(active);
         ctx.history("TASK_COMPLETED", token, Map.of("taskId", complete.taskId(), "review", true));

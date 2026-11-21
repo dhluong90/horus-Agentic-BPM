@@ -55,6 +55,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `when: { balance: "balance + 100 > 0" } -> 422 VALIDATION_FAILED, R1, column balance, TYPE_MISMATCH at position 8 ("+ is not defined for money and number: write the number with a currency, for example 100 VND")`.
 - **Test ID:** `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` (`RLE_004_*` in `ExpressionValidationTest`, `ExpressionTypeCheckPropertiesTest`)
 
+### RLE-082 A host sets the evaluation step budget and time backstop, and a decision past them fails with a named reason
+- **Traces to:** `TR-SEC-01`, `TR-STD-23`, `TR-DET-01`
+- **Milestone:** M1
+- **Given:** `loyalty-score` v1 of tenant `bank-a`, approved under the default settings: one rule whose `points` cell is `1 + 1 + ... + 1` (twelve terms, about 23 expression nodes). Two hosts: one with the defaults, and one with `horus.bpm.rules.evaluation.step-budget: 10`.
+- **When:** Each host evaluates `{ tier: GOLD }`. The host with the budget of 10 also imports the same document as a new rule set.
+- **Then:**
+  - The default host (`step-budget` 100,000 and `timeout-ms` 10,000) returns `points: 12`.
+  - The host with 10 steps returns `EVALUATION_ERROR` with reason `EVALUATION_BUDGET_EXCEEDED` and `limit: STEPS` (`422` over REST). The decision is logged with `outcome = EVALUATION_ERROR` and `error_code = EVALUATION_BUDGET_EXCEEDED`.
+  - The same limits apply to the worst-case check at import and request-publish (`RLE-004`): the document is refused there with the code `EVALUATION_BUDGET_EXCEEDED`.
+  - The settings are `horus.bpm.rules.evaluation.step-budget` (1 to 1,000,000, default 100,000) and `horus.bpm.rules.evaluation.timeout-ms` (1 to 30,000, default 10,000), listed in the configuration metadata with a description, and neither can be switched off. The step count is deterministic; the time bound is only the backstop of a slow machine.
+- **Example:** `step-budget 10, loyalty-score {tier: GOLD} -> EVALUATION_ERROR, EVALUATION_BUDGET_EXCEEDED, logged; default -> points 12`.
+- **Test ID:** `RLE_082_a_host_with_step_budget_10_fails_a_heavy_decision_and_the_default_passes_it`, `RLE_082_a_host_that_lowers_the_budget_also_refuses_such_a_table_at_import`, `RLE_082_the_step_budget_and_the_time_backstop_default_and_may_be_set`
+
+### RLE-083 An evaluation limit outside its range stops start-up and names the property
+- **Traces to:** `TR-SEC-01`, `TR-EXT-03`, `TR-STD-23`
+- **Milestone:** M1
+- **Given:** A host that sets `horus.bpm.rules.evaluation.step-budget` or `horus.bpm.rules.evaluation.timeout-ms`.
+- **When:** The value is `0` or `1000001` for the step budget, or `0` or `30001` for the time backstop; then the ceilings themselves (`1000000` and `30000`).
+- **Then:** Each value outside the range stops start-up with a message that names the property and its range, for example `horus.bpm.rules.evaluation.step-budget must be 1 to 1000000, was 0`; the ceilings are accepted. Nothing is clamped.
+- **Example:** `step-budget=0 -> start-up fails: horus.bpm.rules.evaluation.step-budget must be 1 to 1000000, was 0`.
+- **Test ID:** `RLE_083_an_out_of_range_budget_stops_start_up_naming_the_property_and_its_range`, `RLE_083_the_limits_name_their_property_when_they_are_out_of_range`
+
 ### RLE-005 Money currency mismatch is rejected deterministically
 - **Traces to:** `TR-DET-03`
 - **Milestone:** M1
@@ -447,6 +469,37 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - An approval names the content reviewed (#275): `minh` reads v2 while it is pending at `lockVersion` L; it is sent back, `lan` replaces it and requests publication again. `minh`'s `:approve` with `If-Match: "L"` returns `409 VERSION_CONFLICT`; `:approve` or `:reject` without `If-Match` returns `428 PRECONDITION_REQUIRED`, through REST and the Java API. Neither publishes or records anything; an approval with the current `lockVersion` publishes.
 - **Example:** `lan PUTs card-fee-r2-zero.yaml on draft v2 with If-Match "0" -> 200, still v2, lockVersion 1, new canonical hash, 1 DRAFT_UPDATED row, 1 draft-updated event; If-Match "0" again -> 409; minh -> 403; drafts off -> 403 DRAFT_AUTHORING_DISABLED`.
 - **Test ID:** `RLE_047_author_replaces_draft_in_place_with_import_checks`
+
+### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`, with `authoring.cockpit-drafts` at its default (`false`). `card-fee` v1 (fee for `SILVER` with 3 or more transactions: 10000 VND, canonical hash `H1`) was `PUBLISHED` and is now `RETIRED`, superseded by v2 (same row at 30000 VND, `H2`), which is in effect. `lan` holds `rules:author`; `minh` holds `rules:approve`.
+- **When:** `lan` sends `POST .../rule-sets/card-fee/versions?copyOf=1` with no body and `Idempotency-Key: k-601`, then repeats it. Then `lan` requests publication of v3, `lan` tries to approve it, `minh` reads `GET .../versions/3/diff?base=2` and `?base=1`, and `minh` approves. The Java form is `VersionService.copyVersion("card-fee", 1, options)`.
+- **Then:**
+  - `201` with `card-fee` v3 `DRAFT`, `createdBy: lan`, canonical hash `H1`, no `effectiveFrom`, and `copiedFrom: 1`. The source document is v1's (format and hash), so `?include=source` shows what was originally imported. No version is reopened or edited, and no approval, effective date or acknowledgement is copied.
+  - One history row `CREATED` with actor `lan` and `copied_from = 1`, and one `rules.version.created.v1` event with the additive member `copiedFrom: 1`.
+  - The repeat with `k-601` returns the same `201` and creates no v4.
+  - v1 and v2 are unchanged: their status, history and hashes stay as they were.
+  - `lan`'s approval is `403 SELF_APPROVAL_FORBIDDEN`: whoever restores a version is its maker.
+  - The diff against v2 lists `R2` `CHANGED` from 30000 to 10000 VND. The diff against v1 has no row change and equal canonical hashes.
+  - `minh`'s approval publishes v3 and, with `effectiveFrom` at approval, retires v2 as superseded (`RLE-027`). Evaluating `{ tier: SILVER, txCount: 5 }` then gives 10000 VND from v3. The history shows v1, v2 and v3, with v3's `CREATED` row naming v1.
+  - A restore of a version in any status (`DRAFT`, `PENDING_APPROVAL`, `PUBLISHED`, `RETIRED`) is allowed, and `authoring.cockpit-drafts: false` does not refuse it: it brings in no content that was not already approved (PD-121). The setting goes on governing `PUT` (`RLE-047`).
+- **Example:** `lan POSTs ?copyOf=1 on card-fee (v1 retired, v2 in effect) -> 201, v3 DRAFT, copiedFrom 1, hash H1; lan approves v3 -> 403; minh approves -> v3 serves 10000 VND`.
+- **Test ID:** `RLE_062_an_earlier_version_is_restored_as_the_next_draft_and_needs_approval`
+
+### RLE-063 A restore passes today's import checks and refuses what it cannot copy
+- **Traces to:** `TR-SEC-05`, `TR-DET-02`, `TR-TEN-01`, PD-121
+- **Milestone:** M1
+- **Given:** Tenant `bank-b` sets `masking.tenants.bank-b.require-explicit-mask: true`. Its `kyc-routing` v1, approved before strict mode, has input `nationalId` with no `mask`. Tenant `bank-a`'s `card-fee` as in `RLE-062`. Caller `dan` holds `rules:read` only.
+- **When:** An author in `bank-b` sends `?copyOf=1` for `kyc-routing`. In `bank-a`: `?copyOf=9`; `?copyOf=0`; `?copyOf=1` with a non-empty body; `dan` sends `?copyOf=1`; a `bank-b` caller sends `?copyOf=1` for `card-fee`. On a host whose `evaluation.step-budget` was lowered after v1 was approved, an author restores v1.
+- **Then:**
+  - The `bank-b` copy is `422 VALIDATION_FAILED` naming `nationalId` and `decision-log.require-explicit-mask` (`RLE-050`). The copy is checked as an import of the same document would be today: the step budget (`RLE-004`), the row limit and the mask rules (`RLE-049`, `RLE-050`) apply, so the lowered budget refuses the restore with `EVALUATION_BUDGET_EXCEEDED`.
+  - `?copyOf=9` and the `bank-b` caller get `404 VERSION_NOT_FOUND` and `404 RULE_SET_NOT_FOUND`: the source is read in the caller's tenant only.
+  - `?copyOf=0` and the request with a body get `400 INPUT_INVALID`; a `copyOf` that is not a whole number of 1 or more is the same.
+  - `dan` gets `403 PERMISSION_DENIED`, checked before a body is read.
+  - No failure writes a version, history row, event or idempotency record.
+- **Example:** `bank-b ?copyOf=1 on kyc-routing -> 422, nationalId, decision-log.require-explicit-mask; ?copyOf=0 -> 400; dan -> 403; 0 rows written`.
+- **Test ID:** `RLE_063_a_restore_passes_todays_import_checks_and_refuses_what_it_cannot_copy`
 
 ### RLE-048 The diff marks look-alike characters and reports header and column changes
 - **Traces to:** `TR-UI-02`, `TR-STD-03`, ADR-0026 decision 6

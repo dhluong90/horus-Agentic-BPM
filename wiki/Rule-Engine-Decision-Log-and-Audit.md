@@ -38,23 +38,47 @@ Filters: `ruleSet`, `from`, `to`, `outcome`, matched rule id, and any output val
 
 ## Explain a decision to a customer
 
-`GET /api/bpm/rules/v1/decisions/01JD2X8K3N4P5Q6R7S8T9V0W1X/explain` returns a plain-language rendering: the inputs, the row that matched with its conditions, and the outputs. Example:
+`GET /api/bpm/rules/v1/decisions/01JD2X8K3N4P5Q6R7S8T9V0W1X/explain` returns a plain-language rendering: the row that matched with its conditions and the values the log recorded, and the outputs. It needs `rules:log:read`. Example:
 
 ```json
-{ "ruleSet": "card-fee", "version": 2, "outcome": "OK",
-  "matched": [ { "ruleId": "R2", "conditions": [
-      { "input": "tier", "test": "== 'GOLD'", "value": "GOLD", "masked": false, "missing": false, "result": true },
-      { "input": "balance", "test": ">= 50000000 VND", "value": { "currency": "VND", "amount": 60000000 }, "masked": false, "missing": false, "result": true } ] } ],
+{ "decisionId": "01JD2X8K3N4P5Q6R7S8T9V0W1X", "ruleSet": "card-fee", "version": 2, "hitPolicy": "FIRST",
+  "outcome": "OK", "errorCode": null, "clock": "2027-01-15T02:00:00Z",
+  "matched": [ { "ruleId": "R2", "position": 2, "conditions": [
+      { "input": "tier", "path": "/when/tier", "test": "== 'GOLD'", "value": "GOLD", "masked": false, "missing": false, "result": true },
+      { "input": "balance", "path": "/when/balance", "test": ">= 50000000 VND", "value": { "currency": "VND", "amount": 60000000 }, "masked": false, "missing": false, "result": true } ],
+      "outputs": { "fee": { "currency": "VND", "amount": 0 } } } ],
   "outputs": { "fee": { "currency": "VND", "amount": 0 } },
   "reasons": [ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 2 } } ],
-  "text": "Rule R2 of card-fee version 2 matched because tier is GOLD and balance is 60000000 VND, which is at least 50000000 VND. Result: fee 0 VND." }
+  "language": "en",
+  "text": "Rule R2 of card-fee version 2 matched because tier is GOLD, which equals GOLD, and balance is 60000000 VND, which is at least 50000000 VND. Result: fee 0 VND." }
 ```
 
-`matched`, `outputs` and `reasons` are the contract; `text` is rendered from `reasons` through a message catalogue per language, with locale-neutral numbers (no grouping, money in major units with its currency code). English and Vietnamese catalogues ship. Ask for a language with `?lang=vi` or `Accept-Language`; without one, `text` uses `horus.bpm.rules.explain.default-language` (default `en`), and a missing entry falls back to English. The cockpit reads the same catalogues, so the plain-language readings and the explanations use one wording.
+`matched`, `outputs` and `reasons` are the contract. The reason codes are `RULE_MATCHED`, `NO_RULE_MATCHED`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`, `VALUE_MISSING` and `VALUE_MASKED`, each with named `params`. `text` is rendered from them through a message catalogue per language, with locale-neutral numbers (no grouping, money in major units with its currency code). English and Vietnamese catalogues ship. Ask for a language with `?lang=vi` or `Accept-Language`; `language` says which one was used. Without a language the engine has, `text` uses `horus.bpm.rules.explain.default-language` (default `en`), and a missing entry falls back to English. The cockpit reads the same catalogues, so the plain-language readings and the explanations use one wording.
 
-To change the wording or add a language, place your own catalogue resource on the host's classpath; no code is needed. To replace the renderer entirely, declare a `DecisionExplainer` bean ([[Configuration and Extension Points]]). `reasons` never change.
+To change the wording or add a language, put `horus-bpm/rules/explain_<language>.properties` (UTF-8, one file per language) on the host's class path; its entries replace the engine's, and no code is needed. To replace the renderer entirely, declare a `DecisionExplainer` bean ([[Configuration and Extension Points]]). `reasons` never change.
 
-The explanation is built from the log entry and the stored version only: nothing is evaluated again, rows that did not match are not explained, masked inputs show as `hmac:<keyId>:<hex>` and missing inputs as "has no value". Templates per rule set can override the wording in M3 (see [[Roadmap]]).
+The explanation is built from the log entry and the stored version only: nothing is evaluated again, a later version does not change it, and the same decision always gives the same answer. Rows that did not match are not explained. Conditions are listed in column order. A condition inside an `any` group has `result: null`, because the log does not say which alternative held. Masked inputs show as `hmac:<keyId>:<hex>` with `masked: true`, and missing inputs as "has no value". A decision with no match reads "No rule of card-fee version 1 matched. No output was produced." Templates per rule set can override the wording in M3 (see [[Roadmap]]).
+
+## Read a rule set's history and export evidence
+
+`GET /api/bpm/rules/v1/rule-sets/card-fee/history` (`rules:read`) lists every version, newest first, with its status, effective dates (`effectiveTo` is when it was retired), who created, requested, approved or last rejected it, the comments, and its events oldest first. The first page also lists the rule set's own events, such as evidence exports. Follow `nextCursor` for older versions.
+
+An auditor exports evidence with one call:
+
+```http
+POST /api/bpm/rules/v1/rule-sets/card-fee/evidence
+Idempotency-Key: 4d0f1c2e-ha-2027-01-20
+Content-Type: application/json
+
+{ "format": "csv", "versions": [1, 2], "decisionIds": ["01JD2X8K3N4P5Q6R7S8T9V0W1X", "01JD3A0B1C2D3E4F5G6H7J8K9M", "01JD3B0B1C2D3E4F5G6H7J8K9M"] }
+```
+
+- The engine writes the file, so it is reproducible. It starts with who exported it, when, for which tenant and `Content SHA-256`, the hash of its content. In CSV the content is everything from the column line on; in JSON it is the `content` member as written. The same records always give the same content hash.
+- CSV is one file with a `record` column, `version event` or `decision`. A cell that would run as a spreadsheet formula is prefixed with `'`.
+- Masked inputs stay `hmac:<keyId>:<hex>`.
+- The response carries `X-Evidence-Sha256`, the content hash, and `Content-Digest`, the SHA-256 of the whole file, so you can check the saved file.
+- Decisions need `rules:log:read` as well. At most 100 versions and 100 decisions, all of this rule set; a decision of another rule set is refused, naming it. A file over 8 MB is `422 EVIDENCE_TOO_LARGE`.
+- The export itself is recorded: an `EVIDENCE_EXPORTED` entry in the rule set's history and the event `rules.evidence.exported.v1`. A repeat with the same `Idempotency-Key` returns the same file and records nothing.
 
 ## Mask personal data
 
@@ -155,6 +179,7 @@ Details: [[Rule Engine Configuration]].
 | `rules.version.retired` | A version was retired |
 | `rules.decision.evaluated` | Every decision; off by default because of volume |
 | `rules.decision-log.masked-input-searched` | Every search by a masked input's plain value; the audit entry of that lookup, without the value |
+| `rules.evidence.exported` | Every evidence export: who exported which versions and decisions, the format and the content hash |
 
 These are the events an audit consumer usually needs; the full list, the envelope (`eventId`, `correlationId`, `causationId`, `producer`, `schemaVersion`) and the schema files are in [[Rule Engine Decision API]].
 

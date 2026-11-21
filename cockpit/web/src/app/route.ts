@@ -10,13 +10,26 @@ import { useCallback, useSyncExternalStore } from 'react';
 export const LENSES = ['table', 'changes', 'history', 'source'] as const;
 export type Lens = (typeof LENSES)[number];
 
+/**
+ * A decision search kept in the URL, so a reload or a shared link shows the same list: one rule set and a
+ * calendar month (`2026-11`), or one case reference. Nothing personal is ever put here (PD-108).
+ */
+export interface DecisionQuery {
+  ruleSet?: string | undefined;
+  month?: string | undefined;
+  caseRef?: string | undefined;
+}
+
 export type Route =
   | { name: 'home' }
   | { name: 'rule-sets' }
   | { name: 'rule-set'; ruleSet: string; version: number | undefined; lens: Lens | undefined }
   | { name: 'approvals' }
-  | { name: 'decisions' }
-  | { name: 'processes' };
+  | { name: 'decisions'; query?: DecisionQuery | undefined }
+  | { name: 'decision'; decisionId: string }
+  | { name: 'processes' }
+  | { name: 'process'; key: string; version: number }
+  | { name: 'task'; taskId: string };
 
 /** The menu areas. Every route belongs to exactly one. */
 export const AREAS = ['home', 'rules', 'approvals', 'decisions', 'processes'] as const;
@@ -31,6 +44,11 @@ export function areaOf(route: Route): Area {
     case 'rule-sets':
     case 'rule-set':
       return 'rules';
+    case 'process':
+    case 'task':
+      return 'processes';
+    case 'decision':
+      return 'decisions';
     default:
       return route.name;
   }
@@ -50,16 +68,38 @@ function isLens(value: string | undefined): value is Lens {
  * never a blank screen.
  */
 export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Route {
-  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(safeDecode);
+  const [path = '', search = ''] = hash.replace(/^#\/?/, '').split('?');
+  const parts = path.split('/').filter(Boolean).map(safeDecode);
   const [area, ruleSet, version, lens] = parts;
   if (area === undefined) return fallback;
+  if (area === 'decisions') {
+    if (ruleSet !== undefined) return { name: 'decision', decisionId: ruleSet };
+    const query = decisionQuery(new URLSearchParams(search));
+    return Object.values(query).some((value) => value !== undefined) ? { name: 'decisions', query } : { name: 'decisions' };
+  }
   if (area === 'rules' || area === 'rule-sets') {
     if (ruleSet === undefined) return { name: 'rule-sets' };
     const number = version !== undefined && /^\d+$/.test(version) ? Number(version) : undefined;
     return { name: 'rule-set', ruleSet, version: number, lens: isLens(lens) ? lens : undefined };
   }
+  if (area === 'processes' && ruleSet !== undefined) {
+    // #/processes/<key>/<version>: one version's diagram. A key without a version number opens the list.
+    return version !== undefined && /^[1-9]\d*$/.test(version) ? { name: 'process', key: ruleSet, version: Number(version) } : { name: 'processes' };
+  }
+  if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'home' || area === 'approvals' || area === 'decisions' || area === 'processes') return { name: area };
   return { name: 'home' };
+}
+
+const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+function decisionQuery(params: URLSearchParams): DecisionQuery {
+  const read = (name: string) => {
+    const value = params.get(name)?.trim();
+    return value === undefined || value === '' ? undefined : value;
+  };
+  const month = read('month');
+  return { ruleSet: read('ruleSet'), month: month !== undefined && MONTH.test(month) ? month : undefined, caseRef: read('caseRef') };
 }
 
 function safeDecode(segment: string): string {
@@ -80,6 +120,21 @@ export function formatRoute(route: Route): string {
       if (route.version !== undefined && route.lens !== undefined) parts.push(route.lens);
       return `#/${parts.join('/')}`;
     }
+    case 'process':
+      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}`;
+    case 'task':
+      return `#/tasks/${encodeURIComponent(route.taskId)}`;
+    case 'decisions': {
+      const params = new URLSearchParams();
+      const query = route.query ?? {};
+      if (query.caseRef !== undefined) params.set('caseRef', query.caseRef);
+      else if (query.ruleSet !== undefined) params.set('ruleSet', query.ruleSet);
+      if (query.month !== undefined) params.set('month', query.month);
+      const text = params.toString();
+      return text === '' ? '#/decisions' : `#/decisions?${text}`;
+    }
+    case 'decision':
+      return `#/decisions/${encodeURIComponent(route.decisionId)}`;
     default:
       return `#/${route.name}`;
   }

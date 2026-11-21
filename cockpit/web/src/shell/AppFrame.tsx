@@ -6,9 +6,13 @@ import { availableAreas, landingArea, landingNote } from '../app/navigation';
 import { areaOf, areaRoute, formatRoute, useRoute, type Area, type Route } from '../app/route';
 import { EmptyState, PageHead } from '../components/PageParts';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
+import { DecisionPage } from '../features/decisions/DecisionPage';
 import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
+import { ProcessesProvider } from '../features/processes/api/processesContext';
+import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
+import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
 import { RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
@@ -40,9 +44,11 @@ export interface FrameProps {
 export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
   return (
     <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} fetchImpl={fetchImpl}>
-      <PeopleProvider me={me.user}>
-        <Frame meta={meta} me={me} />
-      </PeopleProvider>
+      <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
+        <PeopleProvider me={me.user}>
+          <Frame meta={meta} me={me} />
+        </PeopleProvider>
+      </ProcessesProvider>
     </RulesProvider>
   );
 }
@@ -79,9 +85,15 @@ function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1
     case 'approvals':
       return <ApprovalsPage pageLimit={pageLimit} />;
     case 'decisions':
-      return <DecisionsPage rulesAvailable={areas.includes('rules')} />;
+      return <DecisionsPage query={route.query ?? {}} pageLimit={pageLimit} />;
+    case 'decision':
+      return <DecisionPage decisionId={route.decisionId} />;
     case 'processes':
-      return <ProcessesPage />;
+      return <ProcessesPage pageLimit={pageLimit} />;
+    case 'process':
+      return <DefinitionPage definitionKey={route.key} version={route.version} />;
+    case 'task':
+      return <ReviewTaskPage taskId={route.taskId} />;
   }
 }
 

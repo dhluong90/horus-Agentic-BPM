@@ -7,9 +7,10 @@ info:
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
     export, replace a draft, diff two versions, request publication, approve, reject, withdraw, retire, history,
     simulate a version over sample inputs or over the logged decisions of a period, evaluate (at the host clock, at a
-    chosen clock, or pinned to a version), batch evaluation of up to 1,000 items, replay of a logged decision, and
+    chosen clock, or pinned to a version), batch evaluation of up to 1,000 items, replay of a logged decision,
     decision-log reads (one decision, one rule set's decisions in a period, the decisions of one case reference, and
-    the searches by a plain or a masked input's value).
+    the searches by a plain or a masked input's value), the plain-language explanation of a decision, a rule set's
+    history across its versions, and the evidence export of versions and decisions.
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -215,12 +216,30 @@ paths:
         With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
         `mask` is `422 VALIDATION_FAILED` with one violation per input, its `column` naming it, and
         nothing is stored (`RLE-050`).
+
+        With `copyOf={v}` and no body, the next draft is a copy of version `v` of the same rule set
+        (`RLE-062`): a restore of an earlier version. It carries `v`'s canonical document byte for
+        byte, so it has the same `canonicalHash`, and names it in `copiedFrom`. Any status of `v`
+        may be copied. No approval, effective date or acknowledgement is copied: the draft is made
+        by the caller, so the caller cannot approve it, and it follows the normal request and
+        approval path. It is checked as an import of the same document would be today, the step
+        budget and the mask rules included (`RLE-063`). It is allowed whatever
+        `authoring.cockpit-drafts` says (PD-121). `v` is read in the caller's tenant only. A
+        `copyOf` that is not a version number of 1 or more, or a body sent with it, is
+        `400 INPUT_INVALID`; an unknown `v` is `404 VERSION_NOT_FOUND`. A failure writes nothing.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
+        - name: copyOf
+          in: query
+          required: false
+          description: The version of this rule set to restore as the next draft; send no body with it
+          schema:
+            type: integer
+            minimum: 1
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CorrelationId'
       requestBody:
-        required: true
+        required: false
         content:
           application/yaml:
             schema:
@@ -504,6 +523,160 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/history:
+    get:
+      tags: [rule-sets]
+      operationId: getRuleSetHistory
+      summary: Read the history of every version of a rule set, newest version first
+      description: |
+        Permission `rules:read`. One item per version, newest first, keyset-paged by version number:
+        status, effective from and to (`effectiveTo` is when the version was retired, or null), who created,
+        requested, approved or last rejected it, the approval comment and the last rejection reason, and the
+        version's events oldest first (the entries of `GET /rule-sets/{name}/versions/{version}/history`), at most
+        100 per version (`eventsTruncated` is true when the version has more; read that endpoint for all of them).
+        The first page (no `cursor`) also lists the rule set's own events, newest first, at most 100
+        (`ruleSetEventsTruncated` is true when there are more): today these are evidence exports
+        (`EVIDENCE_EXPORTED`). Later pages carry an empty `ruleSetEvents`. A rule set of another tenant is
+        `404 RULE_SET_NOT_FOUND`. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of versions with their events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleSetHistory'
+              example:
+                ruleSet: card-fee
+                data:
+                  - version: 2
+                    status: PUBLISHED
+                    effectiveFrom: '2026-12-20T00:00:00Z'
+                    effectiveTo: null
+                    canonicalHash: 3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
+                    createdBy: lan
+                    createdAt: '2026-12-15T01:00:00Z'
+                    requestedBy: lan
+                    requestedAt: '2026-12-16T01:00:00Z'
+                    approvedBy: minh
+                    approvedAt: '2026-12-16T03:00:00Z'
+                    approvalComment: Committee minutes attached
+                    rejectedBy: minh
+                    rejectedAt: '2026-12-15T02:00:00Z'
+                    rejectionReason: R2 waiver needs pricing committee minutes
+                    events:
+                      - action: CREATED
+                        fromStatus: null
+                        toStatus: DRAFT
+                        actor: lan
+                        reason: null
+                        lockVersion: 0
+                        occurredAt: '2026-12-15T01:00:00Z'
+                    eventsTruncated: false
+                ruleSetEvents:
+                  - action: EVIDENCE_EXPORTED
+                    actor: ha
+                    occurredAt: '2027-01-20T03:00:00Z'
+                    evidence:
+                      format: csv
+                      versions: [1, 2]
+                      decisionIds: [01KF2Q8Z0RQ6V2Y8M1C4N5P7T9, 01KF2Q8Z0RQ6V2Y8M1C4N5P7TA, 01KF2Q8Z0RQ6V2Y8M1C4N5P7TB]
+                      contentSha256: 9f4a6c1e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
+                      bytes: 4812
+                ruleSetEventsTruncated: false
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/evidence:
+    post:
+      tags: [rule-sets]
+      operationId: exportEvidence
+      summary: Export versions and decisions of a rule set as an evidence file
+      description: |
+        Permission `rules:read`; a request that names decisions also needs `rules:log:read`, checked before
+        anything is read (`403 PERMISSION_DENIED` naming it). The engine writes the file, so it is reproducible and
+        its handover is recorded (PD-116).
+
+        - `versions`: version numbers of this rule set, at most 100, no repeats. Each contributes every event of its
+          history, oldest first. An unknown version is `404 VERSION_NOT_FOUND`.
+        - `decisionIds`: logged decisions of this rule set, at most 100, no repeats, kept in the order sent. A
+          decision of another rule set is `400 INPUT_INVALID` naming it; one the caller's tenant does not have is
+          `404 DECISION_NOT_FOUND` naming it. Masked inputs stay `hmac:<keyId>:<hex>`.
+        - At least one version or one decision.
+
+        The file starts with who exported it, when, for which tenant, and `contentSha256`: the SHA-256 of the
+        content, which is everything after those header lines in CSV (UTF-8, CRLF line ends, from the column line
+        on), and in JSON the `content` member, the file's last, exactly as written. The same versions and decisions always give the
+        same `contentSha256`, so an auditor can check a file by hashing its content. CSV is one file with a
+        `record` column, `version event` or `decision`; a cell that starts with `=`, `+`, `-`, `@`, a tab or a
+        carriage return is prefixed with `'` so a spreadsheet never runs it as a formula. The response also carries
+        `X-Evidence-Sha256` (the same hex digest) and `Content-Digest` (RFC 9530, SHA-256 of the whole body), so the
+        saved file can be checked against the bytes sent. A file over 8,388,608 bytes is
+        `422 EVIDENCE_TOO_LARGE`; choose fewer decisions.
+
+        In the same transaction the export appends an `EVIDENCE_EXPORTED` entry to the rule set's history (actor,
+        format, versions, decision ids, `contentSha256`, size) and writes `rules.evidence.exported.v1` to the outbox.
+        With an `Idempotency-Key` a repeat returns the same bytes and writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        description: At most 16,384 bytes
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EvidenceRequest'
+            example:
+              format: csv
+              versions: [1, 2]
+              decisionIds: [01KF2Q8Z0RQ6V2Y8M1C4N5P7T9, 01KF2Q8Z0RQ6V2Y8M1C4N5P7TA, 01KF2Q8Z0RQ6V2Y8M1C4N5P7TB]
+      responses:
+        '200':
+          description: The evidence file, with `Content-Disposition` `attachment; filename="<name>-evidence-<exported at, yyyyMMddTHHmmssZ>.<csv|json>"`
+          headers:
+            Content-Digest:
+              description: RFC 9530 digest of the body, `sha-256=:<base64>:`
+              schema:
+                type: string
+            X-Evidence-Sha256:
+              description: The file's `contentSha256`, 64 lower-case hex digits
+              schema:
+                type: string
+                pattern: '^[0-9a-f]{64}$'
+          content:
+            text/csv:
+              schema:
+                type: string
+              example: |
+                # HORUS Rule Engine evidence export
+                # Rule set: card-fee
+                # Tenant: bank-a
+                # Exported by: ha
+                # Exported at: 2027-01-20T03:00:00Z
+                # Content SHA-256: 9f4a6c1e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
+                record,version,occurred_at,action,from_status,to_status,actor,reason,version_canonical_hash,decision_id,outcome,error_code,matched_rule_ids,inputs,outputs,correlation_id,eval_clock
+                version event,1,2026-11-01T01:00:00Z,CREATED,,DRAFT,lan,,4be1...,,,,,,,,
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceFile'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:request-publish:
     post:
@@ -1422,6 +1595,75 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{id}/explain:
+    get:
+      tags: [decisions]
+      operationId: explainDecision
+      summary: Explain one logged decision in plain language
+      description: |
+        Permission `rules:log:read`. Built from the decision row and the stored version it names, and nothing
+        else: no expression is evaluated, and a later version does not change it (RLE-030, DESIGN section 4.7).
+        `matched` lists the matched rows in table order with each condition: the input, the cell's test, the
+        recorded value and `result` (true for a condition that had to hold; null inside an `any` group, where the
+        log does not say which alternative held). Rows that did not match are not explained. `reasons` are the
+        contract: `RULE_MATCHED`, `NO_RULE_MATCHED`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`, `VALUE_MISSING` and
+        `VALUE_MASKED`, each with named `params`. `text` is rendered from `reasons` through a message catalogue:
+        `lang`, then `Accept-Language`, choose among the catalogues the host has (English and Vietnamese ship),
+        else `explain.default-language`; `language` says which was used. Numbers in `text` have no grouping and
+        money is in major units with its currency code (`10000 VND`); JSON values keep money in minor units. A
+        masked input shows its stored `hmac:<keyId>:<hex>` with `masked: true` (RLE-031); the plain value is never
+        available. The same decision always gives the same body. A decision of another tenant is
+        `404 DECISION_NOT_FOUND`. Writes nothing.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lang
+          in: query
+          required: false
+          description: Language of `text`, for example `vi`; a language the host has no catalogue for falls back as described
+          schema:
+            type: string
+            pattern: '^[a-z]{2,3}$'
+        - name: Accept-Language
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The explanation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DecisionExplanation'
+              example:
+                decisionId: 01KF2Q8Z0RQ6V2Y8M1C4N5P7T9
+                ruleSet: card-fee
+                version: 1
+                hitPolicy: FIRST
+                outcome: OK
+                errorCode: null
+                clock: '2026-11-20T10:00:00Z'
+                matched:
+                  - ruleId: R2
+                    position: 2
+                    conditions:
+                      - { input: txCount, path: /when/txCount, test: '>= 3', value: 5, masked: false, missing: false, result: true }
+                    outputs:
+                      fee: { currency: VND, amount: 10000 }
+                outputs:
+                  fee: { currency: VND, amount: 10000 }
+                reasons:
+                  - { code: RULE_MATCHED, params: { ruleId: R2, version: 1 } }
+                language: en
+                text: 'Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND.'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions:find-by-masked-input:
     post:
       tags: [decisions]
@@ -1704,6 +1946,10 @@ components:
           type: [string, 'null']
           format: date-time
           description: When the version was retired, by hand or as superseded; null while it is not retired
+        copiedFrom:
+          type: integer
+          minimum: 1
+          description: 'Present on a draft restored from an earlier version (`RLE-062`), naming the version it was copied from; absent on an imported version'
         retireRequestedBy:
           type: [string, 'null']
           description: |
@@ -1950,6 +2196,10 @@ components:
         noVersionInEffect:
           type: [boolean, 'null']
           description: Present on a `RETIRED` entry only; true when the retirement left the rule set with no version in effect (PD-101)
+        copiedFrom:
+          type: integer
+          minimum: 1
+          description: On the `CREATED` entry of a restore only (`RLE-062`); the version it was copied from
         retireRequestedBy:
           type: [string, 'null']
           description: Present on a `RETIRED` entry only; in `four-eyes` mode the requester whose request the actor confirmed, else null (`RLE-038`)
@@ -2587,6 +2837,225 @@ components:
         truncated:
           type: boolean
           description: True when more decisions match than the limit
+    DecisionExplanation:
+      type: object
+      description: A logged decision explained from its row and its stored version (RLE-030, RLE-031, DESIGN section 4.7)
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched, outputs, reasons, language, text]
+      properties:
+        decisionId: { type: string }
+        ruleSet: { type: string }
+        version: { type: integer }
+        hitPolicy: { type: string, enum: [FIRST, UNIQUE, COLLECT] }
+        outcome: { type: string, enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR] }
+        errorCode: { type: [string, 'null'] }
+        clock:
+          type: string
+          format: date-time
+          description: The instant the decision reasoned about (`evalClock`)
+        matched:
+          type: array
+          description: The matched rows in table order; empty for no match. On `UNIQUE_HIT_VIOLATION` every matched row; on `EVALUATION_ERROR` the rows recorded as matched
+          items:
+            $ref: '#/components/schemas/ExplainedRow'
+        outputs:
+          type: [object, 'null']
+          additionalProperties: true
+          description: The decision's logged outputs; null when it produced none
+        reasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExplanationReason'
+        language:
+          type: string
+          description: The language `text` is written in
+        text:
+          type: string
+          description: The plain-language explanation rendered from `reasons`; a client never parses it
+    ExplainedRow:
+      type: object
+      required: [ruleId, position, conditions, outputs]
+      properties:
+        ruleId: { type: string }
+        position:
+          type: integer
+          minimum: 1
+          description: The row's 1-based place in the table
+        conditions:
+          type: array
+          description: The row's conditions, the plain ones first in column order (the order of the declared inputs), then those of its `all` and `any` groups
+          items:
+            $ref: '#/components/schemas/ExplainedCondition'
+        outputs:
+          type: object
+          additionalProperties: true
+          description: |
+            The outputs this row gave: the decision's outputs under `first` and `unique`; under `collect`, the
+            row's entry of each list output (aggregated outputs are only in the decision's `outputs`); empty on a
+            failed decision
+    ExplainedCondition:
+      type: object
+      required: [input, path, test, value, masked, missing, result]
+      properties:
+        input: { type: string }
+        path:
+          type: string
+          description: JSON Pointer of the cell in the row, for example `/when/txCount` or `/when/any/0/tier`
+        test:
+          type: string
+          description: The cell's condition as stored, for example `>= 3`
+        value:
+          description: The recorded value (money in minor units); `hmac:<keyId>:<hex>` when masked; null when missing
+        masked: { type: boolean }
+        missing:
+          type: boolean
+          description: True when the input had no value
+        result:
+          type: [boolean, 'null']
+          description: True for a condition that had to hold for the row to match; null inside an `any` group
+    ExplanationReason:
+      type: object
+      required: [code, params]
+      properties:
+        code:
+          type: string
+          enum: [RULE_MATCHED, NO_RULE_MATCHED, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR, VALUE_MISSING, VALUE_MASKED]
+        params:
+          type: object
+          additionalProperties: true
+          description: |
+            Named parameters: `RULE_MATCHED` `ruleId`, `version`; `NO_RULE_MATCHED` `ruleSet`, `version`;
+            `UNIQUE_HIT_VIOLATION` `ruleIds`, `version`; `EVALUATION_ERROR` `errorCode`, `ruleIds`, `version`;
+            `VALUE_MISSING` and `VALUE_MASKED` `ruleId`, `input`
+    RuleSetHistory:
+      type: object
+      required: [ruleSet, data, ruleSetEvents, ruleSetEventsTruncated, nextCursor, hasNext]
+      properties:
+        ruleSet: { type: string }
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionHistoryLine'
+        ruleSetEvents:
+          type: array
+          description: The rule set's own events, newest first, on the first page only
+          items:
+            $ref: '#/components/schemas/RuleSetEvent'
+        ruleSetEventsTruncated:
+          type: boolean
+        nextCursor:
+          type: [string, 'null']
+        hasNext:
+          type: boolean
+    VersionHistoryLine:
+      type: object
+      required: [version, status, effectiveFrom, effectiveTo, canonicalHash, createdBy, createdAt, requestedBy,
+        requestedAt, approvedBy, approvedAt, approvalComment, rejectedBy, rejectedAt, rejectionReason, events,
+        eventsTruncated]
+      properties:
+        version: { type: integer }
+        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED] }
+        effectiveFrom: { type: [string, 'null'], format: date-time }
+        effectiveTo:
+          type: [string, 'null']
+          format: date-time
+          description: When the version was retired, by hand or superseded; null while it is not retired
+        canonicalHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        createdBy: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        requestedBy: { type: [string, 'null'] }
+        requestedAt: { type: [string, 'null'], format: date-time }
+        approvedBy: { type: [string, 'null'] }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        approvalComment: { type: [string, 'null'] }
+        rejectedBy:
+          type: [string, 'null']
+          description: The actor of the latest `REJECTED` event listed, or null
+        rejectedAt: { type: [string, 'null'], format: date-time }
+        rejectionReason: { type: [string, 'null'] }
+        events:
+          type: array
+          description: The version's history entries, oldest first, at most 100
+          items:
+            $ref: '#/components/schemas/HistoryEntry'
+        eventsTruncated: { type: boolean }
+    RuleSetEvent:
+      type: object
+      required: [action, actor, occurredAt, evidence]
+      properties:
+        action:
+          type: string
+          enum: [EVIDENCE_EXPORTED]
+        actor: { type: string }
+        occurredAt: { type: string, format: date-time }
+        evidence:
+          $ref: '#/components/schemas/EvidenceSummary'
+    EvidenceSummary:
+      type: object
+      required: [format, versions, decisionIds, contentSha256, bytes]
+      properties:
+        format: { type: string, enum: [csv, json] }
+        versions:
+          type: array
+          items: { type: integer }
+        decisionIds:
+          type: array
+          items: { type: string }
+        contentSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        bytes:
+          type: integer
+          description: Size of the file in bytes
+    EvidenceRequest:
+      type: object
+      required: [format]
+      additionalProperties: false
+      properties:
+        format: { type: string, enum: [csv, json] }
+        versions:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        decisionIds:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, pattern: '^[0-9A-HJKMNP-TV-Z]{26}$' }
+    EvidenceFile:
+      type: object
+      description: The JSON evidence file, compact, with `content` last. `contentSha256` is the SHA-256 of the `content` value exactly as it appears in the file
+      required: [evidence, content]
+      properties:
+        evidence:
+          type: object
+          required: [ruleSet, tenantId, exportedBy, exportedAt, contentSha256]
+          properties:
+            ruleSet: { type: string }
+            tenantId: { type: string }
+            exportedBy: { type: string }
+            exportedAt: { type: string, format: date-time }
+            contentSha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        content:
+          type: object
+          required: [ruleSet, versions, decisions]
+          properties:
+            ruleSet: { type: string }
+            versions:
+              type: array
+              items:
+                type: object
+                required: [version, status, canonicalHash, events]
+                properties:
+                  version: { type: integer }
+                  status: { type: string }
+                  canonicalHash: { type: string }
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HistoryEntry'
+            decisions:
+              type: array
+              items:
+                $ref: '#/components/schemas/LoggedDecision'
     Problem:
       type: object
       required: [type, title, status, code, detail, correlationId]
@@ -2603,7 +3072,7 @@ components:
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
-            EXPRESSION_LANGUAGE_UNSUPPORTED]
+            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE]
         detail: { type: string }
         correlationId: { type: string }
         namespace:

@@ -27,16 +27,74 @@ import java.util.Objects;
  *     acknowledgement or on other actions, never null
  * @param maskedByDefaultInputs on {@code APPROVED}: the inputs masked by the tenant's {@code decision-log.mask-default}
  *     rather than by their declaration at approval (PD-104); else empty, never null
+ * @param copiedFrom on a {@code CREATED} entry of a restore, the earlier version it copied (RLE-062); else null
  * @param retireRequestedBy on a {@code RETIRED} entry in {@code four-eyes} mode, who requested the retirement that
  *     {@code actor} confirmed (RLE-038); otherwise null
  */
 public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus,
         String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
         Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
-        List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, String retireRequestedBy) {
+        List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, Integer copiedFrom,
+        String retireRequestedBy) {
 
     /**
-     * Creates an entry that names no retirement requester.
+     * Creates an entry of a restore's creation, which names no retirement requester.
+     *
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param maskedByDefaultInputs see the record
+     * @param copiedFrom see the record
+     */
+    public VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus, String actor,
+            String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
+            Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
+            List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, Integer copiedFrom) {
+        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy, approvalMode,
+                noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings, maskedByDefaultInputs,
+                copiedFrom, null);
+    }
+
+    /**
+     * Creates an entry of a retirement, which is not the creation of a restore.
+     *
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param maskedByDefaultInputs see the record
+     * @param retireRequestedBy see the record
+     */
+    public VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus, String actor,
+            String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
+            Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
+            List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, String retireRequestedBy) {
+        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy, approvalMode,
+                noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings, maskedByDefaultInputs,
+                null, retireRequestedBy);
+    }
+
+    /**
+     * Creates an entry that is not the creation of a restore and names no retirement requester.
      *
      * @param action see the record
      * @param fromStatus see the record
@@ -59,7 +117,7 @@ public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStat
             List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
         this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy, approvalMode,
                 noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings, maskedByDefaultInputs,
-                null);
+                null, null);
     }
 
     /**

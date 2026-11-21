@@ -69,8 +69,13 @@
       "minimum": 1
     },
     "actor": {
-      "description": "Who imported the document: the author of the draft.",
+      "description": "Who imported the document, or restored the earlier version: the author of the draft.",
       "type": "string"
+    },
+    "copiedFrom": {
+      "description": "Present only when the draft restores an earlier version (POST .../versions?copyOf=): the version it was copied from. Additive within v1.",
+      "type": "integer",
+      "minimum": 1
     }
   },
   "examples": [

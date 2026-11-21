@@ -29,12 +29,13 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 403 | [CLOCK_NOT_ALLOWED](#clock_not_allowed) | rules | M1 |
 | 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | both | rules from 0.2.0 (`PUT` of a draft); processes M2 |
 | 404 | [NO_EFFECTIVE_VERSION](#no_effective_version) | both | M1 |
-| 404 | [RULE_SET_NOT_FOUND](#rule_set_not_found) | rules | M1 |
+| 404 | [RULE_SET_NOT_FOUND](#rule_set_not_found) | both | rules M1; processes M3 (candidate of an agent replay) |
 | 404 | [VERSION_NOT_FOUND](#version_not_found) | rules | M1 |
 | 404 | [DECISION_NOT_FOUND](#decision_not_found) | rules | M1 |
 | 404 | [DEFINITION_NOT_FOUND](#definition_not_found) | processes | M2 |
 | 404 | [INSTANCE_NOT_FOUND](#instance_not_found) | processes | M2 |
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
+| 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
@@ -50,8 +51,10 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [EVALUATION_ERROR](#evaluation_error) | rules | M1 |
 | 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
+| 422 | [EVIDENCE_TOO_LARGE](#evidence_too_large) | rules | M3 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
+| 422 | [REPLAY_TOO_LARGE](#replay_too_large) | processes | M3 |
 | 422 | [FORM_VALIDATION_FAILED](#form_validation_failed) | processes | M2 |
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | M3 |
 | 422 | [CMMN_UNSUPPORTED](#cmmn_unsupported) | both | 0.2.0 |
@@ -157,7 +160,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `409`. Processes only. An older pending version cannot be approved because a version with a higher number is already `ACTIVE` (ADR-0012). Create a new draft from the effective version and request approval again.
 
 ### DRAFT_AUTHORING_DISABLED
-`403`. The host keeps definition changes in its release pipeline. Rules: `horus.bpm.rules.authoring.cockpit-drafts` is `false` (the 0.1.0 default, PD-094), so `PUT /rule-sets/{name}/versions/{v}` is refused; importing a document as a new version, approvals and simulation still work. Processes: `horus.bpm.processes.authoring.cockpit-drafts: false` refuses creating or editing drafts through the `processes:author` endpoints; imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.
+`403`. The host keeps definition changes in its release pipeline. Rules: `horus.bpm.rules.authoring.cockpit-drafts` is `false` (the 0.1.0 default, PD-094), so `PUT /rule-sets/{name}/versions/{v}` is refused; importing a document as a new version, restoring an earlier version as a draft (`?copyOf=`), approvals and simulation still work. Processes: `horus.bpm.processes.authoring.cockpit-drafts: false` refuses creating or editing drafts through the `processes:author` endpoints; imports with `processes:deploy`, approvals and layout saves still work. Change the definition in Git and let the release pipeline import it.
 
 ## Rule Engine
 
@@ -193,6 +196,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### BATCH_TOO_LARGE
 `422`. `:evaluate-batch` with more than `evaluation.max-batch` items (1,000 at most). Split the batch; nothing was evaluated or written.
 
+### EVIDENCE_TOO_LARGE
+`422`. `POST /rule-sets/{name}/evidence` would produce a file over 8,388,608 bytes, or a chosen version has more than 10,000 history events. Export fewer decisions or versions at a time; nothing was written and no export was recorded.
+
 ## Process Engine
 
 ### DEFINITION_NOT_FOUND
@@ -204,11 +210,17 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### TASK_NOT_FOUND
 `404`. Unknown task id, or a task of another tenant.
 
+### REPLAY_NOT_FOUND
+`404`. Unknown agent replay run, a run of another tenant, or a case the run does not have. Runs are deleted `replay.retention` (30 days) after they were created.
+
+### REPLAY_TOO_LARGE
+`422`. The period of an agent replay holds more recorded answers than `horus.bpm.processes.replay.max-cases` (50,000). The body carries `cases` and `limit`. Nothing is written. Choose a shorter period.
+
 ### DEFINITION_TOO_LARGE
 `422`. The definition has more than 500 steps or is larger than 1 MB, or exceeds the lower limit the host set in `horus.bpm.processes.definitions.max-nodes` or `definitions.max-bytes` (`TR-DEF-05`). The body names the limit and the value, for example `{ "limit": "max-nodes", "value": 501 }`. Nothing is written. Split the process with `callProcess`.
 
 ### GUARDRAIL_CONTRACT_INVALID
-`422`. An `agentTask` names a guardrail rule set that does not meet the contract: it exists in your tenant with a version in effect, has hit policy `first` or `unique`, declares the output `allow: boolean`, may declare `reasons: string`, and reads only inputs the step's `outputSchema` declares with a compatible type. Checked at import, at request-approval and at approval, against the version in effect then; nothing is written. `detail` and each entry of `problems` name the step id and the failed check, for example `step assess-documents: guardrail rule set agent-output-guardrails v1 declares no output allow: boolean (outputs decision: string)`. Publish a compliant version of the rule set, then deploy again.
+`422`. An `agentTask` names a guardrail rule set that does not meet the contract: it exists in your tenant with a version in effect, has hit policy `first` or `unique`, declares the output `allow: boolean`, may declare `reasons: string`, and reads only inputs the step's `outputSchema` declares with a compatible type. Checked at import, at request-approval and at approval, against the version in effect then; nothing is written. `detail` and each entry of `problems` name the step id and the failed check, for example `step assess-documents: guardrail rule set agent-output-guardrails v1 declares no output allow: boolean (outputs decision: string)`. Publish a compliant version of the rule set, then deploy again. An agent replay checks its candidate version against the same contract before it creates a run (`POST /agent-replays`).
 
 ### FORM_VALIDATION_FAILED
 `422`. A task completion does not match the task's form schema. The body carries a JSON Pointer to each failing field, for example `/reason`. Correct the field and complete again. Since 0.2.0 the review task of a refused agent result checks the reviewer's answer against the step's output schema; its body carries `violations`, each a path and a rule such as `$.riskScore: expected integer`, and the task stays claimed.

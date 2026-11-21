@@ -81,7 +81,10 @@ export async function readProblem(response: Response): Promise<HostError> {
     return read.success ? [{ ruleId: read.data.ruleId ?? null, column: read.data.column ?? null, message: read.data.message }] : [];
   });
   const STANDARD = new Set(['type', 'title', 'status', 'detail', 'violations', 'code', 'correlationId', 'instance']);
-  const extra = Object.fromEntries(Object.entries(parsed.data).filter(([key]) => !STANDARD.has(key)));
+  const extra: Record<string, unknown> = Object.fromEntries(Object.entries(parsed.data).filter(([key]) => !STANDARD.has(key)));
+  // The Process Engine lists FORM_VALIDATION_FAILED violations as text ("$.riskScore: expected integer"); keep them.
+  const texts = (parsed.data.violations ?? []).filter((item): item is string => typeof item === 'string');
+  if (texts.length > 0) extra['violationTexts'] = texts;
   return {
     ...(violations.length > 0 ? { violations } : {}),
     ...(Object.keys(extra).length > 0 ? { members: extra } : {}),

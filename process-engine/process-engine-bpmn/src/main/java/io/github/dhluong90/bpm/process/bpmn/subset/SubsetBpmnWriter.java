@@ -21,6 +21,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
+import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.nio.charset.StandardCharsets;
@@ -170,6 +171,14 @@ public final class SubsetBpmnWriter {
             if (retry != null) {
                 xml.line(4, "<horus:retry" + optional("max", String.valueOf(retry.max()))
                         + optional("backoff", retry.backoff() == null ? null : retry.backoff().toString()) + "/>");
+            }
+            if (agent != null) {
+                // #101: memory is part of the step, so the export reads back to the same definition hash.
+                for (MemoryEntry m : node.extensions().all(MemoryEntry.class)) {
+                    xml.line(4, "<horus:memory" + optional("from", m.from()) + optional("fields",
+                            String.join(",", m.fields())) + optional("as", m.as()) + " required=\"" + m.required()
+                            + "\"" + (m.includeMasked() ? " includeMasked=\"true\"" : "") + "/>");
+                }
             }
             xml.line(3, "</bpmn:extensionElements>");
         }

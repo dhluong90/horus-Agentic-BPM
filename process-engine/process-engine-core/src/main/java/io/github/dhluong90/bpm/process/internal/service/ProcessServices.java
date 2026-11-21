@@ -78,6 +78,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
 import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
@@ -144,6 +145,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String CURSOR_KEY_NAME = "cursor-hmac";
     /** Job payload key of the audit copy of an agent step's inputs, masked inputs fingerprinted (#59). */
     static final String AUDIT_INPUTS = "auditInputs";
+    /** Job payload key of the memory an agent step receives from earlier steps (#101); the adapter reads it. */
+    static final String MEMORY = "memory";
+    /** Job payload key of the audit copy of that memory, masked fields fingerprinted (#101); history reads it. */
+    static final String AUDIT_MEMORY = "auditMemory";
     /** Job payload key of the step's own delay before each retry, in milliseconds (#58). */
     static final String RETRY_BACKOFF_MS = "retryBackoffMs";
     /** History type of a reviewer's answer that replaced a refused agent answer (#59). */
@@ -185,10 +190,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final io.github.dhluong90.bpm.process.spi.InputMasker inputMasker;
     /** Bounds of agent answer labels (PD-014, #59). */
     private final AgentLabelLimits labelLimits;
+    /** Bounds of the memory agent steps receive from earlier steps (#101). */
+    private final AgentMemoryLimits memoryLimits;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
 
-    private record Compiled(CompiledProcess process, ExecutionKernel kernel) {
+    /**
+     * @param memorySources the steps a later agent step reads as memory (#101); only their results are kept
+     */
+    private record Compiled(CompiledProcess process, ExecutionKernel kernel, java.util.Set<String> memorySources) {
     }
 
     /**
@@ -427,6 +437,46 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             java.util.Set<String> adapters, java.util.Set<String> agents,
             io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
             io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings, async, adapters, agents, outputSchemas, inputMasker, labelLimits,
+                AgentMemoryLimits.DEFAULTS);
+    }
+
+    /**
+     * The full form; see the other constructors for the parameters they share.
+     *
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     * @param async lease margin, default timeout and runner settings of async steps (ADR-0008, #363)
+     * @param adapters names of the host's {@code ServiceAdapter}s
+     * @param agents names of the host's {@code AgentAdapter}s
+     * @param outputSchemas checks async results and agent steps' schemas
+     * @param inputMasker makes the audit copy of masked agent inputs and memory (#59, #101)
+     * @param labelLimits bounds of agent answer labels ({@code agents.labels.*}, #59)
+     * @param memoryLimits bounds of agent step memory ({@code agents.memory.*}, #101)
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
+            java.util.Set<String> adapters, java.util.Set<String> agents,
+            io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
+            io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits,
+            AgentMemoryLimits memoryLimits) {
+        this.memoryLimits = Objects.requireNonNull(memoryLimits, "memoryLimits must not be null");
         this.inputMasker = Objects.requireNonNull(inputMasker, "inputMasker must not be null");
         this.labelLimits = Objects.requireNonNull(labelLimits, "labelLimits must not be null");
         this.async = Objects.requireNonNull(async);
@@ -1110,6 +1160,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + " needs the Rule Engine, which this host does not have", "BusinessRuleTask", task.id(), 0));
             }
         }
+        // #101: an agent step's memory names upstream agent steps and their declared fields only (PRE-101, PRE-102).
+        problems.addAll(AgentMemory.check(process, memoryLimits));
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
         }
@@ -1242,6 +1294,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     // ---- jobs ---------------------------------------------------------------------------------------------
+
+    /**
+     * The decision port this engine evaluates through, for the offline replay of agent answers (#98), which must use
+     * the same port: the starter's port claims the Rule Engine's tenant-scoped entry point once.
+     *
+     * @return the decision port, empty without a Rule Engine
+     */
+    public java.util.Optional<DecisionPort> decisionPort() {
+        return invoker.decisionPort();
+    }
 
     /**
      * The job handlers of this engine, by job kind, for the {@link JobExecutor} of each replica.
@@ -1668,6 +1730,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private void answerFacts(JobRow job, StepResult.Completed completed, Map<String, Object> details) {
         details.put("inputs", auditInputs(job));
+        // #101: the memory the agent saw, masked fields fingerprinted, so the trace of the answer is complete.
+        if (Values.readMap(job.payloadJson()).get(AUDIT_MEMORY) instanceof Map<?, ?> memory) {
+            details.put(MEMORY, memory);
+        }
         Instant claimedAt = job.lockedUntil() == null ? null : job.lockedUntil().minus(job.leaseDuration());
         if (claimedAt != null) {
             details.put("latencyMs", Math.max(0, Duration.between(claimedAt, clock.instant()).toMillis()));
@@ -1694,42 +1760,78 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * token stays on the step. The summary is built from codes only, never from an adapter's detail.
      */
     private void raiseIncident(JobRow job, String errorCode, String summary, Instant now) {
+        raiseIncident(job, errorCode, null, summary, now);
+    }
+
+    private void raiseIncident(JobRow job, String errorCode, String businessCode, String summary, Instant now) {
         if (job.instanceId() == null) {
             return;
         }
-        InstanceRow row = store.findInstance(job.tenantId(), job.instanceId()).orElse(null);
+        raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), job.tokenId(),
+                job.nodeId(), job.id(), attemptId(job.id(), Math.max(1, job.attempt())), Math.max(0, job.attempt() - 1),
+                errorCode, businessCode, summary), now);
+    }
+
+    /**
+     * Where an incident opens and why: a job that failed for good (#58), an agent step whose memory failed before any
+     * call (#101), or a local step whose handler returned a business error with no path in the process (PRE-040),
+     * which has no job.
+     *
+     * @param jobId the failed job, or null for a local step
+     * @param attemptId the attempt of the step, the history key
+     * @param retries attempts after the first
+     * @param businessCode the business error's code, or null
+     * @param summary built from codes and numbers only, never from a handler's or an adapter's detail
+     */
+    private record IncidentSite(String tenantId, String instanceId, String definitionId, String tokenId, String nodeId,
+            String jobId, String attemptId, int retries, String errorCode, String businessCode, String summary) {
+    }
+
+    /**
+     * Opens one {@code OPEN} incident in the current transaction, with {@code INCIDENT_RAISED} in history and
+     * {@code processes.incident.raised.v1}. The token stays on the step.
+     */
+    private void raiseIncident(IncidentSite site, Instant now) {
+        InstanceRow row = store.findInstance(site.tenantId(), site.instanceId()).orElse(null);
         if (row == null) {
             return;
         }
-        String code = errorCode == null || errorCode.isBlank() ? "STEP_FAILED" : errorCode;
-        String cause = summary.length() > 500 ? summary.substring(0, 500) : summary;
-        int retries = Math.max(0, job.attempt() - 1);
+        String code = site.errorCode() == null || site.errorCode().isBlank() ? "STEP_FAILED" : site.errorCode();
+        String cause = site.summary().length() > 500 ? site.summary().substring(0, 500) : site.summary();
         String id = Ulid.next(now);
-        store.insertIncident(new ProcessStore.IncidentRow(job.tenantId(), id, job.instanceId(), job.definitionId(),
-                job.tokenId(), job.nodeId(), code, cause, retries, "OPEN", 0, now, null));
+        store.insertIncident(new ProcessStore.IncidentRow(site.tenantId(), id, site.instanceId(), site.definitionId(),
+                site.tokenId(), site.nodeId(), code, cause, site.retries(), "OPEN", 0, now, null));
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("incidentId", id);
-        details.put("jobId", job.id());
+        if (site.jobId() != null) {
+            details.put("jobId", site.jobId());
+        }
         details.put("errorCode", code);
-        details.put("retryCount", retries);
-        store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
-                INCIDENT_RAISED, job.nodeId(), job.tokenId(), attemptId(job.id(), Math.max(1, job.attempt())),
-                ASYNC_ACTOR, now, details)));
+        if (site.businessCode() != null) {
+            details.put("businessCode", site.businessCode());
+        }
+        details.put("retryCount", site.retries());
+        store.appendHistory(site.tenantId(), site.instanceId(), site.definitionId(), List.of(new HistoryEntry(
+                INCIDENT_RAISED, site.nodeId(), site.tokenId(), site.attemptId(),
+                site.jobId() == null ? DecisionCaller.ENGINE_IDENTITY : ASYNC_ACTOR, now, details)));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("incidentId", id);
         payload.put("instanceId", row.id());
-        payload.put("nodeId", job.nodeId());
+        payload.put("nodeId", site.nodeId());
         payload.put("errorCode", code);
-        payload.put("retryCount", retries);
+        if (site.businessCode() != null) {
+            payload.put("businessCode", site.businessCode());
+        }
+        payload.put("retryCount", site.retries());
         payload.put("definitionKey", row.definitionKey());
         payload.put("version", row.definitionVersion());
         if (row.businessKey() != null) {
             payload.put("businessKey", row.businessKey());
         }
         publish(new ProcessEventPublisher.Event(Ids.child(id, 1),
-                "processes.incident.raised.v1", job.tenantId(), now, payload), row.id());
+                "processes.incident.raised.v1", site.tenantId(), now, payload), row.id());
         LOG.log(System.Logger.Level.WARNING, "process.incident.raised tenant={0} instance={1} node={2} code={3}"
-                + " retryCount={4}", job.tenantId(), job.instanceId(), job.nodeId(), code, retries);
+                + " retryCount={4}", site.tenantId(), site.instanceId(), site.nodeId(), code, site.retries());
     }
 
     @Override
@@ -1844,7 +1946,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 + " retryable={4} final={5}", job.tenantId(), job.id(), job.attempt(), code, retryable, last);
         if (last) {
             String failure = code == null ? "-" : code;
-            raiseIncident(job, business ? UNHANDLED_BUSINESS_ERROR : failure, business
+            raiseIncident(job, business ? UNHANDLED_BUSINESS_ERROR : failure, business ? failure : null, business
                     ? "Business error " + failure + " has no path in the process"
                     : "Attempt " + job.attempt() + " of " + job.maxAttempts() + " failed with " + failure
                             + (retryable ? "; no retry is left" : "; not retryable"), now);
@@ -2259,6 +2361,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         List<String> cancelledTasks = new ArrayList<>();
         List<JobRow> newJobs = new ArrayList<>();
         List<String> cancelledJobs = new ArrayList<>();
+        // Written once the instance row is saved, because both reference it.
+        List<IncidentSite> newIncidents = new ArrayList<>();
+        Map<String, ProcessStore.StepResultRow> recorded = new LinkedHashMap<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -2284,6 +2389,26 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 job.dueAt(), jobSettings.timerLease(), jobSettings.maxAttempts(),
                                 Values.write(job.payload())));
                         case Effect.CancelJob cancel -> cancelledJobs.add(cancel.jobId());
+                        case Effect.RaiseIncident incident -> {
+                            // PRE-040: a local step's business error. The code is the business code; the handler's
+                            // message stayed in the kernel and is never stored.
+                            String attemptId = state.tokens().stream().filter(tk -> tk.id().equals(incident.tokenId()))
+                                    .map(io.github.dhluong90.bpm.process.internal.exec.Token::activityInstanceId)
+                                    .findFirst().orElse(null);
+                            newIncidents.add(new IncidentSite(state.tenantId(), state.instanceId(), definition.id(),
+                                    incident.tokenId(), incident.nodeId(), null, attemptId, 0, incident.errorCode(),
+                                    incident.detail(), "Business error " + incident.detail()
+                                            + " has no path in the process"));
+                        }
+                        case Effect.RecordResult result when compiled.memorySources().contains(result.nodeId()) ->
+                                // #101: kept only for the steps a later agent step reads as memory.
+                                recorded.put(result.nodeId(), new ProcessStore.StepResultRow(state.tenantId(),
+                                        state.instanceId(), result.nodeId(), definition.id(),
+                                        Values.write(result.output()), result.reviewed() ? "REVIEW" : "ANSWER",
+                                        result.activityInstanceId(), clock.instant()));
+                        case Effect.RecordResult result -> {
+                            // No later step reads this step's result as memory: nothing more is kept.
+                        }
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -2362,12 +2487,54 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 payload.put(RETRY_BACKOFF_MS, retry.backoff().toMillis());
                             }
                             Duration lease = timeout.plus(async.leaseMargin());
-                            newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
-                                    definition.id(), call.tokenId(), kind, call.nodeId(),
-                                    clock.instant(), lease, attempts, Values.write(payload)));
+                            Map<String, Object> scheduled = new LinkedHashMap<>(Map.of("jobId", call.attemptId(),
+                                    "target", call.target(), "leaseMs", lease.toMillis(), "jobKind", kind));
+                            // #101: memory is resolved once, here, so every attempt sends the same facts.
+                            AgentMemory.Resolution.Failed memoryFailed = null;
+                            if (!node.extensions().all(MemoryEntry.class).isEmpty()) {
+                                switch (resolveMemory(state, node, compiled, recorded)) {
+                                    case AgentMemory.Resolution.Resolved m -> {
+                                        payload.put(MEMORY, m.memory());
+                                        payload.put(AUDIT_MEMORY, m.audit());
+                                        scheduled.put(MEMORY, m.audit());
+                                        scheduled.put("memoryBytes", m.bytes());
+                                        if (!m.missing().isEmpty()) {
+                                            scheduled.put("memoryMissing", m.missing());
+                                        }
+                                    }
+                                    case AgentMemory.Resolution.Failed f -> memoryFailed = f;
+                                }
+                            }
                             history.add(new HistoryEntry("ASYNC_STEP_SCHEDULED", call.nodeId(), call.tokenId(),
-                                    call.attemptId(), null, clock.instant(), Map.of("jobId", call.attemptId(),
-                                    "target", call.target(), "leaseMs", lease.toMillis(), "jobKind", kind)));
+                                    call.attemptId(), null, clock.instant(), scheduled));
+                            if (memoryFailed == null) {
+                                newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
+                                        definition.id(), call.tokenId(), kind, call.nodeId(),
+                                        clock.instant(), lease, attempts, Values.write(payload)));
+                            } else {
+                                // PRE-101: the step fails before any call, not retryable; the job is stored FAILED
+                                // so it is never claimed, and an incident is opened with it.
+                                newJobs.add(new JobRow(state.tenantId(), call.attemptId(), state.instanceId(),
+                                        definition.id(), call.tokenId(), kind, call.nodeId(), "FAILED",
+                                        clock.instant(), lease, null, null, 0, attempts, Values.write(payload)));
+                                Map<String, Object> failed = new LinkedHashMap<>();
+                                failed.put("jobId", call.attemptId());
+                                failed.put("attempt", 0);
+                                failed.put("errorCode", memoryFailed.code());
+                                failed.put("retryable", false);
+                                failed.put("final", true);
+                                if (memoryFailed.entry() != null) {
+                                    failed.put("memoryEntry", memoryFailed.entry());
+                                }
+                                history.add(new HistoryEntry("ASYNC_ATTEMPT_FAILED", call.nodeId(), call.tokenId(),
+                                        call.attemptId(), null, clock.instant(), failed));
+                                newIncidents.add(new IncidentSite(state.tenantId(), state.instanceId(),
+                                        definition.id(), call.tokenId(), call.nodeId(), call.attemptId(),
+                                        call.attemptId(), 0, memoryFailed.code(), null, memoryFailed.summary()));
+                                LOG.log(System.Logger.Level.WARNING, "process.agent.memory.failed tenant={0} "
+                                        + "instance={1} node={2} code={3}", state.tenantId(), state.instanceId(),
+                                        call.nodeId(), memoryFailed.code());
+                            }
                         }
                         case Effect.EmitEvent event -> {
                             Map<String, Object> payload = new LinkedHashMap<>(event.payload());
@@ -2412,14 +2579,37 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         cancelledTasks.forEach(id -> store.cancelTask(tenant, id));
         newJobs.forEach(job -> jobs.insertJob(job, now));
         cancelledJobs.forEach(id -> jobs.cancelJob(tenant, id, now));
+        recorded.values().forEach(store::recordStepResult);
         store.appendHistory(tenant, state.instanceId(), definition.id(), history);
+        newIncidents.forEach(site -> raiseIncident(site, now));
+    }
+
+    /**
+     * The memory of an agent step (#101): the recorded results of its source steps in this instance, read in the
+     * instance's tenant, with the results recorded earlier in this same run taking precedence.
+     */
+    private AgentMemory.Resolution resolveMemory(InstanceState state, FlowNode node, Compiled compiled,
+            Map<String, ProcessStore.StepResultRow> recordedInRun) {
+        java.util.Set<String> sources = new java.util.LinkedHashSet<>();
+        node.extensions().all(MemoryEntry.class).forEach(m -> sources.add(m.from()));
+        Map<String, Map<String, Object>> results = new LinkedHashMap<>();
+        store.stepResults(state.tenantId(), state.instanceId(), sources)
+                .forEach((nodeId, json) -> results.put(nodeId, Values.readMap(json)));
+        recordedInRun.forEach((nodeId, row) -> {
+            if (sources.contains(nodeId)) {
+                results.put(nodeId, Values.readMap(row.resultJson()));
+            }
+        });
+        return AgentMemory.resolve(state.tenantId(), node, id -> compiled.process().node(id), results, memoryLimits,
+                inputMasker);
     }
 
     private Compiled compiled(StoredDefinition definition) {
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
             Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
-            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions));
+            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions),
+                    AgentMemory.sources(process));
         });
     }
 

@@ -43,6 +43,15 @@ record ListQuery(String name, Bound bound, String sql) {
                             + parent.column() + " but does not filter tenant_id = ? and " + parent.column() + " = ?: " + sql);
                 }
             }
+            case Bound.ParentKeys parents -> {
+                String text = sql.toLowerCase(Locale.ROOT);
+                if (!text.contains("tenant_id = ?")
+                        || !Pattern.compile("\\b" + parents.column() + " = any \\(\\?\\)").matcher(text).find()) {
+                    throw new IllegalArgumentException("List query " + name + " declares the parent keys "
+                            + parents.column() + " but does not filter tenant_id = ? and " + parents.column()
+                            + " = ANY (?): " + sql);
+                }
+            }
         }
     }
 
@@ -81,6 +90,24 @@ record ListQuery(String name, Bound bound, String sql) {
 
             /** Checks the column name. */
             public ParentKey {
+                if (!column.matches("[a-z_]+") || column.equals("tenant_id")) {
+                    throw new IllegalArgumentException("A parent key is a column other than tenant_id, was " + column);
+                }
+            }
+        }
+
+        /**
+         * The rows of a bounded set of parents, such as the history of the instances on one page, found through an
+         * index on {@code (tenant_id, column)} with {@code column = ANY (?)}. The caller bounds the array, at most one
+         * page; each parent's own size limit bounds its rows.
+         *
+         * @param column the parent key column, which the plan's index condition must name
+         * @param why what bounds the parents and their rows, shown in a failing check
+         */
+        record ParentKeys(String column, String why) implements Bound {
+
+            /** Checks the column name. */
+            public ParentKeys {
                 if (!column.matches("[a-z_]+") || column.equals("tenant_id")) {
                     throw new IllegalArgumentException("A parent key is a column other than tenant_id, was " + column);
                 }

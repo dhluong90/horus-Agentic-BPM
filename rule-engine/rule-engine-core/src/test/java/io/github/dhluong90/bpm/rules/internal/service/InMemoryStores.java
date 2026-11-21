@@ -368,6 +368,56 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
         return history.stream().filter(h -> h.tenantId().equals(tenantId) && h.versionId().equals(versionId)).toList();
     }
 
+    /** Rule set events (V24), in append order. */
+    final List<io.github.dhluong90.bpm.rules.internal.store.RuleSetEventRow> ruleSetEvents = new ArrayList<>();
+
+    private static io.github.dhluong90.bpm.rules.internal.store.HistoryVersion line(StoredVersion v) {
+        return new io.github.dhluong90.bpm.rules.internal.store.HistoryVersion(v.id(), v.version(), v.status(),
+                v.effectiveFrom(), v.retiredAt(), v.canonicalHash(), v.createdBy(), v.createdAt(), v.requestedBy(),
+                v.requestedAt(), v.approvedBy(), v.approvedAt(), v.approvalComment());
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.rules.internal.store.HistoryVersion> historyVersions(String tenantId,
+            String ruleSetId, Integer beforeVersion, int limit) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId))
+                .filter(v -> beforeVersion == null || v.version() < beforeVersion)
+                .sorted(Comparator.comparingInt(StoredVersion::version).reversed()).limit(limit)
+                .map(InMemoryStores::line).toList();
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.rules.internal.store.HistoryVersion> versionsByNumber(String tenantId,
+            String ruleSetId, java.util.Collection<Integer> numbers) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId)
+                        && numbers.contains(v.version()))
+                .sorted(Comparator.comparingInt(StoredVersion::version)).map(InMemoryStores::line).toList();
+    }
+
+    @Override
+    public List<HistoryRow> historyOf(String tenantId, java.util.Collection<String> versionIds, int perVersionLimit) {
+        List<HistoryRow> out = new ArrayList<>();
+        versionIds.stream().sorted().forEach(id -> history.stream()
+                .filter(h -> h.tenantId().equals(tenantId) && id.equals(h.versionId()))
+                .sorted(Comparator.comparing(HistoryRow::occurredAt).thenComparing(HistoryRow::id))
+                .limit(perVersionLimit).forEach(out::add));
+        return out;
+    }
+
+    @Override
+    public void appendRuleSetEvent(io.github.dhluong90.bpm.rules.internal.store.RuleSetEventRow row) {
+        ruleSetEvents.add(row);
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.rules.internal.store.RuleSetEventRow> ruleSetEvents(String tenantId,
+            String ruleSetId, int limit) {
+        return ruleSetEvents.stream().filter(e -> e.tenantId().equals(tenantId) && e.ruleSetId().equals(ruleSetId))
+                .sorted(Comparator.comparing(io.github.dhluong90.bpm.rules.internal.store.RuleSetEventRow::occurredAt)
+                        .thenComparing(io.github.dhluong90.bpm.rules.internal.store.RuleSetEventRow::id).reversed())
+                .limit(limit).toList();
+    }
+
     final Map<String, byte[]> engineKeys = new ConcurrentHashMap<>();
     /** Setting name to tenant to value, as {@code rle_setting_seen}. */
     final Map<String, Map<String, String>> settingsSeen = new ConcurrentHashMap<>();

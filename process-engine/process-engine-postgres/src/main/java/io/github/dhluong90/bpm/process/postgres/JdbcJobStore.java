@@ -36,11 +36,14 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public void insertJob(JobRow job, Instant now) {
+        if (!"DUE".equals(job.status()) && !"FAILED".equals(job.status())) {
+            throw new IllegalArgumentException("A new job is DUE, or FAILED before any call; not " + job.status());
+        }
         jdbc.sql("INSERT INTO pre_timer (tenant_id, id, instance_id, definition_id, token_id, job_kind, node_id, status, "
                         + "next_fire_at, lease_duration, attempt, max_attempts, payload, created_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, 'DUE', ?, make_interval(secs => ?), 0, ?, ?::jsonb, ?)")
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, make_interval(secs => ?), 0, ?, ?::jsonb, ?)")
                 .params(job.tenantId(), job.id(), job.instanceId(), job.definitionId(), job.tokenId(), job.jobKind(),
-                        job.nodeId(), ts(job.nextFireAt()), job.leaseDuration().toMillis() / 1000.0, job.maxAttempts(),
+                        job.nodeId(), job.status(), ts(job.nextFireAt()), job.leaseDuration().toMillis() / 1000.0, job.maxAttempts(),
                         job.payloadJson(), ts(now))
                 .update();
     }

@@ -71,6 +71,36 @@ final class ProcessListQueries {
                     + "retry_count, status, lock_version, created_at, resolved_at FROM pre_incident "
                     + "WHERE tenant_id = ? AND instance_id = ? AND status = 'OPEN' ORDER BY created_at, id");
 
+    /** The recorded results of some steps of one instance (V14), by the primary key; parameters: tenant, instance, nodes. */
+    static final ListQuery STEP_RESULTS = new ListQuery("instance-step-results",
+            new Bound.ParentKey("instance_id", "one row per step of one instance, at most the nodes asked for"),
+            "SELECT node_id, result_json::text AS result FROM pre_step_result WHERE tenant_id = ? AND instance_id = ? "
+                    + "AND node_id = ANY (?)");
+
+    /**
+     * The reviewer overrides among the attempts of a page of recorded answers (#98), through
+     * {@code idx_pre_history_instance}; parameters: tenant, instance ids, attempt ids.
+     */
+    static final ListQuery OVERRIDDEN_ATTEMPTS = new ListQuery("replay-overridden-attempts",
+            new Bound.ParentKeys("instance_id", "the instances of one page of recorded answers, at most one page"),
+            "SELECT details->>'refusedAttemptId' AS attempt_id FROM pre_history WHERE tenant_id = ? "
+                    + "AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
+                    + "AND details->>'refusedAttemptId' = ANY (?) AND EXISTS (SELECT 1 FROM jsonb_each(details->'changes') c "
+                    + "WHERE c.value->>'from' IS DISTINCT FROM '***')");
+
+    /** The first page of recorded answers of one agent step in a period (#98). */
+    static final ListQuery RECORDED_ANSWERS = recordedAnswers(false);
+    /** A later page of recorded answers, after the last one of the previous page. */
+    static final ListQuery RECORDED_ANSWERS_AFTER = recordedAnswers(true);
+
+    /** A page of the cases of one replay run (V17), on its primary key; parameters: tenant, run, after seq, limit. */
+    static final ListQuery REPLAY_CASES = new ListQuery("replay-cases",
+            new Bound.Page("seq order on the (tenant_id, replay_id, seq) primary key"),
+            "SELECT seq, attempt_id, instance_id, recorded_at, recorded_outcome, candidate_outcome, change, "
+                    + "recorded_rule_ids::text AS recorded_rule_ids, candidate_rule_ids::text AS candidate_rule_ids, "
+                    + "code, overridden, masked_fields FROM pre_agent_replay_case "
+                    + "WHERE tenant_id = ? AND replay_id = ? AND seq > ? ORDER BY seq LIMIT ?");
+
     /** The first page of definition keys. */
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
@@ -93,10 +123,37 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, OPEN_INCIDENTS, DEFINITION_KEYS,
+        return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, OPEN_INCIDENTS, STEP_RESULTS,
+                OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS, RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS,
                 DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true));
+    }
+
+    /**
+     * The conditions of the recorded answers of one agent step: the result rows of its jobs, which carry the answer's
+     * output. Parameters: tenant, definition key, node, from, to.
+     */
+    static final String ANSWERS_WHERE = "FROM pre_history h "
+            + "JOIN pre_definition d ON d.tenant_id = h.tenant_id AND d.id = h.definition_id "
+            + "WHERE h.tenant_id = ? AND d.key_name = ? AND h.node_id = ? "
+            + "AND h.event_type IN ('ASYNC_RESULT_ACCEPTED','ASYNC_RESULT_REFUSED') AND h.details->'outputFields' IS NOT NULL "
+            + "AND h.occurred_at >= ? AND h.occurred_at < ? ";
+
+    /**
+     * The recorded answers of one agent step in a period, oldest first, by the {@code (tenant_id, occurred_at, id)}
+     * primary key of {@code pre_history} with each answer's job; keyset on {@code (occurred_at, id)}. Parameters:
+     * tenant, definition key, node, from, to, [after occurred at, after id], limit.
+     */
+    private static ListQuery recordedAnswers(boolean after) {
+        return new ListQuery(after ? "replay-recorded-answers-after" : "replay-recorded-answers",
+                new Bound.Page("oldest first on the (tenant_id, occurred_at, id) primary key of pre_history"),
+                "SELECT h.occurred_at, h.id, h.instance_id, h.event_type, h.attempt_id, h.details::text AS details, "
+                        + "j.payload::text AS payload " + ANSWERS_WHERE.replace("WHERE",
+                                "LEFT JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' "
+                                        + "AND j.job_kind = 'ASYNC_AGENT' WHERE")
+                        + (after ? "AND (h.occurred_at, h.id) > (?, ?) " : "")
+                        + "ORDER BY h.occurred_at, h.id LIMIT ?");
     }
 
     /**

@@ -148,6 +148,7 @@ Source: [`diagrams/token-states.mmd`](diagrams/token-states.mmd).
 | `WAITING_USER` | Task completed | `ACTIVE` | Moves to the next step in the same transaction |
 | `ACTIVE` | Async step reached | `WAITING_ASYNC` | Job row created; TX1 claims it later (section 4) |
 | `WAITING_ASYNC` | TX2 accepts the result | `ACTIVE` | Guardrail and schema checks in TX2 |
+| `WAITING_ASYNC` | A local handler returns a business error, or an agent step's memory fails before any call | `WAITING_ASYNC` | Stays on the step, and an incident opens in the same transaction (#55 `PRE-040`, #101 `PRE-101`) |
 | `ACTIVE` | `timer` step | `WAITING_TIMER` | Job `TIMER` at the due time |
 | `WAITING_TIMER` | Timer fires | `ACTIVE` | |
 | `ACTIVE` | Arrives at a converging `parallelGateway` | `JOINED` | Under the `pre_instance` row lock; the last arrival among the tokens of the same scope token creates the post-join `ACTIVE` token (`TR-ASY-03`) |
@@ -199,9 +200,11 @@ The first async step is the remote `serviceTask` (`horus:mode="remote"`, optiona
 - **Park.** The step transaction moves the token to `WAITING_ASYNC` and inserts one `ASYNC_SERVICE` job, `DUE` now, whose id is the token's activity instance id, with `lease_duration = timeout + jobs.lease-margin` and a payload of the adapter name, the timeout, the business key and the bounded inputs. History records `ASYNC_STEP_SCHEDULED`. Cancelling the token cancels the job in the same transaction. Nothing is called.
 - **TX1.** `AsyncStepExecutor` claims due async jobs, `FOR UPDATE SKIP LOCKED`, one job kind at a time and at most as many as that kind's runner has free slots (see "Runner per job kind" below); the timer claim of section 4.4 never returns async jobs. Each claim increments `attempt`, and the attempt id is derived from the job id and the attempt number, so every claim has a new one. The attempt id is a correlation id and the history key, not a credential: anyone who can read an instance can derive it. TX1 therefore also issues each claim a completion token, 256 random bits from `SecureRandom`, and stores only its SHA-256 in `pre_timer.completion_token_hash` (migration V8).
 - **Call.** `ServiceAdapter.execute(AdapterCall)` runs on the adapter executor with no transaction (the executor refuses to call when one is active, and an ArchUnit rule allows no other caller). The call carries tenant, instance, node, business key, job id, attempt id, completion token, attempt number and deadline. The remote side deduplicates by the job id (`AdapterCall.idempotencyKey()`, `TR-IDEM-04`), which every retry of the step keeps; the attempt id changes on each attempt and is never an idempotency key. `AdapterCall.toString()` masks the token. The guard counts the engine's own transactions on the thread through `TransactionRunner.tracked`, whatever the runner, and also asks the runner (Spring: `TransactionSynchronizationManager`) about a host transaction; a host transaction a non-Spring runner cannot see is not detected. At the deadline the executor interrupts the call and records `ADAPTER_TIMEOUT`.
-- **TX2.** `ProcessServices.recordAttempt` locks the instance row, then the job row, and accepts the result only when the job is `CLAIMED` under that attempt with an unexpired lease. A completed result appends `ASYNC_RESULT_ACCEPTED`, delivers the result to the token and marks the job `DONE`. A failed result appends `ASYNC_ATTEMPT_FAILED` with the code, `retryable` and the reporter (never the detail) and sets the job `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` when it is not retryable, is a business error, or used `jobs.max-attempts`; the token stays on the step and the same transaction opens an incident (#58, `pre_incident`, V13): one `OPEN` row with the code (`UNHANDLED_BUSINESS_ERROR` for a business error), a cause built from codes only, never from the detail, and `retry_count`, the attempts after the first, plus `INCIDENT_RAISED` in history and `processes.incident.raised.v1`. `IncidentService.openIncidents(instanceId)` reads them in the caller's tenant; retry and resolve follow with #68. A job claimed more often than `jobs.max-attempts` (its attempts kept dying with their replica) is failed without a call and records `ASYNC_ATTEMPT_FAILED` with `MAX_ATTEMPTS_REACHED`.
+- **TX2.** `ProcessServices.recordAttempt` locks the instance row, then the job row, and accepts the result only when the job is `CLAIMED` under that attempt with an unexpired lease. A completed result appends `ASYNC_RESULT_ACCEPTED`, delivers the result to the token and marks the job `DONE`. A failed result appends `ASYNC_ATTEMPT_FAILED` with the code, `retryable` and the reporter (never the detail) and sets the job `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` when it is not retryable, is a business error, or used `jobs.max-attempts`; the token stays on the step and the same transaction opens an incident (#58, `pre_incident`, V13): one `OPEN` row with the code (`UNHANDLED_BUSINESS_ERROR` for a business error), a cause built from codes only, never from the detail, and `retry_count`, the attempts after the first, plus `INCIDENT_RAISED` in history and `processes.incident.raised.v1`. `IncidentService.openIncidents(instanceId)` reads them in the caller's tenant; retry and resolve follow with #68. The incident row, `INCIDENT_RAISED` and the event carry the business code as `businessCode` (#55, `PRE-111`). A job claimed more often than `jobs.max-attempts` (its attempts kept dying with their replica) is failed without a call and records `ASYNC_ATTEMPT_FAILED` with `MAX_ATTEMPTS_REACHED`.
 - **Hand-off.** An adapter may answer `Accepted`: the slot is freed, no thread waits, and the job keeps its lease while the remote side works. The remote side reports the result through `AsyncStepService.complete(jobId, attemptId, completionToken, result)` or `POST /async-steps/{jobId}:complete`, on any replica. The tenant comes from the resolver and another tenant's job is `404 ASYNC_STEP_NOT_FOUND` with nothing written. The caller needs `processes:step:complete` and one of the roles `adapters.completer-roles` lists for the job's adapter (the adapter scope, checked before any lock); an adapter without an entry cannot be completed from outside. When the attempt id is the job's latest claim, the presented token is hashed and compared with the stored hash in constant time (`MessageDigest.isEqual`); a mismatch is `403 PERMISSION_DENIED` and writes nothing. The scope is a role list per adapter rather than a permission per adapter because permissions are a closed list that host metadata validates at start-up, while roles are what the identity provider already assigns to a callback client. If no result arrives before the lease ends, the job is claimed again and the adapter called with a new attempt id.
 - **Outcomes.** `REFUSED` for a result its kind's check refused (section 4.1; nothing of it is accepted); `ACCEPTED`; `DUPLICATE` for a repeat of an attempt that is already `DONE` (writes nothing); `DISCARDED` for a lease that ended or an attempt that was taken over (writes nothing) and for a cancelled job (writes `LATE_RESULT_DISCARDED` with the attempt id once per job, fenced by `pre_timer.late_result_at`; repeats are logged at DEBUG only).
+- **Late results after a timeout (#55, `PRE-112`).** The attempt check runs before anything else in TX2, so a result for an attempt that is not the job's current claim never reaches the guard, the kernel or the incident code. That covers an attempt whose lease ended, one taken over by a later attempt, a step that completed, and a job that failed with an incident. The result is `DISCARDED` with no row written (`TR-ASY-02`: no state change), only an INFO log line without the result. A repeat gets the same outcome, so a late result is idempotent and can neither reopen a finished step nor close an incident. Only a cancelled job records the late result in history, because the cancel is a state change the caller must be able to correlate (`TR-STD-12`).
+- **Business error of a local step (#55, `PRE-040`).** A `serviceTask` handler that returns `HandlerResult.BusinessError` runs inside the step transaction, so it has no job. The kernel keeps the token on the step in `WAITING_ASYNC` and emits `Effect.RaiseIncident`. The shell opens the incident in the same transaction, after the instance row is saved: `UNHANDLED_BUSINESS_ERROR`, the business code in `cause_summary` and as `businessCode`, `retry_count` 0, and no `jobId`. The call that reached the step (a start, a task completion, a timer or a result) succeeds, and the work done before the step in that transaction is kept. Nothing is retried, and the handler's message stays in the engine log. Before #55 the error rolled the whole transaction back as `STEP_FAILED`, so the start or completion failed and nothing was recorded. Error boundary events (S1) will catch the error before it becomes an incident.
 
 - **Runner per job kind (#363, `PRE-057`).** Each async job kind has its own runner (`AsyncStepRunner`): `ServiceStepRunner` calls the host's `ServiceAdapter` for `ASYNC_SERVICE`, and `AgentStepRunner` calls the host's `AgentAdapter` for `ASYNC_AGENT` (#52). Each runner has its own slots, default timeout, attempts, back-off and guard budget (`runners.<kind>.*`, section 6.5), and every unset value falls back to `adapters.executor-threads`, `adapters.default-timeout`, `jobs.max-attempts` and `jobs.retry-backoff`, so a host that sets nothing runs as before. The executor claims each kind in its own statement (`job_kind = ?`, index `idx_pre_timer_poll_kind`, V9) up to that kind's free slots, so a backlog of agent calls never takes the claims or the slots of remote service calls, and the other way round. The adapter pool has as many threads as all runners have slots. Timers are not a runner of this executor: the timer poller of section 4.4 runs them with `jobs.*`. A runner holds no engine logic: the executor applies the timeout, the transaction guard and the error mapping around it, and a runner never checks its own result.
 - **Result check (#363, `PRE-058` to `PRE-060`).** `recordAttempt` (TX2) checks a completed result before it accepts it, with the guard of the job's kind (section 4.1). The executor and the completion API both reach the engine through `recordAttempt`, so a result reported from outside passes the same check, and no other path accepts a result. Remote service results have no guard. A malformed result gets a fresh attempt while `schema-retries` last (answer `ACCEPTED`) and is refused after that; a refused one is never accepted, and the step goes to a review task or its job fails (answer `REFUSED`, always final).
@@ -279,6 +282,69 @@ flowchart TD
     G -- "allow false, error, no match, overrun" --> V{Reviewer and route-to-human?}
     V -- yes --> T[REFUSED: review task on the step, job DONE]
     V -- no --> X[REFUSED: job FAILED, incident opened]
+```
+
+#### Memory from earlier steps (#101, `PRE-100` to `PRE-102`)
+
+An `agentTask` may declare `<horus:memory from="extract-id" fields="fullName,dob" as="applicant" required="true" includeMasked="false"/>`, one element per entry (`MemoryEntry`; canonical `memory`, covered by the hash, the diff and the approval).
+- **Import.** The reader checks each entry's shape (`AGENT_MEMORY_INVALID`): `from` is an id and never an expression, `as` is an identifier unique on the step, fields are paths of identifiers, at most four levels and 32 fields, and wildcards are never allowed. `AgentMemory.check` then checks it against the whole definition and the host's bounds. `from` must be an agent step upstream of the step (a path of sequence flows leads from it to the step; the step itself is not). Each field must be declared in that step's output schema. A field the schema marks `mask: true`, itself or through an object above it, needs `includeMasked` (`AGENT_MEMORY_MASKED_FIELD`). A step has at most `agents.memory.max-entries` entries. Every problem names the step and the entry, and the import writes nothing.
+- **Recorded results.** The kernel emits `Effect.RecordResult` when a step stores its result: an accepted answer, a local step's output, or a reviewer's answer that replaced a refused one. A refused answer never produces it. The shell keeps the result in `pre_step_result` (V14) only for steps that some step of the definition names in `memory` (`Compiled.memorySources`). It keeps one row per instance and step, replaced on a loop, written after the instance row.
+- **Resolve at park.** In the step transaction that parks the agent job, the shell reads the rows of the step's sources by `(tenant, instance, node)`, with results recorded earlier in the same run taking precedence. `AgentMemory.resolve` copies only the declared fields, nested as declared. An optional field the answer left out is skipped. The result goes into the job payload as `memory`, with `auditMemory`, in which every masked field is the `InputMasker`'s keyed fingerprint. `ASYNC_STEP_SCHEDULED` records `memory` (the audit copy), `memoryBytes` and `memoryMissing`. The answer's history row repeats `memory`, so the trace is complete for offline replay (PD-128).
+- **Call.** `AgentStepRunner` passes the payload's `memory` as `AgentInvocation.memory()`. It is the same on every attempt, because it is never resolved again. The model call stays keyed by the attempt id and side effects by the job id. The guardrail and the schema check stay in `recordAttempt`, and memory never reaches them.
+- **Failures.** When the canonical JSON of the memory is larger than `agents.memory.max-bytes` (`AGENT_MEMORY_TOO_LARGE`), or a `required` entry has no row (`AGENT_MEMORY_MISSING`, for example a branch this instance did not take), the step fails before any call. The job is inserted `FAILED` with attempt 0, so it is never claimed. `ASYNC_ATTEMPT_FAILED` records `final: true`, `retryable: false` and the entry, and an incident opens in the same transaction. The token waits on the step for #68.
+- **Tenancy.** Every read is keyed by the locked instance's tenant and id, so memory never crosses instances or tenants. There is no long-term or vector memory, and memory is data for the model, never instructions to the engine.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant K as Kernel
+    participant S as Shell (step transaction)
+    participant R as pre_step_result
+    participant J as pre_timer and pre_history
+    participant A as AgentAdapter
+    K->>S: RecordResult(screen-sanctions, accepted or reviewed answer)
+    S->>R: upsert (tenant, instance, screen-sanctions) when a later step reads it
+    K->>S: InvokeService(assess-risk, ASYNC)
+    S->>R: read sources of assess-risk in this tenant and instance
+    alt within bounds and every required entry recorded
+        S->>J: job DUE with memory and auditMemory; ASYNC_STEP_SCHEDULED with the audit copy
+        J-->>A: every attempt: invocation.memory() is the same, model call key = attempt id
+    else too large or a required entry missing
+        S->>J: job FAILED at attempt 0, ASYNC_ATTEMPT_FAILED final, incident OPEN
+        Note over A: never called
+    end
+```
+
+#### Offline replay of agent answers (#98, `PRE-092` to `PRE-095`, PD-128)
+
+A changed guardrail, or a changed output schema, is tested against the answers a step already recorded before it goes live. `AgentReplayService` (REST `POST /agent-replays`) takes the step (`definitionKey`, `nodeId`), a period of whole UTC days (`from` and `to` inclusive, at most `query.max-range`) and a candidate rule set version in any status, usually a draft, plus an optional candidate output schema. PD-128 scopes it to guardrail and schema changes: a prompt or model change is replayed by a host harness, because masked inputs are kept only as keyed hashes and the engine never calls a model for a test.
+
+- **Start.** In one transaction, with the tenant from the resolver and `processes:agent:replay`: the period is checked (`400 QUERY_INVALID`), the recorded answers counted (`422 REPLAY_TOO_LARGE` over `replay.max-cases`), the candidate described through `DecisionPort.signature(tenant, ruleSet, version)` (`404 RULE_SET_NOT_FOUND` when the tenant has no such version) and checked by `GuardrailContract` against the candidate schema or the latest recorded one (`422 GUARDRAIL_CONTRACT_INVALID`, nothing written), and a `QUEUED` run stored in `pre_agent_replay` (V17). An optional `Idempotency-Key` returns the original run on a repeat.
+- **Replay.** The job poller's `AgentReplays.pollOnce()` locks the oldest open run with `FOR UPDATE SKIP LOCKED`, reads one page of `replay.page-size` answers (`ASYNC_RESULT_ACCEPTED` and `ASYNC_RESULT_REFUSED` rows of the step, keyset over `(occurred_at, id)` of `pre_history`, joined to their job's guard spec), and writes one report line per answer to `pre_agent_replay_case` with the cursor and counts, in one transaction; the last page completes the run. A page that fails marks the run `FAILED` with the exception class. The same call deletes runs past `replay.retention`.
+- **Check.** Each answer runs through `AgentResultGuard`, the result check of the result transaction, with the candidate in place of the recorded rule set and the candidate schema in place of the recorded one, on a fixed clock at the answer's recorded time, so `today()` is the day it was checked. The decision port is wrapped so the guardrail goes through `DecisionPort.simulate`, which the starter maps to the Rule Engine's simulation path (`TenantScopedRuleEngine.simulate`, `RLE-015`): no decision row, idempotency record or event. A schema violation is final (schema retries are generations of the model). Top-level fields recorded as `***` were never kept: they are left out of the check and out of `required`, and the line counts them. When a rule of the candidate rule set version reads a masked field in a condition or an output (`DecisionSignature.readInputs`, from `RuleSetSignature.readInputs` of the Rule Engine; a declared input that no rule reads does not count), or the schema could test it differently (it fails closed: the candidate output schema differs from the recorded one anywhere except in the definitions of unmasked properties; or the recorded refusal was `AGENT_SCHEMA_INVALID`), the check would not have seen that input, so the line is `NOT_REPLAYED` with `MASKED_INPUT_REQUIRED` and is never `UNCHANGED` or a change. A job without a guard spec is `NOT_REPLAYED` with `GUARD_SPEC_INVALID`. The summary counts the two apart: `notReplayed` and `maskedInputRequired`; V18 adds `masked_input_required` to `pre_agent_replay`.
+- **Report.** Outcomes `ALLOWED`, `REVIEW` and `REFUSED` (the refusal follows the job's recorded route), changes `UNCHANGED`, `NEWLY_ALLOWED`, `NEWLY_REFUSED`, `NEWLY_ROUTED_TO_REVIEW` and `NOT_REPLAYED`, the matched rule ids on both sides, and `OVERRIDDEN_BY_REVIEWER` when a `HUMAN_OVERRIDE` of that attempt changed a field whose value was kept. Lines hold ids, outcomes and rule ids, never values; `GET /agent-replays/{id}/cases/{attemptId}/answer` opens one recorded answer as history keeps it. Reports are test aids, not audit records.
+- **Isolation.** No adapter, runner, executor or network call is reachable from the replay classes (ArchUnit, `PRE-092`); nothing writes `pre_history`, `pre_timer`, `rle_decision` or an instance.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as Replay user
+    participant S as AgentReplayService
+    participant P as Job poller
+    participant H as pre_history and pre_timer
+    participant G as AgentResultGuard
+    participant R as Rule Engine simulation
+    U->>S: POST /agent-replays (step, period, candidate)
+    S->>R: signature of the candidate version
+    S->>S: period, size and contract checks
+    S-->>U: 202 QUEUED run
+    loop one page per poll
+        P->>H: next page of recorded answers (keyset)
+        P->>G: each answer, candidate in place, clock at recorded time
+        G->>R: simulate, writes nothing
+        P->>P: report lines, counts, cursor in one transaction
+    end
+    U->>S: GET /agent-replays/{id} and /cases
 ```
 
 ### 4.2 Saga compensation (ADR-0007, `TR-COMP-01` to `TR-COMP-03`)
@@ -478,6 +544,10 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
 | `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |
 | `POST /async-steps/{jobId}:complete` | `processes:step:complete` | Report the result of a remote step attempt whose adapter answered `Accepted`; body `attemptId`, `completionToken`, `status` (`COMPLETED`, `FAILED`, `BUSINESS_ERROR`), `output` or `errorCode` and `retryable`; answers `outcome` `ACCEPTED`, `DUPLICATE` or `DISCARDED` (section 4); the caller also needs a completer role of the step's adapter | A repeat is `DUPLICATE`; the lease fences late results; the remote call is deduplicated by the job id | `403 PERMISSION_DENIED` (no completer role, wrong token), `404 ASYNC_STEP_NOT_FOUND` | M2 (0.2.0) |
+| `POST /agent-replays` | `processes:agent:replay` | Replay one agent step's recorded answers over a period against a candidate guardrail version and optional output schema (section 4.1); `202` with the queued run | Optional `Idempotency-Key` returns the original run | `400 QUERY_INVALID` (period), `404 RULE_SET_NOT_FOUND`, `422 REPLAY_TOO_LARGE`, `422 GUARDRAIL_CONTRACT_INVALID` | M3 (#98) |
+| `GET /agent-replays/{id}` | `processes:agent:replay` | Read a run and its summary | Read only | `404 REPLAY_NOT_FOUND` | M3 (#98) |
+| `GET /agent-replays/{id}/cases` | `processes:agent:replay` | Read report lines in recorded order, keyset-paged, `limit` 1 to 500 | Read only | `404 REPLAY_NOT_FOUND`, `400 QUERY_INVALID` | M3 (#98) |
+| `GET /agent-replays/{id}/cases/{attemptId}/answer` | `processes:agent:replay` | Open one case's recorded answer as history keeps it (masked fields stay masked) | Read only | `404 REPLAY_NOT_FOUND` | M3 (#98) |
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
 | `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
@@ -489,7 +559,7 @@ Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permi
 
 ### 6.3 Permissions
 
-From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:agent:replay` (replay recorded agent answers against a candidate guardrail and read the reports; held by no role by default, PD-128, #98), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
 
 ### 6.4 Events
 
@@ -506,7 +576,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.step.completed.v1` | `instanceId`, `nodeId`, `attemptId`, `durationMs` |
 | `processes.task.created.v1`, `processes.task.completed.v1` | `taskId`, `instanceId`, `nodeId`, assignment, `completedBy` |
 | `processes.task.claimed.v1`, `processes.task.unclaimed.v1` | `taskId`, `instanceId`, `nodeId`, `assignee`, `claimedBy` or `unclaimedBy`, `definitionKey`, `version`, `businessKey`; the event id is derived from the task id and the lock version the change reaches (0.2.0) |
-| `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode` |
+| `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode`; `businessCode` when the code is `UNHANDLED_BUSINESS_ERROR` (#55) |
 | `processes.compensation.started.v1` | `instanceId`, `scopeId`, stack depth |
 
 `processes.definition.deployed.v1` from the earlier baseline is removed: deploy now creates a draft, and no release has shipped.
@@ -551,6 +621,8 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `lifecycle.reason-max-length` | `2000` | Longest reason a cancellation accepts (PD-103); may be lowered, never raised |
 | `agents.labels.max-count`, `agents.labels.max-key-length`, `agents.labels.max-value-length` | `16`, `64`, `256` | Bounds of agent result labels (section 4.1, PD-014); may be lowered only |
+| `agents.memory.max-entries`, `agents.memory.max-bytes` | `16`, `16384` | Bounds of an agent step's memory (section 4.1, #101): entries per step, checked at import (0 refuses every step that declares memory), and bytes of the resolved memory as canonical JSON, checked when the step is reached; may be lowered only, and start-up refuses a higher value |
+| `replay.page-size`, `replay.max-cases`, `replay.retention` | `500`, `50000`, `P30D` | Offline agent replay (section 4.1, #98): answers per worker transaction (1 to 1,000), most answers per run (may be lowered, never raised), how long a run and its report are kept (1 hour to 366 days) |
 | `tenancy.claim`, `tenancy.dev-tenant` | `tenant_id`, unset | Shared with the Rule Engine under `horus.bpm.*`; session-principal default resolver (ADR-0014 decision 6, PD-079) |
 
 Extension points (ADR-0024, `TR-EXT-02`), each with an engine default registered `@ConditionalOnMissingBean`: `TenantResolver`, `CallerResolver`, `BusinessCalendar` (default 24x7), `StepRegistry`, `FormRegistry`, `RoleCatalogue` (default none), `AgentAdapter` and `ServiceAdapter` (no default; required only by definitions that use them), `OutputSchemaValidator` (default: the JSON Schema subset of section 4.1, #363), `MessageAdapter` (S2), the process event publisher, and `LifecycleGuard` (default allows everything; a host guard may veto a definition, task or incident transition with its own code and can never make a refused transition succeed, `TR-EXT-06`). Approval rules, assignees, SLA durations, escalation targets, retries, timeouts and guardrails are per definition, not engine settings.
@@ -773,6 +845,46 @@ CREATE TABLE pre_incident (                                                     
 CREATE INDEX idx_pre_incident_open ON pre_incident (tenant_id, created_at DESC, id) WHERE status = 'OPEN';
 CREATE INDEX idx_pre_incident_node ON pre_incident (tenant_id, definition_id, node_id) WHERE status = 'OPEN';
 CREATE INDEX idx_pre_incident_instance ON pre_incident (tenant_id, instance_id, created_at, id) WHERE status = 'OPEN';
+
+CREATE TABLE pre_step_result (                                                  -- 0.2.0 (#101, V14): agent memory
+  tenant_id            TEXT        NOT NULL,
+  instance_id          VARCHAR(26) NOT NULL,
+  node_id              TEXT        NOT NULL,          -- a step some later agent step names in <horus:memory>
+  definition_id        VARCHAR(26) NOT NULL,
+  result_json          JSONB       NOT NULL,          -- the accepted answer or the reviewer's answer, never a refused one
+  source               TEXT        NOT NULL CHECK (source IN ('ANSWER','REVIEW')),
+  activity_instance_id VARCHAR(26) NOT NULL,          -- the accepted attempt or the review task
+  recorded_at          TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, instance_id, node_id),      -- the latest result per step; memory reads by this key only
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
+);
+
+CREATE TABLE pre_agent_replay (                                                 -- M3 (#98, V17): offline replay runs
+  tenant_id TEXT NOT NULL, id VARCHAR(26) NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('QUEUED','RUNNING','COMPLETED','FAILED')),
+  definition_key TEXT NOT NULL, node_id TEXT NOT NULL, period_from DATE NOT NULL, period_to DATE NOT NULL,
+  candidate_rule_set TEXT NOT NULL, candidate_version INT NOT NULL, candidate_schema JSONB,
+  idempotency_key TEXT, request_hash CHAR(64), cursor_at TIMESTAMPTZ, cursor_id VARCHAR(26),
+  cases INT, unchanged INT, newly_allowed INT, newly_refused INT, newly_reviewed INT, overridden INT,
+  not_replayed INT, with_masked_fields INT, masked_input_required INT, failure_code TEXT,   -- the last count is V18
+  created_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id)
+);
+CREATE UNIQUE INDEX uq_pre_agent_replay_idempotency ON pre_agent_replay (tenant_id, idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+CREATE INDEX idx_pre_agent_replay_open ON pre_agent_replay (created_at, id)        -- worker claim, crosses tenants
+  WHERE status IN ('QUEUED','RUNNING');
+CREATE INDEX idx_pre_agent_replay_expiry ON pre_agent_replay (expires_at);         -- retention purge
+
+CREATE TABLE pre_agent_replay_case (                                            -- M3 (#98, V17): one line per answer
+  tenant_id TEXT NOT NULL, replay_id VARCHAR(26) NOT NULL, seq INT NOT NULL,
+  attempt_id VARCHAR(26) NOT NULL, instance_id VARCHAR(26) NOT NULL, recorded_at TIMESTAMPTZ NOT NULL,
+  recorded_outcome TEXT NOT NULL, candidate_outcome TEXT NOT NULL, change TEXT NOT NULL,
+  recorded_rule_ids JSONB NOT NULL, candidate_rule_ids JSONB NOT NULL, code TEXT,
+  overridden BOOLEAN NOT NULL, masked_fields INT NOT NULL,                     -- ids, outcomes, rule ids; never values
+  PRIMARY KEY (tenant_id, replay_id, seq),
+  FOREIGN KEY (tenant_id, replay_id) REFERENCES pre_agent_replay (tenant_id, id) ON DELETE CASCADE
+);
 
 CREATE TABLE pre_history (
   tenant_id       TEXT        NOT NULL,

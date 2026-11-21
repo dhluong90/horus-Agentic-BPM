@@ -525,6 +525,80 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
     }
 
+    /**
+     * The signature of a stored version by number, in any status; only {@link EngineScopedRuleEngine} calls it, for an
+     * embedded engine checking a candidate guardrail before a replay. Reads only.
+     *
+     * @param tenant the tenant
+     * @param ruleSet the rule set name
+     * @param number the version number
+     * @return the signature
+     */
+    io.github.dhluong90.bpm.rules.embedded.RuleSetSignature signatureOfVersionAs(String tenant, String ruleSet,
+            int number) {
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new VersionNotFoundException("(invalid name)", number);
+        }
+        return context.withoutDooming(() -> {
+            StoredVersion version = store.findVersion(tenant, ruleSet, number, false)
+                    .orElseThrow(() -> new VersionNotFoundException(ruleSet, number));
+            CompiledRuleSet rules = validated(version);
+            Map<String, String> inputs = new LinkedHashMap<>();
+            rules.inputs().forEach(clause -> inputs.put(clause.name(), clause.type().toString()));
+            Map<String, String> outputs = new LinkedHashMap<>();
+            rules.outputs().forEach(clause -> outputs.put(clause.name(), clause.type().toString()));
+            return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(version.ruleSet(), version.version(),
+                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs(),
+                    rules.inputsRead());
+        });
+    }
+
+    /**
+     * Simulates a stored version over recorded cases, each at its own evaluation time, for an embedded engine's replay
+     * (RLE-015); only {@link EngineScopedRuleEngine} calls it. Writes nothing. A case that cannot be evaluated is a
+     * failed outcome at its position; one regex read budget covers the call, as for {@link #simulate}.
+     *
+     * @param tenant the tenant
+     * @param ruleSet the rule set name
+     * @param number the version number
+     * @param cases 1 to {@code simulation.max-inputs} cases
+     * @return one outcome per case, in order
+     */
+    List<DecisionResult.Outcome> simulateAs(String tenant, String ruleSet, int number,
+            List<io.github.dhluong90.bpm.rules.embedded.TimedInput> cases) {
+        int limit = context.settings().simulationMaxInputs();
+        if (cases.isEmpty() || cases.size() > limit) {
+            throw new IllegalArgumentException("cases must hold 1 to " + limit + " items (simulation.max-inputs)");
+        }
+        if (!RuleSetReader.isRuleSetName(ruleSet)) {
+            throw new VersionNotFoundException("(invalid name)", number);
+        }
+        return context.withoutDooming(() -> {
+            StoredVersion stored = store.findVersion(tenant, ruleSet, number, false)
+                    .orElseThrow(() -> new VersionNotFoundException(ruleSet, number));
+            CompiledRuleSet rules = validated(stored);
+            RequestReads request = context.settings().regexLimits().newRequest();
+            List<DecisionResult.Outcome> out = new ArrayList<>(cases.size());
+            for (io.github.dhluong90.bpm.rules.embedded.TimedInput item : cases) {
+                if (request.spent()) {
+                    out.add(notRun(request));
+                    continue;
+                }
+                try {
+                    InputLimits.check(item.input(), EngineDefaults.DECIMAL_PRECISION,
+                            context.settings().maxInputScale(), context.settings().maxStringLength());
+                    if (context.settings().rejectUndeclaredInputs()) {
+                        rules.requireOnlyDeclared(item.input());
+                    }
+                    out.add(rules.evaluateWithReason(item.input(), item.evaluationTime(), request).outcome());
+                } catch (io.github.dhluong90.bpm.rules.api.HorusBpmException e) {
+                    out.add(new DecisionResult.Failed(e.code(), e.getMessage()));
+                }
+            }
+            return out;
+        });
+    }
+
     /** Runs a check of one sample, naming the sample in the refusal. */
     private static void atSample(int index, Runnable check) {
         try {
@@ -644,7 +718,8 @@ public final class DefaultRuleEngine implements RuleEngine {
             Map<String, String> outputs = new java.util.LinkedHashMap<>();
             rules.outputs().forEach(clause -> outputs.put(clause.name(), clause.type().toString()));
             return new io.github.dhluong90.bpm.rules.embedded.RuleSetSignature(version.ruleSet(), version.version(),
-                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs());
+                    rules.hitPolicy().name(), inputs, outputs, context.settings().rejectUndeclaredInputs(),
+                    rules.inputsRead());
         });
     }
 

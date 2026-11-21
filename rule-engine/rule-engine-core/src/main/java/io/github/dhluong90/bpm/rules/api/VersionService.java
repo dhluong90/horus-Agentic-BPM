@@ -43,6 +43,37 @@ public interface VersionService {
     RuleSetVersion importVersion(String ruleSet, ImportRequest request);
 
     /**
+     * Restores an earlier version of a rule set as its next draft (RLE-062, RLE-063): the draft carries that version's
+     * canonical document, so it has the same canonical hash, and records the version it was copied from. Whatever the
+     * source's status, nothing is reopened or edited, and no approval, effective date or acknowledgement is copied: the
+     * draft follows the normal path, and its approver must be someone other than the caller. It is checked as an import
+     * of the same document would be today (step budget, mask declarations) and is allowed whatever
+     * {@code authoring.cockpit-drafts} says, because it brings in no content that was not already approved.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version to copy, 1 or more
+     * @param options idempotency key and correlation id; a repeat with the same key returns the first result
+     * @return the new draft, with {@code copiedFrom} set
+     * @throws InputInvalidException when {@code version} is less than 1
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author}
+     * @throws RuleSetNotFoundException when the caller's tenant has no such rule set
+     * @throws VersionNotFoundException when the rule set has no such version
+     * @throws ValidationFailedException when the document no longer passes the checks of import
+     */
+    RuleSetVersion copyVersion(String ruleSet, int version, WriteOptions options);
+
+    /**
+     * Restores an earlier version as the next draft, without an idempotency key.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version to copy
+     * @return the new draft
+     */
+    default RuleSetVersion copyVersion(String ruleSet, int version) {
+        return copyVersion(ruleSet, version, WriteOptions.none());
+    }
+
+    /**
      * Replaces the document of a draft in place (RLE-047): the same reading, validation and violations as
      * {@link #importVersion}, the canonical and source hashes recomputed, the version number, author and creation time
      * kept, and the lock version incremented. Writes one {@code DRAFT_UPDATED} history row with the old and new

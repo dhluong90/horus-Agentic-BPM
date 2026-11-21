@@ -34,6 +34,8 @@ export function csrfToken(cookie: string = typeof document === 'undefined' ? '' 
 export interface HostFile {
   file: Blob;
   fileName: string | undefined;
+  /** A response header by name, for headers that describe the file (for example its digest). */
+  header: (name: string) => string | undefined;
 }
 
 /** The file name of an `attachment` Content-Disposition (RFC 6266): `filename*` when present, else `filename`. */
@@ -99,8 +101,9 @@ export async function callHost<T>(fetchImpl: Fetch, baseUrl: string, request: Ho
   return { status: response.status, etag: response.headers.get('ETag') ?? undefined, data: parsed.data };
 }
 
-/** A GET whose answer is a file: the bytes are kept exactly as the host sent them, never parsed or re-encoded. */
+/** A call whose answer is a file: the bytes are kept exactly as the host sent them, never parsed or re-encoded. */
 export async function downloadFromHost(fetchImpl: Fetch, baseUrl: string, request: HostRequest, accept: string): Promise<HostFile> {
   const response = await send(fetchImpl, baseUrl, request, `${accept}, application/problem+json`);
-  return { file: await response.blob(), fileName: attachmentName(response.headers.get('Content-Disposition')) };
+  const { headers } = response;
+  return { file: await response.blob(), fileName: attachmentName(headers.get('Content-Disposition')), header: (name) => headers.get(name) ?? undefined };
 }

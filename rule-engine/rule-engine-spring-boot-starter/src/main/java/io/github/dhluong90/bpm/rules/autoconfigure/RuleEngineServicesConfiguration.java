@@ -11,6 +11,9 @@ import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
+import io.github.dhluong90.bpm.rules.api.RuleSetHistoryService;
+import io.github.dhluong90.bpm.rules.rest.RuleSetHistoryController;
+import io.github.dhluong90.bpm.rules.spi.DecisionExplainer;
 import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
 import io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
@@ -83,12 +86,24 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
-            MaskingPolicy masking, Environment environment) {
+            MaskingPolicy masking, Environment environment, DecisionExplainer explainer) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                 RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
-                properties.toQuerySettings()));
+                properties.toQuerySettings(), explainer));
+    }
+
+    /**
+     * The renderer of decision explanations (RLE-030, PD-027): the engine's English and Vietnamese catalogues with the
+     * host's {@code horus-bpm/rules/explain_<language>.properties} laid over them; a host bean replaces it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    DecisionExplainer ruleEngineDecisionExplainer(RuleEngineProperties properties,
+            org.springframework.core.io.ResourceLoader resources) {
+        return RuleEngineExplainCatalogues.explainer(properties.explain().defaultLanguageOrDefault(),
+                resources.getClassLoader());
     }
 
     /**
@@ -241,6 +256,12 @@ class RuleEngineServicesConfiguration {
         return internals.engines().decisionLogQuery();
     }
 
+    @Bean
+    @ConditionalOnMissingBean
+    RuleSetHistoryService ruleEngineRuleSetHistoryService(RuleEngineInternals internals) {
+        return internals.engines().ruleSetHistory();
+    }
+
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
     static class SecurityCallerConfiguration {
@@ -298,6 +319,13 @@ class RuleEngineServicesConfiguration {
         DecisionLogController ruleEngineDecisionLogController(DecisionLogService decisions,
                 io.github.dhluong90.bpm.rules.api.DecisionLogQuery log, CallerResolver callers) {
             return new DecisionLogController(decisions, log, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        RuleSetHistoryController ruleEngineRuleSetHistoryController(RuleSetHistoryService history,
+                CallerResolver callers) {
+            return new RuleSetHistoryController(history, callers);
         }
 
         @Bean

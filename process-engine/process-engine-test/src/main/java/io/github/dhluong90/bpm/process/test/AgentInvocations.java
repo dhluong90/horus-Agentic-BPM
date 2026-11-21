@@ -41,6 +41,7 @@ public final class AgentInvocations {
         private Instant deadline = Instant.parse("2027-03-01T02:00:30Z");
         private final Map<String, Object> inputs = new LinkedHashMap<>();
         private Map<String, Object> outputSchema = Map.of();
+        private Map<String, Object> memory = Map.of();
 
         private Builder() {
         }
@@ -118,11 +119,17 @@ public final class AgentInvocations {
             return this;
         }
 
+        /** @param value the memory from earlier steps, by entry name (#101) @return this builder */
+        public Builder memory(Map<String, Object> value) {
+            memory = Objects.requireNonNull(value, "memory");
+            return this;
+        }
+
         /** @return the invocation */
         public AgentInvocation build() {
             String attemptKey = attemptId != null ? attemptId : jobId + ":" + attempt;
             return new AgentInvocation(tenantId, instanceId, nodeId, businessKey, jobId, attemptKey, completionToken,
-                    attempt, deadline, inputs, outputSchema);
+                    attempt, deadline, inputs, outputSchema, memory);
         }
     }
 }

@@ -22,6 +22,20 @@ describe('routes', () => {
     }
   });
 
+  it('CKP_071_a_decision_search_and_one_decision_round_trip_through_the_url', () => {
+    const search: Route = { name: 'decisions', query: { ruleSet: 'card-fee', month: '2026-11' } };
+    expect(formatRoute(search)).toBe('#/decisions?ruleSet=card-fee&month=2026-11');
+    expect(parseRoute(formatRoute(search))).toEqual(search);
+    const byCase: Route = { name: 'decisions', query: { caseRef: 'LN-2026-0042', month: '2026-11' } };
+    expect(parseRoute(formatRoute(byCase))).toEqual(byCase);
+    // A month that is not a calendar month is dropped, never sent.
+    expect(parseRoute('#/decisions?ruleSet=card-fee&month=2026-13')).toEqual({ name: 'decisions', query: { ruleSet: 'card-fee' } });
+    const one: Route = { name: 'decision', decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7T9' };
+    expect(formatRoute(one)).toBe('#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7T9');
+    expect(parseRoute(formatRoute(one))).toEqual(one);
+    expect(areaOf(one)).toBe('decisions');
+  });
+
   it('an_unknown_hash_or_a_bad_escape_goes_home_never_a_blank_screen', () => {
     expect(parseRoute('#/settings')).toEqual({ name: 'home' });
     expect(parseRoute('#/rules/%E0%A4%A')).toEqual({ name: 'rule-set', ruleSet: '%E0%A4%A', version: undefined, lens: undefined });

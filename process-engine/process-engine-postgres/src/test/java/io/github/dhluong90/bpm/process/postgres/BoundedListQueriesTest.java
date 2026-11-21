@@ -102,11 +102,24 @@ class BoundedListQueriesTest {
     }
 
     @Test
+    void PRE_036_a_parent_keys_query_must_filter_tenant_and_its_keys_as_an_array() {
+        assertThatThrownBy(() -> new ListQuery("history-of-instances",
+                new Bound.ParentKeys("instance_id", "the instances of one page"),
+                "SELECT id FROM pre_history WHERE tenant_id = ? AND instance_id IN (?, ?)"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("instance_id = ANY (?)");
+        assertThatThrownBy(() -> new Bound.ParentKeys("tenant_id", "a tenant is not a parent"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void PRE_036_the_registry_holds_every_list_query_with_a_unique_name() {
         List<String> names = ProcessListQueries.all().stream().map(ListQuery::name).toList();
 
         assertThat(names).doesNotHaveDuplicates().contains("live-token-counts", "lock-definition-versions",
-                "definition-history", "instance-tokens", "instance-tasks", "instance-open-incidents", "definition-keys", "definition-keys-after",
+                "definition-history", "instance-tokens", "instance-tasks", "instance-open-incidents", "instance-step-results",
+                "replay-overridden-attempts", "replay-recorded-answers", "replay-recorded-answers-after", "replay-cases",
+                "definition-keys", "definition-keys-after",
                 "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "instances-1",
                 "instances-3-key-range-after");
     }

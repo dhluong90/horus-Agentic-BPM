@@ -31,6 +31,18 @@ To reject instead of approve: `POST .../versions/3:reject` with `{ "reason": "..
 
 To take back your own request: `POST .../versions/3:withdraw` with `Idempotency-Key`, `If-Match` set to the version's `ETag`, and optionally `{ "reason": "Wrong fee for GOLD" }`. Only the person who requested publication can withdraw, and they need `rules:author`; anyone else, an approver included, gets `403 PERMISSION_DENIED`. The version returns to draft, nothing is published, the version in effect does not change, and the history shows `WITHDRAWN` with who and why. Edit the draft and request publication again to start a new approval. In the cockpit the requester sees Withdraw on their own pending version and never Approve or Reject.
 
+## Roll a change back
+
+History is never rewritten: to undo a fee change, restore an earlier version as the next draft and publish it the normal way.
+
+| Step | Who | Call | Expected |
+|---|---|---|---|
+| 1. Restore version 1 | alice | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions?copyOf=1` with no body, and an `Idempotency-Key` | `201`, `"version": 3, "status": "DRAFT", "copiedFrom": 1`, the same canonical hash as version 1 |
+| 2. Request publication | alice | `POST .../versions/3:request-publish` | `200`, `"status": "PENDING_APPROVAL"` |
+| 3. Approve | bob | `GET .../versions/3/diff?base=2`, then `POST .../versions/3:approve` | `200`, `"status": "PUBLISHED"`; version 2 is retired as superseded. Alice cannot approve her own restore (`403 SELF_APPROVAL_FORBIDDEN`) |
+
+The restore works on a version in any status and on a host with `authoring.cockpit-drafts: false`, because it brings in content the bank already approved. It carries no approval, effective date or acknowledgement, so the approver acknowledges again anything the version needs. It is checked as an import of the same document would be today: a version approved before `decision-log.require-explicit-mask` was switched on is refused with `422 VALIDATION_FAILED` naming the input. The history of version 3 shows its `CREATED` row with `"copiedFrom": 1`.
+
 ## Schedule a change for a date
 
 Set `effectiveFrom` in the document, or in the `:request-publish` body, before requesting publication:

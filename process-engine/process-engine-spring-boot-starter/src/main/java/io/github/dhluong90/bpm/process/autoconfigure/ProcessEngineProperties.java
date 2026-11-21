@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.process.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.process.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings;
+import io.github.dhluong90.bpm.process.internal.service.ReplaySettings;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param runners per async job kind, the settings of its runner (#363); unset values fall back to {@code adapters.*}
  *     and {@code jobs.*}
  * @param agents agent step settings (#59)
+ * @param replay offline replay of agent answers (#98)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -45,7 +47,8 @@ public record ProcessEngineProperties(
         @DefaultValue Stats stats,
         @DefaultValue Adapters adapters,
         @DefaultValue Runners runners,
-        @DefaultValue Agents agents) {
+        @DefaultValue Agents agents,
+        @DefaultValue Replay replay) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -221,11 +224,38 @@ public record ProcessEngineProperties(
     }
 
     /**
-     * Agent step settings (#59, DESIGN section 4.1).
+     * Agent step settings (#59, #101, DESIGN section 4.1).
      *
      * @param labels bounds of the labels an agent reports with its answer
+     * @param memory bounds of the memory an agent step receives from earlier steps
      */
-    public record Agents(@DefaultValue Labels labels) {
+    public record Agents(@DefaultValue Labels labels, @DefaultValue Memory memory) {
+    }
+
+    /**
+     * Bounds of the memory an agent step receives from earlier agent steps of the same instance
+     * ({@code <horus:memory>}, #101). They may be lowered, never raised.
+     *
+     * @param maxEntries memory entries per agent step, 0 to 16, checked at import; 0 refuses every step that declares
+     *     memory
+     * @param maxBytes bytes of the resolved memory as canonical JSON, 1 to 16384, checked when the step is reached; a
+     *     larger memory fails the step with {@code AGENT_MEMORY_TOO_LARGE} before any call
+     */
+    public record Memory(@DefaultValue("16") int maxEntries, @DefaultValue("16384") int maxBytes) {
+
+        public Memory {
+            try {
+                new io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits(maxEntries, maxBytes);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage()
+                        + " (it may be lowered, never raised)", e);
+            }
+        }
+
+        /** @return the validated bounds */
+        io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits toLimits() {
+            return new io.github.dhluong90.bpm.process.internal.service.AgentMemoryLimits(maxEntries, maxBytes);
+        }
     }
 
     /**
@@ -358,6 +388,32 @@ public record ProcessEngineProperties(
 
         LiveStatsSettings toSettings() {
             return new LiveStatsSettings(liveCacheTtl, liveCacheTtlLarge, liveCacheLargeThreshold);
+        }
+    }
+
+    /**
+     * Offline replay of recorded agent answers against a candidate guardrail or output schema (#98, PRE-092 to
+     * PRE-095).
+     *
+     * @param pageSize recorded answers replayed per worker transaction, 1 to 1,000
+     * @param maxCases most recorded answers one run may cover; may be lowered, never raised above 50,000
+     * @param retention how long a run and its report are kept before they are deleted, 1 hour to 366 days
+     */
+    public record Replay(
+            @DefaultValue("500") int pageSize,
+            @DefaultValue("50000") int maxCases,
+            @DefaultValue("P30D") Duration retention) {
+
+        public Replay {
+            try {
+                new ReplaySettings(pageSize, maxCases, retention);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
+            }
+        }
+
+        ReplaySettings toSettings() {
+            return new ReplaySettings(pageSize, maxCases, retention);
         }
     }
 

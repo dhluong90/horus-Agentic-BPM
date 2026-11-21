@@ -2,8 +2,10 @@ package io.github.dhluong90.bpm.process.internal.service;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * What the decision engine says about a rule set's effective version, read before a definition that relies on it is
@@ -20,14 +22,25 @@ public sealed interface DecisionSignature permits DecisionSignature.Found, Decis
      * @param inputs each declared input and its rule set type, for example {@code integer} or {@code list<string>}
      * @param outputs each declared output and its rule set type
      * @param rejectsUndeclaredInputs whether an evaluation that passes an undeclared input is refused
+     * @param readInputs the declared inputs that a rule condition or output reads; an offline replay needs the value of
+     *     a masked field only when it is one of them
      */
     record Found(String ruleSet, int version, String hitPolicy, Map<String, String> inputs,
-            Map<String, String> outputs, boolean rejectsUndeclaredInputs) implements DecisionSignature {
+            Map<String, String> outputs, boolean rejectsUndeclaredInputs, Set<String> readInputs)
+            implements DecisionSignature {
         public Found {
             Objects.requireNonNull(ruleSet, "ruleSet must not be null");
             Objects.requireNonNull(hitPolicy, "hitPolicy must not be null");
             inputs = Collections.unmodifiableMap(new LinkedHashMap<>(Objects.requireNonNull(inputs, "inputs")));
             outputs = Collections.unmodifiableMap(new LinkedHashMap<>(Objects.requireNonNull(outputs, "outputs")));
+            readInputs = Collections.unmodifiableSet(new LinkedHashSet<>(Objects.requireNonNull(readInputs,
+                    "readInputs")));
+        }
+
+        /** A signature that does not say which inputs are read: every declared input counts as read (fail closed). */
+        public Found(String ruleSet, int version, String hitPolicy, Map<String, String> inputs,
+                Map<String, String> outputs, boolean rejectsUndeclaredInputs) {
+            this(ruleSet, version, hitPolicy, inputs, outputs, rejectsUndeclaredInputs, inputs.keySet());
         }
     }
 

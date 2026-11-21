@@ -84,10 +84,32 @@ public final class PostgresRuleEngines {
     public static RuleEngines create(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, Clock clock, EngineSettings settings, MaskingPolicy masking,
             DecisionQuerySettings querySettings) {
+        return create(dataSource, transactions, tenants, callers, clock, settings, masking, querySettings,
+                io.github.dhluong90.bpm.rules.internal.service.CatalogueExplainer.bundled());
+    }
+
+    /**
+     * Builds the entry points with a masking policy, search bounds and the renderer of decision explanations
+     * (RLE-030).
+     *
+     * @param dataSource the host's data source
+     * @param transactions the host's transaction manager, wrapped
+     * @param tenants resolves the tenant of a call
+     * @param callers resolves the caller of a call
+     * @param clock the host clock
+     * @param settings validated engine settings
+     * @param masking the masking key and default per tenant
+     * @param querySettings validated bounds of decision log searches
+     * @param explainer writes the text of decision explanations
+     * @return the entry points
+     */
+    public static RuleEngines create(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
+            CallerResolver callers, Clock clock, EngineSettings settings, MaskingPolicy masking,
+            DecisionQuerySettings querySettings, io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer) {
         JdbcIdempotencyStore idempotency = new JdbcIdempotencyStore(dataSource);
         EngineContext context = new EngineContext(tenants, callers, clock, transactions, idempotency, settings,
                 masking);
         return RuleEngines.create(context, new JdbcRuleStore(dataSource), new JdbcDecisionLog(dataSource),
-                new JdbcEventOutbox(dataSource), querySettings);
+                new JdbcEventOutbox(dataSource), querySettings, explainer);
     }
 }

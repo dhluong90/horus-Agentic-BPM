@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import tools.jackson.databind.JsonNode;
 
-/** The controller and process-engine/api/openapi.yaml list the same operations and the same problem codes. */
+/** The controllers and process-engine/api/openapi.yaml list the same operations and the same problem codes. */
 class OpenApiContractTest {
 
     private static final JsonNode SPEC = read();
@@ -35,7 +35,8 @@ class OpenApiContractTest {
                 .forEach(method -> documented.add(method.toUpperCase(Locale.ROOT) + " " + path.getKey())));
 
         Set<String> implemented = new TreeSet<>();
-        for (Method method : ProcessController.class.getDeclaredMethods()) {
+        for (Method method : java.util.stream.Stream.of(ProcessController.class, AgentReplayController.class)
+                .flatMap(type -> java.util.Arrays.stream(type.getDeclaredMethods())).toList()) {
             PostMapping post = method.getAnnotation(PostMapping.class);
             GetMapping get = method.getAnnotation(GetMapping.class);
             if (post != null) {

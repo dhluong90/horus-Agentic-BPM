@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.autoconfigure;
 
 import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
+import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
 import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
@@ -29,6 +30,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param masking keys of the keyed fingerprints of masked inputs, for the host and per tenant
  * @param decisionLog what the decision log records, how far ahead its partitions are created and how long it is kept
  * @param simulation limits of {@code :simulate}
+ * @param explain the plain-language explanation of logged decisions
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -43,7 +45,29 @@ public record RuleEngineProperties(
         @DefaultValue Authoring authoring,
         @DefaultValue Masking masking,
         @DefaultValue DecisionLog decisionLog,
-        @DefaultValue Simulation simulation) {
+        @DefaultValue Simulation simulation,
+        @DefaultValue Explain explain) {
+
+    /**
+     * The plain-language explanation of logged decisions ({@code GET /decisions/{id}/explain}, RLE-030, PD-027).
+     * Sentences come from message catalogues: English and Vietnamese ship with the engine, and a host adds entries or
+     * whole languages with {@code horus-bpm/rules/explain_<language>.properties} files (UTF-8) on its class path. A
+     * {@code DecisionExplainer} bean replaces the renderer entirely.
+     *
+     * @param defaultLanguage the language of an explanation when the caller asks for none the host has, two or three
+     *     lower-case letters with a catalogue; default {@code en}
+     */
+    public record Explain(String defaultLanguage) {
+
+        /**
+         * Returns the language in force.
+         *
+         * @return the configured language, or {@code en}
+         */
+        public String defaultLanguageOrDefault() {
+            return defaultLanguage == null || defaultLanguage.isBlank() ? "en" : defaultLanguage.strip();
+        }
+    }
 
     /**
      * Limits of {@code POST .../versions/{v}:simulate} (RLE-016).
@@ -336,11 +360,17 @@ public record RuleEngineProperties(
      * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
      *     false. Replay of a logged decision is not affected
      * @param maxBatch most items one {@code :evaluate-batch} accepts, 1 to 1000; default 1000. Lower only
+     * @param stepBudget most expression nodes one decision may visit, 1 to 1000000; default 100000. Counted, so the
+     *     same decision stops at the same step on every machine; past it the decision fails with
+     *     {@code EVALUATION_ERROR}, reason {@code EVALUATION_BUDGET_EXCEEDED}. Import and request-publish refuse a
+     *     table whose worst case is over it
+     * @param timeoutMs longest time one decision may evaluate, in milliseconds, 1 to 30000; default 10000. The
+     *     backstop for a slow machine; the step budget decides first
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
             Integer regexMaxReads, Integer regexMaxReadsPerDecision, Long regexMaxReadsPerRequest, Boolean pinRetired,
-            Integer maxBatch) {
+            Integer maxBatch, Integer stepBudget, Integer timeoutMs) {
     }
 
     /**
@@ -440,6 +470,9 @@ public record RuleEngineProperties(
                                 ? RegexLimits.MAX_READS_PER_DECISION : evaluation.regexMaxReadsPerDecision(),
                         evaluation.regexMaxReadsPerRequest() == null
                                 ? RegexLimits.MAX_READS_PER_REQUEST : evaluation.regexMaxReadsPerRequest()))
+                .withEvaluationLimits(new EvaluationLimits(
+                        evaluation.stepBudget() == null ? EvaluationLimits.STEP_BUDGET : evaluation.stepBudget(),
+                        evaluation.timeoutMs() == null ? EvaluationLimits.TIMEOUT_MILLIS : evaluation.timeoutMs()))
                 .withDraftAuthoring(Boolean.TRUE.equals(authoring.cockpitDrafts()))
                 .withPinRetired(evaluation.pinRetired() == null ? EngineDefaults.PIN_RETIRED : evaluation.pinRetired())
                 .withLifecycle(

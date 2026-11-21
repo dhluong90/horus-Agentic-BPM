@@ -206,6 +206,15 @@ public final class EngineDefaults {
     /** Default of {@code horus.bpm.rules.decision-log.mask-default}: inputs that declare no {@code mask} are logged. */
     public static final boolean MASK_DEFAULT = false;
 
+    /**
+     * Largest evidence file one export may produce, in bytes (PD-116); a larger one is {@code 422 EVIDENCE_TOO_LARGE}
+     * before anything is written. Bounds the memory one export holds and the size of its idempotency record.
+     */
+    public static final int EVIDENCE_MAX_BYTES = 8_388_608;
+
+    /** Most history events one version may contribute to an evidence file; more is {@code EVIDENCE_TOO_LARGE}. */
+    public static final int EVIDENCE_MAX_EVENTS_PER_VERSION = 10_000;
+
     private EngineDefaults() {
     }
 

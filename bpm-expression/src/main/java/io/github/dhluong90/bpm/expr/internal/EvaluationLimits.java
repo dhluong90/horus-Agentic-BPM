@@ -50,11 +50,11 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
 
     public EvaluationLimits {
         if (stepBudget < 1 || stepBudget > STEP_BUDGET_MAX) {
-            throw new IllegalArgumentException("the evaluation step budget must be 1 to " + STEP_BUDGET_MAX + ", was "
+            throw new IllegalArgumentException("horus.bpm.rules.evaluation.step-budget must be 1 to " + STEP_BUDGET_MAX + ", was "
                     + stepBudget);
         }
         if (timeoutMillis < 1 || timeoutMillis > TIMEOUT_MILLIS_MAX) {
-            throw new IllegalArgumentException("the evaluation timeout must be 1 to " + TIMEOUT_MILLIS_MAX
+            throw new IllegalArgumentException("horus.bpm.rules.evaluation.timeout-ms must be 1 to " + TIMEOUT_MILLIS_MAX
                     + " ms, was " + timeoutMillis);
         }
     }

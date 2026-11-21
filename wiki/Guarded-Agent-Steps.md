@@ -64,6 +64,10 @@ An attempt with no answer within `horus:timeout` fails with `AGENT_TIMEOUT` and 
 
 A schema failure has its own retry, `runners.async-agent.schema-retries` (default 1), so `max` is kept for timeouts and other failures.
 
+A business error (`AdapterResult.BusinessError`) is final: the job fails on that attempt with no retry, and the incident's `error_code` is `UNHANDLED_BUSINESS_ERROR`, with the business code in the cause, in `INCIDENT_RAISED` and in the event (`businessCode`). The adapter's message is never stored.
+
+An answer that arrives too late changes nothing. This covers an attempt whose lease ended, an attempt another attempt took over, a step that already completed, and a job that failed with an incident. Every such report gets `DISCARDED`. It writes no history row, runs no guardrail decision, opens no task and leaves an open incident open. Reporting it again gives the same answer. For a job that was cancelled with its instance, one `LATE_RESULT_DISCARDED` entry records the attempt.
+
 ### History and overrides
 
 Each answer leaves one history row, `ASYNC_RESULT_ACCEPTED` or `ASYNC_RESULT_REFUSED`, with:
@@ -76,7 +80,30 @@ Each answer leaves one history row, `ASYNC_RESULT_ACCEPTED` or `ASYNC_RESULT_REF
 | `latencyMs` | From the claim to the result |
 | `labels` | What the agent reported about its answer, such as `model`, `promptVersion`, `usage.inputTokens` and `usage.outputTokens`, as the adapter returned them with `AdapterResult.completed(output, labels)`; the engine never acts on them. At most `agents.labels.max-count` (16) labels, keys up to 64 and values up to 256 characters; above that the attempt fails with `AGENT_LABELS_INVALID` and is retried |
 
+A step that declares memory also has `memory` in these rows: the facts the agent received from earlier steps, with masked fields as keyed fingerprints (see [Memory from earlier steps](#memory-from-earlier-steps)).
+
 When a reviewer completes the review task of a refused answer, history records `HUMAN_OVERRIDE`: the reviewer, who reported the refused answer and which attempt, the refusal code, the guardrail decision id, the reason (`reason` in the completion body), the reviewer's answer masked the same way, and `changes` with `from` and `to` for each field the reviewer changed. The reviewer's answer must meet the output schema, and the review is always four-eyes.
+
+### Memory from earlier steps
+
+An agent step can receive a small, declared set of facts from earlier agent steps of the same case, instead of the whole case:
+
+```xml
+<horus:memory from="extract-id" fields="fullName,dob" as="applicant"/>
+<horus:memory from="screen-sanctions" fields="hits" as="screening" required="false"/>
+```
+
+The adapter reads them with `invocation.memory()`, for example `{ applicant: { fullName, dob }, screening: { hits: 0 } }`.
+
+The rules:
+- **Declared fields only.** Only the listed fields go out. A field path may be nested (`document.issuer`, at most four levels), and wildcards are refused.
+- **Earlier agent steps only.** `from` must be an agent step that is upstream of this step and whose output schema declares the fields.
+- **The recorded result.** The source is the step's recorded result: the accepted answer, or the reviewer's answer after a refusal. A refused answer never enters memory.
+- **Resolved once.** The engine resolves memory when the step is reached, inside that transaction, and stores it with the job. Every attempt, including a retry after a timeout, sends the same facts. The model call is still keyed by the attempt id and side effects by the job id.
+- **Masked fields need a declaration.** A field the source schema marks `mask: true` is refused at import unless the entry says `includeMasked="true"`. The flag is part of the definition, so the diff and the second person's approval show it. The agent then receives the plain value, and history keeps only its keyed fingerprint.
+- **Bounded.** `agents.memory.max-entries` (16) caps the entries per step and is checked at import. `agents.memory.max-bytes` (16 KiB of canonical JSON) caps the size and is checked when the step is reached. Both may be lowered, never raised.
+- **Failures stop the step before any call.** A larger memory fails the step with `AGENT_MEMORY_TOO_LARGE`. A `required` entry (the default) whose step has no recorded result, for example because the case took another branch, fails it with `AGENT_MEMORY_MISSING`. Either failure is not retryable and opens an incident, and the adapter is never called. With `required="false"` the entry is left out and listed under `memoryMissing` in history.
+- **Same case, same tenant.** Memory reads only the recorded results of its own instance, in the instance's tenant. There is no memory across cases or customers, and no long-term or vector store.
 
 ## The problem
 
@@ -127,6 +154,24 @@ Rules the engine enforces:
 
 The engine's share of an agent step is the two short transactions, about 10 ms in total. 100 concurrent agent calls of 10 seconds each hold no database connection while they wait ([[Architecture]] section 8).
 
+### Replay a changed guardrail before it goes live
+
+Test a changed guardrail, or a changed output schema, against the answers a step has already recorded. A user with `processes:agent:replay` names the step, a period of at most 31 days and a candidate rule set version, usually a draft:
+
+```http
+POST /api/bpm/processes/v1/agent-replays
+{ "definitionKey": "kyc-onboarding", "nodeId": "assess-documents", "from": "2026-11-01", "to": "2026-11-30",
+  "candidate": { "ruleSet": "kyc-document-guardrails", "version": 3 } }
+```
+
+The engine answers `202` with a run and replays it in the background, 500 answers at a time. Each recorded answer goes through the same check as when it was recorded (output schema, then guardrail), with the candidate in place, at the time it was recorded, so `today()` is the day of the original check. The report says, per answer, whether the candidate would allow it, send it to a reviewer or refuse it, compared with what happened, and flags `OVERRIDDEN_BY_REVIEWER` when the candidate would let through an answer a reviewer corrected. For example, lowering R5 from `confidence < 0.90` to `< 0.85` over 1,200 November answers reports 96 newly allowed, 7 of them answers a reviewer had corrected: the change would let those through unchecked.
+
+What a replay never does: call a model or any adapter, write history or the decision log, or move an instance. It reads only your tenant. Fields your schema masks were never kept, so they are left out of the check and counted on the line. A changed prompt or model is replayed by your own harness: your adapter re-runs selected cases outside the engine. Reports are kept for `replay.retention` (30 days) and are not audit records. Limits: `replay.max-cases` (50,000 answers per run), `replay.page-size` (500).
+
+### Calling an MCP tool
+
+[`examples/mcp-tool-adapter`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/mcp-tool-adapter) shows an agent step calling one tool of a Model Context Protocol server through `AgentAdapter`, over Streamable HTTP. The process names the tool in a step input and the adapter refuses any tool outside its configured allow-list; the tool call carries the job id as `_meta.idempotencyKey`, so a retry never runs the tool twice; the tool's `structuredContent` is the answer, checked like any other. Server address and token are host configuration. The example is not part of the engine artifacts.
+
 ### A guardrail is an ordinary rule set
 
 The guardrail is a Rule Engine rule set with hit policy `first` or `unique`. It must declare the output `allow` (boolean) and may declare `reasons` (a string); the engine reads no other output. Its inputs are fields of the agent's answer, so each must be declared in the step's `outputSchema` with a compatible type. Deploying a process definition whose guardrail rule set is missing in your tenant, has no version in effect or breaks this contract fails with `422 GUARDRAIL_CONTRACT_INVALID`, naming the step and the failed check, and nothing is written. The same check runs when approval is requested and at approval, so a guardrail changed after import is caught before the process goes live. Publish the guardrail rule set before you deploy the process. At run time the check fails closed: a decision error counts as `allow: false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.
@@ -135,7 +180,7 @@ Because it is a rule set, it has everything a rule set has:
 
 - versions, effective dates and a decision log entry for every check;
 - a second approver for every change: loosening a guardrail needs the same four-eyes approval as changing a fee;
-- simulation of a draft before publication; replay of past checks is planned for M3.
+- simulation of a draft before publication, and replay of past checks against a draft (see above).
 
 Your compliance team reads the guardrail as a table, not as code or prompt text.
 
@@ -209,7 +254,7 @@ rules:
     then: { allow: true }
 ```
 
-This is version 2, at rung 2. Version 1, at rung 1, was identical except that R6 returned `allow: false` with reason `HUMAN_REVIEW_REQUIRED`, so every case went to a person. Publishing version 2 needed a second approver. From M3 the approver can first replay the checks made under version 1 to see how many cases version 2 would have let through.
+This is version 2, at rung 2. Version 1, at rung 1, was identical except that R6 returned `allow: false` with reason `HUMAN_REVIEW_REQUIRED`, so every case went to a person. Publishing version 2 needed a second approver. The approver can first replay the checks made under version 1 to see how many cases version 2 would have let through.
 
 ### 3. Three runs
 
@@ -242,7 +287,7 @@ If the adapter does not answer within 5 minutes (`timeout: PT5M`), the attempt f
 | Cockpit | Agent task inspector: inputs, schema verdict, output, fired rules; approve or override with a reason (Cockpit 0.2) | |
 | Agent context | Bounded inputs per step | Bounded context passed as agent memory |
 | Planning | One agent call per step | Agent chooses steps inside a bounded block, under the same guardrails |
-| Evaluation | History and human overrides available for your own analysis | Offline runner that replays recorded agent traces and human overrides against a changed prompt or guardrail |
+| Evaluation | History and human overrides available for your own analysis | Offline replay of recorded answers and human overrides against a changed guardrail or output schema; prompt changes through a host harness |
 
 Multi-agent planning is a candidate after 1.0 ([[Roadmap]]). Dates are targets, not commitments; [[Feature status|Feature-Status]] links to the current state of each item.
 

@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
  */
-public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.RaiseIncident, Effect.EmitEvent {
+public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
 
     /**
      * Insert a job in {@code pre_timer}.
@@ -162,6 +162,24 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param detail detail
      */
     record RaiseIncident(String tokenId, String nodeId, String errorCode, String detail) implements Effect {    }
+
+    /**
+     * A step recorded its result: an accepted answer, a local step's output, or a reviewer's answer that replaced a
+     * refused one. The shell keeps it for the steps that later steps read as memory (#101); a refused answer never
+     * produces this effect.
+     *
+     * @param tokenId token
+     * @param nodeId the step
+     * @param activityInstanceId the attempt id of the accepted answer, or the review task id
+     * @param output the result as the step stored it
+     * @param reviewed whether a reviewer's answer replaced a refused one
+     */
+    record RecordResult(String tokenId, String nodeId, String activityInstanceId, Map<String, Object> output,
+            boolean reviewed) implements Effect {
+        public RecordResult {
+            output = output == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(output));
+        }
+    }
 
     /**
      * Hand an engine event to the host publisher in the transaction.

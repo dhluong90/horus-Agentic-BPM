@@ -109,6 +109,26 @@ class ListQueryPlanCheckTest {
                             + "'ADAPTER_FAILED after 3 attempts', CASE WHEN g % 20 = 0 THEN 'RESOLVED' ELSE 'OPEN' END, ? "
                             + "FROM generate_series(10, 5000, 10) g")
                     .params(tenant, p, p, p, p, T).update();
+            // The recorded result of the credit-review step of every other application (V14)
+            seed.sql("INSERT INTO pre_step_result (tenant_id, instance_id, node_id, definition_id, result_json, source, "
+                            + "activity_instance_id, recorded_at) SELECT ?, ? || 'IN' || lpad(g::text, 23, '0'), "
+                            + "'credit-review', ? || 'DEF' || lpad('2', 22, '0'), '{\"score\": 712}', 'ANSWER', "
+                            + "? || 'AI' || lpad(g::text, 23, '0'), ? FROM generate_series(2, 5000, 2) g")
+                    .params(tenant, p, p, p, T).update();
+            // Ten replay runs of the KYC agent step with 200 cases each (V17)
+            seed.sql("INSERT INTO pre_agent_replay (tenant_id, id, status, definition_key, node_id, period_from, period_to, "
+                            + "candidate_rule_set, candidate_version, created_by, created_at, expires_at) "
+                            + "SELECT ?, ? || 'RP' || lpad(g::text, 23, '0'), 'COMPLETED', 'loan-origination', 'kyc-agent', "
+                            + "DATE '2026-10-01', DATE '2026-10-31', 'kyc-guard', 2, 'lan', ?, ?::timestamptz + interval '30 days' "
+                            + "FROM generate_series(1, 10) g")
+                    .params(tenant, p, T, T).update();
+            seed.sql("INSERT INTO pre_agent_replay_case (tenant_id, replay_id, seq, attempt_id, instance_id, recorded_at, "
+                            + "recorded_outcome, candidate_outcome, change, recorded_rule_ids, candidate_rule_ids, overridden, "
+                            + "masked_fields) SELECT ?, ? || 'RP' || lpad((g % 10 + 1)::text, 23, '0'), g / 10, "
+                            + "? || 'AT' || lpad(g::text, 23, '0'), ? || 'IN' || lpad((g % 5000 + 1)::text, 23, '0'), ?, "
+                            + "'ALLOWED', 'REFUSED', 'NEWLY_REFUSED', '[]', '[\"R4\"]', false, 0 "
+                            + "FROM generate_series(0, 1999) g")
+                    .params(tenant, p, p, p, T).update();
             // 20,000 history rows, the table a careless report would group over
             seed.sql("INSERT INTO pre_history (tenant_id, occurred_at, id, instance_id, definition_id, event_type, node_id, "
                             + "details) SELECT ?, ?::timestamptz - (g || ' seconds')::interval, ? || 'HI' || lpad(g::text, 23, '0'), "
@@ -140,6 +160,13 @@ class ListQueryPlanCheckTest {
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));
         samples.put("instance-tasks", List.of("bank-a", INSTANCE));
         samples.put("instance-open-incidents", List.of("bank-a", INSTANCE));
+        samples.put("instance-step-results", List.of("bank-a", INSTANCE, new String[] {"credit-review", "kyc-agent"}));
+        samples.put("replay-overridden-attempts", List.of("bank-a", new String[] {INSTANCE, "AIN" + "%023d".formatted(43)},
+                new String[] {"AAT" + "%023d".formatted(42)}));
+        samples.put("replay-recorded-answers", List.of("bank-a", "loan-origination", "kyc-agent", from, T, 100));
+        samples.put("replay-recorded-answers-after", List.of("bank-a", "loan-origination", "kyc-agent", from, T, from,
+                "AHI" + "%023d".formatted(7), 100));
+        samples.put("replay-cases", List.of("bank-a", "ARP" + "%023d".formatted(3), 50, 100));
         samples.put("definition-keys", List.of(T, "bank-a", 50));
         samples.put("definition-keys-after", List.of(T, "bank-a", "card-dispute", 50));
         samples.put("claim-timers", List.of(T, T, 20, "replica-1", T));
@@ -251,6 +278,12 @@ class ListQueryPlanCheckTest {
                 boolean keyed = nodes.stream().anyMatch(n -> n.path("Index Cond").asString("").contains(parent.column()));
                 if (!keyed) {
                     found.add(query.name() + ": no index condition on " + parent.column() + " (" + parent.why() + ")");
+                }
+            }
+            case Bound.ParentKeys parents -> {
+                boolean keyed = nodes.stream().anyMatch(n -> n.path("Index Cond").asString("").contains(parents.column()));
+                if (!keyed) {
+                    found.add(query.name() + ": no index condition on " + parents.column() + " (" + parents.why() + ")");
                 }
             }
         }

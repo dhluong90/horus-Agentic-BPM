@@ -241,7 +241,7 @@ describe('menu', () => {
 
     expect(within(menu).getByRole('button', { name: 'Expand menu' })).toHaveAttribute('aria-expanded', 'false');
     expect(within(menu).getByRole('link', { name: 'Rules' })).toHaveAttribute('data-tip', 'Rules');
-    expect(within(menu).getByRole('link', { name: 'Decisions (Preview)' })).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Home' })).toHaveAttribute('data-tip', 'Home');
     expect(window.localStorage.getItem('horus.cockpit.menu')).toBe('collapsed');
   });
 
@@ -249,12 +249,14 @@ describe('menu', () => {
     mockHost.use(http.get('*/api/bpm/meta', () => HttpResponse.json({ ...metaRulesOnly, modules: [...metaRulesOnly.modules, { module: 'processes', engineVersion: '0.1.0', apiVersion: 'v1', features: [] }] })));
     open('#/processes');
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Processes Preview' })).toBeInTheDocument();
-    expect(screen.getByText('No process is deployed on this service yet.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'How to import a BPMN file' })).toHaveAttribute('href', expect.stringContaining('Process-Engine-Importing-BPMN'));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Processes' })).toBeInTheDocument();
+    // Lan holds no processes permission: the page says so in one line instead of an empty list.
+    expect(screen.getByText(/Your permissions show no process definitions here/)).toBeInTheDocument();
     expect(screen.queryByText(/is installed on this service/)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('link', { name: 'Decisions' }));
-    expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();
+    // Lan may not read the decision log: Decisions is not in her menu, and Processes stands alone under Preview.
+    const menu = screen.getByRole('navigation', { name: 'Cockpit menu' });
+    expect(within(menu).queryByRole('link', { name: /Decisions/ })).not.toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: /Processes/ })).toBeInTheDocument();
   });
 });
 
@@ -276,8 +278,8 @@ describe('security (review lows)', () => {
     mockHost.events.on('request:start', record);
     open('#/decisions');
 
-    expect(await screen.findByText('Decision history comes in 0.2.0.')).toBeInTheDocument();
-    // Only the shell's own calls: registry, /meta, /me and the rule lists behind the Approvals count.
+    expect(await screen.findByText('Choose a rule set or a case reference, and a month.')).toBeInTheDocument();
+    // Nothing is searched before the user asks. Only the shell's own calls: registry, /meta, /me and the rule lists behind the Approvals count.
     expect(calls.filter((path) => /decision/i.test(path))).toEqual([]);
     expect(calls.every((path) => path.endsWith('/cockpit-hosts.json') || path === '/api/bpm/meta' || path === '/api/bpm/me' || path.startsWith('/api/bpm/rules/v1/rule-sets'))).toBe(true);
     mockHost.events.removeListener('request:start', record);

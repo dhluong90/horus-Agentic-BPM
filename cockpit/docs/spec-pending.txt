@@ -6,9 +6,7 @@
 CKP-001 M1
 CKP-003 M1
 CKP-004 M1
-CKP-005 M1
 CKP-006 M2
-CKP-007 M2
 CKP-008 M2
 CKP-009 M1
 CKP-010 M1
@@ -18,6 +16,7 @@ CKP-012 M1
 CKP-013 M1
 CKP-014 M1
 CKP-015 M1
+# CKP-016: automatic layout ships as CKP-069; stays listed until stored layouts (slice 8.8) and the instance view.
 CKP-016 M2
 CKP-017 M2
 CKP-018 M2
@@ -31,6 +30,7 @@ CKP-025 M3
 CKP-026 M3
 CKP-027 M3
 CKP-028 M2
+# CKP-029: node types and the generic node ship as CKP-070; stays listed until a second host and the stage in the host details.
 CKP-029 M2
 CKP-031 M1
 CKP-032 M1

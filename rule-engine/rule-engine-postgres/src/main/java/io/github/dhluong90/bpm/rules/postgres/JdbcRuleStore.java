@@ -14,6 +14,9 @@ import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.json.Ulid;
 import io.github.dhluong90.bpm.rules.internal.store.HistoryRow;
+import io.github.dhluong90.bpm.rules.internal.store.HistoryVersion;
+import io.github.dhluong90.bpm.rules.internal.store.RuleSetEventRow;
+import io.github.dhluong90.bpm.rules.api.RuleSetHistory;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
 import io.github.dhluong90.bpm.rules.internal.store.VersionInputs;
@@ -40,7 +43,7 @@ public final class JdbcRuleStore implements RuleStore {
             v.tenant_id, v.id, v.rule_set_id, s.name, v.version_num, v.status, v.hit_policy, v.effective_from,
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
-            v.approval_comment, v.created_by, v.created_at, v.retired_at, v.retire_requested_by,
+            v.approval_comment, v.created_by, v.created_at, v.retired_at, v.copied_from, v.retire_requested_by,
             v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version
             """;
 
@@ -113,10 +116,12 @@ public final class JdbcRuleStore implements RuleStore {
         jdbc.sql("""
                 INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, effective_from,
                   canonical_json, canonical_hash, source_format, source_document, source_hash, lock_version,
-                  requested_by, requested_at, approved_by, approved_at, approval_comment, created_by, created_at)
+                  requested_by, requested_at, approved_by, approved_at, approval_comment, created_by, created_at,
+                  copied_from)
                 VALUES (:tenant, :id, :ruleSetId, :num, :status, :hitPolicy, :effectiveFrom,
                   CAST(:canonicalJson AS jsonb), :canonicalHash, :sourceFormat, :sourceDocument, :sourceHash, :lock,
-                  :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdBy, :createdAt)
+                  :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdBy, :createdAt,
+                  :copiedFrom)
                 """)
                 .param("tenant", v.tenantId()).param("id", v.id()).param("ruleSetId", v.ruleSetId())
                 .param("num", v.version()).param("status", v.status().name()).param("hitPolicy", v.hitPolicy())
@@ -127,7 +132,7 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("requestedBy", v.requestedBy()).param("requestedAt", timestamp(v.requestedAt()))
                 .param("approvedBy", v.approvedBy()).param("approvedAt", timestamp(v.approvedAt()))
                 .param("comment", v.approvalComment()).param("createdBy", v.createdBy())
-                .param("createdAt", Timestamp.from(v.createdAt()))
+                .param("createdAt", Timestamp.from(v.createdAt())).param("copiedFrom", v.copiedFrom())
                 .update();
         insertRules(v, v.createdAt());
     }
@@ -341,10 +346,10 @@ public final class JdbcRuleStore implements RuleStore {
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
                   reason, superseded_by, approval_mode, no_version_in_effect, lock_version, occurred_at,
                   canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs,
-                  retire_requested_by)
+                  copied_from, retire_requested_by)
                 VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :none,
                   :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb),
-                  :retireRequestedBy)
+                  :copiedFrom, :retireRequestedBy)
                 """)
                 .param("retireRequestedBy", row.retireRequestedBy())
                 .param("supersededBy", row.supersededBy()).param("mode", row.approvalMode())
@@ -357,6 +362,7 @@ public final class JdbcRuleStore implements RuleStore {
                 .param("hash", row.canonicalHash()).param("previousHash", row.previousCanonicalHash())
                 .param("acknowledged", approved ? acknowledgedJson(row.acknowledgedWarnings()) : null)
                 .param("maskedByDefault", approved ? stringsJson(row.maskedByDefaultInputs()) : null)
+                .param("copiedFrom", row.copiedFrom())
                 .update();
     }
 
@@ -397,27 +403,136 @@ public final class JdbcRuleStore implements RuleStore {
                 SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
                   approval_mode, no_version_in_effect, lock_version, occurred_at, canonical_hash,
                   previous_canonical_hash, acknowledged_warnings::text AS acknowledged,
-                  masked_by_default_inputs::text AS masked_by_default, retire_requested_by
+                  masked_by_default_inputs::text AS masked_by_default, copied_from, retire_requested_by
                 FROM rle_version_history
                 WHERE tenant_id = :tenant AND version_id = :versionId
                 ORDER BY occurred_at, id
                 """)
                 .param("tenant", tenantId).param("versionId", versionId)
-                .query((rs, row) -> {
-                    int supersededBy = rs.getInt("superseded_by");
-                    Integer superseded = rs.wasNull() ? null : supersededBy;
-                    boolean none = rs.getBoolean("no_version_in_effect");
-                    Boolean noVersionInEffect = rs.wasNull() ? null : none;
-                    return new HistoryRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("version_id"),
-                            LifecycleAction.valueOf(rs.getString("action")),
-                            rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
-                            VersionStatus.valueOf(rs.getString("to_status")), rs.getString("actor"),
-                            rs.getString("reason"), rs.getLong("lock_version"), instant(rs, "occurred_at"), superseded,
-                            rs.getString("approval_mode"), noVersionInEffect, rs.getString("canonical_hash"),
-                            rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
-                            strings(rs.getString("masked_by_default")), rs.getString("retire_requested_by"));
-                })
+                .query(JdbcRuleStore::historyRow)
                 .list();
+    }
+
+    /**
+     * A rule set's own history rows, newest first, through {@code idx_rle_version_history_rule_set} (V24): tenant and
+     * rule set lead, the index holds rule set rows only and is ordered as the query.
+     */
+    static final String RULE_SET_EVENTS_SQL = """
+            SELECT tenant_id, id, rule_set_id, action, actor, occurred_at, evidence::text AS evidence
+            FROM rle_version_history
+            WHERE tenant_id = :tenant AND rule_set_id = :ruleSetId AND action = 'EVIDENCE_EXPORTED'
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT :limit
+            """;
+
+    private static final String HISTORY_VERSION_COLUMNS = """
+            v.id, v.version_num, v.status, v.effective_from, v.retired_at, v.canonical_hash, v.created_by, v.created_at,
+            v.requested_by, v.requested_at, v.approved_by, v.approved_at, v.approval_comment
+            """;
+
+    @Override
+    public List<HistoryVersion> historyVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit) {
+        // Keyset on (tenant_id, rule_set_id, version_num), the unique index of V1.
+        return jdbc.sql("SELECT " + HISTORY_VERSION_COLUMNS + """
+                FROM rle_version v
+                WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId
+                  AND (CAST(:before AS INT) IS NULL OR v.version_num < CAST(:before AS INT))
+                ORDER BY v.version_num DESC
+                LIMIT :limit
+                """)
+                .param("tenant", tenantId).param("ruleSetId", ruleSetId).param("before", beforeVersion)
+                .param("limit", limit)
+                .query(JdbcRuleStore::historyVersion).list();
+    }
+
+    @Override
+    public List<HistoryVersion> versionsByNumber(String tenantId, String ruleSetId, java.util.Collection<Integer> numbers) {
+        if (numbers.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.sql("SELECT " + HISTORY_VERSION_COLUMNS + """
+                FROM rle_version v
+                WHERE v.tenant_id = :tenant AND v.rule_set_id = :ruleSetId AND v.version_num IN (:numbers)
+                ORDER BY v.version_num
+                """)
+                .param("tenant", tenantId).param("ruleSetId", ruleSetId).param("numbers", List.copyOf(numbers))
+                .query(JdbcRuleStore::historyVersion).list();
+    }
+
+    @Override
+    public List<HistoryRow> historyOf(String tenantId, java.util.Collection<String> versionIds, int perVersionLimit) {
+        if (versionIds.isEmpty()) {
+            return List.of();
+        }
+        // One query for a page of versions; each version's rows come from idx_rle_version_history_version (V3) in
+        // time order, and the window keeps the oldest perVersionLimit of them.
+        return jdbc.sql("""
+                SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
+                  approval_mode, no_version_in_effect, lock_version, occurred_at, canonical_hash,
+                  previous_canonical_hash, acknowledged, masked_by_default, copied_from, retire_requested_by
+                FROM (
+                  SELECT h.*, h.acknowledged_warnings::text AS acknowledged,
+                    h.masked_by_default_inputs::text AS masked_by_default,
+                    row_number() OVER (PARTITION BY h.version_id ORDER BY h.occurred_at, h.id) AS n
+                  FROM rle_version_history h
+                  WHERE h.tenant_id = :tenant AND h.version_id IN (:ids)
+                    AND h.action IN ('CREATED','REQUESTED','APPROVED','REJECTED','WITHDRAWN','DRAFT_UPDATED',
+                      'RETIRE_REQUESTED','RETIRE_CANCELLED','RETIRED')
+                ) ranked
+                WHERE n <= :perVersion
+                ORDER BY version_id, occurred_at, id
+                """)
+                .param("tenant", tenantId).param("ids", List.copyOf(versionIds)).param("perVersion", perVersionLimit)
+                .query(JdbcRuleStore::historyRow)
+                .list();
+    }
+
+    @Override
+    public void appendRuleSetEvent(RuleSetEventRow row) {
+        jdbc.sql("""
+                INSERT INTO rle_version_history (tenant_id, id, version_id, rule_set_id, action, actor, occurred_at,
+                  evidence)
+                VALUES (:tenant, :id, NULL, :ruleSetId, :action, :actor, :at, CAST(:evidence AS jsonb))
+                """)
+                .param("tenant", row.tenantId()).param("id", row.id()).param("ruleSetId", row.ruleSetId())
+                .param("action", row.action().name()).param("actor", row.actor())
+                .param("at", Timestamp.from(row.occurredAt())).param("evidence", row.evidenceJson())
+                .update();
+    }
+
+    @Override
+    public List<RuleSetEventRow> ruleSetEvents(String tenantId, String ruleSetId, int limit) {
+        return jdbc.sql(RULE_SET_EVENTS_SQL)
+                .param("tenant", tenantId).param("ruleSetId", ruleSetId).param("limit", limit)
+                .query((rs, n) -> new RuleSetEventRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("rule_set_id"), RuleSetHistory.Action.valueOf(rs.getString("action")),
+                        rs.getString("actor"), instant(rs, "occurred_at"), rs.getString("evidence")))
+                .list();
+    }
+
+    private static HistoryVersion historyVersion(ResultSet rs, int row) throws SQLException {
+        return new HistoryVersion(rs.getString("id"), rs.getInt("version_num"),
+                VersionStatus.valueOf(rs.getString("status")), instant(rs, "effective_from"), instant(rs, "retired_at"),
+                rs.getString("canonical_hash"), rs.getString("created_by"), instant(rs, "created_at"),
+                rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
+                instant(rs, "approved_at"), rs.getString("approval_comment"));
+    }
+
+    private static HistoryRow historyRow(ResultSet rs, int row) throws SQLException {
+        int supersededBy = rs.getInt("superseded_by");
+        Integer superseded = rs.wasNull() ? null : supersededBy;
+        boolean none = rs.getBoolean("no_version_in_effect");
+        Boolean noVersionInEffect = rs.wasNull() ? null : none;
+        int copied = rs.getInt("copied_from");
+        Integer copiedFrom = rs.wasNull() ? null : copied;
+        return new HistoryRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("version_id"),
+                LifecycleAction.valueOf(rs.getString("action")),
+                rs.getString("from_status") == null ? null : VersionStatus.valueOf(rs.getString("from_status")),
+                VersionStatus.valueOf(rs.getString("to_status")), rs.getString("actor"),
+                rs.getString("reason"), rs.getLong("lock_version"), instant(rs, "occurred_at"), superseded,
+                rs.getString("approval_mode"), noVersionInEffect, rs.getString("canonical_hash"),
+                rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
+                strings(rs.getString("masked_by_default")), copiedFrom, rs.getString("retire_requested_by"));
     }
 
     @Override
@@ -605,6 +720,8 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     private static StoredVersion version(ResultSet rs, int row) throws SQLException {
+        int copied = rs.getInt("copied_from");
+        Integer copiedFrom = rs.wasNull() ? null : copied;
         return new StoredVersion(rs.getString("tenant_id"), rs.getString("id"), rs.getString("rule_set_id"),
                 rs.getString("name"), rs.getInt("version_num"), VersionStatus.valueOf(rs.getString("status")),
                 rs.getString("hit_policy"), instant(rs, "effective_from"), canonical(rs.getString("canonical_json")),
@@ -612,7 +729,8 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("source_document"), rs.getString("source_hash"), rs.getLong("lock_version"),
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
-                instant(rs, "created_at"), instant(rs, "retired_at"), retirementRequest(rs));
+                instant(rs, "created_at"), instant(rs, "retired_at"), copiedFrom,
+                retirementRequest(rs));
     }
 
     /** The pending four-eyes retirement of a version row (V18, RLE-038), or null; the columns are set together. */

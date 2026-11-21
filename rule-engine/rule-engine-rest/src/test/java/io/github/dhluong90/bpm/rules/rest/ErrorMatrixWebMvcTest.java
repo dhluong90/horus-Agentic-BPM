@@ -117,7 +117,9 @@ class ErrorMatrixWebMvcTest {
                         new RuleSetController(standIn(VersionService.class), callers),
                         new DecisionController(standIn(RuleEngine.class), standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
                         new DecisionLogController(standIn(DecisionLogService.class),
-                        standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers))
+                        standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
+                        new RuleSetHistoryController(standIn(io.github.dhluong90.bpm.rules.api.RuleSetHistoryService.class),
+                                callers))
                 .setControllerAdvice(new ProblemDetails())
                 .build();
     }
@@ -219,6 +221,13 @@ class ErrorMatrixWebMvcTest {
                         post("/api/bpm/rules/v1/decisions/card-fee:evaluate-batch").contentType("application/json")
                                 .content("{\"items\":[{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5}}]}"),
                         s -> s.thrown = new io.github.dhluong90.bpm.rules.api.BatchTooLargeException(1001, 1000)),
+                new Case("EVIDENCE_TOO_LARGE", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/evidence").contentType("application/json")
+                                .content("{\"format\":\"csv\",\"versions\":[1]}"),
+                        s -> {
+                            s.permissions = Set.of("rules:read", "rules:log:read");
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.EvidenceTooLargeException(8_388_608);
+                        }),
                 new Case("VALIDATION_FAILED", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new ValidationFailedException(List.of(new Violation("R3", "fee",
