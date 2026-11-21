@@ -555,12 +555,12 @@ paths:
                     position: 1
                     readings:
                       en:
-                        full: Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Then fee is 0 VND.
-                        short: Balance >= 50,000,000 VND, segment = VIP -> fee = 0 VND
+                        full: Rule R1 applies when Balance is at least 50,000,000 VND and segment is Vip. Then fee is 0 VND.
+                        short: 'Balance at least 50,000,000 VND, Vip: fee 0 VND'
                         source: GENERATED
                       vi:
-                        full: Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là VIP. Khi đó fee là 0 VND.
-                        short: Balance >= 50.000.000 VND, segment = VIP -> fee = 0 VND
+                        full: Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là Vip. Khi đó fee là 0 VND.
+                        short: 'Balance ít nhất 50.000.000 VND, segment Vip: fee 0 VND'
                         source: GENERATED
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -610,9 +610,9 @@ paths:
                     basePosition: 1
                     readingChanged: true
                     previous:
-                      en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND. Then fee is 0 VND.', short: 'Balance >= 50,000,000 VND -> fee = 0 VND', source: GENERATED }
+                      en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND. Then fee is 0 VND.', short: 'Balance at least 50,000,000 VND: fee 0 VND', source: GENERATED }
                     current:
-                      en: { full: 'Rule R1 applies when Balance is at least 60,000,000 VND. Then fee is 0 VND.', short: 'Balance >= 60,000,000 VND -> fee = 0 VND', source: GENERATED }
+                      en: { full: 'Rule R1 applies when Balance is at least 60,000,000 VND. Then fee is 0 VND.', short: 'Balance at least 60,000,000 VND: fee 0 VND', source: GENERATED }
                 unchangedCount: 3
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
@@ -1193,8 +1193,9 @@ paths:
         simulation are those of `:simulate`; the answer reads each side of every sample in plain language
         (`RLE-093`): the matched rows as in `RLE-091`, read in the version that decided them (the baseline's
         rows in the baseline version), then the result, or the sentence of no match or of the failure. Each
-        outcome has a `full` sentence and a `short` form in every language of the catalogue. The sample
-        inputs are not echoed, and a masked input is never written. More than 500 samples is
+        outcome has a `full` sentence and a `short` form in every language of the catalogue. Each result
+        names its sample with `reference` (`S1`, `S2`, ...) and the `label` the caller sent with it, if any.
+        The sample inputs are not echoed, and a masked input is never written. More than 500 samples is
         `422 READINGS_TOO_LARGE`. Writes nothing (no decision row, idempotency record or event), so it takes
         no `Idempotency-Key`; the same version, samples and clock give the same body.
       parameters:
@@ -1208,10 +1209,11 @@ paths:
               $ref: '#/components/schemas/SimulationRequest'
             example:
               samples:
-                - inputs: { balance: { currency: VND, amount: 55000000 }, segment: VIP }
+                - label: VIP customer, balance 55,000,000 VND
+                  inputs: { balance: { currency: VND, amount: 55000000 }, segment: VIP }
       responses:
         '200':
-          description: One reading per sample, in the order sent
+          description: One reading per sample, in the order sent, each naming its sample
           content:
             application/json:
               schema:
@@ -1223,17 +1225,19 @@ paths:
                 languages: [en, vi]
                 results:
                   - index: 0
+                    reference: S1
+                    label: VIP customer, balance 55,000,000 VND
                     changed: true
                     simulated:
                       kind: MATCHED
                       ruleIds: [R5]
                       readings:
-                        en: { full: 'Rule R5 always applies; it has no condition. Result: Tier is BASIC; fee is 50,000 VND.', short: 'R5: Tier = BASIC; fee = 50,000 VND', source: GENERATED }
+                        en: { full: 'Rule R5 always applies; it has no condition. Result: Tier is Basic; fee is 50,000 VND.', short: 'R5: Tier Basic; fee 50,000 VND', source: GENERATED }
                     baseline:
                       kind: MATCHED
                       ruleIds: [R1]
                       readings:
-                        en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Result: Tier is GOLD; fee is 0 VND.', short: 'R1: Tier = GOLD; fee = 0 VND', source: GENERATED }
+                        en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND and segment is Vip. Result: Tier is Gold; fee is 0 VND.', short: 'R1: Tier Gold; fee 0 VND', source: GENERATED }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -2609,7 +2613,11 @@ components:
           description: A full sentence
         short:
           type: string
-          description: The short form
+          description: |
+            The short form, a compact phrase in plain words and never a symbol or an expression: the conditions,
+            then a colon and the result, such as `Gold: fee 0 VND` (en) and `Hạng Gold: phí 0 VND` (vi). A row with
+            no condition reads `Any other case: ...` and `Mọi trường hợp khác: ...`. Names are the column `label`
+            when there is one; a code such as `GOLD` is worded as the rule table shows it (`Gold`).
         source:
           type: string
           enum: [TEMPLATE, GENERATED]
@@ -2694,9 +2702,21 @@ components:
           maxItems: 500
           items:
             type: object
-            required: [index, changed, simulated, baseline]
+            required: [index, reference, label, changed, simulated, baseline]
             properties:
               index: { type: integer, minimum: 0 }
+              reference:
+                type: string
+                description: |
+                  The sample's place in the request, one-based: `S1` for the first. Always present, so a screen can
+                  name a sample the caller did not label.
+                examples: [S1]
+              label:
+                type: [string, 'null']
+                description: |
+                  The `label` the caller sent with the sample, written back as sent, or null when it sent none. The
+                  engine never builds it from the inputs: it is the caller's own words, so keep a masked value out of it.
+                examples: [VIP customer, balance 55,000,000 VND]
               changed: { type: boolean }
               simulated: { $ref: '#/components/schemas/OutcomeReading' }
               baseline:
@@ -2919,6 +2939,15 @@ components:
             type: object
             required: [inputs]
             properties:
+              label:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: |
+                  Optional name for the sample, such as `VIP customer, balance 55,000,000 VND`. `:simulate-readings`
+                  writes it back on that sample's reading, so a reviewer can tell which sample gave which outcome;
+                  `:simulate` checks it and ignores it. Text of another kind, an empty text or one over 100 characters
+                  is `400 INPUT_INVALID`. Do not put a masked value in it: it is echoed as sent.
               inputs:
                 type: object
                 description: Input values by name; money as `Money`
@@ -3172,6 +3201,15 @@ components:
             type: object
             required: [inputs]
             properties:
+              label:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: |
+                  Optional name for the sample, such as `VIP customer, balance 55,000,000 VND`. `:simulate-readings`
+                  writes it back on that sample's reading, so a reviewer can tell which sample gave which outcome;
+                  `:simulate` checks it and ignores it. Text of another kind, an empty text or one over 100 characters
+                  is `400 INPUT_INVALID`. Do not put a masked value in it: it is echoed as sent.
               inputs:
                 type: object
                 description: Input values by name; money as `Money`

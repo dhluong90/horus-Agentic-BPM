@@ -164,7 +164,24 @@ public interface VersionService {
      * @throws VersionNotFoundException when a version the result names no longer exists
      * @throws ReadingsTooLargeException when the result has more samples than one request reads
      */
-    RuleReadings.SimulationReadings readSimulation(SimulationResult result);
+    default RuleReadings.SimulationReadings readSimulation(SimulationResult result) {
+        return readSimulation(result, List.of());
+    }
+
+    /**
+     * As {@link #readSimulation(SimulationResult)}, naming each sample: the reading of sample {@code i} carries
+     * {@code labels.get(i)} as sent, so a reviewer can tell which sample produced which outcome. The label is the
+     * caller's own text and is never taken from the sample's inputs.
+     *
+     * @param result the result of {@link RuleEngine#simulate}
+     * @param labels one label per sample in the order of the result, null for a sample without one; a shorter list
+     *     leaves the rest unlabelled
+     * @return one reading per sample, in the order of the result
+     * @throws VersionNotFoundException when a version the result names no longer exists
+     * @throws ReadingsTooLargeException when the result has more samples than one request reads
+     * @throws IllegalArgumentException when a label is longer than {@link RuleReadings#LABEL_MAX} characters
+     */
+    RuleReadings.SimulationReadings readSimulation(SimulationResult result, List<String> labels);
 
     /**
      * Moves a draft to {@code PENDING_APPROVAL} and records the caller as requester.

@@ -117,19 +117,19 @@ class RuleReadingsTest {
         assertThat(readings.rows()).extracting(RuleReadings.Row::ruleId).containsExactly("R1", "R2", "R3", "R4", "R5");
         assertThat(readings.rows()).extracting(RuleReadings.Row::position).containsExactly(1, 2, 3, 4, 5);
         Reading r1en = readings.rows().get(0).readings().get("en");
-        assertThat(r1en.full()).isEqualTo("Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP."
-                + " Then fee is 0 VND; Tier is GOLD.");
-        assertThat(r1en.shortForm()).isEqualTo("Balance ≥ 50,000,000 VND, segment = VIP → fee = 0 VND; Tier = GOLD");
+        assertThat(r1en.full()).isEqualTo("Rule R1 applies when Balance is at least 50,000,000 VND and segment is Vip."
+                + " Then fee is 0 VND; Tier is Gold.");
+        assertThat(r1en.shortForm()).isEqualTo("Balance at least 50,000,000 VND, Vip: fee 0 VND; Tier Gold");
         assertThat(r1en.source()).isEqualTo("GENERATED");
         Reading r1vi = readings.rows().get(0).readings().get("vi");
-        assertThat(r1vi.full()).isEqualTo("Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là VIP."
-                + " Khi đó fee là 0 VND; Tier là GOLD.");
-        assertThat(r1vi.shortForm()).isEqualTo("Balance ≥ 50.000.000 VND, segment = VIP → fee = 0 VND; Tier = GOLD");
+        assertThat(r1vi.full()).isEqualTo("Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là Vip."
+                + " Khi đó fee là 0 VND; Tier là Gold.");
+        assertThat(r1vi.shortForm()).isEqualTo("Balance ít nhất 50.000.000 VND, segment Vip: fee 0 VND; Tier Gold");
         // and a list, a row with no condition, and the other tests read plainly
-        assertThat(readings.rows().get(2).readings().get("vi").shortForm()).startsWith("Segment thuộc STAFF, PARTNER");
+        assertThat(readings.rows().get(2).readings().get("vi").shortForm()).startsWith("Segment một trong Staff, Partner");
         assertThat(readings.rows().get(4).readings().get("en").full())
                 .startsWith("Rule R5 always applies; it has no condition.");
-        assertThat(readings.rows().get(4).readings().get("en").shortForm()).startsWith("Always");
+        assertThat(readings.rows().get(4).readings().get("en").shortForm()).startsWith("Any other case: ");
     }
 
     @Test
@@ -159,13 +159,13 @@ class RuleReadingsTest {
 
         // Then R3 uses the author's English sentence and still reads generated in Vietnamese
         Reading r3en = readings.rows().get(2).readings().get("en");
-        assertThat(r3en.full()).isEqualTo("Staff and partners hold SILVER and pay 0 VND.");
+        assertThat(r3en.full()).isEqualTo("Staff and partners hold Silver and pay 0 VND.");
         assertThat(r3en.source()).isEqualTo("TEMPLATE");
         assertThat(readings.rows().get(2).readings().get("vi").source()).isEqualTo("GENERATED");
         // and R4 needs the value of an input, which a table does not hold, so the generated sentence is used
         Reading r4en = readings.rows().get(3).readings().get("en");
         assertThat(r4en.source()).isEqualTo("GENERATED");
-        assertThat(r4en.full()).startsWith("Rule R4 applies when segment is MASS.");
+        assertThat(r4en.full()).startsWith("Rule R4 applies when segment is Mass.");
     }
 
     @Test
@@ -233,11 +233,11 @@ class RuleReadingsTest {
         assertThat(r1.readingChanged()).isTrue();
         assertThat(r1.previous().get("en").full()).contains("Balance is at least 50,000,000 VND");
         assertThat(r1.current().get("en").full()).contains("Balance is at least 60,000,000 VND");
-        assertThat(r1.current().get("vi").shortForm()).startsWith("Balance ≥ 60.000.000 VND");
+        assertThat(r1.current().get("vi").shortForm()).startsWith("Balance ít nhất 60.000.000 VND");
         RuleReadings.ChangedRow r4 = diff.rows().get(1);
         assertThat(r4.change()).isEqualTo(VersionDiff.Change.REMOVED);
         assertThat(r4.current()).isEmpty();
-        assertThat(r4.previous().get("en").shortForm()).startsWith("Segment = MASS");
+        assertThat(r4.previous().get("en").shortForm()).isEqualTo("Mass: fee 50,000 VND; Tier Basic");
         assertThat(diff.unchangedCount()).isEqualTo(3);
         // and a diff of a version with itself is refused as the diff is
         assertThatThrownBy(() -> engines.versionService().readingsDiff("account-tier", 2, 2))
@@ -284,10 +284,10 @@ class RuleReadingsTest {
         assertThat(first.baseline().kind()).isEqualTo("MATCHED");
         assertThat(first.baseline().ruleIds()).containsExactly("R1");
         assertThat(first.baseline().readings().get("en").full())
-                .isEqualTo("Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP."
-                        + " Result: Tier is GOLD; fee is 0 VND.");
+                .isEqualTo("Rule R1 applies when Balance is at least 50,000,000 VND and segment is Vip."
+                        + " Result: Tier is Gold; fee is 0 VND.");
         assertThat(first.simulated().ruleIds()).containsExactly("R5");
-        assertThat(first.simulated().readings().get("vi").shortForm()).isEqualTo("R5: Tier = BASIC; fee = 50.000 VND");
+        assertThat(first.simulated().readings().get("vi").shortForm()).isEqualTo("R5: Tier Basic; fee 50.000 VND");
         // and no value of any sample is in the readings
         assertThat(readings.toString()).doesNotContain("079123456789").doesNotContain("55.000.000")
                 .doesNotContain("55,000,000");
@@ -325,5 +325,88 @@ class RuleReadingsTest {
         assertThatThrownBy(() -> engines.versionService().readSimulation(new SimulationResult("account-tier", 1,
                 VersionStatus.PUBLISHED, null, CLOCK, samples)))
                 .isInstanceOf(ReadingsTooLargeException.class).hasMessageContaining("samples");
+    }
+
+    /** A card fee table whose columns carry Vietnamese labels, a yes or no output and a row with no condition. */
+    static final String CARD_FEE = """
+            schemaVersion: 1
+            ruleSet: card-fee
+            hitPolicy: first
+            inputs:
+              - { name: tier, type: string, label: Hạng }
+              - { name: balance, type: money, label: Số dư }
+              - { name: txCount, type: integer, label: Số giao dịch }
+            outputs:
+              - { name: fee, type: money, label: phí }
+              - { name: waived, type: boolean, label: miễn phí }
+            rules:
+              - { id: R1, when: { tier: "== 'GOLD'" }, then: { fee: "0 VND", waived: "true" } }
+              - { id: R2, when: { tier: "== 'FIRST_TIME'", txCount: "== 3" }, then: { fee: "10000 VND" } }
+              - { id: R3, when: {}, then: { fee: "30000 VND", waived: "false" } }
+            """;
+
+    @Test
+    void RLE_091_the_short_form_is_a_compact_phrase_in_plain_words_in_each_language() {
+        // Given a card fee table with labels, where GOLD gets no fee and the last row has no condition
+        publish("card-fee", CARD_FEE, 1);
+
+        // When every row is read
+        RuleReadings.RuleSetReadings readings = engines.versionService().readings("card-fee", 1);
+
+        // Then a tier row reads "Gold: fee 0 VND" in English and "Hạng Gold: phí 0 VND" in Vietnamese
+        Reading r1en = readings.rows().get(0).readings().get("en");
+        Reading r1vi = readings.rows().get(0).readings().get("vi");
+        assertThat(r1en.shortForm()).isEqualTo("Gold: phí 0 VND; miễn phí: Yes");
+        assertThat(r1vi.shortForm()).isEqualTo("Hạng Gold: phí 0 VND; miễn phí: Có");
+        // and a row with no condition reads "Any other case" and "Mọi trường hợp khác", never a bare dash or arrow
+        assertThat(readings.rows().get(2).readings().get("en").shortForm())
+                .isEqualTo("Any other case: phí 30,000 VND; miễn phí: No");
+        assertThat(readings.rows().get(2).readings().get("vi").shortForm())
+                .isEqualTo("Mọi trường hợp khác: phí 30.000 VND; miễn phí: Không");
+        // and a number test keeps its label and no short form holds a symbol, an arrow or a raw expression
+        assertThat(readings.rows().get(1).readings().get("vi").shortForm())
+                .isEqualTo("Hạng First time, Số giao dịch 3: phí 10.000 VND");
+        readings.rows().forEach(row -> row.readings().values().forEach(reading ->
+                assertThat(reading.shortForm()).doesNotContain("=", "→", "->", "≥", "≤", "==", "'")));
+    }
+
+    @Test
+    void RLE_091_a_code_is_worded_as_the_rule_table_shows_it_and_a_label_is_used_in_every_language() {
+        // Given GOLD and FIRST_TIME as written in the table, which the cockpit shows as Gold and First time
+        publish("card-fee", CARD_FEE, 1);
+
+        // When the rows are read, in full and short, and a decision is simulated
+        RuleReadings.RuleSetReadings readings = engines.versionService().readings("card-fee", 1);
+
+        // Then the full sentence shows Gold and First time, never GOLD or FIRST_TIME, and uses the labels
+        assertThat(readings.rows().get(0).readings().get("vi").full())
+                .isEqualTo("Quy tắc R1 áp dụng khi Hạng là Gold. Khi đó phí là 0 VND; miễn phí là Có.");
+        assertThat(readings.rows().get(1).readings().get("en").full()).contains("Hạng is First time");
+        readings.rows().forEach(row -> row.readings().values().forEach(reading ->
+                assertThat(reading.full() + reading.shortForm()).doesNotContain("GOLD", "FIRST_TIME")));
+    }
+
+    @Test
+    void RLE_093_each_simulated_sample_carries_the_label_it_was_sent_with_and_a_reference() {
+        // Given a published card-fee and a simulation of two samples, the first labelled by the caller
+        publish("card-fee", CARD_FEE, 1);
+        caller.become("bank-a", "analyst", Set.of("rules:simulate", "rules:read"));
+        SimulationResult result = engines.ruleEngine().simulate("card-fee", 1, List.of(
+                DecisionInput.of(Map.of("tier", "GOLD", "balance", Money.ofMinor("VND", 60_000_000), "txCount", 5)),
+                DecisionInput.of(Map.of("tier", "CLASSIC", "balance", Money.ofMinor("VND", 1_000), "txCount", 1))));
+
+        // When it is read with one label
+        RuleReadings.SimulationReadings readings = engines.versionService().readSimulation(result,
+                java.util.Arrays.asList("Gold, balance 60,000,000 VND"));
+
+        // Then the first sample names itself, the second has a reference only, and neither echoes an input
+        assertThat(readings.samples()).extracting(RuleReadings.SampleReading::reference).containsExactly("S1", "S2");
+        assertThat(readings.samples()).extracting(RuleReadings.SampleReading::label)
+                .containsExactly("Gold, balance 60,000,000 VND", null);
+        assertThat(readings.samples().get(0).simulated().readings().get("en").shortForm())
+                .isEqualTo("R1: phí 0 VND; miễn phí: Yes");
+        // and a label over the limit is refused
+        assertThatThrownBy(() -> engines.versionService().readSimulation(result, List.of("x".repeat(101))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("100");
     }
 }

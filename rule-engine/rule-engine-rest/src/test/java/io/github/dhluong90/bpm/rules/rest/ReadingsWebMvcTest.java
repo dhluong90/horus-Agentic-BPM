@@ -80,7 +80,10 @@ class ReadingsWebMvcTest {
                             RuleReadings.OutcomeReading outcome = new RuleReadings.OutcomeReading("MATCHED",
                                     List.of("R1"), ROW);
                             yield new RuleReadings.SimulationReadings("account-tier", 2, 1, List.of("en", "vi"),
-                                    List.of(new RuleReadings.SampleReading(0, true, outcome, null)));
+                                    List.of(new RuleReadings.SampleReading(0, "S1",
+                                            args.length > 1 && !((List<?>) args[1]).isEmpty()
+                                                    ? (String) ((List<?>) args[1]).get(0) : null,
+                                            true, outcome, null)));
                         }
                         default -> throw new UnsupportedOperationException(method.getName());
                     };
@@ -197,6 +200,36 @@ class ReadingsWebMvcTest {
             MockHttpServletResponse response = mvc.perform(post(BASE + "2:simulate-readings")
                     .contentType("application/json").content(new byte[4_194_305])).andReturn().getResponse();
             assertThat(response.getStatus()).isEqualTo(403);
+        }
+        assertThat(calls).isEmpty();
+    }
+
+    @Test
+    void RLE_093_the_label_of_a_sample_is_passed_on_and_written_back_with_its_reference() throws Exception {
+        MockHttpServletResponse response = mvc.perform(post(BASE + "2:simulate-readings")
+                .contentType("application/json")
+                .content("{\"samples\":[{\"label\":\"Gold, balance 60,000,000 VND\",\"inputs\":{\"tier\":\"GOLD\"}}]}"))
+                .andReturn().getResponse();
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        JsonNode sample = json(response).get("results").get(0);
+        assertThat(sample.get("reference").asString()).isEqualTo("S1");
+        assertThat(sample.get("label").asString()).isEqualTo("Gold, balance 60,000,000 VND");
+        // and a sample with no label has a reference and a null label
+        MockHttpServletResponse plain = mvc.perform(post(BASE + "2:simulate-readings")
+                .contentType("application/json").content("{\"samples\":[{\"inputs\":{\"tier\":\"GOLD\"}}]}"))
+                .andReturn().getResponse();
+        assertThat(json(plain).get("results").get(0).get("reference").asString()).isEqualTo("S1");
+        assertThat(json(plain).get("results").get(0).get("label").isNull()).isTrue();
+    }
+
+    @Test
+    void RLE_093_a_label_that_is_not_text_of_1_to_100_characters_is_400_and_nothing_runs() throws Exception {
+        for (String label : List.of("7", "\"\"", "\"" + "x".repeat(101) + "\"")) {
+            MockHttpServletResponse response = mvc.perform(post(BASE + "2:simulate-readings")
+                    .contentType("application/json")
+                    .content("{\"samples\":[{\"label\":" + label + ",\"inputs\":{}}]}")).andReturn().getResponse();
+            assertThat(response.getStatus()).isEqualTo(400);
         }
         assertThat(calls).isEmpty();
     }

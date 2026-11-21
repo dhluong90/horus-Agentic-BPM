@@ -13,6 +13,9 @@ import java.util.Objects;
  */
 public final class RuleReadings {
 
+    /** The longest label a caller can give a simulated sample, in characters. */
+    public static final int LABEL_MAX = 100;
+
     private RuleReadings() {
     }
 
@@ -20,7 +23,7 @@ public final class RuleReadings {
      * One reading of one row in one language.
      *
      * @param full the full sentence, such as {@code Rule R1 applies when Balance is at least 50,000,000 VND.}
-     * @param shortForm the short form, such as {@code Balance >= 50,000,000 VND}
+     * @param shortForm the short form, such as {@code Balance at least 50,000,000 VND: fee 0 VND}
      * @param source {@code TEMPLATE} when the full sentence is the author's own for the row (PD-123), otherwise
      *     {@code GENERATED}
      */
@@ -130,14 +133,19 @@ public final class RuleReadings {
      * One simulated sample, read. The sample's input values are never part of it.
      *
      * @param index the position in the request, from 0
+     * @param reference {@code S1}, {@code S2}, and so on: the sample's place in the request, one-based, so a screen
+     *     can name a sample the caller did not label
+     * @param label the name the caller gave the sample (at most {@link #LABEL_MAX} characters), or null; written back
+     *     as sent, so it must not carry a masked value
      * @param changed as in {@link SimulationResult.Sample#changed()}
      * @param simulated the simulated version's outcome
      * @param baseline the effective version's outcome, or null when none is effective
      */
-    public record SampleReading(int index, boolean changed, OutcomeReading simulated, OutcomeReading baseline)
-            implements Serializable {
+    public record SampleReading(int index, String reference, String label, boolean changed,
+            OutcomeReading simulated, OutcomeReading baseline) implements Serializable {
 
         public SampleReading {
+            Objects.requireNonNull(reference, "reference must not be null");
             Objects.requireNonNull(simulated, "simulated must not be null");
         }
     }

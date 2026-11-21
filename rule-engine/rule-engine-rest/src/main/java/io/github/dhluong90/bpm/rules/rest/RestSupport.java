@@ -292,6 +292,8 @@ final class RestSupport {
         for (io.github.dhluong90.bpm.rules.api.RuleReadings.SampleReading sample : result.samples()) {
             ObjectNode item = samples.addObject();
             item.put("index", sample.index());
+            item.put("reference", sample.reference());
+            item.set("label", EngineValues.value(sample.label()));
             item.put("changed", sample.changed());
             item.set("simulated", outcomeReading(sample.simulated()));
             item.set("baseline", outcomeReading(sample.baseline()));

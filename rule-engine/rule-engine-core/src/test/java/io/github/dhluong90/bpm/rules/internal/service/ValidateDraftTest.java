@@ -78,7 +78,7 @@ class ValidateDraftTest {
         assertThat(result.problems()).isEmpty();
         assertThat(result.readings()).extracting(DraftValidation.Reading::ruleId).containsExactly("R1", "R2", "R3");
         assertThat(result.readings().get(0).text().get("en"))
-                .isEqualTo("Rule R1 applies when tier is GOLD. Then fee is 0 VND.");
+                .isEqualTo("Rule R1 applies when tier is Gold. Then fee is 0 VND.");
         assertThat(result.readings().get(1).text().get("vi"))
                 .startsWith("Quy tắc R2 áp dụng khi tx count ít nhất là 3.");
         assertThat(result.readings().get(2).text().get("en")).startsWith("Rule R3 always applies; it has no condition.");
