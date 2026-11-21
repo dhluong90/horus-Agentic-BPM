@@ -298,6 +298,68 @@ export const draftValidation = z
     problems: z.array(validationProblem),
     problemsTruncated: z.boolean(),
     readings: z.array(ruleReading),
+    /** True when the draft is valid but too large for readings: `readings` is then empty and `readingsReason` says why. */
+    readingsTruncated: z.boolean().optional(),
+    readingsReason: z.string().nullable().optional(),
   })
   .loose();
 export type DraftValidation = z.infer<typeof draftValidation>;
+
+/*
+ * Plain-language readings (readVersion, readDiff, simulateReadings; RLE-091 to RLE-093). The engine writes every
+ * sentence in every language of its catalogue; the cockpit only picks the user's language and style (PD-027).
+ */
+export const readingText = z.object({ full: z.string(), short: z.string(), source: z.string().optional() }).loose();
+export type ReadingText = z.infer<typeof readingText>;
+
+export const readingsByLanguage = z.record(z.string(), readingText);
+export type ReadingsByLanguage = z.infer<typeof readingsByLanguage>;
+
+export const ruleSetReadings = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int(),
+    languages: z.array(z.string()),
+    rows: z.array(z.object({ ruleId: z.string(), position: z.number().int(), readings: readingsByLanguage }).loose()),
+  })
+  .loose();
+export type RuleSetReadings = z.infer<typeof ruleSetReadings>;
+
+export const readingsDiff = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int(),
+    base: z.number().int(),
+    languages: z.array(z.string()),
+    rows: z.array(
+      z
+        .object({
+          ruleId: z.string(),
+          change: z.string(),
+          position: z.number().int().optional(),
+          basePosition: z.number().int().optional(),
+          readingChanged: z.boolean(),
+          previous: readingsByLanguage.nullable().optional(),
+          current: readingsByLanguage.nullable().optional(),
+        })
+        .loose(),
+    ),
+    unchangedCount: z.number().int(),
+  })
+  .loose();
+export type ReadingsDiff = z.infer<typeof readingsDiff>;
+export type ReadingsDiffRow = ReadingsDiff['rows'][number];
+
+const outcomeReading = z.object({ kind: z.string(), ruleIds: z.array(z.string()), readings: readingsByLanguage }).loose();
+export type OutcomeReading = z.infer<typeof outcomeReading>;
+
+export const simulationReadings = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int(),
+    baselineVersion: z.number().int().nullable(),
+    languages: z.array(z.string()),
+    results: z.array(z.object({ index: z.number().int(), reference: z.string().optional(), label: z.string().nullable().optional(), changed: z.boolean(), simulated: outcomeReading, baseline: outcomeReading.nullable() }).loose()),
+  })
+  .loose();
+export type SimulationReadings = z.infer<typeof simulationReadings>;

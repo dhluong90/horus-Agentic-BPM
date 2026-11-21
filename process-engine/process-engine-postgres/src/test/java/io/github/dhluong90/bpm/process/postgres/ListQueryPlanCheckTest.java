@@ -205,6 +205,8 @@ class ListQueryPlanCheckTest {
         samples.put("tasks-role-undated", List.of("bank-a", "CREDIT_OFFICER", both, "", 51));
         samples.put("tasks-group-undated", List.of("bank-a", "branch-hcm-01", both, "", 51));
         samples.put("tasks-any-undated", List.of("bank-a", both, INSTANCE, 51));
+        samples.put("instance-node-activities", List.of("bank-a", INSTANCE, from, T));
+        samples.put("instance-history-entries", List.of("bank-a", INSTANCE, from, T, 201));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));

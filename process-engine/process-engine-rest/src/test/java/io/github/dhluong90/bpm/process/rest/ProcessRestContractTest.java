@@ -132,6 +132,25 @@ class ProcessRestContractTest {
     }
 
     @Test
+    void PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304() throws Exception {
+        MvcResult first = exchange(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "200"));
+        assertThat(first.getResponse().getStatus()).isEqualTo(200);
+        assertThat(first.getResponse().getContentAsString()).contains("\"durationMs\":190000")
+                .contains("\"attempts\":2").contains("\"actor\":\"svc-kyc\"");
+        String etag = first.getResponse().getHeader("ETag");
+        assertThat(etag).matches("\"[0-9a-f]{32}\"");
+
+        MvcResult again = exchange(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities")
+                .param("limit", "200").header("If-None-Match", etag));
+        assertThat(again.getResponse().getStatus()).isEqualTo(304);
+        assertThat(again.getResponse().getContentAsByteArray()).isEmpty();
+
+        assertProblem(get(BASE + "/instances/01JD0000000000000000000077/activities"), 404, "INSTANCE_NOT_FOUND");
+        assertProblem(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "0"), 400,
+                "QUERY_INVALID");
+    }
+
+    @Test
     void TR_SEC_08_completing_a_task_twice_is_a_problem_that_matches_the_contract() throws Exception {
         exchange(post(BASE + "/instances").contentType(MediaType.APPLICATION_JSON).header("Idempotency-Key", "s-1")
                 .content("{\"definitionKey\":\"card-fee-review\"}"));
@@ -391,6 +410,23 @@ class ProcessRestContractTest {
                     Map.of("review", new io.github.dhluong90.bpm.process.api.NodeWindowStats.NodeWindow(1200, 1200, 0, 0,
                             0, 5_400_000L, 4_800_000L, 9_900_000L), "start", new io.github.dhluong90.bpm.process.api
                             .NodeWindowStats.NodeWindow(3, 0, 0, 0, 0, null, null, null)));
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.InstanceActivities activities(String instanceId, int limit) {
+            if (!FakeEngine.INSTANCE.equals(instanceId)) {
+                throw new io.github.dhluong90.bpm.process.api.InstanceNotFoundException("No instance " + instanceId);
+            }
+            if (limit < 1 || limit > 200) {
+                throw new io.github.dhluong90.bpm.process.api.QueryInvalidException("limit must be 1 to 200");
+            }
+            var verify = new io.github.dhluong90.bpm.process.api.InstanceActivities.Node("verify-docs",
+                    io.github.dhluong90.bpm.process.api.InstanceActivities.State.COMPLETED, NOW, NOW.plusSeconds(190),
+                    java.time.Duration.ofSeconds(190), 2, "svc-kyc", null, null);
+            var entry = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry("01JD0000000000000000000099",
+                    "NODE_ENTERED", "verify-docs", null, NOW);
+            return new io.github.dhluong90.bpm.process.api.InstanceActivities(instanceId, NOW, null, List.of(verify),
+                    List.of(entry), false);
         }
     }
 

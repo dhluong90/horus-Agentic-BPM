@@ -153,7 +153,7 @@
 .gate__buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .gate__reason { padding: 10px 12px; border-radius: var(--radius-m); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill); font-size: 13px; line-height: 1.45; }
 .btn:disabled { cursor: not-allowed; opacity: .55; }
-.btn--danger-quiet { border-color: var(--bad-fill); color: var(--bad); background: var(--surface); }
+.btn--danger-quiet { border-color: var(--bad-fill); color: var(--bad); font-weight: 600; background: var(--surface); }
 .linkbtn { border: 0; background: none; color: var(--accent); padding: 0; cursor: pointer; text-decoration: underline; font: inherit; }
 
 .field { display: flex; flex-direction: column; gap: 4px; }
@@ -520,3 +520,42 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 /* The amber marker on a condition header whose masking changed to not masked; the sentence is above the table. */
 .masking-flag { color: var(--warn-fill); font-size: 11px; cursor: help; }
 .rs-head__files { display: flex; align-items: center; gap: 4px; }
+
+/* ---------- Plain-language readings: the engine's sentences, shown one view at a time ---------- */
+.readings { display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 20px; }
+.readings__bar, .changes__switch, .sim__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.changes__switch { padding: 16px 20px 0; }
+.readings__count, .readings__foot { margin: 0; color: var(--muted); font: var(--type-label); }
+.readings__list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.reading { display: grid; grid-template-columns: minmax(96px, max-content) minmax(0, 1fr); gap: 4px 16px; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.reading--matched { background: var(--select); box-shadow: inset 3px 0 0 var(--accent); }
+.reading__id { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; padding-left: 8px; }
+.reading__id .change-mark, .reading__id .match-mark { margin-left: 4px; }
+.reading__body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.reading__text { margin: 0; font: var(--type-body); line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
+.reading__text--old { color: var(--ink-2); }
+.reading__text--old del { text-decoration-thickness: 1px; }
+.reading__text--new ins { text-decoration: none; background: var(--diff-mod); border-radius: var(--radius-xs); padding: 1px 4px; }
+.reading--added .reading__text--new ins { background: var(--diff-add); }
+.reading--removed .reading__text--old { color: var(--ink-2); }
+.reading__note { margin: 0; color: var(--muted); font: var(--type-caption); }
+.reading-empty { padding: var(--space-6) 0; }
+.reading-limit { background: var(--accent-soft); border-color: var(--accent-fill); align-items: center; }
+.reading-limit__title { font-weight: 600; margin: 0; }
+.reading-limit .alert__body p { margin: 0; }
+.alert__icon--info { color: var(--accent); font-weight: 600; }
+.reading-style button, .changes__switch .seg button { min-height: 32px; padding: 2px 12px; font: var(--type-label); font-weight: 600; }
+
+/* Simulate: this version's reading above the version in effect. */
+.sim__head { align-items: flex-start; }
+.sim__head .dock__hint { width: auto; flex: 1 1 140px; margin: 0; }
+.sim__run:disabled { background: var(--surface-3); color: var(--muted); border-color: transparent; opacity: 1; }
+.sim__action { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sim__sample { margin: 0; color: var(--ink-2); font: var(--type-caption); }
+.sim__reason { margin: 0; color: var(--ink-2); font: var(--type-caption); }
+.sim__result { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius-m); background: var(--surface-2); border: 1px solid var(--line); }
+.sim__verdict { align-self: flex-start; margin: 0; }
+.sim__side { display: flex; flex-direction: column; gap: 4px; }
+.sim__side--base { padding-top: 10px; border-top: 1px solid var(--line); }
+.sim__label { margin: 0; color: var(--muted); font: var(--type-caption); font-weight: 600; }
+.sim__again { align-self: flex-start; }

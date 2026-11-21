@@ -1,9 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { meHoa, metaWithProcesses } from '../src/mocks/fixtures';
-import { MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
+import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from '../src/mocks/caseDemo';
+import { INSTANCE_ID, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
 import { createFakeProcessEngine, type ProcessSeed } from '../src/mocks/processEngine';
 import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
+import { routeHostSignIn } from './hostSignIn';
 import { mockHost, rememberLocale } from './mockHost';
 
 /*
@@ -47,6 +49,8 @@ interface Screen {
   title: Record<Locale, string | RegExp>;
   /** The fake engine's seed beyond the language: who started the case, who reported the answer. */
   seed?: Omit<ProcessSeed, 'locale'>;
+  /** The signed-in user, when not Hoa. */
+  user?: typeof meHoa;
   /** Steps after the page opens, for example taking the review and starting an override. */
   prepare?: (page: Page, locale: Locale) => Promise<void>;
   /** The element that must be visible without scrolling at 1440x900: the primary action, or the diagram. */
@@ -65,9 +69,34 @@ const T = {
   reported: { en: 'You reported this answer, so someone else decides.', vi: 'Bạn đã gửi câu trả lời này, nên người khác quyết định.' },
   secondPerson: { en: 'A second person decides this answer, not you.', vi: 'Người thứ hai quyết định câu trả lời này, không phải bạn.' },
   masked: { en: 'Part of the answer is masked, so only an override is possible.', vi: 'Một phần câu trả lời đã được che, nên chỉ có thể sửa.' },
+  cases: { en: 'Cases', vi: 'Hồ sơ' },
+  timeline: { en: 'Timeline', vi: 'Dòng thời gian' },
+  openTask: { en: 'Open the task', vi: 'Mở công việc' },
+  kyc: { en: 'Customer onboarding (KYC)', vi: 'Mở khách hàng mới (KYC)' },
+  dispute: { en: 'Card dispute', vi: 'Khiếu nại thẻ' },
+  noCases: { en: 'No case of this process has started yet.', vi: 'Chưa có hồ sơ nào của quy trình này.' },
+  incident: { en: 'The agent did not answer in time.', vi: 'Tác tử AI không trả lời kịp thời hạn.' },
+  capture: { en: 'Capture application', vi: 'Nhập hồ sơ vay' },
+  verify: { en: 'Verify identity documents', vi: 'Xác minh giấy tờ tuỳ thân' },
+  noActivities: { en: 'This service does not report step activity yet.', vi: 'Dịch vụ này chưa cung cấp hoạt động theo từng bước.' },
+  notFound: { en: 'This service has no case with this reference.', vi: 'Dịch vụ này không có hồ sơ với mã tham chiếu này.' },
+  blocked: { en: 'You cannot work on tasks.', vi: 'Bạn không thể xử lý công việc.' },
+  noActivityAction: { en: 'Opens once step activity is reported.', vi: 'Mở được khi dịch vụ báo hoạt động.' },
+  pick: { en: 'Select a step to see what happened there.', vi: 'Chọn một bước để xem điều gì đã diễn ra.' },
 } as const;
 
+const caseTitle = (key: string) => ({ en: `Case ${key}`, vi: `Hồ sơ ${key}` });
+const selectStep = (nodeId: string) => async (page: Page) => {
+  await page.locator(`[data-node="${nodeId}"]`).click();
+};
+
 const SCREENS: readonly Screen[] = [
+  {
+    name: 'landing-home',
+    hash: '#/',
+    title: { en: /^Good (morning|afternoon|evening)/, vi: /^Chào buổi/ },
+    focal: (page, locale) => page.getByRole('link', { name: locale === 'en' ? 'Processes' : 'Quy trình' }).first(),
+  },
   {
     name: 'processes-list',
     hash: '#/processes',
@@ -118,13 +147,91 @@ const SCREENS: readonly Screen[] = [
     title: T.review,
     focal: (page, locale) => page.getByRole('button', { name: T.record[locale] }),
   },
+  {
+    name: 'definition-cases',
+    hash: '#/processes/loan-origination/3/cases',
+    title: T.loan,
+    focal: (page) => page.getByRole('link', { name: 'APP-1038' }),
+  },
+  {
+    name: 'definition-cases-empty',
+    hash: '#/processes/card-dispute/1/cases',
+    title: T.dispute,
+    focal: (page, locale) => page.getByText(T.noCases[locale]),
+  },
+  {
+    name: 'instance-waiting',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    focal: (page, locale) => page.getByRole('link', { name: T.openTask[locale] }),
+  },
+  {
+    name: 'instance-step-completed',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    prepare: selectStep('capture'),
+    focal: (page) => page.locator('.inspector__summary'),
+  },
+  {
+    name: 'instance-timeline',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
+    focal: (page) => page.locator('.timeline tbody tr').first(),
+  },
+  {
+    name: 'instance-incident',
+    hash: `#/instances/${INCIDENT_INSTANCE_ID}`,
+    title: caseTitle('APP-1045'),
+    focal: (page, locale) => page.locator('.inspector__incident').getByText(T.incident[locale]),
+  },
+  {
+    name: 'instance-kyc-step',
+    hash: `#/instances/${KYC_INSTANCE_ID}`,
+    title: caseTitle('KYC-2207'),
+    prepare: selectStep('verify-docs'),
+    focal: (page) => page.locator('.inspector__summary'),
+  },
+  {
+    name: 'instance-completed',
+    hash: `#/instances/${BOOKED_INSTANCE_ID}`,
+    title: caseTitle('APP-1038'),
+    focal: (page, locale) => page.getByText(T.pick[locale]),
+  },
+  {
+    name: 'instance-task-not-allowed',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    user: { ...meHoa, permissions: ['rules:read', 'processes:read'] },
+    focal: (page, locale) => page.getByText(T.blocked[locale]),
+  },
+  {
+    name: 'instance-no-activities',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    seed: { activities: 'missing' },
+    focal: (page, locale) => page.getByText(T.noActivityAction[locale]),
+  },
+  {
+    name: 'instance-activities-error',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    seed: { activities: 'failing' },
+    focal: (page) => page.locator('.inspector .alert--error'),
+  },
+  {
+    name: 'instance-not-found',
+    hash: '#/instances/01JD4I0N0SUCH0000000000000',
+    title: { en: /^Case$/, vi: /^Hồ sơ$/ },
+    focal: (page, locale) => page.getByText(T.notFound[locale]),
+  },
 ];
 
 async function openScreen(page: Page, screen: Screen, viewport: { width: number; height: number }, theme: 'light' | 'dark', locale: Locale) {
   await page.setViewportSize(viewport);
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await rememberLocale(page, locale);
-  await mockEngines(page, { ...screen.seed, locale });
+  await mockEngines(page, { ...screen.seed, locale }, screen.user);
   await page.goto(`./${screen.hash}`);
   await expect(page.getByRole('heading', { level: 1, name: screen.title[locale] })).toBeVisible();
   await expect(page.locator('.skeleton')).toHaveCount(0);
@@ -135,6 +242,43 @@ async function bottomOf(locator: ReturnType<Page['locator']>): Promise<number> {
   const box = await locator.boundingBox();
   if (!box) throw new Error('element has no box');
   return box.y + box.height;
+}
+
+/** The smallest text in the diagram on screen, in px, and whether a node's centre sits in the middle of the canvas. */
+async function diagramFacts(page: Page, nodeId?: string) {
+  const svg = page.locator('[data-layout="auto"]');
+  await expect(svg).toBeVisible();
+  return svg.evaluate((element, id) => {
+    const scale = element.getBoundingClientRect().width / (element as SVGSVGElement).viewBox.baseVal.width;
+    const texts = Array.from(element.querySelectorAll('text')).filter((text) => text.textContent.trim() !== '' && !text.classList.contains('dg-node__glyph') && text.closest('.dg-badge--done') === null);
+    const frame = element.parentElement as HTMLElement;
+    const box = frame.getBoundingClientRect();
+    const node = id !== '' ? element.querySelector(`[data-node="${id}"]`) : null;
+    const nodeBox = node?.getBoundingClientRect();
+    const checks = Array.from(element.querySelectorAll('.dg-badge--done circle')).map((circle) => circle.getBoundingClientRect().width);
+    return {
+      smallest: Math.min(...texts.map((text) => parseFloat(getComputedStyle(text).fontSize) * scale)),
+      smallestCheck: Math.min(99, ...checks),
+      scrolls: frame.scrollWidth > frame.clientWidth + 1,
+      atStart: frame.scrollLeft <= 0,
+      atEnd: frame.scrollLeft >= frame.scrollWidth - frame.clientWidth - 1,
+      scrollLeft: frame.scrollLeft,
+      offCentre: nodeBox ? Math.abs(nodeBox.left + nodeBox.width / 2 - (box.left + box.width / 2)) : undefined,
+      nodeInView: nodeBox ? nodeBox.left >= box.left && nodeBox.right <= box.right : undefined,
+    };
+  }, nodeId ?? '');
+}
+
+/** At the default Fit a case draws no text under 12 px, its checks are at least 22 px, and the selected step is in view. */
+async function expectReadableCase(page: Page) {
+  const picked = page.locator('[data-layout="auto"] .dg-node--selected');
+  const selected = (await picked.count()) > 0 ? await picked.getAttribute('data-node') : null;
+  await expect(async () => {
+    const facts = await diagramFacts(page, selected ?? undefined);
+    expect(facts.smallest).toBeGreaterThanOrEqual(12);
+    expect(facts.smallestCheck).toBeGreaterThanOrEqual(22);
+    if (selected !== null) expect(facts.nodeInView).toBe(true);
+  }).toPass({ timeout: 5_000 });
 }
 
 for (const screen of SCREENS) {
@@ -148,9 +292,38 @@ for (const screen of SCREENS) {
           await expect(focal).toBeVisible();
           expect(await bottomOf(focal)).toBeLessThanOrEqual(viewport.height);
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+          if (screen.name.startsWith('instance-') && screen.name !== 'instance-not-found' && screen.name !== 'instance-timeline') await expectReadableCase(page);
           await page.screenshot({ path: `e2e/screenshots/${file}`, fullPage: false });
         });
       }
+    }
+  }
+}
+
+/** The journey starts on the host's own sign-in form, with the same host label as the cockpit's service chip. */
+for (const viewport of VIEWPORTS) {
+  for (const theme of THEMES) {
+    for (const locale of LOCALES) {
+      test(`TR_UI_03_visual_sign-in_${String(viewport.width)}x${String(viewport.height)}_${theme}_${locale}`, async ({ page }) => {
+        await page.setViewportSize(viewport);
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await rememberLocale(page, locale);
+        await routeHostSignIn(page, locale === 'en' ? 'Retail banking' : 'Ngân hàng bán lẻ');
+        await page.goto(`./login?lang=${locale}`);
+        const submit = page.getByRole('button', { name: locale === 'en' ? 'Sign in' : 'Đăng nhập', exact: true });
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await expect(page.getByLabel(locale === 'en' ? 'Username' : 'Tên đăng nhập')).toBeVisible();
+        await expect(submit).toBeVisible();
+        expect(await bottomOf(submit)).toBeLessThanOrEqual(viewport.height);
+        await page.screenshot({ path: `e2e/screenshots/proc-sign-in-${String(viewport.width)}x${String(viewport.height)}-${theme}-${locale}.png`, fullPage: false });
+        if (viewport.height === 900 && locale === 'en') {
+          // Known host finding, reported on the pull request: each demo user button is named "Sign in as lan, Author",
+          // which does not start with its visible text (label-content-name-mismatch). The fix belongs to the host page.
+          const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+          const serious = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id);
+          expect(serious.filter((id) => id !== 'label-content-name-mismatch')).toEqual([]);
+        }
+      });
     }
   }
 }
@@ -266,6 +439,97 @@ for (const locale of LOCALES) {
     await expect(page.locator('main')).not.toContainText(/hmac|9f4a/);
   });
 }
+
+for (const locale of LOCALES) {
+  test(`CKP_017_an_unavailable_task_says_why_in_one_line_${locale}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, locale);
+    await mockEngines(page, { locale }, { ...meHoa, permissions: ['rules:read', 'processes:read'] });
+    await page.goto(`./#/instances/${INSTANCE_ID}`);
+    const reason = page.getByText(T.blocked[locale]);
+    await expect(reason).toBeVisible();
+    expect((await reason.boundingBox())?.height ?? 99).toBeLessThanOrEqual(24);
+  });
+
+  test(`CKP_017_the_task_breadcrumb_leads_back_to_the_case_${locale}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, locale);
+    await mockEngines(page, { locale });
+    await page.goto(`./#/tasks/${REVIEW_TASK_ID}`);
+    const crumbs = page.locator('.crumbs');
+    await expect(crumbs.getByRole('link', { name: T.loan[locale] })).toHaveAttribute('href', '#/processes/loan-origination/3/cases');
+    await expect(crumbs.getByRole('link', { name: caseTitle('APP-1042')[locale] })).toHaveAttribute('href', `#/instances/${INSTANCE_ID}`);
+    await expect(page.getByRole('heading', { level: 1, name: T.review[locale] })).toBeVisible();
+    // The engine node id is under Details only, never in the rendered body.
+    expect(await page.locator('main').innerText()).not.toContain('loans-7f9c');
+  });
+}
+
+for (const viewport of VIEWPORTS) {
+  test(`CKP_017_a_wide_case_opens_at_the_12px_floor_centred_on_the_current_step_${String(viewport.height)}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockEngines(page);
+    for (const [id, step] of [[KYC_INSTANCE_ID, 'approve'], [INCIDENT_INSTANCE_ID, 'assess-documents']] as const) {
+      await page.goto(`./#/instances/${id}`);
+      await expect(page.locator(`[data-node="${step}"]`)).toHaveAttribute('aria-pressed', 'true');
+      await expect(async () => {
+        const facts = await diagramFacts(page, step);
+        expect(facts.smallest).toBeGreaterThanOrEqual(12);
+        expect(facts.scrolls).toBe(true);
+        // Centred, unless the canvas cannot scroll further toward that side.
+        expect(facts.nodeInView).toBe(true);
+        expect((facts.offCentre ?? 99) <= 24 || facts.atStart || facts.atEnd).toBe(true);
+      }).toPass({ timeout: 5_000 });
+      await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+      // The side panel stays beside the drawing above 1180 px.
+      const panel = await page.getByRole('complementary', { name: 'Selected step' }).boundingBox();
+      const canvas = await page.locator('.dg__frame').boundingBox();
+      expect(panel && canvas && panel.x >= canvas.x + canvas.width && Math.round(panel.width) === 360).toBe(true);
+    }
+  });
+}
+
+test('CKP_017_a_wide_case_pans_by_keyboard_and_by_drag', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockEngines(page);
+  await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
+  const frame = page.getByRole('region', { name: 'Diagram canvas. Use the arrow keys to move around.' });
+  await expect(frame).toBeVisible();
+  await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+  const left = () => frame.evaluate((element) => element.scrollLeft);
+  await frame.focus();
+  expect(await frame.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe('none');
+  const before = await left();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(left).toBeLessThan(before);
+  const moved = await left();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(left).toBeGreaterThan(moved);
+  // Dragging the canvas background pans the other way from the pointer.
+  const box = await frame.boundingBox();
+  if (!box) throw new Error('canvas has no box');
+  const start = await left();
+  await page.mouse.move(box.x + 30, box.y + box.height - 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 230, box.y + box.height - 20, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(left).toBeLessThan(start);
+});
+
+test('CKP_017_whole_case_is_an_overview_below_the_floor', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockEngines(page);
+  await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
+  await page.getByRole('button', { name: 'Whole case' }).click();
+  await expect(page.getByText('Overview of the whole case; text is smaller.')).toBeVisible();
+  await expect(async () => {
+    const facts = await diagramFacts(page);
+    expect(facts.scrolls).toBe(false);
+  }).toPass({ timeout: 5_000 });
+  await expect(page.locator('[data-minimap="true"]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Fit' }).click();
+  await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+});
 
 for (const viewport of VIEWPORTS) {
   test(`CKP_069_diagram_text_is_at_least_12px_at_fit_and_fit_uses_the_canvas_${String(viewport.height)}`, async ({ page }) => {

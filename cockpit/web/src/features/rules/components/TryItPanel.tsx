@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent, type ReactNode } from 'react';
 import type { InputClause, RuleSetDefinition, RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n, type Locale } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
@@ -100,22 +100,55 @@ function Field({ input, value, currency, invalid, onChange, onCurrency }: {
   );
 }
 
+/**
+ * The sample form of Try it and Simulate: one field per input, money with separators and its currency. `read`
+ * gives the inputs to send, or marks the first field that cannot be sent and gives undefined.
+ */
+export function useSampleForm(definition: RuleSetDefinition): { fields: ReactNode; read: () => Record<string, unknown> | undefined; describe: () => string } {
+  const { locale } = useI18n();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [invalid, setInvalid] = useState<string | undefined>(undefined);
+  const [typedCurrency, setTypedCurrency] = useState<Record<string, string>>({});
+  const currencies: Record<string, string> = {};
+  for (const input of definition.inputs) {
+    const known = currencyOfInput(definition, input.name);
+    if (known.kind === 'known') currencies[input.name] = known.code;
+    else if (known.kind === 'unknown') currencies[input.name] = typedCurrency[input.name] ?? '';
+  }
+  const fields = definition.inputs.map((input) => (
+    <Field key={input.name} input={input} currency={currencyOfInput(definition, input.name)} value={values[input.name] ?? ''} invalid={invalid === input.name}
+      onChange={(text) => { setValues((current) => ({ ...current, [input.name]: text })); }}
+      onCurrency={(code) => { setTypedCurrency((current) => ({ ...current, [input.name]: code })); }} />
+  ));
+  const read = () => {
+    const built = build(definition, values, currencies, locale);
+    if (!built.ok) {
+      setInvalid(built.field);
+      return undefined;
+    }
+    setInvalid(undefined);
+    return built.inputs;
+  };
+  // The sample as the user typed it, for naming it beside a result. A masked input is never written out.
+  const describe = () => definition.inputs
+    .filter((input) => (values[input.name] ?? '').trim() !== '')
+    .map((input) => {
+      const text = (values[input.name] ?? '').trim();
+      const code = currencies[input.name]?.trim().toUpperCase();
+      const shown = input.mask === true ? '••••' : input.type === 'money' && code ? `${text} ${code}` : text;
+      return `${clauseLabel(input, locale)}: ${shown}`;
+    })
+    .join(', ');
+  return { fields, read, describe };
+}
+
 /** Evaluate sample inputs against the version in effect and show the matched row and outputs. */
 export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; onMatched: (ruleIds: string[]) => void }) {
   const { t, locale } = useI18n();
   const { can } = useRulesSession();
   const evaluate = useEvaluate(version.ruleSet, (answer) => { onMatched(answer.matchedRuleIds); });
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [invalid, setInvalid] = useState<string | undefined>(undefined);
-  const [typedCurrency, setTypedCurrency] = useState<Record<string, string>>({});
   const definition = version.definition;
-  const currencyFor = (name: string) => currencyOfInput(definition, name);
-  const currencies: Record<string, string> = {};
-  for (const input of definition.inputs) {
-    const known = currencyFor(input.name);
-    if (known.kind === 'known') currencies[input.name] = known.code;
-    else if (known.kind === 'unknown') currencies[input.name] = typedCurrency[input.name] ?? '';
-  }
+  const form = useSampleForm(definition);
 
   if (!can('rules:evaluate')) {
     return (
@@ -127,13 +160,8 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const built = build(definition, values, currencies, locale);
-    if (!built.ok) {
-      setInvalid(built.field);
-      return;
-    }
-    setInvalid(undefined);
-    evaluate.start(built.inputs);
+    const inputs = form.read();
+    if (inputs !== undefined) evaluate.start(inputs);
   };
   const result = evaluate.data;
 
@@ -141,11 +169,7 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
     <div className="try">
       <p className="dock__hint">{version.status === 'PUBLISHED' ? t('try.hint') : t('try.draftNote')}</p>
       <form className="try__form" onSubmit={submit}>
-        {definition.inputs.map((input) => (
-          <Field key={input.name} input={input} currency={currencyFor(input.name)} value={values[input.name] ?? ''} invalid={invalid === input.name}
-            onChange={(text) => { setValues((current) => ({ ...current, [input.name]: text })); }}
-            onCurrency={(code) => { setTypedCurrency((current) => ({ ...current, [input.name]: code })); }} />
-        ))}
+        {form.fields}
         <button type="submit" className="btn btn--primary try__run" disabled={evaluate.isPending} aria-busy={evaluate.isPending}>
           <span aria-hidden="true">▷</span> {evaluate.isPending ? t('try.running') : t('try.run')}
         </button>

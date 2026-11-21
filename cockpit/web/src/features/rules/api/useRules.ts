@@ -29,6 +29,8 @@ function useKeys() {
     diff: (name: string, version: number, hash: string, lockVersion: number, base: number) => [...rules, name, 'diff', version, hash, lockVersion, base] as const,
     // The checked text is the key: an answer is only ever shown for the table it was given.
     check: (name: string, version: number, text: string) => [...rules, name, 'check', version, text] as const,
+    readings: (name: string, version: number, hash: string) => [...rules, name, 'readings', version, hash] as const,
+    diffReadings: (name: string, version: number, hash: string, base: number) => [...rules, name, 'diff-readings', version, hash, base] as const,
   };
 }
 
@@ -267,4 +269,42 @@ export function useExportVersion(onDone: (exported: ExportedFile) => void) {
 export function useEvaluate(ruleSet: string, onDone: (result: DecisionResult) => void) {
   const { client } = useRulesSession();
   return useSingleFlight((inputs: Record<string, unknown>, key) => client.evaluate(ruleSet, inputs, key), onDone);
+}
+
+/** Readings are refused for good by these answers, so a retry cannot help: no permission, or too many rows to read. */
+function retryReading(failures: number, error: unknown): boolean {
+  const status = error instanceof HostCallError && error.hostError.kind === 'problem' ? error.hostError.status : undefined;
+  return failures < 2 && status !== 403 && status !== 404 && status !== 422;
+}
+
+/** Every row of a version in plain language (RLE-091); keyed by the content hash, so new content is read again. */
+export function useVersionReadings(version: Pick<RuleSetVersion, 'ruleSet' | 'version' | 'canonicalHash'>, enabled: boolean) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: keys.readings(version.ruleSet, version.version, version.canonicalHash),
+    queryFn: ({ signal }) => client.readVersion(version.ruleSet, version.version, signal),
+    enabled,
+    staleTime: 60_000,
+    retry: retryReading,
+  });
+}
+
+/** The changed rows of a diff, each read in both versions (RLE-092); off while there is no base. */
+export function useDiffReadings(version: Pick<RuleSetVersion, 'ruleSet' | 'version' | 'canonicalHash'>, base: number | undefined) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: keys.diffReadings(version.ruleSet, version.version, version.canonicalHash, base ?? 0),
+    queryFn: ({ signal }) => client.readDiff(version.ruleSet, version.version, base ?? 0, signal),
+    enabled: base !== undefined,
+    staleTime: 60_000,
+    retry: retryReading,
+  });
+}
+
+/** Runs one sample beside the version in effect and reads both outcomes (RLE-093). The engine logs nothing. */
+export function useSimulateReadings(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
+  const { client } = useRulesSession();
+  return useMutation({ mutationFn: (inputs: Readonly<Record<string, unknown>>) => client.simulateReadings(version.ruleSet, version.version, [inputs]) });
 }

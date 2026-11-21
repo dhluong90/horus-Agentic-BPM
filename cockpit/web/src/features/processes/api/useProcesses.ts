@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
 import type { TaskAnswer } from '../../../api/processes/processesClient';
 import type { DefinitionSummary, Task } from '../../../api/processes/schemas';
@@ -19,6 +19,8 @@ function useKeys() {
     graph: (key: string, version: number) => [...base, 'graph', key, version] as const,
     task: (id: string) => [...base, 'task', id] as const,
     instance: (id: string) => [...base, 'instance', id] as const,
+    activities: (id: string) => [...base, 'instance', id, 'activities'] as const,
+    instances: (key: string) => [...base, 'instances', key] as const,
   };
 }
 
@@ -66,13 +68,39 @@ export function useTask(id: string) {
 }
 
 /** The task's instance, for who started it. A reviewer without processes:read gets no answer; four eyes then rests on the engine. */
-export function useInstance(id: string | undefined) {
+export function useInstance(id: string | undefined, live = false) {
   const { client, can } = useProcessesSession();
   const keys = useKeys();
   return useQuery({
     queryKey: keys.instance(id ?? ''),
     queryFn: ({ signal }) => client.getInstance(id ?? '', signal),
     enabled: id !== undefined && can('processes:read'),
+    ...(live ? { refetchInterval: 15_000 } : {}),
+  });
+}
+
+/** The instances of one process key, every status, newest first, one page at a time (Load more). */
+export function useInstances(definitionKey: string, pageLimit: number) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  return useInfiniteQuery({
+    queryKey: keys.instances(definitionKey),
+    queryFn: ({ pageParam, signal }) => client.listInstances({ definitionKey, cursor: pageParam, limit: pageLimit, signal }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => (last.hasNext && last.nextCursor !== null ? last.nextCursor : undefined),
+    staleTime: 10_000,
+  });
+}
+
+/** What happened at each step of one instance, as the engine computed it (PRE-027). Read again every 15 s while open. */
+export function useInstanceActivities(id: string, enabled: boolean) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: keys.activities(id),
+    queryFn: ({ signal }) => client.getInstanceActivities(id, signal),
+    enabled,
+    refetchInterval: 15_000,
   });
 }
 
