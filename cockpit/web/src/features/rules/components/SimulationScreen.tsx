@@ -9,6 +9,7 @@ import { useSimulateSamples } from '../api/useRules';
 import { valueLabel } from '../model/cells';
 import { clauseLabel } from '../model/reading';
 import { emptyRow, isBlank, readPastedRows, referenceOf, type PasteProblem, type SampleRow } from '../model/samples';
+import { editBlock } from './ActionDock';
 import { ProblemNotice } from './ProblemNotice';
 import { EmptyNote, ForbiddenNote, MaskedNote, ReadingStyleSwitch, TooLargeNote, maskedInputs, readingIn, useViewerReadingStyle } from './ReadingParts';
 import { SampleControl, buildSample, currencyOfInput, sampleCurrencies } from './TryItPanel';
@@ -50,7 +51,7 @@ function describe(definition: RuleSetDefinition, row: SampleRow, currencies: Rea
       if (input.mask === true) shown = '••••';
       else if (input.type === 'boolean') shown = text === 'true' ? yes : no;
       else if (input.allowed) shown = valueLabel(text);
-      else if (input.type === 'money') shown = `${text} ${currencies[input.name] ?? ''}`.trim();
+      else if (input.type === 'money') shown = `${text}\u00a0${currencies[input.name] ?? ''}`.trim();
       else shown = text;
       return `${clauseLabel(input, locale)} ${shown}`;
     })
@@ -183,9 +184,10 @@ function Results({ answer, run, definition }: { answer: SimulationReadings; run:
  * The Simulate view of a draft. Without the permissions the samples can still be typed; Run stays visible,
  * disabled, with the reason beside it.
  */
-export function SimulationScreen({ version }: { version: RuleSetVersion }) {
+export function SimulationScreen({ version, onEdit }: { version: RuleSetVersion; onEdit: () => void }) {
   const { t, locale } = useI18n();
-  const { can } = useRulesSession();
+  const session = useRulesSession();
+  const { can } = session;
   const definition = version.definition;
   const simulate = useSimulateSamples(version);
   const [view, setView] = useState<View>('samples');
@@ -217,7 +219,16 @@ export function SimulationScreen({ version }: { version: RuleSetVersion }) {
   const show = (next: View) => { focusTitle.current = true; setView(next); };
 
   if (version.status !== 'DRAFT') return <div className="simrun"><EmptyNote text="sim.draftsOnly" /></div>;
-  if (definition.rules.length === 0) return <div className="simrun"><EmptyNote text="sim.noRows" /></div>;
+  if (definition.rules.length === 0) {
+    // The way out of an empty draft is to add rows to it; shown only to someone who may edit it.
+    const mayEdit = editBlock(version, session) === undefined;
+    return (
+      <div className="simrun">
+        <EmptyNote text="sim.noRows" />
+        {mayEdit ? <div className="simrun__actions simrun__actions--center"><button type="button" className="btn" onClick={onEdit}><span aria-hidden="true">✎</span> {t('editor.edit')}</button></div> : null}
+      </div>
+    );
+  }
 
   const send = (samples: Run) => { setRun(samples); simulate.mutate(samples.samples); };
   const start = (event: FormEvent) => {
@@ -293,9 +304,11 @@ export function SimulationScreen({ version }: { version: RuleSetVersion }) {
           </div>
           <div className="simrun__actions">
             {answer !== undefined ? <ReadingStyleSwitch /> : null}
-            <button type="button" className="btn" onClick={() => { simulate.reset(); show('samples'); }}>
-              <span aria-hidden="true">←</span> {t('sim.changeSamples')}
-            </button>
+            {failure !== 'forbidden' ? (
+              <button type="button" className="btn" onClick={() => { simulate.reset(); show('samples'); }}>
+                <span aria-hidden="true">←</span> {t('sim.changeSamples')}
+              </button>
+            ) : null}
           </div>
         </div>
         <div role="status" aria-live="polite" className="simrun__body">

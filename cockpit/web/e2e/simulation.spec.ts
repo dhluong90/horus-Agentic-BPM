@@ -27,6 +27,7 @@ const RUN: Words = { en: 'Run simulation', vi: 'Chạy mô phỏng' };
 const PASTE: Words = { en: 'Paste rows', vi: 'Dán các dòng' };
 const ROWS: Words = { en: 'Rows', vi: 'Các dòng' };
 const ADD: Words = { en: 'Add these rows', vi: 'Thêm các dòng này' };
+const EDIT: Words = { en: 'Edit draft', vi: 'Sửa bản nháp' };
 const BACK: Words = { en: 'Change the samples', vi: 'Đổi các mẫu' };
 
 const FIVE: Words = {
@@ -83,9 +84,9 @@ const SCREENS: readonly Screen[] = [
   { name: 'error', scenario: 'rules-author-simulate', hash: '#/rules/card-fee/2/simulate', primary: BACK, prepare: runFive,
     route: async (page) => { await page.route(SIM, (route) => route.fulfill(problem(500, 'INTERNAL'))); },
     ready: async (page) => { await expect(page.locator('.simrun .alert--error')).toBeVisible(); } },
-  { name: 'forbidden', scenario: 'rules-author-simulate', hash: '#/rules/card-fee/2/simulate', primary: BACK, prepare: runFive,
+  { name: 'forbidden', scenario: 'rules-author-simulate', hash: '#/rules/card-fee/2/simulate', prepare: runFive,
     route: async (page) => { await page.route(SIM, (route) => route.fulfill(problem(403, 'PERMISSION_DENIED'))); },
-    ready: async (page) => { await expect(page.locator('.simrun .reading-empty')).toBeVisible(); } },
+    ready: async (page) => { await expect(page.locator('.simrun .reading-empty')).toBeVisible(); await expect(page.locator('.simrun__actions .btn')).toHaveCount(0); } },
   { name: 'too-large', scenario: 'rules-author-simulate', hash: '#/rules/card-fee/2/simulate', primary: BACK, prepare: runFive,
     route: async (page) => { await page.route(SIM, (route) => route.fulfill(problem(422, 'READINGS_TOO_LARGE'))); },
     ready: async (page) => { await expect(page.locator('.simrun .reading-limit')).toBeVisible(); } },
@@ -97,10 +98,10 @@ const SCREENS: readonly Screen[] = [
   { name: 'masked-results', scenario: 'rules-author-simulate', hash: '#/rules/kyc-routing/2/simulate', primary: BACK, visible: '.simrun__results',
     prepare: async (page, locale) => { await page.locator('.simrun__grid input[type="password"]').fill('SEG-4471'); await page.getByRole('button', { name: RUN[locale], exact: true }).click(); },
     ready: async (page) => { await expect(page.locator('.simrun .reading__note')).toBeVisible(); } },
-  { name: 'no-rows', scenario: 'rules-author-simulate', hash: '#/rules/new-fees/1/simulate',
+  { name: 'no-rows', scenario: 'rules-author-simulate', hash: '#/rules/new-fees/1/simulate', primary: EDIT,
     ready: async (page) => { await expect(page.locator('.simrun .reading-empty')).toBeVisible(); } },
   { name: 'drafts-only', scenario: 'rules-author-simulate', hash: '#/rules/card-fee/1/simulate',
-    ready: async (page) => { await expect(page.locator('.simrun .reading-empty')).toBeVisible(); } },
+    ready: async (page) => { await expect(page.locator('.simrun .reading-empty')).toBeVisible(); await expect(page.locator('.rs-tabs [role="tab"][aria-selected="true"]')).toHaveCount(0); } },
 ];
 
 async function checkScreen(page: Page, viewport: { width: number; height: number }, locale: Locale, primary: Words | undefined, visible: string | undefined) {
@@ -115,6 +116,8 @@ async function checkScreen(page: Page, viewport: { width: number; height: number
     expect((box?.y ?? 0) + Math.min(box?.height ?? 0, 120), 'result is visible without scrolling').toBeLessThanOrEqual(viewport.height);
   }
   const main = page.locator('main');
+  // One primary action per view: the header's Request publish is secondary beside the view's own.
+  expect(await main.locator('.btn--primary:visible').count()).toBeLessThanOrEqual(1);
   // No spec ids, raw expressions, raw JSON or masked values; one language at a time. An error code appears only
   // inside the closed Details disclosure, as the styleguide allows, so only the visible text is checked for it.
   await expect(main).not.toContainText(/CK-F-|CKP-0|PD-\d|RLE-0|READINGS_TOO_LARGE|PERMISSION_DENIED/);

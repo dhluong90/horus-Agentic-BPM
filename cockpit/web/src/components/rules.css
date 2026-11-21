@@ -570,6 +570,7 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .simrun__sub { margin: 0; color: var(--muted); font: var(--type-body); }
 .simrun__actions { display: flex; align-items: center; gap: var(--space-2, 8px); flex-wrap: wrap; }
 .simrun__run:disabled { opacity: 1; background: var(--surface-3); border-color: transparent; color: var(--muted); }
+.simrun__actions--center { justify-content: center; }
 .simrun__reason { margin: calc(-1 * var(--space-2, 8px)) 0 0; align-self: flex-end; color: var(--ink-2); font: var(--type-caption); }
 .simrun__hint { margin: 0; color: var(--muted); font: var(--type-caption); }
 .simrun__foot { display: flex; flex-direction: column; gap: 4px; }

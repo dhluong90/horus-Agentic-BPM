@@ -134,6 +134,7 @@ describe('simulation of a draft', () => {
   it('CKP_004_a_draft_without_rows_says_so', async () => {
     open('#/rules/new-fees/1/simulate');
     expect(await screen.findByText('This draft has no rows to simulate yet.')).toBeVisible();
+    expect(within(screen.getByText('This draft has no rows to simulate yet.').closest('.simrun') as HTMLElement).getByRole('button', { name: /Edit draft/ })).toBeEnabled();
   });
 
   it('CKP_004_too_many_samples_refused_and_failed_read_in_words', async () => {
@@ -148,12 +149,14 @@ describe('simulation of a draft', () => {
     await user.selectOptions(await screen.findByLabelText('S1, Tier'), 'GOLD');
     await user.click(screen.getByRole('button', { name: 'Run simulation' }));
     expect(await screen.findByText('The service reads a limited number of samples at once. Run fewer samples.')).toBeVisible();
-    refusal = [403, 'PERMISSION_DENIED'];
-    await again();
-    expect(await screen.findByText('You cannot simulate rules on this service.')).toBeVisible();
     refusal = [500, 'INTERNAL'];
     await again();
     expect(await screen.findByText('The service could not answer. Try again.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
+    // A user who cannot run anything is not offered to change the samples.
+    refusal = [403, 'PERMISSION_DENIED'];
+    await again();
+    expect(await screen.findByText('You cannot simulate rules on this service.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Change the samples/ })).toBeNull();
   });
 });

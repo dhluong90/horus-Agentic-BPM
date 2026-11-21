@@ -117,7 +117,7 @@ function ChangesLens({ version, base }: { version: RuleSetVersion; base: Version
   return <>{switcher}{body}</>;
 }
 
-function LensContent({ lens, version, base, matched, onOpenTable }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string>; onOpenTable: () => void }) {
+function LensContent({ lens, version, base, matched, onOpenTable, onEdit }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string>; onOpenTable: () => void; onEdit: () => void }) {
   switch (lens) {
     case 'table':
     case 'edit':
@@ -131,7 +131,7 @@ function LensContent({ lens, version, base, matched, onOpenTable }: { lens: Lens
     case 'source':
       return <SourceView version={version} />;
     case 'simulate':
-      return <SimulationScreen version={version} />;
+      return <SimulationScreen version={version} onEdit={onEdit} />;
   }
 }
 
@@ -194,7 +194,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: next.version ?? version.version, lens: next.lens ?? (next.version !== undefined ? undefined : lens) });
   };
   const drafting = version.status === 'DRAFT';
-  const tabLens: 'table' | 'readings' | 'changes' | 'history' | 'simulate' = lens === 'source' || lens === 'edit' || (lens === 'simulate' && !drafting) ? 'table' : lens;
+  // Simulation runs on drafts only: on another version no tab is active, as the body is not any of them.
+  const simulateOnOther = lens === 'simulate' && !drafting;
+  const tabLens: 'table' | 'readings' | 'changes' | 'history' | 'simulate' | undefined = simulateOnOther ? undefined : lens === 'source' || lens === 'edit' ? 'table' : lens;
   // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
   const comparing = !editing && lens === 'changes';
   // The samples and their results need the full width too; the inspector steps aside.
@@ -220,7 +222,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
 
   const main: ReactNode = (
     <div className="card workbench__main">
-      <LensContent lens={lens} version={version} base={base} matched={matched} onOpenTable={() => { go({ lens: 'table' }); }} />
+      <LensContent lens={lens} version={version} base={base} matched={matched} onOpenTable={() => { go({ lens: 'table' }); }} onEdit={() => { go({ lens: 'edit' }); }} />
     </div>
   );
 
@@ -240,7 +242,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
               <select id="version-picker" className="field__input field__input--compact" value={version.version} onChange={(e) => { go({ version: Number(e.target.value) }); }}>
                 {versions.map((v) => <option key={v.version} value={v.version}>{t(`versionState.${v.status}`, { version: String(v.version) })}</option>)}
               </select>
-              <HeaderActions version={version} onEdit={() => { go({ lens: 'edit' }); }}
+              <HeaderActions version={version} demoteRequest={lens === 'simulate'} onEdit={() => { go({ lens: 'edit' }); }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
                 requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
