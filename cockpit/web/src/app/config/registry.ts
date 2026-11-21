@@ -70,6 +70,11 @@ function checkDesignRules(registry: HostRegistry): RegistryProblem | undefined {
     baseUrls.add(host.baseUrl);
   }
   if (!registry.hosts.some((host) => host.enabled)) return { reason: 'no-enabled-host' };
+  // Per-host tokens need each host's scope, or that host's token could not be requested (DESIGN section 4).
+  if (registry.auth.mode === 'oidc' && registry.auth.tokenMode === 'per-host') {
+    const index = registry.hosts.findIndex((host) => host.enabled && host.scope === undefined);
+    if (index >= 0) return { reason: 'invalid', pointer: `/hosts/${String(index)}/scope`, message: 'Required with tokenMode per-host' };
+  }
   return undefined;
 }
 
@@ -91,11 +96,20 @@ export function parseRegistry(body: unknown): RegistryResult {
   return problem ? { ok: false, problem } : result;
 }
 
+/**
+ * The cockpit's own directory as an absolute URL. Every page of the build names it in a meta element (the sign-in
+ * callback page sits two levels down), so the registry is read from the same place on every page.
+ */
+export function cockpitBase(doc: Document = document): URL {
+  const root = doc.querySelector('meta[name="horus-cockpit-root"]')?.getAttribute('content') ?? './';
+  return new URL(root, doc.baseURI);
+}
+
 /** Loads the registry served next to index.html. Never throws. */
 export async function loadRegistry(fetchImpl: typeof fetch = fetch): Promise<RegistryResult> {
   let response: Response;
   try {
-    response = await fetchImpl(REGISTRY_FILE, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual' });
+    response = await fetchImpl(new URL(REGISTRY_FILE, cockpitBase()).toString(), { cache: 'no-store', credentials: 'same-origin', redirect: 'manual' });
   } catch {
     return { ok: false, problem: { reason: 'unavailable', status: undefined } };
   }
@@ -109,7 +123,7 @@ export async function loadRegistry(fetchImpl: typeof fetch = fetch): Promise<Reg
   return parseRegistry(body);
 }
 
-/** In this release the cockpit works with one host: the first enabled one (host switching comes later). */
+/** Embedded mode works with one host: the first enabled one. */
 export function selectHost(registry: HostRegistry): RegistryHost | undefined {
   return registry.hosts.find((host) => host.enabled);
 }

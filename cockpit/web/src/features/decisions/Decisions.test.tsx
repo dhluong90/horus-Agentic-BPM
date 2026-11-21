@@ -189,13 +189,28 @@ describe('one decision', () => {
 
   it('CKP_072_a_decision_of_another_tenant_or_missing_reads_as_not_found', async () => {
     open('#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7ZZ');
-    expect(await screen.findByText('No decision with this id in tenant bank-a.')).toBeInTheDocument();
+    expect(await screen.findByText('Decision not found for tenant bank-a.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('CKP_042_a_user_without_the_decision_log_is_told_so_and_no_decision_is_requested', async () => {
+    open(`#/decisions/${NAMED}`, 'rules-auditor-no-log');
+    expect(await screen.findByText('You do not have permission to open decisions.')).toBeInTheDocument();
+    expect(decisionCalls()).toEqual([]);
+  });
+
+  it('CKP_042_a_link_with_markup_or_a_long_id_is_not_valid_and_nothing_of_it_is_rendered', async () => {
+    open(`#/decisions/${encodeURIComponent('<img src=x onerror=alert(1)>')}`);
+    expect(await screen.findByText('This link is not valid.')).toBeInTheDocument();
+    expect(document.querySelector('img[src="x"]')).toBeNull();
+    open(`#/decisions/${NAMED}X`);
+    expect(await screen.findAllByText('This link is not valid.')).not.toHaveLength(0);
+    expect(decisionCalls()).toEqual([]);
   });
 
   it('CKP_072_a_link_that_is_not_a_decision_id_is_refused_before_any_request', async () => {
     open('#/decisions/not-a-decision');
-    expect(await screen.findByText('This link does not name a decision.')).toBeInTheDocument();
+    expect(await screen.findByText('This link is not valid.')).toBeInTheDocument();
     expect(decisionCalls()).toEqual([]);
   });
 });

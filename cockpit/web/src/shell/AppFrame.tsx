@@ -68,7 +68,7 @@ function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
     <div className="frame">
       <NavRail areas={areas} current={area} reviewCount={reviewCount} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : route.name === 'decision' ? <DecisionRefused /> : <NotAvailable />}
       </main>
     </div>
   );
@@ -105,6 +105,22 @@ function NotAvailable() {
       <PageHead id="unavailable-title" title={t('area.unavailable.title')} subtitle={t('area.unavailable.subtitle')} />
       <article className="card">
         <EmptyState text={t('area.unavailable.body')} action={{ label: t('menu.home'), href: formatRoute({ name: 'home' }) }} />
+      </article>
+    </section>
+  );
+}
+
+/**
+ * A decision link opened by someone who may not read the decision log (CKP-042): said in words, and no decision
+ * is requested.
+ */
+function DecisionRefused() {
+  const { t } = useI18n();
+  return (
+    <section className="workspace" aria-labelledby="decision-refused-title">
+      <PageHead id="decision-refused-title" title={t('decisions.title')} subtitle={t('area.unavailable.subtitle')} />
+      <article className="card" role="note">
+        <EmptyState text={t('dlog.link.noPermission')} action={{ label: t('menu.home'), href: formatRoute({ name: 'home' }) }} />
       </article>
     </section>
   );

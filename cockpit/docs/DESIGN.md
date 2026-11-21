@@ -110,7 +110,7 @@ The cockpit reads its host list from one file, **`cockpit-hosts.json`**, served 
 | `auth.issuer`, `auth.clientId` | with `oidc` | | Issuer URL (https) and the public client id registered at the bank's identity provider |
 | `auth.scopes` | no | `[]` | Extra sign-in scopes; `openid` is always added |
 | `auth.tokenMode` | no | `per-host` | `per-host`: one access token per host, requested with the host's `scope`, so a token is valid at one host only. `shared`: one token for all hosts, audience lists every host |
-| `auth.redirectPath`, `auth.postLogoutRedirectPath` | no | `auth/callback`, empty | Paths relative to the cockpit |
+| `auth.redirectPath`, `auth.postLogoutRedirectPath` | no | `auth/callback`, empty | Paths relative to the cockpit. The bundle ships the callback as the page `auth/callback/index.html`, so the redirect URI the cockpit sends, and the identity provider registers, is `<cockpit>/auth/callback/` with the trailing slash: any static server serves that page with no rewrite rule, and its assets resolve at any cockpit path. Every page names the cockpit's own directory in `<meta name="horus-cockpit-root">`, from which the registry is read |
 | `hosts[].id` | yes | | Kebab-case, unique; appears in merged lists and in URLs (`/hosts/loans/instances/...`) |
 | `hosts[].label` | yes | | A string, or a map per locale with at least `en` |
 | `hosts[].baseUrl` | yes | | `https://` origin plus optional path prefix, no trailing slash; `http://localhost` for development; empty string means same origin |

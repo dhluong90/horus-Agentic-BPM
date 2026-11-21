@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { mockHost, setScenario } from '../mocks/node';
 
@@ -146,11 +146,31 @@ describe('host registry', () => {
     expect(requested.every((path) => path.endsWith('/cockpit-hosts.json'))).toBe(true);
   });
 
-  it('TR_UI_01_registry_with_identity_provider_sign_in_is_refused_in_this_release_and_calls_no_host', async () => {
+  it('CKP_013_registry_with_identity_provider_sends_the_browser_to_sign_in_with_pkce_before_any_host_call', async () => {
     setScenario('registry-oidc');
-    render(<App />);
+    const navigated: string[] = [];
+    const oidc = {
+      fetchImpl: (async () => Response.json({
+        issuer: 'https://idp.bank.example/realms/operations',
+        authorization_endpoint: 'https://idp.bank.example/realms/operations/auth',
+        token_endpoint: 'https://idp.bank.example/realms/operations/token',
+      })) as typeof fetch,
+      pending: new Map<string, string>(),
+    };
+    render(<App oidc={{
+      fetchImpl: oidc.fetchImpl,
+      pending: { getItem: (key) => oidc.pending.get(key) ?? null, setItem: (key, value) => { oidc.pending.set(key, value); }, removeItem: (key) => { oidc.pending.delete(key); } },
+      navigate: (url) => { navigated.push(url); },
+      randomBytes: (length) => new Uint8Array(length).fill(7),
+      sha256: async () => new Uint8Array(32).fill(9).buffer,
+      now: () => 0,
+    }} />);
 
-    expect(await screen.findByText(/not available in this version/)).toBeInTheDocument();
+    expect(await screen.findByText('Signing you in…')).toBeInTheDocument();
+    await vi.waitFor(() => { expect(navigated).toHaveLength(1); });
+    const url = new URL(navigated[0] ?? '');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('scope')).toBe('openid loans-bpm');
     expect(requested.every((path) => path.endsWith('/cockpit-hosts.json'))).toBe(true);
   });
 });

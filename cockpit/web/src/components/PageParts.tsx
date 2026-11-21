@@ -58,6 +58,7 @@ export function LoadingRows({ rows = 3 }: { rows?: number }) {
 /** What a failed call means for the user. 404 and 405: the host's engine is older than this list. */
 function errorKey(host: HostError): MessageKey {
   if (host.kind === 'signed-out') return 'area.error.signedOut';
+  if (host.kind === 'no-access') return 'area.error.forbidden';
   const status = host.kind === 'problem' || host.kind === 'unexpected-response' ? host.status : undefined;
   if (status === 403) return 'area.error.forbidden';
   if (status === 404 || status === 405) return 'area.error.notOffered';

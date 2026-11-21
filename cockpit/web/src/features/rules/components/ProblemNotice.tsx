@@ -30,6 +30,8 @@ function messageKey(error: HostError): MessageKey {
     }
     case 'signed-out':
       return 'error.signedOut.title';
+    case 'no-access':
+      return 'error.noAccess.title';
     case 'unreachable':
       return 'error.unreachable.title';
     case 'unexpected-response':

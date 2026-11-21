@@ -16,6 +16,8 @@ export interface SessionSummary {
   capabilities: readonly MessageKey[];
   /** The host's base URL, for sign-out on the host. */
   baseUrl: string;
+  /** Standalone mode signs out at the identity provider; embedded mode at the host. */
+  signOut?: () => Promise<boolean>;
 }
 
 export function initials(name: string): string {
@@ -42,7 +44,13 @@ export function capabilities(permissions: readonly string[]): MessageKey[] {
  * The top bar (styleguide section 8): product mark over the menu column, the breadcrumb over the content, then
  * one service pill, the language and theme switches and the account menu.
  */
-export function SessionHeader({ session, banner, breadcrumb }: { session: SessionSummary | undefined; banner: string | undefined; breadcrumb?: ReactNode }) {
+export function SessionHeader({ session, banner, breadcrumb, service }: {
+  session: SessionSummary | undefined;
+  banner: string | undefined;
+  breadcrumb?: ReactNode;
+  /** Standalone mode: the host picker, shown even before or without a session on the current host. */
+  service?: ReactNode;
+}) {
   const { t } = useI18n();
   return (
     <header className="topbar" data-testid="session-header">
@@ -59,7 +67,7 @@ export function SessionHeader({ session, banner, breadcrumb }: { session: Sessio
           {banner}
         </span>
       ) : null}
-      {session ? <ServicePill session={session} /> : null}
+      {service ?? (session ? <ServicePill session={session} /> : null)}
       <PreferenceControls />
       {session ? <AccountMenu session={session} /> : null}
     </header>
@@ -135,6 +143,13 @@ function AccountMenu({ session }: { session: SessionSummary }) {
         {session.capabilities.length > 0 ? <p className="account__roles">{session.capabilities.map((key) => t(key)).join(' · ')}</p> : null}
         <button type="button" className="btn btn--quiet account__signout" onClick={() => {
           setSignOutFailed(false);
+          if (session.signOut) {
+            // Standalone: the identity provider ends the session and sends the browser back.
+            void session.signOut().then((leaving) => {
+              if (!leaving) setSignOutFailed(true);
+            });
+            return;
+          }
           void signOutOfHost(session.baseUrl).then((signedOut) => {
             // Reload only once the host has ended the session; otherwise the user would still be signed in.
             if (signedOut) window.location.reload();

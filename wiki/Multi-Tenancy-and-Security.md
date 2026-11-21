@@ -14,7 +14,7 @@ The engines ask one extension point, `TenantResolver`, for the tenant of every c
 |---|---|---|
 | Default resolver | Reads the `tenancy.claim` attribute (default `tenant_id`) of the authenticated principal in the host's Spring Security context. A server-side session login and a validated bearer token are handled alike | OIDC hosts, and host web applications that embed the cockpit behind their own session login |
 | Your own `TenantResolver` bean | Replaces the default; you do not exclude any auto-configuration | The tenant comes from your user directory, a realm, a path or a subdomain |
-| `tenancy.dev-tenant` | One fixed tenant for local work without an identity provider | The `dev` profile only. The starter refuses to start when it is set outside `dev` |
+| `tenancy.dev-tenant` | One fixed tenant for local work without an identity provider, for session principals only | A purely local start-up: the `dev` profile, with no profile other than `dev` or `test` beside it (`prod,dev` is refused). A validated token without a tenant is still refused with `401`, so a client-credentials token is never served as the development tenant |
 
 No header-based resolver ships. A gateway header as the tenant source was rejected: one misconfigured gateway would let one tenant's operator see another tenant's data. A host that writes a resolver that trusts a request header owns that risk.
 
@@ -59,6 +59,8 @@ Expressions are parsed by a hand-written recursive-descent parser into a sealed,
 | Agent inputs | Masked before they are written to `pre_history`; the adapter receives the clear values (`TR-AGT-02`) |
 
 ## Cockpit security headers and CORS
+
+The example hosts, which banks copy, send the session cookie and `XSRF-TOKEN` with `Secure` and `SameSite=Lax`, and skip the CSRF check for a bearer request only when a token decoder is configured, so a session request with a junk `Authorization: Bearer` header is still CSRF-checked. The removed header-based tenancy properties stop the start-up even when the host declares its own `TenantResolver`.
 
 | Shape | Headers set by `cockpit-spring-boot-starter` |
 |---|---|
