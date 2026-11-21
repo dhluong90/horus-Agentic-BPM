@@ -36,9 +36,58 @@ export const definitionVersion = z
     createdBy: z.string(),
     createdAt: z.string(),
     effectiveFrom: nullableString,
+    /** Sent as If-Match on the lifecycle commands (approve, reject). */
+    lockVersion: z.number().int().optional(),
+    requestedBy: nullableString,
+    requestedAt: nullableString,
+    approvedBy: nullableString,
+    approvedAt: nullableString,
+    decisionComment: nullableString,
   })
   .loose();
 export type DefinitionVersion = z.infer<typeof definitionVersion>;
+
+const HASH = /^[0-9a-f]{64}$/;
+
+/** One side of a graph diff. The hash is omitted when the diff is truncated (PD-139). */
+const graphDiffSide = z
+  .object({ version: z.number().int().min(1), status: z.enum(DEFINITION_STATUSES), definitionHash: z.string().regex(HASH).optional() })
+  .loose();
+
+export const graphDiffNode = z.object({ id: z.string(), name: nullableString, type: z.string() }).loose();
+export type GraphDiffNode = z.infer<typeof graphDiffNode>;
+
+export const graphDiffChange = z
+  .object({ id: z.string(), name: nullableString, type: nullableString, path: z.string(), from: z.unknown(), to: z.unknown() })
+  .loose();
+export type GraphDiffChange = z.infer<typeof graphDiffChange>;
+
+export const graphDiffEdge = z
+  .object({ id: nullableString, from: z.string(), fromName: nullableString, to: z.string(), toName: nullableString, kind: z.string() })
+  .loose();
+export type GraphDiffEdge = z.infer<typeof graphDiffEdge>;
+
+/**
+ * Steps and links added, removed and changed between two stored versions (getDefinitionDiff, PRE-025, PRE-176).
+ * `approvableHash` is the target's definitionHash, the value an approval names after this review; it is null when
+ * the change list was cut off at its limit (`truncated`), because a cut-off list is not a complete review (PD-139).
+ */
+export const graphDiff = z
+  .object({
+    definitionKey: z.string(),
+    approvableHash: z.string().regex(HASH).nullable(),
+    base: graphDiffSide,
+    target: graphDiffSide,
+    identical: z.boolean(),
+    nodesAdded: z.array(graphDiffNode),
+    nodesRemoved: z.array(graphDiffNode),
+    nodesChanged: z.array(graphDiffChange),
+    edgesAdded: z.array(graphDiffEdge),
+    edgesRemoved: z.array(graphDiffEdge),
+    truncated: z.boolean(),
+  })
+  .loose();
+export type GraphDiff = z.infer<typeof graphDiff>;
 
 export const TASK_STATUSES = ['OPEN', 'CLAIMED', 'COMPLETED', 'CANCELLED'] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];

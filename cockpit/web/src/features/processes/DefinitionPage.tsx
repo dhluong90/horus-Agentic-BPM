@@ -1,49 +1,133 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { setCrumbLabel } from '../../app/crumbs';
+import { suppliedName, usePersonName } from '../../app/people';
+import { formatRoute, type ProcessLens } from '../../app/route';
+import type { DefinitionVersion } from '../../api/processes/schemas';
 import { AreaError, LoadingRows, PageHead } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
 import { Tabs } from '../rules/components/Tabs';
-import { useDefinitionGraph, useDefinitionVersion } from './api/useProcesses';
+import { useProcessesSession } from './api/processesContext';
+import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useRejectDefinition } from './api/useProcesses';
+import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
+import { DOCK_RESERVE } from './approval/dock';
+import { approvalBlock, reviewedHash, type DiffState } from './model/graphDiff';
 import { flowOrder, type DiagramGraph } from './model/bpmnGraph';
 import { nodeTypeLabel } from './model/nodeLabels';
 import { DefinitionStatusPill } from './ProcessesPage';
 
 /* The diagram and dagre load on demand, in their own chunk, only when a diagram opens (CKP-028). */
 const DefinitionDiagram = lazy(() => import('./diagram/DefinitionDiagram'));
+/* The Changes view loads with the diagram, only when a version's changes open (CKP-024). */
+const ChangesView = lazy(() => import('./approval/ChangesView'));
 
-type Lens = 'diagram' | 'steps';
+/** A version whose change from the version in effect is worth reading: a draft, or one waiting for approval. */
+const hasChanges = (version: DefinitionVersion | undefined) => version?.status === 'PENDING_APPROVAL' || version?.status === 'DRAFT';
 
-/** One definition version as a diagram, laid out automatically (CKP-069), with its steps as a list beside it. */
-export function DefinitionPage({ definitionKey, version }: { definitionKey: string; version: number }) {
+type Approve = ReturnType<typeof useApproveDefinition>;
+type Reject = ReturnType<typeof useRejectDefinition>;
+
+/**
+ * One definition version as a diagram, laid out automatically (CKP-069), with its steps as a list beside it. A
+ * version waiting for approval opens on its Changes (CKP-024) with the four-eyes decision docked below.
+ */
+export function DefinitionPage({ definitionKey, version, lens }: { definitionKey: string; version: number; lens?: ProcessLens | undefined }) {
   const { t } = useI18n();
+  const personName = usePersonName();
   const details = useDefinitionVersion(definitionKey, version);
   const graph = useDefinitionGraph(definitionKey, version);
-  const [lens, setLens] = useState<Lens>('diagram');
+  const reviewable = hasChanges(details.data);
+  const diff = useDefinitionDiff(definitionKey, version, reviewable);
+  const approve = useApproveDefinition(definitionKey);
+  const reject = useRejectDefinition(definitionKey);
+  // The outcome is the engine's answer to this page's decision; nothing is shown as decided before it.
+  const decided = approve.isSuccess ? 'approved' : reject.isSuccess ? 'rejected' : undefined;
+  const pending = details.data?.status === 'PENDING_APPROVAL';
+  const shown: ProcessLens = lens === 'changes' && !reviewable && details.data !== undefined ? 'diagram' : lens ?? (pending ? 'changes' : 'diagram');
   const title = details.data?.name ?? definitionKey;
   const name = details.data?.name ?? undefined;
   useEffect(() => {
     setCrumbLabel(name);
     return () => { setCrumbLabel(undefined); };
   }, [name]);
+  const select = (next: ProcessLens) => { window.location.hash = formatRoute({ name: 'process', key: definitionKey, version, lens: next }); };
+  const requester = details.data?.requestedBy;
+  const subtitle = pending && requester !== null && requester !== undefined
+    ? t('definition.subtitlePending', { version: String(version), who: personName(requester, suppliedName(details.data, 'requestedBy')) })
+    : t('definition.subtitle', { version: String(version) });
+  const docked = pending || decided !== undefined;
+  const items = [
+    ...(reviewable ? [{ id: 'changes' as const, label: t('definition.lens.changes') }] : []),
+    { id: 'diagram' as const, label: t('definition.lens.diagram') },
+    ...(graph.data ? [{ id: 'steps' as const, label: t('definition.lens.steps', { count: String(graph.data.nodes.length) }) }] : []),
+  ];
   return (
-    <section className="workspace" aria-labelledby="definition-title">
-      <PageHead id="definition-title" title={title} subtitle={t('definition.subtitle', { version: String(version) })}
+    <section className={docked ? 'workspace workspace--docked' : 'workspace'} aria-labelledby="definition-title">
+      <PageHead id="definition-title" title={title} subtitle={subtitle}
         action={details.data ? <DefinitionStatusPill status={details.data.status} /> : undefined} />
       <article className="card card--diagram">
         {graph.isPending ? <LoadingRows rows={6} /> : graph.isError ? (
           <AreaError error={graph.error} onRetry={() => { void graph.refetch(); }} />
         ) : (
-          <Tabs label={t('definition.lenses')} selected={lens} onSelect={setLens}
-            items={[{ id: 'diagram', label: t('definition.lens.diagram') }, { id: 'steps', label: t('definition.lens.steps', { count: String(graph.data.nodes.length) }) }]}>
-            {lens === 'diagram' ? (
+          <Tabs label={t('definition.lenses')} selected={shown} onSelect={select} items={items}>
+            {shown === 'changes' ? (
+              diff.isPending ? <LoadingRows rows={6} /> : diff.isError ? (
+                <AreaError error={diff.error} onRetry={() => { void diff.refetch(); }} />
+              ) : (
+                <Suspense fallback={<LoadingRows rows={6} />}>
+                  <ChangesView definitionKey={definitionKey} diff={diff.data} title={title} targetGraph={graph.data} />
+                </Suspense>
+              )
+            ) : shown === 'diagram' ? (
               <Suspense fallback={<LoadingRows rows={6} />}>
-                <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} />
+                <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: DOCK_RESERVE } : {})} />
               </Suspense>
             ) : <StepList graph={graph.data} />}
           </Tabs>
         )}
       </article>
+      {details.data !== undefined && docked ? (
+        decided !== undefined ? <DecidedLine version={details.data} outcome={decided} /> : (
+          <Decision version={details.data} diff={diff} approve={approve} reject={reject} onReload={() => { void details.refetch(); }} />
+        )
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * The decision for a pending version. The hash it approves is the one of the content the user first saw on this
+ * page; when the content on screen moves on, Approve waits until the user confirms they checked it again.
+ */
+function Decision({ version, diff, approve, reject, onReload }: {
+  version: DefinitionVersion; diff: ReturnType<typeof useDefinitionDiff>; approve: Approve; reject: Reject; onReload: () => void;
+}) {
+  const { userId, can } = useProcessesSession();
+  const state: DiffState = diff.isPending ? { status: 'loading' } : diff.isError ? { status: 'error' } : diff.data === null ? { status: 'first-version' } : { status: 'ready', diff: diff.data };
+  const current = reviewedHash(state, version);
+  const [seen, setSeen] = useState<string | undefined>(undefined);
+  // The first content the user sees is the content they review; taken once, while rendering (no extra paint).
+  if (seen === undefined && current !== undefined) setSeen(current);
+  const block = approvalBlock({ version, state, userId, canApprove: can('processes:approve'), seenHash: seen });
+  return (
+    <ApprovalDock version={version} block={block} hash={seen}
+      approve={{
+        start: ({ comment }) => { if (seen !== undefined) approve.mutate({ version, args: { expectedDefinitionHash: seen, comment } }); },
+        isPending: approve.isPending,
+        error: approve.error ?? undefined,
+      }}
+      reject={{
+        start: ({ reason }) => { reject.mutate({ version, args: reason }); },
+        isPending: reject.isPending,
+        error: reject.error ?? undefined,
+      }}
+      onReviewAgain={() => { approve.reset(); reject.reset(); setSeen(current); }}
+      onReload={() => {
+        approve.reset();
+        reject.reset();
+        onReload();
+        void diff.refetch();
+      }}
+    />
   );
 }
 

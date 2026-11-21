@@ -37,7 +37,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-021 | `CKP_021_task_form_completion_and_link` | Playwright | M2 | `TR-UI-02`, `TR-UI-03`, `TR-UI-04` | Planned |
 | CKP-022 | `CKP_022_tenant_switcher_allowed_tenants_only` | Playwright, proxy | M2 | `TR-SEC-03`, `TR-TEN-01` | Planned |
 | CKP-023 | `CKP_023_cockpit_drafts_off_hides_authoring` | Testing Library | M2 | `TR-DEF-04` | Planned |
-| CKP-024 | `CKP_024_process_approval_graph_diff_blocks_requester` | Playwright | M3 | `TR-SEC-04`, `TR-UI-02` | Planned |
+| CKP-024 | `CKP_024_*` (`cockpit/web/src/features/processes/model/graphDiff.test.ts`, `cockpit/web/src/features/processes/approval/ProcessApproval.test.tsx`, `cockpit/web/e2e/process-approval.spec.ts`) | Vitest, Testing Library with the fake Process Engine; Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, keyboard and axe-core | M3 | `TR-SEC-04`, `TR-UI-02` | Automated. The engine's graph diff drawn on the proposed and the in-effect diagram and listed in words; Approve sends the hash of the content first seen and the lock version; the requester and the importer see Approve disabled with one line; a cut-off change list is too large to approve here and sends nothing; a content-changed refusal is not retried; reject needs a reason; a first version has nothing to compare |
 | CKP-025 | `CKP_025_modeller_offers_catalogue_steps_and_saves_draft` | Playwright | M3 (cut candidate, fallback 1.1) | `TR-SEC-01`, `TR-UI-02` | Planned |
 | CKP-026 | `CKP_026_heatmap_window_stats_per_node` | Testing Library | M3 (cut candidate) | `TR-PERF-10` | Planned |
 | CKP-027 | `CKP_027_migration_plan_side_by_side_diagrams` | Playwright | M3 | `TR-MIG-03` | Planned |

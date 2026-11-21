@@ -11,6 +11,10 @@ import { useCallback, useSyncExternalStore } from 'react';
 export const LENSES = ['table', 'changes', 'history', 'source', 'edit'] as const;
 export type Lens = (typeof LENSES)[number];
 
+/** The views of one process definition version: its diagram, its steps as a list, and what it changes. */
+export const PROCESS_LENSES = ['diagram', 'steps', 'changes'] as const;
+export type ProcessLens = (typeof PROCESS_LENSES)[number];
+
 /**
  * A decision search kept in the URL, so a reload or a shared link shows the same list: one rule set and a
  * calendar month (`2026-11`), or one case reference. Nothing personal is ever put here (PD-108).
@@ -29,7 +33,7 @@ export type Route =
   | { name: 'decisions'; query?: DecisionQuery | undefined }
   | { name: 'decision'; decisionId: string }
   | { name: 'processes' }
-  | { name: 'process'; key: string; version: number }
+  | { name: 'process'; key: string; version: number; lens?: ProcessLens | undefined }
   | { name: 'task'; taskId: string };
 
 /** The menu areas. Every route belongs to exactly one. */
@@ -60,6 +64,10 @@ export function areaRoute(area: Area): Route {
   return area === 'rules' ? { name: 'rule-sets' } : { name: area };
 }
 
+function isProcessLens(value: string | undefined): value is ProcessLens {
+  return value !== undefined && (PROCESS_LENSES as readonly string[]).includes(value);
+}
+
 function isLens(value: string | undefined): value is Lens {
   return value !== undefined && (LENSES as readonly string[]).includes(value);
 }
@@ -84,8 +92,9 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
     return { name: 'rule-set', ruleSet, version: number, lens: isLens(lens) ? lens : undefined };
   }
   if (area === 'processes' && ruleSet !== undefined) {
-    // #/processes/<key>/<version>: one version's diagram. A key without a version number opens the list.
-    return version !== undefined && /^[1-9]\d*$/.test(version) ? { name: 'process', key: ruleSet, version: Number(version) } : { name: 'processes' };
+    // #/processes/<key>/<version>[/<lens>]: one version. A key without a version number opens the list.
+    if (version === undefined || !/^[1-9]\d*$/.test(version)) return { name: 'processes' };
+    return isProcessLens(lens) ? { name: 'process', key: ruleSet, version: Number(version), lens } : { name: 'process', key: ruleSet, version: Number(version) };
   }
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'home' || area === 'approvals' || area === 'decisions' || area === 'processes') return { name: area };
@@ -122,7 +131,7 @@ export function formatRoute(route: Route): string {
       return `#/${parts.join('/')}`;
     }
     case 'process':
-      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}`;
+      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}${route.lens !== undefined ? `/${route.lens}` : ''}`;
     case 'task':
       return `#/tasks/${encodeURIComponent(route.taskId)}`;
     case 'decisions': {
