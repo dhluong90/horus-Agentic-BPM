@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRE-072: a loan disbursement with service step faults. Two are refused at import: an unknown mode and a timeout
+     on a local step. The unregistered handler and adapter names are not checked at import; request-approval and
+     approval refuse them. The line numbers below are part of the test: post-to-core starts on line 31. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-disbursement-faults"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-disbursement-faults" name="Loan disbursement with faults" isExecutable="true">
+    <bpmn:startEvent id="start" name="Disbursement approved"/>
+    <bpmn:serviceTask id="reserve-limit" name="Reserve the limit" horus:handler="limits.reserv">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="notify-partner" name="Notify the partner" horus:handler="partner-hub"
+                      horus:mode="remote" horus:timeout="PT10S">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="check-cutoff" name="Check the cut-off time" horus:handler="limits.reserve"
+                      horus:timeout="PT5S">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <!-- The posting runs in a batch window in the host; the engine knows only local and remote steps. -->
+
+    <bpmn:serviceTask id="post-to-core" name="Post to core banking" horus:handler="core-banking" horus:mode="batch"/>
+    <bpmn:endEvent id="end" name="Disbursed"/>
+    <bpmn:sequenceFlow id="start__reserve" sourceRef="start" targetRef="reserve-limit"/>
+    <bpmn:sequenceFlow id="reserve__notify" sourceRef="reserve-limit" targetRef="notify-partner"/>
+    <bpmn:sequenceFlow id="notify__cutoff" sourceRef="notify-partner" targetRef="check-cutoff"/>
+    <bpmn:sequenceFlow id="cutoff__post" sourceRef="check-cutoff" targetRef="post-to-core"/>
+    <bpmn:sequenceFlow id="post__end" sourceRef="post-to-core" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

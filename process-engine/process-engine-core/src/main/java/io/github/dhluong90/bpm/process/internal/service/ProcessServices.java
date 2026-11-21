@@ -603,7 +603,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             requireStatus(current, "DRAFT", "request approval of");
             requireLock(current, expectedLockVersion);
             // PRE-016: the guardrail rule set may have changed since import; checked again before anything is written.
-            checkGuardrailContracts(tenant, storedProcess(current));
+            Process stored = storedProcess(current);
+            checkServiceRegistrations(stored);
+            checkGuardrailContracts(tenant, stored);
             Instant now = clock.instant();
             if (effectiveFrom != null && effectiveFrom.isBefore(now)) {
                 throw new InputInvalidException("effectiveFrom must not be in the past");
@@ -643,8 +645,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 + "(horus.bpm.lifecycle.approver-must-differ-from: makers)");
             }
             requireLock(current, expectedLockVersion);
-            // PRE-016: and again at approval, against the rule set version in effect now.
-            checkGuardrailContracts(tenant, storedProcess(current));
+            // PRE-016: and again at approval, against the rule set version in effect now; PRE-072: and the host's
+            // handlers and adapters, which may have been removed since the request.
+            Process stored = storedProcess(current);
+            checkServiceRegistrations(stored);
+            checkGuardrailContracts(tenant, stored);
             // An older version never overtakes a newer active one (PRE-021).
             for (StoredDefinition other : locked.all()) {
                 if ("ACTIVE".equals(other.status()) && other.version() > current.version()) {
@@ -1136,24 +1141,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return bounded.replaceAll("\\p{Cntrl}", "?");
     }
 
-    /** Every handler a definition names must be registered, and decisions need a Rule Engine. */
+    /**
+     * What an import checks against this host: agent steps' adapters and guard specs, and that decisions have a Rule
+     * Engine. The handlers and adapters of service steps are checked only when the version is about to become active
+     * (PRE-072), so a pipeline can import a draft before the host registers them; an import that activates at once
+     * (dev auto-approve) checks them too.
+     */
     private void checkBindings(Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
+        if (settings.definitionsAutoApprove()) {
+            problems.addAll(serviceRegistrationProblems(process));
+        }
         for (FlowElement element : process.flowElements()) {
             if (element instanceof ServiceTask task && task.extensions().first(AgentTaskSpec.class).isPresent()) {
                 agentBindings(task, problems);
-            } else if (element instanceof ServiceTask task) {
-                HandlerRef ref = task.extensions().first(HandlerRef.class).orElse(null);
-                String handler = ref == null ? null : ref.handler();
-                if (handler != null && ref != null && "remote".equals(ref.mode())) {
-                    if (!adapters.contains(handler)) {
-                        problems.add(DefinitionProblem.of("ADAPTER_NOT_REGISTERED", "No ServiceAdapter named " + handler
-                                + " is registered in this host", task.id()));
-                    }
-                } else if (handler != null && !invoker.hasHandler(handler)) {
-                    problems.add(DefinitionProblem.of("HANDLER_NOT_REGISTERED", "No ServiceTaskHandler named " + handler
-                            + " is registered in this host", task.id()));
-                }
             } else if (element instanceof BusinessRuleTask task && !invoker.hasRuleEngine()) {
                 // ADR-0027: refused at activation, naming the step, so nothing fails at run time.
                 problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "businessRuleTask " + task.id()
@@ -1165,6 +1166,41 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
         }
+    }
+
+    /**
+     * PRE-072: every handler and adapter a service step names is registered in this host. Checked at request-approval
+     * and approval, before anything is written; one problem per step, naming {@code step -> name}.
+     */
+    private void checkServiceRegistrations(Process process) {
+        List<DefinitionProblem> problems = serviceRegistrationProblems(process);
+        if (!problems.isEmpty()) {
+            throw new ValidationFailedException(problems);
+        }
+    }
+
+    private List<DefinitionProblem> serviceRegistrationProblems(Process process) {
+        List<DefinitionProblem> problems = new ArrayList<>();
+        for (FlowElement element : process.flowElements()) {
+            if (!(element instanceof ServiceTask task) || task.extensions().first(AgentTaskSpec.class).isPresent()) {
+                continue;
+            }
+            HandlerRef ref = task.extensions().first(HandlerRef.class).orElse(null);
+            String handler = ref == null ? null : ref.handler();
+            if (handler == null) {
+                continue;
+            }
+            if ("remote".equals(ref.mode())) {
+                if (!adapters.contains(handler)) {
+                    problems.add(DefinitionProblem.of("ADAPTER_NOT_REGISTERED", task.id() + " -> " + safe(handler)
+                            + ": no ServiceAdapter of this name is registered in this host", task.id()));
+                }
+            } else if (!invoker.hasHandler(handler)) {
+                problems.add(DefinitionProblem.of("HANDLER_NOT_REGISTERED", task.id() + " -> " + safe(handler)
+                        + ": no ServiceTaskHandler of this name is registered in this host", task.id()));
+            }
+        }
+        return problems;
     }
 
     /**

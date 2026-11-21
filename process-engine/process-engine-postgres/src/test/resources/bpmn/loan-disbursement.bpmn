@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A loan disbursement (PRE-070): the host reserves the customer's limit in its own database, in the step's
+     transaction, then posts the disbursement to the core banking system, which answers in seconds. The posting is a
+     remote step: it runs on the Async Wait-State with no transaction open and no connection held. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-disbursement"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-disbursement" name="Loan disbursement" isExecutable="true">
+    <bpmn:startEvent id="start" name="Disbursement approved"/>
+    <bpmn:serviceTask id="reserve-limit" name="Reserve the limit" horus:handler="limits.reserve" horus:resultVariable="reservation">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+        <horus:input name="currency" value="${instance.currency}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="post-to-core" name="Post to core banking" horus:handler="core-banking"
+                      horus:mode="remote" horus:timeout="PT10S" horus:resultVariable="posting">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+        <horus:input name="currency" value="${instance.currency}"/>
+        <horus:input name="reservationId" value="${instance.reservation.reservationId}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end" name="Disbursed"/>
+    <bpmn:sequenceFlow id="start__reserve" sourceRef="start" targetRef="reserve-limit"/>
+    <bpmn:sequenceFlow id="reserve__post" sourceRef="reserve-limit" targetRef="post-to-core"/>
+    <bpmn:sequenceFlow id="post__end" sourceRef="post-to-core" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>
