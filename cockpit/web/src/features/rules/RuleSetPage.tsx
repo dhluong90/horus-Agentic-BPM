@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { setCrumbLabel } from '../../app/crumbs';
-import { toHostError } from '../../api/hostError';
-import type { Rule, RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
+import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
-import { useApprove, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
+import { useApprove, useCopyVersion, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { saveFile } from '../../app/saveFile';
-import { DecisionCard, DetailsPanel, DraftsOffNote, EditDock, HeaderActions, type Review } from './components/ActionDock';
+import { DecisionCard, DetailsPanel, DraftsOffNote, editBlock, HeaderActions, type Review } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
-import { DraftChanges } from './components/DraftChanges';
-import { DraftEditor } from './components/DraftEditor';
+import { DraftWorkspace } from './components/DraftWorkspace';
 import { EvidenceExport } from './components/EvidenceExport';
 import { RuleSetHistoryView } from './components/RuleSetHistoryView';
 import { useFilePicker } from './components/ImportFileButton';
@@ -22,11 +20,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { Tabs } from './components/Tabs';
 import { Toast } from './components/Toast';
 import { TryItPanel } from './components/TryItPanel';
-import { diffRules } from './model/diff';
 import { formatDateTime } from './model/dates';
-import { draftReducer, initialDraft } from './model/draft';
-import { placeErrors } from './model/engineErrors';
-import { toDocument, toRows } from './model/table';
 import { columnLabel } from './model/reading';
 import { formatRoute, type Lens, type Route } from '../../app/route';
 import type { RuleDocument } from '../../api/rules/rulesClient';
@@ -51,7 +45,7 @@ function Subtitle({ version, editing }: { version: RuleSetVersion; editing: bool
   const { t, locale } = useI18n();
   const n = String(version.version);
   let text: string;
-  if (editing) text = t('editor.newDraftOf', { version: n });
+  if (editing) text = t('editor.editing', { version: n });
   else if (version.status === 'PUBLISHED') text = t('head.inEffect', { version: n, policy: t(policyKey(version.hitPolicy)) });
   else if (version.status === 'PENDING_APPROVAL') text = t('head.pending', { version: n, who: version.requestedBy ?? '', when: formatDateTime(version.requestedAt, locale) ?? '' });
   else if (version.status === 'DRAFT') text = t('head.draft', { version: n });
@@ -96,6 +90,7 @@ function ChangesLens({ version, base }: { version: RuleSetVersion; base: Version
 function LensContent({ lens, version, base, matched }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string> }) {
   switch (lens) {
     case 'table':
+    case 'edit':
       return <DecisionTable definition={version.definition} version={version.version} matched={matched} />;
     case 'changes':
       return <ChangesLens version={version} base={base} />;
@@ -129,14 +124,16 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
     window.document.getElementById('rule-set-title')?.focus();
     onTitleFocused();
   }, [focusTitle, onTitleFocused, version.version]);
-  const { t, locale } = useI18n();
-  const { can } = useRulesSession();
-  const [editing, setEditing] = useState(false);
-  const [draft, dispatch] = useReducer(draftReducer, version.definition, (definition) => initialDraft(toRows(definition)));
+  const { t } = useI18n();
+  const session = useRulesSession();
+  const { can } = session;
+  // The grid edits a stored draft only, and only for the user the engine lets replace it (its author).
+  const block = editBlock(version, session);
+  const editing = lens === 'edit' && block === undefined;
   const [matched, setMatched] = useState<ReadonlySet<string>>(new Set());
-  const save = useSaveDraft(version.ruleSet, (saved) => {
-    say(t('editor.saved', { version: String(saved.version) }));
-    navigate({ name: 'rule-set', ruleSet: saved.ruleSet, version: saved.version, lens: 'table' });
+  const newDraft = useCopyVersion(version.ruleSet, (created) => {
+    say(t('editor.created', { version: String(created.version) }));
+    navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'edit' });
   });
   const requestPublish = useRequestPublish((updated) => { say(t('dock.requested', { version: String(updated.version) })); });
   const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); });
@@ -152,25 +149,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
     const column = [...version.definition.inputs, ...version.definition.outputs].find((c) => c.name === name);
     return columnLabel(name, column?.description);
   };
-  const errors = placeErrors(save.error ? toHostError(save.error) : undefined);
-  const onlyLocated = errors.length > 0 && errors.every((e) => e.kind !== 'table');
-  const document = editing ? toDocument(version.definition, draft.rows) : undefined;
-  const draftRules = (document?.['rules'] ?? []) as Rule[];
-  const unsaved = editing ? diffRules(version.definition.rules, draftRules).filter((row) => row.change !== 'UNCHANGED').length : 0;
   const base = baseOf(versions, version.version);
   const go = (next: Partial<{ version: number; lens: Lens }>) => {
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: next.version ?? version.version, lens: next.lens ?? (next.version !== undefined ? undefined : lens) });
   };
-  const reset = (next: boolean) => {
-    dispatch({ type: 'reset', rows: toRows(version.definition) });
-    save.reset();
-    setEditing(next);
-  };
-  const saveDraft = () => {
-    // JSON text is valid YAML 1.2; this engine release imports YAML only, so the document is sent as YAML.
-    save.start({ contentType: 'application/yaml', text: JSON.stringify(document, null, 2) });
-  };
-  const tabLens: 'table' | 'changes' | 'history' = lens === 'source' ? 'table' : lens;
+  const tabLens: 'table' | 'changes' | 'history' = lens === 'source' || lens === 'edit' ? 'table' : lens;
   // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
   const comparing = !editing && lens === 'changes';
   // Approve only what is on screen: the diff shown must be of this version's content, and the content must be what
@@ -185,28 +168,18 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
       approve={{ start: ({ comment, acknowledgedWarnings }) => { approve.start({ version, comment, acknowledgedWarnings }); }, isPending: approve.isPending, error: approve.error }}
       reject={{ start: (reason) => { reject.start({ version, reason }); }, isPending: reject.isPending, error: reject.error }} />
   );
-  // The breadcrumb names what is on screen: "New draft" while editing, "Version N draft" for a draft.
-  const crumb = editing ? t('crumb.newDraft') : version.status === 'DRAFT' ? t('crumb.versionDraft', { version: String(version.version) }) : undefined;
+  // The breadcrumb names what is on screen: "Version N draft" for a draft, while editing too.
+  const crumb = version.status === 'DRAFT' ? t('crumb.versionDraft', { version: String(version.version) }) : undefined;
   useEffect(() => {
     setCrumbLabel(crumb);
     return () => { setCrumbLabel(undefined); };
   }, [crumb]);
 
-  let main: ReactNode;
-  if (editing) {
-    main = (
-      <div className="card workbench__main">
-        {save.error ? <ProblemNotice error={save.error} showDetail={locale !== 'en' || !onlyLocated} /> : null}
-        <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} errors={errors} />
-      </div>
-    );
-  } else {
-    main = (
-      <div className="card workbench__main">
-        <LensContent lens={lens} version={version} base={base} matched={matched} />
-      </div>
-    );
-  }
+  const main: ReactNode = (
+    <div className="card workbench__main">
+      <LensContent lens={lens} version={version} base={base} matched={matched} />
+    </div>
+  );
 
   return (
     <>
@@ -224,11 +197,17 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
               <select id="version-picker" className="field__input field__input--compact" value={version.version} onChange={(e) => { go({ version: Number(e.target.value) }); }}>
                 {versions.map((v) => <option key={v.version} value={v.version}>{t(`versionState.${v.status}`, { version: String(v.version) })}</option>)}
               </select>
-              <HeaderActions version={version} onEdit={() => { reset(true); }} requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
+              <HeaderActions version={version} onEdit={() => { go({ lens: 'edit' }); }}
+                newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
+                requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
           ) : null}
         </div>
         <DraftsOffNote />
+        {lens === 'edit' && block !== undefined && block !== 'dock.draftsOff' ? (
+          <p className="reason-line rs-head__note"><span aria-hidden="true">⊘</span> {t(block, { who: version.createdBy ?? '' })}</p>
+        ) : null}
+        {newDraft.error ? <ProblemNotice error={newDraft.error} /> : null}
         {picker.input}
         {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located refusedFile={importVersion.fileName !== undefined ? { fileName: importVersion.fileName, columnLabel: label } : undefined} /> : null}
         {exportFile.error ? <ProblemNotice error={exportFile.error} located columnLabel={label} /> : null}
@@ -256,20 +235,27 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
           </div>
         ) : null}
       </div>
-      <div className={editing ? 'workbench workbench--editing' : comparing ? 'workbench workbench--wide' : 'workbench'}>
+      {editing ? (
+        <DraftWorkspace latest={version}
+          onSaved={(saved) => {
+            say(t('editor.replaced', { version: String(saved.version) }));
+            navigate({ name: 'rule-set', ruleSet: saved.ruleSet, version: saved.version, lens: 'table' });
+          }}
+          onDiscard={() => { go({ lens: 'table' }); }} />
+      ) : null}
+      {editing ? null : <div className={comparing ? 'workbench workbench--wide' : 'workbench'}>
         {main}
         {comparing ? null : <aside className="workbench__side">
-          {editing ? <DraftChanges definition={version.definition} base={version.definition.rules} next={draftRules} /> : null}
-          {!editing && version.status === 'PENDING_APPROVAL' ? decision(false) : null}
-          {!editing && version.status === 'DRAFT' && version.warnings.length > 0 ? (
+          {version.status === 'PENDING_APPROVAL' ? decision(false) : null}
+          {version.status === 'DRAFT' && version.warnings.length > 0 ? (
             // The author sees what the approver will see, before requesting publication.
             <section aria-labelledby="draft-pii-title">
               <h2 id="draft-pii-title" className="sr-only">{t('pii.title')}</h2>
               <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
             </section>
           ) : null}
-          {!editing && lens === 'history' ? <EvidenceExport ruleSet={version.ruleSet} versions={versions} /> : null}
-          {!editing && lens !== 'history' ? (
+          {lens === 'history' ? <EvidenceExport ruleSet={version.ruleSet} versions={versions} /> : null}
+          {lens !== 'history' ? (
             <Inspector version={version} importedFrom={importedFrom[version.version]} onMatched={(ids) => {
               setMatched(new Set(ids));
               // The matched row is marked in the table, so the table is what the user sees next.
@@ -277,14 +263,8 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
             }} />
           ) : null}
         </aside>}
-      </div>
+      </div>}
       {comparing && version.status === 'PENDING_APPROVAL' ? decision(true) : null}
-      {editing ? <EditDock unsaved={unsaved} toFix={errors.length} saving={save.isPending} onSave={saveDraft} onDiscard={() => { reset(false); }}
-        onViewChanges={() => {
-          const card = window.document.getElementById('draft-changes');
-          card?.scrollIntoView({ block: 'center' });
-          card?.focus({ preventScroll: true });
-        }} /> : null}
     </>
   );
 }
@@ -342,7 +322,9 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
   return (
     <section className="workspace rs" aria-labelledby="rule-set-title">
       <Workbench
-        key={`${name}-${String(current.version)}-${String(current.lockVersion)}`}
+        // While the grid is open a newer lock version must not remount it: the edits stay, and the editor offers the
+        // newer version (DraftWorkspace). Elsewhere a new lock version is a fresh view.
+        key={`${name}-${String(current.version)}-${activeLens === 'edit' ? 'edit' : String(current.lockVersion)}`}
         version={current}
         versions={versions.data}
         openedHash={openedHash ?? current.canonicalHash}

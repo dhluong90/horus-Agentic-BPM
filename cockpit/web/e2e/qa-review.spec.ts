@@ -28,7 +28,7 @@ const SCREENS: { name: string; scenario: Scenario; hash: string; prepare?: (p: P
     await p.getByRole('button', { name: l === 'en' ? 'Actions for row R2' : 'Thao tác cho dòng R2' }).click();
     await p.getByRole('menuitem', { name: l === 'en' ? 'Duplicate row R2' : 'Nhân bản dòng R2' }).click();
     await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance', { exact: true }).fill('');
-    await p.getByRole('button', { name: l === 'en' ? 'Save draft' : 'Lưu bản nháp' }).click();
+    await p.keyboard.press('Enter');
     await expect(p.locator('.cell-edit--bad').first()).toBeVisible();
   } },
   { name: 'requester-pending', scenario: 'rules-author', hash: '#/rules/card-fee/2' },
@@ -110,8 +110,9 @@ test('QA_413_on_reject_shows_the_plain_message_and_code', async ({ page }) => {
 
 test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
   await open(page, 'rules-author', '#/rules/card-fee/1');
-  await page.route('**/api/bpm/rules/v1/rule-sets/card-fee/versions', async (route) => {
-    if (route.request().method() !== 'POST') { await route.fallback(); return; }
+  // The save replaces draft 3, the copy that New draft creates.
+  await page.route('**/api/bpm/rules/v1/rule-sets/card-fee/versions/3', async (route) => {
+    if (route.request().method() !== 'PUT') { await route.fallback(); return; }
     await route.fulfill({ status: 413, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Content Too Large', status: 413, code: 'PAYLOAD_TOO_LARGE', detail: 'The document is larger than 1048576 bytes', correlationId: '01JQA413' }) });
   });
   await page.getByRole('button', { name: 'New draft' }).click();

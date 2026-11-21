@@ -21,7 +21,8 @@ export function readingText(reading: CellReading, t: Translate): string {
     case 'group':
       return t('table.group');
     case 'raw':
-      return reading.text;
+      // An unfinished cell (an operator with no value yet) reads with the table's symbols, never engine syntax.
+      return reading.text.replace(/^>=/, '≥').replace(/^<=/, '≤').replace(/^==/, '=').replace(/^!=/, '≠');
   }
 }
 

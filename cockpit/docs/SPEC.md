@@ -60,12 +60,17 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ## Process Operations, `agentTask` & Grid Authoring (Cockpit 0.2)
 
 ### CKP-006 Interactive rule table editor validates expressions inline via `:validate`
-- **Traces to:** `TR-DET-02`, `TR-UI-02`
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, PD-113, `RLE-090`
 - **Milestone:** M2
-- **Given:** Analyst edits draft `card-fee` v3 in Cockpit 0.2 grid editor and types invalid condition `balance + 100 > 0`.
-- **When:** User clicks **Validate** or **Request Publish**.
-- **Then:** Server `:validate` error binds directly to row `R2` cell `balance` and blocks publish request submission until fixed.
-- **Example:** `Invalid cell "balance + 100" -> inline error on row R2, Request Publish blocked`.
+- **Given:** `card-fee` v1 `PUBLISHED` and v2 `DRAFT` written by `lan` (`lockVersion 0`); `lan` holds `rules:author`, `minh` holds `rules:approve`; `authoring.cockpit-drafts` on.
+- **When:** `lan` opens the grid of v2 (Edit draft, route `#/rules/card-fee/2/edit`), empties the amount of `R2`'s Balance condition and presses Enter; then fixes it and saves. Separately: `R3`'s fee is changed while someone else saves v2 (`lockVersion` 1), and `lan` saves; `lan` opens the grid of v1 or of a draft another author wrote; `minh` opens v2 after it is requested.
+- **Then:**
+  - A committed cell (Enter, leaving the cell, a row action) sends the table to `POST .../versions/2:validate`, with no `Idempotency-Key` and no `If-Match`. The engine's problem shows on row `R2`, cell Balance, as its catalogue message in the screen's language (`The cell is not a valid expression.` / `Ô này không phải là biểu thức hợp lệ.`); no code, expression, JSON or YAML is shown. An answer for an older table is never shown on a newer one (the check is keyed by the table text). A problem on a row or column the table no longer shows moves to its row or to the table.
+  - Save draft stays disabled while a checked cell has a problem, with one line saying why (`Fix the marked cells to save.`), and while nothing changed (`Nothing to save yet.`). Once fixed, Save draft sends `PUT .../versions/2` with `If-Match: "0"` and an `Idempotency-Key`, and the draft reads as a table again with Request publish as a separate step.
+  - On `409 VERSION_CONFLICT` the edits stay on screen, a notice says someone else saved the draft, Save draft says to load the latest version first, and the cockpit never retries with the newer lock version on its own. Load the latest version replaces the edits with the stored draft and its new lock version.
+  - Arrow keys move between cells (Up and Down by column, Left and Right by control, leaving text only at its start or end); Enter commits a cell; Escape puts back the value the cell had when it took the focus.
+  - An approved version is never edited: its grid route shows the table read only with `Approved versions never change. Start a new draft.`; New draft first creates a draft copy (`POST .../versions?copyOf=1`) and opens the grid on it. A draft another author wrote shows Edit draft disabled with `Only hoa can change this draft.` A reviewer of a pending version sees it read only with `Waiting for approval, so it cannot change.` beside the decision.
+- **Example:** `R2 Balance "≥" with no amount -> Enter -> :validate -> "The cell is not a valid expression." on R2/Balance, Save draft disabled; "≥ 40,000,000 VND" -> PUT v2 If-Match "0" -> saved`.
 - **Test ID:** `CKP_006_grid_editor_shows_row_validation_errors`
 
 ### CKP-007 `agentTask` inspector displays bounded inputs, schema verdict, guardrail rules, and override diff

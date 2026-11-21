@@ -15,7 +15,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
 interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
-export interface StoredHistory { action: 'CREATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
+export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
 export interface StoredVersion {
   ruleSet: string;
@@ -47,7 +47,25 @@ const hash = (text: string) => Array.from({ length: 8 }, (_, seed) => {
   return h.toString(16).padStart(8, '0');
 }).join('');
 
-interface Violation { ruleId: string | null; column: string | null; message: string }
+interface Violation { ruleId: string | null; column: string | null; message: string; code: string }
+
+/**
+ * The engine's problem catalogue (explain_en / explain_vi.properties): one sentence per code, never the cell's text.
+ * The `:validate` answer carries these by language code (RLE-090).
+ */
+const PROBLEM_CATALOGUE: Record<string, { en: string; vi: string }> = {
+  SYNTAX_ERROR: { en: 'The cell is not a valid expression.', vi: 'Ô này không phải là biểu thức hợp lệ.' },
+  UNKNOWN_INPUT: { en: 'The cell uses a name that is not a declared input.', vi: 'Ô này dùng một tên không phải là đầu vào đã khai báo.' },
+  TYPE_MISMATCH: { en: 'The cell mixes values of different types, or is not a true or false condition.', vi: 'Ô này trộn các giá trị khác kiểu, hoặc không phải là điều kiện đúng hoặc sai.' },
+  INVALID_LITERAL: { en: 'The cell has a date, time, money amount or number that is not written correctly.', vi: 'Ô này có ngày, giờ, số tiền hoặc số được viết sai.' },
+  UNKNOWN_OUTPUT: { en: 'The rule sets a value for an output that is not declared.', vi: 'Quy tắc này gán giá trị cho một đầu ra chưa được khai báo.' },
+  RULE_INVALID: { en: 'The rule cannot be accepted.', vi: 'Quy tắc này chưa được chấp nhận.' },
+  COLUMN_INVALID: { en: 'The column cannot be accepted.', vi: 'Cột này chưa được chấp nhận.' },
+  DOCUMENT_INVALID: { en: 'The document cannot be accepted.', vi: 'Tài liệu này chưa được chấp nhận.' },
+};
+
+/** At most this many problems in one `:validate` answer. */
+const PROBLEM_LIMIT = 100;
 
 function problem(status: number, code: string, detail: string, violations?: Violation[]): FakeResponse {
   const titles: Record<number, string> = { 400: 'Bad Request', 403: 'Forbidden', 404: 'Not Found', 409: 'Conflict', 413: 'Content Too Large', 422: 'Unprocessable Content' };
@@ -161,23 +179,28 @@ function validate(definition: Definition): Violation[] {
   for (const rule of definition.rules) {
     for (const [input, condition] of Object.entries(rule.when)) {
       if (!types.has(input)) {
-        found.push({ ruleId: rule.id, column: null, message: `unknown input '${input}'` });
+        found.push({ ruleId: rule.id, column: null, message: `unknown input '${input}'`, code: 'UNKNOWN_INPUT' });
         continue;
       }
       if (/^(==|!=|>=|<=|>|<)\s*$/.test(condition.trim())) {
-        found.push({ ruleId: rule.id, column: input, message: `Unexpected end of expression at position ${String(condition.trim().length + 1)}` });
+        found.push({ ruleId: rule.id, column: input, message: `Unexpected end of expression at position ${String(condition.trim().length + 1)}`, code: 'SYNTAX_ERROR' });
+        continue;
+      }
+      // Arithmetic on a money input with a plain number ("balance + 100 > 0") is a type error in the engine.
+      if (types.get(input) === 'money' && /[A-Za-z_]\w*\s*[-+*/]\s*\d/.test(condition)) {
+        found.push({ ruleId: rule.id, column: input, message: 'adds a number to a money', code: 'TYPE_MISMATCH' });
         continue;
       }
       const bare = /^(==|!=)\s*([A-Za-z_]\w*)$/.exec(condition);
-      if (bare && bare[2] !== 'true' && bare[2] !== 'false' && bare[2] !== 'null') found.push({ ruleId: rule.id, column: input, message: `Unknown input '${bare[2] ?? ''}' at position ${String(condition.indexOf(bare[2] ?? '') + 1)}` });
-      else if (types.get(input) === 'money' && /^(>=|<=|>|<|==|!=)\s*-?\d+(\.\d+)?$/.test(condition.trim())) found.push({ ruleId: rule.id, column: input, message: 'compares a money with a number' });
+      if (bare && bare[2] !== 'true' && bare[2] !== 'false' && bare[2] !== 'null') found.push({ ruleId: rule.id, column: input, message: `Unknown input '${bare[2] ?? ''}' at position ${String(condition.indexOf(bare[2] ?? '') + 1)}`, code: 'UNKNOWN_INPUT' });
+      else if (types.get(input) === 'money' && /^(>=|<=|>|<|==|!=)\s*-?\d+(\.\d+)?$/.test(condition.trim())) found.push({ ruleId: rule.id, column: input, message: 'compares a money with a number', code: 'TYPE_MISMATCH' });
     }
     for (const [output, value] of Object.entries(rule.then)) {
-      if (!outputs.has(output)) found.push({ ruleId: rule.id, column: null, message: `unknown output '${output}'` });
+      if (!outputs.has(output)) found.push({ ruleId: rule.id, column: null, message: `unknown output '${output}'`, code: 'UNKNOWN_OUTPUT' });
       else if (outputs.get(output) === 'money' && (typeof value === 'number' || (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value.trim())))) {
-        found.push({ ruleId: rule.id, column: output, message: `output ${output} is money and needs a currency: write ${String(value)} followed by its ISO 4217 currency code` });
+        found.push({ ruleId: rule.id, column: output, message: `output ${output} is money and needs a currency: write ${String(value)} followed by its ISO 4217 currency code`, code: 'INVALID_LITERAL' });
       } else if (outputs.get(output) === 'money' && typeof value === 'string' && !MONEY_TEXT.test(value.trim()) && /^\d/.test(value.trim())) {
-        found.push({ ruleId: rule.id, column: output, message: `output ${output} is not a money amount` });
+        found.push({ ruleId: rule.id, column: output, message: `output ${output} is not a money amount`, code: 'INVALID_LITERAL' });
       }
     }
   }
@@ -417,6 +440,8 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
   });
 
   function importVersion(name: string | undefined, request: FakeRequest): FakeResponse {
+    const copyOf = new URL(request.path, 'http://host').searchParams.get('copyOf');
+    if (name !== undefined && copyOf !== null) return copyVersion(name, copyOf, request);
     // The import limit as #145 answers it (an engine before #145 says 422 "Document larger than ...").
     if (request.body.length > IMPORT_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(IMPORT_LIMIT)} bytes`);
     // As the engine of this release: the media type names the source format, and only YAML is imported.
@@ -441,6 +466,78 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     store.push(stored);
     const answer = view(stored, request, marks);
     return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${stored.ruleSet}/versions/${String(stored.version)}` } };
+  }
+
+  /** The next draft as a byte-for-byte copy of version `copyOf` (RLE-062); a body sent with it is refused. */
+  function copyVersion(name: string, copyOf: string, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    const number = Number(copyOf);
+    if (!Number.isInteger(number) || number < 1 || request.body !== '') return problem(400, 'INPUT_INVALID', 'copyOf must be a version number of 1 or more, sent with no body');
+    if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+    const from = find(name, number);
+    if (!from) return problem(404, 'VERSION_NOT_FOUND', `Version ${copyOf} of rule set ${name} not found`);
+    const stored: StoredVersion = {
+      ruleSet: name, version: versionsOf(name).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: from.source, definition: structuredClone(from.definition),
+      history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
+    };
+    store.push(stored);
+    const answer = view(stored, request, marks);
+    return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${name}/versions/${String(stored.version)}` } };
+  }
+
+  /** The checks every draft write and validate share, in the engine's order after the permission. */
+  function draftDocument(v: StoredVersion, request: FakeRequest): { ok: true; document: Definition } | { ok: false; response: FakeResponse } {
+    if (request.body.length > IMPORT_LIMIT) return { ok: false, response: problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(IMPORT_LIMIT)} bytes`) };
+    if (v.status !== 'DRAFT') return { ok: false, response: problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`) };
+    const parsed = parseDocument(request.body);
+    if (typeof parsed === 'string') return { ok: false, response: problem(422, 'VALIDATION_FAILED', parsed) };
+    if (parsed.ruleSet !== v.ruleSet) return { ok: false, response: problem(400, 'INPUT_INVALID', `Document ruleSet ${parsed.ruleSet} differs from ${v.ruleSet}`) };
+    return { ok: true, document: parsed };
+  }
+
+  /** validateDraft (RLE-090): the checks of a save, answered as cell problems with catalogue messages; nothing is written. */
+  function validateDraft(v: StoredVersion, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    const checked = draftDocument(v, request);
+    if (!checked.ok) {
+      const refused = JSON.parse(checked.response.body) as { code?: string };
+      if (refused.code !== 'VALIDATION_FAILED') return checked.response;
+      return json({ ruleSet: v.ruleSet, version: v.version, valid: false, problems: [{ ruleId: null, column: null, code: 'DOCUMENT_INVALID', position: null, message: PROBLEM_CATALOGUE['DOCUMENT_INVALID'] }], problemsTruncated: false, readings: [] });
+    }
+    const found = validate(checked.document);
+    const problems = found.slice(0, PROBLEM_LIMIT).map((f) => ({
+      ruleId: f.ruleId, column: f.column, code: f.code, position: null,
+      message: PROBLEM_CATALOGUE[f.code] ?? PROBLEM_CATALOGUE[f.column !== null ? 'RULE_INVALID' : 'DOCUMENT_INVALID'],
+    }));
+    const readings = found.length > 0 ? [] : checked.document.rules.map((rule) => ({
+      ruleId: rule.id,
+      text: Object.keys(rule.when).length === 0
+        ? { en: `Rule ${rule.id} always applies; it has no condition.`, vi: `Quy tắc ${rule.id} luôn áp dụng; quy tắc này không có điều kiện.` }
+        : { en: `Rule ${rule.id} applies when ${Object.keys(rule.when).join(' and ')} match.`, vi: `Quy tắc ${rule.id} áp dụng khi ${Object.keys(rule.when).join(' và ')} khớp.` },
+    }));
+    return json({ ruleSet: v.ruleSet, version: v.version, valid: found.length === 0, problems, problemsTruncated: found.length > PROBLEM_LIMIT, readings });
+  }
+
+  /** replaceDraft: only the draft's author, with the lock version they loaded; a refused document stores nothing. */
+  function replaceDraft(v: StoredVersion, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    if (v.createdBy !== request.user) return problem(403, 'PERMISSION_DENIED', `Only the author of ${v.ruleSet} v${String(v.version)} may replace it; import your own document as a new version`);
+    const ifMatch = request.headers['if-match'];
+    if (ifMatch === undefined) return problem(428, 'PRECONDITION_REQUIRED', 'If-Match is required');
+    if (request.headers['idempotency-key'] === undefined) return problem(400, 'INPUT_INVALID', 'Idempotency-Key is required');
+    const checked = draftDocument(v, request);
+    if (!checked.ok) return checked.response;
+    if (ifMatch !== `"${String(v.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT', `Expected lock version ${ifMatch.replaceAll('"', '')} but ${v.ruleSet} v${String(v.version)} is at ${String(v.lockVersion)}`);
+    const violations = validate(checked.document);
+    const first = violations[0];
+    if (first) {
+      const where = first.ruleId === null ? '' : first.column === null ? `Rule ${first.ruleId}: ` : `Rule ${first.ruleId}, column ${first.column}: `;
+      return problem(422, 'VALIDATION_FAILED', `${where}${first.message}`, violations);
+    }
+    Object.assign(v, { definition: checked.document, source: request.body, lockVersion: v.lockVersion + 1 });
+    record(v, 'DRAFT_UPDATED', 'DRAFT', request.user, null);
+    return view(v, request, marks);
   }
 
   function record(v: StoredVersion, action: StoredHistory['action'], from: string, actor: string, reason: string | null) {
@@ -535,7 +632,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
 
   function handle(request: FakeRequest): FakeResponse {
     const key = request.headers['idempotency-key'];
-    if (request.method !== 'POST' || key === undefined) return route(request);
+    if ((request.method !== 'POST' && request.method !== 'PUT') || key === undefined) return route(request);
     const replayKey = `${request.user}\u0000${key}\u0000${request.path}`;
     const replayed = replays.get(replayKey);
     if (replayed) return replayed;
@@ -554,7 +651,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
-    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject)?$/.exec(path))) {
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate)?$/.exec(path))) {
       const name = m[1] ?? '';
       if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
       const v = find(name, Number(m[2]));
@@ -571,6 +668,8 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       if (request.method === 'GET' && tail === undefined) return view(v, request, marks, url.searchParams.get('include') === 'source');
       if (request.method === 'GET' && tail === '/history') return json({ data: v.history ?? [] });
       if (request.method === 'GET' && tail === '/export') return exportOf(v, url.searchParams.get('format'));
+      if (request.method === 'PUT' && tail === undefined) return replaceDraft(v, request);
+      if (request.method === 'POST' && tail === ':validate') return validateDraft(v, request);
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
     }
     if (request.method === 'POST' && (m = /^\/decisions\/([^/:]+):evaluate$/.exec(path))) return evaluate(m[1] ?? '', request);
@@ -663,5 +762,21 @@ export function auditSeed(): StoredVersion[] {
     { ruleSet: 'card-fee', version: 3, status: 'DRAFT', lockVersion: 0, createdBy: 'lan', createdAt: '2026-11-20T02:00:00Z', requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(v3, null, 2), definition: v3,
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-20T02:00:00Z' }] },
     { ruleSet: 'kyc-risk', version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(KYC_RISK_V1, null, 2), definition: KYC_RISK_V1, ...base },
+  ];
+}
+
+/**
+ * card-fee for the grid editor (CKP-006): v1 published, v2 the draft Lan is editing (R3's fee raised to
+ * 35,000 VND), and kyc-risk v2 a draft written by Hoa, which only Hoa may change.
+ */
+export function draftSeed(): StoredVersion[] {
+  const v2: Definition = { ...CARD_FEE_V1, rules: CARD_FEE_V1.rules.map((rule) => (rule.id === 'R3' ? { ...rule, then: { fee: '35000 VND', waived: false } } : rule)) };
+  const created = (actor: string, at: string): StoredHistory[] => [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor, reason: null, lockVersion: 0, occurredAt: at }];
+  const [published, , kyc] = demoSeed();
+  return [
+    published as StoredVersion,
+    { ruleSet: 'card-fee', version: 2, status: 'DRAFT', lockVersion: 0, createdBy: 'lan', createdAt: '2026-11-20T02:00:00Z', requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(v2, null, 2), definition: v2, history: created('lan', '2026-11-20T02:00:00Z') },
+    kyc as StoredVersion,
+    { ruleSet: 'kyc-risk', version: 2, status: 'DRAFT', lockVersion: 0, createdBy: 'hoa', createdAt: '2026-11-20T03:00:00Z', requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(KYC_RISK_V1, null, 2), definition: KYC_RISK_V1, history: created('hoa', '2026-11-20T03:00:00Z') },
   ];
 }

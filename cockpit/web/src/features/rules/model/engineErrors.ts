@@ -33,3 +33,31 @@ export function placeErrors(error: HostError | undefined): ErrorPlace[] {
     return { kind: 'table', message: v.message };
   });
 }
+
+/** The part of a `:validate` problem placement needs (RLE-090). */
+export interface CheckProblem {
+  ruleId: string | null;
+  column: string | null;
+  message: Readonly<Record<string, string>>;
+}
+
+/**
+ * Where each problem of the engine's check goes, with its sentence in the reader's language. A problem on a row
+ * that is no longer in the table, or on a column the table does not show, moves up to its row or to the table,
+ * so no problem is ever lost. The engine's message for `locale` is used; when the engine has none in that
+ * language, `fallback` (one plain sentence of the cockpit) keeps the screen in one language.
+ */
+export function placeProblems(
+  problems: readonly CheckProblem[],
+  rowIds: ReadonlySet<string>,
+  columns: ReadonlySet<string>,
+  locale: string,
+  fallback: string,
+): ErrorPlace[] {
+  return problems.map((p): ErrorPlace => {
+    const message = p.message[locale] ?? fallback;
+    if (p.ruleId === null || !rowIds.has(p.ruleId)) return { kind: 'table', message };
+    if (p.column !== null && columns.has(p.column)) return { kind: 'cell', ruleId: p.ruleId, column: p.column, message };
+    return { kind: 'row', ruleId: p.ruleId, message };
+  });
+}

@@ -271,3 +271,33 @@ export const versionDiff = z
   })
   .loose();
 export type VersionDiff = z.infer<typeof versionDiff>;
+
+/**
+ * One cell problem of a `:validate` answer (RLE-090): where it is, a stable code, and the engine's catalogue
+ * message by language code. The message never repeats the cell's text, so a masked value is never echoed.
+ */
+const validationProblem = z
+  .object({
+    ruleId: z.string().nullable(),
+    column: z.string().nullable(),
+    code: z.string(),
+    position: z.number().int().nullable().optional(),
+    message: z.record(z.string(), z.string()),
+  })
+  .loose();
+export type ValidationProblem = z.infer<typeof validationProblem>;
+
+const ruleReading = z.object({ ruleId: z.string(), text: z.record(z.string(), z.string()) }).loose();
+
+/** The answer of validateDraft: nothing was stored; `valid` says whether a save of the same body would be accepted. */
+export const draftValidation = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int().min(1),
+    valid: z.boolean(),
+    problems: z.array(validationProblem),
+    problemsTruncated: z.boolean(),
+    readings: z.array(ruleReading),
+  })
+  .loose();
+export type DraftValidation = z.infer<typeof draftValidation>;

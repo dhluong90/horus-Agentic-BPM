@@ -159,7 +159,7 @@ A host that keeps production rule changes in Git can turn off cockpit editing pe
 
 | Task | What you do | What you see |
 |---|---|---|
-| Edit a table in a grid | Change typed cells, start from a template, validate | Validation messages bound to the row and cell; publication request blocked until errors are fixed |
+| Edit a table in a grid | On a draft you wrote, choose **Edit draft**; on the version in effect, **New draft** first stores a copy of it as the next draft and opens that. Change typed cells and rows; the arrow keys move between cells, Enter checks a cell and Esc puts it back | Each cell you leave or confirm is checked by the engine (`POST .../versions/{v}:validate`), which stores nothing. Its problems show on their row and cell in your language. **Save draft** stays disabled, with the reason beside it, until the cells are fixed, and saves into the draft with the lock version you opened (`PUT .../versions/{v}`, `If-Match`). If someone else saved the draft in the meantime, your edits stay on screen and you choose **Load the latest version**. Requesting publication is a separate step on the saved draft. An approved version is never edited, and a draft another person wrote is read only for you |
 
 ## Process Engine tasks (Cockpit 0.2)
 
@@ -218,6 +218,8 @@ Moving a box on a diagram changes only the layout. It needs no approval; see pri
 | A screen is missing for one host | The host's engine version does not support it, or you lack the permission | Check `/api/bpm/meta` and `/api/bpm/me` on that host |
 | Approve button disabled for you | You requested this publication | Ask a different identity with `rules:approve` |
 | No edit controls on a draft | Cockpit editing is turned off in this environment, or you lack `rules:author` | Change the rule set in Git and import it, or map the permission to your role |
+| Edit draft disabled: "Only lan can change this draft" | Only the author of a draft may replace it; the engine refuses anyone else | Import your own change as a new version, or ask the author |
+| "Someone else saved this draft after you opened it" | The draft's lock version moved on while you edited | Choose **Load the latest version**, then make your change again |
 | Decisions screen is empty or forbidden | You lack `rules:log:read` | Map the permission to your role |
 | A tenant is not offered in the tenant switcher | It is not in your token's list of allowed tenants | Ask your identity provider administrator to add it |
 | Inputs shown as `***` | They are declared `mask: true` | Expected; the plaintext is never stored (TR-SEC-05) |
