@@ -89,7 +89,7 @@ public record DecisionLogEntry(
         return !evalClock.equals(evaluatedAt);
     }
 
-    /** What a logged decision ended with. */
+    /** What a logged decision ended with. New values may be added; do not switch on it exhaustively. */
     public enum Outcome {
         /** At least one rule matched. */
         MATCHED,

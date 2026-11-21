@@ -208,6 +208,12 @@ public final class DefaultRuleEngine implements RuleEngine {
             throw new InputInvalidException("correlationId must be 1 to " + EngineDefaults.CORRELATION_ID_MAX_LENGTH
                     + " characters of A-Z, a-z, 0-9, '.', '_', ':' or '-'");
         }
+        if (request.decision() != null && !request.decision().equals(request.ruleSet())) {
+            // One decision per rule set, named after it, until decision requirement graphs arrive in stage S1
+            // (DN-08, RLE-097). Naming the rule set's own decision is the same request, so it stays out of the hash.
+            throw new InputInvalidException("decision must be the rule set's name or left out: a rule set holds one"
+                    + " decision, named after it; rule sets with several decisions are added in stage S1");
+        }
         InputLimits.check(request.input(), EngineDefaults.DECIMAL_PRECISION, context.settings().maxInputScale(),
                 context.settings().maxStringLength());
         // The clock and the pin are part of the request only when set, so a key used before they existed still replays.

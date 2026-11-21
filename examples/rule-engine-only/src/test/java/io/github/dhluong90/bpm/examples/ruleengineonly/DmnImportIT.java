@@ -113,6 +113,69 @@ class DmnImportIT {
         }
     }
 
+    static final String FEE_YAML = """
+            schemaVersion: 1
+            ruleSet: dmn-ready-fee
+            hitPolicy: first
+            errorMode: strict
+            inputs:
+              - { name: tier, type: string }
+            outputs:
+              - { name: fee, type: money }
+            rules:
+              - { id: R1, when: { tier: "== 'GOLD'" }, then: { fee: "0 VND" } }
+              - { id: R2, when: {}, then: { fee: "50000 VND" } }
+            """;
+
+    @Test
+    void RLE_095_a_reserved_name_is_refused_over_http_with_its_stage_and_nothing_is_stored() throws Exception {
+        // Given dmn-ready-fee written with the reserved hit policy priority
+        byte[] priority = FEE_YAML.replace("hitPolicy: first", "hitPolicy: priority")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        // When alice imports it
+        Reply refused = send("alice", "POST", "/rule-sets", priority, "application/yaml");
+        Reply lookup = send("alice", "GET", "/rule-sets/dmn-ready-fee", null, null);
+
+        // Then 422 VALIDATION_FAILED names the policy and stage S1, and no rule set exists
+        assertThat(refused.status()).isEqualTo(422);
+        assertThat(refused.json().path("code").asString()).isEqualTo("VALIDATION_FAILED");
+        assertThat(refused.json().path("detail").asString()).contains("hitPolicy priority is added in stage S1");
+        assertThat(lookup.status()).isEqualTo(404);
+    }
+
+    @Test
+    void RLE_097_the_evaluate_body_names_its_decision_and_only_the_rule_sets_own_is_accepted_over_http() throws Exception {
+        // Given dmn-ready-fee v1 published (written with errorMode: strict, RLE-096)
+        byte[] yaml = FEE_YAML.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String rules = "/rule-sets/dmn-ready-fee/versions/1";
+        Reply created = send("alice", "POST", "/rule-sets", yaml, "application/yaml");
+        send("alice", "POST", rules + ":request-publish", null, null);
+        send("bob", "POST", rules + ":approve", null, null);
+
+        // When a teller evaluates naming decision dmn-ready-fee, then naming risk-adj, then a number
+        Reply named = send("teller", "POST", "/decisions/dmn-ready-fee:evaluate",
+                "{\"inputs\":{\"tier\":\"GOLD\"},\"decision\":\"dmn-ready-fee\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json");
+        Reply other = send("teller", "POST", "/decisions/dmn-ready-fee:evaluate",
+                "{\"inputs\":{\"tier\":\"GOLD\"},\"decision\":\"risk-adj\"}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json");
+        Reply number = send("teller", "POST", "/decisions/dmn-ready-fee:evaluate",
+                "{\"inputs\":{\"tier\":\"GOLD\"},\"decision\":7}"
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8), "application/json");
+
+        // Then the own decision matches R1 with a 0 VND fee; the others are 400 INPUT_INVALID naming decision
+        assertThat(created.status()).isEqualTo(201);
+        assertThat(created.json().path("definition").has("errorMode")).isFalse();
+        assertThat(named.status()).isEqualTo(200);
+        assertThat(named.json().path("matchedRuleIds").get(0).asString()).isEqualTo("R1");
+        for (Reply refused : java.util.List.of(other, number)) {
+            assertThat(refused.status()).isEqualTo(400);
+            assertThat(refused.json().path("code").asString()).isEqualTo("INPUT_INVALID");
+            assertThat(refused.json().path("detail").asString()).startsWith("decision must be");
+        }
+    }
+
     Reply send(String user, String method, String path, byte[] body, String contentType) throws Exception {
         if (ReviewedContent.decides(path)) {
             byte[] bound = ReviewedContent.withHash(path, body, p -> send(user, "GET", p, null, null).body());

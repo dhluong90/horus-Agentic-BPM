@@ -318,6 +318,48 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
 - **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`
 
+### RLE-095 A schema version 1 document that uses a name reserved for full DMN is refused by name with its stage
+- **Traces to:** `TR-STD-04`, `TR-STD-03`, `TR-STD-26`, #38
+- **Milestone:** M1
+- **Given:** `card-fee.yaml` (schema version 1, `hitPolicy: first`) and five copies, each changed in one place: `hitPolicy: priority` (also `any`, `ruleOrder` and `outputOrder`); `expressionLanguage: feel` (also `FEEL` and the OMG FEEL namespace URIs of DMN 1.2 to 1.5, such as `https://www.omg.org/spec/DMN/20230324/FEEL/`); `schemaVersion: 2`; `errorMode: spec`. Control cases: `hitPolicy: cheapest`, `expressionLanguage: javascript`, and `schemaVersion` values of `0`, `-1`, `"2"`, `1.5` and `99999999999`.
+- **When:** Each document is read, and the `priority` copy of a rule set named `dmn-ready-fee` is posted to `POST /api/bpm/rules/v1/rule-sets` as `application/yaml`.
+- **Then:**
+  - Each reserved name is refused with `422 VALIDATION_FAILED`, and the detail names the member, the value and the stage that adds it. A hit policy gives "hitPolicy priority is added in stage S1; this release reads first, unique and collect". FEEL gives "expressionLanguage FEEL is added in stage S1 with a later schema version". `schemaVersion: 2` gives "schemaVersion 2 is written for a later engine release; this release reads schema version 1". `errorMode: spec` gives "errorMode spec is added in stage S1" (PD-125). A later schema version is never read as version 1.
+  - The control cases keep their plain refusal ("hitPolicy must be first, unique or collect", "expressionLanguage must be urn:horus-bpm:expr:v1", "schemaVersion must be 1"). These details name no stage and do not echo an unknown hit policy.
+  - Over HTTP the refusal is `422 VALIDATION_FAILED`, and `GET /rule-sets/dmn-ready-fee` is `404` afterwards, so nothing is stored.
+- **Example:** `card-fee.yaml with hitPolicy: priority -> 422 VALIDATION_FAILED "hitPolicy priority is added in stage S1", 0 rows`.
+- **Test ID:** `RLE_095_a_reserved_hit_policy_is_refused_by_name_with_stage_s1`, `RLE_095_an_unknown_hit_policy_keeps_the_plain_refusal`, `RLE_095_feel_as_expression_language_is_refused_by_name_with_stage_s1`, `RLE_095_another_expression_language_keeps_the_plain_refusal`, `RLE_095_a_later_schema_version_is_refused_by_name_and_never_read_as_version_1`, `RLE_095_a_schema_version_that_is_not_a_later_version_keeps_the_plain_refusal`, `RLE_095_error_mode_spec_is_refused_by_name_with_stage_s1`, `RLE_095_a_reserved_name_is_refused_over_http_with_its_stage_and_nothing_is_stored`
+
+### RLE-096 `errorMode: strict` is a member of schema version 1 that changes no hash
+- **Traces to:** `TR-STD-23`, `TR-STD-03`, PD-066, PD-125, #38
+- **Milestone:** M1
+- **Given:** `card-fee.yaml` without `errorMode`, and the same document with `errorMode: strict`. Control cases: `errorMode: lenient`, `errorMode: STRICT`, `errorMode: ""` and `errorMode: true`.
+- **When:** Both documents are read. The `strict` one is also exported to DMN 1.5 and the export is read again.
+- **Then:**
+  - Both documents give the same model, the same canonical JSON and the same `canonical_hash`. The canonical JSON has no `errorMode` member, because `strict` is the mode of every schema version 1 rule set, written or not. Only another mode, from stage S1, will be printed and hashed.
+  - The DMN round trip gives the same hash: an imported DMN table evaluates in `strict` mode until stage S1 (PD-125, `RLE-045`).
+  - `lenient`, `STRICT` and `""` are `422 VALIDATION_FAILED` with "errorMode must be strict or spec". `true` is refused because `errorMode` must be a string.
+- **Example:** `card-fee.yaml + errorMode: strict -> same canonical JSON and hash as card-fee.yaml`.
+- **Test ID:** `RLE_096_error_mode_strict_is_accepted_and_keeps_the_canonical_json_and_hash`, `RLE_096_error_mode_strict_survives_a_dmn_round_trip_with_the_same_hash`, `RLE_096_another_error_mode_is_refused_naming_both_modes`, `RLE_096_error_mode_must_be_a_string`
+
+### RLE-097 An evaluation can name its decision, and only the rule set's own decision is accepted
+- **Traces to:** `TR-STD-28`, `TR-IDEM-01`, `TR-TEN-01`, DN-08, #38
+- **Milestone:** M1
+- **Given:** Tenant `bank-a` has `card-fee` v1 `PUBLISHED`. A teller holds `rules:evaluate`. Tenant `bank-b` has no `card-fee`.
+- **When:**
+  - The teller evaluates `{ tier: GOLD, txCount: 5 }` three times: without a decision id, with `DecisionRequest.withDecision("card-fee")`, and with `withDecision("risk-adj")`.
+  - The same inputs are sent with `Idempotency-Key: k-097`, first without a decision id and then with `card-fee`.
+  - Over HTTP, `POST /api/bpm/rules/v1/decisions/dmn-ready-fee:evaluate` is sent with the body member `"decision": "dmn-ready-fee"`, then `"risk-adj"`, then `7`.
+  - A `bank-b` teller evaluates `card-fee` with `withDecision("card-fee")`.
+- **Then:**
+  - Leaving the decision out and naming `card-fee` give the same result: `R1` matches and `fee` is `{ "currency": "VND", "amount": 0 }`. Each call is logged once.
+  - The decision id is not part of the request hash, so the second `k-097` call replays the first decision and writes no second row.
+  - `risk-adj` is `400 INPUT_INVALID`, with a detail that starts "decision must be the rule set's name or left out", names stage S1 and does not echo the id. A non-string `decision` is `400 INPUT_INVALID` as well. No decision row is written.
+  - The `bank-b` call is `404 RULE_SET_NOT_FOUND`, and nothing is written.
+  - The four-argument and six-argument `DecisionRequest` constructors still compile and leave `decision` null.
+- **Example:** `evaluate card-fee with decision risk-adj -> 400 INPUT_INVALID, 0 decision rows`.
+- **Test ID:** `RLE_097_naming_the_rule_sets_own_decision_gives_the_same_result_as_leaving_it_out`, `RLE_097_the_decision_id_is_outside_the_idempotency_hash`, `RLE_097_another_decision_id_is_input_invalid_naming_decision_and_logs_nothing`, `RLE_097_another_tenants_rule_set_is_not_found_whatever_the_decision_id_and_nothing_is_written`, `RLE_097_the_older_constructors_leave_the_decision_out`, `RLE_097_the_evaluate_body_names_its_decision_and_only_the_rule_sets_own_is_accepted_over_http`
+
 ---
 
 ## Version Lifecycle: Reject, Retire and Diff (RE-F-07, RE-F-08)
