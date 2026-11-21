@@ -159,6 +159,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-135](#pd-135-the-1.0-api-freeze-date-is-5-february-2027) | The 1.0 API freeze date is 5 February 2027 | Decided (maintainer, 2026-11-21) |
 | [PD-136](#pd-136-isc-licence-is-allowed-for-the-diagram-library-dependencies) | ISC licence is allowed for the diagram library dependencies | Decided (maintainer, 2026-11-21) |
 | [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
+| [PD-138](#pd-138-approvals-require-the-reviewed-content-hash-for-rules-and-process-definitions) | Approvals require the reviewed content hash, for rules and process definitions | Decided (product manager, delegated, PD-073) |
 
 ---
 
@@ -3839,3 +3840,34 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Decision.** Yes. The release is tagged 0.2.0, following PD-134.
 
 **Consequences.** None beyond the release itself.
+
+### PD-138 Approvals require the reviewed content hash, for rules and process definitions
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | #275 makes an approval name the exact content the approver reviewed. What is the default of `horus.bpm.rules.approval.require-content-hash`, and does the Process Engine follow-up from the #401 review (approval bound to the diffed hash) ship in 1.0? |
+| Raised by | Architect, #275; follow-up from the #401 review |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21; options 1 and 1 |
+
+**Options considered: the default**
+
+1. Required (`true`) by default (chosen). Consequence: an approval without `expectedCanonicalHash` is refused. Host API clients written against 0.x must send the hash before they upgrade. Maker-checker holds from the first release that has the field.
+2. Optional by default, required from 1.0. Consequence: 0.x clients keep working, but making the field required after the 1.0 freeze is a breaking change (PD-135), and until then an approval can still bind to content nobody saw.
+3. Optional with a warning. Consequence: the same gap as option 2, with no date on which it closes.
+
+**Options considered: the Process Engine follow-up**
+
+1. In 1.0 (chosen). Consequence: a process definition is approved against the hash of the content the approver reviewed, the same control as rules. One more small issue before the freeze.
+2. After 1.0. Consequence: the rule side is bound and the process side is not, and the change is breaking once the contract is frozen.
+
+**Recommendation and decision.** Required by default, and the Process Engine follow-up is in 1.0. Maker-checker is a non-negotiable control (PD-126), the cockpit already sends the hash, and 0.x is the last time a required field costs nothing in compatibility. The cost, host clients that must start sending the hash, is stated in the release notes. A diff that is cut off at 1,000 changes is not the content the approver reviewed, so it must never be approvable as if complete.
+
+**Consequences.**
+- Setting `horus.bpm.rules.approval.require-content-hash`: `true` by default. `false` is accepted only in the `dev` profile; start-up is refused with it in any other profile, as in PD-126 and PD-131.
+- Rules: `:approve` and `:reject` need `expectedCanonicalHash` next to the `If-Match` lock version; a mismatch is refused and nothing is written (#275).
+- Process Engine: approving a definition version needs the hash of the content reviewed. A diff cut off at 1,000 changes carries no approvable hash; the complete change set is read, page by page, before Approve is offered, and an approval against a cut-off diff is refused.
+- Release notes for 0.2.0 name the new required field and the client change.
+- Configurable: only the `dev` relaxation.
+
+**Follow-ups.** Product manager: the issue "Process Engine: Approve Only the Reviewed Definition". Architect: the SPEC and OpenAPI change for both. Cockpit: send the hash on every approval (#246 follow-up). If the process side misses 1.0, definition approval does not ship without the hash.
