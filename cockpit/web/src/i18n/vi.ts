@@ -689,4 +689,5 @@ export const vi: Record<MessageKey, string> = {
   'sim.changed': 'Kết quả thay đổi',
   'sim.same': 'Kết quả như cũ',
   'sim.changeSample': 'Đổi mẫu thử',
+  'sim.sample': 'Mẫu thử: {sample}',
 };

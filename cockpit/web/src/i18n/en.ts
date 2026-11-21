@@ -687,6 +687,7 @@ export const en = {
   'sim.changed': 'The result changes',
   'sim.same': 'Same result',
   'sim.changeSample': 'Change the sample',
+  'sim.sample': 'Sample: {sample}',
 } as const;
 
 export type MessageKey = keyof typeof en;

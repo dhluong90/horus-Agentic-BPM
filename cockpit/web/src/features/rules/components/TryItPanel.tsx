@@ -104,7 +104,7 @@ function Field({ input, value, currency, invalid, onChange, onCurrency }: {
  * The sample form of Try it and Simulate: one field per input, money with separators and its currency. `read`
  * gives the inputs to send, or marks the first field that cannot be sent and gives undefined.
  */
-export function useSampleForm(definition: RuleSetDefinition): { fields: ReactNode; read: () => Record<string, unknown> | undefined } {
+export function useSampleForm(definition: RuleSetDefinition): { fields: ReactNode; read: () => Record<string, unknown> | undefined; describe: () => string } {
   const { locale } = useI18n();
   const [values, setValues] = useState<Record<string, string>>({});
   const [invalid, setInvalid] = useState<string | undefined>(undefined);
@@ -129,7 +129,17 @@ export function useSampleForm(definition: RuleSetDefinition): { fields: ReactNod
     setInvalid(undefined);
     return built.inputs;
   };
-  return { fields, read };
+  // The sample as the user typed it, for naming it beside a result. A masked input is never written out.
+  const describe = () => definition.inputs
+    .filter((input) => (values[input.name] ?? '').trim() !== '')
+    .map((input) => {
+      const text = (values[input.name] ?? '').trim();
+      const code = currencies[input.name]?.trim().toUpperCase();
+      const shown = input.mask === true ? '••••' : input.type === 'money' && code ? `${text} ${code}` : text;
+      return `${columnLabel(input.name, input.description)}: ${shown}`;
+    })
+    .join(', ');
+  return { fields, read, describe };
 }
 
 /** Evaluate sample inputs against the version in effect and show the matched row and outputs. */
