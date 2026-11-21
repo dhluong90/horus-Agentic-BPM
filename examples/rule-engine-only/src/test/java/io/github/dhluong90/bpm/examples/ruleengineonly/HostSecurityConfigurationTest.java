@@ -63,6 +63,37 @@ class HostSecurityConfigurationTest {
     }
 
     @Test
+    void dev_refuses_a_key_set_or_public_key_that_is_not_on_this_machine() {
+        MockEnvironment remoteKeys = new MockEnvironment().withProperty(JWT + "jwk-set-uri", "https://sso.bank-a.vn/certs");
+        MockEnvironment localKeys = new MockEnvironment().withProperty(JWT + "jwk-set-uri", "http://127.0.0.1:8180/certs");
+        MockEnvironment publicKey = new MockEnvironment().withProperty(JWT + "public-key-location", "https://keys.bank-a.vn/issuer.pub");
+        MockEnvironment localKey = new MockEnvironment().withProperty(JWT + "public-key-location", "classpath:issuer.pub");
+
+        assertThatThrownBy(() -> HostSecurityConfiguration.requireLocalDevelopment(remoteKeys))
+                .hasMessageContaining("jwk-set-uri").hasMessageContaining("is not on this machine");
+        assertThatCode(() -> HostSecurityConfiguration.requireLocalDevelopment(localKeys)).doesNotThrowAnyException();
+        assertThatThrownBy(() -> HostSecurityConfiguration.requireLocalDevelopment(publicKey))
+                .hasMessageContaining("public key https://keys.bank-a.vn/issuer.pub");
+        assertThatCode(() -> HostSecurityConfiguration.requireLocalDevelopment(localKey)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void the_xsrf_cookie_is_secure_and_same_site_lax() {
+        var repository = HostSecurityConfiguration.csrfCookies(new MockEnvironment());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        repository.saveToken(repository.generateToken(request), request, response);
+
+        var cookie = response.getCookie("XSRF-TOKEN");
+        assertThat(cookie).isNotNull();
+        assertThat(cookie.getSecure()).isTrue();
+        assertThat(cookie.getAttribute("SameSite")).isEqualTo("Lax");
+        // The page reads it and sends it back in X-XSRF-TOKEN
+        assertThat(cookie.isHttpOnly()).isFalse();
+    }
+
+    @Test
     void TR_SEC_12_a_host_that_accepts_tokens_must_name_its_audience() {
         MockEnvironment noAudience = new MockEnvironment().withProperty(JWT + "issuer-uri", "https://sso.bank-a.vn/realms/loans");
         MockEnvironment withAudience = new MockEnvironment()
