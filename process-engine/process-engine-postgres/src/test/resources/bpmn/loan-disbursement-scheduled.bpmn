@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The loan disbursement of PRE-070 on its value date (PRE-071 b): a timer reaches the local limit reservation, so
+     the handler runs in the transaction of the timer's firing. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-disbursement-scheduled"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-disbursement-scheduled" name="Scheduled loan disbursement" isExecutable="true">
+    <bpmn:startEvent id="start" name="Disbursement approved"/>
+    <bpmn:intermediateCatchEvent id="value-date" name="Value date">
+      <bpmn:timerEventDefinition id="value-date-timer">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT1H</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:serviceTask id="reserve-limit" name="Reserve the limit" horus:handler="limits.reserve" horus:resultVariable="reservation">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+        <horus:input name="currency" value="${instance.currency}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="post-to-core" name="Post to core banking" horus:handler="core-banking"
+                      horus:mode="remote" horus:timeout="PT10S" horus:resultVariable="posting">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end" name="Disbursed"/>
+    <bpmn:sequenceFlow id="start__wait" sourceRef="start" targetRef="value-date"/>
+    <bpmn:sequenceFlow id="wait__reserve" sourceRef="value-date" targetRef="reserve-limit"/>
+    <bpmn:sequenceFlow id="reserve__post" sourceRef="reserve-limit" targetRef="post-to-core"/>
+    <bpmn:sequenceFlow id="post__end" sourceRef="post-to-core" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

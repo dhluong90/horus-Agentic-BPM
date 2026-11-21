@@ -73,7 +73,7 @@ The root element must declare the namespaces, and the process must be executable
 |---|---|---|---|
 | `startEvent` with no event definition | | `name` | `<bpmn:startEvent id="start"/>` |
 | `endEvent` with no event definition | | `name` | `<bpmn:endEvent id="end-approved"/>` |
-| `serviceTask` | `horus:handler`, the name of a `ServiceTaskHandler` bean in your host | `horus:resultVariable`, `horus:input` elements | `horus:handler="cardProfiles.load"` |
+| `serviceTask` | `horus:handler`, the name of a `ServiceTaskHandler` bean in your host (a local step), or of a `ServiceAdapter` bean with `horus:mode="remote"` | `horus:mode` (`local`, the default, or `remote`), `horus:timeout` on a remote step only, `horus:resultVariable`, `horus:input` elements | `horus:handler="cardProfiles.load"` |
 | `businessRuleTask` | `horus:ruleSet`, the name of a published rule set | `horus:resultVariable`, `horus:input` elements | `horus:ruleSet="card-fee"` |
 | `userTask` | `horus:assignee` as `user:<id>`, `role:<role>` or `group:<group>`; `horus:resultVariable` | `horus:fourEyes="true"`: the starter and earlier completers may not complete it. `horus:sla`: working time until the task is due, an ISO 8601 duration such as `PT4H`, up to 366 days; `horus:calendar`: the tenant calendar it counts in (elapsed time without one; since 0.3.0) | `horus:assignee="role:CARD_OFFICER"` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
@@ -150,7 +150,7 @@ These are refused in 0.2.0:
 | Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
 | Activities | `subProcess`, `transaction`, `callActivity`, `adHocSubProcess`, `task`, `scriptTask`, `manualTask`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
-| Service task variants | `horus:mode` other than `local` (remote steps import since 0.2.0), and any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]) |
+| Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
 | Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1`, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` (FEEL is `S1`; XPath and the others are `not planned`) |
 
@@ -169,6 +169,8 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `KEY_INVALID` | Make the `process` id kebab-case, for example `card-fee-review` |
 | `NOT_EXECUTABLE` | Set `isExecutable="true"` on the process |
 | `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask` |
+| `MODE_INVALID` | Set `horus:mode` to `local` or `remote`, or leave it out for a local step |
+| `TIMEOUT_INVALID` | Put `horus:timeout` only on a remote step, as a positive ISO-8601 duration such as `PT10S`; a local step runs in the caller's transaction and has no timeout of its own |
 | `RULE_SET_MISSING` | Add `horus:ruleSet` to the `businessRuleTask` |
 | `ASSIGNEE_INVALID` | Set `horus:assignee` to `user:<id>`, `role:<role>` or `group:<group>` |
 | `SLA_INVALID` | Set `horus:sla` to a positive ISO 8601 duration up to 366 days, such as `PT4H` or `P2D`; `horus:calendar` to a calendar key such as `vn-banking-hours`; a calendar needs an SLA |
@@ -184,6 +186,17 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `AGENT_NOT_REGISTERED` | Register an `AgentAdapter` bean under the name in `horus:agent` |
 | `GUARD_SPEC_INVALID` | Fix the agent step's guard spec as the message says: one `<horus:outputSchema>` holding a JSON object in the supported subset, and one `<horus:guardrail>` with a kebab-case `decision`, `onViolation` `route-to-human` (with a `reviewer`) or `fail`, and no `fourEyes` other than `true` |
 | `RETRY_INVALID` | Give the agent step at most one `<horus:retry>`, with `max` from 0 to 20 (the retries after the first attempt) and, optionally, `backoff` as a positive ISO-8601 duration such as `PT1S` |
+
+### A handler or adapter the host does not register
+
+The import does not check that the handler or adapter a service step names is registered, so a pipeline can import a draft before the host that runs it is deployed. The check runs when the version is about to become active: `:request-approval` and `:approve` answer `422 VALIDATION_FAILED` with one problem per step, and the version stays where it was. A dev auto-approved import checks at import.
+
+| Problem code | Example message | Fix |
+|---|---|---|
+| `HANDLER_NOT_REGISTERED` | `reserve-limit -> limits.reserv: no ServiceTaskHandler of this name is registered in this host` | Register a `ServiceTaskHandler` bean under that name, or correct `horus:handler` in a new draft |
+| `ADAPTER_NOT_REGISTERED` | `notify-partner -> partner-hub: no ServiceAdapter of this name is registered in this host` | Register a `ServiceAdapter` bean under that name |
+
+Agent steps are different: an unregistered `horus:agent` is refused at import (`AGENT_NOT_REGISTERED`).
 
 ### An unsafe or oversized file
 

@@ -514,6 +514,44 @@ The first Process Engine slice (pull request #149, on the contract of #139) sett
 | Local handlers and decisions | Run inside the caller's transaction (section 4). Each call is timed, and above `handlers.slow-call-warning` (default 200 ms) a `process.step.slow` warning names the step, the target and the elapsed time, never the inputs. The no-network rule is stated on `ServiceTaskHandler` | Permanent |
 | Dependency on the Rule Engine | `process-engine-core` depends on `bpm-expression` and not on `rule-engine-core` (ADR-0027, 0.2.0). Gateway conditions compile through the `ExpressionLanguage` SPI in an untyped environment. A `businessRuleTask` calls the `DecisionPort` with the instance's tenant, a `DecisionCaller`, the engine clock and the step key (section 4.4); the adapter lives in the process starter, which declares `rule-engine-core` optional and builds it only when the Rule Engine is on the class path and a `RuleEngine` bean exists. Without one, a definition with a `businessRuleTask` is refused at activation with `BPMN_NOT_EXECUTABLE` naming the step | ADR-0027 (0.2.0) |
 
+### 5.9 Local and remote service steps (#63)
+
+A `serviceTask` chooses its mode with `horus:mode`: none or `local` calls a `ServiceTaskHandler` in the step transaction; `remote` parks the token on the Async Wait-State of section 4 and runs a `ServiceAdapter` on the async executor. Any other value is `MODE_INVALID` at import, and `horus:timeout` on a local step is `TIMEOUT_INVALID`; both name the step and its line (`PRE-072`). The handler or adapter name is resolved against the host's typed beans, never by reflection, and only when the version is about to become active (request-approval and approval, or a dev auto-approved import), so a pipeline can import a draft before the host registers the bean.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Caller
+    participant E as Engine (step TX)
+    participant H as limits.reserve (local)
+    participant DB as Host PostgreSQL
+    participant X as Async executor (no TX)
+    participant A as core-banking adapter (remote)
+    C->>E: POST /instances (LN-2026-0042, 50,000,000 VND)
+    E->>DB: lock pre_instance
+    E->>H: handle(ServiceCall: tenant from the instance row, attempt id, bounded inputs)
+    H->>DB: insert reservation (same TX)
+    E->>DB: token WAITING_ASYNC + ASYNC_SERVICE job, commit together
+    E-->>C: 201 RUNNING
+    X->>DB: TX1 claim job, lease, store token hash; commit
+    X->>A: execute(AdapterCall: idempotencyKey = job id, new attempt id)
+    A-->>X: Completed { postingRef: FT26324001 }
+    X->>DB: TX2 ASYNC_RESULT_ACCEPTED, store postingRef, INSTANCE_ENDED
+    alt handler throws
+        H--xE: exception
+        E->>DB: rollback (no instance, no reservation, no history)
+        E-->>C: 500 INTERNAL with correlationId only
+    end
+```
+
+| Concern | Local step | Remote step |
+|---|---|---|
+| Transaction | The caller's or the firing's; the handler's writes commit or roll back with the step | None open during the call; TX1 claims, TX2 records |
+| Key | None needed: nothing outlives a rollback. The attempt id correlates only | The job id (`AdapterCall.idempotencyKey()`), the same on every retry; the attempt id fences late results |
+| Failure | A throw rolls back; a request is `500 INTERNAL`, a firing retries after its backoff; a returned `Failed` is `422 STEP_FAILED` | `ASYNC_ATTEMPT_FAILED`; retry after back-off up to `jobs.max-attempts`; `ADAPTER_TIMEOUT` at `horus:timeout` |
+| Tenant | The locked `pre_instance` row's | The locked `pre_instance` row's; a completion for another tenant's job is `404` |
+| Slow call | `process.step.slow` above `handlers.slow-call-warning`, never the inputs | Bounded by `horus:timeout` |
+
 ## 6. Java API and REST contract
 
 ### 6.1 Java API (`io.github.dhluong90.bpm.process.api`, ADR-0022)
@@ -1255,7 +1293,8 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Replica dies before the effective-date job runs | One key, until the lease expires | Lease on `pre_timer` | Another replica claims the job after `jobs.timer-lease`; the previous version stays effective until then because effective selection reads `effective_from`, not the job |
 | Concurrent layout saves | One layout | Duplicate primary key on `revision` | `409 VERSION_CONFLICT`; the cockpit reloads and shows the newer revision |
 | Malicious BPMN (entity expansion, deep nesting) | One request | Reader limits, DTD refused | `422 BPMN_UNSAFE_XML`; no transaction was opened |
-| Host database restored to an earlier point in time (PD-044, `TR-DR-01`, `TR-DR-02`) | Every instance changed after the restore point | Jobs `CLAIMED` with `locked_until` from before the restore; adapter calls whose TX2 was lost | No engine step: start-up adds at most 5 s; expired leases are reclaimed by the normal poller and retried with a new `attemptId`, so adapters must be idempotent by `attemptId`; the host reconciles side effects and consumers tolerate events for state the restore removed. Proven by the 1.0 restore test |
+| Host database restored to an earlier point in time (PD-044, `TR-DR-01`, `TR-DR-02`) | Every instance changed after the restore point | Jobs `CLAIMED` with `locked_until` from before the restore; adapter calls whose TX2 was lost | No engine step: start-up adds at most 5 s; expired leases are reclaimed by the normal poller and retried with a new `attemptId` and the same job id, so adapters must be idempotent by the job id (`AdapterCall.idempotencyKey()`, section 4, `TR-IDEM-04`); the host reconciles side effects and consumers tolerate events for state the restore removed. Proven by the 1.0 restore test |
+| A local handler throws (`PRE-071`) | One step | The exception leaves `ServiceTaskHandler.handle` | The step transaction rolls back with every row the handler and the earlier steps wrote; a request answers `500 INTERNAL` with a `correlationId` only; a job firing is due again after `jobs.retry-backoff` times the attempt and `FAILED` after `jobs.max-attempts`. The attempt id derives from the committed instance state, so a repeated firing presents the same one |
 | Instance cancelled while an adapter call runs | One step | TX2 finds the job `CANCELLED` | Result discarded and recorded once as `LATE_RESULT_DISCARDED` with the attempt id; the external effect, if any, is the host's to reconcile by the job id (DN-10) |
 | Handler returns a business error before S1 | One step | `HandlerResult.BusinessError` | Incident `UNHANDLED_BUSINESS_ERROR` with the code; retry or resolve as any incident (DN-09) |
 | Two operators retry or decide one incident at once | One incident | The second waits on the instance row lock, then sees the new lock version or status | `409 VERSION_CONFLICT` or `409 INVALID_STATE`; the first command stands |

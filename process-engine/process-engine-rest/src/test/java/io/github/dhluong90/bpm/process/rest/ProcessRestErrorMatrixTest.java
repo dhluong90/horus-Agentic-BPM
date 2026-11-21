@@ -118,6 +118,26 @@ class ProcessRestErrorMatrixTest {
     }
 
     @Test
+    void PRE_071_a_local_handler_that_throws_on_start_is_500_INTERNAL_with_a_correlation_id_only() throws Exception {
+        // Given the start's local step limits.reserve throws with the customer's national id in its message
+        fake.failure = () -> new io.github.dhluong90.bpm.process.internal.service.LocalHandlerException(
+                "limits.reserve", "reserve-limit", new IllegalStateException("limit of customer 079088001234 is frozen"));
+
+        MockHttpServletResponse response = perform(post(BASE + "/instances")
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON).header("Idempotency-Key", "ln-0042")
+                .content("{\"definitionKey\":\"loan-disbursement\",\"businessKey\":\"LN-2026-0042\","
+                        + "\"variables\":{\"amountMinor\":50000000,\"currency\":\"VND\"}}"));
+
+        assertThat(response.getStatus()).isEqualTo(500);
+        JsonNode body = json(response);
+        assertThat(body.get("code").stringValue()).isEqualTo("INTERNAL");
+        assertThat(body.has("detail")).isFalse();
+        assertThat(body.get("correlationId").stringValue()).hasSize(26);
+        assertThat(response.getContentAsString()).doesNotContain("079088001234", "limits.reserve", "IllegalState");
+        assertNoInternals(response);
+    }
+
+    @Test
     void TR_SEC_08_a_valid_correlation_id_is_echoed_and_an_unsafe_one_is_replaced() throws Exception {
         fake.failure = () -> new ProcessException("INSTANCE_NOT_FOUND", "No instance");
 

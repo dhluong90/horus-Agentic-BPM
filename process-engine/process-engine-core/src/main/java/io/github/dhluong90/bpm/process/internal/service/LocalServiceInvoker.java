@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 
 /**
  * Local handlers by name, and decisions through a {@link DecisionPort}; both inside the current transaction. A
@@ -24,6 +25,7 @@ public final class LocalServiceInvoker implements ServiceInvoker {
     private final Map<String, ServiceTaskHandler> handlers;
     private final Optional<DecisionPort> decisions;
     private final long slowCallNanos;
+    private final LongSupplier ticker;
 
     /**
      * @param handlers registered handlers by name
@@ -33,9 +35,21 @@ public final class LocalServiceInvoker implements ServiceInvoker {
      */
     public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<DecisionPort> decisions,
             java.time.Duration slowCallWarning) {
+        this(handlers, decisions, slowCallWarning, System::nanoTime);
+    }
+
+    /**
+     * @param handlers registered handlers by name
+     * @param decisions the decision port, or empty when the host has no decision engine
+     * @param slowCallWarning calls longer than this are logged at WARNING ({@code handlers.slow-call-warning})
+     * @param ticker the monotonic nanosecond source the call is timed with; {@code System::nanoTime} in production
+     */
+    public LocalServiceInvoker(Map<String, ServiceTaskHandler> handlers, Optional<DecisionPort> decisions,
+            java.time.Duration slowCallWarning, LongSupplier ticker) {
         this.handlers = Map.copyOf(handlers);
         this.decisions = java.util.Objects.requireNonNull(decisions, "decisions must not be null");
         this.slowCallNanos = slowCallWarning.toNanos();
+        this.ticker = java.util.Objects.requireNonNull(ticker, "ticker must not be null");
     }
 
     /** @param name handler name @return whether it is registered */
@@ -58,7 +72,7 @@ public final class LocalServiceInvoker implements ServiceInvoker {
     @Override
     public StepResult invoke(String tenantId, String instanceId, String businessKey, Effect.InvokeService call,
             DecisionCaller caller, Instant now) {
-        long started = System.nanoTime();
+        long started = ticker.getAsLong();
         try {
             return switch (call.kind()) {
                 case HANDLER -> handler(tenantId, instanceId, businessKey, call);
@@ -67,7 +81,7 @@ public final class LocalServiceInvoker implements ServiceInvoker {
                         false);
             };
         } finally {
-            long elapsed = System.nanoTime() - started;
+            long elapsed = ticker.getAsLong() - started;
             if (elapsed > slowCallNanos) {
                 // Never the inputs: they may hold personal data.
                 LOG.log(System.Logger.Level.WARNING, "process.step.slow kind={0} target={1} node={2} instance={3} "
@@ -89,10 +103,12 @@ public final class LocalServiceInvoker implements ServiceInvoker {
             result = handler.handle(new ServiceCall(tenantId, instanceId, call.nodeId(), businessKey, call.attemptId(),
                     call.inputs()));
         } catch (RuntimeException e) {
-            // The step fails and everything rolls back; the exception text stays in the log.
+            // PRE-071: the exception propagates, so the step and everything written in its transaction (the handler's
+            // own rows included) roll back. A request answers 500 INTERNAL with a correlation id only; a job firing is
+            // retried after its backoff. The log names the step and the exception class, never its message.
             LOG.log(System.Logger.Level.WARNING, "process.handler.error target={0} node={1} instance={2} exception={3}",
                     call.target(), call.nodeId(), instanceId, e.getClass().getName());
-            return new StepResult.Failed("HANDLER_ERROR", String.valueOf(e.getMessage()), false);
+            throw new LocalHandlerException(call.target(), call.nodeId(), e);
         }
         return switch (result) {
             case HandlerResult.Completed c -> new StepResult.Completed(c.output());

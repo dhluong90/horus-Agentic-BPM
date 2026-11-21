@@ -73,7 +73,12 @@ paths:
         whose guardrail rule set breaks the guardrail contract (missing in the tenant or without a version in effect,
         hit policy other than `first` or `unique`, no `allow: boolean` output, `reasons` other than a string, or an
         input the output schema does not declare) is `422 GUARDRAIL_CONTRACT_INVALID`, with `problems` naming the
-        step and the failed check; nothing is written. Permission `processes:deploy`.
+        step and the failed check; nothing is written. A `serviceTask` whose `horus:mode` is neither `local` nor
+        `remote` (`MODE_INVALID`), or a local one with `horus:timeout` (`TIMEOUT_INVALID`), is `422
+        VALIDATION_FAILED` with the step id and line (`PRE-072`). The handler or adapter a service step names need
+        not be registered yet, so a pipeline can import a draft before the host registers it; the names are checked
+        at request-approval and approval, and at import only when dev auto-approval activates the version.
+        Permission `processes:deploy`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -185,8 +190,11 @@ paths:
         `effectiveFrom` is when the version should take effect once approved; omitted means at approval; a time in
         the past is `400 INPUT_INVALID`. A version that is not a draft is `409 INVALID_STATE`. Publishes
         `processes.definition.publish-requested.v1`. The guardrail contract of every `agentTask` is checked again
-        against the rule set version in effect now (`422 GUARDRAIL_CONTRACT_INVALID`, nothing written). Permission
-        `processes:author` or `processes:deploy`.
+        against the rule set version in effect now (`422 GUARDRAIL_CONTRACT_INVALID`, nothing written). Every
+        handler and adapter a service step names must be registered in this host: otherwise `422
+        VALIDATION_FAILED` with one problem per step naming `step -> name` (`HANDLER_NOT_REGISTERED`,
+        `ADAPTER_NOT_REGISTERED`), and the version stays `DRAFT` (`PRE-072`). Permission `processes:author` or
+        `processes:deploy`.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -223,7 +231,8 @@ paths:
         version of the key is retired, once, with `processes.definition.retired.v1` and `supersededBy`. Running
         instances keep their version. Publishes `processes.definition.approved.v1`. The guardrail contract of every
         `agentTask` is checked again, as at import (`422 GUARDRAIL_CONTRACT_INVALID`; the version stays pending).
-        Permission `processes:approve`.
+        The handlers and adapters of service steps are checked again as at request-approval (`422
+        VALIDATION_FAILED`; the version stays pending). Permission `processes:approve`.
 
         The approval is bound to the content the approver reviewed (PRE-177, PD-139). `expectedDefinitionHash` is the
         `definitionHash` of the version as the approver saw it. While `horus.bpm.processes.approval.require-content-hash`
@@ -591,8 +600,11 @@ paths:
       operationId: startInstance
       summary: Start an instance on the effective version of a process key
       description: |
-        Runs every synchronous step up to the first user task or the end in one transaction. A step that fails
-        rolls everything back (`422 STEP_FAILED`, with `nodeId` and `reason`). A request needs a `businessKey` or
+        Runs every synchronous step up to the first user task or the end in one transaction, local service
+        handlers included; a remote step parks on the async wait-state and its call runs later with no transaction
+        open (`PRE-070`). A step that fails rolls everything back (`422 STEP_FAILED`, with `nodeId` and `reason`).
+        A local handler that throws rolls back everything it and the earlier steps wrote and is `500 INTERNAL` with
+        a `correlationId` only, never the exception text (`PRE-071`). A request needs a `businessKey` or
         an `Idempotency-Key` (`428 PRECONDITION_REQUIRED` without either), so a retry can never start a second
         instance. An instance that already exists for the business key is returned with `200`; a new one with
         `201`; a replay of the same `Idempotency-Key` returns the first answer. Permission `processes:start`.

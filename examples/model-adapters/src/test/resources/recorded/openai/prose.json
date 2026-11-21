@@ -1,0 +1,14 @@
+{
+  "id": "chatcmpl-rec-0003",
+  "object": "chat.completion",
+  "created": 1795665600,
+  "model": "kyc-model-2026-11",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "The passport looks valid and the name matches, so I would approve this applicant.", "refusal": null},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {"prompt_tokens": 412, "completion_tokens": 38, "total_tokens": 450}
+}
