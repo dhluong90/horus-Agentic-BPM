@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("26");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("30");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -213,7 +213,8 @@ class RuleEngineOnlyHostIT {
                 "20 io.github.dhluong90.bpm.rules.postgres.migration.V20__rle_decision_correlation_index",
                 "21 V21__rle_version_copied_from.sql",
                 "24 io.github.dhluong90.bpm.rules.postgres.migration.V24__rle_version_history_rule_set_events",
-                "25 V25__rle_decision_function_versions.sql", "26 V26__rle_version_function.sql");
+                "25 V25__rle_decision_function_versions.sql", "26 V26__rle_version_function.sql",
+                "30 io.github.dhluong90.bpm.rules.postgres.migration.V30__rle_version_pending_index");
     }
 
     @Test

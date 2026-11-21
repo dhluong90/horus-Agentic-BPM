@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
-import type { TaskAnswer } from '../../../api/processes/processesClient';
-import type { DefinitionSummary, Task } from '../../../api/processes/schemas';
+import type { DefinitionApproval, TaskAnswer } from '../../../api/processes/processesClient';
+import type { DefinitionSummary, DefinitionVersion, Task } from '../../../api/processes/schemas';
+import { toHostError } from '../../../api/hostError';
 import { readBpmnGraph } from '../model/bpmnGraph';
 import { useProcessesSession } from './processesContext';
 
@@ -15,8 +16,11 @@ function useKeys() {
   const base = [hostId, tenant, 'processes'] as const;
   return {
     definitions: [...base, 'definitions'] as const,
+    /** The approvals queue's pages (#31): read again after a decision here, so the queue and its count follow. */
+    approvals: [...base, 'approvals'] as const,
     version: (key: string, version: number) => [...base, 'definition', key, version] as const,
     graph: (key: string, version: number) => [...base, 'graph', key, version] as const,
+    diff: (key: string, version: number) => [...base, 'diff', key, version] as const,
     task: (id: string) => [...base, 'task', id] as const,
     instance: (id: string) => [...base, 'instance', id] as const,
   };
@@ -57,6 +61,57 @@ export function useDefinitionGraph(key: string, version: number) {
     queryFn: async ({ signal }) => readBpmnGraph(await client.exportBpmn(key, version, signal)),
     staleTime: Infinity,
   });
+}
+
+/**
+ * The engine's change list from the version in effect to this one. A key with no version in effect answers
+ * 404 NO_EFFECTIVE_VERSION: this is a first version, with nothing to compare, and is returned as `null`.
+ */
+export function useDefinitionDiff(key: string, version: number, enabled: boolean) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: keys.diff(key, version),
+    queryFn: async ({ signal }) => {
+      try {
+        return await client.getDiff(key, version, undefined, signal);
+      } catch (error) {
+        const hostError = toHostError(error);
+        if (hostError.kind === 'problem' && hostError.code === 'NO_EFFECTIVE_VERSION') return null;
+        throw error;
+      }
+    },
+    enabled,
+    retry: false,
+  });
+}
+
+/**
+ * Approve or reject a pending version, then read the key again. Nothing changes on screen before the engine
+ * answers; the answer is the version as stored, which replaces the cached one.
+ */
+function useLifecycle<TArgs>(key: string, send: (version: DefinitionVersion, args: TArgs, idempotencyKey: string) => Promise<DefinitionVersion>, name: string) {
+  const keys = useKeys();
+  const queryClient = useQueryClient();
+  const keyFor = useActionKey();
+  return useMutation({
+    mutationFn: ({ version, args }: { version: DefinitionVersion; args: TArgs }) =>
+      send(version, args, keyFor(`${name}:${key}:${String(version.version)}:${String(version.lockVersion ?? 0)}:${JSON.stringify(args)}`)),
+    onSuccess: async (stored) => {
+      queryClient.setQueryData(keys.version(stored.key, stored.version), stored);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: keys.definitions }), queryClient.invalidateQueries({ queryKey: keys.approvals })]);
+    },
+  });
+}
+
+export function useApproveDefinition(key: string) {
+  const { client } = useProcessesSession();
+  return useLifecycle<DefinitionApproval>(key, (version, approval, idempotencyKey) => client.approveDefinition(version.key, version.version, version.lockVersion ?? 0, approval, idempotencyKey), 'approve');
+}
+
+export function useRejectDefinition(key: string) {
+  const { client } = useProcessesSession();
+  return useLifecycle<string>(key, (version, reason, idempotencyKey) => client.rejectDefinition(version.key, version.version, version.lockVersion ?? 0, reason, idempotencyKey), 'reject');
 }
 
 export function useTask(id: string) {

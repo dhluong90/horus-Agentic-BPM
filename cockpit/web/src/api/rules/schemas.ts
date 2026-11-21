@@ -108,6 +108,28 @@ export interface Page<T> {
   hasNext: boolean;
 }
 
+/** Why the caller may not approve or reject a pending version (GET /approvals, RLE-190). */
+export const PENDING_DENIALS = ['PERMISSION_REQUIRED', 'SELF_APPROVAL_FORBIDDEN', 'AUTHOR_UNKNOWN'] as const;
+export type PendingDenial = (typeof PENDING_DENIALS)[number];
+
+/**
+ * An item of GET /approvals: a version waiting for a second person, with the hash a reviewer sends back and what
+ * this caller may do. Never the definition. An unknown denial code from a newer engine is kept as text.
+ */
+export const pendingRuleApproval = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int().min(1),
+    canonicalHash: z.string().regex(/^[0-9a-f]{64}$/),
+    lockVersion: z.number().int(),
+    requestedBy: z.string(),
+    requestedAt: z.string(),
+    allowedActions: z.array(z.string()),
+    deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
+  })
+  .loose();
+export type PendingRuleApproval = z.infer<typeof pendingRuleApproval>;
+
 export const HISTORY_ACTIONS = ['CREATED', 'REQUESTED', 'APPROVED', 'REJECTED'] as const;
 export const historyEntry = z
   .object({

@@ -368,6 +368,20 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public List<io.github.dhluong90.bpm.rules.internal.store.PendingVersion> listPendingApprovals(String tenantId,
+            DecisionLog.Position after, int limit) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId)
+                        && v.status() == io.github.dhluong90.bpm.rules.api.VersionStatus.PENDING_APPROVAL)
+                .sorted(Comparator.comparing(StoredVersion::requestedAt).thenComparing(StoredVersion::id))
+                .filter(v -> after == null || v.requestedAt().isAfter(after.createdAt())
+                        || (v.requestedAt().equals(after.createdAt()) && v.id().compareTo(after.id()) > 0))
+                .limit(limit)
+                .map(v -> new io.github.dhluong90.bpm.rules.internal.store.PendingVersion(v.id(), v.ruleSet(),
+                        v.version(), v.canonicalHash(), v.lockVersion(), v.createdBy(), v.requestedBy(),
+                        v.requestedAt())).toList();
+    }
+
+    @Override
     public void appendHistory(HistoryRow row) {
         history.add(row);
     }

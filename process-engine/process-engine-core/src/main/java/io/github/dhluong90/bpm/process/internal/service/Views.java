@@ -298,6 +298,19 @@ public final class Views {
         return o;
     }
 
+    /** @param a pending approval @return JSON tree: hashes and identities, never the definition (#31) */
+    public static ObjectNode pendingApproval(io.github.dhluong90.bpm.process.api.PendingApproval a) {
+        ObjectNode o = EngineJson.NODES.objectNode().put("key", a.key());
+        putNullable(o, "name", a.name());
+        o.put("version", a.version()).put("definitionHash", a.definitionHash()).put("lockVersion", a.lockVersion())
+                .put("requestedBy", a.requestedBy()).put("requestedAt", a.requestedAt().toString());
+        ArrayNode actions = o.putArray("allowedActions");
+        a.allowedActions().forEach(actions::add);
+        ObjectNode denied = o.putObject("deniedActions");
+        a.deniedActions().forEach(denied::put);
+        return o;
+    }
+
     /** @param i summary @return JSON tree */
     public static ObjectNode instanceSummary(InstanceSummary i) {
         ObjectNode o = EngineJson.NODES.objectNode();

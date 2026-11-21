@@ -1187,6 +1187,76 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return new Page<>(items, cursors().sign(tenant, "", "definitions", items.get(limit - 1).key()));
     }
 
+    /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#pendingApprovals(PageRequest)}. */
+    public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_READ);
+        PageRequest request = page == null ? PageRequest.first() : page;
+        int limit = limit(request);
+        // Verified in memory before any transaction: a forged cursor never reaches the database.
+        String after = cursors().verify(tenant, "", "pending-approvals", request.cursor());
+        Instant afterRequestedAt = null;
+        String afterId = null;
+        if (after != null) {
+            int bar = after.lastIndexOf('|');
+            try {
+                afterRequestedAt = Instant.parse(after.substring(0, bar));
+                afterId = after.substring(bar + 1);
+            } catch (RuntimeException e) {
+                throw Cursors.invalid();
+            }
+            if (!afterId.matches("[0-9A-HJKMNP-TV-Z]{26}")) {
+                throw Cursors.invalid();
+            }
+        }
+        Instant lastAt = afterRequestedAt;
+        String lastId = afterId;
+        java.util.Set<String> held = callers.currentPermissions();
+        List<ProcessStore.PendingApprovalRow> rows = transactions.inTransaction(() -> store.pendingApprovals(tenant,
+                lastAt, lastId, limit + 1));
+        List<io.github.dhluong90.bpm.process.api.PendingApproval> items = rows.stream().limit(limit)
+                .map(r -> pendingApproval(r, caller, held)).toList();
+        if (rows.size() <= limit) {
+            return new Page<>(items, null);
+        }
+        ProcessStore.PendingApprovalRow last = rows.get(limit - 1);
+        return new Page<>(items, cursors().sign(tenant, "", "pending-approvals", last.requestedAt() + "|" + last.id()));
+    }
+
+    /**
+     * What the caller may do with a pending version now, as {@code approve} and {@code reject} do: the requester never
+     * approves or rejects, and under the default {@code approver-must-differ-from: makers} the importer or creator does
+     * not approve either; with maker-checker off (dev profile only) a requester may approve. A hint: the commands
+     * check again.
+     */
+    private io.github.dhluong90.bpm.process.api.PendingApproval pendingApproval(ProcessStore.PendingApprovalRow row,
+            String caller, java.util.Set<String> held) {
+        List<String> allowed = new ArrayList<>(2);
+        Map<String, String> denied = new LinkedHashMap<>(2);
+        String approve = io.github.dhluong90.bpm.process.api.PendingApproval.APPROVE;
+        String reject = io.github.dhluong90.bpm.process.api.PendingApproval.REJECT;
+        if (!held.contains(PERMISSION_APPROVE)) {
+            denied.put(approve, io.github.dhluong90.bpm.process.api.PendingApproval.PERMISSION_REQUIRED);
+            denied.put(reject, io.github.dhluong90.bpm.process.api.PendingApproval.PERMISSION_REQUIRED);
+        } else {
+            boolean requester = caller.equals(row.requestedBy());
+            boolean self = requester || (settings.approverRule() == EngineSettings.ApproverRule.MAKERS
+                    && caller.equals(row.createdBy()));
+            if (self && settings.makerChecker()) {
+                denied.put(approve, io.github.dhluong90.bpm.process.api.PendingApproval.SELF_APPROVAL_FORBIDDEN);
+            } else {
+                allowed.add(approve);
+            }
+            if (requester) {
+                denied.put(reject, io.github.dhluong90.bpm.process.api.PendingApproval.SELF_APPROVAL_FORBIDDEN);
+            } else {
+                allowed.add(reject);
+            }
+        }
+        return new io.github.dhluong90.bpm.process.api.PendingApproval(row.key(), row.name(), row.version(),
+                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied);
+    }
+
     /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#instances(InstanceQuery)}. */
     public Page<InstanceSummary> instances(InstanceQuery query) {
         String tenant = tenant();

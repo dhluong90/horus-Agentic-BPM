@@ -1,8 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { toHostError } from '../../api/hostError';
 import { useI18n } from '../../i18n/I18nProvider';
-import type { PendingRequest } from '../overview/useRuleOverview';
-import { useWithdraw } from './useWithdraw';
+import { useWithdraw, type WithdrawTarget } from './useWithdraw';
 
 /** The engine's default `lifecycle.reason-max-length`; the engine checks the real limit and answers 400 above it. */
 const REASON_MAX = 2000;
@@ -11,12 +10,12 @@ const REASON_MAX = 2000;
  * Withdraws the user's own request, with an optional reason. The request stays on screen until the engine
  * confirms; a refused withdrawal shows the engine's error.
  */
-export function WithdrawDialog({ request, onClose, onDone }: { request: PendingRequest; onClose: () => void; onDone: (message: string) => void }) {
+export function WithdrawDialog({ request, onClose, onDone }: { request: WithdrawTarget; onClose: () => void; onDone: (message: string) => void }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const reasonId = useId();
   const [reason, setReason] = useState('');
-  const { version } = request;
+  const version = request;
   const name = { name: version.ruleSet, version: String(version.version) };
   const withdraw = useWithdraw(() => {
     onDone(t('approvals.withdrawn', name));

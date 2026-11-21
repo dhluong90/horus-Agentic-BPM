@@ -56,11 +56,11 @@ class IncidentMigrationTest {
         flyway(ds, "27").migrate();
         incidentsOfTheLastRelease(jdbc);
 
-        // When V29 and V30 run with the migrator's settings
+        // When V29, V30 and V35 run with the migrator's settings
         int applied = new ProcessEngineSchemaMigrator(ds).migrate();
 
         // Then the rows keep their state, have no resolution and no retry in flight, and both indexes are valid
-        assertThat(applied).isEqualTo(2);
+        assertThat(applied).isEqualTo(3);
         assertThat(jdbc.sql("SELECT status || ' ' || coalesce(resolution, '-') || ' ' || retrying FROM pre_incident "
                 + "ORDER BY id").query(String.class).list()).containsExactly("OPEN - false", "RESOLVED - false");
         assertThat(index(jdbc, "idx_pre_incident_status")).containsEntry("valid", true);

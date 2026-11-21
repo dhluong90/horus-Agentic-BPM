@@ -220,6 +220,38 @@ public interface ProcessStore {
      */
     List<DefinitionSummary> definitionKeys(String tenant, String afterKey, int limit, Instant now);
 
+    /**
+     * A definition version waiting for approval, without its definition or source (#31, PRE-190).
+     *
+     * @param id the version id, the tie-break of the keyset
+     * @param key the definition key
+     * @param name the process name, or null
+     * @param version the version number
+     * @param definitionHash the definition hash
+     * @param lockVersion the optimistic lock
+     * @param createdBy the importer or creator
+     * @param requestedBy the requester
+     * @param requestedAt when approval was requested
+     */
+    record PendingApprovalRow(String id, String key, String name, int version, String definitionHash,
+            long lockVersion, String createdBy, String requestedBy, Instant requestedAt) {
+    }
+
+    /**
+     * A page of the tenant's definition versions in {@code PENDING_APPROVAL}, oldest request first on
+     * {@code (requested_at, id)} (PRE-190).
+     *
+     * @param tenant tenant
+     * @param afterRequestedAt keyset: the {@code requestedAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id, or null
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<PendingApprovalRow> pendingApprovals(String tenant, Instant afterRequestedAt, String afterId,
+            int limit) {
+        throw new UnsupportedOperationException("pending approvals are not supported by this store");
+    }
+
     void insertDefinition(StoredDefinition definition);
 
     /**

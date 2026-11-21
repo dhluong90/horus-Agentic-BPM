@@ -10,7 +10,7 @@ info:
     chosen clock, or pinned to a version), batch evaluation of up to 1,000 items, replay of a logged decision,
     decision-log reads (one decision, one rule set's decisions in a period, the decisions of one case reference, and
     the searches by a plain or a masked input's value), the plain-language explanation of a decision, a rule set's
-    history across its versions, and the evidence export of versions and decisions.
+    history across its versions, the pending approvals queue, and the evidence export of versions and decisions.
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -30,6 +30,54 @@ tags:
   - name: decisions
     description: Evaluation and the decision log
 paths:
+  /approvals:
+    get:
+      tags: [rule-sets]
+      operationId: listPendingApprovals
+      summary: List the versions waiting for a second person, oldest request first
+      description: |
+        The pending approvals queue of the caller's tenant (#31, `RLE-190`): every version in `PENDING_APPROVAL`
+        across all rule sets, including one that is not the latest version of its rule set. Permission `rules:read`;
+        the answer shows what the caller may do, it does not need `rules:approve`. Ordered by `(requestedAt, id)`,
+        keyset-paged with a signed cursor bound to the tenant and this list; at most `query.max-page-size` (200) per
+        page, 50 by default. A cursor from another list, another tenant or an edited one is `400 QUERY_INVALID`.
+
+        Each item has what a reviewer needs to open the version and to decide on exactly the content that was
+        reviewed (`RLE-084`, PD-139): the `canonicalHash` to send back as `expectedCanonicalHash` and the
+        `lockVersion` to send as `If-Match`. Items never carry the definition, the source or an input value.
+
+        `allowedActions` is what the caller may send now, in the order `approve`, `reject`, `withdraw`.
+        `deniedActions` gives, for `approve` and `reject` only, why the caller may not send one, as a code:
+        `PERMISSION_REQUIRED` (no `rules:approve`), `SELF_APPROVAL_FORBIDDEN` (the caller requested or authored the
+        version) or `AUTHOR_UNKNOWN` (no recorded author, so nobody can approve it, PD-105). An action in
+        `allowedActions` has no entry. The commands check again and stay the authority. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of pending versions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingApprovalPage'
+              example:
+                data:
+                  - ruleSet: card-fee
+                    version: 2
+                    canonicalHash: 3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
+                    lockVersion: 1
+                    requestedBy: lan
+                    requestedAt: '2026-12-15T01:30:00Z'
+                    allowedActions: []
+                    deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /rule-sets:
     get:
       tags: [rule-sets]
@@ -2355,6 +2403,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/VersionSummary'
+        nextCursor:
+          type: [string, 'null']
+        hasNext:
+          type: boolean
+    PendingApproval:
+      type: object
+      required: [ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        canonicalHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The value the reviewer sends back as `expectedCanonicalHash` (`RLE-084`, PD-139)
+        lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        allowedActions:
+          type: array
+          items: { type: string, enum: [approve, reject, withdraw] }
+        deniedActions:
+          type: object
+          description: For `approve` and `reject` the caller may not send, the reason as a code
+          properties:
+            approve: { $ref: '#/components/schemas/PendingDenial' }
+            reject: { $ref: '#/components/schemas/PendingDenial' }
+          additionalProperties: false
+    PendingDenial:
+      type: string
+      enum: [PERMISSION_REQUIRED, SELF_APPROVAL_FORBIDDEN, AUTHOR_UNKNOWN]
+    PendingApprovalPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingApproval'
         nextCursor:
           type: [string, 'null']
         hasNext:

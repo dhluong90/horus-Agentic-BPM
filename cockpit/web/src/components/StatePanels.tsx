@@ -37,10 +37,12 @@ export function HostErrorPanel({ error, onRetry }: { error: HostError; onRetry: 
   const code = error.kind === 'problem' ? error.code : undefined;
   const correlationId = error.kind === 'problem' || error.kind === 'unexpected-response' ? error.correlationId : undefined;
   const status = error.kind === 'problem' || error.kind === 'unexpected-response' ? error.status : undefined;
+  // A signed-out user has done nothing wrong: one calm line and the way back in, no alarm colour or icon.
+  const calm = error.kind === 'signed-out';
   return (
-    <section className="panel panel--error" role="alert" aria-labelledby="host-error-title">
+    <section className={calm ? 'panel panel--calm' : 'panel panel--error'} role={calm ? 'status' : 'alert'} data-testid={calm ? 'signed-out' : undefined} aria-labelledby="host-error-title">
       <h1 id="host-error-title" className="panel__title">
-        <span className="status-icon status-icon--bad" aria-hidden="true">!</span>
+        {calm ? null : <span className="status-icon status-icon--bad" aria-hidden="true">!</span>}
         {t(text.title)}
       </h1>
       <p className="panel__body">{t(text.body)}</p>

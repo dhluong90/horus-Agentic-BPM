@@ -174,6 +174,16 @@ public interface RuleStore {
     List<VersionSummary> listVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit);
 
     /**
+     * Lists the versions of every rule set of a tenant that wait for approval, oldest request first (#31, RLE-190).
+     *
+     * @param tenantId the tenant
+     * @param after the position after which to read, or null from the oldest request
+     * @param limit at most this many
+     * @return the pending versions, without their documents
+     */
+    List<PendingVersion> listPendingApprovals(String tenantId, DecisionLog.Position after, int limit);
+
+    /**
      * Appends one lifecycle history row.
      *
      * @param row the row

@@ -4,10 +4,14 @@ import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
   definitionVersion,
+  pendingDefinitionApprovalPage,
+  type PendingDefinitionApproval,
+  graphDiff,
   processInstance,
   task,
   type DefinitionSummary,
   type DefinitionVersion,
+  type GraphDiff,
   type ProcessInstance,
   type Task,
 } from './schemas';
@@ -23,6 +27,15 @@ export interface TaskAnswer {
 }
 
 /**
+ * What Approve sends (approveDefinition): the definitionHash of the content the approver reviewed, never one read
+ * again at decision time (PD-139), and an optional comment.
+ */
+export interface DefinitionApproval {
+  expectedDefinitionHash: string;
+  comment: string;
+}
+
+/**
  * Typed client of the Process Engine REST API (process-engine/api/openapi.yaml). One method per operation; the
  * operation id is named on each. Task commands carry the caller's Idempotency-Key and the task's lockVersion as
  * If-Match.
@@ -30,8 +43,16 @@ export interface TaskAnswer {
 export interface ProcessesClient {
   /** listDefinitions: one page of keys, ordered by key */
   listDefinitions(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<DefinitionSummary>>;
+  /** listPendingApprovals: one page of definition versions waiting for a second person, oldest request first (PRE-190) */
+  listPendingApprovals(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<PendingDefinitionApproval>>;
   /** getDefinitionVersion */
   getVersion(key: string, version: number, signal?: AbortSignal): Promise<DefinitionVersion>;
+  /** getDefinitionDiff: steps and links changed from `base` (the version in effect when absent) to this version */
+  getDiff(key: string, version: number, base?: number, signal?: AbortSignal): Promise<GraphDiff>;
+  /** approveDefinition: as a second person, bound to the reviewed content hash */
+  approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
+  /** rejectDefinition: back to draft with a reason */
+  rejectDefinition(key: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<DefinitionVersion>;
   /** exportDefinition (format=bpmn): the version's graph as BPMN 2.0 XML; writes nothing */
   exportBpmn(key: string, version: number, signal?: AbortSignal): Promise<string>;
   /** getTask: the task with the actions this caller may take, and the review context of a refused agent answer */
@@ -61,8 +82,29 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/definitions${text === '' ? '' : `?${text}`}`, ...withSignal(request.signal) }, definitionSummaryPage);
       return answer.data;
     },
+    async listPendingApprovals(request = {}) {
+      const query = new URLSearchParams();
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      const text = query.toString();
+      const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/approvals${text === '' ? '' : `?${text}`}`, ...withSignal(request.signal) }, pendingDefinitionApprovalPage);
+      return answer.data;
+    },
     async getVersion(key, version, signal) {
       return (await call({ method: 'GET', path: versionPath(key, version), ...withSignal(signal) }, definitionVersion)).data;
+    },
+    async getDiff(key, version, base, signal) {
+      const query = base !== undefined ? `?base=${String(base)}` : '';
+      return (await call({ method: 'GET', path: `${versionPath(key, version)}/diff${query}`, ...withSignal(signal) }, graphDiff)).data;
+    },
+    async approveDefinition(key, version, lockVersion, approval, idempotencyKey) {
+      const comment = approval.comment.trim();
+      const body = { contentType: 'application/json', text: JSON.stringify({ expectedDefinitionHash: approval.expectedDefinitionHash, comment: comment === '' ? null : comment }) };
+      return (await call({ method: 'POST', path: `${versionPath(key, version)}:approve`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
+    },
+    async rejectDefinition(key, version, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
+      return (await call({ method: 'POST', path: `${versionPath(key, version)}:reject`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
     },
     async exportBpmn(key, version, signal) {
       const answer = await downloadFromHost(fetchImpl, baseUrl, { method: 'GET', path: `${versionPath(key, version)}/export?format=bpmn`, ...withSignal(signal) }, 'application/bpmn+xml');

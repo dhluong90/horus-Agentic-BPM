@@ -623,6 +623,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /definitions` | `processes:deploy` | Import a full JSON or YAML document as the next `DRAFT`; optional `requestApproval` and `effectiveFrom` in the body | `Idempotency-Key` | `422 VALIDATION_FAILED`, `422 GUARDRAIL_CONTRACT_INVALID`, `422 DEFINITION_TOO_LARGE` | M2 |
 | `POST /definitions:import-bpmn` | `processes:deploy` | Import a BPMN subset file as a `DRAFT` | `Idempotency-Key` | `422 CMMN_UNSUPPORTED`, `422 BPMN_UNSUPPORTED_ELEMENT`, `422 BPMN_UNSAFE_XML`, `422 VALIDATION_FAILED` | M3 |
 | `GET /definitions` | `processes:read` | Keys with effective version, pending count, last change | Cursor, at most 200 | | M2 |
+| `GET /approvals` | `processes:read` | The pending approvals queue of the tenant (#31, `PRE-190`): every `PENDING_APPROVAL` definition version across all keys, including one that is not the latest, oldest request first, keyset on `(requested_at, id)`. Items: `key`, `name`, `version`, `definitionHash` (what a reviewer sends back as `expectedDefinitionHash`, `PRE-177`, PD-139), `lockVersion` (the `If-Match`), `requestedBy`, `requestedAt`, `allowedActions` and `deniedActions`, for `approve` and `reject` only, as `PERMISSION_REQUIRED` or `SELF_APPROVAL_FORBIDDEN`: the requester may do neither, the maker (importer or creator) may reject but not approve under the default `approver-must-differ-from: makers`. Never the definition, the source or a variable. Read permission, not `processes:approve`, so the cockpit shows a reader why they cannot decide; the decision commands stay the authority. Same shape as `GET /approvals` of the Rule Engine (`RLE-190`) | Signed cursor bound to the tenant and the list (`pending-approvals`), at most 200 | `400 QUERY_INVALID` | M2 (0.3.0, #31) |
 | `POST /definitions/{key}/drafts` | `processes:author` | New draft from `fromVersion` or blank | `Idempotency-Key` | `403 DRAFT_AUTHORING_DISABLED` | M2 |
 | `GET /definitions/{key}/versions/{v}` | `processes:read` | Document, status, hash, approval fields; `?include=layout` adds the latest layout; `?include=source` adds `sourceFormat`, `sourceDocument` and `sourceHash` (DN-01) | `ETag` from hash and layout revision | `404 DEFINITION_NOT_FOUND` | M2 |
 | `PUT /definitions/{key}/versions/{v}` | `processes:author` | Replace draft content | `If-Match: "<lockVersion>"` | `403 DRAFT_AUTHORING_DISABLED`, `409 VERSION_CONFLICT`, `409 INVALID_STATE` | M2 |
@@ -997,6 +998,11 @@ CREATE INDEX idx_pre_incident_instance ON pre_incident (tenant_id, instance_id, 
 CREATE INDEX idx_pre_incident_status ON pre_incident (tenant_id, status, created_at DESC, id DESC);
 CREATE INDEX idx_pre_incident_unresolved ON pre_incident (tenant_id, instance_id, created_at, id)
   WHERE status IN ('OPEN','RESOLUTION_PENDING');
+-- 0.3.0 (#31, V35, built CONCURRENTLY outside a transaction): the pending approvals list, oldest request first. The V7
+-- index idx_pre_definition_pending (tenant_id, requested_at) stays for replicas of the previous release; it has no id
+-- tie-break for the keyset.
+CREATE INDEX idx_pre_definition_pending_page ON pre_definition (tenant_id, requested_at, id)
+  WHERE status = 'PENDING_APPROVAL';
 
 CREATE TABLE pre_step_result (                                                  -- 0.2.0 (#101, V14): agent memory
   tenant_id            TEXT        NOT NULL,
@@ -1244,6 +1250,7 @@ Source: [`diagrams/cockpit-reads.mmd`](diagrams/cockpit-reads.mmd).
 | Open incidents per node | `idx_pre_incident_node` | Small: open incidents are hundreds | Under 2 ms | Unchanged |
 | Incident list of one status | `idx_pre_incident_status` range for `(tenant, status)`, `LIMIT 201` ordered by `(created_at DESC, id DESC)`, keyset | About 3 buffer reads per page | Under 2 ms | 10x incidents does not change a page; `RESOLVED` grows with history, and the keyset never scans past one page |
 | Unresolved incidents of one instance | `idx_pre_incident_unresolved` for `(tenant, instance)` | At most one per waiting token | Under 1 ms; also read by every accepted async result to close a retried incident | Unchanged |
+| Pending approvals list | `idx_pre_definition_pending_page` for `(tenant)` over `PENDING_APPROVAL`, `LIMIT 201` already in `(requested_at, id)` order, keyset | About 3 buffer reads per page | Under 2 ms | 10x pending versions does not change a page; the partial index holds only versions that wait |
 | Window stats per node | PK range on `pre_node_stats_hourly` for `(tenant, definition, bucket_start range)` | 20 nodes x 720 hours (31 days) = 14,400 rows, histograms merged in SQL | About 15 ms | 500 nodes x 720 hours = 360,000 rows, about 200 ms: the 31-day cap holds this; longer windows need a daily rollup (open question 11.4) |
 | Task query, one user | `idx_pre_task_mine` and `idx_pre_task_claimed` for the user, `idx_pre_task_role_due` per role, `idx_pre_task_group` per group, `idx_pre_task_open_due` for `any`; each range `LIMIT page + 1` ordered by `(due_at, id)` after the cursor, then its undated part by id while the page is short, merged in Java (0.3.0, #70) | About 0.3 ms per index range | User with 5 roles and 3 groups: 10 ranges, about 3 ms | 10x open tasks does not change it: each range stops after one page. When one role holds nearly all open tasks the planner may read `idx_pre_task_open_due` and filter by role: still an ordered range scan under the `Limit`, checked in `TaskQueryPostgresIT` |
 | SLA breaches | The same indexes with `due_at < now()` | Same | Same | Same |

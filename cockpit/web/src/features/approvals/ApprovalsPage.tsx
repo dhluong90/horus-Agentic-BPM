@@ -1,44 +1,41 @@
-import { useState } from 'react';
-import type { RuleSetSummary } from '../../api/rules/schemas';
-import { suppliedName, usePersonName } from '../../app/people';
+import { useId, useState } from 'react';
+import { usePersonName } from '../../app/people';
 import { formatRoute } from '../../app/route';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useProcessesSession } from '../processes/api/processesContext';
 import { useRulesSession } from '../rules/api/rulesContext';
-import { StatusBadge } from '../rules/components/StatusBadge';
 import { StatusPill } from '../rules/components/StatusPill';
 import { formatDateTime } from '../rules/model/dates';
-import { useRetryRules } from '../overview/useRetryRules';
-import { mapLoadable, relevantRequests, useEveryRuleSet, useOpenVersions, type Loadable, type PendingRequest } from '../overview/useRuleOverview';
+import { denialMessage, inView, itemKey, reviewRoute, type ApprovalItem, type Engine, type QueueView } from './queue';
+import { useApprovalQueue, type ApprovalQueue } from './useApprovalQueue';
 import { WithdrawDialog } from './WithdrawDialog';
 
-type View = 'review' | 'mine';
-
-const key = (request: PendingRequest) => `${request.version.ruleSet}/${String(request.version.version)}`;
-
 /**
- * The four-eyes queue (PD-093): requests this user may review, and their own requests, which they follow
- * and may withdraw. One view at a time; the selected request is previewed beside the list.
+ * The four-eyes queue across both engines (#31, PD-093): requests this user may review, and their own requests,
+ * which they follow and may withdraw. One view at a time; the selected request is previewed beside the list. The
+ * decision is taken on the existing review screen, where the change is read: the rule diff or the process diff,
+ * each of which sends the hash of the content on screen (PD-139). Approve that the engine does not offer is shown
+ * disabled, with the engine's reason in one line.
  */
-export function ApprovalsPage({ pageLimit }: { pageLimit: number }) {
+export function ApprovalsPage({ engines, pageLimit }: { engines: readonly Engine[]; pageLimit: number }) {
   const { t } = useI18n();
-  const { can, userId } = useRulesSession();
-  const retry = useRetryRules();
-  const ruleSets = useEveryRuleSet(pageLimit);
-  const versions = useOpenVersions(ruleSets);
-  const approver = can('rules:approve');
-  const requests = mapLoadable(versions, (data) => relevantRequests(data, userId));
-  const toReview = mapLoadable(requests, (data) => data.filter((request) => request.canApprove));
-  const mine = mapLoadable(requests, (data) => data.filter((request) => request.mine));
-  const [view, setView] = useState<View>(approver ? 'review' : 'mine');
+  const rules = useRulesSession();
+  const processes = useProcessesSession();
+  const queue = useApprovalQueue(engines, pageLimit);
+  const approver = (engines.includes('rules') && rules.can('rules:approve')) || (engines.includes('processes') && processes.can('processes:approve'));
+  // Until the user picks a view: To review for an approver, unless nothing waits there and their own requests do.
+  const [chosen, setView] = useState<QueueView | undefined>(undefined);
   const [selected, setSelected] = useState<string | undefined>(undefined);
-  const [withdrawing, setWithdrawing] = useState<PendingRequest | undefined>(undefined);
+  const [withdrawing, setWithdrawing] = useState<ApprovalItem | undefined>(undefined);
   const [notice, setNotice] = useState('');
-  const shown = view === 'review' ? toReview : mine;
-  const current = shown.status === 'ready' ? (shown.data.find((request) => key(request) === selected) ?? shown.data[0]) : undefined;
-  const next = toReview.status === 'ready' ? toReview.data[0] : undefined;
-  const count = (value: Loadable<PendingRequest[]>) => (value.status === 'ready' ? String(value.data.length) : '');
-  const published = ruleSets.status === 'ready' ? new Map(ruleSets.data.map((item: RuleSetSummary) => [item.ruleSet, item.publishedVersion])) : new Map<string, number | null>();
+  const { state } = queue;
+  const items = state.status === 'ready' ? state.items : [];
+  const view: QueueView = chosen ?? (approver && (items.some((item) => inView(item, 'review')) || !items.some((item) => inView(item, 'mine'))) ? 'review' : 'mine');
+  const shown = items.filter((item) => inView(item, view));
+  const current = shown.find((item) => itemKey(item) === selected) ?? shown[0];
+  const next = items.find((item) => item.canApprove);
+  const count = (of: QueueView) => (state.status === 'ready' ? String(items.filter((item) => inView(item, of)).length) + (state.more ? '+' : '') : '');
 
   return (
     <section className="workspace" aria-labelledby="approvals-title">
@@ -46,31 +43,32 @@ export function ApprovalsPage({ pageLimit }: { pageLimit: number }) {
         id="approvals-title"
         title={t('approvals.title')}
         subtitle={approver ? t('approvals.subtitle') : t('approvals.subtitleAuthor')}
-        action={next !== undefined ? <a className="btn btn--primary" href={formatRoute({ name: 'rule-set', ruleSet: next.version.ruleSet, version: next.version.version, lens: 'changes' })}>{t('approvals.reviewNext')}</a> : undefined}
+        action={next !== undefined ? <a className="btn btn--primary" href={formatRoute(reviewRoute(next))}>{t('approvals.reviewNext')}</a> : undefined}
       />
       <p className="sr-only" role="status" aria-live="polite">{notice}</p>
+      {state.status === 'ready' && state.failed.length > 0 ? <Incomplete failed={state.failed} onRetry={queue.retry} /> : null}
       <div className="queue">
         <div className="queue__list">
-          <div className="seg" role="group" aria-label={t('approvals.title')}>
-            {approver ? (
-              <button type="button" className="hit" aria-pressed={view === 'review'} onClick={() => { setView('review'); setSelected(undefined); }}>
-                {t('home.toReview')} <span className="seg__count tnum">{count(toReview)}</span>
+          {state.status !== 'forbidden' && state.status !== 'error' ? (
+            <div className="seg" role="group" aria-label={t('approvals.title')}>
+              {approver ? (
+                <button type="button" className="hit" aria-pressed={view === 'review'} onClick={() => { setView('review'); setSelected(undefined); }}>
+                  {t('home.toReview')} <span className="seg__count tnum">{count('review')}</span>
+                </button>
+              ) : null}
+              <button type="button" className="hit" aria-pressed={view === 'mine'} onClick={() => { setView('mine'); setSelected(undefined); }}>
+                {t('approvals.yourRequests')} <span className="seg__count tnum">{count('mine')}</span>
               </button>
-            ) : null}
-            <button type="button" className="hit" aria-pressed={view === 'mine'} onClick={() => { setView('mine'); setSelected(undefined); }}>
-              {t('approvals.yourRequests')} <span className="seg__count tnum">{count(mine)}</span>
-            </button>
-          </div>
-          <QueueBody items={shown} view={view} current={current} onSelect={(request) => { setSelected(key(request)); }} onRetry={retry} />
+            </div>
+          ) : null}
+          <QueueBody queue={queue} engines={engines} items={shown} view={view} current={current} onSelect={(item) => { setSelected(itemKey(item)); }} />
         </div>
-        {current !== undefined ? (
-          <Preview request={current} replaces={published.get(current.version.ruleSet) ?? null} onWithdraw={setWithdrawing} />
-        ) : null}
+        {current !== undefined ? <Preview item={current} onWithdraw={setWithdrawing} /> : null}
       </div>
       {withdrawing !== undefined ? (
         <WithdrawDialog
-          key={key(withdrawing)}
-          request={withdrawing}
+          key={itemKey(withdrawing)}
+          request={{ ruleSet: withdrawing.key, version: withdrawing.version, lockVersion: withdrawing.lockVersion }}
           onClose={() => { setWithdrawing(undefined); }}
           onDone={(message) => {
             setNotice(message);
@@ -82,64 +80,106 @@ export function ApprovalsPage({ pageLimit }: { pageLimit: number }) {
   );
 }
 
-function QueueBody({ items, view, current, onSelect, onRetry }: { items: Loadable<PendingRequest[]>; view: View; current: PendingRequest | undefined; onSelect: (request: PendingRequest) => void; onRetry: () => void }) {
+/** One engine answered and another did not: the list says it is incomplete, and offers to read it again. */
+function Incomplete({ failed, onRetry }: { failed: readonly Engine[]; onRetry: () => void }) {
+  const { t } = useI18n();
+  const text = failed.length > 1 ? t('approvals.partial.both') : failed[0] === 'processes' ? t('approvals.partial.processes') : t('approvals.partial.rules');
+  return (
+    <div className="notice notice--warn notice--line queue__notice" role="status">
+      <div className="notice__row">
+        <p className="notice__title"><span className="notice__icon" aria-hidden="true">!</span> {text}</p>
+        <button type="button" className="btn btn--quiet btn--small hit" onClick={onRetry}>{t('action.retry')}</button>
+      </div>
+    </div>
+  );
+}
+
+function QueueBody({ queue, engines, items, view, current, onSelect }: {
+  queue: ApprovalQueue; engines: readonly Engine[]; items: readonly ApprovalItem[]; view: QueueView; current: ApprovalItem | undefined; onSelect: (item: ApprovalItem) => void;
+}) {
   const { t, locale } = useI18n();
   const personName = usePersonName();
-  if (items.status === 'loading') return <LoadingRows rows={2} />;
-  if (items.status === 'error') return <AreaError error={items.error} onRetry={onRetry} />;
-  if (items.data.length === 0) {
+  const { state } = queue;
+  if (state.status === 'loading') return <article className="card"><LoadingRows rows={3} /></article>;
+  if (state.status === 'error') return <article className="card"><AreaError error={state.error} onRetry={queue.retry} /></article>;
+  if (state.status === 'forbidden') {
     return (
       <article className="card">
-        <EmptyState icon="approvals" text={view === 'review' ? t('approvals.empty') : t('approvals.emptyMine')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />
+        <EmptyState icon="approvals" text={t('approvals.forbidden')} action={{ label: t('menu.home'), href: formatRoute({ name: 'home' }) }} />
+      </article>
+    );
+  }
+  if (items.length === 0) {
+    const next = engines.includes('rules') ? { label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) } : { label: t('approvals.openProcesses'), href: formatRoute({ name: 'processes' }) };
+    return (
+      <article className="card">
+        <EmptyState icon="approvals" text={view === 'review' ? t('approvals.empty') : t('approvals.emptyMine')} action={next} />
       </article>
     );
   }
   return (
-    <ul className="queue__items">
-      {items.data.map((request) => {
-        const { version } = request;
-        const selected = current !== undefined && key(current) === key(request);
-        const who = request.mine ? t('approvals.yourRequest') : personName(version.requestedBy ?? '', suppliedName(version, 'requestedBy'));
-        return (
-          <li key={key(request)}>
-            <button type="button" className={selected ? 'queue-card is-selected' : 'queue-card'} aria-pressed={selected} onClick={() => { onSelect(request); }}>
-              <span className="queue-card__title">{t('rules.nameVersion', { name: version.ruleSet, version: String(version.version) })}</span>
-              <StatusPill status={version.status} />
-              <span className="queue-card__meta tnum">{who} · {formatDateTime(version.requestedAt ?? version.createdAt, locale)}</span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <ul className="queue__items">
+        {items.map((item) => {
+          const selected = current !== undefined && itemKey(current) === itemKey(item);
+          const who = item.mine ? t('approvals.yourRequest') : personName(item.requestedBy, item.requesterName);
+          return (
+            <li key={itemKey(item)}>
+              <button type="button" className={selected ? 'queue-card is-selected' : 'queue-card'} aria-pressed={selected} onClick={() => { onSelect(item); }}>
+                <span className="queue-card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</span>
+                <span className="tag tag--kind">{item.engine === 'rules' ? t('approvals.kind.rules') : t('approvals.kind.processes')}</span>
+                <span className="queue-card__meta tnum">{who} · {formatDateTime(item.requestedAt, locale)}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {state.more ? (
+        <button type="button" className="btn btn--quiet hit" disabled={queue.loadingMore} aria-busy={queue.loadingMore} onClick={queue.loadMore}>
+          {queue.loadingMore ? t('approvals.loadingMore') : t('approvals.showMore')}
+        </button>
+      ) : null}
+    </>
   );
 }
 
-/** The selected request: who asked, when, what it replaces, and the way to the full review. */
-function Preview({ request, replaces, onWithdraw }: { request: PendingRequest; replaces: number | null; onWithdraw: (request: PendingRequest) => void }) {
+/**
+ * The selected request: what it is, who asked and when, and the decision. Where the engine offers Approve, the way
+ * in is the full review with the change in view; where it does not, Approve is disabled with the reason beside it.
+ */
+function Preview({ item, onWithdraw }: { item: ApprovalItem; onWithdraw: (item: ApprovalItem) => void }) {
   const { t, locale } = useI18n();
   const personName = usePersonName();
-  const { version } = request;
-  const requester = personName(version.requestedBy ?? '', suppliedName(version, 'requestedBy'));
-  const review = formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'changes' });
+  const reasonId = useId();
+  const review = formatRoute(reviewRoute(item));
+  const requester = item.mine ? t('approvals.yourRequest') : personName(item.requestedBy, item.requesterName);
   return (
     <article className="card queue__preview" aria-labelledby="approval-preview">
       <div className="card__head">
-        <h2 id="approval-preview" className="card__title">{t('rules.nameVersion', { name: version.ruleSet, version: String(version.version) })}</h2>
-        <span className="muted tnum">{replaces !== null ? t('approvals.replaces', { version: String(replaces) }) : t('approvals.firstVersion')}</span>
+        <h2 id="approval-preview" className="card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</h2>
+        <StatusPill status="PENDING_APPROVAL" />
       </div>
       <dl className="facts-list">
+        <div><dt>{t('approvals.kindLabel')}</dt><dd>{item.engine === 'rules' ? t('approvals.kind.rules') : t('approvals.kind.processes')}</dd></div>
         <div><dt>{t('rulesArea.col.requestedBy')}</dt><dd>{requester}</dd></div>
-        <div><dt>{t('approvals.sent')}</dt><dd className="tnum">{formatDateTime(version.requestedAt ?? version.createdAt, locale)}</dd></div>
-        <div><dt>{t('rulesArea.col.status')}</dt><dd><StatusBadge status={version.status} /></dd></div>
+        <div><dt>{t('approvals.sent')}</dt><dd className="tnum">{formatDateTime(item.requestedAt, locale)}</dd></div>
       </dl>
-      {request.mine ? <p className="muted">{t('approvals.waitingForOther')}</p> : null}
-      <div className="queue__preview-actions">
-        <a className="btn" href={review}><span aria-hidden="true">→</span> {request.canApprove ? t('approvals.openReview') : t('approvals.openChanges')}</a>
-        {request.canWithdraw ? (
-          <button type="button" className="btn btn--quiet" onClick={() => { onWithdraw(request); }}>{t('approvals.withdraw')}</button>
-        ) : null}
-      </div>
+      {item.canApprove ? (
+        <div className="queue__preview-actions">
+          <a className="btn" href={review}><span aria-hidden="true">✓</span> {t('approvals.reviewAndApprove')}</a>
+        </div>
+      ) : (
+        <div className="queue__decision">
+          <p className="reason-line" id={reasonId}><span aria-hidden="true">⊘</span> {t(denialMessage(item.approveDenied ?? 'UNAVAILABLE'))}</p>
+          <div className="queue__preview-actions">
+            <button type="button" className="btn" disabled aria-describedby={reasonId}><span aria-hidden="true">✓</span> {t('approvals.approve')}</button>
+            <a className="btn btn--quiet" href={review}>{t('approvals.openChanges')} <span aria-hidden="true">→</span></a>
+            {item.canWithdraw ? (
+              <button type="button" className="btn btn--quiet" onClick={() => { onWithdraw(item); }}>{t('approvals.withdraw')}</button>
+            ) : null}
+          </div>
+        </div>
+      )}
     </article>
   );
 }
-
