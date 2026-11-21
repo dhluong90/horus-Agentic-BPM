@@ -124,6 +124,13 @@ class DevAutoPublishExemptionIT {
 
     private static Reply send(String port, String user, String method, String path, byte[] body, String contentType,
             String ifMatch) throws Exception {
+        if (ReviewedContent.decides(path)) {
+            byte[] bound = ReviewedContent.withHash(path, body, p -> send(port, user, "GET", p, null, null, null).body());
+            if (bound != body && contentType == null) {
+                contentType = "application/json";
+            }
+            body = bound;
+        }
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/bpm/rules/v1"
                         + path))
                 .header("Authorization", TestTokens.bearerFor(user, "bank-a", ALL_RULE_PERMISSIONS))
