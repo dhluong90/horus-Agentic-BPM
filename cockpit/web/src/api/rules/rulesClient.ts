@@ -25,6 +25,7 @@ import {
   type ReadingsDiff,
   type RuleSetReadings,
   type SimulationReadings,
+  type SimulationSample,
 } from './schemas';
 import {
   decisionExplanation,
@@ -133,7 +134,7 @@ export interface RulesClient {
   /** readDiff: the changed rows of a diff, each read in both versions (RLE-092); writes nothing */
   readDiff(name: string, version: number, base: number, signal?: AbortSignal): Promise<ReadingsDiff>;
   /** simulateReadings: runs the samples beside the version in effect and reads each outcome (RLE-093); logs nothing */
-  simulateReadings(name: string, version: number, samples: readonly Readonly<Record<string, unknown>>[], signal?: AbortSignal): Promise<SimulationReadings>;
+  simulateReadings(name: string, version: number, samples: readonly SimulationSample[], signal?: AbortSignal): Promise<SimulationReadings>;
   /** evaluate: runs the version in effect at the host clock and logs one decision */
   evaluate(ruleSet: string, inputs: Readonly<Record<string, unknown>>, idempotencyKey: string): Promise<DecisionResult>;
 }
@@ -353,7 +354,8 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
         {
           method: 'POST',
           path: `${versionPath(name, version)}:simulate-readings`,
-          body: { contentType: 'application/json', text: JSON.stringify({ samples: samples.map((inputs) => ({ inputs })) }) },
+          // A label is the caller's own name for the sample, echoed on its reading; one left blank is not sent.
+          body: { contentType: 'application/json', text: JSON.stringify({ samples: samples.map(({ label, inputs }) => (label !== undefined && label !== '' ? { label, inputs } : { inputs })) }) },
           ...(signal ? { signal } : {}),
         },
         simulationReadings,

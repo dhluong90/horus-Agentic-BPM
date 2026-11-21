@@ -25,7 +25,7 @@ function Result({ answer, version, sample }: { answer: SimulationReadings; versi
   if (!answer.languages.includes(locale)) return <EmptyNote text="readings.noLanguage" />;
   return (
     <div className="sim__result">
-      {sample === '' && result.reference === undefined ? null : <p className="sim__sample">{t('sim.sample', { sample: [result.reference, result.label ?? sample].filter((part) => part !== undefined && part !== '').join(' · ') })}</p>}
+      <p className="sim__sample">{t('sim.sample', { sample: [result.reference, result.label ?? sample].filter((part) => part !== '').join(' · ') })}</p>
       <p className={result.changed ? 'change-mark change-mark--changed sim__verdict' : 'badge sim__verdict'}>
         <span aria-hidden="true">{result.changed ? '✎' : '='}</span> {result.changed ? t('sim.changed') : t('sim.same')}
       </p>

@@ -24,6 +24,7 @@ import { ReadingsView } from './components/ReadingsView';
 import { ReadingsDiffView } from './components/ReadingsDiffView';
 import { ReadingStyleSwitch } from './components/ReadingParts';
 import { SimulatePanel } from './components/SimulatePanel';
+import { SimulationScreen } from './components/SimulationScreen';
 import { formatDateTime } from './model/dates';
 import { columnLabel } from './model/reading';
 import { formatRoute, type Lens, type Route } from '../../app/route';
@@ -60,7 +61,10 @@ function Subtitle({ version, editing }: { version: RuleSetVersion; editing: bool
 function Inspector({ version, importedFrom, onMatched }: { version: RuleSetVersion; importedFrom: string | undefined; onMatched: (ids: string[]) => void }) {
   const { t } = useI18n();
   const [tab, setTab] = useState<'details' | 'try' | 'simulate'>('details');
-  const items = [{ id: 'details', label: t('inspector.details') }, { id: 'try', label: t('inspector.tryIt') }, { id: 'simulate', label: t('inspector.simulate') }] as const;
+  // A draft has its own Simulate view with several samples; the inspector keeps the one-sample check for the others.
+  const items = version.status === 'DRAFT'
+    ? [{ id: 'details', label: t('inspector.details') }, { id: 'try', label: t('inspector.tryIt') }] as const
+    : [{ id: 'details', label: t('inspector.details') }, { id: 'try', label: t('inspector.tryIt') }, { id: 'simulate', label: t('inspector.simulate') }] as const;
   let panel: ReactNode;
   if (tab === 'details') panel = <DetailsPanel version={version} importedFrom={importedFrom} />;
   else if (tab === 'try') panel = <TryItPanel version={version} onMatched={onMatched} />;
@@ -126,6 +130,8 @@ function LensContent({ lens, version, base, matched, onOpenTable }: { lens: Lens
       return <RuleSetHistoryView ruleSet={version.ruleSet} openVersion={version.version} />;
     case 'source':
       return <SourceView version={version} />;
+    case 'simulate':
+      return <SimulationScreen version={version} />;
   }
 }
 
@@ -187,9 +193,12 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
   const go = (next: Partial<{ version: number; lens: Lens }>) => {
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: next.version ?? version.version, lens: next.lens ?? (next.version !== undefined ? undefined : lens) });
   };
-  const tabLens: 'table' | 'readings' | 'changes' | 'history' = lens === 'source' || lens === 'edit' ? 'table' : lens;
+  const drafting = version.status === 'DRAFT';
+  const tabLens: 'table' | 'readings' | 'changes' | 'history' | 'simulate' = lens === 'source' || lens === 'edit' || (lens === 'simulate' && !drafting) ? 'table' : lens;
   // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
   const comparing = !editing && lens === 'changes';
+  // The samples and their results need the full width too; the inspector steps aside.
+  const wide = comparing || (!editing && lens === 'simulate');
   // Approve only what is on screen: the diff shown must be of this version's content, and the content must be what
   // the user opened. The same query as the Changes view, so nothing is fetched twice.
   const diff = useVersionDiff(version, comparing && version.status === 'PENDING_APPROVAL' ? base?.version : undefined);
@@ -250,7 +259,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
         {!editing ? (
           <div className="rs-head__tabs">
             <Tabs label={t('lens.label')} className="rs-tabs" selected={tabLens} onSelect={(id) => { go({ lens: id }); }}
-              items={[{ id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') }]}>
+              items={[
+                { id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') },
+                // Simulation runs on drafts only (CKP-004).
+                ...(drafting ? [{ id: 'simulate', label: t('lens.simulate') } as const] : []),
+              ]}>
               {null}
             </Tabs>
             <div className="rs-head__files">
@@ -278,9 +291,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
           }}
           onDiscard={() => { go({ lens: 'table' }); }} />
       ) : null}
-      {editing ? null : <div className={comparing ? 'workbench workbench--wide' : 'workbench'}>
+      {editing ? null : <div className={wide ? 'workbench workbench--wide' : 'workbench'}>
         {main}
-        {comparing ? null : <aside className="workbench__side">
+        {wide ? null : <aside className="workbench__side">
           {version.status === 'PENDING_APPROVAL' ? decision(false) : null}
           {version.status === 'DRAFT' && version.warnings.length > 0 ? (
             // The author sees what the approver will see, before requesting publication.
