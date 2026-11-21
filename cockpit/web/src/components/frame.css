@@ -162,6 +162,14 @@
 .facts-list dt { color: var(--muted); font: var(--type-label); }
 .facts-list dd { margin: 0; color: var(--ink); }
 .queue__preview-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* The kind of change (rule set or process): a neutral tag, never a status colour. */
+.tag--kind { background: var(--surface-3); color: var(--ink-2); font-weight: 500; }
+/* Disabled is not a colour (styleguide 3): surface-3 fill, muted text, no border; the reason is written above it. */
+.queue__decision .btn:disabled { opacity: 1; background: var(--surface-3); border-color: transparent; color: var(--muted); }
+.queue__decision { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.queue__notice { margin-bottom: var(--gap); }
+.queue__notice .notice__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.queue__list > .btn { align-self: stretch; }
 
 /* ---------- Dialog ---------- */
 .dialog { width: min(480px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--surface); color: var(--ink); box-shadow: var(--sh-3); }

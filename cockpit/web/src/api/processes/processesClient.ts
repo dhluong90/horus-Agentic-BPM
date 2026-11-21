@@ -4,6 +4,8 @@ import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
   definitionVersion,
+  pendingDefinitionApprovalPage,
+  type PendingDefinitionApproval,
   graphDiff,
   processInstance,
   task,
@@ -41,6 +43,8 @@ export interface DefinitionApproval {
 export interface ProcessesClient {
   /** listDefinitions: one page of keys, ordered by key */
   listDefinitions(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<DefinitionSummary>>;
+  /** listPendingApprovals: one page of definition versions waiting for a second person, oldest request first (PRE-190) */
+  listPendingApprovals(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<PendingDefinitionApproval>>;
   /** getDefinitionVersion */
   getVersion(key: string, version: number, signal?: AbortSignal): Promise<DefinitionVersion>;
   /** getDefinitionDiff: steps and links changed from `base` (the version in effect when absent) to this version */
@@ -76,6 +80,14 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       if (request.cursor !== undefined) query.set('cursor', request.cursor);
       const text = query.toString();
       const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/definitions${text === '' ? '' : `?${text}`}`, ...withSignal(request.signal) }, definitionSummaryPage);
+      return answer.data;
+    },
+    async listPendingApprovals(request = {}) {
+      const query = new URLSearchParams();
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      const text = query.toString();
+      const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/approvals${text === '' ? '' : `?${text}`}`, ...withSignal(request.signal) }, pendingDefinitionApprovalPage);
       return answer.data;
     },
     async getVersion(key, version, signal) {

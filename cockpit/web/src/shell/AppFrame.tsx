@@ -17,7 +17,8 @@ import { RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
 import { PeopleProvider } from '../app/people';
-import { usePendingRequests, useEveryRuleSet } from '../features/overview/useRuleOverview';
+import { queueEngines, reviewCount, useApprovalQueue } from '../features/approvals/useApprovalQueue';
+import type { Engine } from '../features/approvals/queue';
 import { NavRail } from './NavRail';
 import '../components/frame.css';
 
@@ -58,7 +59,8 @@ function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
   const [route] = useRoute(areaRoute(landingArea(meta, areas)));
   const area = areaOf(route);
   const main = useFocusOnNavigation(formatRoute(route));
-  const reviewCount = useReviewCount(meta.limits.maxPageSize, areas.includes('approvals'));
+  const engines = areas.includes('approvals') ? queueEngines(meta, me) : NO_ENGINES;
+  const review = useReviewCount(engines, meta.limits.maxPageSize);
   const note = landingNote(meta);
   useEffect(() => {
     // A start-up log line for the host's operators; the user simply lands on Home.
@@ -66,24 +68,24 @@ function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
   }, [note]);
   return (
     <div className="frame">
-      <NavRail areas={areas} current={area} reviewCount={reviewCount} />
+      <NavRail areas={areas} current={area} reviewCount={review.count} reviewMore={review.more} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} /> : <NotAvailable />}
       </main>
     </div>
   );
 }
 
-function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[] }) {
+function AreaContent({ route, meta, me, areas, engines }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[] }) {
   const pageLimit = meta.limits.maxPageSize;
   switch (route.name) {
     case 'home':
-      return <HomePage pageLimit={pageLimit} me={me} areas={areas} />;
+      return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} />;
     case 'rule-sets':
     case 'rule-set':
       return <RulesArea route={route} pageLimit={pageLimit} />;
     case 'approvals':
-      return <ApprovalsPage pageLimit={pageLimit} />;
+      return <ApprovalsPage engines={engines} pageLimit={pageLimit} />;
     case 'decisions':
       return <DecisionsPage query={route.query ?? {}} pageLimit={pageLimit} />;
     case 'decision':
@@ -122,8 +124,9 @@ function useFocusOnNavigation(location: string) {
   return main;
 }
 
-/** How many requests this user may review now: the count on the Approvals menu item. */
-function useReviewCount(pageLimit: number, enabled: boolean): number {
-  const pending = usePendingRequests(useEveryRuleSet(pageLimit, enabled));
-  return pending.status === 'ready' ? pending.data.filter((request) => request.canApprove).length : 0;
+const NO_ENGINES: readonly Engine[] = [];
+
+/** How many requests this user may approve now, across both engines: the count on the Approvals menu item. */
+function useReviewCount(engines: readonly Engine[], pageLimit: number): { count: number; more: boolean } {
+  return reviewCount(useApprovalQueue(engines, pageLimit).state);
 }

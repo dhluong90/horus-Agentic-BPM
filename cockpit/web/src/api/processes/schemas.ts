@@ -146,3 +146,23 @@ export const processInstance = z
   })
   .loose();
 export type ProcessInstance = z.infer<typeof processInstance>;
+
+/**
+ * An item of GET /approvals (PRE-190): a definition version waiting for a second person, with the hash a reviewer
+ * sends back as expectedDefinitionHash and what this caller may do. Never the definition or a variable.
+ */
+export const pendingDefinitionApproval = z
+  .object({
+    key: z.string(),
+    name: nullableString,
+    version: z.number().int().min(1),
+    definitionHash: z.string().regex(/^[0-9a-f]{64}$/),
+    lockVersion: z.number().int(),
+    requestedBy: z.string(),
+    requestedAt: z.string(),
+    allowedActions: z.array(z.string()),
+    deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
+  })
+  .loose();
+export type PendingDefinitionApproval = z.infer<typeof pendingDefinitionApproval>;
+export const pendingDefinitionApprovalPage = page(pendingDefinitionApproval);

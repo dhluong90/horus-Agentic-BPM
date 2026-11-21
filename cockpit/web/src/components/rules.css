@@ -449,6 +449,12 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .notice__row { display: flex; align-items: center; gap: 12px; }
 .notice--line .notice__title { flex: 1 1 auto; font-weight: 600; font-size: 14px; }
 .notice__icon { color: var(--bad); font-weight: 700; }
+/* The same line for a warning (an incomplete list) and for information (content changed, review again). */
+.notice--line.notice--warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-fill); }
+.notice--line.notice--warn .notice__icon { color: var(--warn); }
+.notice--line.notice--info { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-fill); }
+.notice--line.notice--info .notice__icon { color: var(--accent); }
+.notice--line.notice--info .notice__more { border-top-color: color-mix(in srgb, var(--accent-fill) 25%, transparent); }
 .notice__toggle { border: 0; background: none; color: var(--ink-2); font: 600 13px/1.45 var(--font-ui); cursor: pointer; min-height: 32px; padding: 0 4px; white-space: nowrap; }
 .notice__toggle:hover { color: var(--ink); }
 .notice__more[hidden] { display: none; }

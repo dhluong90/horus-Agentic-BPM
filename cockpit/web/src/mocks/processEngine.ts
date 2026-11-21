@@ -206,6 +206,34 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     return json(200, versionBody(found), { ETag: `"${String(found.lockVersion)}"` });
   }
 
+  /**
+   * listPendingApprovals (PRE-190): every pending version of the tenant, oldest request first, with what this caller
+   * may send and why approve or reject is not offered. One page holds the demo; `limit` is checked as the engine does.
+   */
+  function pendingApprovals(url: URL, request: ProcessRequest): ProcessAnswer {
+    if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+    const limitText = url.searchParams.get('limit');
+    const limit = limitText === null ? 50 : Number(limitText);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) return problem(400, 'QUERY_INVALID');
+    const approver = request.permissions.includes('processes:approve');
+    const data = definitions
+      .filter((d) => d.status === 'PENDING_APPROVAL')
+      .map((d) => {
+        const requestedBy = d.requestedBy ?? d.createdBy ?? 'lan';
+        const self = request.user === requestedBy || request.user === (d.createdBy ?? 'lan');
+        const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : undefined;
+        return {
+          key: d.key, name: d.name, version: d.version, definitionHash: d.definitionHash ?? DEFAULT_HASH, lockVersion: d.lockVersion,
+          requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
+          allowedActions: denial === undefined ? ['approve', 'reject'] : [],
+          deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
+        };
+      })
+      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key))
+      .slice(0, limit);
+    return json(200, { data, nextCursor: null, hasNext: false });
+  }
+
   function handle(request: ProcessRequest): ProcessAnswer {
     const url = new URL(request.path, 'http://host.test');
     const path = decodeURIComponent(url.pathname).replace(/^.*?\/api\/bpm\/processes\/v1/, BASE);
@@ -221,6 +249,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       }));
       return json(200, { data, nextCursor: null, hasNext: false });
     }
+    if (request.method === 'GET' && path === `${BASE}/approvals`) return pendingApprovals(url, request);
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
     const version = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/export)?$/.exec(path);
