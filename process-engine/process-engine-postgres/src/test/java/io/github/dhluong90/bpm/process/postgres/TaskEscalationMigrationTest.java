@@ -30,10 +30,10 @@ class TaskEscalationMigrationTest {
 
     @Test
     void PRE_178_V32_keeps_existing_tasks_and_builds_its_indexes_concurrently() {
-        // Given a database at V30 with an open task of bank-a that has no escalation
+        // Given a database at V31 with an open task of bank-a that has no escalation
         DataSource ds = TestEngine.emptySchema("mig_v32_fresh");
         JdbcClient jdbc = JdbcClient.create(ds);
-        flyway(ds, "30").migrate();
+        flyway(ds, "31").migrate();
         jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
                 + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
                 + "created_by, created_at, lock_version) VALUES ('bank-a', 'D1', 'k', 1, 'DRAFT', 'k', '{}'::jsonb, "

@@ -137,10 +137,10 @@ class MigrationPlanSchemaMigrationTest {
 
     @Test
     void TR_OPS_01_V33_and_V34_add_the_layout_table_and_widen_the_plan_checks_without_touching_existing_plans() {
-        // Given a database at V30 with a plan made by the last release and its history row
+        // Given a database at V32 with a plan made by the last release and its history row
         DataSource ds = TestEngine.emptySchema("mig_v34_plan");
         JdbcClient jdbc = JdbcClient.create(ds);
-        flyway(ds, "30").migrate();
+        flyway(ds, "32").migrate();
         twoLoans(jdbc);
         jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
                 + "definition_hash, source_format, source_document, source_hash, node_count, source, created_by, "

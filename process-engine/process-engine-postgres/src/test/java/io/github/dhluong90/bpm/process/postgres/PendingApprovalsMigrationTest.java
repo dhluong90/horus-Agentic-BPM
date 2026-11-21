@@ -41,10 +41,10 @@ class PendingApprovalsMigrationTest {
 
     @Test
     void TR_OPS_01_V35_builds_a_valid_partial_index_on_existing_definitions_concurrently() {
-        // Given a database at V30 with a pending definition written by the last release
+        // Given a database at V34 with a pending definition written by the last release
         DataSource ds = TestEngine.emptySchema("mig_v35_fresh");
         JdbcClient jdbc = JdbcClient.create(ds);
-        flyway(ds, "30").migrate();
+        flyway(ds, "34").migrate();
         definitionOfTheLastRelease(jdbc);
 
         // When V35 runs with the migrator's settings
@@ -64,7 +64,7 @@ class PendingApprovalsMigrationTest {
         // Given V30, and an earlier concurrent build of the index that failed and left it INVALID
         DataSource ds = TestEngine.emptySchema("mig_v35_rerun");
         JdbcClient jdbc = JdbcClient.create(ds);
-        flyway(ds, "30").migrate();
+        flyway(ds, "34").migrate();
         definitionOfTheLastRelease(jdbc);
         jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
                 + "definition_hash, source_format, source_document, source_hash, node_count, source, created_by, "
