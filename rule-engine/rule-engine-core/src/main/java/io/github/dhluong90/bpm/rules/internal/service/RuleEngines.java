@@ -79,7 +79,8 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         EngineMeters meters = new EngineMeters();
         Supersession supersession = new Supersession(store, outbox, context.settings(), context.transactions(), meters);
         return new RuleEngines(new DefaultRuleEngine(context, store, log, cache, querySettings, meters),
-                new DefaultVersionService(context, store, outbox, keys, supersession, cache, meters), keys,
+                new DefaultVersionService(context, store, outbox, keys, supersession, cache, meters,
+                        explainer instanceof CatalogueExplainer catalogue ? catalogue : CatalogueExplainer.bundled()), keys,
                 new DefaultDecisionLogService(context, log, outbox, store, explainer), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, store, keys, querySettings),

@@ -184,6 +184,23 @@ public class RuleSetController {
     }
 
     /**
+     * {@code POST /rule-sets/{name}/versions/{v}:validate}: the checks of a save on an edited table, storing nothing
+     * (RLE-090). The permission is checked first, then the body is read within the import limit. No
+     * {@code Idempotency-Key} and no {@code If-Match}: nothing is written.
+     */
+    @PostMapping("/{name}/versions/{version:\\d+}:validate")
+    public ResponseEntity<byte[]> validateDraft(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream body,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType) throws IOException {
+        RestSupport.require(callers, "rules:author");
+        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength), null);
+        return RestSupport.json(HttpStatus.OK, RestSupport.validation(versions.validateDraft(name, version, request)));
+    }
+
+    /**
      * {@code GET /rule-sets/{name}/versions/{v}/diff?base={w}}: the engine's row-level diff of two versions (RLE-028).
      * Writes nothing.
      */

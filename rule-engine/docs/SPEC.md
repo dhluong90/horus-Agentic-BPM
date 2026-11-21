@@ -552,6 +552,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `lan PUTs card-fee-r2-zero.yaml on draft v2 with If-Match "0" -> 200, still v2, lockVersion 1, new canonical hash, 1 DRAFT_UPDATED row, 1 draft-updated event; If-Match "0" again -> 409; minh -> 403; drafts off -> 403 DRAFT_AUTHORING_DISABLED`.
 - **Test ID:** `RLE_047_author_replaces_draft_in_place_with_import_checks`
 
+### RLE-090 A draft's edited table is validated as a save would validate it, and nothing is stored
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-02`, `TR-TEN-01`, PD-113
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with `horus.bpm.rules.authoring.cockpit-drafts: true`; `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` from `card-fee.yaml`, `lockVersion 0`; `lan` holds `rules:author`, `dan` holds `rules:read`; a caller of `bank-b` holds `rules:author`. Tenant `bank-a` declares `kyc-routing` v1 `DRAFT` whose input `nationalId` has `mask: true` and whose `R1` tests `nationalId == '079123456789'`.
+- **When:** `lan` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:validate` with (a) `card-fee.yaml` with `R2` writing `fee: "0 VND"`; (b) `card-fee.yaml` with `R2` testing `txCount: ">= tierX"`. Failure cases: the same body for v1; for v9; as `dan`; as the `bank-b` caller; with `ruleSet: fx-margin`; with a body of 1,048,577 bytes; with drafts off. `lan` also validates `kyc-routing`.
+- **Then:**
+  - (a) is `200` with `valid: true`, `problems: []` and one reading per rule, `R1` to `R3`, in `en` and `vi` (`R3`: "Rule R3 always applies; it has no condition."). (b) is `200` with `valid: false`, `readings: []` and one problem on `ruleId: R2`, `column: txCount`, `code: UNKNOWN_INPUT`, `message.en` "The cell uses a name that is not a declared input." and `message.vi` "Ô này dùng một tên không phải là đầu vào đã khai báo."; a save of the same body is `422 VALIDATION_FAILED` naming the same rule and column, because both run the same checks.
+  - A problem's message is chosen by its code from the message catalogue of the explanations (`en`, `vi`, a host's own languages) and never repeats text of the cell. A problem with no code is `RULE_INVALID`, `COLUMN_INVALID` or `DOCUMENT_INVALID` by where it is. At most 100 problems are listed, with `problemsTruncated` when more were found.
+  - The reading of `kyc-routing` `R1` says that `nationalId` is masked and its test is not shown; the value `079123456789` appears nowhere in the answer.
+  - v1 is `409 INVALID_STATE`; v9 is `404 VERSION_NOT_FOUND`; `dan` is `403 PERMISSION_DENIED`, checked before the body is read; the `bank-b` caller is `404 RULE_SET_NOT_FOUND`; the `fx-margin` file is `400 INPUT_INVALID`; the large body is `413 PAYLOAD_TOO_LARGE`; with drafts off `lan` gets `403 DRAFT_AUTHORING_DISABLED`.
+  - No call writes a version, a history row, an event or an idempotency record, and the call takes no `Idempotency-Key` and no `If-Match`. Every `rle_` table is byte for byte as it was.
+- **Example:** `lan validates card-fee v2 with R2 testing txCount >= tierX -> 200, valid false, R2 / txCount / UNKNOWN_INPUT with an English and a Vietnamese message; 0 rows written`.
+- **Test ID:** `RLE_090_a_cell_problem_is_placed_on_its_rule_and_column_with_a_code_and_both_languages`
+
 ### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
 - **Milestone:** M1

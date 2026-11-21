@@ -4,6 +4,12 @@ import io.github.dhluong90.bpm.expr.api.Money;
 import io.github.dhluong90.bpm.rules.api.DecisionExplanation;
 import io.github.dhluong90.bpm.rules.api.DecisionExplanation.Condition;
 import io.github.dhluong90.bpm.rules.api.DecisionExplanation.MatchedRow;
+import io.github.dhluong90.bpm.rules.api.DraftValidation;
+import io.github.dhluong90.bpm.rules.api.Violation;
+import io.github.dhluong90.bpm.rules.internal.model.Definitions;
+import io.github.dhluong90.bpm.rules.internal.model.InputClause;
+import io.github.dhluong90.bpm.rules.internal.model.Rule;
+import io.github.dhluong90.bpm.rules.internal.model.When;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.read.ExplanationTemplates;
 import io.github.dhluong90.bpm.rules.spi.DecisionExplainer;
@@ -132,6 +138,78 @@ public final class CatalogueExplainer implements DecisionExplainer {
     @Override
     public String defaultLanguage() {
         return defaultLanguage;
+    }
+
+    /**
+     * Words one problem of a refused draft in every language of the catalogue (RLE-090). The sentence is chosen by
+     * the code alone, so it never repeats text of the cell: a value of a masked input cannot reach it. A problem with
+     * no code gets {@code RULE_INVALID}, {@code COLUMN_INVALID} or {@code DOCUMENT_INVALID} by where it is.
+     *
+     * @param violation the problem the compiler found
+     * @return the problem with its code and its message by language
+     */
+    public DraftValidation.Problem problem(Violation violation) {
+        String code = violation.code() != null ? violation.code()
+                : violation.ruleId() != null ? "RULE_INVALID" : violation.column() != null ? "COLUMN_INVALID"
+                : "DOCUMENT_INVALID";
+        Map<String, String> message = new LinkedHashMap<>();
+        for (String language : new TreeSet<>(catalogues.keySet())) {
+            Words words = words(language);
+            String key = "problem." + code;
+            message.put(language, words.has(key) ? words.get(key)
+                    : words.get("problem." + (violation.ruleId() != null ? "RULE_INVALID"
+                            : violation.column() != null ? "COLUMN_INVALID" : "DOCUMENT_INVALID")));
+        }
+        return new DraftValidation.Problem(violation.ruleId(), violation.column(), code, violation.position(), message);
+    }
+
+    /**
+     * Reads each rule of a valid table in every language of the catalogue. A condition on a masked input says that
+     * the value is masked and leaves out the test, so a masked value is never echoed (RLE-090).
+     *
+     * @param model the table
+     * @param maskByDefault whether the tenant masks an input that declares no {@code mask}
+     * @return one reading per rule, in document order
+     */
+    public List<DraftValidation.Reading> readings(Definitions model, boolean maskByDefault) {
+        Set<String> masked = new TreeSet<>();
+        for (InputClause input : model.decision().table().inputs()) {
+            if (input.masked(maskByDefault)) {
+                masked.add(input.name());
+            }
+        }
+        List<DraftValidation.Reading> readings = new ArrayList<>();
+        for (Rule rule : model.decision().table().rules()) {
+            Map<String, String> text = new LinkedHashMap<>();
+            for (String language : new TreeSet<>(catalogues.keySet())) {
+                Words words = words(language);
+                List<String> parts = whenParts(rule.when(), masked, words);
+                text.put(language, parts.isEmpty() ? words.format("reading.always", "ruleId", rule.id())
+                        : words.format("reading.rule", "ruleId", rule.id(), "conditions",
+                                String.join(words.get("join.conditions"), parts)));
+            }
+            readings.add(new DraftValidation.Reading(rule.id(), text));
+        }
+        return readings;
+    }
+
+    private static List<String> whenParts(When when, Set<String> masked, Words words) {
+        List<String> parts = new ArrayList<>();
+        when.cells().forEach((input, test) -> parts.add(masked.contains(input)
+                ? words.format("reading.masked", "input", input)
+                : words.format("reading.condition", "input", input, "test", test(test, words))));
+        if (!when.any().isEmpty()) {
+            parts.add(words.format("any", "alternatives", String.join(words.get("join.alternatives"),
+                    when.any().stream().map(w -> String.join(words.get("join.and"), whenParts(w, masked, words)))
+                            .toList())));
+        }
+        when.all().forEach(w -> parts.addAll(whenParts(w, masked, words)));
+        return parts;
+    }
+
+    private Words words(String language) {
+        return new Words(catalogues.getOrDefault(language, catalogues.get(defaultLanguage)), catalogues.get(ENGLISH),
+                DecisionExplanation.Wording.NONE);
     }
 
     @Override
@@ -427,6 +505,10 @@ public final class CatalogueExplainer implements DecisionExplainer {
             }
             return m.group(1) + grouped + (m.group(3) == null ? "" : get("format.decimal") + m.group(3))
                     + (m.group(4) == null ? "" : m.group(4));
+        }
+
+        boolean has(String key) {
+            return entries.containsKey(key) || english.containsKey(key);
         }
 
         String get(String key) {
