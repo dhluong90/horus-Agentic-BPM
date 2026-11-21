@@ -100,7 +100,7 @@ From 0.2 the process diagram is the default landing area, but only on a host tha
 1. Download the cockpit archive of the matching release and serve it from any static web server.
 2. List your services in the cockpit's host registry, one base URL per service (TR-UI-01). The configuration format will be documented here before Cockpit 0.1 ships.
 3. Configure one OpenID Connect identity provider whose tokens every listed service accepts. The cockpit signs in once, as a public client with PKCE, and uses that sign-in for every host.
-4. Allow the cockpit's origin in each service's CORS configuration; the cockpit calls `/api/bpm/rules/v1` and, from 0.2, `/api/bpm/processes/v1` directly. Allow the request headers the cockpit sends: `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`.
+4. Set `horus.bpm.rest.cors.allowed-origins` to the cockpit's exact origin and `horus.bpm.security.audiences` to the host's audience on each service (see [[Rule Engine Configuration]]); to let a user switch tenants, also `horus.bpm.tenancy.switching.enabled: true`; the cockpit calls `/api/bpm/rules/v1` and, from 0.2, `/api/bpm/processes/v1` directly. Allow the request headers the cockpit sends: `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`.
 
 Each host answers two endpoints the cockpit reads after sign-in:
 

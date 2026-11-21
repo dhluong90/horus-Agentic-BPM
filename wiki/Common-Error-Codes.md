@@ -25,7 +25,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | rules | 0.3.0 |
 | 401 | [UNAUTHENTICATED](#unauthenticated) | both | M1 |
 | 403 | [PERMISSION_DENIED](#permission_denied) | both | M1 |
-| 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
+| 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | 0.3.0 |
 | 403 | [SELF_APPROVAL_FORBIDDEN](#self_approval_forbidden) | both | M1 |
 | 403 | [CLOCK_NOT_ALLOWED](#clock_not_allowed) | rules | M1 |
 | 403 | [DRAFT_AUTHORING_DISABLED](#draft_authoring_disabled) | both | rules from 0.2.0 (`PUT` of a draft); processes M2 |
