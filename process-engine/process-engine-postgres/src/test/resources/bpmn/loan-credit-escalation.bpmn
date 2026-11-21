@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Credit review whose overdue task escalates (PRE-178 to PRE-180): due 8 working hours after creation on the bank's
+     calendar vn-banking-hours, then moved to the branch supervisor and later the regional manager. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-credit-escalation"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-credit-escalation" name="Loan credit review with escalation" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:userTask id="review-application" name="Review application" horus:assignee="role:credit-officer"
+                   horus:fourEyes="true" horus:resultVariable="review" horus:sla="PT8H"
+                   horus:calendar="vn-banking-hours" horus:escalation="role:branch-supervisor;role:regional-manager|PT4H"/>
+    <bpmn:endEvent id="end" name="Reviewed"/>
+    <bpmn:sequenceFlow id="start__review" sourceRef="start" targetRef="review-application"/>
+    <bpmn:sequenceFlow id="review__end" sourceRef="review-application" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

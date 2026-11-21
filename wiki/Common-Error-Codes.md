@@ -39,6 +39,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
 | 404 | [INCIDENT_NOT_FOUND](#incident_not_found) | processes | 0.3.0 |
+| 404 | [CALENDAR_NOT_FOUND](#calendar_not_found) | processes | 0.3.0 |
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
 | 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
 | 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
@@ -98,6 +99,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### IDEMPOTENCY_KEY_REUSE_MISMATCH
 `422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
+
+### CALENDAR_NOT_FOUND
+`404`. Unknown calendar key or calendar change id, or one of another tenant. Nothing is written by a command that answers it. A task whose `horus:calendar` the tenant does not have fails its step instead (`422 STEP_FAILED`, reason `CALENDAR_NOT_FOUND`).
 
 ### CONTENT_HASH_REQUIRED
 `400`. `:approve` or `:reject` did not send `expectedCanonicalHash`, the `canonicalHash` of the content the reviewer saw, and `horus.bpm.rules.approval.require-content-hash` is on (the default, `RLE-084`, PD-139). Send the hash the reviewer's screen showed when they opened the version. Nothing is written. A host on the `dev` profile can turn the requirement off; any other profile refuses to start with it off.

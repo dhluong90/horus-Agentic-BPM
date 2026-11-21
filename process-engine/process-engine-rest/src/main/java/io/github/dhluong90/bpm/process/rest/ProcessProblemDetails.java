@@ -23,7 +23,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
 @RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class,
-        MigrationController.class, IncidentController.class})
+        MigrationController.class, IncidentController.class, CalendarController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
@@ -38,6 +38,7 @@ public class ProcessProblemDetails {
             Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
             Map.entry("CHANGE_SET_TRUNCATED", HttpStatus.CONFLICT),
             Map.entry("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("CALENDAR_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("OUTPUT_INVALID", UNPROCESSABLE),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),

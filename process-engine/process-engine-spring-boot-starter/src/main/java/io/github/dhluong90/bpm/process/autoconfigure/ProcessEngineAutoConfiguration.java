@@ -258,10 +258,11 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
             matchIfMissing = true)
     ProcessJobPoller processEngineJobPoller(JobExecutor executor, AsyncStepExecutor async, AgentReplays replays,
-            ProcessEngineProperties properties) {
-        // One poll runs the timers, starts the async attempts there are free adapter slots for, and replays one page
-        // of an offline agent replay (#98).
-        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce(),
+            ProcessServices services, ProcessEngineProperties properties) {
+        // One poll runs the timers, starts the async attempts there are free adapter slots for, replays one page
+        // of an offline agent replay (#98) and applies the task escalation levels that have come due (#73).
+        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce()
+                + services.escalateOverdue(),
                 executor.replicaId(),
                 properties.jobs().pollInterval(), Clock.systemUTC());
     }
@@ -368,7 +369,8 @@ public class ProcessEngineAutoConfiguration {
         }
         return new Calendars(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
                 clock.getIfUnique(Clock::systemUTC), transactions, store, publisher,
-                Calendars.Approval.valueOf(properties.calendar().approval().name()));
+                Calendars.Approval.valueOf(properties.calendar().approval().name()), properties.idempotencyRetention(),
+                properties.query().maxPageSize());
     }
 
     @Bean
@@ -707,6 +709,13 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         IncidentController processEngineIncidentController(IncidentService incidents) {
             return new IncidentController(incidents);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.CalendarController processEngineCalendarController(
+                CalendarService calendars) {
+            return new io.github.dhluong90.bpm.process.rest.CalendarController(calendars);
         }
 
         @Bean
