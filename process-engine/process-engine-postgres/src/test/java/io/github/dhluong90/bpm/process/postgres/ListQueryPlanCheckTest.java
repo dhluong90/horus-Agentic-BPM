@@ -173,6 +173,9 @@ class ListQueryPlanCheckTest {
         samples.put("claim-async-steps", List.of(T, T, 20, "replica-1", T));
         samples.put("claim-async-kind", List.of(T, T, "ASYNC_SERVICE", 20, "replica-1", T));
         samples.put("instance-history-actors", List.of("bank-a", INSTANCE, "NODE_ENTERED"));
+        samples.put("migration-live-nodes", List.of("bank-a", DEFINITION));
+        samples.put("migration-instances-at-node", List.of("bank-a", DEFINITION, "credit-review", 100));
+        samples.put("migration-movable-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-review"}, 100));
         samples.put("calendar-holidays", List.of("bank-a", "ACAL1"));
         String[] both = {"CLAIMED", "OPEN"};
         Timestamp end = Timestamp.from(Instant.parse("9999-12-31T00:00:00Z"));

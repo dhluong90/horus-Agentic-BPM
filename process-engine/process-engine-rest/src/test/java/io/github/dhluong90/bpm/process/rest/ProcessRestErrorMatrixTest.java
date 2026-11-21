@@ -334,6 +334,18 @@ class ProcessRestErrorMatrixTest {
         }
 
         @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiff diffFromEffective(DefinitionRef target) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
             maybeFail();
             return new DefinitionExport(key, version, "a".repeat(64), format, "<definitions/>");

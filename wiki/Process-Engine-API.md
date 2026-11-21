@@ -14,6 +14,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /definitions` | `ProcessQueryService.definitions(PageRequest)` | `processes:read` | One item per key, ordered by key: `latestVersion`, `latestStatus`, `effectiveVersion` (the version a start uses now, or `null`), `lastChangedAt`. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}` | `DefinitionService.version(key, version)` | `processes:read` | Status, hashes, `approvedBy`, `approvedAt`, `effectiveFrom` and the lifecycle fields (`lockVersion`, `requestedBy`, `retiredBy`, `supersededBy`); no source document. `ETag` is the definition hash; the lifecycle commands take the `lockVersion` field as `If-Match`. This is the `Location` an import returns. `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}/export?format=bpmn` | `DefinitionService.exportDefinition(key, version, SourceFormat.BPMN_XML)` | `processes:read` | BPMN 2.0 XML (`application/bpmn+xml`) of the executable subset with a generated diagram layout. Importing it gives the same `definitionHash`, which is also the `ETag`. Read-only. A version of another tenant is `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
+| `GET /definitions/{key}/versions/{version}/diff?base=` | `DefinitionService.diff(base, target)`, `.diffFromEffective(target)` | `processes:read` | Steps and links added, removed and changed between two stored versions of one key, of any status, so an approver compares a pending version with the effective one before signing. `base` defaults to the effective version (`404 NO_EFFECTIVE_VERSION` without one). Every element carries its BPMN id and readable name; layout and XML are never returned. At most 1,000 changed values, then `truncated: true`. `ETag` from both definition hashes; `If-None-Match` answers `304`. Another tenant's version is `404 DEFINITION_NOT_FOUND`. Read-only. 0.3.0 |
 | `POST /definitions/{key}/versions/{v}:request-approval` | `requestApproval(ref, lockVersion, effectiveFrom, idempotencyKey)` | `processes:author` or `processes:deploy` | `DRAFT` to `PENDING_APPROVAL`; optional `effectiveFrom`, never in the past. `If-Match` required. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:approve` | `approve(ref, lockVersion, comment, idempotencyKey)` | `processes:approve` | To `ACTIVE`, effective from `effectiveFrom` or now. The requester gets `403 SELF_APPROVAL_FORBIDDEN`; an older version than the active one gets `409 VERSION_SUPERSEDED`. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:reject` | `reject(ref, lockVersion, reason, idempotencyKey)` | `processes:approve` | Back to `DRAFT`; `reason` required (`400` without). 0.2.0 |
@@ -29,6 +30,9 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /agent-replays/{id}`, `GET /agent-replays/{id}/cases` | `AgentReplayService.run(id)`, `.cases(id, page)` | `processes:agent:replay` | The run's status and summary, and its report: one line per recorded answer with the attempt id, the recorded and the candidate outcome, the change, the matched rule ids and the `OVERRIDDEN_BY_REVIEWER` flag, never an output value. M3 |
 | `GET /agent-replays/{id}/cases/{attemptId}/answer` | `AgentReplayService.recordedAnswer(id, attemptId)` | `processes:agent:replay` | One case's recorded answer as history keeps it: masked output fields as `***`, masked inputs as keyed hashes. M3 |
 | `GET /tasks` | `ProcessQueryService.tasks(TaskQuery)` | `processes:task:work`; `assignment=any` also needs `processes:task:manage` | `assignment`: one or more of `mine` (declared to you or claimed by you), `candidate` (open tasks of your roles and groups), `any` (the whole tenant); `mine,candidate` when absent. `status`: `OPEN`, `CLAIMED` or both (default). `role`, `group`: narrow `candidate` and `any` to one role or group (with `mine` alone, `400 QUERY_INVALID`). `dueBefore`, and `slaBreached=true` for tasks whose due time has passed. Ordered by `dueAt`, then `id`; tasks without a due time come last, by `id`. At most 200 per page (`limit` above 200 is `400 QUERY_INVALID`). Items carry no variables and no review context. See [Task lists](#task-lists). Since 0.2.0 |
+| `POST /migrations` | `MigrationService.plan(MigrationPlanRequest)` | `processes:migration:manage` | Plans moving the running instances of `sourceVersion` to the active `targetVersion` of one key. Body `{"definitionKey": "loan-review", "sourceVersion": 1, "targetVersion": 2}`; any other field is `400`. Answers `201` with `approval: {"mode": "four-eyes", "secondPersonRequired": true}`: executing the plan will need a second holder of the permission (`single` only on the `dev` profile). Moves nothing. `Idempotency-Key` returns the first plan. A retired target is `409 INVALID_STATE`. 0.3.0 |
+| `GET /migrations/{id}` | `MigrationService.find(id)` | `processes:migration:manage` or `processes:read` | The plan. Another tenant's plan is `404 MIGRATION_NOT_FOUND`. 0.3.0 |
+| `POST /migrations/{id}:validate` | `MigrationService.validate(id)` | `processes:migration:manage` | Dry run: which running instances would move and which steps have no counterpart in the target. Reads only, needs no approval and no idempotency key. See Migration dry run below. 0.3.0 |
 | `GET /tasks/{id}` | `TaskService.task(id)` | `processes:task:work` | The task with its instance, step, assignment, `fourEyes`, claim and completion, `dueAt` (since 0.2.0), and `allowedActions` for this caller (`claim`, `unclaim`, `complete`). The review task of a refused agent answer also has `review`: the code, reasons, matched rule ids, guardrail decision id, the refused attempt and who reported it, the inputs the agent saw (a masked input as its keyed fingerprint) and the answer masked by the output schema. `ETag` is the task `lockVersion`. Since 0.2.0 |
 | `POST /tasks/{id}:claim` | `TaskService.claim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `OPEN` to `CLAIMED` by the caller, who must be an assignee (`403 TASK_NOT_ASSIGNED`); a four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`). `If-Match` and `Idempotency-Key` required (`428`). Since 0.2.0 |
 | `POST /tasks/{id}:unclaim` | `TaskService.unclaim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `CLAIMED` to `OPEN`; only the claimant (`403 TASK_NOT_ASSIGNED`). Same headers. Since 0.2.0 |
@@ -72,7 +76,7 @@ Every endpoint answers errors as RFC 9457 problem details with a `code`:
 | 400 | `INPUT_INVALID`, `QUERY_INVALID` |
 | 401 | `UNAUTHENTICATED` |
 | 403 | `PERMISSION_DENIED`, `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN`, `TENANT_NOT_ALLOWED` |
-| 404 | `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` |
+| 404 | `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`, `MIGRATION_NOT_FOUND` |
 | 409 | `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
 | 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`, `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` |
@@ -172,6 +176,49 @@ GET /api/bpm/processes/v1/definitions/card-fee-review/versions/1/node-stats?mode
 200 {"definitionKey":"card-fee-review","version":1,"mode":"live","asOf":"2026-11-20T09:30:00Z",
      "nodes":{"officer-review":{"WAITING_USER":3}}}
 ```
+
+## Compare two versions
+
+Example: v2 of KYC onboarding adds a fraud check and gives the approval to a credit officer.
+
+```
+GET /api/bpm/processes/v1/definitions/kyc-onboarding/versions/2/diff?base=1
+
+200 {"definitionKey":"kyc-onboarding","identical":false,
+     "nodesAdded":[{"id":"fraud-check","name":"Fraud check","type":"serviceTask"}],
+     "nodesRemoved":[],
+     "nodesChanged":[{"id":"approve","name":"Approve","type":"userTask","path":"/assignee/role","from":"ops","to":"credit-officer"}],
+     "edgesAdded":[{"id":"fraud__approve","from":"fraud-check","to":"approve","kind":"next",...},
+                   {"id":"verify__fraud","from":"verify-docs","to":"fraud-check","kind":"next",...}],
+     "edgesRemoved":[{"id":"verify__approve","from":"verify-docs","to":"approve","kind":"next",...}],
+     "truncated":false, ...}
+```
+
+Steps are matched by BPMN id and compared on the canonical form that is hashed and approved; `path` is a JSON Pointer inside the step, so a changed branch condition is `/branches/0/when` on its gateway. Links are matched by `(from, to, kind)`, with kind `next`, `branch[i]`, `default` or `fork`. Moving boxes changes nothing. The same two versions always give the same body.
+
+## Migration dry run
+
+Example: 500 loans run on `loan-review` v1; v2 removes the step `legacy-review`, where 50 of them wait.
+
+```
+POST /api/bpm/processes/v1/migrations            {"definitionKey":"loan-review","sourceVersion":1,"targetVersion":2}
+201 {"id":"01J...","status":"PLANNED","approval":{"mode":"four-eyes","secondPersonRequired":true},"planHash":"..."}
+
+POST /api/bpm/processes/v1/migrations/01J...:validate
+200 {"valid":false,"instances":{"running":500,"movable":450,"blocked":50},
+     "conflicts":[{"code":"STEP_NOT_IN_TARGET","nodeId":"legacy-review","name":"Legacy committee review",
+                   "instances":{"count":50,"instanceIds":["01J..."],"truncated":false}}],
+     "movable":{"count":450,"instanceIds":["01J...", "... 100 ids"],"truncated":true},
+     "checkedAt":"2027-03-01T02:00:00Z","validUntil":"2027-03-01T03:00:00Z", ...}
+```
+
+Every step of the source version that holds live tokens maps by identical id: `SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another kind of step. A target that is no longer active is `TARGET_NOT_ACTIVE`. The dry run writes nothing, so running it again is always safe. Executing a plan follows in a later release; it will need a fresh dry run of the same `planHash` and a second person's approval.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `horus.bpm.processes.migration.approval` | `four-eyes` | The approval a new plan records for its execution. `single` is accepted only when the `dev` profile is active on its own; start-up is refused otherwise |
+| `horus.bpm.processes.migration.dry-run-sample-size` | `100` | Most instance ids listed per conflict and for the instances that would move, 1 to 500; may be lowered only |
+| `horus.bpm.processes.migration.dry-run-validity` | `PT1H` | How long an execution may rely on a dry run; at most one hour, may be lowered only |
 
 ## Export a definition as BPMN
 

@@ -365,7 +365,15 @@ A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(st
 
 Source: [`diagrams/calendar-change.mmd`](diagrams/calendar-change.mmd).
 
-`MigrationService` validates a plan as a dry run, then executes in batches of 100 instances, one `pre_instance` lock at a time; it updates `pre_instance.definition_id` and every token's `definition_id` in the same transaction (`TR-MIG-01`, `TR-MIG-02`). Explicit step mappings are M3 (`TR-MIG-03`).
+`MigrationService` (#74) works in three steps; the first two ship in 0.3.0.
+
+1. **Plan.** `plan(key, sourceVersion, targetVersion)` checks that the target is `ACTIVE` and the source `ACTIVE` or `RETIRED` in the caller's tenant, reads both models through the stored-source integrity check, and writes one `pre_migration` row, one `PLANNED` row of `pre_migration_history` and `processes.migration.planned.v1` in one transaction, idempotent on its key. The plan records `planHash` (SHA-256 over the key and both definition ids and hashes) and the approval its execution needs, fixed at creation from `migration.approval`: `four-eyes` by default; `single` only when the `dev` profile is active on its own, otherwise start-up is refused (PD-114 as amended by PD-131, `PRE-174`). Planning moves nothing.
+2. **Dry run.** `validate(id)` only reads; it writes no row of any table and needs no approval (`PRE-014`). It reads the live tokens per step of the source version from `idx_pre_token_live`, maps each step onto the target by identical id (`SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another step type), and for each conflicting step counts the waiting running instances and lists the first `migration.dry-run-sample-size` ids in id order on `idx_pre_token_live_node_instance` (V24). A target no longer `ACTIVE` is the conflict `TARGET_NOT_ACTIVE`. It counts the running instances and lists those that would move on `idx_pre_instance_running_definition` (V25). The report carries `planHash` and `validUntil` (`migration.dry-run-validity` after `checkedAt`), which a later execution is bound to.
+3. **Execute** (M2, `PRE-015`, not built yet). The holder of `processes:migration:manage` proposes an execution with a reason against a dry run of the same `planHash` younger than `migration.dry-run-validity`; a second holder, never the proposer, approves; only the approval moves instances, in batches of `migration.batch-size`, one `pre_instance` lock at a time, updating `pre_instance.definition_id` and every token's `definition_id` in the same transaction (`TR-MIG-01`, `TR-MIG-02`). Explicit step mappings are M3 (`TR-MIG-03`).
+
+![Migration plan and dry run](images/migration-dry-run.svg)
+
+Source: [`diagrams/migration-dry-run.mmd`](diagrams/migration-dry-run.mmd).
 
 ### 4.4 Jobs and timers across replicas (`PRE-006`, `TR-PERF-05`, `TR-ASY-02`)
 
@@ -421,7 +429,7 @@ Standards foundations (ADR-0017):
 
 ### 5.3 Graph diff (PE-F-46)
 
-`GraphDiff diff(base, target)` is a pure function. Nodes are matched by step `id`; edges by `(from, to, kind)` where kind is `next`, `branch[i]`, `default` or `fork`. Output: `nodesAdded`, `nodesRemoved`, `nodesChanged` (each with JSON Pointer paths and old and new values), `edgesAdded`, `edgesRemoved`. Layout is never part of the diff. Complexity O(N + E); a 500-node definition diffs in under 5 ms.
+`GraphDiffs.diff(base, target)` is a pure function of the two models (`PRE-025`, `PRE-176`). Nodes are matched by BPMN id and compared on their canonical form, the form that is hashed and approved, without the members that name the following step (`next`, `default`, a branch's `next`); a changed value is one entry with its JSON Pointer path inside the step and its old and new value, so a changed branch condition is `/branches/i/when` on the gateway. Edges are matched by `(from, to, kind)` where kind is `next`, `branch[i]` (the i-th conditional branch of an exclusive gateway, from 0, in document order), `default` or `fork`. Output: `nodesAdded`, `nodesRemoved` (id, name, type), `nodesChanged` (id, name, type, path, from, to), `edgesAdded`, `edgesRemoved` (sequence flow id, both step ids and names, kind), all sorted, and `truncated` when more than 1,000 changed values were found. Layout is not in the model, so it is never part of the diff, and no XML is returned. `DefinitionService.diff(base, target)` and `diffFromEffective(target)` read both versions of one key in the caller's tenant, of any lifecycle status, through the stored-source integrity check, and write nothing; the REST `ETag` is derived from both definition hashes. Complexity O(N + E) apart from sorting; a 500-node definition diffs in under 5 ms.
 
 ### 5.4 Layout (ADR-0013, `TR-DEF-02`, M3)
 
@@ -499,9 +507,16 @@ public interface DefinitionService {
   DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, @Nullable String idempotencyKey);
   Optional<DefinitionVersion> find(DefinitionRef ref);                    // processes:read
   List<DefinitionHistoryEntry> history(DefinitionRef ref);                // processes:read, oldest first
-  GraphDiff diff(DefinitionRef base, DefinitionRef target);
+  GraphDiff diff(DefinitionRef base, DefinitionRef target);                // processes:read, read-only (#76)
+  GraphDiff diffFromEffective(DefinitionRef target);                       // base: the effective version
   LayoutRevision saveLayout(DefinitionRef ref, int expectedRevision, Layout layout);
   Optional<LayoutRevision> latestLayout(DefinitionRef ref);
+}
+
+public interface MigrationService {                                        // #74
+  MigrationPlan plan(MigrationPlanRequest request);                        // processes:migration:manage
+  MigrationPlan find(String migrationId);                                  // processes:migration:manage or processes:read
+  MigrationDryRun validate(String migrationId);                            // processes:migration:manage, read-only
 }
 
 public interface ProcessQueryService {
@@ -540,7 +555,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /definitions/{key}/versions/{v}:reject` | `processes:approve` | Back to `DRAFT`, reason required | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
 | `GET /definitions/{key}/versions/{v}/history` | `processes:read` | Lifecycle history, oldest first: action, statuses, actor, comment, time | None | `404 DEFINITION_NOT_FOUND` | M2 |
 | `POST /definitions/{key}/versions/{v}:retire` | `processes:approve` (`ACTIVE`), `processes:author` (`DRAFT`) | To `RETIRED`; body `{ "reason": "...", "confirmNoVersionInEffect": true }`, reason required for `ACTIVE` (PD-102), the flag only for the last version in effect (PD-101) | `Idempotency-Key`, `If-Match` | `400 INPUT_INVALID`, `409 INVALID_STATE`, `409 LAST_VERSION_IN_EFFECT` | M2 |
-| `GET /definitions/{key}/versions/{v}/diff?base=` | `processes:read` | Graph diff; `base` defaults to the effective version | `ETag` | | M2 |
+| `GET /definitions/{key}/versions/{v}/diff?base=` | `processes:read` | Graph diff of two stored versions (section 5.3); `base` defaults to the effective version | `ETag`, `If-None-Match` answers `304` | `404 DEFINITION_NOT_FOUND`, `404 NO_EFFECTIVE_VERSION` | M2 (0.3.0, #76) |
 | `GET /definitions/{key}/versions/{v}/export?format=json\|yaml\|bpmn` | `processes:read` | Export; `bpmn` is M3 | | | M2, M3 |
 | `GET`, `PUT /definitions/{key}/versions/{v}/layout` | `processes:read`, `processes:author` | Latest layout; save a new revision | `If-Match: "<revision>"` on `PUT` | `409 VERSION_CONFLICT`, `422 LAYOUT_INVALID` | M3 |
 | `GET /definitions/{key}/versions/{v}/layout/revisions` | `processes:read` | Revision list with author and time | Cursor | | M3 |
@@ -563,7 +578,10 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
 | `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
-| `POST /migrations`, `/{id}:validate`, `/{id}:execute` | `processes:migration:manage` | Plan, dry run, execute | `Idempotency-Key` | | M2 |
+| `POST /migrations` | `processes:migration:manage` | Create a plan; records the approval its execution needs (section 4.3) | `Idempotency-Key` | `404 DEFINITION_NOT_FOUND`, `409 INVALID_STATE` | M2 (0.3.0, #74) |
+| `GET /migrations/{id}` | `processes:migration:manage` or `processes:read` | Read a plan | Read only | `404 MIGRATION_NOT_FOUND` | M2 (0.3.0, #74) |
+| `POST /migrations/{id}:validate` | `processes:migration:manage` | Dry run; reads only, so no idempotency key and no approval | Read only | `404 MIGRATION_NOT_FOUND` | M2 (0.3.0, #74) |
+| `POST /migrations/{id}:execute` | `processes:migration:manage`, a second holder approves | Propose and approve an execution (PD-131) | `Idempotency-Key` | `409 DRY_RUN_REQUIRED` | M2 |
 
 Implemented in 0.2.0 (`PRE-049`, `PRE-050`, `PRE-051`, `PRE-030`): `GET /tasks` (#70), `GET /tasks/{id}` (with `dueAt`, #72), `POST /tasks/{id}:claim` and `:unclaim` (`If-Match` and `Idempotency-Key` required), `GET /definitions`, `GET /definitions/{key}/versions/{v}` without `include` (its `ETag` is the definition hash), `GET /instances`, `POST /instances/{id}:cancel` (`processes:cancel`; both `If-Match` and `Idempotency-Key` required, `428` without; reason required), besides the import, start, read and complete of 0.1.0. List cursors are signed with HMAC-SHA256 over tenant, filters and the last key, with one random key per database in `pre_engine_key` (section 7), so a cursor issued to another tenant or for other filters is `400 QUERY_INVALID`.
 
@@ -583,6 +601,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt`, `sourceHash`, `readerVersion` (5.8) |
 | `processes.definition.rejected.v1` | `definitionKey`, `version`, `rejectedBy`, `reason` |
 | `processes.definition.retired.v1` | `definitionKey`, `version`, `retiredBy` or `supersededBy`; for a manual retirement also `reason`, `approvalMode` (`single` or `four-eyes`), `requestedBy` in `four-eyes` mode, and `noVersionInEffect` (PD-101, PD-102) |
+| `processes.migration.planned.v1` | `migrationId`, `definitionKey`, `sourceVersion`, `targetVersion`, `planHash`, `approval` (`four-eyes` or `single`), `createdBy` (#74); the event id is derived from the plan id |
 | `processes.instance.cancelled.v1` | `instanceId`, `definitionKey`, `version`, `businessKey`, `cancelledBy`, `reason` (PD-103) |
 | `processes.instance.started.v1`, `.completed.v1`, `.failed.v1` | `instanceId`, `definitionKey`, `version`, `businessKey` |
 | `processes.step.completed.v1` | `instanceId`, `nodeId`, `attemptId`, `durationMs` |
@@ -629,6 +648,9 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `runners.<kind>.schema-retries` | `1` for `async-agent`, `0` for `async-service` | Fresh attempts for a result that breaks its output schema before it is refused with `AGENT_SCHEMA_INVALID`; counted apart from `max-attempts`. `0` to `5` |
 | `adapters.completer-roles` | none | Per adapter name, the roles that may complete its steps through the completion API on top of `processes:step:complete` (section 4); an adapter without an entry cannot be completed from outside; a name that is no registered adapter stops start-up |
 | `migration.batch-size` | `100` | Instances per migration batch, one instance lock at a time (section 4.3); may be lowered only |
+| `migration.approval` | `four-eyes` | The approval a new migration plan records for its execution (PD-131): `four-eyes`, a second holder of `processes:migration:manage` approves; `single` is accepted only when the `dev` profile is active on its own, otherwise start-up is refused, and is logged at WARN. Published as `migration.approval` in `/api/bpm/meta` |
+| `migration.dry-run-sample-size` | `100` | Most instance ids a dry run lists per conflict and for the instances that would move, 1 to 500; may be lowered only |
+| `migration.dry-run-validity` | `PT1H` | How long an execution may rely on a dry run of the same plan (PD-114); at most `PT1H`, may be lowered only |
 | `tokens.cleanup-after`, `tokens.cleanup-batch` | unset (keep), `10000` | When set, the scheduler deletes `pre_token` rows of instances ended longer ago, in batches; history keeps every transition (open question 11.3) |
 | `stats.live-cache-large-threshold` | `100000` | Token count above which `stats.live-cache-ttl-large` applies |
 | `query.max-range` | `P31D` | Longest time range of a list query (ADR-0015); may be lowered only |
@@ -989,6 +1011,46 @@ CREATE TABLE pre_engine_key (
   created_at  TIMESTAMPTZ NOT NULL
 );
 
+-- 0.3.0 (#74, V23 to V25): migration plans. A plan moves nothing; the dry run only reads. Execution states follow.
+CREATE TABLE pre_migration (
+  tenant_id            TEXT        NOT NULL,
+  id                   VARCHAR(26) NOT NULL,
+  definition_key       TEXT        NOT NULL,
+  source_definition_id VARCHAR(26) NOT NULL,
+  source_version       INT         NOT NULL CHECK (source_version >= 1),
+  target_definition_id VARCHAR(26) NOT NULL,
+  target_version       INT         NOT NULL CHECK (target_version >= 1),
+  plan_hash            CHAR(64)    NOT NULL,     -- key, both definition ids and hashes
+  approval             TEXT        NOT NULL CHECK (approval IN ('four-eyes','single')),
+  status               TEXT        NOT NULL CHECK (status IN ('PLANNED')),
+  created_by           TEXT        NOT NULL,
+  created_at           TIMESTAMPTZ NOT NULL,
+  lock_version         BIGINT      NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, source_definition_id) REFERENCES pre_definition (tenant_id, id),
+  FOREIGN KEY (tenant_id, target_definition_id) REFERENCES pre_definition (tenant_id, id),
+  CHECK (source_definition_id <> target_definition_id)
+);
+CREATE INDEX idx_pre_migration_definition ON pre_migration (tenant_id, definition_key, created_at DESC, id);
+
+CREATE TABLE pre_migration_history (            -- append-only, triggers refuse UPDATE, DELETE and TRUNCATE
+  tenant_id    TEXT        NOT NULL,
+  id           VARCHAR(26) NOT NULL,
+  migration_id VARCHAR(26) NOT NULL,
+  action       TEXT        NOT NULL CHECK (action IN ('PLANNED')),
+  actor_id     TEXT        NOT NULL,
+  details      JSONB       NOT NULL DEFAULT '{}',
+  occurred_at  TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, migration_id) REFERENCES pre_migration (tenant_id, id)
+);
+
+-- V24 and V25, each CREATE INDEX CONCURRENTLY outside a transaction, re-runnable after a failed build:
+CREATE INDEX idx_pre_token_live_node_instance ON pre_token (tenant_id, definition_id, current_node_id, instance_id)
+  WHERE status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT');
+CREATE INDEX idx_pre_instance_running_definition ON pre_instance (tenant_id, definition_id, id)
+  WHERE status = 'RUNNING';
+
 -- 0.2.0 (#72, V20). Changed only through pre_calendar_change (section 4.3).
 CREATE TABLE pre_calendar (
   tenant_id       TEXT        NOT NULL,
@@ -1147,7 +1209,7 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | 11.2 | Should the approver also differ from every identity that edited the draft, for both engines? | **Decided 2026-11-20 (PD-096):** yes. The approver differs from every maker (importer or creator, every editor, requester) under `lifecycle.approver-must-differ-from`, default `makers`; section 3.2 and `PRE-019` | Closed |
 | 11.3 | Remove tokens of instances ended more than 30 days ago? `pre_token` is not an audit table; history keeps every transition | Made configurable on 2026-11-19 (`tokens.cleanup-after`, unset by default, ADR-0024); recommended value `P30D` | Maintainers, M2 |
 | 11.4 | Windows longer than 31 days for the heatmap need a daily rollup table | Defer to after 1.0 unless a pilot asks | Architect, M3 |
-| 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | DDL before M2 execution work | Maintainers, M2 |
+| 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | **Closed 2026-11-21 (#74):** `pre_migration` and `pre_migration_history` (V23), dry-run indexes V24 and V25 (section 7); execution states widen the status `CHECK` with the execution feature | Closed |
 | 11.6 | Which JSON library major `*-core` uses (ADR-0011) | **Decided** 2026-11-19 (PD-071 option 1, ADR-0021): Jackson 3 in `internal` only; engine REST bodies use the engine's mapper (`PRE-045`). Condition: the Spring Boot 3.5 coexistence test passes in Sprint 1, or option 3 (no JSON library in the core) returns | Closed; the condition is checked by the maintainers in the first parsing pull request |
 | 11.7 | P2: scope tokens in M2 (ADR-0020) | **Decided** 2026-11-19 (PD-059 option 1): applied in sections 3.4, 4.2 and 7 (`PRE-044`, `TR-STD-29`) | Closed |
 | 11.8 | P3: BPMN semantic model as the in-memory model (ADR-0018) | **Decided** 2026-11-19 (PD-060 option 2): applied in section 5.1 (`PRE-043`, `TR-STD-28`) | Closed |

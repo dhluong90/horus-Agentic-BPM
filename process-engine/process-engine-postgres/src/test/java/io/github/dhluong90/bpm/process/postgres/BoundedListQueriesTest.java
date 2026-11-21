@@ -121,7 +121,8 @@ class BoundedListQueriesTest {
                 "replay-overridden-attempts", "replay-recorded-answers", "replay-recorded-answers-after", "replay-cases",
                 "definition-keys", "definition-keys-after",
                 "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "calendar-holidays",
-                "tasks-mine-dated", "tasks-any-undated", "instances-1",
+                "tasks-mine-dated", "tasks-any-undated", "migration-live-nodes", "migration-instances-at-node",
+                "migration-movable-instances", "instances-1",
                 "instances-3-key-range-after");
     }
 
