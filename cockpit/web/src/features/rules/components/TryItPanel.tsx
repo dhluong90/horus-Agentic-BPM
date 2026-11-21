@@ -28,9 +28,13 @@ export function currencyOfInput(definition: RuleSetDefinition, input: string): I
   return code === undefined ? { kind: 'unknown' } : { kind: 'known', code };
 }
 
-type Built = { ok: true; inputs: Record<string, unknown> } | { ok: false; field: string };
+export type Built = { ok: true; inputs: Record<string, unknown> } | { ok: false; field: string };
 
-function build(definition: RuleSetDefinition, values: Record<string, string>, currencies: Readonly<Record<string, string>>, locale: Locale): Built {
+/**
+ * The inputs of one sample as the engine takes them: money as `{ currency, amount }` in minor units, whole numbers,
+ * yes or no, lists. A blank field is left out (any value). The first field that cannot be sent is named instead.
+ */
+export function buildSample(definition: RuleSetDefinition, values: Readonly<Record<string, string>>, currencies: Readonly<Record<string, string>>, locale: Locale): Built {
   const inputs: Record<string, unknown> = {};
   for (const input of definition.inputs) {
     const text = (values[input.name] ?? '').trim();
@@ -52,49 +56,79 @@ function build(definition: RuleSetDefinition, values: Record<string, string>, cu
   return { ok: true, inputs };
 }
 
-function Field({ input, value, currency, invalid, onChange, onCurrency }: {
+/** The currency each money input is sent in: the one its cells name, else the one the user typed. */
+export function sampleCurrencies(definition: RuleSetDefinition, typed: Readonly<Record<string, string>>): Record<string, string> {
+  const currencies: Record<string, string> = {};
+  for (const input of definition.inputs) {
+    const known = currencyOfInput(definition, input.name);
+    if (known.kind === 'known') currencies[input.name] = known.code;
+    else if (known.kind === 'unknown') currencies[input.name] = typed[input.name] ?? '';
+  }
+  return currencies;
+}
+
+export interface SampleControlProps {
   input: InputClause;
   value: string;
   currency: InputCurrency;
   invalid: boolean;
   onChange: (text: string) => void;
   onCurrency: (code: string) => void;
-}) {
+  /** The field's id, for a visible label. */
+  id?: string | undefined;
+  /** The field's name when no visible label points at it, as in a grid cell. */
+  ariaLabel?: string | undefined;
+  describedBy?: string | undefined;
+}
+
+/**
+ * The control of one sample input. A masked input is a password field: its value shows as dots and the browser
+ * neither remembers nor checks its spelling. Money groups its digits while typing and carries its currency.
+ */
+export function SampleControl({ input, value, currency, invalid, onChange, onCurrency, id, ariaLabel, describedBy }: SampleControlProps) {
   const { t, locale } = useI18n();
-  const id = useId();
   const label = clauseLabel(input, locale);
-  const common = { id, className: 'field__input', 'aria-invalid': invalid };
-  let control;
+  const common = { id, className: 'field__input', 'aria-invalid': invalid, 'aria-label': ariaLabel, 'aria-describedby': describedBy };
+  if (input.mask === true) {
+    return <input {...common} type="password" autoComplete="off" spellCheck={false} placeholder={t('try.anyPlaceholder')} value={value} onChange={(e) => { onChange(e.target.value); }} />;
+  }
   if (input.allowed || input.type === 'boolean') {
     const options = input.type === 'boolean' ? [['true', t('table.yes')], ['false', t('table.no')]] : (input.allowed ?? []).map((v) => [String(v), valueLabel(String(v))]);
-    control = (
+    return (
       <select {...common} value={value} onChange={(e) => { onChange(e.target.value); }}>
         <option value="">{t('try.anyPlaceholder')}</option>
         {options.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
       </select>
     );
-  } else if (input.type === 'money' && currency.kind === 'mixed') {
+  }
+  if (input.type === 'money' && currency.kind === 'mixed') {
     // The rule set compares this input in more than one currency: the panel cannot choose for the user.
-    control = <p className="cell-error">{t('try.mixedCurrency')}</p>;
-  } else if (input.type === 'money') {
-    control = (
+    return <p className="cell-error">{t('try.mixedCurrency')}</p>;
+  }
+  if (input.type === 'money') {
+    const name = ariaLabel ?? label;
+    return (
       <span className="money-input">
         <input {...common} inputMode="decimal" className="field__input tnum" placeholder={t('try.anyPlaceholder')} value={value} onChange={(e) => { onChange(groupWhileTyping(e.target.value, locale)); }} />
         {currency.kind === 'known' ? (
-          <span className="money-input__code" aria-label={t('try.currency', { name: label })}>{currency.code}</span>
+          <span className="money-input__code" aria-label={t('try.currency', { name })}>{currency.code}</span>
         ) : (
-          <input className="money-input__code money-input__code--edit" aria-label={t('try.currency', { name: label })} maxLength={3} placeholder="VND"
+          <input className="money-input__code money-input__code--edit" aria-label={t('try.currency', { name })} maxLength={3} placeholder="VND"
             onChange={(e) => { onCurrency(e.target.value); }} />
         )}
       </span>
     );
-  } else {
-    control = <input {...common} type={input.type === 'date' ? 'date' : 'text'} inputMode={input.type === 'integer' ? 'numeric' : undefined} placeholder={t('try.anyPlaceholder')} value={value} onChange={(e) => { onChange(e.target.value); }} />;
   }
+  return <input {...common} type={input.type === 'date' ? 'date' : 'text'} inputMode={input.type === 'integer' ? 'numeric' : undefined} placeholder={t('try.anyPlaceholder')} value={value} onChange={(e) => { onChange(e.target.value); }} />;
+}
+
+function Field({ input, value, currency, invalid, onChange, onCurrency }: Omit<SampleControlProps, 'id' | 'ariaLabel' | 'describedBy'>) {
+  const { t, locale } = useI18n();
+  const id = useId();
   return (
     <div className="field">
-      <label className="field__label" htmlFor={id}>{label}</label>
-      {control}
+      <label className="field__label" htmlFor={id}>{clauseLabel(input, locale)}</label>
+      <SampleControl id={id} input={input} value={value} currency={currency} invalid={invalid} onChange={onChange} onCurrency={onCurrency} />
       {invalid ? <span className="cell-error">{t('try.invalidAmount', { example: locale === 'vi' ? '60.000.000' : '60,000,000' })}</span> : null}
     </div>
   );
@@ -109,19 +143,14 @@ export function useSampleForm(definition: RuleSetDefinition): { fields: ReactNod
   const [values, setValues] = useState<Record<string, string>>({});
   const [invalid, setInvalid] = useState<string | undefined>(undefined);
   const [typedCurrency, setTypedCurrency] = useState<Record<string, string>>({});
-  const currencies: Record<string, string> = {};
-  for (const input of definition.inputs) {
-    const known = currencyOfInput(definition, input.name);
-    if (known.kind === 'known') currencies[input.name] = known.code;
-    else if (known.kind === 'unknown') currencies[input.name] = typedCurrency[input.name] ?? '';
-  }
+  const currencies = sampleCurrencies(definition, typedCurrency);
   const fields = definition.inputs.map((input) => (
     <Field key={input.name} input={input} currency={currencyOfInput(definition, input.name)} value={values[input.name] ?? ''} invalid={invalid === input.name}
       onChange={(text) => { setValues((current) => ({ ...current, [input.name]: text })); }}
       onCurrency={(code) => { setTypedCurrency((current) => ({ ...current, [input.name]: code })); }} />
   ));
   const read = () => {
-    const built = build(definition, values, currencies, locale);
+    const built = buildSample(definition, values, currencies, locale);
     if (!built.ok) {
       setInvalid(built.field);
       return undefined;
