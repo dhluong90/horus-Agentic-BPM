@@ -15,6 +15,11 @@ public final class TestImages {
         return required("bpm.test.postgres.image");
     }
 
+    /** PgBouncer, from {@code bpm.test.pgbouncer.image}, for the tests behind a transaction-mode pooler. */
+    public static String pgbouncer() {
+        return required("bpm.test.pgbouncer.image");
+    }
+
     private static String required(String property) {
         String image = System.getProperty(property);
         if (image == null || image.isBlank()) {

@@ -1,0 +1,23 @@
+# TR-LIC-01, PD-098: the reference FEEL engine and its resolved runtime, allowed in test scope only.
+#
+# One line per artifact: groupId:artifactId:version | licence (SPDX id from allowed-licences.txt) | reason.
+# tools/check-test-oracle.py compares this file with the org.camunda.feel:feel-engine subtree that
+# `mvn dependency:tree -Dscope=test -pl rule-engine/rule-engine-core` resolves, and fails on a version that
+# differs, an artifact this file does not name, or an entry that is no longer resolved. The release build
+# fails when bom-release.json contains any artifact named here, at any version.
+#
+# To change the oracle's version, open a pull request that updates this file with the new resolved tree,
+# checks the licence of every new or changed artifact, and names the change in its description.
+# jackson-annotations is not here: it is a compile dependency through Jackson 3 and the normal licence gate
+# covers it.
+org.camunda.feel:feel-engine:1.22.1 | Apache-2.0 | the reference FEEL implementation, differential test oracle (RLE-021)
+org.scala-lang:scala-library:2.13.18 | Apache-2.0 | Scala runtime of feel-engine
+com.lihaoyi:fastparse_2.13:3.1.1 | MIT | parser library of feel-engine
+com.lihaoyi:sourcecode_2.13:0.4.0 | MIT | dependency of fastparse
+com.lihaoyi:geny_2.13:1.1.0 | MIT | dependency of fastparse
+org.slf4j:slf4j-api:2.0.20 | MIT | logging API of feel-engine; version from the Spring Boot BOM
+com.fasterxml.uuid:java-uuid-generator:5.2.0 | Apache-2.0 | dependency of feel-engine
+com.fasterxml.jackson.module:jackson-module-scala_2.13:2.21.7 | Apache-2.0 | dependency of feel-engine; version from the Spring Boot BOM
+com.fasterxml.jackson.core:jackson-core:2.21.7 | Apache-2.0 | Jackson 2, brought in by jackson-module-scala
+com.fasterxml.jackson.core:jackson-databind:2.21.7 | Apache-2.0 | Jackson 2, brought in by jackson-module-scala
+com.thoughtworks.paranamer:paranamer:2.8.3 | BSD-3-Clause | brought in by jackson-module-scala

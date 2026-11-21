@@ -1,5 +1,7 @@
 package io.github.dhluong90.bpm.host.autoconfigure;
 
+import io.github.dhluong90.bpm.host.internal.CorrelationIds;
+import io.github.dhluong90.bpm.host.internal.Problem;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.core.Ordered;

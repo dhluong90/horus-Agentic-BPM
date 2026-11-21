@@ -5,7 +5,9 @@ name: Deploy
 # files or the example hosts change, and every week on main, so a new vulnerability in the JRE, busybox
 # or PostgreSQL is found without a commit; the CI workflow covers the engines. The weekly run also checks
 # for a newer Temurin JRE than the Dockerfile pins (deploy/check-jre-release.py); GitHub notifies the
-# owner when a scheduled run fails.
+# owner when a scheduled run fails. The weekly and manual runs also rescan the latest vX.Y.Z release (its
+# example image and its bill of materials; a finding fails the run, naming the tag) and the test images
+# pinned by digest (a finding opens an issue per image instead), #293.
 on:
   pull_request:
     paths:
@@ -35,6 +37,10 @@ on:
     inputs:
       no-cache:
         description: "Build the image with no layer cache, to compare its content digest with a cached build"
+        type: boolean
+        default: false
+      open-issues:
+        description: "Open or update an issue for each pinned test image with a high or critical finding (the Monday run always does)"
         type: boolean
         default: false
 
@@ -248,3 +254,267 @@ jobs:
       - name: Newer Temurin 21 JRE than deploy/docker/Dockerfile pins
         continue-on-error: ${{ github.event_name == 'pull_request' }}
         run: deploy/check-jre-release.py
+
+  released-tag-rescan:
+    # #293: adopters run released versions, so the weekly run also rebuilds the example image of the latest
+    # vX.Y.Z tag from that tag's own Dockerfile and sources, and applies today's image gates and Grype policy
+    # (deploy/scan-image.sh and .grype.yaml of this checkout). The released jars are covered by scanning the
+    # bill of materials attached to that GitHub Release. A finding fails the job, naming the tag.
+    name: Released tag rescan${{ matrix.arch == 'arm64' && ' (arm64)' || '' }}
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
+            grype-sha256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            # SHA-256 of grype_0.122.1_linux_arm64.tar.gz, from the signed checksum file of that release.
+            grype-sha256: "819e5be3d9516432fedb7b6b56df7306c3a16607606dfc05826eefbb00e471da"
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    env:
+      GRYPE_VERSION: "0.122.1"
+      GRYPE_SHA256: ${{ matrix.grype-sha256 }}
+      ARCH: ${{ matrix.arch }}
+      RELEASED_IMAGE: horus-bpm/rule-engine-only-released:local # pin-exempt: built in this job from the released tag
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Latest release tag (vX.Y.Z)
+        id: tag
+        run: |
+          set -euo pipefail
+          tag="$(git ls-remote --tags --refs "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" 'v*' \
+            | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          test -n "$tag" || { echo "::error title=Released tag rescan::no vX.Y.Z tag found"; exit 1; }
+          echo "Rescanning the latest release tag: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the released tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          path: released
+          persist-credentials: false
+
+      # A release whose Dockerfile pins no JRE for this architecture never shipped an image for it (v0.1.0
+      # is linux/amd64 only): the leg says so and passes, and its bill of materials is still scanned on x64.
+      - name: Does the tag build an image for this architecture
+        id: arch
+        run: |
+          if grep -Eq "^[[:space:]]*${ARCH}\) arch=" released/deploy/docker/Dockerfile; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+            echo "The Dockerfile of ${{ steps.tag.outputs.tag }} pins no JRE for $ARCH: no image to rescan on this leg."
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.arch.outputs.supported == 'true'
+
+      # No layer cache: the image is rebuilt the way an adopter builds it from the tag.
+      - name: Build the released example image from the tag's Dockerfile
+        if: steps.arch.outputs.supported == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: released
+          file: released/deploy/docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          build-args: EXAMPLE=rule-engine-only
+          tags: ${{ env.RELEASED_IMAGE }}
+          load: true
+          push: false
+          provenance: false
+          no-cache: true
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Install Grype (signature and pinned checksum verified)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+          tarball="grype_${GRYPE_VERSION}_linux_${ARCH}.tar.gz"
+          sums="grype_${GRYPE_VERSION}_checksums.txt"
+          curl -sSfL -O "$base/$tarball" -O "$base/$sums" -O "$base/$sums.sigstore.json"
+          cosign verify-blob "$sums" --bundle "$sums.sigstore.json" \
+            --certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          grep " ${tarball}\$" "$sums" | sha256sum -c -
+          echo "${GRYPE_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" grype
+          echo "GRYPE=$RUNNER_TEMP/grype" >> "$GITHUB_ENV"
+
+      - name: Image gates on the released image, no secrets in layers and no high or critical vulnerability
+        id: image
+        if: steps.arch.outputs.supported == 'true'
+        continue-on-error: true
+        run: deploy/scan-image.sh "$RELEASED_IMAGE"
+
+      # The bill of materials does not depend on the architecture: scanned once, on the x64 leg. Its
+      # SHA-256 is checked against the SHA256SUMS of the same release before the scan.
+      - name: Release bill of materials of the tag, Java and npm, no high or critical vulnerability
+        id: sbom
+        if: matrix.arch == 'amd64'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/release-$TAG"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p bom-release.json -p SHA256SUMS -D "$dir"
+          (cd "$dir" && grep -E '  \./bom-release\.json$' SHA256SUMS | sha256sum -c -)
+          tools/scan-dependencies.sh "$dir/bom-release.json"
+
+      - name: Upload the scan reports of the released tag
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: released-tag-scan-${{ matrix.arch }}
+          path: target/grype-*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Result for the released tag
+        if: ${{ !cancelled() }}
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          SUPPORTED: ${{ steps.arch.outputs.supported }}
+          IMAGE_OUTCOME: ${{ steps.image.outcome }}
+          SBOM_OUTCOME: ${{ steps.sbom.outcome }}
+        run: |
+          if [[ "$SUPPORTED" == false ]]; then IMAGE_OUTCOME="not released for $ARCH"; fi
+          {
+            echo "### Released tag rescan: $TAG ($ARCH)"
+            echo
+            echo "| Scan | Result |"
+            echo "|---|---|"
+            echo "| Example image built from $TAG, image gates | $IMAGE_OUTCOME |"
+            echo "| bom-release.json of the $TAG release | ${SBOM_OUTCOME:-skipped} |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [[ ( "$SUPPORTED" != false && "$IMAGE_OUTCOME" != success ) || ( "$ARCH" == amd64 && "$SBOM_OUTCOME" != success ) ]]; then
+            echo "::error title=Released tag $TAG::the weekly rescan of $TAG failed ($ARCH): image gates $IMAGE_OUTCOME, release SBOM ${SBOM_OUTCOME:-skipped}. See the reports above and the released-tag-scan-$ARCH artifact."
+            exit 1
+          fi
+
+  test-images-rescan:
+    # #293: the images the tests pin by digest (tools/check-image-pins.py --list: PostgreSQL, PgBouncer, the
+    # Testcontainers reaper, Playwright) never pick up base-image fixes. They never ship either, so a high or
+    # critical finding opens an issue per image (or comments on the open one) instead of failing the run.
+    name: Pinned test images rescan
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GRYPE_VERSION: "0.122.1"
+      # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
+      GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+      OUT: ${{ github.workspace }}/target/test-image-rescan
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Tests of the rescan and of the image list
+        run: |
+          python3 tools/test_rescan_test_images.py -v
+          python3 tools/test_check_image_pins.py -v
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Install Grype (signature and pinned checksum verified)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+          tarball="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          sums="grype_${GRYPE_VERSION}_checksums.txt"
+          curl -sSfL -O "$base/$tarball" -O "$base/$sums" -O "$base/$sums.sigstore.json"
+          cosign verify-blob "$sums" --bundle "$sums.sigstore.json" \
+            --certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          grep " ${tarball}\$" "$sums" | sha256sum -c -
+          echo "${GRYPE_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" grype
+          echo "GRYPE=$RUNNER_TEMP/grype" >> "$GITHUB_ENV"
+
+      - name: Scan every pinned test image (findings are reported, not failed)
+        run: |
+          python3 tools/check-image-pins.py --list
+          python3 tools/rescan-test-images.py "$OUT"
+          { echo "### Pinned test images rescan"; echo; cat "$OUT/summary.md"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the scan reports of the test images
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rescan-test-images
+          path: target/test-image-rescan/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # The token is given to this step only; Grype never sees it. A manual run opens issues only when
+      # asked (input open-issues), so a trial run reports in the summary and changes nothing.
+      - name: Open or update one issue per test image with a finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OPEN_ISSUES: ${{ github.event_name == 'schedule' || inputs.open-issues == true }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for title_file in "$OUT"/*.title; do
+            title="$(head -n 1 "$title_file")"; body="${title_file%.title}.md"
+            if [[ "$OPEN_ISSUES" != true ]]; then
+              echo "Would open or update: $title" | tee -a "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            number="$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+              --jq "map(select(.title == \"$title\")) | first | .number // empty")"
+            if [[ -n "$number" ]]; then
+              gh issue comment "$number" --body-file "$body"
+              echo "Updated #$number: $title" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              url="$(gh issue create --title "$title" --body-file "$body" \
+                --label type:chore --label module:cross-cutting --label priority:p2)"
+              echo "Opened $url: $title" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+  rescan-summary:
+    # One table for the weekly run: the current branch, the latest release tag and the test images.
+    name: Weekly rescan summary
+    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+    needs: [compose-smoke, released-tag-rescan, test-images-rescan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Results
+        env:
+          REF: ${{ github.ref_name }}
+          TAG: ${{ needs.released-tag-rescan.outputs.tag }}
+          BRANCH_RESULT: ${{ needs.compose-smoke.result }}
+          TAG_RESULT: ${{ needs.released-tag-rescan.result }}
+          IMAGES_RESULT: ${{ needs.test-images-rescan.result }}
+        run: |
+          {
+            echo "### Weekly rescan"
+            echo
+            echo "| Scanned | Result |"
+            echo "|---|---|"
+            echo "| \`$REF\`: image build, smoke test and image gates | $BRANCH_RESULT |"
+            echo "| Latest release \`${TAG:-unknown}\`: image gates and release SBOM | $TAG_RESULT |"
+            echo "| Pinned test images (findings open issues, never fail) | $IMAGES_RESULT |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

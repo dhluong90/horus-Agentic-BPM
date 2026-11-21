@@ -54,4 +54,14 @@ class HostArchitectureTest {
                 .because("engines and hosts compile against the SPI on either Spring Boot line (ADR-0016)")
                 .check(host);
     }
+
+    @Test
+    void TR_SEC_08_the_public_handlers_and_the_internals_do_not_reach_into_the_auto_configuration() {
+        noClasses()
+                .that().resideInAnyPackage("io.github.dhluong90.bpm.host.security..", "io.github.dhluong90.bpm.host.internal..",
+                        "io.github.dhluong90.bpm.host.spi..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.host.autoconfigure..")
+                .because("hosts import the public packages only, and those must not drag the unpromised one in")
+                .check(host);
+    }
 }

@@ -1,5 +1,7 @@
 package io.github.dhluong90.bpm.host.autoconfigure;
 
+import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
+import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.host.spi.TenantResolver;
@@ -125,7 +127,7 @@ public class EngineAccessAutoConfiguration {
         EngineAccess horusBpmEngineAccess(ObjectProvider<ModuleDescriptor> modules, HostMetadataProperties properties,
                 TenantResolver tenantResolver) {
             return new DefaultEngineAccess(tenantResolver, properties.tenancy().claim(),
-                    claims(EngineAccessAutoConfiguration.class.getClassLoader()), properties.security().challenge(),
+                    claims(EngineAccessAutoConfiguration.class.getClassLoader()), properties.security(),
                     modules(modules));
         }
 

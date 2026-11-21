@@ -105,7 +105,7 @@ Event types follow `<module>.<aggregate>.<pastTense>.v<N>`, with module `rules` 
 | `rules.version.published.v1` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy`, `acknowledgedWarnings` (list of `{ code, input }`, empty when none) and `maskedByDefaultInputs` (inputs masked only by the tenant default at approval, empty when none) (PD-104, additive; both lists on every publication); schema `rule-engine/api/schema/rules.version.published.v1.schema.json` |
 | `rules.version.rejected.v1` | `ruleSet`, `version`, `rejectedBy`, `reason`; schema `rule-engine/api/schema/rules.version.rejected.v1.schema.json` |
 | `rules.version.withdrawn.v1` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given); schema `rule-engine/api/schema/rules.version.withdrawn.v1.schema.json` |
-| `rules.version.retire-requested.v1` (M3, `four-eyes` mode) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt` |
+| `rules.version.retire-requested.v1` (`four-eyes` mode, #213) | `ruleSet`, `version`, `requestedBy`, `reason`; the request instant is the envelope's `occurredAt`; schema `rule-engine/api/schema/rules.version.retire-requested.v1.schema.json` |
 | `rules.version.retired.v1` | `ruleSet`, `version`, `retiredBy` (`lifecycle.system-actor`, `system:supersession` by default, when superseded), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version or null), `retiredAt`, `noVersionInEffect` (PD-101, section 3.3.4), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the four-eyes requester, else null); schema `rule-engine/api/schema/rules.version.retired.v1.schema.json` |
 | `rules.decision.evaluated.v1` | `decisionId`, `ruleSet`, `version`, `outcome` (`MATCHED`, `NO_MATCH` or `FAILED`); no inputs or outputs, which stay in the decision log; schema `rule-engine/api/schema/rules.decision.evaluated.v1.schema.json` |
 
@@ -284,6 +284,7 @@ public interface RuleEngine {
   DecisionResult replay(String decisionId);         // the logged version, inputs and clock; writes nothing (#22)
   <T> T evaluateAs(String ruleSet, DecisionInput input, Class<T> outputType); // throws instead of returning Failed
   SimulationResult simulate(String ruleSet, int version, List<DecisionInput> samples); // rules:simulate; logs nothing (RLE-016)
+  HistorySimulationResult simulateHistory(String ruleSet, int version, HistorySimulation period); // rules:simulate and rules:log:read; logs nothing (RLE-015)
 }
 
 // package io.github.dhluong90.bpm.rules.embedded: engine to engine, not for hosts
@@ -314,6 +315,7 @@ Permissions follow ADR-0010: `rules:evaluate`, `rules:read`, `rules:author`, `ru
 | `POST /decisions/{ruleSet}/versions/{v}:evaluate` | `rules:pin`, plus `rules:simulate` when the body sets `clock` | Optional `Idempotency-Key`. Only approved versions: a `DRAFT` is `409 INVALID_STATE` and is tried with `:simulate`; a `RETIRED` version is `409 INVALID_STATE` unless `evaluation.pin-retired` is `true`. A decision evaluated with a chosen clock carries `clockChosen: true` in the response and keeps `eval_clock` apart from `created_at` in the log, so a back-dated decision is visible | `403 PERMISSION_DENIED`, `403 CLOCK_NOT_ALLOWED`, `404 VERSION_NOT_FOUND`, `409 INVALID_STATE`, `422 UNIQUE_HIT_VIOLATION`, `422 EVALUATION_ERROR` |
 | `POST /decisions/{decisionId}:replay` | `rules:log:read` | No body; writes nothing; the logged version, inputs and clock (`TR-DET-05`, section 4.1) | `404 DECISION_NOT_FOUND`, `422 REPLAY_NOT_POSSIBLE` (a masked input had a value), `422 UNIQUE_HIT_VIOLATION` and `422 EVALUATION_ERROR` when the logged decision failed |
 | `POST /decisions/{ruleSet}:evaluate-batch` | `rules:evaluate` | At most 1,000 items; `Idempotency-Key`; per-item outcome in a `207`-style body with `200` status | `400 INPUT_INVALID`, `404 NO_EFFECTIVE_VERSION`; item errors `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR` |
+| `POST /rule-sets/{name}/versions/{v}:simulate-history` | `rules:simulate` and `rules:log:read`, checked before the body is read | Body `{ "from", "to", "limit" }`, at most 16,384 bytes. Replays the caller's tenant's decisions of `[from, to)` through the logged version and this version, both at each logged clock; writes nothing, so no `Idempotency-Key`. The period is at most `query.max-range` and the run at most `simulation.max-inputs` decisions, newest first, with `truncated` when there were more. See section 4.2.2 | `400 QUERY_INVALID` (period missing, reversed or too long, limit out of range, malformed instant), `404 VERSION_NOT_FOUND` (also for another tenant's version, before any decision is read), `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` |
 | `POST /rule-sets/{name}/versions/{v}:simulate` | `rules:simulate`, checked before the body is read | Body `{ "samples": [{ "inputs": {...} }] }`, 1 to `simulation.max-inputs` sets (default and ceiling 1,000), at most 1,048,576 bytes. Runs the version in any status and the version effective at the host clock in memory; writes nothing (no decision row, idempotency record or event), so no `Idempotency-Key`; no generated id in the response, so the same version, samples and clock give the same body (`RLE-016`, `TR-DET-01`). See section 4.2.1 | `400 INPUT_INVALID` (no samples, too many, or a sample invalid, named `samples[i]`), `404 VERSION_NOT_FOUND` (also for another tenant's version and an unknown rule set), `413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_FAILED` |
 | `GET /rule-sets`, `GET /rule-sets/{name}` | `rules:read` | Signed keyset cursor by name (byte order), `limit` 1 to `query.max-page-size` (default 50, at most 200); each item: `ruleSet`, `latestVersion`, `latestStatus`, `publishedVersion` (the version selected at the host clock, section 3.3.1, or null), `lastChangedAt` (latest version timestamp or history row) (`RLE-039`) | `400 QUERY_INVALID` (limit or cursor), `404 RULE_SET_NOT_FOUND` |
 | `GET /rule-sets/{name}/versions` | `rules:read` | Keyset cursor by version number, newest first, same `limit`; items carry the lifecycle fields and `allowedActions`, never the definition (`RLE-040`) | `400 QUERY_INVALID`, `404 RULE_SET_NOT_FOUND` |
@@ -373,6 +375,46 @@ sequenceDiagram
     E-->>C: 200 results with changed flags, nothing written
 ```
 
+#### 4.2.2 Replay of logged decisions through a draft (`RLE-015`)
+
+Sample customers miss edge cases. `:simulate-history` answers the approver's question with real decisions: of the decisions made last month, which would the draft decide differently?
+
+- **Both sides at the logged clock.** Each decision is evaluated with the version it was made with, loaded by number as `replay` does (never selected, so a version superseded or retired since still runs), and with the simulated version, both at the decision's `eval_clock`, so `today()` and `now()` are those of the decision. The logged side is what was decided (`TR-DET-05`); it is evaluated again rather than read from the stored JSON, so both sides compare as typed values with the rule of section 4.2.1.
+- **Inputs.** The logged inputs, as stored. Inputs the simulated version does not declare are left out of its side; inputs it declares that the decision did not have are missing, as in an evaluation.
+- **Masked inputs.** A decision whose masked input had a value holds only its fingerprint and cannot be evaluated again. It is listed with `maskedInputs` (names only, never values), both sides null and `changed` false, and counted in `notReplayableCount`; the run goes on.
+- **Bounds.** The period is at most `query.max-range` (31 days) and the run at most `simulation.max-inputs` (1,000) decisions, newest first; both are host settings that may be lowered (PD-018). One read, through the same statement as `GET /decisions`: tenant and rule set first and the period on the partition key, under `query.statement-timeout`; one row more than the limit sets `truncated`. All the decisions of the run read from one `evaluation.regex-max-reads-per-request` counter, so a run stops at the same decision every time.
+- **Permissions and tenancy.** `rules:simulate` and `rules:log:read`, because the answer is built from logged inputs, the reason replay needs `rules:log:read`. The tenant comes from the resolver only; a version of another tenant is `404 VERSION_NOT_FOUND` before any decision is read, and decisions of another tenant are never read.
+- **No side effects.** The read and every evaluation run in one transaction that writes nothing: no decision row, idempotency record, event or history row, and the response holds no logged input. The cockpit screen is a later slice.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Approver (rules:simulate, rules:log:read)
+    participant R as SimulationController
+    participant E as RuleEngine.simulateHistory
+    participant S as rle_version (read only)
+    participant L as rle_decision (read only)
+    C->>R: POST .../card-fee/versions/2:simulate-history {from, to, limit}
+    R->>R: both permissions, bounded body, instants parsed
+    R->>E: simulateHistory("card-fee", 2, period)
+    E->>E: period within query.max-range, limit within simulation.max-inputs (else 400 QUERY_INVALID)
+    E->>S: find v2 in the caller's tenant
+    alt not in this tenant
+        E-->>C: 404 VERSION_NOT_FOUND, no decision read
+    end
+    E->>E: integrity check and compile v2 (else 422 VALIDATION_FAILED)
+    E->>L: SELECT tenant, rule set, created_at in [from, to), newest first, limit + 1
+    loop each logged decision
+        alt a masked input had a value
+            E->>E: not replayable, inputs named, never values
+        else
+            E->>S: logged version by number (once per version)
+            E->>E: evaluate logged version and v2 at eval_clock, one regex budget for the run
+        end
+    end
+    E-->>C: 200 counts and items with changed flags, nothing written
+```
+
 ### 4.3 Host metadata
 
 The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version, API version `v1`, feature flags such as `rules.simulation`, `rules.replay`, `rules.grid-editor`) and the `rules:*` permissions the caller holds to `GET /api/bpm/me`. Both endpoints and their contract are owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6 and ship in M1 (X-F-22, `RLE-019`). Settings whose value depends on the tenant are added to the `rules` settings for the caller's tenant through the host metadata module's `TenantModuleSettings` seam: `decision-log.mask-default` and `decision-log.require-explicit-mask` in force, both always present and boolean (`RLE-050`, `RLE-052`). Because `/meta` now differs per tenant, it is sent like `/me`: `Vary: Authorization, Cookie, X-Tenant-Id`, and a weak ETag over the caller's tenant and the body, so a cached body or a `304` of one tenant is never served in another, even when both bodies are equal. It stays `private, max-age=60`. `TenantModuleSettings` implementations read settings held in memory, with no database query per request.
@@ -389,7 +431,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `readings.style` | `sentence` | Style of plain-language readings of rules and of explanation `text` (CK-F-44, PD-077): `sentence` (patterns from the message catalogue) or `shorthand` (`tier: GOLD, PLATINUM`). If sentences miss the M1 checkpoint of 8 Jan 2027, M1 ships with `shorthand` only and the property accepts only that value until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `explain.default-language` | `en` | Language of `text` when the request names none available (PD-027, PD-077) |
 | `publication.require-simulation-report` | `false` | From M3 (RE-F-23, PD-022): when `true`, per host or per rule set (`publication.require-simulation-report.rule-sets`), `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Off by default; in M1 the approver runs the simulation herself |
-| `decision-log.retention` | none; required outside `dev` from M3 | Whole months, ISO 8601 (`P12M`, `P120M`). The scheduler drops whole monthly partitions of `rle_decision` that lie entirely before `now() - retention` (ADR-0010). From M3, outside the `dev` profile, start-up is refused until it is set, and a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). The `dev` profile needs no value and drops nothing. Before M3 nothing is deleted and the property is ignored with a start-up note |
+| `decision-log.retention` | none: unset keeps everything and warns | `keep-forever`, or whole months in ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs a WARN at every start-up saying the setting is unset, that everything is kept, the rough growth per row and the setting name (PD-130). `keep-forever` says the same choice explicitly and logs INFO. Only an explicit period enables drops. PD-050 stays the 1.0 rule: a later release requires the setting (#104) |
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
 | `evaluation.regex-max-reads` | `1000000` | Characters one `matches()` may read, `1` to `1000000`, lower only: the deterministic primary bound (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
@@ -411,7 +453,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `tenancy.dev-tenant` | unset | Fixed tenant in the `dev` profile only; start-up is refused when set outside `dev` |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | Reason on `:reject` and `:retire`; a host may make it optional for reject only, never for retire (a retire must say why, ADR-0025) |
 | `lifecycle.system-actor` | `system:supersession` | Actor recorded for automatic supersession. It must start with `system:`, a namespace reserved for the engine's own actors: a caller whose id starts with `system:` is refused with `403 PERMISSION_DENIED` on every operation, so no host user can act or be recorded under an engine actor's name (security review of #269) |
-| `decision-log.retention-floor` | `P12M` | Shortest `decision-log.retention` accepted (PD-050); a host may raise it to its own policy, never set it below `P12M` (`TR-EXT-05`) |
+| `decision-log.retention-floor` | `P12M` | Shortest `decision-log.retention` accepted (PD-050), in whole months; a host may raise it to its own policy, so a shorter retention set by mistake stops start-up, and never set it below `P12M` (`TR-EXT-05`) |
 | `lifecycle.retire-approval` (host property `horus.bpm.lifecycle.retire-approval`, shared with the Process Engine, PD-102) | `single` | Approval mode of manual retirement (PD-080, ADR-0025): `single` (one `rules:approve` holder with a reason) or `four-eyes` (a second holder confirms; from M3). Shown in `/api/bpm/meta` settings and recorded on each retirement event and history row. Independent of the PD-012 emergency publication path |
 | `lifecycle.retire-last-version` (host property `horus.bpm.lifecycle.retire-last-version`, shared with the Process Engine) | `confirm` | Retiring the last version in effect (PD-101, section 3.3.4): `confirm` needs `confirmNoVersionInEffect: true`, else `409 LAST_VERSION_IN_EFFECT`; `four-eyes` makes it a retirement request a second `rules:approve` holder confirms; `refuse` always answers `409 LAST_VERSION_IN_EFFECT`. Shown in `/api/bpm/meta` settings. `four-eyes` fails start-up until four-eyes retirement ships (RE-F-49) |
 | `lifecycle.approver-must-differ-from` (host property `horus.bpm.lifecycle.approver-must-differ-from`) | `makers` | Shared by both engines: host property `horus.bpm.lifecycle.approver-must-differ-from` (PD-096), published as `lifecycle.approver-must-differ-from` in each engine module's `/api/bpm/meta` settings. `makers` (default): the approver differs from every maker of the version, that is the importer or creator, every editor of the draft and the requester. `requester`: the approver differs from the requester only; this relaxes a control, so it is never the default, it is logged at WARN at start-up and recorded on every approval history row. The requester can never approve under either value (`403 SELF_APPROVAL_FORBIDDEN`, with a detail naming why) |
@@ -509,7 +551,11 @@ Micrometer names, exported to Prometheus with the usual suffixes; no tenant, rul
 | `horus.rle.cache.size` | Gauge | `horus_rle_cache_size` | none |
 | `horus.rle.cache.evictions` | Counter | `horus_rle_cache_evictions_total` | `cause` (`size`, `epoch`, `notify`) |
 | `horus.rle.partition.default.rows` | Gauge | `horus_rle_partition_default_rows` | none |
-| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`) |
+| `horus.rle.lifecycle.retired` | Counter | `horus_rle_lifecycle_retired_total` | `reason` (`SUPERSEDED`, `MANUAL`), counted after commit |
+| `horus.rle.evaluations` | Timer | `horus_rle_evaluations_seconds_count`, `_sum`, `_max` | `outcome` (`matched`, `no_match`, `failed`, `refused`) |
+| `horus.rle.evaluation.errors` | Counter | `horus_rle_evaluation_errors_total` | `code` (an engine error code; anything else is `OTHER`) |
+
+The core records evaluations and retirements without a metrics library: `EngineMeters` hands each record (an outcome, an error code, a reason, a duration) to the recorders bound to it, and the starter binds one per meter registry when Micrometer is present. Every evaluation call is timed once, from the permission check to the decision log write, including a refusal (`refused`) and an idempotent replay. Percentile histograms are the host's choice (`management.metrics.distribution.percentiles-histogram.horus.rle.evaluations`).
 
 ## 5. Storage model (`rule-engine-postgres`)
 
@@ -552,6 +598,8 @@ CREATE TABLE rle_version (
   retire_requested_by TEXT,                      -- four-eyes retirement request (M3, PD-080); selection never reads it
   retire_requested_at TIMESTAMPTZ,
   retire_reason     TEXT,
+  retire_confirm_no_version BOOLEAN,             -- V18: the request accepted that no version may remain in effect (PD-101)
+                                                 -- V18 checks: the four retire_* columns are set together, only while PUBLISHED
   created_at        TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, rule_set_id, version_num),
@@ -577,6 +625,7 @@ CREATE TABLE rle_version_history (
   approval_mode     TEXT        CHECK (approval_mode IN ('single','four-eyes','system')),  -- RETIRED rows: mode in force (PD-080)
   acknowledged_warnings JSONB,                   -- APPROVED rows: [{code, input}] accepted by the approver, [] when none (PD-104, additive migration)
   masked_by_default_inputs JSONB,                -- APPROVED rows: inputs masked only by the tenant default, [] when none (PD-104)
+  retire_requested_by TEXT,                      -- V18: RETIRED rows in four-eyes mode, the requester; CHECK it differs from actor
   -- V15: CHECK (action = 'APPROVED' OR both columns null); CHECK both are JSON arrays when set
   no_version_in_effect BOOLEAN,                  -- RETIRED rows: true when no version remained in effect (PD-101, additive migration)
   lock_version      BIGINT      NOT NULL,        -- after the transition
@@ -699,6 +748,22 @@ CREATE TABLE rle_masking_key_check (
   first_seen_at  TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, key_id)
 );
+
+-- Record of every decision log partition dropped by retention (V19, #104, PD-050): one row per tenant with decisions
+-- in the month and one with tenant_id '*' for the total, written in the transaction that drops it. Append-only:
+-- triggers refuse UPDATE, DELETE and TRUNCATE (SQLSTATE 55000). Counts only, never decision data.
+CREATE TABLE rle_decision_log_drop (
+  tenant_id       TEXT        NOT NULL CHECK (tenant_id <> ''),
+  partition_name  TEXT        NOT NULL CHECK (partition_name ~ '^rle_decision_[0-9]{4}_[0-9]{2}$'),
+  range_from      TIMESTAMPTZ NOT NULL,
+  range_to        TIMESTAMPTZ NOT NULL,
+  decision_count  BIGINT      NOT NULL CHECK (decision_count >= 0),
+  retention       TEXT        NOT NULL CHECK (retention ~ '^P[0-9]+M$'),
+  cutoff          TIMESTAMPTZ NOT NULL,
+  dropped_at      TIMESTAMPTZ NOT NULL,
+  CHECK (range_from < range_to AND range_to <= cutoff),
+  PRIMARY KEY (tenant_id, partition_name)
+);
 ```
 
 Partition maintenance (`TR-OPS-04`, `RLE-017`):
@@ -707,12 +772,45 @@ Partition maintenance (`TR-OPS-04`, `RLE-017`):
 
 Source: [`diagrams/partition-maintenance.mmd`](diagrams/partition-maintenance.mmd).
 
+Retention, the second step of the same daily run (#104, PD-050):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant J as Partition job (horus-rle-partitions)
+    participant P as DecisionLogPartitions
+    participant DB as Host PostgreSQL
+    Note over J: Start-up warns when decision-log.retention is unset; nothing is dropped
+    J->>P: ensureAhead(now, partitions-ahead)
+    alt decision-log.retention is set
+        J->>P: dropExpired(now, retention)
+        P->>DB: BEGIN, SET LOCAL lock_timeout = 2s, pg_advisory_xact_lock
+        P->>DB: list attached rle_decision_YYYY_MM, keep those with upper bound at or before now - retention
+        loop each expired month
+            P->>DB: LOCK TABLE rle_decision_YYYY_MM IN SHARE MODE
+            P->>DB: SELECT tenant_id, count(*) GROUP BY tenant_id
+            P->>DB: INSERT rle_decision_log_drop, one row per tenant and one for '*'
+            P->>DB: DROP TABLE rle_decision_YYYY_MM
+        end
+        alt a lock waits past 2 s
+            DB-->>P: lock timeout, ROLLBACK: nothing dropped or recorded
+            P-->>J: logged at WARN, the next daily run retries
+        else
+            P->>DB: COMMIT
+            P-->>J: dropped months and counts, logged at WARN
+        end
+    else no retention (dev only)
+        Note over J: nothing is ever dropped
+    end
+```
+
 | Rule | Detail |
 |---|---|
 | Boundaries | Calendar months in UTC, half-open `[first day, first day of next month)`; names `rle_decision_YYYY_MM` |
 | Creation | Daily and at start-up, months up to `now() + decision-log.partitions-ahead` (7 days), and always the current and the next month; one replica at a time through a transaction-scoped advisory lock (no session state, `TR-OPS-05`); `lock_timeout = 5s`, retried on the next run. Runs on the starter's daemon thread `horus-rle-partitions` (`DecisionLogPartitions.ensureAhead`) |
 | Default partition | Should stay empty. If it holds rows of a month being created, they are copied into the new partition and removed from the default in the same transaction before `ATTACH`; this moves rows without losing any, and the bounded `DELETE` names `rle_decision_default` only, never `rle_decision`. Gauge `horus_rle_partition_default_rows` alerts above 0; it is read from `rle_decision_default` when the registry asks and is bound only when the host has Micrometer |
-| Retention | From M3 (PD-050): partitions whose upper bound is before `now() - decision-log.retention` are dropped with `lock_timeout = 2s`; the period is required outside `dev`, in whole months, at least `P12M`. In `dev`, and before M3, nothing is dropped. No row is ever deleted by date (`TR-OBS-01`) |
+| Retention | PD-050, #104: after creating the months ahead, the same job drops each monthly partition whose upper bound is at or before the cutoff, the host clock minus `decision-log.retention` in UTC calendar months (`P12M` at `2028-02-03` is `2027-02-03`, so `rle_decision_2027_01` goes and `2027_02` stays). One transaction under the same advisory lock, `lock_timeout = 2s`: per expired month, `LOCK` the partition in `SHARE` mode, count its rows per tenant, insert the record into `rle_decision_log_drop`, then `DROP TABLE`. Either every expired month is dropped and recorded, or none is and the next run retries. The default partition is never dropped. Each drop is logged at WARN with its counts. The period is required outside `dev`, in whole months, at least `decision-log.retention-floor` (`P12M`); without it nothing is ever dropped. No row is ever deleted by date (`TR-OBS-01`) |
+| Drop record | `rle_decision_log_drop` (V19), append-only: triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` (SQLSTATE `55000`). One row per tenant that had decisions in the month, with its count, and one row with `tenant_id = '*'` holding the total, so an empty month is recorded too; each row carries the partition, its range, the retention and the cutoff in force and `dropped_at`. It holds counts only, never decision data, and no API returns it |
 | Lock impact | `ATTACH` takes `SHARE UPDATE EXCLUSIVE` on the parent and does not block inserts. `DROP TABLE` of a partition takes `ACCESS EXCLUSIVE` on the parent; inserts queue behind it for at most the 2 s `lock_timeout`, once a month |
 
 ## 6. Runtime mechanics and capacity math

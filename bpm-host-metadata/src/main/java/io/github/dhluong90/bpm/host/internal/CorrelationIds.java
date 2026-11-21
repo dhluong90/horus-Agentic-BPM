@@ -1,4 +1,4 @@
-package io.github.dhluong90.bpm.host.autoconfigure;
+package io.github.dhluong90.bpm.host.internal;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
@@ -12,10 +12,12 @@ import org.jspecify.annotations.Nullable;
  * the response header and every log entry carry the same value. A caller's own {@code X-Correlation-Id}
  * is never adopted: it is logged as {@code clientCorrelationId}, so a caller cannot attach its requests to
  * another request's trail.
+ *
+ * <p>Internal: no compatibility promise. Hosts never import this package.
  */
-final class CorrelationIds {
+public final class CorrelationIds {
 
-    static final String HEADER = "X-Correlation-Id";
+    public static final String HEADER = "X-Correlation-Id";
     private static final String ATTRIBUTE = CorrelationIds.class.getName();
     private static final int LOG_VALUE_MAX = 128;
     private static final char[] CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".toCharArray();
@@ -26,7 +28,7 @@ final class CorrelationIds {
     }
 
     /** The id this host issued for the request. */
-    static String of(HttpServletRequest request) {
+    public static String of(HttpServletRequest request) {
         if (request.getAttribute(ATTRIBUTE) instanceof String id) {
             return id;
         }
@@ -36,12 +38,12 @@ final class CorrelationIds {
     }
 
     /** The caller's own correlation id, made log-safe, or {@code -} when it sent none. */
-    static String clientValue(HttpServletRequest request) {
+    public static String clientValue(HttpServletRequest request) {
         return loggable(request.getHeader(HEADER));
     }
 
     /** A ULID: 48 bits of milliseconds and 80 random bits, 26 Crockford base32 characters. */
-    static String newUlid(long epochMillis) {
+    public static String newUlid(long epochMillis) {
         byte[] random = new byte[10];
         RANDOM.nextBytes(random);
         long high = (epochMillis << 16) | ((random[0] & 0xFFL) << 8) | (random[1] & 0xFFL);
@@ -64,7 +66,7 @@ final class CorrelationIds {
      * {@code lan%40bank-a.vn}), and the result is cut at 128 characters with a trailing {@code ...}.
      * {@code null} becomes {@code -}.
      */
-    static String loggable(@Nullable String value) {
+    public static String loggable(@Nullable String value) {
         if (value == null) {
             return "-";
         }

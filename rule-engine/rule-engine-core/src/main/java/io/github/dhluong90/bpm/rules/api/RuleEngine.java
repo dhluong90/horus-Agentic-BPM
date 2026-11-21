@@ -81,4 +81,31 @@ public interface RuleEngine {
     default SimulationResult simulate(String ruleSet, int version, java.util.List<DecisionInput> samples) {
         throw new UnsupportedOperationException("simulate is not supported by " + getClass().getName());
     }
+
+    /**
+     * Replays real logged decisions of a rule set through a stored version, without logging anything (RLE-015). Each
+     * decision the caller's tenant made in the period is evaluated twice at its logged clock: with the version it was
+     * made with, loaded by number as {@link #replay(String)} does, and with the simulated version. The result counts
+     * and flags the decisions whose outcome would change. A decision whose masked input had a value cannot be
+     * evaluated again and is counted as not replayable, naming the inputs and never their values. All the decisions
+     * of one run share one regular expression read budget ({@code evaluation.regex-max-reads-per-request}).
+     *
+     * <p>Needs {@code rules:simulate} and {@code rules:log:read}, because the answer is built from logged inputs. The
+     * period is at most {@code query.max-range} (31 days) and the run at most {@code simulation.max-inputs} (1,000)
+     * decisions, the newest first; both may be lowered by the host.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version to simulate, in any status
+     * @param request the period and the most decisions to replay
+     * @return one item per logged decision, newest first
+     * @throws VersionNotFoundException when the caller's tenant has no such version ({@code VERSION_NOT_FOUND})
+     * @throws ValidationFailedException when the stored version does not compile ({@code VALIDATION_FAILED})
+     * @throws QueryInvalidException when the period or the limit is missing or out of bounds ({@code QUERY_INVALID})
+     * @throws PermissionDeniedException when the caller lacks {@code rules:simulate} or {@code rules:log:read}
+     * @throws UnsupportedOperationException from an implementation other than the engine's, such as a host's test
+     *     double written before this method existed; the engine's own implementation always supports it
+     */
+    default HistorySimulationResult simulateHistory(String ruleSet, int version, HistorySimulation request) {
+        throw new UnsupportedOperationException("simulateHistory is not supported by " + getClass().getName());
+    }
 }
