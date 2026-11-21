@@ -91,7 +91,7 @@ function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1
     case 'processes':
       return <ProcessesPage pageLimit={pageLimit} />;
     case 'process':
-      return <DefinitionPage definitionKey={route.key} version={route.version} />;
+      return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
   }
