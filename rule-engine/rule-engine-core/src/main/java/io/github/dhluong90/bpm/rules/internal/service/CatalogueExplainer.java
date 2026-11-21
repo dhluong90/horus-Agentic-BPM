@@ -46,6 +46,8 @@ public final class CatalogueExplainer implements DecisionExplainer {
 
     private static final Pattern LANGUAGE = Pattern.compile("^[a-z]{2,3}$");
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z]+)}");
+    private static final Pattern CODE = Pattern.compile("^[A-Z][A-Z0-9_]*$");
+    private static final String SHORT = "short.";
 
     /** A literal as the normal form prints it: a quoted string, a number or money, a boolean, a date or datetime. */
     private static final String LITERAL = "'(?:[^'\\\\]|\\\\.)*'|-?[0-9]+(?:\\.[0-9]+)?(?: [A-Z]{3})?|true|false"
@@ -322,10 +324,15 @@ public final class CatalogueExplainer implements DecisionExplainer {
         if ("is not null".equals(test)) {
             return words.format(prefix + "test.is-not-null", "input", input);
         }
+        boolean readable = !prefix.isEmpty(); // a reading words a code as the table does; an explanation as logged
         Matcher comparison = COMPARISON.matcher(test);
         if (comparison.matches()) {
-            return words.format(prefix + COMPARISON_KEYS.get(comparison.group(1)), "input", input, "operand",
-                    literal(comparison.group(2), words));
+            String key = COMPARISON_KEYS.get(comparison.group(1));
+            if (SHORT.equals(prefix) && "test.eq".equals(key) && comparison.group(2).startsWith("'")) {
+                key = "test.eq.text"; // "Gold", not "tier = Gold": the value alone names the case
+            }
+            return words.format(prefix + key, "input", input, "operand",
+                    literal(comparison.group(2), words, readable));
         }
         Matcher membership = MEMBERSHIP.matcher(test);
         if (membership.matches()) {
@@ -333,7 +340,7 @@ public final class CatalogueExplainer implements DecisionExplainer {
             if (membership.group(2) != null) {
                 Matcher one = ONE_LITERAL.matcher(membership.group(2));
                 while (one.find()) {
-                    members.add(literal(one.group(), words));
+                    members.add(literal(one.group(), words, readable));
                 }
             }
             return words.format(prefix + ("in".equals(membership.group(1)) ? "test.in" : "test.not-in"), "input",
@@ -341,16 +348,21 @@ public final class CatalogueExplainer implements DecisionExplainer {
         }
         Matcher between = BETWEEN.matcher(test);
         if (between.matches()) {
-            return words.format(prefix + "test.between", "input", input, "low", literal(between.group(1), words),
-                    "high", literal(between.group(2), words));
+            return words.format(prefix + "test.between", "input", input, "low", literal(between.group(1), words, readable),
+                    "high", literal(between.group(2), words, readable));
         }
         return words.format(prefix + "test.other", "input", input, "test", test);
     }
 
     /** A literal of a test as a reader would write it: a string without its quotes, a date without its function. */
     static String literal(String literal, Words words) {
+        return literal(literal, words, false);
+    }
+
+    /** As {@link #literal(String, Words)}; {@code readable} words a code such as {@code GOLD} as the table does. */
+    static String literal(String literal, Words words, boolean readable) {
         if (literal.startsWith("'")) {
-            return unquote(literal);
+            return readable ? codeLabel(unquote(literal)) : unquote(literal);
         }
         if (literal.startsWith("date('") || literal.startsWith("datetime('")) {
             return literal.substring(literal.indexOf('\'') + 1, literal.length() - 2);
@@ -359,6 +371,24 @@ public final class CatalogueExplainer implements DecisionExplainer {
             return words.get("bool." + literal);
         }
         return words.number(literal); // a number, or money such as 50000000 VND, grouped for the language
+    }
+
+    /**
+     * A code as the rule table shows it: {@code GOLD} is {@code Gold}, {@code FIRST_TIME} is {@code First time}. A code
+     * of one or two characters is an abbreviation, such as a country (VN), and other text stays as written, so a
+     * reading and the table beside it always agree.
+     */
+    static String codeLabel(String value) {
+        if (!CODE.matcher(value).matches() || value.length() <= 2) {
+            return value;
+        }
+        String words = value.toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+        return words.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + words.substring(1);
+    }
+
+    /** A decided output value worded for a reading: a code as the table shows it, anything else as {@link #value}. */
+    static String readableValue(JsonNode node, Words words) {
+        return node != null && node.isString() ? codeLabel(node.stringValue()) : value(node, words);
     }
 
     private static String unquote(String quoted) {

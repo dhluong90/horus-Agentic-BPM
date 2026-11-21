@@ -404,8 +404,14 @@ public final class DefaultVersionService implements VersionService {
     }
 
     @Override
-    public RuleReadings.SimulationReadings readSimulation(SimulationResult result) {
+    public RuleReadings.SimulationReadings readSimulation(SimulationResult result, List<String> labels) {
         Objects.requireNonNull(result, "result must not be null");
+        Objects.requireNonNull(labels, "labels must not be null");
+        labels.stream().filter(label -> label != null && label.length() > RuleReadings.LABEL_MAX).findAny()
+                .ifPresent(label -> {
+                    throw new IllegalArgumentException("A sample label is at most " + RuleReadings.LABEL_MAX
+                            + " characters");
+                });
         String tenant = context.tenant();
         context.callerWith(PERMISSION_READ);
         if (result.samples().size() > EngineDefaults.READINGS_MAX) {
@@ -416,7 +422,8 @@ public final class DefaultVersionService implements VersionService {
             ReadingBuilder.Table baseline = result.baselineVersion() == null ? null
                     : table(tenant, result.ruleSet(), result.baselineVersion());
             List<RuleReadings.SampleReading> samples = result.samples().stream()
-                    .map(sample -> new RuleReadings.SampleReading(sample.index(), sample.changed(),
+                    .map(sample -> new RuleReadings.SampleReading(sample.index(), "S" + (sample.index() + 1),
+                            sample.index() < labels.size() ? labels.get(sample.index()) : null, sample.changed(),
                             reader.outcome(sample.simulated(), simulated),
                             sample.baseline() == null || baseline == null ? null
                                     : reader.outcome(sample.baseline(), baseline)))

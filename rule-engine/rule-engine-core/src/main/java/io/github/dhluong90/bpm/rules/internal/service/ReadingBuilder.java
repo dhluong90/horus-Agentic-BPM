@@ -152,11 +152,14 @@ final class ReadingBuilder {
         }
         List<String> outputs = new ArrayList<>();
         matched.outputs().forEach((name, value) -> outputs.add(words.format("reading.output", "name",
-                words.outputName(name), "value", CatalogueExplainer.value(EngineValues.value(value), words))));
+                words.outputName(name), "value", CatalogueExplainer.readableValue(EngineValues.value(value), words))));
         String joined = String.join(words.get("join.outputs"), outputs);
         List<String> shortOutputs = new ArrayList<>();
-        matched.outputs().forEach((name, value) -> shortOutputs.add(words.format("short.output", "name",
-                words.outputName(name), "value", CatalogueExplainer.value(EngineValues.value(value), words))));
+        matched.outputs().forEach((name, value) -> {
+            JsonNode node = EngineValues.value(value);
+            shortOutputs.add(words.format(node != null && node.isBoolean() ? "short.output.flag" : "short.output",
+                    "name", words.outputName(name), "value", CatalogueExplainer.readableValue(node, words)));
+        });
         String full = String.join(" ", sentences)
                 + (joined.isEmpty() ? "" : " " + words.format("result", "outputs", joined));
         String shortForm = shortOutputs.isEmpty()
@@ -240,19 +243,22 @@ final class ReadingBuilder {
         }
 
         private Reading reading(Rule rule, String language, CatalogueExplainer.Words words) {
-            Map<String, String> outputs = thenValues(rule, words);
+            Map<String, Then> thens = thenValues(rule, words);
+            Map<String, String> outputs = new LinkedHashMap<>();
+            thens.forEach((name, then) -> outputs.put(name, then.text()));
             String conditionsFull = conditionSentence(rule, words);
             String conditionsShort = capitalise(shortConditions(rule, words));
             String then = outputs.isEmpty() ? "" : String.join(words.get("join.outputs"),
                     outputs.entrySet().stream().map(e -> words.format("reading.output", "name",
                             words.outputName(e.getKey()), "value", e.getValue())).toList());
             String thenShort = outputs.isEmpty() ? "" : String.join(words.get("join.outputs"),
-                    outputs.entrySet().stream().map(e -> words.format("short.output", "name",
-                            words.outputName(e.getKey()), "value", e.getValue())).toList());
+                    thens.entrySet().stream().map(e -> words.format(e.getValue().flag() ? "short.output.flag"
+                            : "short.output", "name", words.outputName(e.getKey()), "value", e.getValue().text()))
+                            .toList());
             String authored = authored(rule, outputs, language, words);
             String full = authored != null ? authored : conditionsFull
                     + (then.isEmpty() ? "" : " " + words.format("reading.then", "outputs", then));
-            String shortForm = conditionsShort + (thenShort.isEmpty() ? "" : " " + words.format("short.then",
+            String shortForm = conditionsShort + (thenShort.isEmpty() ? "" : words.format("short.then",
                     "outputs", thenShort));
             return new Reading(full, shortForm, authored != null ? TEMPLATE : GENERATED);
         }
@@ -292,19 +298,22 @@ final class ReadingBuilder {
         }
 
         /** The values of the row's literal outputs, written for the language; an expression is left out. */
-        private Map<String, String> thenValues(Rule rule, CatalogueExplainer.Words words) {
-            Map<String, String> values = new LinkedHashMap<>();
+        private Map<String, Then> thenValues(Rule rule, CatalogueExplainer.Words words) {
+            Map<String, Then> values = new LinkedHashMap<>();
             rule.then().forEach((name, cell) -> {
+                boolean yesNo = cell instanceof Cell.Literal literal && literal.value() instanceof Boolean
+                        || cell instanceof Cell.Expression expression && ("true".equals(expression.source())
+                        || "false".equals(expression.source()));
                 String value = switch (cell) {
                     case Cell.Literal literal -> literal.value() == null ? words.get("null")
                             : literal.value() instanceof Boolean flag ? words.get("bool." + flag)
                             : words.number(((BigDecimal) literal.value()).toPlainString());
                     case Cell.Expression expression -> expression.source() != null
                             && CatalogueExplainer.WHOLE_LITERAL.matcher(expression.source()).matches()
-                            ? CatalogueExplainer.literal(expression.source(), words) : null;
+                            ? CatalogueExplainer.literal(expression.source(), words, true) : null;
                 };
                 if (value != null) {
-                    values.put(name, value);
+                    values.put(name, new Then(value, yesNo));
                 }
             });
             return values;
@@ -335,6 +344,9 @@ final class ReadingBuilder {
             return out.toString();
         }
     }
+
+    /** The words of one literal output of a row, and whether it is a yes or no value. */
+    private record Then(String text, boolean flag) { }
 
     private static String capitalise(String text) {
         return text.isEmpty() ? text : text.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + text.substring(1);

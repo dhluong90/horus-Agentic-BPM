@@ -122,14 +122,15 @@ class ReadingsPostgresIT {
         RuleReadings.RuleSetReadings rows = versions.readings("card-fee", 2);
         RuleReadings.ReadingsDiff diff = versions.readingsDiff("card-fee", 2, 1);
         RuleReadings.SimulationReadings simulation = versions.readSimulation(engine.simulate("card-fee", 2,
-                List.of(DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)))));
+                List.of(DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)))),
+                List.of("Silver, 5 transactions"));
 
         // Then every row reads in both languages
         assertThat(rows.languages()).containsExactly("en", "vi");
         assertThat(rows.rows()).extracting(RuleReadings.Row::ruleId).containsExactly("R1", "R2", "R3");
         assertThat(rows.rows().get(1).readings().get("en").full())
                 .isEqualTo("Rule R2 applies when tx count is at least 3. Then fee is 0 VND.");
-        assertThat(rows.rows().get(1).readings().get("vi").shortForm()).isEqualTo("Tx count ≥ 3 → fee = 0 VND");
+        assertThat(rows.rows().get(1).readings().get("vi").shortForm()).isEqualTo("Tx count ít nhất 3: fee 0 VND");
         // and the diff lists R2 with the old and the new reading
         assertThat(diff.rows()).singleElement().satisfies(row -> {
             assertThat(row.ruleId()).isEqualTo("R2");
@@ -141,9 +142,11 @@ class ReadingsPostgresIT {
         assertThat(simulation.baselineVersion()).isEqualTo(1);
         assertThat(simulation.samples().get(0).simulated().ruleIds()).containsExactly("R2");
         assertThat(simulation.samples().get(0).simulated().readings().get("en").shortForm())
-                .isEqualTo("R2: fee = 0 VND");
+                .isEqualTo("R2: fee 0 VND");
+        assertThat(simulation.samples().get(0).reference()).isEqualTo("S1");
+        assertThat(simulation.samples().get(0).label()).isEqualTo("Silver, 5 transactions");
         assertThat(simulation.samples().get(0).baseline().readings().get("en").shortForm())
-                .isEqualTo("R2: fee = 10,000 VND");
+                .isEqualTo("R2: fee 10,000 VND");
         // and nothing was written
         assertThat(snapshot()).isEqualTo(before);
     }

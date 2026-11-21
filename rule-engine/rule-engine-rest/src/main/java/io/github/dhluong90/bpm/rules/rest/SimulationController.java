@@ -5,6 +5,7 @@ import io.github.dhluong90.bpm.rules.api.HistorySimulation;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.rules.api.RuleReadings;
 import io.github.dhluong90.bpm.rules.api.SimulationResult;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
@@ -73,7 +74,7 @@ public class SimulationController {
         // Permission first, then a bounded read: a caller without rules:simulate never makes the host buffer a body.
         RestSupport.require(callers, "rules:simulate");
         return RestSupport.json(HttpStatus.OK,
-                EngineValues.simulation(simulateSamples(name, version, requestBody, contentLength)));
+                EngineValues.simulation(simulateSamples(name, version, requestBody, contentLength, null)));
     }
 
     /**
@@ -97,12 +98,14 @@ public class SimulationController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
         RestSupport.require(callers, "rules:simulate");
         RestSupport.require(callers, "rules:read");
-        return RestSupport.json(HttpStatus.OK, RestSupport.simulationReadings(
-                versions.readSimulation(simulateSamples(name, version, requestBody, contentLength))));
+        List<String> labels = new ArrayList<>();
+        SimulationResult result = simulateSamples(name, version, requestBody, contentLength, labels);
+        return RestSupport.json(HttpStatus.OK, RestSupport.simulationReadings(versions.readSimulation(result, labels)));
     }
 
-    private SimulationResult simulateSamples(String name, int version, InputStream requestBody, Long contentLength)
-            throws IOException {
+    /** Runs the samples; {@code labels}, when given, receives each sample's {@code label} or null. */
+    private SimulationResult simulateSamples(String name, int version, InputStream requestBody, Long contentLength,
+            List<String> labels) throws IOException {
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.EVALUATE_BODY_MAX_BYTES);
         JsonNode request = EngineValues.readRequest(body);
         JsonNode samples = request.isObject() ? request.get("samples") : null;
@@ -119,6 +122,15 @@ public class SimulationController {
             JsonNode sample = samples.get(i);
             if (!sample.isObject() || !sample.path("inputs").isObject()) {
                 throw new InputInvalidException("samples[" + i + "] must be an object with an inputs object");
+            }
+            JsonNode label = sample.get("label");
+            if (label != null && !label.isNull() && (!label.isString() || label.stringValue().isBlank()
+                    || label.stringValue().length() > RuleReadings.LABEL_MAX)) {
+                throw new InputInvalidException("samples[" + i + "].label must be text of 1 to "
+                        + RuleReadings.LABEL_MAX + " characters");
+            }
+            if (labels != null) {
+                labels.add(label == null || label.isNull() ? null : label.stringValue());
             }
             try {
                 inputs.add(EngineValues.inputsFromJson(sample.get("inputs")));
