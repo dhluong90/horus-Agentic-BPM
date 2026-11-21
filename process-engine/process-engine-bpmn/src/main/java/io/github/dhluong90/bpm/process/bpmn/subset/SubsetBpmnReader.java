@@ -22,7 +22,10 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
@@ -34,7 +37,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.foreign.ForeignFragment;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HorusExtension;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalJson;
@@ -96,6 +101,8 @@ public final class SubsetBpmnReader {
     static final java.time.Duration MAX_SLA = java.time.Duration.ofDays(366);
     private static final int MAX_CALENDAR_KEY = 100;
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
+    /** A {@code horus:compensate} value: a handler or adapter name, or {@code manual}. */
+    private static final Pattern COMPENSATE_HANDLER = Pattern.compile("^[A-Za-z][A-Za-z0-9_.-]{0,99}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
     /** The step id a {@code horus:memory} entry reads from: an id, never an expression or a variable path. */
     private static final Pattern MEMORY_STEP = Pattern.compile("^[A-Za-z_][A-Za-z0-9_.-]{0,199}$");
@@ -304,6 +311,19 @@ public final class SubsetBpmnReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
+            container(elements, artifacts, false);
+            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
+        }
+
+
+        /**
+         * The flow elements and artifacts of a process or of a {@code saga} block ({@code transaction}), read into
+         * the given lists.
+         *
+         * @param inSaga whether the container is a {@code saga}, where {@code throwCompensation} may stand
+         */
+        private void container(List<FlowElement> elements, List<Artifact> artifacts, boolean inSaga)
+                throws XMLStreamException {
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (!BPMN.equals(xml.getNamespaceURI())) {
@@ -318,6 +338,8 @@ public final class SubsetBpmnReader {
                     case "businessRuleTask" -> elements.add(businessRuleTask());
                     case "userTask" -> elements.add(userTask());
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
+                    case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
+                    case "transaction" -> elements.add(saga());
                     case "exclusiveGateway" -> {
                         String id = id();
                         String gwName = attr("name");
@@ -349,7 +371,94 @@ public final class SubsetBpmnReader {
                     }
                 }
             }
-            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
+        }
+
+        /**
+         * A {@code saga} block (#67, ADR-0007): a BPMN {@code transaction} whose steps run under their own scope
+         * token. It has a none start event, steps and at least one end event of its own; its {@code incoming} and
+         * {@code outgoing} flows are in the enclosing container. {@code method} other than the default is refused.
+         */
+        private FlowElement saga() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            String method = attr("method");
+            if (method != null && !"##Compensate".equals(method)) {
+                unsupported("transaction method", id, BpmnStages.NOT_PLANNED, "is not supported; a saga is undone by"
+                        + " compensation (method ##Compensate)");
+            }
+            List<FlowElement> elements = new ArrayList<>();
+            List<Artifact> artifacts = new ArrayList<>();
+            container(elements, artifacts, true);
+            return new Transaction(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
+                    withRefs(elements), artifacts, List.of(), null);
+        }
+
+        /**
+         * {@code throwCompensation} (#67, PRE-076): an {@code intermediateThrowEvent} with one
+         * {@code compensateEventDefinition} and no {@code activityRef}, inside a {@code saga} block. It undoes the
+         * completed steps of its {@code saga} newest first. Every other throw event is named as unsupported.
+         */
+        private FlowElement throwEvent(boolean inSaga) throws XMLStreamException {
+            String element = "intermediateThrowEvent";
+            String id = id();
+            String name = attr("name");
+            int line = line();
+            CompensateEventDefinition compensate = null;
+            int definitions = 0;
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
+                    definitions++;
+                    if (attr("activityRef") != null) {
+                        unsupported(element + " with compensateEventDefinition activityRef", id, BpmnStages.S2);
+                    }
+                    compensate = new CompensateEventDefinition(attr("id"), null, true, null);
+                    children(local, id, false);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
+                    definitions++;
+                    unsupported(element + " with " + local, id, BpmnStages.of(local));
+                    skip();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported(element + " child " + local, id, BpmnStages.of(local));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            if (definitions == 0) {
+                unsupported(element, id, BpmnStages.S0, BpmnStages.message(BpmnStages.S0));
+            } else if (definitions > 1) {
+                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+            } else if (compensate != null && !inSaga) {
+                invalid.add(new DefinitionProblem("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
+                        + " steps of its saga block; put it inside a transaction", element, safe(id), line));
+            }
+            return new IntermediateThrowEvent(id, name, List.of(), List.of(),
+                    compensate == null ? List.of() : List.of(compensate), List.of(), null, null);
+        }
+
+        /**
+         * {@code horus:compensate} (a handler name, or {@code manual}) and {@code horus:onFailure}
+         * ({@code compensate}) of a service or agent step (#67).
+         */
+        private void compensation(String id, int line, List<HorusExtension> ext) {
+            String compensate = horus("compensate");
+            if (compensate != null) {
+                if (!COMPENSATE_HANDLER.matcher(compensate).matches()) {
+                    invalid.add(new DefinitionProblem("COMPENSATE_INVALID", "horus:compensate names a registered"
+                            + " handler or adapter, or is manual", "serviceTask", safe(id), line));
+                }
+                ext.add(new CompensateHandlerRef(compensate));
+            }
+            String onFailure = horus("onFailure");
+            if (onFailure != null) {
+                if (!OnFailure.COMPENSATE.equals(onFailure)) {
+                    invalid.add(new DefinitionProblem("ON_FAILURE_INVALID", "horus:onFailure is compensate",
+                            "serviceTask", safe(id), line));
+                }
+                ext.add(new OnFailure(onFailure));
+            }
         }
 
         /**
@@ -575,6 +684,7 @@ public final class SubsetBpmnReader {
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
+            compensation(id, line, ext);
             Node children = children("serviceTask", id, true);
             ext.addAll(children.horus());
             return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
@@ -590,6 +700,9 @@ public final class SubsetBpmnReader {
                 throws XMLStreamException {
             String agent = horus("agent");
             String timeoutText = horus("timeout");
+            // Read while the reader is on the start tag; added after the agent parts (#67).
+            List<HorusExtension> undo = new ArrayList<>();
+            compensation(id, line, undo);
             if (handler != null || mode != null) {
                 invalid.add(new DefinitionProblem("AGENT_TASK_INVALID", "An agentTask names its adapter with "
                         + "horus:agent; horus:handler and horus:mode do not apply", "serviceTask", safe(id), line));
@@ -636,6 +749,7 @@ public final class SubsetBpmnReader {
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
+            ext.addAll(undo);
             ext.addAll(horusParts);
             return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
                     info(ext, foreign));
@@ -1273,10 +1387,16 @@ public final class SubsetBpmnReader {
 
     /** Fills {@code incoming} and {@code outgoing} of every node from the sequence flows. */
     private static Process withRefs(Process p) {
-        List<SequenceFlow> flows = p.flowElements().stream().filter(SequenceFlow.class::isInstance)
+        return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(),
+                withRefs(p.flowElements()), p.artifacts(), p.laneSets(), p.info());
+    }
+
+    /** Fills incoming and outgoing of the elements of one container from its own sequence flows. */
+    private static List<FlowElement> withRefs(List<FlowElement> elements) {
+        List<SequenceFlow> flows = elements.stream().filter(SequenceFlow.class::isInstance)
                 .map(SequenceFlow.class::cast).toList();
         List<FlowElement> out = new ArrayList<>();
-        for (FlowElement e : p.flowElements()) {
+        for (FlowElement e : elements) {
             List<String> in = flows.stream().filter(f -> f.targetRef() != null && f.targetRef().equals(e.id()))
                     .map(SequenceFlow::id).toList();
             List<String> o = flows.stream().filter(f -> f.sourceRef() != null && f.sourceRef().equals(e.id()))
@@ -1295,11 +1415,14 @@ public final class SubsetBpmnReader {
                         g.defaultFlow(), g.info());
                 case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), in, o, c.eventDefinitions(),
                         c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
+                case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), in, o,
+                        t.eventDefinitions(), t.eventDefinitionRefs(), t.data(), t.info());
                 case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
+                case Transaction t -> new Transaction(t.id(), t.name(), in, o, t.activity(), t.method(),
+                        t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 default -> e;
             });
         }
-        return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(), out, p.artifacts(),
-                p.laneSets(), p.info());
+        return out;
     }
 }

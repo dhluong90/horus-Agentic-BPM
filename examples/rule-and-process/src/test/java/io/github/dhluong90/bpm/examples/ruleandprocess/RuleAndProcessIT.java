@@ -128,7 +128,7 @@ class RuleAndProcessIT {
                 .containsExactly("1 ACTIVE BPMN_XML STARTUP");
         assertThat(jdbc.sql("SELECT version FROM pre_schema_history WHERE success ORDER BY installed_rank")
                 .query(String.class).list()).containsExactly("0", "1", "2", "3", "4", "6", "7", "8", "9", "10", "13", "14", "17",
-                "18", "20", "21", "22", "23", "24", "25", "26", "27", "29", "30");
+                "18", "20", "21", "22", "23", "24", "25", "26", "27", "29", "30", "31");
         assertThat(jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE script LIKE '%pre_%'").query(Long.class)
                 .single()).isZero();
     }

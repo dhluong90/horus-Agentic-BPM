@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
  */
-public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
+public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
 
     /**
      * Insert a job in {@code pre_timer}.
@@ -160,6 +160,20 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
     record PushCompensation(String scopeTokenId, String nodeId, String attemptId, String handler, Map<String, Object> inputSnapshot) implements Effect {
         public PushCompensation {
             inputSnapshot = inputSnapshot == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(inputSnapshot));
+        }
+    }
+
+    /**
+     * A compensation of a scope started (#67): the shell walks the scope's stack newest first, one undo at a time,
+     * and ends the instance with {@link Command.EndCompensation} once the stack is walked to the bottom.
+     *
+     * @param scopeTokenId the scope whose completed steps are undone
+     * @param nodeId the step that failed, or the {@code throwCompensation}
+     * @param cause the code that started it
+     */
+    record StartCompensation(String scopeTokenId, String nodeId, String cause) implements Effect {
+        public StartCompensation {
+            Objects.requireNonNull(scopeTokenId, "scopeTokenId must not be null");
         }
     }
 

@@ -80,6 +80,19 @@ final class ProcessListQueries {
                     + "WHERE tenant_id = ? AND instance_id = ? AND status IN ('OPEN','RESOLUTION_PENDING') "
                     + "ORDER BY created_at, id");
 
+    /** The columns of a compensation stack entry (#67, V31). */
+    static final String COMPENSATION_COLUMNS = "tenant_id, id, instance_id, scope_token_id, seq, step_id, forward_job_id, "
+            + "forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, completed_at";
+
+    /**
+     * The compensation stack of one instance (#67), by scope token and newest first, on
+     * {@code uq_pre_compensation_stack_seq} (V31).
+     */
+    static final ListQuery COMPENSATION_STACK = new ListQuery("instance-compensation-stack",
+            new Bound.ParentKey("instance_id", "the undo entries of one instance, one per completed step with an undo"),
+            "SELECT " + COMPENSATION_COLUMNS + " FROM pre_compensation_stack WHERE tenant_id = ? AND instance_id = ? "
+                    + "ORDER BY scope_token_id, seq DESC");
+
     /** The first page of the incidents of one status (#68, PRE-080). */
     static final ListQuery INCIDENTS = incidents(false);
     /** A later page, after the last incident of the previous page. */
@@ -313,7 +326,7 @@ final class ProcessListQueries {
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
         List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
-                OPEN_INCIDENTS, INCIDENTS, INCIDENTS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
+                OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
@@ -455,7 +468,7 @@ final class ProcessListQueries {
         }
 
         private static String asyncKinds() {
-            return "('" + JobStore.ASYNC_SERVICE + "','" + JobStore.ASYNC_AGENT + "')";
+            return "('" + JobStore.ASYNC_SERVICE + "','" + JobStore.ASYNC_AGENT + "','" + JobStore.COMPENSATION + "')";
         }
     }
 

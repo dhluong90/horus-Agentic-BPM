@@ -79,6 +79,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
+import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
 import io.github.dhluong90.bpm.process.internal.store.JobStore.JobRow;
@@ -610,7 +611,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         checkGuardrailContracts(tenant, process);
         String canonical = CanonicalProcessWriter.canonicalText(process);
         String hash = Hashes.sha256(canonical);
-        int nodeCount = (int) process.flowElements().stream().filter(FlowNode.class::isInstance).count();
+        int nodeCount = (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count();
         String requestHash = Hashes.sha256Parts("import", caller, request.format().name(), Hashes.sha256(bytes));
         return transactions.inTransaction(() -> idempotent(tenant, "import", request.idempotencyKey(), requestHash,
                 () -> {
@@ -1322,7 +1323,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (settings.definitionsAutoApprove()) {
             problems.addAll(serviceRegistrationProblems(process));
         }
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof ServiceTask task && task.extensions().first(AgentTaskSpec.class).isPresent()) {
                 agentBindings(task, problems);
             } else if (element instanceof BusinessRuleTask task && !invoker.hasRuleEngine()) {
@@ -1351,7 +1352,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private List<DefinitionProblem> serviceRegistrationProblems(Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
+            if (element instanceof ServiceTask task) {
+                undoRegistrationProblem(task).ifPresent(problems::add);
+            }
             if (!(element instanceof ServiceTask task) || task.extensions().first(AgentTaskSpec.class).isPresent()) {
                 continue;
             }
@@ -1371,6 +1375,33 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             }
         }
         return problems;
+    }
+
+    /**
+     * #67: the undo a step names with {@code horus:compensate} is registered like a forward binding: a local step's
+     * undo is a {@code ServiceTaskHandler}, a remote or agent step's undo a {@code ServiceAdapter}; {@code manual}
+     * names nothing.
+     */
+    private java.util.Optional<DefinitionProblem> undoRegistrationProblem(ServiceTask task) {
+        String undo = task.extensions().first(io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef
+                .class).map(io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef::handler)
+                .orElse(null);
+        if (undo == null || MANUAL.equals(undo)) {
+            return java.util.Optional.empty();
+        }
+        boolean remote = task.extensions().first(AgentTaskSpec.class).isPresent() || task.extensions()
+                .first(HandlerRef.class).map(h -> "remote".equals(h.mode())).orElse(false);
+        if (remote && !adapters.contains(undo)) {
+            return java.util.Optional.of(DefinitionProblem.of("ADAPTER_NOT_REGISTERED", task.id() + " -> "
+                    + safe(undo) + " (compensate): no ServiceAdapter of this name is registered in this host",
+                    task.id()));
+        }
+        if (!remote && !invoker.hasHandler(undo)) {
+            return java.util.Optional.of(DefinitionProblem.of("HANDLER_NOT_REGISTERED", task.id() + " -> "
+                    + safe(undo) + " (compensate): no ServiceTaskHandler of this name is registered in this host",
+                    task.id()));
+        }
+        return java.util.Optional.empty();
     }
 
     /**
@@ -1413,7 +1444,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         List<DefinitionProblem> problems = new ArrayList<>();
         Instant now = clock.instant();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (!(element instanceof ServiceTask task)) {
                 continue;
             }
@@ -1729,6 +1760,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             // The step's continuation failed and rolled back; give the attempt back as a failed one.
             String code = runFailureCode(failed);
             return transactions.inTransaction(() -> {
+                jobs.findJob(tenant, jobId).filter(j -> j.instanceId() != null)
+                        .ifPresent(j -> store.lockInstance(tenant, j.instanceId()));
                 JobRow job = jobs.lockJob(tenant, jobId).orElseThrow(() -> new AsyncStepNotFoundException(
                         "No async step " + jobId));
                 if (!current(job, attemptId)) {
@@ -1806,6 +1839,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             LOG.log(System.Logger.Level.INFO, "process.async.late-result tenant={0} job={1} status={2} attempt={3}"
                     + " sameAttempt={4}", tenant, job.id(), job.status(), job.attempt(), sameAttempt);
             return StepCompletion.Outcome.DISCARDED;
+        }
+        if (JobStore.COMPENSATION.equals(job.jobKind())) {
+            return recordUndo(row, job, attemptId, result, reportedBy);
         }
         if (row == null || !"RUNNING".equals(row.status())) {
             jobs.cancelJob(tenant, job.id(), clock.instant());
@@ -2009,6 +2045,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (job.instanceId() == null) {
             return;
         }
+        String cause = businessCode != null ? businessCode : errorCode;
+        if (JobStore.COMPENSATION.equals(job.jobKind())) {
+            undoFailed(job, cause, now);
+            return;
+        }
+        if (compensateInstead(job, cause)) {
+            return;
+        }
         raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), job.tokenId(),
                 job.nodeId(), job.id(), attemptId(job.id(), Math.max(1, job.attempt())), Math.max(0, job.attempt() - 1),
                 errorCode, businessCode, summary), now);
@@ -2177,6 +2221,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 "incident-retry", idempotencyKey, requestHash, () -> {
                     LockedIncident locked = lockIncident(tenant, incidentId, expectedLockVersion, "retry");
                     ProcessStore.IncidentRow incident = locked.incident();
+                    if (COMPENSATION_INCIDENTS.contains(incident.errorCode())) {
+                        return retryUndo(locked, caller, why);
+                    }
                     if (NOT_RETRYABLE.contains(incident.errorCode())) {
                         throw new InvalidStateException("Incident " + incidentId + " (" + incident.errorCode()
                                 + ") failed before any call because the step's memory could not be built; running it"
@@ -2244,8 +2291,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         io.github.dhluong90.bpm.process.api.Incident done = transactions.inTransaction(() -> idempotent(tenant,
                 "incident-resolve", idempotencyKey, requestHash, () -> {
                     LockedIncident locked = lockIncident(tenant, incidentId, expectedLockVersion, "resolve");
-                    io.github.dhluong90.bpm.process.internal.exec.Token token = waitingToken(tenant, locked);
-                    JobRow job = jobs.findJob(tenant, token.activityInstanceId()).orElse(null);
+                    boolean undo = COMPENSATION_INCIDENTS.contains(locked.incident().errorCode());
+                    // #67: an undo's incident has no waiting step; its resolution marks the undo done by hand.
+                    io.github.dhluong90.bpm.process.internal.exec.Token token = undo ? null : waitingToken(tenant, locked);
+                    JobRow job = undo ? null : jobs.findJob(tenant, token.activityInstanceId()).orElse(null);
                     // PRE-078: the step's output schema, as for any result; the guardrail is not run on a person's
                     // answer. A violation names the path and what is wrong there, never the value.
                     Map<String, Object> schema = job == null ? null
@@ -2268,7 +2317,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     details.put("approvalMode", mode);
                     store.appendHistory(tenant, proposed.instanceId(), proposed.definitionId(), List.of(
                             new HistoryEntry(INCIDENT_RESOLUTION_PROPOSED, proposed.nodeId(), proposed.tokenId(),
-                                    token.activityInstanceId(), caller, now, details)));
+                                    token == null ? null : token.activityInstanceId(), caller, now, details)));
                     Map<String, Object> payload = incidentPayload(proposed, locked.instance());
                     payload.put("proposedBy", caller);
                     payload.put("approvalMode", mode);
@@ -2276,8 +2325,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             now);
                     if (settings.resolveApproval() == EngineSettings.ResolveApproval.SINGLE) {
                         // dev profile only: the proposer's resolution applies at once, recorded as single.
-                        return incidentView(applyResolution(locked, proposed, token, job, caller, null, now), job,
-                                caller, java.util.Set.of());
+                        ProcessStore.IncidentRow applied = undo ? applyUndoResolution(locked, proposed, caller, null,
+                                now) : applyResolution(locked, proposed, token, job, caller, null, now);
+                        return incidentView(applied, job, caller, java.util.Set.of());
                     }
                     return incidentView(proposed, job, caller, java.util.Set.of());
                 }, Views::incidentToJson, Views::incidentFromJson));
@@ -2297,6 +2347,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         io.github.dhluong90.bpm.process.api.Incident done = transactions.inTransaction(() -> idempotent(tenant,
                 "incident-approve", idempotencyKey, requestHash, () -> {
                     LockedIncident locked = lockPending(tenant, incidentId, expectedLockVersion, caller, "approve");
+                    if (COMPENSATION_INCIDENTS.contains(locked.incident().errorCode())) {
+                        return incidentView(applyUndoResolution(locked, locked.incident(), caller, note,
+                                clock.instant()), null, caller, java.util.Set.of());
+                    }
                     io.github.dhluong90.bpm.process.internal.exec.Token token = waitingToken(tenant, locked);
                     JobRow job = jobs.findJob(tenant, token.activityInstanceId()).orElse(null);
                     ProcessStore.IncidentRow resolved = applyResolution(locked, locked.incident(), token, job, caller,
@@ -2387,8 +2441,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 .orElseThrow(() -> incidentNotFound(incidentId));
         ProcessStore.IncidentRow incident = store.lockIncident(tenant, incidentId)
                 .orElseThrow(() -> incidentNotFound(incidentId));
-        if (!"RUNNING".equals(instance.status()) && !io.github.dhluong90.bpm.process.api.Incident.RESOLVED.equals(
-                incident.status())) {
+        boolean undoIncident = InstanceStatus.COMPENSATING.name().equals(instance.status())
+                && COMPENSATION_INCIDENTS.contains(incident.errorCode());
+        if (!"RUNNING".equals(instance.status()) && !undoIncident
+                && !io.github.dhluong90.bpm.process.api.Incident.RESOLVED.equals(incident.status())) {
             throw new InvalidStateException("Instance " + instance.id() + " is " + instance.status());
         }
         StoredDefinition definition = store.definition(tenant, instance.definitionId()).orElseThrow();
@@ -2573,7 +2629,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         List<String> actions = new ArrayList<>();
         if (io.github.dhluong90.bpm.process.api.Incident.OPEN.equals(status) && !retrying) {
-            if (!NOT_RETRYABLE.contains(errorCode)) {
+            if (!NOT_RETRYABLE.contains(errorCode) && !COMPENSATION_MANUAL_REQUIRED.equals(errorCode)) {
                 actions.add("retry");
             }
             actions.add("resolve");
@@ -2755,6 +2811,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             if (row.lockVersion() != expectedLockVersion) {
                 throw new VersionConflictException("Instance " + instanceId + " is at lock version " + row.lockVersion());
             }
+            if (InstanceStatus.COMPENSATING.name().equals(row.status())) {
+                // PRE-076: an undo is never abandoned half way; an operator resolves the incidents first.
+                throw new InvalidStateException("Instance " + instanceId + " is COMPENSATING: a compensation is"
+                        + " running, and an undo is never abandoned half way; resolve its incidents first");
+            }
             if (!"RUNNING".equals(row.status())) {
                 throw new InvalidStateException("Instance " + instanceId + " is " + row.status());
             }
@@ -2766,6 +2827,359 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             closeOnCancel(tenant, row.id(), caller, clock.instant());
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
+    }
+
+
+    // ---- saga compensation (#67, ADR-0007, DESIGN section 4.2) ------------------------------------------------
+
+    /** Payload key of an undo job: the job the forward step ran under. */
+    static final String FORWARD_JOB_ID = "forwardJobId";
+    /** Payload key of an undo job: the accepted forward attempt. */
+    static final String FORWARD_ATTEMPT_ID = "forwardAttemptId";
+    /** Payload key of an undo job: its stack entry. */
+    static final String COMPENSATION_ENTRY = "entryId";
+    /** Incident code of an undo that failed for good: not retryable, or its last attempt used (PRE-074). */
+    static final String COMPENSATION_FAILED = "COMPENSATION_FAILED";
+    /** Incident code of an undo declared {@code compensate: manual} (PRE-075). */
+    static final String COMPENSATION_MANUAL_REQUIRED = "COMPENSATION_MANUAL_REQUIRED";
+    /** The incidents of a compensation walk: they hold the walk, not a step. */
+    static final java.util.Set<String> COMPENSATION_INCIDENTS = java.util.Set.of(COMPENSATION_FAILED,
+            COMPENSATION_MANUAL_REQUIRED);
+    /** The engine actor of the walk. */
+    static final String COMPENSATION_ACTOR = "system:compensation";
+    private static final String MANUAL = "manual";
+
+    /**
+     * The stack entry of a completed step: its undo, the forward step's keys and what the undo needs. A remote or agent
+     * step's attempt id is its job id, whose accepted attempt is the job's current one; a local step has no job.
+     */
+    private ProcessStore.CompensationEntry entryOf(Effect.PushCompensation push, String tenant, String instanceId,
+            FlowNode node, Instant now) {
+        JobRow forward = jobs.findJob(tenant, push.attemptId()).filter(j -> JobStore.isAsync(j.jobKind()))
+                .orElse(null);
+        String forwardJobId = forward == null ? null : forward.id();
+        String forwardAttemptId = forward == null ? push.attemptId()
+                : attemptId(forward.id(), Math.max(1, forward.attempt()));
+        boolean remote = node.extensions().first(AgentTaskSpec.class).isPresent() || node.extensions()
+                .first(HandlerRef.class).map(h -> "remote".equals(h.mode())).orElse(false);
+        String mode = MANUAL.equals(push.handler()) ? MANUAL : remote ? "remote" : "local";
+        return new ProcessStore.CompensationEntry(tenant, Ulid.next(now), instanceId, push.scopeTokenId(), 0,
+                push.nodeId(), forwardJobId, forwardAttemptId, push.handler(), mode, Values.write(push.inputSnapshot()),
+                ProcessStore.CompensationEntry.PENDING, null, now, null);
+    }
+
+    /** The entries of one scope token, newest first. */
+    private List<ProcessStore.CompensationEntry> scopeStack(String tenant, String instanceId, String scopeTokenId) {
+        return store.compensationEntries(tenant, instanceId).stream()
+                .filter(e -> e.scopeTokenId().equals(scopeTokenId))
+                .sorted(java.util.Comparator.comparingInt(ProcessStore.CompensationEntry::seq).reversed())
+                .toList();
+    }
+
+    /**
+     * The kernel started a compensation (PRE-073): {@code processes.compensation.started.v1} with the scope token and
+     * the number of steps to undo, then the first undo. Under the instance row lock, in the transaction of the change.
+     */
+    private void startCompensation(StoredDefinition definition, String tenant, String instanceId,
+            Effect.StartCompensation started) {
+        long depth = scopeStack(tenant, instanceId, started.scopeTokenId()).stream()
+                .filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).count();
+        InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
+        Instant now = clock.instant();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("instanceId", instanceId);
+        payload.put("scopeId", started.scopeTokenId());
+        payload.put("depth", depth);
+        payload.put("nodeId", started.nodeId());
+        if (started.cause() != null) {
+            payload.put("cause", started.cause());
+        }
+        payload.put("definitionKey", row.definitionKey());
+        payload.put("version", row.definitionVersion());
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        publish(new ProcessEventPublisher.Event(Ids.child(started.scopeTokenId() + "/compensation", 1),
+                "processes.compensation.started.v1", tenant, now, payload), instanceId);
+        LOG.log(System.Logger.Level.WARNING, "process.compensation.started tenant={0} instance={1} scope={2} node={3}"
+                + " cause={4} depth={5}", tenant, instanceId, started.scopeTokenId(), started.nodeId(), started.cause(),
+                depth);
+        advanceWalk(definition, tenant, instanceId, started.scopeTokenId());
+    }
+
+    /**
+     * One step of the walk, under the instance row lock: nothing while an undo is in flight or an incident holds the
+     * walk; otherwise the newest {@code PENDING} entry gets its undo job, or, for {@code compensate: manual}, an
+     * incident; with none left the scope is {@code COMPENSATED} and the instance {@code FAILED} (PRE-013).
+     */
+    private void advanceWalk(StoredDefinition definition, String tenant, String instanceId, String scopeTokenId) {
+        List<ProcessStore.CompensationEntry> stack = scopeStack(tenant, instanceId, scopeTokenId);
+        if (stack.stream().anyMatch(e -> !ProcessStore.CompensationEntry.PENDING.equals(e.status())
+                && !ProcessStore.CompensationEntry.DONE.equals(e.status()))) {
+            return;
+        }
+        ProcessStore.CompensationEntry next = stack.stream()
+                .filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).findFirst().orElse(null);
+        Instant now = clock.instant();
+        if (next == null) {
+            InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
+            run(definition, row, stateOf(tenant, row), new Command.EndCompensation(scopeTokenId),
+                    new RunAs.EngineWork(tenant, COMPENSATION_ACTOR));
+            LOG.log(System.Logger.Level.WARNING, "process.compensation.done tenant={0} instance={1} scope={2}", tenant,
+                    instanceId, scopeTokenId);
+            return;
+        }
+        Map<String, Object> details = undoDetails(next);
+        if (MANUAL.equals(next.mode())) {
+            // PRE-075: never skipped silently; the walk waits for an operator, with the step's context.
+            store.updateCompensation(next.with(ProcessStore.CompensationEntry.MANUAL, null, null));
+            FlowNode node = compiled(definition).process().node(next.stepId()).orElse(null);
+            Map<String, Object> snapshot = Values.readMap(next.inputSnapshotJson());
+            details.put("inputSnapshot", node == null ? Map.of() : AgentAudit.maskInputs(tenant, node, snapshot,
+                    inputMasker));
+            store.appendHistory(tenant, instanceId, definition.id(), List.of(new HistoryEntry(
+                    "COMPENSATION_STEP_MANUAL", next.stepId(), scopeTokenId, next.forwardAttemptId(),
+                    COMPENSATION_ACTOR, now, details)));
+            raiseIncident(new IncidentSite(tenant, instanceId, definition.id(), scopeTokenId, next.stepId(), null,
+                    next.forwardAttemptId(), 0, COMPENSATION_MANUAL_REQUIRED, null, "Step " + next.stepId()
+                            + " is undone by hand (compensate: manual), entry " + next.id() + ", forward job "
+                            + (next.forwardJobId() == null ? "-" : next.forwardJobId()) + ", forward attempt "
+                            + next.forwardAttemptId() + "; the compensation waits for its resolution"), now);
+            return;
+        }
+        // Each undo is its own job, keyed by its own id on every retry, with the COMPENSATION runner's retry policy.
+        String jobId = Ulid.next(now);
+        RunnerSettings runner = async.runner(JobStore.COMPENSATION, jobSettings);
+        Duration timeout = async.timeout(JobStore.COMPENSATION, null, jobSettings);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("target", next.handler());
+        payload.put(ServiceStepRunner.MODE, next.mode());
+        payload.put("timeoutMs", timeout.toMillis());
+        InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        payload.put("inputs", Values.readMap(next.inputSnapshotJson()));
+        if (next.forwardJobId() != null) {
+            payload.put(FORWARD_JOB_ID, next.forwardJobId());
+        }
+        payload.put(FORWARD_ATTEMPT_ID, next.forwardAttemptId());
+        payload.put(COMPENSATION_ENTRY, next.id());
+        Duration lease = timeout.plus(async.leaseMargin());
+        jobs.insertJob(JobRow.due(tenant, jobId, instanceId, definition.id(), scopeTokenId, JobStore.COMPENSATION,
+                next.stepId(), now, lease, runner.maxAttempts(), Values.write(payload)), now);
+        store.updateCompensation(next.with(ProcessStore.CompensationEntry.RUNNING, jobId, null));
+        details.put("jobId", jobId);
+        details.put("leaseMs", lease.toMillis());
+        store.appendHistory(tenant, instanceId, definition.id(), List.of(new HistoryEntry(
+                "COMPENSATION_STEP_SCHEDULED", next.stepId(), scopeTokenId, next.forwardAttemptId(),
+                COMPENSATION_ACTOR, now, details)));
+    }
+
+    /** What history keeps of an entry: ids, codes and the handler, never the snapshot. */
+    private static Map<String, Object> undoDetails(ProcessStore.CompensationEntry entry) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("entryId", entry.id());
+        details.put("seq", entry.seq());
+        details.put("handler", entry.handler());
+        details.put("mode", entry.mode());
+        if (entry.forwardJobId() != null) {
+            details.put(FORWARD_JOB_ID, entry.forwardJobId());
+        }
+        details.put(FORWARD_ATTEMPT_ID, entry.forwardAttemptId());
+        return details;
+    }
+
+    private java.util.Optional<ProcessStore.CompensationEntry> entry(String tenant, String instanceId, Object id) {
+        return id == null ? java.util.Optional.empty() : store.compensationEntries(tenant, instanceId).stream()
+                .filter(e -> e.id().equals(String.valueOf(id))).findFirst();
+    }
+
+    /**
+     * The result transaction of an undo attempt (PRE-073, PRE-074), under the instance and job locks, while the
+     * attempt is current. A local undo runs its handler here, in this transaction. A completed undo is {@code DONE}
+     * and the walk goes on; a failure is given back for a retry or fails the job, which pauses the walk with
+     * {@code COMPENSATION_FAILED}.
+     */
+    private StepCompletion.Outcome recordUndo(InstanceRow row, JobRow job, String attemptId, StepResult result,
+            String reportedBy) {
+        String tenant = job.tenantId();
+        Map<String, Object> payload = Values.readMap(job.payloadJson());
+        ProcessStore.CompensationEntry entry = entry(tenant, job.instanceId(), payload.get(COMPENSATION_ENTRY))
+                .orElse(null);
+        if (row == null || !InstanceStatus.COMPENSATING.name().equals(row.status()) || entry == null
+                || !ProcessStore.CompensationEntry.RUNNING.equals(entry.status()) || !job.id().equals(entry.jobId())) {
+            jobs.cancelJob(tenant, job.id(), clock.instant());
+            return StepCompletion.Outcome.DISCARDED;
+        }
+        StepResult outcome = result;
+        if (result instanceof StepResult.Completed && ServiceStepRunner.LOCAL.equals(payload.get(ServiceStepRunner.MODE))) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> inputs = payload.get("inputs") instanceof Map<?, ?> m ? (Map<String, Object>) m
+                    : Map.of();
+            try {
+                outcome = invoker.undo(tenant, row.id(), row.businessKey(), job.nodeId(), entry.handler(), attemptId,
+                        entry.forwardAttemptId(), inputs);
+            } catch (RuntimeException e) {
+                // Rolls the undo back with its writes; the attempt is given back as a failed one.
+                throw new AttemptRunFailed(e);
+            }
+        }
+        switch (outcome) {
+            case StepResult.Completed completed -> {
+                Instant now = clock.instant();
+                if (!jobs.markDone(tenant, job.id(), job.lockedBy(), job.attempt(), now)) {
+                    throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
+                }
+                store.updateCompensation(entry.with(ProcessStore.CompensationEntry.DONE, job.id(), now));
+                Map<String, Object> details = undoDetails(entry);
+                details.put("jobId", job.id());
+                details.put("attempt", job.attempt());
+                store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
+                        "COMPENSATION_STEP_COMPLETED", entry.stepId(), entry.scopeTokenId(), attemptId, reportedBy, now,
+                        details)));
+                closeRetried(tenant, row.id(), entry.scopeTokenId(), now);
+                advanceWalk(store.definition(tenant, row.definitionId()).orElseThrow(), tenant, row.id(),
+                        entry.scopeTokenId());
+            }
+            case StepResult.BusinessError error -> giveBack(job, attemptId, error.code(), false, true, reportedBy);
+            case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), false,
+                    reportedBy);
+        }
+        return StepCompletion.Outcome.ACCEPTED;
+    }
+
+    /** PRE-074: an undo failed for good. Its entry is {@code FAILED}, an incident holds the walk, nothing else moves. */
+    private void undoFailed(JobRow job, String cause, Instant now) {
+        ProcessStore.CompensationEntry entry = entry(job.tenantId(), job.instanceId(),
+                Values.readMap(job.payloadJson()).get(COMPENSATION_ENTRY)).orElse(null);
+        if (entry == null) {
+            return;
+        }
+        store.updateCompensation(entry.with(ProcessStore.CompensationEntry.FAILED, job.id(), null));
+        Map<String, Object> details = undoDetails(entry);
+        details.put("jobId", job.id());
+        details.put("errorCode", cause);
+        store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
+                "COMPENSATION_STEP_FAILED", entry.stepId(), entry.scopeTokenId(),
+                attemptId(job.id(), Math.max(1, job.attempt())), COMPENSATION_ACTOR, now, details)));
+        raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), entry.scopeTokenId(),
+                entry.stepId(), job.id(), attemptId(job.id(), Math.max(1, job.attempt())), Math.max(0, job.attempt() - 1),
+                COMPENSATION_FAILED, cause, "Undo " + entry.handler() + " of " + entry.stepId() + " (entry "
+                        + entry.id() + ", forward job " + (entry.forwardJobId() == null ? "-" : entry.forwardJobId())
+                        + ") failed with " + cause + "; the compensation is paused"), now);
+    }
+
+    /**
+     * PRE-073: a forward step whose job failed for good, and which declares {@code onFailure: compensate}, starts the
+     * compensation of its scope instead of opening an incident.
+     *
+     * @return whether the compensation started
+     */
+    private boolean compensateInstead(JobRow job, String cause) {
+        if (!JobStore.ASYNC_SERVICE.equals(job.jobKind()) && !JobStore.ASYNC_AGENT.equals(job.jobKind())) {
+            return false;
+        }
+        InstanceRow row = store.lockInstance(job.tenantId(), job.instanceId()).orElse(null);
+        if (row == null || !"RUNNING".equals(row.status())) {
+            return false;
+        }
+        StoredDefinition definition = store.definition(job.tenantId(), row.definitionId()).orElseThrow();
+        boolean compensates = compiled(definition).process().node(job.nodeId())
+                .flatMap(n -> n.extensions().first(OnFailure.class)).map(OnFailure::compensates).orElse(false);
+        if (!compensates) {
+            return false;
+        }
+        InstanceState state = stateOf(job.tenantId(), row);
+        boolean waiting = state.tokens().stream().anyMatch(t -> t.id().equals(job.tokenId())
+                && t.status() == TokenStatus.WAITING_ASYNC && job.id().equals(t.activityInstanceId()));
+        if (!waiting) {
+            return false;
+        }
+        run(definition, row, state, new Command.Compensate(job.tokenId(), job.id(), cause),
+                new RunAs.EngineWork(job.tenantId(), ASYNC_ACTOR));
+        return true;
+    }
+
+    /** The entry an undo incident holds: on its scope token and step, {@code FAILED} or {@code MANUAL}. */
+    private ProcessStore.CompensationEntry heldEntry(ProcessStore.IncidentRow incident) {
+        return store.compensationEntries(incident.tenantId(), incident.instanceId()).stream()
+                .filter(e -> e.scopeTokenId().equals(incident.tokenId()) && e.stepId().equals(incident.nodeId())
+                        && (ProcessStore.CompensationEntry.FAILED.equals(e.status())
+                                || ProcessStore.CompensationEntry.MANUAL.equals(e.status())))
+                .findFirst()
+                .orElseThrow(() -> new InvalidStateException("Incident " + incident.id() + " holds no undo of "
+                        + incident.nodeId() + " any more"));
+    }
+
+    /**
+     * PRE-074: a retry of a failed undo runs its job again under the same job id, with one more attempt and a new
+     * attempt id, so the remote side never applies the undo twice. A manual undo has nothing to run again.
+     */
+    private io.github.dhluong90.bpm.process.api.Incident retryUndo(LockedIncident locked, String caller, String why) {
+        ProcessStore.IncidentRow incident = locked.incident();
+        if (COMPENSATION_MANUAL_REQUIRED.equals(incident.errorCode())) {
+            throw new InvalidStateException("Incident " + incident.id() + " is a manual undo: there is nothing to run"
+                    + " again. Undo the step by hand, then resolve the incident");
+        }
+        String tenant = incident.tenantId();
+        ProcessStore.CompensationEntry entry = heldEntry(incident);
+        JobRow job = entry.jobId() == null ? null : jobs.lockJob(tenant, entry.jobId()).orElse(null);
+        if (job == null || !"FAILED".equals(job.status())) {
+            throw new InvalidStateException("The undo job of incident " + incident.id() + " is "
+                    + (job == null ? "missing" : job.status()) + "; an attempt is due or running");
+        }
+        Instant now = clock.instant();
+        ProcessStore.IncidentRow retried = incident.next(incident.status(), incident.retryCount() + 1, true);
+        writeIncident(retried);
+        Map<String, Object> details = incidentDetails(retried);
+        details.put("reason", why);
+        details.put("jobId", job.id());
+        details.put("entryId", entry.id());
+        store.appendHistory(tenant, retried.instanceId(), retried.definitionId(), List.of(new HistoryEntry(
+                INCIDENT_RETRIED, retried.nodeId(), retried.tokenId(), null, caller, now, details)));
+        Map<String, Object> payload = incidentPayload(retried, locked.instance());
+        payload.put("retriedBy", caller);
+        payload.put("reason", why);
+        publishIncident(retried, "processes.incident.retried.v1", payload, locked.instance(), now);
+        if (!jobs.retryFailed(tenant, job.id(), now)) {
+            throw new IllegalStateException("Job " + job.id() + " left FAILED under its lock");
+        }
+        store.updateCompensation(entry.with(ProcessStore.CompensationEntry.RUNNING, job.id(), null));
+        LOG.log(System.Logger.Level.INFO, "process.incident.retried tenant={0} incident={1} retryCount={2} undo=true",
+                tenant, incident.id(), retried.retryCount());
+        return incidentView(retried, null, caller, java.util.Set.of());
+    }
+
+    /**
+     * PRE-074, PRE-075: an approved resolution of an undo incident marks the undo done by hand, resolves the incident
+     * {@code COMPLETED_MANUALLY} with both people, and the walk goes on, in the caller's transaction.
+     */
+    private ProcessStore.IncidentRow applyUndoResolution(LockedIncident locked, ProcessStore.IncidentRow pending,
+            String approver, String comment, Instant now) {
+        ProcessStore.CompensationEntry entry = heldEntry(pending);
+        String tenant = pending.tenantId();
+        store.updateCompensation(entry.with(ProcessStore.CompensationEntry.DONE, entry.jobId(), now));
+        Map<String, Object> details = undoDetails(entry);
+        details.put("resolvedBy", approver);
+        details.put("manual", true);
+        store.appendHistory(tenant, pending.instanceId(), pending.definitionId(), List.of(new HistoryEntry(
+                "COMPENSATION_STEP_COMPLETED", entry.stepId(), entry.scopeTokenId(), null, approver, now, details)));
+        ProcessStore.IncidentRow current = store.lockIncident(tenant, pending.id()).orElseThrow();
+        ProcessStore.IncidentRow resolved = current.resolved(COMPLETED_MANUALLY, approver, now);
+        writeIncident(resolved);
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("proposedBy", pending.proposedBy());
+        extra.put("reason", pending.proposalReason());
+        extra.put("output", pending.proposalOutputJson() == null ? Map.of()
+                : Values.readMap(pending.proposalOutputJson()));
+        extra.put("approvalMode", pending.approvalMode());
+        if (comment != null) {
+            extra.put("comment", comment);
+        }
+        recordResolved(resolved, approver, null, extra, now);
+        advanceWalk(locked.definition(), tenant, pending.instanceId(), entry.scopeTokenId());
+        return resolved;
     }
 
     // ---- TaskService --------------------------------------------------------------------------------------
@@ -3234,6 +3648,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // Written once the instance row is saved, because both reference it.
         List<IncidentSite> newIncidents = new ArrayList<>();
         Map<String, ProcessStore.StepResultRow> recorded = new LinkedHashMap<>();
+        // #67: undo entries in the order their steps completed, and a compensation the run started.
+        List<Effect.PushCompensation> pushes = new ArrayList<>();
+        Effect.StartCompensation[] compensation = new Effect.StartCompensation[1];
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -3294,6 +3711,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.RecordResult result -> {
                             // No later step reads this step's result as memory: nothing more is kept.
                         }
+                        case Effect.PushCompensation push -> pushes.add(push);
+                        case Effect.StartCompensation started -> compensation[0] = started;
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -3478,7 +3897,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         cancelledJobs.forEach(id -> jobs.cancelJob(tenant, id, now));
         recorded.values().forEach(store::recordStepResult);
         store.appendHistory(tenant, state.instanceId(), definition.id(), history);
+        // After the tokens: an entry references its scope token.
+        for (Effect.PushCompensation push : pushes) {
+            FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
+            store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, now));
+        }
         newIncidents.forEach(site -> raiseIncident(site, now));
+        if (compensation[0] != null) {
+            startCompensation(definition, tenant, state.instanceId(), compensation[0]);
+        }
         return newIncidents;
     }
 

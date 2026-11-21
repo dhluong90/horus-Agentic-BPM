@@ -447,7 +447,7 @@ class AsyncWaitStateTest {
         String loan = apply(pod1, "LOAN-2027-0049").id();
 
         assertThat(pod1.async.pollOnce()).isEqualTo(1);
-        assertThat(pod1.async.freeSlots()).isEqualTo(1);
+        assertThat(pod1.async.freeSlots(io.github.dhluong90.bpm.process.internal.store.JobStore.ASYNC_SERVICE)).isEqualTo(1);
         assertThat(pod1.async.awaitIdle(Duration.ofSeconds(30))).isTrue();
 
         assertThat(interrupted).isTrue();
@@ -455,7 +455,7 @@ class AsyncWaitStateTest {
         assertThat(TestEngine.jdbc().sql("SELECT details->>'errorCode' FROM pre_history WHERE instance_id = ? AND "
                 + "event_type = 'ASYNC_ATTEMPT_FAILED'").param(loan).query(String.class).single())
                 .isEqualTo(AsyncStepExecutor.TIMEOUT);
-        assertThat(pod1.async.freeSlots()).isEqualTo(2);
+        assertThat(pod1.async.freeSlots(io.github.dhluong90.bpm.process.internal.store.JobStore.ASYNC_SERVICE)).isEqualTo(2);
     }
 
     // ---- PRE-040, PRE-111, PRE-113: business errors (#55) -------------------------------------------------------

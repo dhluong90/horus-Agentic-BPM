@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * Inputs of the kernel. Each is applied under the instance row lock by the shell.
  */
-public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.RetryStep {
+public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.RetryStep, Command.Compensate, Command.EndCompensation {
 
     /**
      * Starts the instance at its none start event.
@@ -175,6 +175,34 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
         public RetryStep {
             Objects.requireNonNull(tokenId, "tokenId must not be null");
             Objects.requireNonNull(attemptId, "attemptId must not be null");
+        }
+    }
+
+    /**
+     * A step that declares {@code horus:onFailure="compensate"} failed for good in the shell (#67, PRE-073): its job
+     * is {@code FAILED} because the failure was not retryable, the last attempt was used, or the answer was a
+     * business error. The compensation of the step's scope starts instead of an incident.
+     *
+     * @param tokenId the token waiting on the failed step
+     * @param attemptId the token's current attempt id, its job id
+     * @param cause the failure's code
+     */
+    record Compensate(String tokenId, String attemptId, String cause) implements Command {
+        public Compensate {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
+            Objects.requireNonNull(attemptId, "attemptId must not be null");
+        }
+    }
+
+    /**
+     * The shell walked a compensating scope's stack to the bottom (#67): the scope is {@code COMPENSATED} and the
+     * instance {@code FAILED}. The only command a {@code COMPENSATING} instance accepts.
+     *
+     * @param scopeTokenId the compensated scope
+     */
+    record EndCompensation(String scopeTokenId) implements Command {
+        public EndCompensation {
+            Objects.requireNonNull(scopeTokenId, "scopeTokenId must not be null");
         }
     }
 }

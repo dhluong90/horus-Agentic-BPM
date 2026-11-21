@@ -1,0 +1,27 @@
+# Guardrails on the document assessor's answer (#66): a risk score of 70 or more never moves a loan on unchecked; a
+# compliance reviewer looks at it first. A decline never needs a second look. The assessor's free-text summary is
+# an input no rule reads.
+schemaVersion: 1
+ruleSet: loan-document-guardrails
+description: Guardrails on the agent's document assessment of a loan application
+hitPolicy: first
+
+inputs:
+  - { name: riskScore,      type: integer }
+  - { name: recommendation, type: string }
+  - { name: summary,        type: string }
+
+outputs:
+  - { name: allow,   type: boolean }
+  - { name: reasons, type: string }
+
+rules:
+  - id: R1
+    when: { recommendation: "== 'DECLINE'" }
+    then: { allow: "true", reasons: "''" }
+  - id: R2
+    when: { riskScore: ">= 70" }
+    then: { allow: "false", reasons: "'HIGH_RISK_SCORE'" }
+  - id: R3
+    when: {}
+    then: { allow: "true", reasons: "''" }
