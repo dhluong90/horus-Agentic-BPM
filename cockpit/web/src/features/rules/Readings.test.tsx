@@ -39,7 +39,7 @@ describe('readings of a version', () => {
     const list = await screen.findByRole('list', { name: 'Rows of card-fee version 1 in plain words' });
     const items = within(list).getAllByRole('listitem');
     expect(items).toHaveLength(5);
-    expect(items[1]).toHaveTextContent('Rule R2 applies when tier is GOLD and balance is at least 50,000,000 VND. Then fee is 0 VND; waived is Yes.');
+    expect(items[1]).toHaveTextContent('Rule R2 applies when Tier is Gold and Balance is at least 50,000,000 VND. Then fee is 0 VND; waived is Yes.');
     expect(screen.getByRole('button', { name: 'Sentence' })).toHaveAttribute('aria-pressed', 'true');
     expect(calls.filter((c) => c.path === '/rule-sets/card-fee/versions/1/readings')).toHaveLength(1);
   });
@@ -47,7 +47,7 @@ describe('readings of a version', () => {
   it('CKP_076_vietnamese_shows_the_vietnamese_sentence_with_grouped_amounts', async () => {
     open('#/rules/card-fee/1/readings', 'rules-approver', 'vi');
     const list = await screen.findByRole('list', { name: 'Các dòng của card-fee phiên bản 1 bằng lời' });
-    expect(within(list).getAllByRole('listitem')[1]).toHaveTextContent('Quy tắc R2 áp dụng khi tier là GOLD và balance ít nhất là 50.000.000 VND. Khi đó fee là 0 VND; waived là Có.');
+    expect(within(list).getAllByRole('listitem')[1]).toHaveTextContent('Quy tắc R2 áp dụng khi Hạng là Gold và Số dư ít nhất là 50.000.000 VND. Khi đó phí là 0 VND; miễn phí là Có.');
     expect(screen.queryByText(/Rule R2 applies/)).toBeNull();
   });
 
@@ -56,7 +56,7 @@ describe('readings of a version', () => {
     open('#/rules/card-fee/1/readings');
     await screen.findByRole('list', { name: /in plain words/ });
     await user.click(screen.getByRole('button', { name: 'Short' }));
-    expect(await screen.findByText('tier = GOLD, balance >= 50,000,000 VND -> fee = 0 VND; waived = Yes')).toBeVisible();
+    expect(await screen.findByText('Gold, Balance at least 50,000,000 VND: fee 0 VND; waived: Yes')).toBeVisible();
     expect(window.localStorage.getItem('horus.cockpit.readingStyle')).toBe('short');
     // No new request: the engine sent both styles.
     expect(calls.filter((c) => c.path.endsWith('/readings'))).toHaveLength(1);
@@ -66,7 +66,7 @@ describe('readings of a version', () => {
     window.localStorage.setItem('horus.cockpit.readingStyle', 'short');
     reloadReadingStyle();
     open('#/rules/card-fee/1/readings');
-    expect(await screen.findByText(/^Balance|^tier = GOLD, balance/)).toBeVisible();
+    expect(await screen.findByText(/^Gold, Balance at least/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Short' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -122,8 +122,8 @@ describe('readings of a change', () => {
     await user.click(await screen.findByRole('button', { name: 'Readings' }));
     const list = await screen.findByRole('list', { name: 'Changed rows of version 2 against version 1, in plain words' });
     const r3 = within(list).getAllByRole('listitem').find((item) => item.textContent.includes('R3'));
-    expect(r3?.querySelector('del')).toHaveTextContent('Rule R3 applies when tier is GOLD. Then fee is 30,000 VND; waived is No.');
-    expect(r3?.querySelector('ins')).toHaveTextContent('Rule R3 applies when tier is GOLD. Then fee is 35,000 VND; waived is No.');
+    expect(r3?.querySelector('del')).toHaveTextContent('Rule R3 applies when Tier is Gold. Then fee is 30,000 VND; waived is No.');
+    expect(r3?.querySelector('ins')).toHaveTextContent('Rule R3 applies when Tier is Gold. Then fee is 35,000 VND; waived is No.');
     const r6 = within(list).getAllByRole('listitem').find((item) => item.textContent.includes('R6'));
     expect(r6).toHaveTextContent('Added');
     expect(r6?.querySelector('del')).toBeNull();
@@ -166,8 +166,8 @@ describe('readings of a simulation', () => {
     expect(await screen.findByText('The result changes')).toBeVisible();
     expect(screen.getByRole('heading', { name: 'Version 2' })).toBeVisible();
     expect(screen.getByText('In effect: version 1')).toBeVisible();
-    expect(screen.getByText('Rule R3 applies when tier is GOLD. Result: fee is 35,000 VND; waived is No.')).toBeVisible();
-    expect(screen.getByText('Rule R3 applies when tier is GOLD. Result: fee is 30,000 VND; waived is No.')).toBeVisible();
+    expect(screen.getByText('Rule R3 applies when Tier is Gold. Result: fee is 35,000 VND; waived is No.')).toBeVisible();
+    expect(screen.getByText('Rule R3 applies when Tier is Gold. Result: fee is 30,000 VND; waived is No.')).toBeVisible();
     const sent = calls.find((c) => c.path === '/rule-sets/card-fee/versions/2:simulate-readings');
     expect(sent?.key).toBeNull();
     await waitFor(() => { expect(JSON.parse(sent?.body ?? '{}')).toEqual({ samples: [{ inputs: { tier: 'GOLD' } }] }); });

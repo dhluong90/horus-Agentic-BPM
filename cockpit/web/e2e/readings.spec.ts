@@ -56,7 +56,7 @@ const SCREENS: readonly Screen[] = [
     ready: async (page) => { await expect(page.locator('.reading').nth(4)).toBeVisible(); } },
   { name: 'version-short', scenario: 'rules-author', hash: '#/rules/card-fee/1/readings', primary: NEW_DRAFT,
     prepare: async (page, locale) => { await page.getByRole('button', { name: locale === 'en' ? 'Short' : 'Rút gọn', exact: true }).click(); },
-    ready: async (page) => { await expect(page.locator('.reading__text').first()).toContainText('->'); } },
+    ready: async (page) => { await expect(page.locator('.reading__text').first()).toContainText(': '); } },
   { name: 'version-loading', scenario: 'rules-author', hash: '#/rules/card-fee/1/readings', primary: NEW_DRAFT,
     route: async (page) => { await page.route(`${RULES}/card-fee/versions/1/readings`, () => { /* never answers: the skeleton stays */ }); },
     ready: async (page) => { await expect(page.locator('.readings .skeleton')).toBeVisible(); } },
@@ -141,8 +141,8 @@ test('CKP_076_the_reading_style_is_remembered_after_a_reload', async ({ page }) 
   await mockRuleEngine(page, 'rules-author', readingsSeed());
   await page.goto('./#/rules/card-fee/1/readings');
   await page.getByRole('button', { name: 'Short', exact: true }).click();
-  await expect(page.locator('.reading__text').first()).toContainText('->');
+  await expect(page.locator('.reading__text').first()).toContainText(': ');
   await page.reload();
   await expect(page.getByRole('button', { name: 'Short', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('.reading__text').first()).toContainText('->');
+  await expect(page.locator('.reading__text').first()).toContainText(': ');
 });
