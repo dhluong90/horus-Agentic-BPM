@@ -180,6 +180,29 @@
             "escalateTo": { "$ref": "#/$defs/assignee" }
           }
         },
+        "escalation": {
+          "description": "Up to three levels. The first fires at the due time plus its after, each later one its after of working time past the previous (PRE-178 to PRE-180).",
+          "type": "object",
+          "required": ["levels"],
+          "additionalProperties": false,
+          "properties": {
+            "levels": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "required": ["to"],
+                "additionalProperties": false,
+                "properties": {
+                  "to": { "$ref": "#/$defs/assignee" },
+                  "after": { "$ref": "#/$defs/duration" }
+                }
+              }
+            },
+            "onClaimed": { "enum": ["release", "keep"], "default": "release" }
+          }
+        },
         "resultVariable": { "$ref": "#/$defs/identifier" },
         "next": { "$ref": "#/$defs/next" }
       }

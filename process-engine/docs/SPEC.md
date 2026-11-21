@@ -1287,3 +1287,73 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `export -> 4 shapes; instance -> underwrite WAITING_USER`.
 - **Test ID:** `PRE_186_*` in `GuardedAgentJourneyIT`
 
+## Task Escalation and the Calendar API (#73, #409)
+
+### PRE-178 An overdue task moves to the escalation role at its deadline, keeping four eyes
+- **Traces to:** `TR-CAL-01`, `TR-SEC-04`
+- **Milestone:** M2
+- **Given:**
+  - Task `review-application` is for `role:credit-officer`, four-eyes, `horus:sla="PT8H"` on the tenant calendar `vn-banking-hours`: Monday to Friday 08:00 to 17:00, `Asia/Ho_Chi_Minh`.
+  - It is created Thu 3 Dec 2026 15:00 ICT, so it is due Fri 4 Dec 2026 14:00 ICT: 2 hours on Thursday and 6 on Friday.
+  - `horus:escalation="role:branch-supervisor"`: one level, to `role:branch-supervisor`, waiting `PT0S`.
+  - `minh` started the instance, so `minh` is a four-eyes participant.
+- **When:** The injected engine clock reaches Fri 4 Dec 14:00 ICT and the engine sweeps (`ProcessServices.escalateOverdue`, run by the job poller of every replica); the clock is one second earlier on the first sweep.
+- **Then:**
+  - At 13:59:59 nothing changes. At 14:00:00, under the `pre_instance` lock, the task's assignment becomes `role:branch-supervisor`, the task stays `OPEN` and counts level 1.
+  - History records `TASK_ESCALATED` by `system:timer` with the level, the assignment before and after and the due time. `processes.task.escalated.v1` is published in the same transaction with `taskId`, `instanceId`, `nodeId`, `level`, `from` and `to`.
+  - `minh`, even holding `branch-supervisor`, still cannot claim the task (`403 SELF_APPROVAL_FORBIDDEN`): escalation never removes a participant, so four eyes holds after any number of levels (`TR-SEC-04`). Another supervisor claims it.
+  - A task completed at 13:59:59 is never escalated. A second sweep, or a second replica sweeping at the same moment, applies nothing more: one history entry and one event per level, across replicas.
+  - The sweep reads at most `jobs.batch-size` due tasks across tenants through the registered bounded query `escalations-due` (`EngineSweep`, partial index `idx_pre_task_escalation_due`, V32), then locks each task's own instance and rereads the task before it changes anything; each change is made in the tenant of the locked row, and one task's failure holds back no other.
+- **Example:** `created Thu 15:00, PT8H business -> due Fri 14:00 -> role credit-officer -> branch-supervisor`.
+- **Test ID:** `PRE_178_an_overdue_task_moves_to_the_escalation_role_at_its_deadline_keeping_four_eyes` (`TaskEscalationPostgresIT`), `PRE_178_a_task_completed_before_its_deadline_is_never_escalated`, `PRE_178_the_sweep_is_tenant_scoped_idempotent_and_applies_a_level_once_across_replicas`, `PRE_178_the_first_level_with_no_wait_fires_at_the_due_time` (`EscalationPlanTest`), `PRE_178_V32_keeps_existing_tasks_and_builds_its_indexes_concurrently` (`TaskEscalationMigrationTest`)
+
+### PRE-179 A second level fires on business time, and a claimed task follows its declared rule
+- **Traces to:** `TR-CAL-01`, `TR-CAL-02`
+- **Milestone:** M2
+- **Given:**
+  - The task of `PRE-178` declares `horus:escalation="role:branch-supervisor;role:regional-manager|PT4H"`: up to 3 levels separated by `;`, each a target and an optional wait after `|`.
+  - Officer `tt.binh` claimed the task at 10:00 on Friday.
+  - Variant A declares nothing, or `horus:onClaimed="release"`, the default. Variant B declares `horus:onClaimed="keep"`.
+- **When:** Level 1 fires at Fri 14:00. Level 2 is 4 business hours later: 3 hours on Friday and 1 on Monday, so Mon 7 Dec 2026 09:00 ICT.
+- **Then:**
+  - Variant A at level 1: the claim is released, the task is `OPEN` for `branch-supervisor`, and the event names `tt.binh` as `releasedClaimant`.
+  - Variant B at level 1: `tt.binh` keeps the claim, the assignment changes, and `tt.binh` still completes the task; nobody else can claim it.
+  - Every level time is computed once, when the task is created, from the calendar of its SLA and stored with the task. Level 2 is Mon 09:00, not Sat 02:00, and a calendar change approved after the task was created, such as 7 Dec as a holiday, does not move it (`TR-CAL-02`).
+  - At import, a fourth level, a target equal to the assignment it replaces, a later level that waits nothing, a wait that is not an ISO 8601 duration of zero or more up to 366 days, an escalation without `horus:sla`, an unknown claim rule or `horus:onClaimed` without an escalation is `422 VALIDATION_FAILED` with the problem code `ESCALATION_INVALID`. A task without `horus:escalation` keeps its canonical form and hash.
+- **Example:** `level 2 PT4H after Fri 14:00 -> Mon 09:00 ICT -> regional-manager`.
+- **Test ID:** `PRE_179_a_second_level_fires_on_business_time_and_a_claimed_task_is_released` (`TaskEscalationPostgresIT`), `PRE_179_a_claimant_who_keeps_the_claim_still_completes_the_task`, `PRE_179_a_later_level_counts_its_wait_in_business_time_across_the_weekend` (`EscalationPlanTest`), `PRE_179_*` in `SubsetBpmnReaderEscalationTest`
+
+### PRE-180 An escalation that cannot apply is recorded, never silent, and never crosses tenants
+- **Traces to:** `TR-SEC-04`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:**
+  - Variant A: a level targets `user:minh`, who started the instance of a four-eyes task.
+  - Variant B: the instance is cancelled before the deadline, while a task of another tenant with the same schedule is overdue.
+  - Variant C: two replicas sweep the same overdue task at the same moment.
+- **When:** The deadline passes and the sweep runs.
+- **Then:**
+  - A: the assignment is unchanged, the level is counted so the sweep does not try it again, history records `ESCALATION_REFUSED` with `ESCALATION_TARGET_FORBIDDEN`, and an incident with that code opens.
+  - B: the cancelled instance's task is not escalated; only the other tenant's task moves, and its event carries that tenant. A task is only ever changed under the lock of its own instance row, in the tenant stored on it.
+  - C: one replica applies the level and the other, after the first commits, finds it applied and writes nothing.
+  - Not in this release: a target role the host `RoleCatalogue` does not list is not checked at approval (the SPI follows with its slice).
+- **Example:** `target user minh is the maker -> no change, incident ESCALATION_TARGET_FORBIDDEN`.
+- **Test ID:** `PRE_180_a_level_that_targets_the_maker_is_recorded_with_an_incident_and_changes_nothing`, `PRE_180_a_cancelled_instance_is_not_escalated_and_another_tenants_task_is_never_touched` (`TaskEscalationPostgresIT`)
+
+### PRE-181 The calendars in force and the calendar changes are read over REST, in the caller's tenant
+- **Traces to:** `TR-CAL-01`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with calendars `branch-hours`, `card-centre` and `vn-banking-hours`, a pending change of `vn-banking-hours` and two approved ones; tenant `bank-b` with `bank-b-hours`; the caller holds `processes:read`.
+- **When:** The caller reads `GET /calendars` with `limit=1` and then with the returned cursor, `GET /calendars/vn-banking-hours`, `GET /calendar-changes?status=PENDING` and `status=APPROVED` page by page, and `GET /calendar-changes/{id}`; a manager of `bank-b` uses a cursor of `bank-a`.
+- **Then:** Calendars come in key order as summaries without hours or holidays, each page read through the registered bounded queries `calendars` and `calendars-after` (the `(tenant_id, calendar_key)` unique index); one calendar has its hours and holidays and an `ETag` of its version; changes come newest first through `idx_pre_calendar_change_status` (V32) with the old and the new value; `bank-b` never sees `bank-a` rows; a cursor of another tenant, an unknown status or a limit above `query.max-page-size` is `400 QUERY_INVALID`; another tenant's calendar or change is `404 CALENDAR_NOT_FOUND`. Every body validates against `process-engine/api/openapi.yaml`.
+- **Example:** `GET /calendars?limit=1 -> branch-hours + nextCursor; the cursor with bank-b -> 400 QUERY_INVALID`.
+- **Test ID:** `PRE_181_calendars_and_changes_are_listed_in_pages_for_the_callers_tenant_only` (`CalendarChangeIdempotencyPostgresIT`), `PRE_181_the_calendar_list_one_calendar_and_the_changes_match_the_contract` (`CalendarRestContractTest`)
+
+### PRE-182 A calendar change is proposed, approved and rejected once per idempotency key, under four eyes
+- **Traces to:** `TR-IDEM-01`, `TR-CAL-01`, `TR-SEC-04`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`, `vn-banking-hours` at version 3, `kim` and `lan` holding `processes:calendar:manage`, `horus.bpm.processes.calendar.approval` at its default `four-eyes` (PD-118 as amended by PD-131); `kim` proposes with `If-Match: "3"` and `Idempotency-Key: k-1`.
+- **When:** `POST /calendars/vn-banking-hours/changes` is sent twice with the same key and body, once with the same key and another reason, once without `If-Match` and once without the key; `lan` approves with `a-1` and repeats it; two replicas receive the same proposal together; `bank-b` proposes with the same key `k-1`.
+- **Then:** The first call is `201` with the change `PENDING` and a `Location`; the repeat returns the same status and body and writes no second change, no second decision and no second `processes.calendar.changed.v1` (the answer is stored whole in `pre_idempotency` in the transaction of the work, so a repeat after the approval still answers `PENDING`); the same key with another request is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; a missing `If-Match` or key is `428 PRECONDITION_REQUIRED`; a stale `If-Match` is `409 VERSION_CONFLICT`; the concurrent proposals create one change; a key belongs to its tenant; a caller without `processes:calendar:manage` is refused before any key is claimed. `kim` approving is `403 SELF_APPROVAL_FORBIDDEN`. An approval or rejection needs no `If-Match`: the calendar version a change was proposed against is checked under the calendar's row lock, and a change that is no longer pending is `409 INVALID_STATE`. A body with a tenant or any other field is `400 INPUT_INVALID`.
+- **Example:** `propose(k-1) twice -> one change; approve(a-1) twice -> version 4 once, one event`.
+- **Test ID:** `PRE_182_a_proposal_repeated_with_the_same_key_returns_the_first_answer_and_writes_nothing_more`, `PRE_182_an_approval_repeated_with_the_same_key_applies_once_and_emits_one_event`, `PRE_182_two_concurrent_proposals_with_one_key_create_one_change_and_a_key_is_per_tenant`, `PRE_182_a_proposal_without_the_permission_is_refused_before_any_key_is_claimed` (`CalendarChangeIdempotencyPostgresIT`), `PRE_182_*` in `CalendarRestContractTest`
+

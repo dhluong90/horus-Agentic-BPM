@@ -197,7 +197,7 @@ public interface BusinessCalendar {
   boolean isBusinessTime(String tenantId, String calendarKey, Instant at);
 }
 ```
-The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`. A calendar is created or changed by a proposal that a second holder of `processes:calendar:manage` approves (four eyes by default; one person only in the `dev` profile). A task without `horus:calendar` counts elapsed time. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`). Escalation of an overdue task (`escalateTo`) follows in a later release. See [[Process Engine API]] for an example.
+The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`. A calendar is created or changed by a proposal that a second holder of `processes:calendar:manage` approves (four eyes by default; one person only in the `dev` profile). A task without `horus:calendar` counts elapsed time. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`). An overdue task escalates to the next level of its `horus:escalation` on the same calendar (0.3.0). See [[Process Engine API]] for an example.
 
 ## Instance migration
 ![Instance migration](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/instance-migration.svg)

@@ -211,6 +211,11 @@ class ListQueryPlanCheckTest {
         samples.put("gauge-open-incidents", List.of());
         samples.put("gauge-oldest-due-job", List.of("TIMER"));
         samples.put("calendar-holidays", List.of("bank-a", "ACAL1"));
+        samples.put("escalations-due", List.of(T, 100));
+        samples.put("calendars", List.of("bank-a", 51));
+        samples.put("calendars-after", List.of("bank-a", "vn-banking-hours", 51));
+        samples.put("calendar-changes", List.of("bank-a", "PENDING", 51));
+        samples.put("calendar-changes-after", List.of("bank-a", "PENDING", T, "ACC" + "%023d".formatted(9), 51));
         String[] both = {"CLAIMED", "OPEN"};
         Timestamp end = Timestamp.from(Instant.parse("9999-12-31T00:00:00Z"));
         Timestamp epoch = Timestamp.from(Instant.EPOCH);

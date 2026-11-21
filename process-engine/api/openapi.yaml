@@ -53,6 +53,8 @@ tags:
     description: Plan moving running instances to another version, check it with a dry run, and run it with a second person's approval
   - name: incidents
     description: List incidents, retry a failed step, and resolve one with a second person's approval
+  - name: calendars
+    description: Read the tenant's business calendars, propose a change, and approve or reject it as a second person
 paths:
   /approvals:
     get:
@@ -1732,6 +1734,222 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /calendars:
+    get:
+      tags: [calendars]
+      operationId: listCalendars
+      summary: List the tenant's business calendars by key
+      description: |
+        PRE-181. The calendars of the caller's tenant only, by key, keyset-paged with a signed cursor bound to the
+        tenant; at most `query.max-page-size` (200) per page. Each item is a summary without working hours or
+        holidays: read one calendar for those. Read only. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of calendar summaries
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendars/{key}:
+    get:
+      tags: [calendars]
+      operationId: getCalendar
+      summary: Read one calendar in force
+      description: |
+        PRE-181. The calendar as the last approved change left it. The `ETag` is its version, quoted: send it as
+        `If-Match` when proposing a change. Another tenant's calendar is `404 CALENDAR_NOT_FOUND`. Permission
+        `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarKey'
+      responses:
+        '200':
+          description: The calendar
+          headers:
+            ETag:
+              description: The calendar's version, quoted; send it as `If-Match` with a proposal
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Calendar' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendars/{key}/changes:
+    post:
+      tags: [calendars]
+      operationId: proposeCalendarChange
+      summary: Propose a new calendar or a change of one
+      description: |
+        PRE-114, PRE-181, PRE-182. Proposes the whole calendar as it should be (`calendar`) with a `reason`. `If-Match`
+        is the version the change is made against: `"0"` for a new calendar. Under four eyes (the default, PD-131)
+        the change is `PENDING` and applies only when a second holder of `processes:calendar:manage` approves it, and
+        then only to deadlines set after that; due times already set never move. Under `calendar.approval=single`,
+        which start-up accepts only on the `dev` profile alone, the proposal applies at once and is recorded as
+        `SINGLE`. Every proposal and decision is kept with the people, the time and the old and new value.
+
+        A repeat with the same `Idempotency-Key` and the same request returns the first answer, status and body, and
+        writes nothing: no second change, no second event. The same key with another request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. A calendar that is not at the `If-Match` version is
+        `409 VERSION_CONFLICT`. A key or a calendar that is not valid is `400 INPUT_INVALID`. Permission
+        `processes:calendar:manage`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarKey'
+        - $ref: '#/components/parameters/CalendarIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalendarProposal' }
+            example:
+              reason: Tet holiday 2027 added
+              calendar:
+                zone: Asia/Ho_Chi_Minh
+                week:
+                  MONDAY: ['08:00-17:00']
+                  TUESDAY: ['08:00-17:00']
+                  WEDNESDAY: ['08:00-17:00']
+                  THURSDAY: ['08:00-17:00']
+                  FRIDAY: ['08:00-17:00']
+                holidays: { '2027-02-08': Tet }
+      responses:
+        '201':
+          description: The change
+          headers:
+            Location: { schema: { type: string }, description: The change's address }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes:
+    get:
+      tags: [calendars]
+      operationId: listCalendarChanges
+      summary: List the calendar changes of one status, newest first
+      description: |
+        PRE-181. The changes of the caller's tenant only, newest first on `(proposedAt, id)`, keyset-paged with a
+        signed cursor bound to the tenant and the status; at most `query.max-page-size` (200) per page. Read only.
+        Permission `processes:read`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: '`PENDING` when absent. Another value is `400 QUERY_INVALID`.'
+          schema: { type: string, enum: [PENDING, APPROVED, REJECTED], default: PENDING }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChangePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes/{id}:
+    get:
+      tags: [calendars]
+      operationId: getCalendarChange
+      summary: Read one calendar change with its old and new value
+      description: |
+        PRE-181. Another tenant's change is `404 CALENDAR_NOT_FOUND`. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarChangeId'
+      responses:
+        '200':
+          description: The change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes/{id}:approve:
+    post:
+      tags: [calendars]
+      operationId: approveCalendarChange
+      summary: Approve a pending change as a second person and apply it
+      description: |
+        PRE-114, PRE-182. In one transaction under the calendar's row lock the calendar moves to its next version, the
+        decision is recorded and `processes.calendar.changed.v1` is published. The approver is never the proposer
+        (`403 SELF_APPROVAL_FORBIDDEN`, and the table refuses it too). A change that is no longer `PENDING` is
+        `409 INVALID_STATE`; a calendar that changed since the proposal is `409 VERSION_CONFLICT` and the change stays
+        `PENDING`. A change needs no `If-Match`: it cannot be edited, and the calendar version it was proposed against
+        is checked under the lock. A repeat with the same `Idempotency-Key` returns the first answer and writes
+        nothing. Permission `processes:calendar:manage`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarChangeId'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalendarDecision' }
+            example: { comment: Checked against the State Bank notice }
+      responses:
+        '200':
+          description: The approved change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes/{id}:reject:
+    post:
+      tags: [calendars]
+      operationId: rejectCalendarChange
+      summary: Reject a pending change; the calendar stays as it is
+      description: |
+        PRE-114, PRE-182. A holder of `processes:calendar:manage` rejects with a `comment` that says why; the proposer
+        may withdraw their own. The calendar and its version do not change. A change that is no longer `PENDING` is
+        `409 INVALID_STATE`. A repeat with the same `Idempotency-Key` returns the first answer and writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/CalendarChangeId'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalendarDecision' }
+            example: { comment: The date is not a bank holiday }
+      responses:
+        '200':
+          description: The rejected change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -1739,6 +1957,25 @@ components:
       scheme: bearer
       description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
   parameters:
+    CalendarKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string, maxLength: 100, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+    CalendarChangeId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 26 }
+    CalendarIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The version of the calendar the change is made against, quoted: the `ETag` of `GET /calendars/{key}`, or `"0"`
+        for a calendar that does not exist yet. Missing is `428 PRECONDITION_REQUIRED`; stale is
+        `409 VERSION_CONFLICT`.
+      schema: { type: string, example: '"1"' }
     IncidentId:
       name: id
       in: path
@@ -1865,7 +2102,7 @@ components:
         RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`,
         `QUERY_INVALID` (a list limit, cursor or range) or `CONTENT_HASH_REQUIRED` (an approval that names no reviewed
         content). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`,
-        `INCIDENT_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
+        `INCIDENT_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND`, `CALENDAR_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
@@ -1886,6 +2123,96 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    CalendarWeek:
+      type: object
+      description: Working hours per weekday as local ranges; a weekday that is absent is not a working day.
+      propertyNames: { enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY] }
+      additionalProperties:
+        type: array
+        maxItems: 8
+        items: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]-([0-2][0-9]:[0-5][0-9]|24:00)$', example: '08:00-17:00' }
+    WorkingCalendar:
+      type: object
+      required: [zone, week, holidays]
+      description: A time zone, working hours per weekday and holidays. Every computation uses the zone, never the host's.
+      properties:
+        zone: { type: string, example: Asia/Ho_Chi_Minh }
+        week: { $ref: '#/components/schemas/CalendarWeek' }
+        holidays:
+          type: object
+          description: Local dates that are not working days, each with a description of at most 200 characters; at most 2,000.
+          additionalProperties: { type: string, maxLength: 200 }
+    Calendar:
+      type: object
+      required: [key, version, calendar, updatedBy, approvedBy, updatedAt]
+      properties:
+        key: { type: string }
+        version: { type: integer, minimum: 1, description: 1 after creation, one more after each approved change }
+        calendar: { $ref: '#/components/schemas/WorkingCalendar' }
+        updatedBy: { type: string, description: Who proposed the change in force }
+        approvedBy: { type: string, description: Who approved it; the proposer only under `calendar.approval=single` }
+        updatedAt: { type: string, format: date-time }
+    CalendarSummary:
+      type: object
+      required: [key, version, zone, updatedBy, approvedBy, updatedAt]
+      properties:
+        key: { type: string }
+        version: { type: integer, minimum: 1 }
+        zone: { type: string }
+        updatedBy: { type: string }
+        approvedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    CalendarPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/CalendarSummary' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
+    CalendarProposal:
+      type: object
+      required: [calendar, reason]
+      additionalProperties: false
+      properties:
+        calendar: { $ref: '#/components/schemas/WorkingCalendar' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    CalendarDecision:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: { type: string, maxLength: 500, description: Optional on approval; required, with a reason, on rejection }
+    CalendarChange:
+      type: object
+      required: [id, calendarKey, status, approval, baseVersion, previous, proposed, reason, proposedBy, proposedAt,
+        decidedBy, decidedAt, comment]
+      properties:
+        id: { type: string }
+        calendarKey: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        approval: { type: string, enum: [FOUR_EYES, SINGLE], description: '`SINGLE` only when the dev profile let the proposer apply it alone' }
+        baseVersion: { type: integer, minimum: 0, description: The calendar version the proposal was made against, 0 for a new calendar }
+        previous:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/WorkingCalendar'
+        proposed: { $ref: '#/components/schemas/WorkingCalendar' }
+        reason: { type: string }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        comment: { type: [string, 'null'] }
+    CalendarChangePage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/CalendarChange' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     IncidentReason:
       type: object
       required: [reason]
@@ -2668,7 +2995,7 @@ components:
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
-            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND,
+            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND,
             OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }

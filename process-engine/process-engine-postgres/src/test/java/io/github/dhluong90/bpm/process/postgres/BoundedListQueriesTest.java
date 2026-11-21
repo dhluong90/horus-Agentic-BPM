@@ -140,6 +140,7 @@ class BoundedListQueriesTest {
                 "tasks-mine-dated", "tasks-any-undated", "migration-live-nodes", "migration-instances-at-node",
                 "migration-movable-instances", "instance-token-entered-at", "rollup-slice", "window-node-sums",
                 "window-node-histogram", "gauge-active-instances", "gauge-open-incidents", "gauge-oldest-due-job",
+                "escalations-due", "calendars", "calendars-after", "calendar-changes", "calendar-changes-after",
                 "instances-1",
                 "instances-3-key-range-after");
     }
