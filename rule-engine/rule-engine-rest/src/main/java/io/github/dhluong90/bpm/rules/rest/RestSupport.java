@@ -180,6 +180,127 @@ final class RestSupport {
         return key;
     }
 
+    /** The body of {@code :validate}; member order is fixed. */
+    static ObjectNode validation(io.github.dhluong90.bpm.rules.api.DraftValidation result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("valid", result.valid());
+        ArrayNode problems = node.putArray("problems");
+        for (io.github.dhluong90.bpm.rules.api.DraftValidation.Problem p : result.problems()) {
+            ObjectNode item = problems.addObject();
+            item.put("ruleId", p.ruleId());
+            item.put("column", p.column());
+            item.put("code", p.code());
+            if (p.position() == null) {
+                item.putNull("position");
+            } else {
+                item.put("position", p.position());
+            }
+            ObjectNode message = item.putObject("message");
+            new java.util.TreeMap<>(p.message()).forEach(message::put);
+        }
+        node.put("problemsTruncated", result.problemsTruncated());
+        ArrayNode readings = node.putArray("readings");
+        for (io.github.dhluong90.bpm.rules.api.DraftValidation.Reading r : result.readings()) {
+            ObjectNode item = readings.addObject();
+            item.put("ruleId", r.ruleId());
+            ObjectNode text = item.putObject("text");
+            new java.util.TreeMap<>(r.text()).forEach(text::put);
+        }
+        return node;
+    }
+
+    private static ObjectNode reading(io.github.dhluong90.bpm.rules.api.RuleReadings.Reading reading) {
+        return EngineJson.NODES.objectNode().put("full", reading.full()).put("short", reading.shortForm())
+                .put("source", reading.source());
+    }
+
+    private static ObjectNode readings(java.util.Map<String, io.github.dhluong90.bpm.rules.api.RuleReadings.Reading> byLanguage) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        new java.util.TreeMap<>(byLanguage).forEach((language, reading) -> node.set(language, reading(reading)));
+        return node;
+    }
+
+    private static ArrayNode strings(java.util.List<String> values) {
+        ArrayNode array = EngineJson.NODES.arrayNode();
+        values.forEach(array::add);
+        return array;
+    }
+
+    /** Writes the readings of every row of a version (RLE-091). Member order is fixed, so the body is repeatable. */
+    static ObjectNode ruleSetReadings(io.github.dhluong90.bpm.rules.api.RuleReadings.RuleSetReadings result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.set("languages", strings(result.languages()));
+        ArrayNode rows = node.putArray("rows");
+        for (io.github.dhluong90.bpm.rules.api.RuleReadings.Row row : result.rows()) {
+            ObjectNode item = rows.addObject();
+            item.put("ruleId", row.ruleId());
+            item.put("position", row.position());
+            item.set("readings", readings(row.readings()));
+        }
+        return node;
+    }
+
+    /** Writes the readings of the rows of a diff, in both versions (RLE-092). */
+    static ObjectNode readingsDiff(io.github.dhluong90.bpm.rules.api.RuleReadings.ReadingsDiff result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("base", result.base());
+        node.set("languages", strings(result.languages()));
+        ArrayNode rows = node.putArray("rows");
+        for (io.github.dhluong90.bpm.rules.api.RuleReadings.ChangedRow row : result.rows()) {
+            ObjectNode item = rows.addObject();
+            item.put("ruleId", row.ruleId());
+            item.put("change", row.change().name());
+            if (row.position() != null) {
+                item.put("position", row.position());
+            }
+            if (row.basePosition() != null) {
+                item.put("basePosition", row.basePosition());
+            }
+            item.put("readingChanged", row.readingChanged());
+            item.set("previous", readings(row.previous()));
+            item.set("current", readings(row.current()));
+        }
+        node.put("unchangedCount", result.unchangedCount());
+        return node;
+    }
+
+    private static JsonNode outcomeReading(io.github.dhluong90.bpm.rules.api.RuleReadings.OutcomeReading outcome) {
+        if (outcome == null) {
+            return EngineJson.NODES.nullNode();
+        }
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("kind", outcome.kind());
+        node.set("ruleIds", strings(outcome.ruleIds()));
+        node.set("readings", readings(outcome.readings()));
+        return node;
+    }
+
+    /** Writes the readings of a simulation result (RLE-093); no sample input is part of it. */
+    static ObjectNode simulationReadings(io.github.dhluong90.bpm.rules.api.RuleReadings.SimulationReadings result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.set("baselineVersion", EngineValues.value(result.baselineVersion()));
+        node.set("languages", strings(result.languages()));
+        ArrayNode samples = node.putArray("results");
+        for (io.github.dhluong90.bpm.rules.api.RuleReadings.SampleReading sample : result.samples()) {
+            ObjectNode item = samples.addObject();
+            item.put("index", sample.index());
+            item.put("reference", sample.reference());
+            item.set("label", EngineValues.value(sample.label()));
+            item.put("changed", sample.changed());
+            item.set("simulated", outcomeReading(sample.simulated()));
+            item.set("baseline", outcomeReading(sample.baseline()));
+        }
+        return node;
+    }
+
     /**
      * Writes a version diff (RLE-028, RLE-048). Field values are the canonical JSON the engine computed, embedded as
      * JSON; member order is fixed, so a repeated request returns a byte-identical body.

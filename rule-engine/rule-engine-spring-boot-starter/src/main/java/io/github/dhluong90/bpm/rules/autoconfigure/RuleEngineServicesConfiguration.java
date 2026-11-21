@@ -330,8 +330,9 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        SimulationController ruleEngineSimulationController(RuleEngine engine, CallerResolver callers) {
-            return new SimulationController(engine, callers);
+        SimulationController ruleEngineSimulationController(RuleEngine engine, VersionService versions,
+                CallerResolver callers) {
+            return new SimulationController(engine, versions, callers);
         }
 
         @Bean

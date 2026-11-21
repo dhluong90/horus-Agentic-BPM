@@ -205,7 +205,7 @@ final class VersionDiffs {
             }
             JsonNode a = from.get(member);
             JsonNode b = to.get(member);
-            if ((member.equals("when") || member.equals("then")) && isObjectOrAbsent(a) && isObjectOrAbsent(b)) {
+            if ((member.equals("when") || member.equals("then") || member.equals("explain")) && isObjectOrAbsent(a) && isObjectOrAbsent(b)) {
                 JsonNode left = a == null ? EngineValues.read("{}") : a;
                 JsonNode right = b == null ? EngineValues.read("{}") : b;
                 fields.addAll(members(left, right, "/" + member, Set.of(), member.equals("then")));

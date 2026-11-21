@@ -20,6 +20,7 @@ Design preview: describes the 0.1 target.
 |---|---|---|---|
 | 1. Create a draft from the current version | alice | `POST /api/bpm/rules/v1/rule-sets/card-fee/versions?copyOf=2` (or post an edited file as the body) | `201`, body contains `"version": 3, "status": "DRAFT"` |
 | 2. Edit the draft | alice | `PUT /api/bpm/rules/v1/rule-sets/card-fee/versions/3` with the full document | `200`; validation errors come back as `422 VALIDATION_FAILED` with row ids |
+| 2a. Check an edit without saving | alice | `POST .../versions/3:validate` with the edited document | `200`; `valid`, the cell problems with rule, column, code and an English and Vietnamese message, and a reading per rule; nothing is stored |
 | 3. Check it | alice | Simulate as in [[Rule Engine Simulation and Testing]] | Report of outputs per sample row |
 | 4. Request publication | alice | `POST .../versions/3:request-publish` | `200`, `"status": "PENDING_APPROVAL"`; the draft is now frozen |
 | 5. Review the diff | bob | `GET .../versions/3/diff?base=2`, or the Approvals screen in the [[Cockpit]] | Added, removed, changed and moved rows, changed columns, each input's masking status (`nationalId: MASKED to NOT_MASKED`) and any personal-data warning |
