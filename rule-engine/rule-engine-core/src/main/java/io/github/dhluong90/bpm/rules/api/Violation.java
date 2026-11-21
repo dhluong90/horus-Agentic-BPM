@@ -13,9 +13,24 @@ import java.util.Objects;
  *     {@code FORBIDDEN_CONSTRUCT} (RLE-004), or null for a problem that has none
  * @param position the zero-based character position of the problem in the cell text as written, or null when the
  *     problem concerns the cell as a whole or is not in a cell
+ * @param syntax for a {@code SYNTAX_ERROR}, what the parser expected at {@code position} as a stable kind such as
+ *     {@code CLOSE_PAREN} (#419); null for any other problem. A kind, never text of the cell
  */
-public record Violation(String ruleId, String column, String message, String code, Integer position)
+public record Violation(String ruleId, String column, String message, String code, Integer position, String syntax)
         implements Serializable {
+
+    /**
+     * Creates a problem with a code and a position and no syntax kind.
+     *
+     * @param ruleId the rule (row), or null
+     * @param column the input or output name (column), or null
+     * @param message the problem
+     * @param code the code, or null
+     * @param position the zero-based character position, or null
+     */
+    public Violation(String ruleId, String column, String message, String code, Integer position) {
+        this(ruleId, column, message, code, position, null);
+    }
 
     public Violation {
         Objects.requireNonNull(message, "message must not be null");

@@ -61,7 +61,12 @@ class ValidateDraftWebMvcTest {
                     }
                     return new DraftValidation("card-fee", 3, false,
                             List.of(new DraftValidation.Problem("R2", "balance", "TYPE_MISMATCH", 8,
-                                    Map.of("en", "The cell mixes values.", "vi", "Ô này trộn các giá trị."))),
+                                    Map.of("en", "The cell mixes values.", "vi", "Ô này trộn các giá trị.")),
+                            new DraftValidation.Problem("R3", "txCount", "SYNTAX_ERROR", 9,
+                                    Map.of("en", "The cell is not a valid expression.", "vi", "Ô này không hợp lệ."),
+                                    Map.of("en", "A closing parenthesis ) to match the opening one.",
+                                            "vi", "Dấu đóng ngoặc ) khớp với dấu mở ngoặc."),
+                                    "(balance + 100) > 0")),
                             false, List.of());
                 });
         mvc = MockMvcBuilders.standaloneSetup(new RuleSetController(service, callers))
@@ -125,5 +130,21 @@ class ValidateDraftWebMvcTest {
 
         assertThat(response.getStatus()).isEqualTo(409);
         assertThat(json(response).get("code").asString()).isEqualTo("INVALID_STATE");
+    }
+
+    @Test
+    void RLE_099_a_syntax_error_carries_the_expected_token_and_an_example_and_others_carry_none() throws Exception {
+        MockHttpServletResponse response = mvc.perform(post(URL).contentType("application/yaml")
+                .content("ruleSet: card-fee\n")).andReturn().getResponse();
+
+        JsonNode problems = json(response).get("problems");
+        JsonNode syntax = problems.get(1);
+        assertThat(syntax.get("code").asString()).isEqualTo("SYNTAX_ERROR");
+        assertThat(syntax.get("position").asInt()).isEqualTo(9);
+        assertThat(syntax.get("expected").get("en").asString()).isEqualTo("A closing parenthesis ) to match the opening one.");
+        assertThat(syntax.get("expected").get("vi").asString()).isEqualTo("Dấu đóng ngoặc ) khớp với dấu mở ngoặc.");
+        assertThat(syntax.get("example").asString()).isEqualTo("(balance + 100) > 0");
+        assertThat(problems.get(0).has("expected")).isFalse();
+        assertThat(problems.get(0).has("example")).isFalse();
     }
 }

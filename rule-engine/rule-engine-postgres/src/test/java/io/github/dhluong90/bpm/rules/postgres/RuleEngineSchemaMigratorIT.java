@@ -36,7 +36,7 @@ class RuleEngineSchemaMigratorIT {
 
         assertThat(result.initialVersion()).isNull();
         assertThat(result.currentVersion()).isEqualTo("30");
-        assertThat(result.migrationsExecuted()).isEqualTo(21);
+        assertThat(result.migrationsExecuted()).isEqualTo(22);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -126,9 +126,9 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.currentVersion()).isEqualTo("30");
-        assertThat(result.migrationsExecuted()).isEqualTo(21);
+        assertThat(result.migrationsExecuted()).isEqualTo(22);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "18", "19", "20", "21", "24", "25", "26", "30");
+                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "18", "19", "20", "21", "24", "25", "26", "28", "30");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }

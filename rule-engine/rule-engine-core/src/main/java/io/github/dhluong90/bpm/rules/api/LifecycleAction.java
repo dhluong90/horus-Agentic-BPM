@@ -15,5 +15,7 @@ public enum LifecycleAction {
     /** In four-eyes mode, a retirement was requested; the version stays published and serving (RLE-038). */
     RETIRE_REQUESTED,
     /** A pending retirement request was withdrawn with a reason; the version stays published (RLE-038). */
-    RETIRE_CANCELLED
+    RETIRE_CANCELLED,
+    /** The author discarded a draft that was no longer wanted (RLE-098); the version stays in the history. */
+    DISCARDED
 }

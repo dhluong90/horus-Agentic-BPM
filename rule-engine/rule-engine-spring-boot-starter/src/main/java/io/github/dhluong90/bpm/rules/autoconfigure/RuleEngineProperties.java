@@ -197,7 +197,9 @@ public record RuleEngineProperties(
      *     default. When set, the daily partition job drops each monthly partition that lies wholly before the host
      *     clock minus this period, and records the drop in {@code rle_decision_log_drop}; rows are never deleted.
      *     Never on by default: unset, every decision is kept, nothing is dropped, start-up is not affected and a WARN
-     *     is logged at every start-up (PD-130). Required at 1.0 (PD-050). A period must be at least {@code retention-floor}
+     *     is logged at every start-up (PD-130). Required from 1.0, outside the {@code dev} profile: unset then refuses
+     *     start-up naming this property (#373, PD-050).
+     *     A period must be at least {@code retention-floor}
      * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
      *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
      */
@@ -254,6 +256,15 @@ public record RuleEngineProperties(
          */
         public boolean keepForeverChosen() {
             return retention != null && KEEP_FOREVER.equals(retention.trim());
+        }
+
+        /**
+         * Tells whether the host left retention unset.
+         *
+         * @return true when no value, not even {@code keep-forever}, was given
+         */
+        public boolean retentionUnset() {
+            return retention == null || retention.isBlank();
         }
 
         /** The explicit value for "keep every decision", so a host can say so instead of leaving the setting unset. */

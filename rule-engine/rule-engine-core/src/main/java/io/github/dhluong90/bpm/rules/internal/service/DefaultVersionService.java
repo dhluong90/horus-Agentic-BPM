@@ -74,6 +74,7 @@ public final class DefaultVersionService implements VersionService {
     static final String EVENT_RETIRED = Supersession.EVENT_RETIRED;
     static final String EVENT_DRAFT_UPDATED = "rules.version.draft-updated.v1";
     static final String EVENT_WITHDRAWN = "rules.version.withdrawn.v1";
+    static final String EVENT_DISCARDED = "rules.version.discarded.v1";
     static final String EVENT_RETIRE_REQUESTED = "rules.version.retire-requested.v1";
 
     private static final String CURSOR_RULE_SETS = "rule-sets";
@@ -715,6 +716,37 @@ public final class DefaultVersionService implements VersionService {
             history(updated, LifecycleAction.WITHDRAWN, current.status(), actor, reason, now);
             event(tenant, EVENT_WITHDRAWN, updated, actor, now, opts.correlationId(), payload -> payload
                     .put("withdrawnBy", actor)
+                    .put("reason", reason));
+            return view(updated, false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public RuleSetVersion discard(String ruleSet, int version, WriteOptions options) {
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        EventEnvelope.requireValidCorrelationId(opts.correlationId());
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_AUTHOR);
+        String reason = optionalReason(opts.comment());
+        String requestHash = Hashes.sha256Parts("discard", actor, ruleSet, Integer.toString(version),
+                String.valueOf(opts.expectedLockVersion()), reason);
+        return context.idempotent(tenant, "discard", opts.idempotencyKey(), requestHash, 200, () -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.DRAFT) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "discard");
+            }
+            // As for replacing a draft: only its author may throw it away, so nobody removes another person's work.
+            if (!actor.equals(current.createdBy())) {
+                throw PermissionDeniedException.notAuthorToDiscard(ruleSet, version);
+            }
+            checkLock(current, opts);
+            Instant now = context.clock().instant();
+            StoredVersion updated = current.discarded();
+            store.updateVersion(updated, current.lockVersion());
+            history(updated, LifecycleAction.DISCARDED, current.status(), actor, reason, now);
+            event(tenant, EVENT_DISCARDED, updated, actor, now, opts.correlationId(), payload -> payload
+                    .put("discardedBy", actor)
+                    .put("canonicalHash", current.canonicalHash())
                     .put("reason", reason));
             return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);

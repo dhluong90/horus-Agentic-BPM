@@ -200,7 +200,7 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12, V14 to V21 and V24 to V26.
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12, V14 to V21 and V24 to V26 and V28.
         assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
                 "2 V2__rle_version_created_by.sql", "3 V3__rle_version_history.sql",
                 "4 V4__rle_version_history_append_only.sql", "5 V5__rle_engine_key.sql",
@@ -214,6 +214,7 @@ class RuleEngineOnlyHostIT {
                 "21 V21__rle_version_copied_from.sql",
                 "24 io.github.dhluong90.bpm.rules.postgres.migration.V24__rle_version_history_rule_set_events",
                 "25 V25__rle_decision_function_versions.sql", "26 V26__rle_version_function.sql",
+                "28 V28__rle_version_discarded.sql",
                 "30 io.github.dhluong90.bpm.rules.postgres.migration.V30__rle_version_pending_index");
     }
 
