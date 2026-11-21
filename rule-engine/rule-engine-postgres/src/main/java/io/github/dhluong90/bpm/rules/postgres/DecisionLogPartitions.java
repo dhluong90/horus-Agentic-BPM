@@ -131,7 +131,7 @@ public final class DecisionLogPartitions {
         return transactions.inNewTransaction(status -> {
             jdbc.sql("SET LOCAL lock_timeout = '5s'").update();
             jdbc.sql("SELECT pg_advisory_xact_lock(:key)").param("key", ADVISORY_LOCK_KEY)
-                    .query((rs, rowNum) -> rowNum).list();
+                    .query((rs, rowNum) -> rowNum).single();
             List<String> created = new ArrayList<>();
             for (YearMonth month : months) {
                 if (!exists(month)) {
@@ -216,7 +216,7 @@ public final class DecisionLogPartitions {
         return transactions.inNewTransaction(status -> {
             jdbc.sql("SET LOCAL lock_timeout = '2s'").update();
             jdbc.sql("SELECT pg_advisory_xact_lock(:key)").param("key", ADVISORY_LOCK_KEY)
-                    .query((rs, rowNum) -> rowNum).list();
+                    .query((rs, rowNum) -> rowNum).single();
             List<Dropped> dropped = new ArrayList<>();
             for (YearMonth month : expired(presentMonths(), cutoff)) {
                 dropped.add(drop(month, recorded, cutoff, now));
@@ -231,11 +231,8 @@ public final class DecisionLogPartitions {
      * @return the months in order
      */
     public List<YearMonth> presentMonths() {
-        List<String> names = jdbc.sql("""
-                SELECT child.relname FROM pg_inherits i
-                JOIN pg_class child ON child.oid = i.inhrelid
-                WHERE i.inhparent = 'rle_decision'::regclass
-                """).query(String.class).list();
+        List<String> names = RuleListQueries.DECISION_PARTITIONS.list(jdbc, java.util.Map.of(),
+                (rs, row) -> rs.getString("relname"));
         List<YearMonth> months = new ArrayList<>();
         for (String name : names) {
             Matcher matcher = MONTH_PARTITION.matcher(name);

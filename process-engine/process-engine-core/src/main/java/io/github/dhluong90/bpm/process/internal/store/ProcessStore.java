@@ -126,7 +126,17 @@ public interface ProcessStore {
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
             String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
-            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt, String reviewJson) {
+            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt, String reviewJson,
+            Instant dueAt) {
+
+        /** A task without a due time. */
+        public TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId,
+                String nodeId, String name, String assignee, boolean fourEyes, String status, long lockVersion,
+                String claimedBy, Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt,
+                String reviewJson) {
+            this(tenantId, id, instanceId, tokenId, definitionId, nodeId, name, assignee, fourEyes, status,
+                    lockVersion, claimedBy, claimedAt, completedBy, createdAt, completedAt, reviewJson, null);
+        }
 
         /** A task without review context. */
         public TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId,
@@ -208,6 +218,16 @@ public interface ProcessStore {
     void updateInstance(InstanceRow row);
 
     List<Token> tokens(String tenant, String instanceId);
+
+    /**
+     * When each token of the instance entered its current node, read through the instance's token index. Used for
+     * the duration of a step that waited in an earlier transaction ({@code processes.step.completed.v1}).
+     *
+     * @return token id to entry time; empty when the store keeps no entry times
+     */
+    default java.util.Map<String, java.time.Instant> tokenEnteredAt(String tenant, String instanceId) {
+        return java.util.Map.of();
+    }
 
     /** Inserts new tokens and updates changed ones. */
     void saveTokens(String tenant, String instanceId, String definitionId, List<Token> tokens, Instant now);

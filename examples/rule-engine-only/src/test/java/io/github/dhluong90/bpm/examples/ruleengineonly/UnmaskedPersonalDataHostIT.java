@@ -90,7 +90,9 @@ class UnmaskedPersonalDataHostIT {
 
             // RLE-053: bob's approval without the acknowledgement is 409 naming the warning, the input and the setting
             String approve = "/api/bpm/rules/v1/rule-sets/kyc-routing/versions/1:approve";
-            Reply unacknowledged = sendJson(port, bob, approve, "{\"comment\": \"ok\"}", "ack-1");
+            // The approval names the content bob reviewed (RLE-084): the hash the request answered with
+            String reviewed = "\"expectedCanonicalHash\": \"" + requested.json().path("canonicalHash").asString() + "\", ";
+            Reply unacknowledged = sendJson(port, bob, approve, "{" + reviewed + "\"comment\": \"ok\"}", "ack-1");
             assertThat(unacknowledged.status()).isEqualTo(409);
             assertThat(unacknowledged.json().path("code").asString()).isEqualTo("WARNINGS_NOT_ACKNOWLEDGED");
             JsonNode missing = unacknowledged.json().path("warnings").get(0);
@@ -102,7 +104,7 @@ class UnmaskedPersonalDataHostIT {
                     .path("status").asString()).isEqualTo("PENDING_APPROVAL");
             // With the code it is published, and the history shows the acknowledgement with the approval
             Reply approved = sendJson(port, bob, approve,
-                    "{\"comment\": \"ok\", \"acknowledgedWarnings\": [{\"code\": \"UNMASKED_PERSONAL_DATA\","
+                    "{" + reviewed + "\"comment\": \"ok\", \"acknowledgedWarnings\": [{\"code\": \"UNMASKED_PERSONAL_DATA\","
                             + " \"input\": \"nationalId\"}]}", "ack-2");
             assertThat(approved.status()).isEqualTo(200);
             assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
@@ -118,7 +120,7 @@ class UnmaskedPersonalDataHostIT {
             assertThat(approval.path("acknowledgedWarnings").get(0).path("input").asString()).isEqualTo("nationalId");
             assertThat(approval.path("maskedByDefaultInputs")).isEmpty();
             // A list of codes, the earlier shape, is 400 INPUT_INVALID
-            assertThat(sendJson(port, bob, approve, "{\"acknowledgedWarnings\": [\"UNMASKED_PERSONAL_DATA\"]}", "ack-3")
+            assertThat(sendJson(port, bob, approve, "{" + reviewed + "\"acknowledgedWarnings\": [\"UNMASKED_PERSONAL_DATA\"]}", "ack-3")
                     .status()).isEqualTo(400);
 
             // RLE-050: bank-b runs in strict mode, so the same import is 422 naming nationalId, and nothing is stored

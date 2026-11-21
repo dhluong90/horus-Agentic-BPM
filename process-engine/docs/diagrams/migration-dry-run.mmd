@@ -1,0 +1,37 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant O as Operator (processes:migration:manage)
+  end
+  box rgb(224,242,241) Host service
+    participant R as REST layer
+    participant M as MigrationService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_migration, pre_token, pre_instance
+  end
+  O->>R: POST /migrations, Idempotency-Key, key, sourceVersion 1, targetVersion 2
+  R->>M: plan(tenant and caller from the resolvers)
+  rect rgb(255,248,225)
+    Note over M,DB: TX1, sync: claim the key, check both versions, write the plan
+    M->>DB: read v1 and v2 of the tenant, models hash-checked
+    alt target not ACTIVE
+      M-->>R: 409 INVALID_STATE, nothing written
+    end
+    M->>DB: INSERT pre_migration (approval four-eyes), pre_migration_history PLANNED
+    M->>DB: processes.migration.planned.v1 through the host publisher, COMMIT
+  end
+  R-->>O: 201 plan, approval four-eyes, planHash
+  O->>R: POST /migrations/{id}:validate
+  R->>M: validate(tenant from the resolver)
+  rect rgb(232,245,233)
+    Note over M,DB: read only: no INSERT, UPDATE or DELETE, no approval needed
+    M->>DB: live tokens per step of v1 (idx_pre_token_live)
+    M->>M: map each step onto v2 by identical id (CPU only)
+    M->>DB: per conflicting step, count and first ids (V24 index)
+    M->>DB: running, movable sample (V25 index)
+  end
+  alt another tenant's plan
+    M-->>R: 404 MIGRATION_NOT_FOUND
+  end
+  R-->>O: 200 valid false, STEP_NOT_IN_TARGET legacy-review 50 loans, validUntil

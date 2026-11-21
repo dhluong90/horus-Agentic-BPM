@@ -27,6 +27,8 @@
 - [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]]
 - [[Process Engine: API|Process-Engine-API]]
 - [[Process Engine: guarded agent steps|Guarded-Agent-Steps]]
+- [[Process Engine: agent autonomy ladder and evaluation|Agent-Autonomy-Ladder-and-Eval-Guide]]
+- [[Process Engine: run an agent step in shadow|Agent-Shadow-Mode]]
 
 **Cockpit**: authors, approvers, operators
 - [[Cockpit: embed, approve, operate|Cockpit]]

@@ -85,10 +85,11 @@ test('CKP_037_approving_sends_the_accepted_code_and_publishes', async ({ page })
   const sent = page.waitForRequest((request) => request.method() === 'POST' && request.url().includes(':approve'));
   await page.getByRole('checkbox', { name: TEXT.en.accept }).check();
   await page.getByRole('button', { name: TEXT.en.approve }).click();
+  // The approval names the content the approver saw (PD-139): the canonical hash of the version on screen.
   expect((await sent).postDataJSON()).toEqual({ acknowledgedWarnings: [
     { code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' },
     { code: 'UNMASKED_PERSONAL_DATA', input: 'email' },
-  ] });
+  ], expectedCanonicalHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
   await expect(page.getByText('Version 2 is published.')).toBeVisible();
 });
 

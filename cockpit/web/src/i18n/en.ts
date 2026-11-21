@@ -352,6 +352,8 @@ export const en = {
   'try.noPermission': 'You cannot run rules on this service.',
   'problem.VALIDATION_FAILED': 'The service found a problem in the table.',
   'problem.SELF_APPROVAL_FORBIDDEN': 'You cannot approve a change you wrote or requested.',
+  'problem.CONTENT_CHANGED': 'The rules changed after you opened this version. Review it again before you decide.',
+  'problem.CONTENT_HASH_REQUIRED': 'This decision did not say which content you reviewed. Reload the page and decide again.',
   'problem.VERSION_CONFLICT': 'Someone changed this version. Reload it and try again.',
   'problem.WARNINGS_NOT_ACKNOWLEDGED': 'Approval needs your acceptance of the personal-data note.',
   'problem.INVALID_STATE': 'This version no longer allows this action.',

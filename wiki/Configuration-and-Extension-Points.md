@@ -43,7 +43,7 @@ Each is an interface with an engine default. Declare a bean of the same type and
 | `CurrencyRegistry` | rules | ISO 4217 scales | You trade a currency without an ISO scale, such as gold |
 | `DecisionExplainer` | rules | Explanation from a message catalogue per language (English and Vietnamese) | You want house wording or another language in API answers |
 | `LifecycleGuard` | both | Allows every transition | You need an extra check, such as a change ticket on retire. A guard can refuse; it can never let through what the engine refuses |
-| `BusinessCalendar` | processes | 24x7 | SLAs count business hours and holidays |
+| `BusinessCalendar` | processes | The tenant's stored calendars, changed under four eyes; elapsed time for a task without `horus:calendar` | Your calendars live in another system, such as core banking. Your bean gets the tenant of the instance and must not depend on the JVM's time zone |
 | `StepRegistry`, `FormRegistry`, `RoleCatalogue` | processes | Empty | You offer handlers, forms and roles to authors |
 | `AgentAdapter`, `ServiceAdapter` | processes | None | Your definitions call models or services |
 | Event publisher | both | Spring application events | Events go to an outbox or a bus |

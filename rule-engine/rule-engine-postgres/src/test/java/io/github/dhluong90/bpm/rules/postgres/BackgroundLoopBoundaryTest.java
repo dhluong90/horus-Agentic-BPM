@@ -131,7 +131,7 @@ class BackgroundLoopBoundaryTest {
         });
         RuleEnginePostgresIT.Caller caller = new RuleEnginePostgresIT.Caller();
         return PostgresRuleEngines.create(none, new RuleEngineTransactions(new DataSourceTransactionManager(none)),
-                caller, caller, Clock.systemUTC(), EngineSettings.defaults());
+                caller, caller, Clock.systemUTC(), EngineSettings.defaults().withRequireContentHash(false));
     }
 
     private static void await(java.util.function.BooleanSupplier condition) throws InterruptedException {

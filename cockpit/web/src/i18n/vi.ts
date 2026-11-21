@@ -354,6 +354,8 @@ export const vi: Record<MessageKey, string> = {
   'try.noPermission': 'Bạn không có quyền chạy quy tắc trên dịch vụ này.',
   'problem.VALIDATION_FAILED': 'Hệ thống phát hiện lỗi trong bảng.',
   'problem.SELF_APPROVAL_FORBIDDEN': 'Bạn không thể phê duyệt thay đổi do chính mình soạn hoặc gửi.',
+  'problem.CONTENT_CHANGED': 'Nội dung đã thay đổi sau khi bạn mở phiên bản này. Hãy xem lại trước khi quyết định.',
+  'problem.CONTENT_HASH_REQUIRED': 'Quyết định này không nêu nội dung bạn đã xem. Hãy tải lại trang rồi quyết định lại.',
   'problem.VERSION_CONFLICT': 'Phiên bản vừa bị người khác thay đổi. Hãy tải lại rồi thử lại.',
   'problem.WARNINGS_NOT_ACKNOWLEDGED': 'Cần bạn xác nhận ghi chú về dữ liệu cá nhân để phê duyệt.',
   'problem.INVALID_STATE': 'Phiên bản này không còn cho phép thao tác này.',

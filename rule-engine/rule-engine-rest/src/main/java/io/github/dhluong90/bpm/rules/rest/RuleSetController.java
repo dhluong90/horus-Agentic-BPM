@@ -240,9 +240,11 @@ public class RuleSetController {
         long lock = RestSupport.requiredIfMatch(ifMatch, ":approve");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String comment = null;
+        String expectedHash = null;
         java.util.List<io.github.dhluong90.bpm.rules.api.AcknowledgedWarning> acknowledged = new java.util.ArrayList<>();
         if (body.length > 0) {
             JsonNode node = EngineValues.readRequest(body);
+            expectedHash = expectedCanonicalHash(node);
             JsonNode value = node.get("comment");
             if (value != null && !value.isNull()) {
                 if (!value.isString()) {
@@ -269,11 +271,26 @@ public class RuleSetController {
             }
         }
         WriteOptions options = new WriteOptions(idempotencyKey, lock, comment,
-                ProblemDetails.correlationId(correlationId), acknowledged);
+                ProblemDetails.correlationId(correlationId), acknowledged).expectingContent(expectedHash);
         return RestSupport.version(HttpStatus.OK, versions.approve(name, version, options), callers);
     }
 
-    /** {@code POST /rule-sets/{name}/versions/{v}:reject}, body {@code {"reason": "..."}} required. */
+    /** The optional {@code expectedCanonicalHash} of a decision body: a string, or absent (RLE-084). */
+    private static String expectedCanonicalHash(JsonNode body) {
+        JsonNode value = body.get("expectedCanonicalHash");
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isString()) {
+            throw new InputInvalidException("expectedCanonicalHash must be a string");
+        }
+        return value.stringValue();
+    }
+
+    /**
+     * {@code POST /rule-sets/{name}/versions/{v}:reject}, body {@code {"reason": "...", "expectedCanonicalHash": "..."}},
+     * the reason required (RLE-084).
+     */
     @PostMapping("/{name}/versions/{version:\\d+}:reject")
     public ResponseEntity<byte[]> reject(
             @PathVariable("name") String name,
@@ -287,17 +304,20 @@ public class RuleSetController {
         long lock = RestSupport.requiredIfMatch(ifMatch, ":reject");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String reason = null;
+        String expectedHash = null;
         if (body.length > 0) {
-            JsonNode value = EngineValues.readRequest(body).get("reason");
+            JsonNode node = EngineValues.readRequest(body);
+            JsonNode value = node.get("reason");
             if (value != null && !value.isNull()) {
                 if (!value.isString()) {
                     throw new InputInvalidException("reason must be a string");
                 }
                 reason = value.stringValue();
             }
+            expectedHash = expectedCanonicalHash(node);
         }
         WriteOptions options = new WriteOptions(idempotencyKey, lock, reason,
-                ProblemDetails.correlationId(correlationId));
+                ProblemDetails.correlationId(correlationId)).expectingContent(expectedHash);
         return RestSupport.version(HttpStatus.OK, versions.reject(name, version, options), callers);
     }
 

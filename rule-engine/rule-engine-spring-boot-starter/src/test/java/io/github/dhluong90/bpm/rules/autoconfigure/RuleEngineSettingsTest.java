@@ -170,6 +170,23 @@ class RuleEngineSettingsTest {
     }
 
     @Test
+    void RLE_077_the_history_cap_of_a_comparison_defaults_to_50000_and_may_be_set_up_to_200000() {
+        runner.run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxHistoryDecisions())
+                .isEqualTo(50_000));
+        runner.withPropertyValues("horus.bpm.rules.simulation.max-history-decisions=5000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxHistoryDecisions())
+                        .isEqualTo(5_000));
+        runner.withPropertyValues("horus.bpm.rules.simulation.max-history-decisions=200000")
+                .run(context -> assertThat(context.getBean(EngineSettings.class).simulationMaxHistoryDecisions())
+                        .isEqualTo(200_000));
+        for (String value : new String[] {"0", "200001"}) {
+            runner.withPropertyValues("horus.bpm.rules.simulation.max-history-decisions=" + value)
+                    .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                            .hasMessageContaining("horus.bpm.rules.simulation.max-history-decisions must be 1 to 200000"));
+        }
+    }
+
+    @Test
     void RLE_082_the_step_budget_and_the_time_backstop_default_and_may_be_set() {
         runner.run(context -> assertThat(context.getBean(EngineSettings.class).evaluationLimits())
                 .isEqualTo(new EvaluationLimits(100_000, 10_000)));

@@ -93,7 +93,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-08 | Service steps run in the host transaction when local and through the `ServiceAdapter` SPI with the async protocol when remote | S1 | M2 | PE 7.2 API, 7.4 | | TR-ASY-01 | spec gap | PE-F-16 | |
 | PE-F-09 | A `decision` step evaluates a rule set in the host transaction and routes on its outputs | S1 | M2 | PE 7.4 | | TR-EMB-04 | spec gap | RE-F-01, RE-F-20 | |
 | PE-F-10 | Four-eyes: the requester or an earlier actor cannot complete an approval task | S2 | M2 | PE 7.2 Logic | PRE-007 | TR-SEC-04 | specified | PE-F-07 | |
-| PE-F-11 | SLA deadlines respect working hours, holidays and time zone per tenant and do not move when the calendar changes | S2 | M2 | PE 7.2 Logic, 7.2 API | PRE-008 | TR-CAL-01, TR-CAL-02 | specified | | |
+| PE-F-11 | SLA deadlines respect working hours, holidays and time zone per tenant and do not move when the calendar changes | S2 | M2 | PE 7.2 Logic, 7.2 API | PRE-008, PRE-114 | TR-CAL-01, TR-CAL-02 | specified | | PD-118, PD-131 |
 | PE-F-12 | A step starts a child process (`callProcess`) and waits for it | S1 | M2 (cut candidate) | PE 7.4 | | | spec gap | PE-F-26 | PD-031, PD-127 |
 | PE-F-13 | An overdue task escalates to the configured user or role | S2 | M2 | PE 7.4 | | TR-CAL-01 | spec gap | PE-F-11 | |
 | PE-F-14 | A tenant never reads or changes another tenant's definitions, instances, tasks or history | S1 | M2 | PE 7.4 | | TR-TEN-01, TR-TEN-02, TR-SEC-03 | spec gap | | |
@@ -114,8 +114,8 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-29 | A migration plan is validated as a dry run that changes nothing | S2 | M2 | PE 7.2 Logic | PRE-014 | TR-MIG-01 | specified | PE-F-01 | PD-017 |
 | PE-F-30 | A migration executes in batches; one instance's failure affects only that instance | S2 | M2 (cut candidate) | PE 7.2 Logic | PRE-015 | TR-MIG-02 | specified | PE-F-29 | PD-017, PD-031 |
 | PE-F-31 | A migration maps renamed steps explicitly and cancels removed steps | S2 | M3 | PE 7.4, 8 | | TR-MIG-03 | spec gap | PE-F-30 | |
-| PE-F-32 | Hosts get metrics for active instances, incidents and timer lag, and events for start, completion and incident | S1, S2 | M2 | PE 7.2 Observability | | TR-OBS-02, TR-OBS-04, TR-OBS-06 | spec gap | X-F-07 | |
-| PE-F-33 | Throughput of 1 000 step transitions per second per replica is measured and reported | S1 | M2 | PE 7.4 | | TR-PERF-04 | spec gap | | PD-026 |
+| PE-F-32 | Hosts get metrics for active instances, incidents and timer lag, and events for start, completion and incident | S1, S2 | M2 | PE 7.2 Observability | PRE-084, PRE-085, PRE-086 | TR-OBS-02, TR-OBS-04, TR-OBS-06 | specified | X-F-07 | |
+| PE-F-33 | Throughput of 1 000 step transitions per second per replica is measured and reported | S1 | M2 | PE 7.4 | PRE-087 | TR-PERF-04 | specified | | PD-026 |
 | PE-F-34 | An MCP tool adapter is available as an example outside the engine artifacts | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
 | PE-F-35 | Reference adapters for common model APIs are available in `examples/` | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
 | PE-F-36 | An agent receives bounded context from earlier steps as memory | S3 | M3 | PE 7.4, 8 | PRE-100, PRE-101, PRE-102 | TR-AGT-01, TR-AGT-02, TR-SEC-05 | specified | PE-F-22 | |
@@ -131,8 +131,8 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-46 | The engine API returns the graph diff between two definition versions: nodes and edges added, removed or changed | S2 | M2 | PE | | | spec gap | PE-F-45 | PD-033 |
 | PE-F-47 | An instance's activity history (nodes run, when, how long, attempts, who acted) is read bounded by the instance start | S2 | M2 | PE 7.2 Data | | TR-OBS-01 | spec gap | PE-F-15 | PD-032 |
 | PE-F-48 | Live counts of active tokens per node of a definition version, from an index, never from history | S2 | M2 | PE | | | spec gap | PE-F-01 | PD-038 |
-| PE-F-49 | Hourly rollup of counts, incidents and p50 and p95 durations per node, filled by the scheduler with a watermark, a few minutes behind | S2 | M3 | PE | | | spec gap | PE-F-15, PE-F-48 | PD-038 |
-| PE-F-50 | Tasks are queried by assignee, role, group, due date and SLA breach; the caller resolver supplies roles and groups | S2 | M2 | PE 7.4 | | TR-TEN-01 | spec gap | PE-F-07 | PD-035 |
+| PE-F-49 | Hourly rollup of counts, incidents and p50 and p95 durations per node, filled by the scheduler with a watermark, a few minutes behind | S2 | M3 | PE | PRE-029 | TR-PERF-10 | specified | PE-F-15, PE-F-48 | PD-038 |
+| PE-F-50 | Tasks are queried by assignee, role, group, due date and SLA breach; the caller resolver supplies roles and groups | S2 | M2 | PE 7.4 | PRE-030 | TR-TEN-01 | specified | PE-F-07 | PD-035 |
 | PE-F-51 | A `userTask` declares a form (JSON Schema with display hints) or a link to the host's own screen | S1, S2 | M2 | PE 7.4 | | | spec gap | PE-F-07 | PD-032 |
 | PE-F-52 | The host publishes a step catalogue: registered service and agent adapters with input schemas, rule sets that meet the guardrail contract, calendars and roles | S1, S3 | M3 | PE | | TR-SEC-01 | spec gap | PE-F-08, PE-F-24, PE-F-19 | PD-032 |
 | PE-F-53 | An architect exports a definition as a BPMN subset; elements outside the subset are named | S1 | M3 (cut candidate) | PE 8 | PRE-034 | TR-DEF-01 | spec gap | PE-F-41 | PD-034 |
@@ -281,16 +281,16 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 | Module | M0 | M1 | M2 | M3 | 1.1 (S1) | 1.2 (S2) | 1.3 (S3) | Later | Total |
 |---|---|---|---|---|---|---|---|---|---|
 | Rule Engine | 0 | 31 (17 / 14 / 0) | 2 (0 / 2 / 0) | 7 (1 / 6 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 4 (0 / 1 / 3) | 49 (18 / 23 / 8) |
-| Process Engine | 0 | 0 | 44 (21 / 23 / 0) | 11 (0 / 11 / 0) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (21 / 34 / 11) |
+| Process Engine | 0 | 0 | 44 (22 / 22 / 0) | 11 (0 / 11 / 0) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (22 / 33 / 11) |
 | Cockpit | 0 | 14 (7 / 7 / 0) | 16 (4 / 12 / 0) | 10 (1 / 9 / 0) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 0 | 3 (0 / 0 / 3) | 45 (12 / 28 / 5) |
 | Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 5 (1 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 4 (0 / 0 / 4) | 30 (12 / 12 / 6) |
-| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (26 / 39 / 0) | 33 (3 / 30 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 13 (0 / 1 / 12) | 190 (63 / 97 / 30) |
+| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (27 / 38 / 0) | 33 (3 / 30 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 13 (0 / 1 / 12) | 190 (64 / 96 / 30) |
 
 ![Features per module per milestone](images/fm-features-per-module.svg)
 
 The same counts as the table. Teal: engines; blue: cockpit; green: cross-cutting; purple: the standards track. Source: [diagrams/fm-features-per-module.mmd](diagrams/fm-features-per-module.mmd).
 
-Totals: 190 features; 63 specified, 97 spec gaps, 30 design previews. PD-089 (2026-11-19) moved RE-F-35, withdrawing one's own pending request, from later to M1 as a spec gap: M1 from 57 to 58, later from 13 to 12. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
+Totals: 190 features; 64 specified, 96 spec gaps, 30 design previews. PRE-030 (#70) specifies PE-F-50. PD-089 (2026-11-19) moved RE-F-35, withdrawing one's own pending request, from later to M1 as a spec gap: M1 from 57 to 58, later from 13 to 12. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
 
 The standards direction (PD-057, decided 2026-11-18) added 27 counted features. Foundations before 1.0: 10 (4 in M1, all Rule Engine; 5 in M2, 4 Process Engine and 1 Cockpit; 1 cross-cutting in M3), of which 8 are specified by SPEC statements already written and 2 are spec gaps. Standards track: 17 new design previews (11 in 1.1, 4 in 1.2, 2 in 1.3) and PE-F-40 moved from later to 1.2, for 18 in the track. No standards feature is a cut candidate: the foundations are the items that are expensive later.
 

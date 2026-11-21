@@ -127,7 +127,8 @@ public class RuleEngineAutoConfiguration {
         return RuleEngineModule.descriptor(properties.security().rolePermissions(), properties.authoring().cockpitDrafts(),
                 properties.toSettings(environment).retireApproval(),
                 properties.toSettings(environment).retireLastVersion(),
-                properties.toSettings(environment).acknowledgeWarnings());
+                properties.toSettings(environment).acknowledgeWarnings(),
+                properties.toSettings(environment).requireContentHash());
     }
 
     /**

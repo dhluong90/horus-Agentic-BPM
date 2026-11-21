@@ -43,7 +43,7 @@ class RequestRegexBudgetTest {
                 perRequest);
         RuleEngines engines = RuleEngines.create(new EngineContext(caller, caller,
                 Clock.fixed(Instant.parse("2027-01-15T02:00:00Z"), ZoneOffset.UTC), stores, stores,
-                EngineSettings.defaults().withRegexLimits(limits)), stores, stores, stores);
+                EngineSettings.defaults().withRequireContentHash(false).withRegexLimits(limits)), stores, stores, stores);
         caller.become("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(
                 RegexBoundsTest.screening(2).getBytes(StandardCharsets.UTF_8)));
@@ -130,7 +130,7 @@ class RequestRegexBudgetTest {
     @Test
     void RLE_007_the_request_budget_is_1_to_five_billion_and_defaults_to_fifty_million() {
         assertThat(RegexLimits.defaults().maxReadsPerRequest()).isEqualTo(50_000_000L);
-        assertThat(EngineSettings.defaults().regexLimits().maxReadsPerRequest()).isEqualTo(50_000_000L);
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).regexLimits().maxReadsPerRequest()).isEqualTo(50_000_000L);
         assertThat(new RegexLimits(50, 10, 1000, 1000, 5_000_000_000L).maxReadsPerRequest())
                 .isEqualTo(5_000_000_000L);
         assertThatThrownBy(() -> new RegexLimits(50, 10, 1000, 1000, 0))

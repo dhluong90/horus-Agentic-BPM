@@ -23,6 +23,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 record ListQuery(String name, Bound bound, String sql) {
 
     private static final Pattern LIMIT_PARAMETER = Pattern.compile("(?i)\\bORDER BY\\b.+\\bLIMIT \\?");
+    private static final Pattern ANY_LIMIT = Pattern.compile("(?i)\\bORDER BY\\b.+\\bLIMIT (\\?|\\d+)");
+    private static final Pattern SINGLE_COUNT = Pattern.compile("(?i)^SELECT count\\(\\*\\) FROM [a-z_]+ WHERE [^;]+$");
 
     /** Checks the SQL against the bound. */
     ListQuery {
@@ -50,6 +52,22 @@ record ListQuery(String name, Bound bound, String sql) {
                     throw new IllegalArgumentException("List query " + name + " declares the parent keys "
                             + parents.column() + " but does not filter tenant_id = ? and " + parents.column()
                             + " = ANY (?): " + sql);
+                }
+            }
+            case Bound.EngineSweep sweep -> {
+                String text = sql.toLowerCase(Locale.ROOT);
+                if (sweep.column() != null) {
+                    String column = "\\b(?:[a-z]+\\.)?" + sweep.column();
+                    if (!Pattern.compile(column + " >= \\?").matcher(text).find()
+                            || !Pattern.compile(column + " < \\?").matcher(text).find()) {
+                        throw new IllegalArgumentException("List query " + name + " declares an engine sweep over "
+                                + sweep.column() + " but has no range " + sweep.column() + " >= ? AND "
+                                + sweep.column() + " < ?: " + sql);
+                    }
+                } else if (!ANY_LIMIT.matcher(sql).find()
+                        && !(SINGLE_COUNT.matcher(sql).find() && !text.contains("group by"))) {
+                    throw new IllegalArgumentException("List query " + name + " declares an engine sweep without a "
+                            + "time range, so it needs ORDER BY ... LIMIT or must be a single count: " + sql);
                 }
             }
         }
@@ -111,6 +129,29 @@ record ListQuery(String name, Bound bound, String sql) {
                 if (!column.matches("[a-z_]+") || column.equals("tenant_id")) {
                     throw new IllegalArgumentException("A parent key is a column other than tenant_id, was " + column);
                 }
+            }
+        }
+
+        /**
+         * An engine-internal read across tenants, such as one slice of the statistics rollup or a metric gauge
+         * ({@code PRE-036}, DESIGN section 8.1). It has no {@code tenant_id = ?}: it takes no tenant from a caller,
+         * and its rows never go back to a caller. Use it only for reads the engine runs on its own schedule; a read on
+         * a request path is a {@link Page} or a parent-key bound of one tenant. Its SQL either has a range on both ends of
+         * {@code column}, or, when {@code column} is null, an {@code ORDER BY ... LIMIT} or a single {@code count(*)}
+         * that the plan check requires to read a partial index or an index condition.
+         *
+         * @param column the time column whose range bounds the rows, or null for a limit or a single count
+         * @param why what bounds the rows, such as the setting that caps the range, shown in a failing check
+         */
+        record EngineSweep(String column, String why) implements Bound {
+
+            /** Checks the column name. */
+            public EngineSweep {
+                if (column != null && (!column.matches("[a-z_]+") || column.equals("tenant_id"))) {
+                    throw new IllegalArgumentException("An engine sweep is bounded by a column other than tenant_id, "
+                            + "was " + column);
+                }
+                Objects.requireNonNull(why, "why");
             }
         }
     }

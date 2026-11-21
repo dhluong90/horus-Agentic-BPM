@@ -16,8 +16,9 @@ import java.util.List;
 final class ProcessListQueries {
 
     /**
-     * The live statuses, written exactly as in the predicate of {@code idx_pre_token_live} (V1), so the planner can
-     * answer the count with an index-only scan of that partial index and never touches {@code pre_history}.
+     * The live statuses, written exactly as in the predicates of {@code idx_pre_token_live} (V1) and
+     * {@code idx_pre_token_live_node_instance} (V24), so the planner can answer the count with an index-only scan of
+     * a partial index and never touches {@code pre_history}.
      */
     static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT')";
 
@@ -31,7 +32,7 @@ final class ProcessListQueries {
 
     static final String TASK_COLUMNS = "tenant_id, id, instance_id, token_id, definition_id, node_id, name, "
             + "assignee_user, assignee_role, assignee_group, four_eyes, status, lock_version, claimed_by, claimed_at, "
-            + "completed_by, created_at, completed_at, review::text AS review";
+            + "completed_by, created_at, completed_at, review::text AS review, due_at";
 
     /** Live tokens per node of one definition version (PRE-028). */
     static final ListQuery LIVE_COUNTS = new ListQuery("live-token-counts",
@@ -101,6 +102,92 @@ final class ProcessListQueries {
                     + "code, overridden, masked_fields FROM pre_agent_replay_case "
                     + "WHERE tenant_id = ? AND replay_id = ? AND seq > ? ORDER BY seq LIMIT ?");
 
+    /** Live tokens per step of one definition version, for a migration dry run (PRE-014). */
+    static final ListQuery MIGRATION_LIVE_NODES = new ListQuery("migration-live-nodes",
+            new Bound.ParentKey("definition_id", "one row per step of one definition version, at most its node count"),
+            "SELECT current_node_id, count(*) AS live FROM pre_token "
+                    + "WHERE tenant_id = ? AND definition_id = ? AND status IN " + LIVE_STATUSES + " "
+                    + "GROUP BY current_node_id");
+
+    /**
+     * The instances with a live token at one step of a definition version, in id order, on
+     * {@code idx_pre_token_live_node_instance} (V24). Parameters: tenant, definition id, step id, limit.
+     */
+    static final ListQuery MIGRATION_INSTANCES_AT_NODE = new ListQuery("migration-instances-at-node",
+            new Bound.Page("keyset on instance_id of idx_pre_token_live_node_instance (V24)"),
+            "SELECT DISTINCT instance_id FROM pre_token WHERE tenant_id = ? AND definition_id = ? "
+                    + "AND current_node_id = ? AND status IN " + LIVE_STATUSES + " ORDER BY instance_id LIMIT ?");
+
+    /**
+     * The running instances of a definition version with no live token at any of the given steps, in id order, on
+     * {@code idx_pre_instance_running_definition} (V25); each candidate is checked through
+     * {@code idx_pre_token_instance}. Parameters: tenant, definition id, the steps as a text array, limit.
+     */
+    static final ListQuery MIGRATION_MOVABLE_INSTANCES = new ListQuery("migration-movable-instances",
+            new Bound.Page("id order of idx_pre_instance_running_definition (V25)"),
+            "SELECT i.id FROM pre_instance i WHERE i.tenant_id = ? AND i.definition_id = ? AND i.status = 'RUNNING' "
+                    + "AND NOT EXISTS (SELECT 1 FROM pre_token t WHERE t.tenant_id = i.tenant_id "
+                    + "AND t.instance_id = i.id AND t.status IN " + LIVE_STATUSES + " "
+                    + "AND t.current_node_id = ANY (?::text[])) ORDER BY i.id LIMIT ?");
+
+    /** The entry time of each token of one instance (#110), for the duration of a completed step. */
+    static final ListQuery TOKEN_ENTERED_AT = new ListQuery("instance-token-entered-at",
+            new Bound.ParentKey("instance_id", "the tokens of one instance, at most a few per node of its definition"),
+            "SELECT id, entered_at FROM pre_token WHERE tenant_id = ? AND instance_id = ?");
+
+    /**
+     * One slice of the hourly step statistics rollup (#110), for every tenant: the events of the slice, each completed
+     * step with the entry time of its token through {@code idx_pre_history_instance}. The range is at most
+     * {@code stats.rollup-max-slice}; it is read through {@code idx_pre_history_time_brin} on every partition (V27)
+     * or, on PostgreSQL 18, a skip scan of the primary key. Parameters: from, to.
+     */
+    static final ListQuery ROLLUP_SLICE = new ListQuery("rollup-slice",
+            new Bound.EngineSweep("occurred_at", "one slice of at most stats.rollup-max-slice, by occurred_at"),
+            "SELECT h.tenant_id, h.definition_id, h.node_id, h.event_type, "
+                    + "h.occurred_at, CASE WHEN h.event_type = 'NODE_COMPLETED' THEN (SELECT max(e.occurred_at) "
+                    + "FROM pre_history e WHERE e.tenant_id = h.tenant_id AND e.instance_id = h.instance_id "
+                    + "AND e.occurred_at <= h.occurred_at AND e.event_type = 'NODE_ENTERED' AND e.token_id = h.token_id "
+                    + "AND e.node_id = h.node_id) END AS entered_at "
+                    + "FROM pre_history h WHERE h.occurred_at >= ? AND h.occurred_at < ? AND h.node_id IS NOT NULL "
+                    + "AND h.event_type IN ('NODE_ENTERED','NODE_COMPLETED','NODE_FAILED','INCIDENT_RAISED','SLA_BREACHED')");
+
+    /**
+     * The step sums of one definition version in a window (#110), on the primary key
+     * {@code (tenant_id, definition_id, bucket_start, node_id)} of {@code pre_node_stats_hourly}; the window is at
+     * most {@code query.max-range}. Parameters: tenant, definition, from, to.
+     */
+    static final ListQuery WINDOW_NODE_SUMS = new ListQuery("window-node-sums",
+            new Bound.ParentKey("definition_id", "one row per step of one definition version, a window of at most "
+                    + "query.max-range"),
+            "SELECT node_id, sum(entered_count) AS entered, sum(completed_count) AS "
+                    + "completed, sum(failed_count) AS failed, sum(incident_count) AS incidents, sum(sla_breach_count) AS "
+                    + "sla_breaches, sum(duration_sum_ms) AS duration_sum FROM pre_node_stats_hourly "
+                    + "WHERE tenant_id = ? AND definition_id = ? AND bucket_start >= ? AND bucket_start < ? GROUP BY node_id");
+
+    /** The duration histogram per step of one definition version in a window, on the same primary key. */
+    static final ListQuery WINDOW_NODE_HISTOGRAM = new ListQuery("window-node-histogram",
+            new Bound.ParentKey("definition_id", "one row per step and histogram bucket of one definition version, a "
+                    + "window of at most query.max-range"),
+            "SELECT s.node_id, u.k, sum(u.h)::bigint AS n "
+                    + "FROM pre_node_stats_hourly s CROSS JOIN LATERAL unnest(s.duration_hist) WITH ORDINALITY AS u(h, k) "
+                    + "WHERE s.tenant_id = ? AND s.definition_id = ? AND s.bucket_start >= ? AND s.bucket_start < ? "
+                    + "GROUP BY s.node_id, u.k");
+
+    /** The running instances of every tenant, for a gauge (#86): an index-only count of V25's partial index. */
+    static final ListQuery GAUGE_ACTIVE_INSTANCES = new ListQuery("gauge-active-instances",
+            new Bound.EngineSweep(null, "one count over idx_pre_instance_running_definition (V25), running rows only"),
+            "SELECT count(*) FROM pre_instance WHERE status = 'RUNNING'");
+
+    /** The open incidents of every tenant, for a gauge (#86): an index-only count of {@code idx_pre_incident_open}. */
+    static final ListQuery GAUGE_OPEN_INCIDENTS = new ListQuery("gauge-open-incidents",
+            new Bound.EngineSweep(null, "one count over idx_pre_incident_open, open rows only"),
+            "SELECT count(*) FROM pre_incident WHERE status = 'OPEN'");
+
+    /** The oldest due job of one kind, for a gauge (#86), on {@code idx_pre_timer_poll_kind}. Parameter: the kind. */
+    static final ListQuery GAUGE_OLDEST_DUE_JOB = new ListQuery("gauge-oldest-due-job",
+            new Bound.EngineSweep(null, "the first entry of idx_pre_timer_poll_kind for one kind, LIMIT 1"),
+            "SELECT next_fire_at FROM pre_timer WHERE job_kind = ? AND status = 'DUE' ORDER BY next_fire_at, id LIMIT 1");
+
     /** The first page of definition keys. */
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
@@ -110,6 +197,95 @@ final class ProcessListQueries {
             new Bound.ParentKey("instance_id", "the actors in the history of one instance, at most one per event"),
             "SELECT DISTINCT actor_id FROM pre_history WHERE tenant_id = ? AND instance_id = ? AND event_type = ? "
                     + "AND actor_id IS NOT NULL");
+
+    /** The holidays of one calendar (#72), at most {@code WorkingCalendar.MAX_HOLIDAYS}. */
+    static final ListQuery CALENDAR_HOLIDAYS = new ListQuery("calendar-holidays",
+            new Bound.ParentKey("calendar_id", "the holidays of one calendar, at most 2,000"),
+            "SELECT holiday_date, description FROM pre_holiday WHERE tenant_id = ? AND calendar_id = ? "
+                    + "ORDER BY holiday_date");
+
+    /** The columns of a task list item: the task and its instance's key, version and business key; no review. */
+    static final String TASK_SUMMARY_COLUMNS = "t.tenant_id, t.id, t.instance_id, t.node_id, t.name, t.assignee_user, "
+            + "t.assignee_role, t.assignee_group, t.status, t.lock_version, t.claimed_by, t.created_at, t.due_at, "
+            + "i.definition_key, i.definition_ver, i.business_key";
+
+    /**
+     * One range of the task query (#70, PRE-030; DESIGN section 8.2): the index that serves it and the predicate of
+     * that partial index, written exactly as in V22 so the planner can use it. The engine reads each range of a
+     * caller (their user, their claims, each role, each group) separately and merges the pages.
+     */
+    enum TaskRange {
+        /** Tasks declared to a user, open or claimed, on {@code idx_pre_task_mine}. */
+        MINE("assignee_user", "t.status IN ('OPEN','CLAIMED') AND t.assignee_user IS NOT NULL", "idx_pre_task_mine"),
+        /** Tasks a user claimed, on {@code idx_pre_task_claimed}. */
+        CLAIMED("claimed_by", "t.status = 'CLAIMED'", "idx_pre_task_claimed"),
+        /** Open tasks of one role, on {@code idx_pre_task_role_due}. */
+        ROLE("assignee_role", "t.status = 'OPEN' AND t.assignee_role IS NOT NULL", "idx_pre_task_role_due"),
+        /** Open tasks of one group, on {@code idx_pre_task_group}. */
+        GROUP("assignee_group", "t.status = 'OPEN' AND t.assignee_group IS NOT NULL", "idx_pre_task_group"),
+        /** Every open or claimed task of the tenant, on {@code idx_pre_task_open_due}. */
+        ANY(null, "t.status IN ('OPEN','CLAIMED')", "idx_pre_task_open_due");
+
+        private final String column;
+        private final String predicate;
+        private final String index;
+
+        TaskRange(String column, String predicate, String index) {
+            this.column = column;
+            this.predicate = predicate;
+            this.index = index;
+        }
+
+        /** @return whether the range takes a key: the user, role or group */
+        boolean keyed() {
+            return column != null;
+        }
+    }
+
+    /**
+     * The dated part of a range: tasks with a due time, by {@code (due_at, id)} after a key and before an upper
+     * bound. Parameters: tenant, [key], statuses (text array), after due time, after id, due before, limit.
+     */
+    static ListQuery datedTasks(TaskRange range) {
+        return new ListQuery("tasks-" + range.name().toLowerCase(java.util.Locale.ROOT) + "-dated",
+                new Bound.Page("earliest due first on " + range.index),
+                "SELECT " + TASK_SUMMARY_COLUMNS + " FROM pre_task t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
+                        + "AND i.id = t.instance_id WHERE t.tenant_id = ? "
+                        + (range.keyed() ? "AND t." + range.column + " = ? " : "")
+                        + "AND " + range.predicate + " AND t.status = ANY (?) "
+                        + "AND (t.due_at, t.id) > (?, ?) AND t.due_at < ? ORDER BY t.due_at, t.id LIMIT ?");
+    }
+
+    /**
+     * The undated part of a range: tasks without a due time, which follow the dated ones, by id. Ordered by
+     * {@code (due_at, id)} like the index, all due times being null, so the plan reads the index in order and never
+     * sorts. Parameters: tenant, [key], statuses (text array), after id, limit.
+     */
+    static ListQuery undatedTasks(TaskRange range) {
+        return new ListQuery("tasks-" + range.name().toLowerCase(java.util.Locale.ROOT) + "-undated",
+                new Bound.Page("tasks without a due time, by id, on " + range.index),
+                "SELECT " + TASK_SUMMARY_COLUMNS + " FROM pre_task t JOIN pre_instance i ON i.tenant_id = t.tenant_id "
+                        + "AND i.id = t.instance_id WHERE t.tenant_id = ? "
+                        + (range.keyed() ? "AND t." + range.column + " = ? " : "")
+                        + "AND " + range.predicate + " AND t.status = ANY (?) "
+                        + "AND t.due_at IS NULL AND t.id > ? ORDER BY t.due_at, t.id LIMIT ?");
+    }
+
+    private static final java.util.Map<TaskRange, ListQuery> DATED = taskQueries(true);
+    private static final java.util.Map<TaskRange, ListQuery> UNDATED = taskQueries(false);
+
+    private static java.util.Map<TaskRange, ListQuery> taskQueries(boolean dated) {
+        java.util.EnumMap<TaskRange, ListQuery> queries = new java.util.EnumMap<>(TaskRange.class);
+        for (TaskRange range : TaskRange.values()) {
+            queries.put(range, dated ? datedTasks(range) : undatedTasks(range));
+        }
+        return java.util.Collections.unmodifiableMap(queries);
+    }
+
+    /** @return the registered query of one part of a range */
+    static ListQuery tasks(TaskRange range, boolean dated) {
+        return (dated ? DATED : UNDATED).get(range);
+    }
 
     /** Due timers, for every tenant: the poll of each replica. */
     static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
@@ -123,11 +299,17 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, OPEN_INCIDENTS, STEP_RESULTS,
-                OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS, RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS,
-                DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
+                OPEN_INCIDENTS, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS, RECORDED_ANSWERS_AFTER, REPLAY_CASES,
+                DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
+                CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
+                TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
+                GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB,
                 instances(1, false, false, false, false),
-                instances(3, true, true, true, true));
+                instances(3, true, true, true, true)));
+        all.addAll(DATED.values());
+        all.addAll(UNDATED.values());
+        return List.copyOf(all);
     }
 
     /**

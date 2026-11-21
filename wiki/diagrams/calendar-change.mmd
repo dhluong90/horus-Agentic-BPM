@@ -1,0 +1,23 @@
+sequenceDiagram
+  autonumber
+  actor Kim as Kim (calendar manager)
+  actor Lan as Lan (second manager)
+  participant Cal as CalendarService
+  participant DB as pre_calendar, pre_holiday, pre_calendar_change
+  participant Eng as Task creation (step transaction)
+  Kim->>Cal: propose(vn-banking-hours, calendar, expectedVersion 1, reason)
+  Cal->>DB: lock calendar, check version 1, insert change PENDING
+  Kim->>Cal: approve(change)
+  Cal-->>Kim: 403 SELF_APPROVAL_FORBIDDEN, nothing written
+  Lan->>Cal: approve(change)
+  Cal->>DB: lock change and calendar, version still 1
+  alt calendar changed since the proposal
+    Cal-->>Lan: 409 VERSION_CONFLICT, change stays PENDING
+  else version matches
+    Cal->>DB: replace hours and holidays, version 2, change APPROVED by Lan
+    Cal-->>Lan: approved, event processes.calendar.changed.v1 names Kim and Lan
+  end
+  Note over Eng,DB: A new userTask with horus:sla reads the calendar in force
+  Eng->>DB: read vn-banking-hours of the instance tenant
+  Eng->>Eng: due_at = working time from the engine clock, in the calendar zone
+  Eng->>DB: insert pre_task with due_at, never recomputed

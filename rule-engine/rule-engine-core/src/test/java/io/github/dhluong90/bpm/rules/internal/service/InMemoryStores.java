@@ -222,6 +222,15 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public synchronized long countInPeriod(String tenantId, String ruleSet, Instant from, Instant to, int atMost,
+            java.time.Duration statementTimeout) {
+        return decisions.stream()
+                .filter(r -> r.tenantId().equals(tenantId) && r.ruleSet().equals(ruleSet))
+                .filter(r -> !r.createdAt().isBefore(from) && r.createdAt().isBefore(to))
+                .limit(atMost).count();
+    }
+
+    @Override
     public Optional<DecisionRecord> find(String tenantId, String id) {
         return decisions.stream().filter(d -> d.tenantId().equals(tenantId) && d.id().equals(id)).findFirst();
     }

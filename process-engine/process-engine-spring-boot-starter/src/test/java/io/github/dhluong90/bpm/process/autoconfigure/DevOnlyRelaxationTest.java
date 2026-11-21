@@ -54,6 +54,23 @@ class DevOnlyRelaxationTest {
     }
 
     @Test
+    void PRE_114_single_person_calendar_changes_are_refused_outside_dev() {
+        // PD-131: four eyes is the default; single is accepted only when dev is active on its own
+        String property = "horus.bpm.processes.calendar.approval";
+        assertThatThrownBy(() -> startUp(new String[] {"prod"}, property, "single"))
+                .hasMessageContaining("horus.bpm.processes.calendar.approval=single").hasMessageContaining("dev profile");
+        assertThatThrownBy(() -> startUp(new String[] {}, property, "single")).hasMessageContaining("dev profile");
+        assertThatThrownBy(() -> startUp(new String[] {"dev", "prod"}, property, "single"))
+                .hasMessageContaining("dev profile");
+        assertThatCode(() -> startUp(new String[] {"dev"}, property, "single")).doesNotThrowAnyException();
+        assertThatCode(() -> startUp(new String[] {"prod"}, property, "four-eyes")).doesNotThrowAnyException();
+        MockEnvironment defaults = new MockEnvironment();
+        assertThat(org.springframework.boot.context.properties.bind.Binder.get(defaults)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class).calendar().approval())
+                .isEqualTo(ProcessEngineProperties.CalendarApproval.FOUR_EYES);
+    }
+
+    @Test
     @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
     void PRE_019_start_up_logs_one_warn_for_the_requester_relaxation_and_none_for_makers(
             org.springframework.boot.test.system.CapturedOutput output) {

@@ -73,7 +73,7 @@ class RuleSetHistoryAndEvidenceTest {
 
     @BeforeEach
     void cardFeeWithThreeVersionsAndThreeDecisions() {
-        engines = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults(),
+        engines = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults().withRequireContentHash(false),
                 MaskingPolicy.withKey(MaskingKey.of(MaskedInputsTest.KEY_A))), stores, stores, stores);
         engines.cursorKeys().load();
         var versions = engines.versionService();
@@ -295,7 +295,7 @@ class RuleSetHistoryAndEvidenceTest {
 
         // A file over the limit is refused
         var small = new DefaultRuleSetHistoryService(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults()), stores, stores, stores, engines.cursorKeys(), 500);
+                EngineSettings.defaults().withRequireContentHash(false)), stores, stores, stores, engines.cursorKeys(), 500);
         assertThatThrownBy(() -> small.exportEvidence("card-fee", request(EvidenceFormat.CSV, List.of(1, 2), decisions,
                 null))).isInstanceOf(EvidenceTooLargeException.class);
 

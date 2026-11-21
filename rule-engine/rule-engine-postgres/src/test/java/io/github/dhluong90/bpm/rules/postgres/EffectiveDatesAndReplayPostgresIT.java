@@ -74,7 +74,7 @@ class EffectiveDatesAndReplayPostgresIT {
 
     RuleEngines engines(DataSource db) {
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
-        RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults());
+        RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();
         return engines;
     }

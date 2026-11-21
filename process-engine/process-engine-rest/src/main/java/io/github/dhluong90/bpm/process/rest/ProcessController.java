@@ -10,6 +10,7 @@ import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.InstanceQuery;
+import io.github.dhluong90.bpm.process.api.TaskQuery;
 import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
@@ -246,6 +247,135 @@ public class ProcessController {
     }
 
     /**
+     * Lists tasks by assignment, status, role, group, due date and missed deadline ({@code processes:task:work};
+     * {@code assignment=any} needs {@code processes:task:manage}; PRE-030). Ordered by {@code dueAt}, then
+     * {@code id}; tasks without a due time follow. Items carry no variables and no review context.
+     */
+    @GetMapping("/tasks")
+    public ResponseEntity<byte[]> taskList(@RequestParam(value = "assignment", required = false) String assignment,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "role", required = false) String role,
+            @RequestParam(value = "group", required = false) String group,
+            @RequestParam(value = "dueBefore", required = false) String dueBefore,
+            @RequestParam(value = "slaBreached", required = false) String slaBreached,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        boolean breached;
+        if (slaBreached == null || slaBreached.strip().equals("false")) {
+            breached = false;
+        } else if (slaBreached.strip().equals("true")) {
+            breached = true;
+        } else {
+            throw new QueryInvalidException("slaBreached must be true or false");
+        }
+        TaskQuery query = new TaskQuery(csv(assignment), csv(status), role, group, instantOf("dueBefore", dueBefore),
+                breached, new PageRequest(limitOf(limit), cursor));
+        return json(HttpStatus.OK, Views.page(queries.tasks(query), Views::taskSummary), null, null);
+    }
+
+    private static Set<String> csv(String value) {
+        Set<String> parts = new LinkedHashSet<>();
+        if (value != null) {
+            for (String part : value.split(",", -1)) {
+                parts.add(part.strip());
+            }
+        }
+        return parts;
+    }
+
+    /**
+     * Compares two stored versions of one key ({@code processes:read}, PRE-025, PRE-176): steps and links added,
+     * removed and changed, by BPMN id and name, never layout or XML. {@code base} defaults to the effective version.
+     * The {@code ETag} is derived from both definition hashes, so {@code If-None-Match} with it answers {@code 304}.
+     */
+    @GetMapping("/definitions/{key}/versions/{version}/diff")
+    public ResponseEntity<byte[]> diff(@PathVariable("key") String key, @PathVariable("version") String version,
+            @RequestParam(value = "base", required = false) String base,
+            @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
+        int target = versionNumber("version", version);
+        io.github.dhluong90.bpm.process.api.GraphDiff diff = base == null
+                ? definitions.diffFromEffective(DefinitionRef.of(key, target))
+                : definitions.diff(DefinitionRef.of(key, versionNumber("base", base)), DefinitionRef.of(key, target));
+        String etag = "\"" + io.github.dhluong90.bpm.process.internal.json.Hashes.sha256Parts("graph-diff.v1",
+                diff.base().definitionHash(), diff.target().definitionHash()) + "\"";
+        if (etag.equals(ifNoneMatch == null ? null : ifNoneMatch.strip())) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).header(HttpHeaders.ETAG, etag).build();
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.ETAG, etag)
+                .body(bytes(graphDiff(diff)));
+    }
+
+    private static int versionNumber(String name, String value) {
+        int number;
+        try {
+            number = Integer.parseInt(value.strip());
+        } catch (NumberFormatException e) {
+            throw new InputInvalidException(name + " must be a version number, for example 1");
+        }
+        if (number < 1) {
+            throw new InputInvalidException(name + " must be a version number, for example 1");
+        }
+        return number;
+    }
+
+    static ObjectNode graphDiff(io.github.dhluong90.bpm.process.api.GraphDiff d) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("definitionKey", d.definitionKey());
+        side(node.putObject("base"), d.base());
+        side(node.putObject("target"), d.target());
+        node.put("identical", d.identical());
+        tools.jackson.databind.node.ArrayNode added = node.putArray("nodesAdded");
+        d.nodesAdded().forEach(n -> step(added.addObject(), n));
+        tools.jackson.databind.node.ArrayNode removed = node.putArray("nodesRemoved");
+        d.nodesRemoved().forEach(n -> step(removed.addObject(), n));
+        tools.jackson.databind.node.ArrayNode changed = node.putArray("nodesChanged");
+        for (io.github.dhluong90.bpm.process.api.GraphDiff.NodeChange c : d.nodesChanged()) {
+            ObjectNode change = changed.addObject();
+            change.put("id", c.id());
+            putNullable(change, "name", c.name());
+            putNullable(change, "type", c.type());
+            change.put("path", c.path());
+            change.set("from", io.github.dhluong90.bpm.process.internal.json.Values.toJson(c.from()));
+            change.set("to", io.github.dhluong90.bpm.process.internal.json.Values.toJson(c.to()));
+        }
+        tools.jackson.databind.node.ArrayNode edgesAdded = node.putArray("edgesAdded");
+        d.edgesAdded().forEach(e -> edge(edgesAdded.addObject(), e));
+        tools.jackson.databind.node.ArrayNode edgesRemoved = node.putArray("edgesRemoved");
+        d.edgesRemoved().forEach(e -> edge(edgesRemoved.addObject(), e));
+        node.put("truncated", d.truncated());
+        return node;
+    }
+
+    private static void side(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Side side) {
+        node.put("version", side.version());
+        node.put("status", side.status());
+        node.put("definitionHash", side.definitionHash());
+    }
+
+    private static void step(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Node step) {
+        node.put("id", step.id());
+        putNullable(node, "name", step.name());
+        node.put("type", step.type());
+    }
+
+    private static void edge(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Edge edge) {
+        putNullable(node, "id", edge.id());
+        node.put("from", edge.from());
+        putNullable(node, "fromName", edge.fromName());
+        node.put("to", edge.to());
+        putNullable(node, "toName", edge.toName());
+        node.put("kind", edge.kind());
+    }
+
+    private static void putNullable(ObjectNode node, String name, String value) {
+        if (value == null) {
+            node.putNull(name);
+        } else {
+            node.put(name, value);
+        }
+    }
+
+    /**
      * Exports a definition version of the caller's tenant ({@code processes:read}, PRE-034). {@code format=bpmn}
      * returns BPMN 2.0 XML that imports back to the same {@code definitionHash}, which is also the {@code ETag}.
      */
@@ -432,14 +562,17 @@ public class ProcessController {
     }
 
     /**
-     * Live tokens per node of one definition version, from the live token index ({@code processes:read}, PRE-028).
-     * Only {@code mode=live} in this release; the window mode follows with the hourly rollup.
+     * Per node of one definition version: {@code mode=live} the live tokens from the live token index (PRE-028),
+     * {@code mode=window} the counts and typical durations of whole hours from the hourly rollup (PRE-029). Needs
+     * {@code processes:read}; both read the caller's tenant only.
      */
     @GetMapping("/definitions/{key}/versions/{version}/node-stats")
     public ResponseEntity<byte[]> nodeStats(@PathVariable("key") String key, @PathVariable("version") String version,
-            @RequestParam(value = "mode", defaultValue = "live") String mode) {
-        if (!"live".equals(mode)) {
-            throw new InputInvalidException("mode must be live in this release");
+            @RequestParam(value = "mode", defaultValue = "live") String mode,
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to) {
+        if (!"live".equals(mode) && !"window".equals(mode)) {
+            throw new InputInvalidException("mode must be live or window");
         }
         int number;
         try {
@@ -449,6 +582,12 @@ public class ProcessController {
         }
         if (number < 1) {
             throw new InputInvalidException("version must be a positive integer");
+        }
+        if ("window".equals(mode)) {
+            return windowStats(key, number, instant("from", from), instant("to", to));
+        }
+        if (from != null || to != null) {
+            throw new InputInvalidException("from and to apply to mode=window only");
         }
         NodeCounts counts = queries.liveNodeCounts(key, number);
         ObjectNode body = EngineJson.NODES.objectNode();
@@ -462,6 +601,56 @@ public class ProcessController {
             byStatus.forEach(statuses::put);
         });
         return json(HttpStatus.OK, body, counts.asOf().toEpochMilli(), null);
+    }
+
+    private ResponseEntity<byte[]> windowStats(String key, int version, java.time.Instant from, java.time.Instant to) {
+        io.github.dhluong90.bpm.process.api.NodeWindowStats stats = queries.nodeWindowStats(key, version, from, to);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("definitionKey", stats.definitionKey());
+        body.put("version", stats.version());
+        body.put("mode", "window");
+        body.put("from", stats.from().toString());
+        body.put("to", stats.to().toString());
+        if (stats.asOf() == null) {
+            body.putNull("asOf");
+            body.putNull("lagSeconds");
+        } else {
+            body.put("asOf", stats.asOf().toString());
+            body.put("lagSeconds", stats.lag().toSeconds());
+        }
+        ObjectNode nodes = body.putObject("nodes");
+        stats.nodes().forEach((node, figures) -> {
+            ObjectNode n = nodes.putObject(node);
+            n.put("entered", figures.entered());
+            n.put("completed", figures.completed());
+            n.put("failed", figures.failed());
+            n.put("incidents", figures.incidents());
+            n.put("slaBreaches", figures.slaBreaches());
+            putOrNull(n, "meanMs", figures.meanMs());
+            putOrNull(n, "p50Ms", figures.p50Ms());
+            putOrNull(n, "p95Ms", figures.p95Ms());
+        });
+        // The answer changes as the rollup advances, so it carries no ETag.
+        return json(HttpStatus.OK, body, null, null);
+    }
+
+    private static void putOrNull(ObjectNode node, String name, Long value) {
+        if (value == null) {
+            node.putNull(name);
+        } else {
+            node.put(name, value);
+        }
+    }
+
+    private static java.time.Instant instant(String name, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return java.time.Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new InputInvalidException(name + " must be a UTC time such as 2026-11-20T10:00:00Z");
+        }
     }
 
     /**

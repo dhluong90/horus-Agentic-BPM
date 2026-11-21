@@ -83,7 +83,7 @@ class MaskedInputsTest {
 
     RuleEngines engines(MaskingPolicy masking, Clock clock) {
         return RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults(), masking), stores, stores, stores);
+                EngineSettings.defaults().withRequireContentHash(false), masking), stores, stores, stores);
     }
 
     /** A clock the test moves forward. */

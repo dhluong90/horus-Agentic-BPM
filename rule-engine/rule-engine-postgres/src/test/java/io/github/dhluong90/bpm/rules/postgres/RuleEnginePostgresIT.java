@@ -78,7 +78,7 @@ class RuleEnginePostgresIT {
         new DecisionLogPartitions(db, transactions).ensureCurrentAndNextMonth(NOW);
         host = new TransactionTemplate(transactionManager);
         engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                EngineSettings.defaults());
+                EngineSettings.defaults().withRequireContentHash(false));
     }
 
     @Test
@@ -263,7 +263,7 @@ class RuleEnginePostgresIT {
         caller.as("bank-a", "teller-01");
 
         RuleEngines lenient = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults().withRejectUndeclaredInputs(false));
+                caller, caller, Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults().withRequireContentHash(false).withRejectUndeclaredInputs(false));
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("card-fee",
                 DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5, "nationalId", "079090001234"))))
                 .isInstanceOf(io.github.dhluong90.bpm.rules.api.InputInvalidException.class);

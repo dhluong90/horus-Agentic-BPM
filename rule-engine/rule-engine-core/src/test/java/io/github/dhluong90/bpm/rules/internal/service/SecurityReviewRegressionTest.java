@@ -41,7 +41,7 @@ class SecurityReviewRegressionTest {
     /** PRICING masks nationalId, so the engine needs a key; without one it fails closed (RLE-012). */
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults(), MaskingPolicy.withKey(MaskingKey.of(new byte[32]))),
+                    stores, stores, EngineSettings.defaults().withRequireContentHash(false), MaskingPolicy.withKey(MaskingKey.of(new byte[32]))),
             stores, stores, stores);
 
     /** A table that multiplies a money input by a decimal input, the shape the review probed. */
@@ -153,7 +153,7 @@ class SecurityReviewRegressionTest {
         MaskingKey key = MaskingKey.of(new byte[32]);
         RuleEngines lenient = RuleEngines.create(new EngineContext(caller, caller,
                 Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC), stores, stores,
-                EngineSettings.defaults().withRejectUndeclaredInputs(false), MaskingPolicy.withKey(key)),
+                EngineSettings.defaults().withRequireContentHash(false).withRejectUndeclaredInputs(false), MaskingPolicy.withKey(key)),
                 stores, stores, stores);
         publish(PRICING, "pricing");
         caller.become("bank-a", "teller", EVALUATE_ONLY);

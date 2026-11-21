@@ -102,14 +102,14 @@ class UnmaskedPersonalDataTest {
 
     VersionService versions() {
         RuleEngines engines = RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(JAN_15, ZoneOffset.UTC),
-                stores, stores, EngineSettings.defaults().withDraftAuthoring(true), policy), stores, stores, stores);
+                stores, stores, EngineSettings.defaults().withRequireContentHash(false).withDraftAuthoring(true), policy), stores, stores, stores);
         engines.cursorKeys().load();
         return engines.versionService();
     }
 
     RuleEngines engines() {
         return RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(JAN_15, ZoneOffset.UTC), stores,
-                stores, EngineSettings.defaults(), policy), stores, stores, stores);
+                stores, EngineSettings.defaults().withRequireContentHash(false), policy), stores, stores, stores);
     }
 
     static ImportRequest yaml(String text) {

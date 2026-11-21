@@ -195,6 +195,48 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `5 samples -> 5 results, 2 marked changed, 0 rle_decision inserts`.
 - **Test ID:** `RLE_016_sample_simulation_leaves_decision_log_untouched`
 
+### RLE-075 Two versions are compared over a month of logged decisions with totals side by side
+- **Traces to:** `TR-OBS-01`, `TR-DET-01`, `TR-DET-05`
+- **Milestone:** M3
+- **Given:** Tenant `bank-a`; `card-fee` v1 published (`R1` GOLD -> 0 VND, `R2` `txCount >= 3` -> 10000 VND, `R3` default -> 50000 VND); v2 `DRAFT`, equal except `R3` -> 30000 VND. January 2027 holds 10,000 logged `card-fee` decisions: 2,000 matched `R1`, 3,000 `R2` and 5,000 `R3`. Caller `thu` holds `rules:simulate` and `rules:log:read`.
+- **When:** `thu` posts `POST /api/bpm/rules/v1/rule-sets/card-fee:compare` with `{ "base": 1, "candidate": 2, "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z" }`, then repeats it. In Java: `RuleEngine.compare("card-fee", ComparisonRequest.of(1, 2, from, to))`.
+- **Then:** `200` with:
+  - `decisionsCompared: 10000`, `changedCount: 5000` (changed as in DESIGN 4.2.1: the outcome kind, an output value or the failure code differs).
+  - `outcomes` per side: `MATCHED 10000` for both.
+  - `totals` per numeric and money output, per currency, in minor units, as exact decimal text: `fee` VND `base` `"280000000"`, `candidate` `"180000000"`, `difference` `"-100000000"`.
+  - `transitions` (at most 20, ordered by count, then by output and value): `{ output: fee, from: 50000 VND, to: 30000 VND, count: 5000 }`.
+  - `from`, `to` and both canonical hashes (`baseCanonicalHash`, `candidateCanonicalHash`).
+  - `rle_decision`, the idempotency table, the outbox and the history gain no row, and no event is written. The repeat returns a byte-identical body, which holds no input, decision id or fingerprint.
+- **Example:** `v1 vs v2 over January -> 10000 compared, 5000 changed, fee 280000000 -> 180000000 VND (-100000000)`.
+- **Test ID:** `RLE_075_two_versions_are_compared_over_a_period_with_totals_side_by_side`
+
+### RLE-076 Decisions that cannot be re-evaluated are counted, never guessed
+- **Traces to:** `TR-SEC-05`, `TR-DET-05`
+- **Milestone:** M3
+- **Given:** `kyc-route` v1 does not read `nationalId`; v2 adds a condition on `nationalId` (`mask: true`); v3 has the content of v1. January holds 1,200 decisions. In 900 of them `nationalId` had a value, of which the log holds only the fingerprint. In 300 it was `null`.
+- **When:** `thu` compares v1 with v2 over January, then v1 with v3. (A version compared with itself is refused, `RLE-077`; v3 stands for it.)
+- **Then:**
+  - v1 against v2: the 900 decisions with a masked value are not evaluated and are reported as `skipped: { MASKED_INPUT: 900 }`. The 300 with `null` are compared, because a logged `null` is the real input. `decisionsCompared` is 300, and totals cover those 300 only.
+  - v1 against v3 compares all 1,200 with `changedCount: 0`, because a masked input that neither version reads does not prevent re-evaluation. The set of inputs a version reads is every input named by a rule condition or an output cell.
+  - Where a version reads an input that a logged decision does not hold, because the input was added later, the decision counts under `MISSING_INPUT`.
+  - No plain value and no fingerprint appears in the response.
+- **Example:** `v1 vs v2 -> skipped MASKED_INPUT 900, 300 compared; v1 vs v3 -> 1200 compared, 0 changed`.
+- **Test ID:** `RLE_076_decisions_that_cannot_be_reevaluated_are_counted_not_guessed`
+
+### RLE-077 A comparison is bounded, permission-checked and tenant-scoped
+- **Traces to:** `TR-SEC-03`, `TR-SEC-02`, `TR-TEN-01`
+- **Milestone:** M3
+- **Given:** As in `RLE-075`, plus `simulation.max-history-decisions` (default 50,000, from 1 to 200,000; PD-124) set to 5,000 in a test, and a caller `dan` with `rules:log:read` only.
+- **When:** The January comparison runs with the lowered cap; a 32-day period; `base` equal to `candidate`; `base` 9, which does not exist; a `bank-b` caller; `dan`; a run in which `evaluation.regex-max-reads-per-request` runs out part-way; a version whose stored document no longer matches its hash.
+- **Then:**
+  - The over-cap period is `422 HISTORY_TOO_LARGE`, naming the 10,000 decisions found and the setting (`found`, `atLeast`, `maxHistoryDecisions`). A sample is never taken, so totals are never partial. The count stops at the ceiling of 200,000 and then says `atLeast: true`.
+  - The 32-day period and equal versions are `400 QUERY_INVALID` (`query.max-range`, `candidate`). Version 9 is `404 VERSION_NOT_FOUND`. The `bank-b` caller gets `404 RULE_SET_NOT_FOUND`. `dan` gets `403 PERMISSION_DENIED`, because the comparison needs both `rules:simulate` and `rules:log:read`.
+  - The regex run is refused whole with `422 EVALUATION_ERROR`, `REGEX_TIMEOUT` in the detail, naming `evaluation.regex-max-reads-per-request`, and returns no partial totals.
+  - Each version is integrity-checked and compiled before any decision is read (`422 VALIDATION_FAILED` otherwise). Decisions are read page by page, so memory holds a page and not the period. Nothing is written in any case.
+  - A value of the setting outside 1 to 200,000 stops start-up naming `horus.bpm.rules.simulation.max-history-decisions`.
+- **Example:** `cap 5000, 10000 found -> 422 HISTORY_TOO_LARGE found 10000; 32 days -> 400 QUERY_INVALID query.max-range`.
+- **Test ID:** `RLE_077_comparison_is_bounded_permission_checked_and_tenant_scoped`
+
 ---
 
 ## Decision Log Partitions, Tenancy and Host Metadata
@@ -390,6 +432,19 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - Paging and the 31-day bound are as in `RLE-070`. The search writes nothing to the decision log. It needs `rules:log:read`; the masked search keeps its own permission and rate limit (`RLE-012`).
 - **Example:** `productCode = HOME-30Y -> 30 decisions; amount = 2500000000 VND -> 2; nationalId -> 400 QUERY_INVALID, use find-by-masked-input`.
 - **Test ID:** `RLE_071_decisions_are_found_by_a_plain_input_value_and_never_by_a_masked_one`
+
+### RLE-085 Every multi-row read of the Rule Engine store is a registered list query with a declared bound
+- **Traces to:** `TR-PERF-07`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** `rule-engine-postgres` with `RuleListQueries`, the registry of every statement that returns more than one row: the rule set, version and history pages, the rule set events, the decision log searches by rule set, by correlation id and by input, and the engine-internal sweeps. A seeded PostgreSQL with two tenants, 3,000 rule sets each and three monthly decision partitions.
+- **When:** The build runs the ArchUnit rule and the query-plan check on the oldest and the newest supported PostgreSQL; a store method is added that groups every decision of a tenant without the registry; a registered query is declared as a page without `LIMIT :limit`, without a tenant filter, or a decision search without a period on the partition key.
+- **Then:**
+  - Every multi-row read goes through `ListQuery.list`, and only the registry builds a `ListQuery`; the unregistered method fails the build and names the class and the call. The statements that do not keep their declared bound do not load.
+  - Each query declares one bound: a page (tenant, `ORDER BY`, `LIMIT :limit`), a page of the partitioned decision log (also a period `created_at >= :from AND created_at < :to`), the rows of one parent key, a set of named keys of one tenant, or a sweep across tenants that runs at start-up and says why it is small.
+  - `EXPLAIN (FORMAT JSON)` of each registered query, with sequential scans off, shows no sequential scan or whole-index walk of an engine table (a sweep may read its small table), a `Limit` for each page, an index condition on the key of each parent-key or key-set query, and for each decision search at most two monthly partitions for a 31-day period, one for an exact month, and never the default partition.
+  - No query changes its behaviour or result.
+- **Example:** `jdbc.sql("SELECT outcome, count(*) FROM rle_decision WHERE tenant_id = :tenant GROUP BY outcome").list() -> build fails: UnregisteredDecisionRead.outcomeCounts calls JdbcClient$MappedQuerySpec.list()`.
+- **Test ID:** `RLE_085_every_multi_row_read_of_the_store_is_a_registered_list_query`, `RLE_085_an_unregistered_group_by_over_the_decision_log_fails_the_build`, `RLE_085_a_page_query_without_order_by_and_limit_does_not_load`, `RLE_085_a_decision_page_without_a_period_on_the_partition_key_does_not_load`, `RLE_085_a_parent_key_or_key_set_query_must_filter_tenant_and_its_key`, `RLE_085_the_registry_holds_every_list_query_with_a_unique_name`, `RLE_085_list_queries_pass_query_plan_check`, `RLE_085_a_31_day_decision_search_reads_two_monthly_partitions_and_a_month_reads_one`, `RLE_085_a_group_by_over_the_decision_log_fails_the_plan_check`, `RLE_085_a_parent_key_without_an_index_fails_the_plan_check`
 
 ---
 
@@ -604,6 +659,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - **Order case:** `403 SELF_APPROVAL_FORBIDDEN`: four eyes is checked first, then the recorded author, then the lock version.
 - **Example:** `pending v1 without author -> bob approves -> 409 AUTHOR_UNKNOWN, nothing written; reject v1, lan imports v2 -> bob approves v2 -> PUBLISHED`.
 - **Test ID:** `RLE_054_a_pending_version_with_no_recorded_author_cannot_be_approved`
+
+### RLE-084 An approval or a rejection binds to the exact content that was reviewed
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`
+- **Milestone:** M1
+- **Given:**
+  - Tenant `bank-a`. `lan` authored `card-fee` v1 with `R2` at 10,000 VND and requested publication; `bob` holds `rules:approve` and reviewed that content, whose `canonicalHash` is `H1`, at lock version `L1`.
+  - `lan` then withdrew the request, replaced the draft with `R2` at 12,000 VND and requested publication again under the same number: the version is `PENDING_APPROVAL` with `canonicalHash` `H2` and lock version `L2`.
+- **When:**
+  1. `bob` approves with `If-Match: L2` (the refreshed lock version) and `expectedCanonicalHash: H1`; then rejects the same way.
+  2. `bob` sends `expectedCanonicalHash` that is not 64 lower-case hexadecimal characters.
+  3. `bob` approves with `expectedCanonicalHash: H2`, under the key step 1 used.
+  4. A client that names no `expectedCanonicalHash` approves, or rejects, with the current lock version: first on a host with the default `approval.require-content-hash` (true), then on a host that turned it off on the `dev` profile (PD-139).
+  5. A host starts with `approval.require-content-hash=false` on the `prod` profile, on `dev,prod`, and on `dev` alone.
+- **Then:**
+  - **Step 1** is `409 CONTENT_CHANGED` (not `VERSION_CONFLICT`, so a client that refreshes and retries on a conflict cannot re-bind the decision) for both, carrying `currentCanonicalHash: H2` and `currentLockVersion: L2` and saying the content changed since it was reviewed. The version stays `PENDING_APPROVAL` at `L2`; no history row, no event and no idempotency record is written, so nothing can be replayed. Through the Java API a `ContentChangedException`, with the same two values.
+  - **Step 2** is `400 INPUT_INVALID` naming `expectedCanonicalHash`; nothing is written.
+  - **Step 3** is `200` and the version is `PUBLISHED`: the key of a refused request is free.
+  - **Step 4** with the default is `400 CONTENT_HASH_REQUIRED` naming `expectedCanonicalHash`, for approve and for reject, answered before anything is read; nothing is written. With the setting off it works as before and publishes on the lock version alone.
+  - **Step 5** refuses start-up on `prod` and on `dev,prod`, naming `horus.bpm.rules.approval.require-content-hash=false` and the active profiles; `dev` alone (optionally with `test`) starts and logs a WARN. The setting is published in `/api/bpm/meta` as `approval.require-content-hash`.
+  - The order of checks is: permission, `If-Match` present, status, four eyes (then a recorded author), lock version, reviewed content, strict mode, acknowledgement. A stale lock version is still `409 VERSION_CONFLICT` first, and now names the current content too; a missing hash is refused before all of these, with the body. The cockpit sends the hash of the content the reviewer opened, never one read again at approval time. The hash is part of the idempotency request hash only when it is named, so a request stored before this field existed still replays.
+- **Example:** `approve v1 with If-Match 4 and hash of the 10000 VND content, content now 12000 VND at lock 4 -> 409 CONTENT_CHANGED, currentCanonicalHash = hash of 12000 VND`; `approve v1 with If-Match 4 and no hash -> 400 CONTENT_HASH_REQUIRED`.
+- **Test ID:** `RLE_084_an_approval_with_the_hash_of_the_current_content_publishes_as_before`, `RLE_084_a_decision_without_a_hash_is_refused_by_default_and_writes_nothing`, `RLE_084_a_decision_without_a_hash_is_allowed_when_the_requirement_is_off`, `RLE_084_turning_the_requirement_off_is_refused_outside_the_dev_profile`, `RLE_084_a_hash_that_no_longer_matches_is_CONTENT_CHANGED_with_the_current_hash_and_nothing_is_approved` and `RLE_084_approve_and_reject_send_the_hash_of_the_content_the_reviewer_opened_without_reading_it_again` (cockpit), `RLE_084_a_version_withdrawn_replaced_and_requested_again_is_refused_with_the_old_hash_even_with_the_new_lock`, `RLE_084_a_rejection_of_other_content_than_reviewed_is_refused_and_writes_nothing`, `RLE_084_a_stale_lock_version_is_still_refused_first_and_names_the_current_state`, `RLE_084_a_hash_that_is_not_64_lower_case_hexadecimal_characters_is_400_input_invalid`, `RLE_084_the_same_key_with_another_hash_is_not_a_replay`, `RLE_084_an_approval_or_rejection_of_other_content_than_reviewed_is_409_and_writes_nothing` (over HTTP), `RLE_084_an_approval_that_names_no_hash_is_400_content_hash_required` (over HTTP)
 
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 

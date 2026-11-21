@@ -151,7 +151,7 @@ class CacheCoherencePostgresIT {
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         RuleEnginePostgresIT.Caller caller = new RuleEnginePostgresIT.Caller();
         RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.systemUTC(),
-                EngineSettings.defaults());
+                EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();
         CacheCoherence coherence = new CacheCoherence(db, engines.cache(), checkInterval, listen);
         coherence.start();

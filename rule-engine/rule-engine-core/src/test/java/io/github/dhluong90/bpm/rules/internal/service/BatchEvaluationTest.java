@@ -43,13 +43,13 @@ class BatchEvaluationTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
 
     RuleEngines engines() {
-        return engines(EngineSettings.defaults());
+        return engines(EngineSettings.defaults().withRequireContentHash(false));
     }
 
     /** Rule sets are published through an engine with the default limits, then served by one with these settings. */
     RuleEngines engines(EngineSettings settings) {
         RuleEngines authoring = RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                stores, stores, EngineSettings.defaults()), stores, stores, stores);
+                stores, stores, EngineSettings.defaults().withRequireContentHash(false)), stores, stores, stores);
         publish(authoring, "bank-a", CardFee.yaml(), "card-fee");
         publish(authoring, "bank-a", CardFee.resource("/rules/loan-pricing.yaml"), "loan-pricing");
         caller.become("bank-a", "svc-eod", EVALUATE);
@@ -181,15 +181,15 @@ class BatchEvaluationTest {
 
     @Test
     void RLE_068_max_batch_may_be_lowered_and_never_raised() {
-        RuleEngines lowered = engines(EngineSettings.defaults().withMaxBatch(3));
+        RuleEngines lowered = engines(EngineSettings.defaults().withRequireContentHash(false).withMaxBatch(3));
         DecisionInput gold = DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5));
 
         assertThatThrownBy(() -> lowered.ruleEngine().evaluateBatch("card-fee", List.of(gold, gold, gold, gold)))
                 .isInstanceOf(BatchTooLargeException.class).hasMessageContaining("at most 3 items");
         assertThat(lowered.ruleEngine().evaluateBatch("card-fee", List.of(gold, gold, gold)).succeeded()).isEqualTo(3);
-        assertThatThrownBy(() -> EngineSettings.defaults().withMaxBatch(1001))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withMaxBatch(1001))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("evaluation.max-batch");
-        assertThatThrownBy(() -> EngineSettings.defaults().withMaxBatch(0))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withMaxBatch(0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("evaluation.max-batch");
     }
 
@@ -220,7 +220,7 @@ class BatchEvaluationTest {
         long budget = 6 * perRow + perRow / 2;
         RegexLimits limits = new RegexLimits(1000, 4096, RegexLimits.MAX_READS, RegexLimits.MAX_READS_PER_DECISION,
                 budget);
-        RuleEngines engines = engines(EngineSettings.defaults().withRegexLimits(limits));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withRegexLimits(limits));
         publish(engines, "bank-a", RegexBoundsTest.screening(2).getBytes(StandardCharsets.UTF_8),
                 "remittance-screening");
         caller.become("bank-a", "svc-eod", EVALUATE);
@@ -254,7 +254,7 @@ class BatchEvaluationTest {
     @Test
     void RLE_068_the_step_budget_is_per_item_so_one_heavy_item_fails_alone() {
         // Given a budget that a GOLD customer (first row) fits and a STANDARD customer (every row) does not
-        RuleEngines engines = engines(EngineSettings.defaults().withEvaluationLimits(new EvaluationLimits(6, 10_000)));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withEvaluationLimits(new EvaluationLimits(6, 10_000)));
         List<DecisionInput> items = List.of(
                 DecisionInput.of(Map.of("tier", "GOLD", "txCount", 5)),
                 DecisionInput.of(Map.of("tier", "STANDARD", "txCount", 0)),

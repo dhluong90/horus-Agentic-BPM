@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The workload of the throughput report (PRE-087): an exclusive gateway, local service steps, a one-second timer (the minimum the engine accepts, due as the
+     test clock moves) and a parallel fork and join, with no wait for a person, so every instance ends by itself. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_throughput-10-step"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="throughput-10-step" name="Throughput workload" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:exclusiveGateway id="route" default="route__prepare"/>
+    <bpmn:serviceTask id="prepare" horus:handler="load.step" horus:resultVariable="prepared"/>
+    <bpmn:serviceTask id="enrich" horus:handler="load.step" horus:resultVariable="enriched"/>
+    <bpmn:intermediateCatchEvent id="settle">
+      <bpmn:timerEventDefinition id="settle-timer">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT1S</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:parallelGateway id="fork"/>
+    <bpmn:serviceTask id="post-ledger" horus:handler="load.step" horus:resultVariable="posted"/>
+    <bpmn:serviceTask id="notify" horus:handler="load.step" horus:resultVariable="notified"/>
+    <bpmn:parallelGateway id="join"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="start__route" sourceRef="start" targetRef="route"/>
+    <bpmn:sequenceFlow id="route__enrich" sourceRef="route" targetRef="enrich">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">score &gt;= 700</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="route__prepare" sourceRef="route" targetRef="prepare"/>
+    <bpmn:sequenceFlow id="prepare__enrich" sourceRef="prepare" targetRef="enrich"/>
+    <bpmn:sequenceFlow id="enrich__settle" sourceRef="enrich" targetRef="settle"/>
+    <bpmn:sequenceFlow id="settle__fork" sourceRef="settle" targetRef="fork"/>
+    <bpmn:sequenceFlow id="fork__post-ledger" sourceRef="fork" targetRef="post-ledger"/>
+    <bpmn:sequenceFlow id="fork__notify" sourceRef="fork" targetRef="notify"/>
+    <bpmn:sequenceFlow id="post-ledger__join" sourceRef="post-ledger" targetRef="join"/>
+    <bpmn:sequenceFlow id="notify__join" sourceRef="notify" targetRef="join"/>
+    <bpmn:sequenceFlow id="join__end" sourceRef="join" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -40,12 +40,12 @@ describe('rules client', () => {
     const { sent, fetchImpl } = engineFetch();
     const client = createRulesClient('', fetchImpl);
     const pending = await client.getVersion('card-fee', 2);
-    const approved = await client.approve('card-fee', 2, pending.lockVersion, 'Checked', 'key-1');
+    const approved = await client.approve('card-fee', 2, pending.lockVersion, pending.canonicalHash, 'Checked', 'key-1');
     expect(approved.status).toBe('PUBLISHED');
     const post = sent[1];
     expect(post?.url).toBe('/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve');
     expect(post?.headers).toMatchObject({ 'idempotency-key': 'key-1', 'if-match': '"1"', 'x-xsrf-token': 'token-123', 'content-type': 'application/json' });
-    expect(JSON.parse(post?.body ?? '{}')).toEqual({ comment: 'Checked' });
+    expect(JSON.parse(post?.body ?? '{}')).toEqual({ expectedCanonicalHash: pending.canonicalHash, comment: 'Checked' });
     expect(sent[0]?.headers['x-xsrf-token']).toBeUndefined();
     document.cookie = 'XSRF-TOKEN=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
   });
@@ -65,9 +65,18 @@ describe('rules client', () => {
     // Lan wrote and requested card-fee v2; even holding rules:approve she cannot approve it.
     const { fetchImpl } = engineFetch('lan', ['rules:read', 'rules:author', 'rules:approve']);
     const client = createRulesClient('', fetchImpl);
-    const error: unknown = await client.approve('card-fee', 2, 1, undefined, 'key-2').catch((e: unknown) => e);
+    const error: unknown = await client.approve('card-fee', 2, 1, 'a'.repeat(64), undefined, 'key-2').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(HostCallError);
     expect(error instanceof HostCallError ? error.hostError : undefined).toMatchObject({ kind: 'problem', status: 403, code: 'SELF_APPROVAL_FORBIDDEN' });
+  });
+
+  it('RLE_084_a_hash_that_no_longer_matches_is_CONTENT_CHANGED_with_the_current_hash_and_nothing_is_approved', async () => {
+    const { fetchImpl } = engineFetch('minh');
+    const client = createRulesClient('', fetchImpl);
+    const stored = (await client.getVersion('card-fee', 2)).canonicalHash;
+    const error: unknown = await client.approve('card-fee', 2, 1, 'a'.repeat(64), undefined, 'key-c').catch((e: unknown) => e);
+    expect(error instanceof HostCallError ? error.hostError : undefined).toMatchObject({ kind: 'problem', status: 409, code: 'CONTENT_CHANGED', members: { currentCanonicalHash: stored } });
+    expect((await client.getVersion('card-fee', 2)).status).toBe('PENDING_APPROVAL');
   });
 
   it('RLE_039_rule_sets_page_with_a_cursor_until_the_last_page', async () => {
@@ -96,10 +105,11 @@ describe('rules client', () => {
   it('RLE_025_reject_sends_the_reason_with_if_match_and_a_key_and_is_recorded_in_history', async () => {
     const { sent, fetchImpl } = engineFetch('minh');
     const client = createRulesClient('', fetchImpl);
-    const rejected = await client.reject('card-fee', 2, 1, 'Needs committee minutes', 'key-r');
+    const reviewed = (await client.getVersion('card-fee', 2)).canonicalHash;
+    const rejected = await client.reject('card-fee', 2, 1, reviewed, 'Needs committee minutes', 'key-r');
     expect(rejected).toMatchObject({ status: 'DRAFT', requestedBy: null });
-    expect(sent[0]?.headers).toMatchObject({ 'idempotency-key': 'key-r', 'if-match': '"1"' });
-    expect(JSON.parse(sent[0]?.body ?? '{}')).toEqual({ reason: 'Needs committee minutes' });
+    expect(sent[1]?.headers).toMatchObject({ 'idempotency-key': 'key-r', 'if-match': '"1"' });
+    expect(JSON.parse(sent[1]?.body ?? '{}')).toEqual({ reason: 'Needs committee minutes', expectedCanonicalHash: reviewed });
     const history = await client.getHistory('card-fee', 2);
     expect(history.map((h) => [h.action, h.actor, h.reason ?? null])).toEqual([['CREATED', 'lan', null], ['REQUESTED', 'lan', null], ['REJECTED', 'minh', 'Needs committee minutes']]);
   });

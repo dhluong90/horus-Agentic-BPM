@@ -146,6 +146,13 @@ class EvaluationMetricsIT {
     }
 
     Reply send(String user, String method, String path, byte[] body, String contentType) throws Exception {
+        if (ReviewedContent.decides(path)) {
+            byte[] bound = ReviewedContent.withHash(path, body, p -> send(user, "GET", p, null, null).body());
+            if (bound != body && contentType == null) {
+                contentType = "application/json";
+            }
+            body = bound;
+        }
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(path))
                 .header("Authorization", TestTokens.bearer(user))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()

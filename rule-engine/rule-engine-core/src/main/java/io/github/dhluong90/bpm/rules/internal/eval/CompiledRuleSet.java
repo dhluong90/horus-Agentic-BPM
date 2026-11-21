@@ -754,7 +754,9 @@ public final class CompiledRuleSet {
 
     /**
      * Returns the inputs that any rule condition or output cell reads, as against the inputs the table merely
-     * declares. An offline replay uses it to tell whether a field it could not keep makes a difference.
+     * declares. An offline replay uses it to tell whether a field it could not keep makes a difference, and a logged
+     * value of an input the table never reads (a masked one, say) does not stop the table being evaluated again
+     * (RLE-076).
      *
      * @return the input names, sorted
      */
