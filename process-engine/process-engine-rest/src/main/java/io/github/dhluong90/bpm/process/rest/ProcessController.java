@@ -326,8 +326,10 @@ public class ProcessController {
     static ObjectNode graphDiff(io.github.dhluong90.bpm.process.api.GraphDiff d) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("definitionKey", d.definitionKey());
-        side(node.putObject("base"), d.base());
-        side(node.putObject("target"), d.target());
+        // PRE-177 (PD-139): a cut-off change list carries no hash that may be approved, on either side.
+        side(node.putObject("base"), d.base(), !d.truncated());
+        side(node.putObject("target"), d.target(), !d.truncated());
+        putNullable(node, "approvableHash", d.approvableHash());
         node.put("identical", d.identical());
         tools.jackson.databind.node.ArrayNode added = node.putArray("nodesAdded");
         d.nodesAdded().forEach(n -> step(added.addObject(), n));
@@ -351,10 +353,13 @@ public class ProcessController {
         return node;
     }
 
-    private static void side(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Side side) {
+    private static void side(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Side side,
+            boolean withHash) {
         node.put("version", side.version());
         node.put("status", side.status());
-        node.put("definitionHash", side.definitionHash());
+        if (withHash) {
+            node.put("definitionHash", side.definitionHash());
+        }
     }
 
     private static void step(ObjectNode node, io.github.dhluong90.bpm.process.api.GraphDiff.Node step) {

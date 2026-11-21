@@ -41,6 +41,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [INCIDENT_NOT_FOUND](#incident_not_found) | processes | 0.3.0 |
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
 | 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
+| 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
 | 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
@@ -234,7 +235,10 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `400`. An approval of a process definition version did not name `expectedDefinitionHash`, the `definitionHash` of the content the approver reviewed, while `horus.bpm.processes.approval.require-content-hash` is on (the default, PD-139). Nothing is read or written. Send the hash shown with the version you reviewed. Only the `dev` profile may turn the setting off.
 
 ### CONTENT_CHANGED
-`409`. The stored content of the definition version is not the content the approver reviewed: `expectedDefinitionHash` differs from its `definitionHash`. The body carries `currentDefinitionHash` and `currentLockVersion`. Nothing is written, published or recorded. Show the approver the current content and its changes again; never retry with the new hash on your own, because that would approve content nobody reviewed. A change list that was cut off at its limit has no hash to approve: read every page first.
+`409`. The stored content of the definition version is not the content the approver reviewed: `expectedDefinitionHash` differs from its `definitionHash`. The body carries `currentDefinitionHash` and `currentLockVersion`. Nothing is written, published or recorded. Show the approver the current content and its changes again; never retry with the new hash on your own, because that would approve content nobody reviewed. A change list that was cut off at its limit has no hash to approve, see [CHANGE_SET_TRUNCATED](#change_set_truncated).
+
+### CHANGE_SET_TRUNCATED
+`409`. An approval of a process definition version named a hash, but the change list from the effective version to this one has more than 1,000 changed values and is cut off, so nobody can have reviewed it complete (PD-139). The diff of such a pair has `approvableHash: null` and no `definitionHash` on either side. Nothing is written. Until the diff is paged, such a version can be approved only on the `dev` profile with `horus.bpm.processes.approval.require-content-hash=false`.
 
 ### OUTPUT_INVALID
 `422`. The output an operator proposed to resolve an incident breaks the step's output schema. `paths` lists each failing path and rule, for example `$.riskScore: expected integer`, never a value. Nothing is written. Correct the output and propose again.

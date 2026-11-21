@@ -36,6 +36,17 @@ public record GraphDiff(String definitionKey, Side base, Side target, List<Node>
         edgesRemoved = List.copyOf(edgesRemoved);
     }
 
+    /**
+     * The hash an approval of the target may name after a reviewer read this diff (PRE-177, PD-139): the target's
+     * {@code definitionHash} when the change list is complete, and null when it is {@link #truncated()}, because a
+     * change list cut off at its limit is not the content anybody reviewed.
+     *
+     * @return the target's definition hash, or null when truncated
+     */
+    public String approvableHash() {
+        return truncated ? null : target.definitionHash();
+    }
+
     /** @return true when the two versions have the same steps, values and links */
     public boolean identical() {
         return nodesAdded.isEmpty() && nodesRemoved.isEmpty() && nodesChanged.isEmpty() && edgesAdded.isEmpty()

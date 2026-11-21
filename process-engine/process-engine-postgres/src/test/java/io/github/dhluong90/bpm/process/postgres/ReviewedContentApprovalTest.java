@@ -3,11 +3,13 @@ package io.github.dhluong90.bpm.process.postgres;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.dhluong90.bpm.process.api.ChangeSetTruncatedException;
 import io.github.dhluong90.bpm.process.api.ContentChangedException;
 import io.github.dhluong90.bpm.process.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
+import io.github.dhluong90.bpm.process.api.GraphDiff;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
@@ -170,6 +172,67 @@ class ReviewedContentApprovalTest {
         // Then nothing is written
         assertThat(footprint()).isEqualTo(before);
         assertThat(stored(1).status()).isEqualTo("PENDING_APPROVAL");
+    }
+
+    /** kyc-onboarding with 400 review steps in a row; {@code label} and {@code role} name and assign every one. */
+    private static byte[] longKyc(String label, String role) {
+        StringBuilder steps = new StringBuilder("<bpmn:startEvent id=\"start\" name=\"Application received\"/>");
+        String previous = "start";
+        for (int i = 0; i < 400; i++) {
+            String id = "review-" + String.format("%03d", i);
+            steps.append("<bpmn:userTask id=\"%s\" name=\"%s %d\" horus:assignee=\"role:%s\" horus:resultVariable=\"%s%d\"/>"
+                    .formatted(id, label, i, role, label.toLowerCase(java.util.Locale.ROOT), i));
+            steps.append("<bpmn:sequenceFlow id=\"%s__%s\" sourceRef=\"%s\" targetRef=\"%s\"/>"
+                    .formatted(previous, id, previous, id));
+            previous = id;
+        }
+        steps.append("<bpmn:endEvent id=\"end\" name=\"Account opened\"/>");
+        steps.append("<bpmn:sequenceFlow id=\"last__end\" sourceRef=\"%s\" targetRef=\"end\"/>".formatted(previous));
+        return ("<?xml version=\"1.0\" encoding=\"UTF-8\"?><bpmn:definitions "
+                + "xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" xmlns:horus=\"urn:horus-bpm:bpmn:extensions:v1\" "
+                + "id=\"Definitions_kyc-onboarding\" targetNamespace=\"urn:horus-bpm:examples\" "
+                + "expressionLanguage=\"urn:horus-bpm:expr:v1\"><bpmn:process id=\"kyc-onboarding\" name=\"KYC onboarding\" "
+                + "isExecutable=\"true\">" + steps + "</bpmn:process></bpmn:definitions>").getBytes(StandardCharsets.UTF_8);
+    }
+
+    private DefinitionVersion pendingDocument(byte[] document) {
+        engine.identity.as("bank-a", "pipeline", PIPELINE);
+        DefinitionVersion draft = engine.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML, document,
+                null));
+        engine.identity.as("bank-a", "alice", AUTHOR);
+        return engine.services.requestApproval(draft.ref(), draft.lockVersion(), null, null);
+    }
+
+    @Test
+    void PRE_177_a_truncated_diff_exposes_no_approvable_hash_and_an_approval_against_it_is_refused() {
+        // Given v1 active, and v2 pending with every one of 400 steps renamed, reassigned and given another result
+        // variable: 1,200 changed values, more than a diff lists
+        DefinitionVersion v1 = pendingDocument(longKyc("Review", "KYC_OFFICER"));
+        engine.identity.as("bank-a", "bob", APPROVER);
+        engine.services.approve(v1.ref(), v1.lockVersion(), v1.definitionHash(), null, "ap-t1");
+        DefinitionVersion v2 = pendingDocument(longKyc("Check", "RISK_OFFICER"));
+
+        // When bob reads the diff against the effective version
+        engine.identity.as("bank-a", "bob", APPROVER);
+        GraphDiff diff = engine.services.diffFromEffective(v2.ref());
+
+        // Then it is cut off and offers no hash to approve
+        assertThat(diff.truncated()).isTrue();
+        assertThat(diff.nodesChanged()).hasSize(GraphDiff.MAX_CHANGES);
+        assertThat(diff.approvableHash()).isNull();
+
+        // And an approval naming v2's hash anyway is refused, writing, publishing and recording nothing
+        Map<String, Object> before = footprint();
+        long events = approvedEvents();
+        assertThatThrownBy(() -> engine.services.approve(v2.ref(), v2.lockVersion(), v2.definitionHash(), null,
+                "ap-t2"))
+                .isInstanceOfSatisfying(ChangeSetTruncatedException.class,
+                        e -> assertThat(e.code()).isEqualTo("CHANGE_SET_TRUNCATED"));
+        assertThat(footprint()).isEqualTo(before);
+        assertThat(approvedEvents()).isEqualTo(events);
+        assertThat(stored(2).status()).isEqualTo("PENDING_APPROVAL");
+        assertThat(TestEngine.jdbc().sql("SELECT count(*) FROM pre_idempotency WHERE idempotency_key = 'ap-t2'")
+                .query(Long.class).single()).isZero();
     }
 
     @Test

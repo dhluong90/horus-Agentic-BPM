@@ -232,8 +232,10 @@ paths:
         answer is `409 CONTENT_CHANGED` with `currentDefinitionHash` and `currentLockVersion`, and nothing is written,
         published or recorded; the check runs after the status, four-eyes and lock-version checks. The approval's
         history row and `processes.definition.approved.v1` record `reviewedDefinitionHash`. A change list between two
-        versions that was cut off at its limit carries no hash that may be approved: a client offers Approve only once
-        it has shown the complete change set.
+        versions that was cut off at its limit carries no hash that may be approved: the diff then has
+        `approvableHash: null` and no `definitionHash` on either side, and an approval naming a hash is
+        `409 CHANGE_SET_TRUNCATED` when the change list from the effective version to this one is cut off; nothing is
+        written. Until the diff is paged, such a version is approved only on the `dev` profile without a hash.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -438,7 +440,9 @@ paths:
         `(from, to, kind)`, where `kind` is `next`, `branch[i]` (the i-th conditional branch of an exclusive gateway,
         from 0), `default` or `fork`. Every element carries its BPMN id and readable name. Layout is never part of
         the diff and no XML is returned. Every list is sorted, so the same two versions always give the same body.
-        At most 1,000 changed values are listed, with `truncated: true` beyond.
+        At most 1,000 changed values are listed, with `truncated: true` beyond. `approvableHash` is the target's
+        `definitionHash`, the value an approval names after this review (PD-139); a truncated diff is not a complete
+        review, so it has `approvableHash: null` and omits `definitionHash` on both sides.
 
         `base` defaults to the effective version of the key; without one the answer is `404 NO_EFFECTIVE_VERSION`.
         A version that does not exist in the caller's tenant is `404 DEFINITION_NOT_FOUND`, also when it exists in
@@ -1503,7 +1507,7 @@ components:
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
@@ -1988,9 +1992,13 @@ components:
             `not planned`; `S0` is an element of the current stage that this release has not finished
     GraphDiff:
       type: object
-      required: [definitionKey, base, target, identical, nodesAdded, nodesRemoved, nodesChanged, edgesAdded, edgesRemoved, truncated]
+      required: [definitionKey, base, target, approvableHash, identical, nodesAdded, nodesRemoved, nodesChanged, edgesAdded, edgesRemoved, truncated]
       properties:
         definitionKey: { type: string }
+        approvableHash:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: The target's definitionHash, which an approval names after this review; null when truncated (PD-139)
         base: { $ref: '#/components/schemas/GraphDiffSide' }
         target: { $ref: '#/components/schemas/GraphDiffSide' }
         identical: { type: boolean, description: True when both versions have the same steps, values and links }
@@ -2026,11 +2034,11 @@ components:
         truncated: { type: boolean, description: True when more than 1,000 changed values were found }
     GraphDiffSide:
       type: object
-      required: [version, status, definitionHash]
+      required: [version, status]
       properties:
         version: { type: integer, minimum: 1 }
         status: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, RETIRED] }
-        definitionHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        definitionHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Omitted when the diff is truncated }
     GraphDiffNode:
       type: object
       required: [id, name, type]
@@ -2143,7 +2151,8 @@ components:
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
-            REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, INCIDENT_NOT_FOUND,
+            REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
+            INCIDENT_NOT_FOUND,
             OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }

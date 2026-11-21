@@ -731,6 +731,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + expectedDefinitionHash + " but it is " + current.definitionHash() + ", at lock version "
                         + current.lockVersion(), current.definitionHash(), current.lockVersion());
             }
+            // PRE-177 (PD-139): an approval may not rest on a change list cut off at its limit. Pure computation on
+            // rows already read in this transaction; no call leaves the process.
+            if (expectedDefinitionHash != null) {
+                requireCompleteChangeSet(tenant, current);
+            }
             // PRE-016: and again at approval, against the rule set version in effect now.
             checkGuardrailContracts(tenant, storedProcess(current));
             // An older version never overtakes a newer active one (PRE-021).
@@ -1100,6 +1105,27 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 .orElseThrow(() -> new NoEffectiveVersionException("Definition " + target.key()
                         + " has no effective version to compare with; pass base"));
         return GraphDiffs.diff(to.key(), side(from), storedProcess(from), side(to), storedProcess(to));
+    }
+
+    /**
+     * Refuses an approval whose change set against the effective version is truncated (PRE-177, PD-139): no reviewer
+     * can have read it complete, so the diff exposes no approvable hash and the approval is refused before anything is
+     * written. A first version, or one approved while no version is effective, has no change list to cut off.
+     */
+    private void requireCompleteChangeSet(String tenant, StoredDefinition current) {
+        java.util.Optional<StoredDefinition> effective = store.effectiveDefinition(tenant, current.key(),
+                clock.instant());
+        if (effective.isEmpty() || effective.get().version() == current.version()) {
+            return;
+        }
+        StoredDefinition from = effective.get();
+        if (GraphDiffs.diff(current.key(), side(from), storedProcess(from), side(current), storedProcess(current))
+                .truncated()) {
+            throw new io.github.dhluong90.bpm.process.api.ChangeSetTruncatedException("The change list from "
+                    + current.key() + " v" + from.version() + " to v" + current.version() + " has more than "
+                    + io.github.dhluong90.bpm.process.api.GraphDiff.MAX_CHANGES + " changed values and is cut off; "
+                    + "no approval can rest on it");
+        }
     }
 
     private StoredDefinition storedVersion(String tenant, DefinitionRef ref) {

@@ -914,6 +914,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - (c) `bob` approves without a hash, or with a value that is not a hash.
   - (d) A `bank-b` approver approves `bank-a`'s v1 with `H`.
   - (e) `bob` repeats (a) under the same `Idempotency-Key`, then sends another hash under that key.
+  - (f) v1 is `ACTIVE`; v2 is pending and differs from v1 in more than 1,000 values. `bob` reads the diff of v2 against the effective v1, then approves v2 naming its `definitionHash`.
 - **Then:**
   - (a) v1 is `ACTIVE`; the `APPROVED` history row and `processes.definition.approved.v1` carry `reviewedDefinitionHash: H`.
   - (b) The first is `409 CONTENT_CHANGED` naming `currentDefinitionHash H2` and `currentLockVersion`; nothing is written, published or recorded. The second is accepted.
@@ -921,9 +922,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - (d) `404 DEFINITION_NOT_FOUND`; nothing is written.
   - (e) The repeat replays the first answer; the other hash is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
   - The check runs under the key lock after the status, four-eyes and lock-version checks, through the Java API and REST alike.
-  - A change list between two versions that is cut off at its limit carries no hash that may be approved; a client offers Approve only after the complete change set was shown, and sends the hash of the complete content.
+  - (f) The diff is `truncated` with `approvableHash: null` and no `definitionHash` on either side; the approval is `409 CHANGE_SET_TRUNCATED` and nothing is written, published or recorded. A change list cut off at its limit carries no hash that may be approved.
 - **Example:** `bob approves with H after the content became H2 -> 409 CONTENT_CHANGED (current H2), 0 rows`.
-- **Test ID:** `PRE_177_an_approval_with_the_reviewed_hash_publishes_the_version_and_records_the_hash`, `PRE_177_an_approval_of_content_changed_after_review_is_refused_naming_the_current_hash_and_writes_nothing`, `PRE_177_an_approval_without_a_hash_is_refused_while_the_setting_is_on`, `PRE_177_with_the_dev_relaxation_an_approval_without_a_hash_is_accepted`, `PRE_177_another_tenants_version_is_refused_and_nothing_is_written`, `PRE_177_a_replay_with_another_hash_under_the_same_key_is_a_key_reuse`, `PRE_177_the_two_approval_refusals_match_the_contract_and_name_the_current_content`, `PRE_177_an_approval_without_the_reviewed_hash_is_accepted_only_on_the_dev_profile`
+- **Test ID:** `PRE_177_an_approval_with_the_reviewed_hash_publishes_the_version_and_records_the_hash`, `PRE_177_an_approval_of_content_changed_after_review_is_refused_naming_the_current_hash_and_writes_nothing`, `PRE_177_an_approval_without_a_hash_is_refused_while_the_setting_is_on`, `PRE_177_with_the_dev_relaxation_an_approval_without_a_hash_is_accepted`, `PRE_177_another_tenants_version_is_refused_and_nothing_is_written`, `PRE_177_a_replay_with_another_hash_under_the_same_key_is_a_key_reuse`, `PRE_177_a_truncated_diff_exposes_no_approvable_hash_and_an_approval_against_it_is_refused`, `PRE_177_the_two_approval_refusals_match_the_contract_and_name_the_current_content`, `PRE_177_an_approval_without_the_reviewed_hash_is_accepted_only_on_the_dev_profile`
 
 ---
 

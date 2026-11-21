@@ -36,6 +36,7 @@ public class ProcessProblemDetails {
             Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_HASH_REQUIRED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
+            Map.entry("CHANGE_SET_TRUNCATED", HttpStatus.CONFLICT),
             Map.entry("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("OUTPUT_INVALID", UNPROCESSABLE),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),

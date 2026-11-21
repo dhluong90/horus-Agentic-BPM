@@ -157,7 +157,8 @@ class ProcessRestContractTest {
         assertThat(body).contains("\"nodesAdded\":[{\"id\":\"fraud-check\",\"name\":\"Fraud check\"")
                 .contains("\"path\":\"/assignee/role\",\"from\":\"ops\",\"to\":\"credit-officer\"")
                 .contains("\"path\":\"/fourEyes\",\"from\":null,\"to\":true")
-                .contains("\"kind\":\"next\"").doesNotContain("<").doesNotContain("Bounds");
+                .contains("\"kind\":\"next\"").doesNotContain("<").doesNotContain("Bounds")
+                .contains("\"approvableHash\":\"" + "b".repeat(64) + "\"");
         String etag = result.getResponse().getHeader("ETag");
         assertThat(etag).matches("\"[0-9a-f]{64}\"");
 
@@ -167,6 +168,16 @@ class ProcessRestContractTest {
         assertThat(again.getResponse().getContentAsByteArray()).isEmpty();
         assertThat(exchange(get(BASE + "/definitions/kyc-onboarding/versions/2/diff")).getResponse()
                 .getHeader("ETag")).as("base defaults to the effective version").isEqualTo(etag);
+    }
+
+    @Test
+    void PRE_177_a_truncated_diff_exposes_no_approvable_hash() throws Exception {
+        MvcResult result = exchange(get(BASE + "/definitions/kyc-onboarding/versions/4/diff").param("base", "1"));
+
+        assertThat(result.getResponse().getStatus()).isEqualTo(200);
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("\"truncated\":true").contains("\"approvableHash\":null")
+                .doesNotContain("definitionHash").doesNotContain("a".repeat(64)).doesNotContain("c".repeat(64));
     }
 
     @Test
@@ -265,6 +276,13 @@ class ProcessRestContractTest {
         /** kyc-onboarding v1 to v2: a fraud check added, the approver's role changed, one link replaced by two. */
         @Override
         public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+            if ("kyc-onboarding".equals(target.key()) && target.version() == 4 && base.version() == 1) {
+                io.github.dhluong90.bpm.process.api.GraphDiff full = kycDiff();
+                return new io.github.dhluong90.bpm.process.api.GraphDiff(full.definitionKey(), full.base(),
+                        new io.github.dhluong90.bpm.process.api.GraphDiff.Side(4, "PENDING_APPROVAL", "c".repeat(64)),
+                        full.nodesAdded(), full.nodesRemoved(), full.nodesChanged(), full.edgesAdded(),
+                        full.edgesRemoved(), true);
+            }
             if (!"kyc-onboarding".equals(target.key()) || target.version() != 2 || base.version() != 1) {
                 throw new DefinitionNotFoundException("No definition " + target.key() + " in this tenant");
             }
