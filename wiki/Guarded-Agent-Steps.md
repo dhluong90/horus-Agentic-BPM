@@ -200,6 +200,26 @@ When the input changes (a new document type, a new country, a new regulation, a 
 
 For regulated decisions, start at rung 1. Human override rate, read from history, is the first measure of whether to move up.
 
+### Calling a model API
+
+[`examples/model-adapters`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/model-adapters) has two reference adapters you can copy as a first adapter: one for OpenAI-compatible Chat Completions, which covers hosted vendors and self-hosted servers such as vLLM or Ollama, and one for Anthropic Messages. Both use the JDK HTTP client and no vendor SDK, and neither is part of the engine artifacts.
+
+- **The host chooses the vendor.** A step names the adapter (`horus:agent="doc-reviewer"`). The API, base address, model, prompt template (`prompts/kyc-review@p7`) and key are host configuration under `example.model-adapters.adapters.<name>`, with the key from the environment.
+- **The prompt carries only the step's inputs.** The versioned template is rendered from the step's bounded inputs; its version is the `promptVersion` label.
+- **Structured output.** The adapter asks for JSON in the step's output schema (`invocation.outputSchema()`), and the engine still checks the answer in the result transaction.
+- **Keyed by the attempt id.** A model call changes nothing on the far side, so each retry is a new call with a new attempt id, sent as `user` or `metadata.user_id`. No tenant id is sent.
+- **Labels.** `model`, `promptVersion`, `usage.inputTokens` and `usage.outputTokens`.
+
+| API answer | Attempt code | Retried |
+|---|---|---|
+| HTTP 400 | `MODEL_REQUEST_INVALID` | no |
+| HTTP 401 or 403 | `MODEL_AUTH_FAILED` | no |
+| HTTP 429 | `MODEL_RATE_LIMITED` | yes, after the step's backoff |
+| HTTP 5xx or 529 | `MODEL_UNAVAILABLE` | yes |
+| No answer within the request timeout | `ADAPTER_TIMEOUT` | yes |
+| A refusal or a content-filter stop | `MODEL_REFUSED` | no |
+| Prose instead of JSON | `AGENT_SCHEMA_INVALID`, from the result check | yes, once |
+
 ## Worked example: KYC document review
 
 A bank's onboarding process asks an agent to read identity documents. The agent returns a structured assessment; a guardrail decides whether a person must look.
