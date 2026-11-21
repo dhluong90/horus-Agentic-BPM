@@ -18,6 +18,7 @@ import io.github.dhluong90.bpm.rules.api.SimulationResult;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import java.nio.charset.StandardCharsets;
@@ -98,9 +99,10 @@ class RuleReadingsTest {
         } else {
             engines.versionService().importVersion(ruleSet, ImportRequest.yaml(source));
         }
-        long lock = engines.versionService().requestPublish(ruleSet, version, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = engines.versionService().requestPublish(ruleSet, version, WriteOptions.none());
         caller.become("bank-a", "minh");
-        engines.versionService().approve(ruleSet, version, new WriteOptions(null, lock, null));
+        engines.versionService().approve(ruleSet, version, new WriteOptions(null, requested.lockVersion(), null)
+                .expectingContent(requested.canonicalHash()));
         caller.become("bank-a", "dan", Set.of("rules:read"));
     }
 
