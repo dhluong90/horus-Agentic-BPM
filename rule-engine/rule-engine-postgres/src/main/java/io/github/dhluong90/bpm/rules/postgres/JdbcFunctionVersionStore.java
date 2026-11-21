@@ -52,30 +52,23 @@ public final class JdbcFunctionVersionStore implements FunctionVersionStore {
     @Override
     public Map<String, String> approvedWith(String tenantId, String ruleSet, int version) {
         Map<String, String> versions = new TreeMap<>();
-        jdbc.sql("""
-                SELECT f.function_name, f.function_version
-                FROM rle_version_function f
-                JOIN rle_version v ON v.tenant_id = f.tenant_id AND v.id = f.version_id
-                JOIN rle_rule_set r ON r.tenant_id = v.tenant_id AND r.id = v.rule_set_id
-                WHERE f.tenant_id = :tenant AND r.name = :ruleSet AND v.version_num = :version
+        java.util.Optional<String> versionId = jdbc.sql("""
+                SELECT v.id FROM rle_version v JOIN rle_rule_set r ON r.tenant_id = v.tenant_id AND r.id = v.rule_set_id
+                WHERE v.tenant_id = :tenant AND r.name = :ruleSet AND v.version_num = :version
                 """).param("tenant", tenantId).param("ruleSet", ruleSet).param("version", version)
-                .query((rs, row) -> {
+                .query(String.class).optional();
+        versionId.ifPresent(id -> RuleListQueries.VERSION_FUNCTIONS.list(jdbc,
+                ListQuery.params("tenant", tenantId, "versionId", id), (rs, row) -> {
                     versions.put(rs.getString("function_name"), rs.getString("function_version"));
                     return null;
-                }).list();
+                }));
         return versions;
     }
 
     @Override
     public List<Use> publishedUses() {
-        return jdbc.sql("""
-                SELECT f.tenant_id, r.name, v.version_num, f.function_name, f.function_version
-                FROM rle_version_function f
-                JOIN rle_version v ON v.tenant_id = f.tenant_id AND v.id = f.version_id
-                JOIN rle_rule_set r ON r.tenant_id = v.tenant_id AND r.id = v.rule_set_id
-                WHERE v.status = 'PUBLISHED'
-                ORDER BY f.function_name, f.tenant_id, r.name, v.version_num
-                """).query((rs, row) -> new Use(rs.getString("tenant_id"), rs.getString("name"),
-                rs.getInt("version_num"), rs.getString("function_name"), rs.getString("function_version"))).list();
+        return RuleListQueries.PUBLISHED_FUNCTION_USES.list(jdbc, ListQuery.params(), (rs, row) -> new Use(
+                rs.getString("tenant_id"), rs.getString("name"), rs.getInt("version_num"),
+                rs.getString("function_name"), rs.getString("function_version")));
     }
 }
