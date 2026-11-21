@@ -116,6 +116,59 @@ class RuleEnginePartitionMaintenanceTest {
     }
 
     @Test
+    void RLE_093_from_1_0_an_unset_retention_refuses_start_up_outside_dev_and_until_then_it_warns(
+            CapturedOutput output) {
+        RuleEngineProperties.DecisionLog unset = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, null, null);
+        org.springframework.mock.env.MockEnvironment prod = new org.springframework.mock.env.MockEnvironment();
+        prod.setActiveProfiles("prod");
+
+        // Given engine 1.0.0, an unset retention outside dev stops start-up and names the property and the choices
+        assertThatThrownBy(() -> DecisionLogRetention.resolve(unset, prod, "1.0.0"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("horus.bpm.rules.decision-log.retention is required from Rule Engine 1.0")
+                .hasMessageContaining("keep-forever").hasMessageContaining("P12M");
+        // and so does a host with no profile at all, and a host on dev together with another profile
+        assertThatThrownBy(() -> DecisionLogRetention.resolve(unset, new org.springframework.mock.env.MockEnvironment(),
+                "1.2.0")).isInstanceOf(IllegalStateException.class);
+        org.springframework.mock.env.MockEnvironment mixed = new org.springframework.mock.env.MockEnvironment();
+        mixed.setActiveProfiles("dev", "prod");
+        assertThatThrownBy(() -> DecisionLogRetention.resolve(unset, mixed, "2.0.0"))
+                .isInstanceOf(IllegalStateException.class);
+
+        // but the dev profile needs no setting: it warns and keeps everything, as before 1.0
+        org.springframework.mock.env.MockEnvironment dev = new org.springframework.mock.env.MockEnvironment();
+        dev.setActiveProfiles("dev", "test");
+        assertThat(DecisionLogRetention.resolve(unset, dev, "1.0.0")).isNull();
+        assertThat(output).contains("retention is unset");
+
+        // and before 1.0, or when the version is unknown, nothing refuses start-up on any profile
+        assertThat(DecisionLogRetention.resolve(unset, prod, "0.3.0-SNAPSHOT")).isNull();
+        assertThat(DecisionLogRetention.resolve(unset, prod, "0.9.9")).isNull();
+        assertThat(DecisionLogRetention.resolve(unset, prod, null)).isNull();
+
+        // and from 1.0 a bank that chose either answer starts normally
+        RuleEngineProperties.DecisionLog forever = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, "keep-forever", null);
+        RuleEngineProperties.DecisionLog months = new RuleEngineProperties.DecisionLog(
+                null, null, null, null, null, "P12M", null);
+        assertThat(DecisionLogRetention.resolve(forever, prod, "1.0.0")).isNull();
+        assertThat(DecisionLogRetention.resolve(months, prod, "1.0.0")).isEqualTo(Period.ofMonths(12));
+    }
+
+    @Test
+    void RLE_093_the_required_from_version_is_read_as_a_major_number() {
+        assertThat(DecisionLogRetention.required("1.0.0")).isTrue();
+        assertThat(DecisionLogRetention.required("1.0.0-RC1")).isTrue();
+        assertThat(DecisionLogRetention.required("12.3.4")).isTrue();
+        assertThat(DecisionLogRetention.required("0.3.0-SNAPSHOT")).isFalse();
+        assertThat(DecisionLogRetention.required("0.99.0")).isFalse();
+        assertThat(DecisionLogRetention.required("unknown")).isFalse();
+        assertThat(DecisionLogRetention.required("")).isFalse();
+        assertThat(DecisionLogRetention.required(null)).isFalse();
+    }
+
+    @Test
     void RLE_017_without_a_retention_the_job_never_drops_a_partition() {
         DecisionLogPartitions partitions = mock(DecisionLogPartitions.class);
         when(partitions.ensureAhead(JAN_26_2027, Duration.ofDays(7))).thenReturn(List.of());
