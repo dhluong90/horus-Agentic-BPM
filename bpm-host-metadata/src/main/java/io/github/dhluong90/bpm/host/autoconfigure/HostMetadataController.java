@@ -141,7 +141,7 @@ final class HostMetadataController {
             entries.add(entry);
         }
         body.put("modules", entries);
-        body.put("tenancy", Map.of("switching", false));
+        body.put("tenancy", Map.of("switching", properties.tenancy().switching().enabled()));
         body.put("limits", Map.of("maxPageSize", properties.limits().maxPageSize()));
         return tenantSettings.isEmpty() ? cacheable(request, body, META_CACHE_CONTROL, new String[0])
                 : cacheable(request, body, META_TENANT_CACHE_CONTROL, META_VARY);
@@ -211,7 +211,7 @@ final class HostMetadataController {
         }
         Map<String, Object> tenant = new LinkedHashMap<>();
         tenant.put("current", caller.tenant());
-        tenant.put("allowed", List.of(caller.tenant()));
+        tenant.put("allowed", caller.allowedTenants());
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("schemaVersion", 1);
         body.put("user", user);
