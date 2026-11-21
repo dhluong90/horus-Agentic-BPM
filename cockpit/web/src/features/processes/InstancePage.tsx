@@ -42,9 +42,6 @@ import { nodeTypeLabel } from './model/nodeLabels';
 const DefinitionDiagram = lazy(() => import('./diagram/DefinitionDiagram'));
 
 type Lens = 'diagram' | 'timeline';
-
-/** Viewport height kept under the drawing for the step panel, so the panel and its action stay above the fold. */
-const STEP_PANEL_RESERVE = 210;
 type T = (key: MessageKey, params?: Record<string, string>) => string;
 
 export function InstancePage({ instanceId }: { instanceId: string }) {
@@ -163,7 +160,7 @@ function InstanceDiagram({ instance, graph, activities, load, label }: {
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const selected = picked ?? firstStep(marks, order);
   const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t)])), [marks, t]);
-  const overlay: DiagramOverlay = { badges, selected, onSelect: setPicked, reserveBelow: STEP_PANEL_RESERVE };
+  const overlay: DiagramOverlay = { badges, selected, onSelect: setPicked };
   const node = graph.nodes.find((item) => item.id === selected);
   return (
     <div className="instance-grid">

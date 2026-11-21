@@ -5,6 +5,7 @@ import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from '../sr
 import { INSTANCE_ID, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
 import { createFakeProcessEngine, type ProcessSeed } from '../src/mocks/processEngine';
 import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
+import { routeHostSignIn } from './hostSignIn';
 import { mockHost, rememberLocale } from './mockHost';
 
 /*
@@ -243,19 +244,40 @@ async function bottomOf(locator: ReturnType<Page['locator']>): Promise<number> {
   return box.y + box.height;
 }
 
-/** The default Fit shows the whole case: nothing scrolls inside the canvas, and every completed-step check is at least 22 px. */
-async function expectWholeCase(page: Page) {
+/** The smallest text in the diagram on screen, in px, and whether a node's centre sits in the middle of the canvas. */
+async function diagramFacts(page: Page, nodeId?: string) {
   const svg = page.locator('[data-layout="auto"]');
   await expect(svg).toBeVisible();
-  // Fit settles once the canvas has been measured beside the step panel; wait for that, not a fixed delay.
+  return svg.evaluate((element, id) => {
+    const scale = element.getBoundingClientRect().width / (element as SVGSVGElement).viewBox.baseVal.width;
+    const texts = Array.from(element.querySelectorAll('text')).filter((text) => text.textContent.trim() !== '' && !text.classList.contains('dg-node__glyph') && text.closest('.dg-badge--done') === null);
+    const frame = element.parentElement as HTMLElement;
+    const box = frame.getBoundingClientRect();
+    const node = id !== '' ? element.querySelector(`[data-node="${id}"]`) : null;
+    const nodeBox = node?.getBoundingClientRect();
+    const checks = Array.from(element.querySelectorAll('.dg-badge--done circle')).map((circle) => circle.getBoundingClientRect().width);
+    return {
+      smallest: Math.min(...texts.map((text) => parseFloat(getComputedStyle(text).fontSize) * scale)),
+      smallestCheck: Math.min(99, ...checks),
+      scrolls: frame.scrollWidth > frame.clientWidth + 1,
+      atStart: frame.scrollLeft <= 0,
+      atEnd: frame.scrollLeft >= frame.scrollWidth - frame.clientWidth - 1,
+      scrollLeft: frame.scrollLeft,
+      offCentre: nodeBox ? Math.abs(nodeBox.left + nodeBox.width / 2 - (box.left + box.width / 2)) : undefined,
+      nodeInView: nodeBox ? nodeBox.left >= box.left && nodeBox.right <= box.right : undefined,
+    };
+  }, nodeId ?? '');
+}
+
+/** At the default Fit a case draws no text under 12 px, its checks are at least 22 px, and the selected step is in view. */
+async function expectReadableCase(page: Page) {
+  const picked = page.locator('[data-layout="auto"] .dg-node--selected');
+  const selected = (await picked.count()) > 0 ? await picked.getAttribute('data-node') : null;
   await expect(async () => {
-    const fit = await svg.evaluate((element) => {
-      const frame = element.parentElement as HTMLElement;
-      const checks = Array.from(element.querySelectorAll('.dg-badge--done circle')).map((circle) => circle.getBoundingClientRect().width);
-      return { scrollsX: frame.scrollWidth > frame.clientWidth + 1, scrollsY: frame.scrollHeight > frame.clientHeight + 1, smallestCheck: Math.min(99, ...checks) };
-    });
-    expect({ scrollsX: fit.scrollsX, scrollsY: fit.scrollsY }).toEqual({ scrollsX: false, scrollsY: false });
-    expect(fit.smallestCheck).toBeGreaterThanOrEqual(22);
+    const facts = await diagramFacts(page, selected ?? undefined);
+    expect(facts.smallest).toBeGreaterThanOrEqual(12);
+    expect(facts.smallestCheck).toBeGreaterThanOrEqual(22);
+    if (selected !== null) expect(facts.nodeInView).toBe(true);
   }).toPass({ timeout: 5_000 });
 }
 
@@ -270,10 +292,38 @@ for (const screen of SCREENS) {
           await expect(focal).toBeVisible();
           expect(await bottomOf(focal)).toBeLessThanOrEqual(viewport.height);
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-          if (screen.name.startsWith('instance-') && screen.name !== 'instance-not-found' && screen.name !== 'instance-timeline') await expectWholeCase(page);
+          if (screen.name.startsWith('instance-') && screen.name !== 'instance-not-found' && screen.name !== 'instance-timeline') await expectReadableCase(page);
           await page.screenshot({ path: `e2e/screenshots/${file}`, fullPage: false });
         });
       }
+    }
+  }
+}
+
+/** The journey starts on the host's own sign-in form, with the same host label as the cockpit's service chip. */
+for (const viewport of VIEWPORTS) {
+  for (const theme of THEMES) {
+    for (const locale of LOCALES) {
+      test(`TR_UI_03_visual_sign-in_${String(viewport.width)}x${String(viewport.height)}_${theme}_${locale}`, async ({ page }) => {
+        await page.setViewportSize(viewport);
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await rememberLocale(page, locale);
+        await routeHostSignIn(page, locale === 'en' ? 'Retail banking' : 'Ngân hàng bán lẻ');
+        await page.goto(`./login?lang=${locale}`);
+        const submit = page.getByRole('button', { name: locale === 'en' ? 'Sign in' : 'Đăng nhập', exact: true });
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        await expect(page.getByLabel(locale === 'en' ? 'Username' : 'Tên đăng nhập')).toBeVisible();
+        await expect(submit).toBeVisible();
+        expect(await bottomOf(submit)).toBeLessThanOrEqual(viewport.height);
+        await page.screenshot({ path: `e2e/screenshots/proc-sign-in-${String(viewport.width)}x${String(viewport.height)}-${theme}-${locale}.png`, fullPage: false });
+        if (viewport.height === 900 && locale === 'en') {
+          // Known host finding, reported on the pull request: each demo user button is named "Sign in as lan, Author",
+          // which does not start with its visible text (label-content-name-mismatch). The fix belongs to the host page.
+          const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+          const serious = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id);
+          expect(serious.filter((id) => id !== 'label-content-name-mismatch')).toEqual([]);
+        }
+      });
     }
   }
 }
@@ -414,6 +464,72 @@ for (const locale of LOCALES) {
     expect(await page.locator('main').innerText()).not.toContain('loans-7f9c');
   });
 }
+
+for (const viewport of VIEWPORTS) {
+  test(`CKP_017_a_wide_case_opens_at_the_12px_floor_centred_on_the_current_step_${String(viewport.height)}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mockEngines(page);
+    for (const [id, step] of [[KYC_INSTANCE_ID, 'approve'], [INCIDENT_INSTANCE_ID, 'assess-documents']] as const) {
+      await page.goto(`./#/instances/${id}`);
+      await expect(page.locator(`[data-node="${step}"]`)).toHaveAttribute('aria-pressed', 'true');
+      await expect(async () => {
+        const facts = await diagramFacts(page, step);
+        expect(facts.smallest).toBeGreaterThanOrEqual(12);
+        expect(facts.scrolls).toBe(true);
+        // Centred, unless the canvas cannot scroll further toward that side.
+        expect(facts.nodeInView).toBe(true);
+        expect((facts.offCentre ?? 99) <= 24 || facts.atStart || facts.atEnd).toBe(true);
+      }).toPass({ timeout: 5_000 });
+      await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+      // The side panel stays beside the drawing above 1180 px.
+      const panel = await page.getByRole('complementary', { name: 'Selected step' }).boundingBox();
+      const canvas = await page.locator('.dg__frame').boundingBox();
+      expect(panel && canvas && panel.x >= canvas.x + canvas.width && Math.round(panel.width) === 360).toBe(true);
+    }
+  });
+}
+
+test('CKP_017_a_wide_case_pans_by_keyboard_and_by_drag', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockEngines(page);
+  await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
+  const frame = page.getByRole('region', { name: 'Diagram canvas. Use the arrow keys to move around.' });
+  await expect(frame).toBeVisible();
+  await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+  const left = () => frame.evaluate((element) => element.scrollLeft);
+  await frame.focus();
+  expect(await frame.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe('none');
+  const before = await left();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(left).toBeLessThan(before);
+  const moved = await left();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(left).toBeGreaterThan(moved);
+  // Dragging the canvas background pans the other way from the pointer.
+  const box = await frame.boundingBox();
+  if (!box) throw new Error('canvas has no box');
+  const start = await left();
+  await page.mouse.move(box.x + 30, box.y + box.height - 20);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 230, box.y + box.height - 20, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(left).toBeLessThan(start);
+});
+
+test('CKP_017_whole_case_is_an_overview_below_the_floor', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockEngines(page);
+  await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
+  await page.getByRole('button', { name: 'Whole case' }).click();
+  await expect(page.getByText('Overview of the whole case; text is smaller.')).toBeVisible();
+  await expect(async () => {
+    const facts = await diagramFacts(page);
+    expect(facts.scrolls).toBe(false);
+  }).toPass({ timeout: 5_000 });
+  await expect(page.locator('[data-minimap="true"]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Fit' }).click();
+  await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+});
 
 for (const viewport of VIEWPORTS) {
   test(`CKP_069_diagram_text_is_at_least_12px_at_fit_and_fit_uses_the_canvas_${String(viewport.height)}`, async ({ page }) => {

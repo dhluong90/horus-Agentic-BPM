@@ -214,13 +214,13 @@ export function overlaps(a: Pick<PlacedNode, 'x' | 'y' | 'width' | 'height'>, b:
 /** The scale "100 %" draws at, and the smallest Fit uses for a definition: its smallest text is then the 12 px caption stop. */
 export const MIN_SCALE = 1;
 
-/** The smallest scale Fit uses for a whole case; below it the drawing scrolls rather than become unreadable. */
+/** The smallest scale of the "Whole case" overview; below it the drawing scrolls rather than become unreadable. */
 export const WHOLE_FIT_MIN_SCALE = 0.4;
 
 /**
- * The scale that fits a drawing into its canvas, up to `max` and down to `min`. A definition keeps `min` at 100 %, so
- * a wider drawing scrolls rather than shrink text below 12 px (CKP-069); a case passes WHOLE_FIT_MIN_SCALE so the
- * operator sees every step and end of the case at once, and "100 %" shows it at full size (CKP-017).
+ * The scale that fits a drawing into its canvas, up to `max` and down to `min`. Fit keeps `min` at 100 %, so a wider
+ * drawing pans rather than shrink text below 12 px (CKP-069, CKP-017); only the "Whole case" overview passes
+ * WHOLE_FIT_MIN_SCALE.
  */
 export function fitScale(drawing: { width: number; height: number }, canvas: { width: number; height: number }, max = 1.6, min = MIN_SCALE): number {
   if (drawing.width <= 0 || drawing.height <= 0 || canvas.width <= 0 || canvas.height <= 0) return MIN_SCALE;

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { isKnownNodeType, type DiagramGraph } from '../model/bpmnGraph';
 import {
@@ -19,17 +19,22 @@ import {
   type Point,
 } from '../model/layout';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
+import { Minimap, type View } from './Minimap';
 import { NodeIcon } from './NodeIcon';
 
 /*
  * The read-only definition diagram (CKP-069, CKP-070), in its own chunk with dagre so the first screen does not load
  * them (CKP-028). Drawn as SVG with the diagram tokens of the styleguide; agent steps carry the violet that means
  * "agent step" and nothing else. A node type this cockpit does not draw is a dashed box named in words. "Fit" scales
- * a definition to the canvas, up or down, but never below 100 %, where the smallest text is 12 px; a case (with an
- * overlay) is fitted whole, so every step and end is on screen, and "100 %" shows it at full size.
+ * the drawing to the canvas, up or down, but never below 100 %, where the smallest text is 12 px. A drawing larger
+ * than its canvas at that floor opens centred on the selected step, pans by drag and by the arrow keys, and shows a
+ * minimap of the part in view; a case also offers "Whole case", an overview that may draw below the floor.
  */
 
-type Zoom = 'fit' | 'actual';
+type Zoom = 'fit' | 'actual' | 'whole';
+
+/** How far one arrow key press pans the canvas, in screen pixels; with Shift, three times as far. */
+const PAN_STEP = 80;
 
 /** A status badge on one step of an instance (CKP-017): its tone, icon and words, all decided by the caller. */
 export interface StepBadge {
@@ -46,8 +51,6 @@ export interface DiagramOverlay {
   badges: ReadonlyMap<string, StepBadge>;
   selected: string | undefined;
   onSelect: (nodeId: string) => void;
-  /** Height kept free under the canvas inside the viewport, for the step panel below the drawing. */
-  reserveBelow: number;
 }
 
 const BADGE_HEIGHT = 20;
@@ -95,7 +98,6 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
 
 /** Space kept under the canvas inside the viewport: the card's padding and the page's bottom margin (as in processes.css). */
 const BELOW_CANVAS = 52;
-const MIN_FIT_HEIGHT = 200;
 const MIN_CANVAS_HEIGHT = 240;
 const LABEL_CHAR = 6.8;
 
@@ -217,20 +219,20 @@ function Node({ node, typeLabel, badge, interaction }: { node: PlacedNode; typeL
 export default function DefinitionDiagram({ graph, label, overlay }: { graph: DiagramGraph; label: string; overlay?: DiagramOverlay | undefined }) {
   const { t } = useI18n();
   const marker = useId().replace(/:/g, '');
+  const noteId = useId();
   const withBadges = overlay !== undefined;
   const layout = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges }), [graph, t, withBadges]);
   const [zoom, setZoom] = useState<Zoom>('fit');
   const frame = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<{ width: number; height: number } | undefined>(undefined);
-  const reserveBelow = overlay?.reserveBelow ?? 0;
+  const [view, setView] = useState<View | undefined>(undefined);
 
   useEffect(() => {
     const element = frame.current;
     if (!element) return;
     const measure = () => {
       const top = element.getBoundingClientRect().top + window.scrollY;
-      const free = window.innerHeight - top - BELOW_CANVAS - reserveBelow;
-      setCanvas({ width: element.clientWidth, height: Math.max(reserveBelow > 0 ? MIN_FIT_HEIGHT : MIN_CANVAS_HEIGHT, free) });
+      setCanvas({ width: element.clientWidth, height: Math.max(MIN_CANVAS_HEIGHT, window.innerHeight - top - BELOW_CANVAS) });
     };
     measure();
     window.addEventListener('resize', measure);
@@ -240,50 +242,125 @@ export default function DefinitionDiagram({ graph, label, overlay }: { graph: Di
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, [reserveBelow]);
+  }, []);
 
-  const scale = zoom === 'fit' && canvas !== undefined ? fitScale(layout, canvas, undefined, withBadges ? WHOLE_FIT_MIN_SCALE : MIN_SCALE) : MIN_SCALE;
-  const selected = overlay?.selected;
-  useEffect(() => {
-    // Keep the selected step in view when the drawing is wider than its canvas.
-    const element = frame.current;
-    const placed = selected !== undefined ? layout.nodes.find((item) => item.id === selected) : undefined;
-    if (!element || !placed) return;
-    const centreX = (placed.x + placed.width / 2) * scale;
-    const centreY = (placed.y + placed.height / 2) * scale;
-    const left = centreX - element.clientWidth / 2;
-    const top = centreY - element.clientHeight / 2;
-    if (centreX < element.scrollLeft + 40 || centreX > element.scrollLeft + element.clientWidth - 40) element.scrollLeft = Math.max(0, left);
-    if (centreY < element.scrollTop + 40 || centreY > element.scrollTop + element.clientHeight - 40) element.scrollTop = Math.max(0, top);
-  }, [selected, layout, scale]);
+  const fit = canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
+  const whole = canvas !== undefined ? fitScale(layout, canvas, undefined, WHOLE_FIT_MIN_SCALE) : MIN_SCALE;
+  // "Whole case" is offered only when the case does not fit at the 12 px floor.
+  const offerWhole = withBadges && whole < MIN_SCALE;
+  const mode: Zoom = zoom === 'whole' && !offerWhole ? 'fit' : zoom;
+  const scale = mode === 'fit' ? fit : mode === 'whole' ? whole : MIN_SCALE;
   const width = Math.ceil(layout.width * scale);
   const height = Math.ceil(layout.height * scale);
+
+  /** Reads which part of the drawing is in view, for the minimap. */
+  const readView = useCallback(() => {
+    const element = frame.current;
+    if (!element) return;
+    const overflows = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+    setView(overflows ? {
+      x: element.scrollLeft / scale, y: element.scrollTop / scale,
+      width: Math.min(layout.width, element.clientWidth / scale), height: Math.min(layout.height, element.clientHeight / scale),
+    } : undefined);
+  }, [scale, layout]);
+
+  const centreOn = useCallback((x: number, y: number) => {
+    const element = frame.current;
+    if (!element) return;
+    element.scrollLeft = Math.max(0, x * scale - element.clientWidth / 2);
+    element.scrollTop = Math.max(0, y * scale - element.clientHeight / 2);
+    readView();
+  }, [scale, readView]);
+
+  const selected = overlay?.selected;
+  const centredAt = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    // Opening, or changing the zoom, centres the selected step; picking another step scrolls only if it is out of view.
+    const element = frame.current;
+    const placed = selected !== undefined ? layout.nodes.find((item) => item.id === selected) : undefined;
+    if (!element || canvas === undefined) return;
+    const key = `${mode}:${scale.toFixed(3)}:${String(layout.width)}`;
+    const fresh = centredAt.current !== key;
+    centredAt.current = key;
+    if (!placed) { readView(); return; }
+    const x = placed.x + placed.width / 2;
+    const y = placed.y + placed.height / 2;
+    const outOfView = x * scale < element.scrollLeft + 40 || x * scale > element.scrollLeft + element.clientWidth - 40
+      || y * scale < element.scrollTop + 40 || y * scale > element.scrollTop + element.clientHeight - 40;
+    if (fresh || outOfView) centreOn(x, y);
+    else readView();
+  }, [selected, layout, scale, mode, canvas, centreOn, readView]);
+
+  const drag = useRef<{ x: number; y: number; left: number; top: number } | undefined>(undefined);
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    const element = frame.current;
+    if (!element || view === undefined || event.button !== 0) return;
+    if ((event.target as Element).closest('.dg-node--pick') !== null) return;
+    drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop };
+    element.setPointerCapture(event.pointerId);
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    const element = frame.current;
+    const start = drag.current;
+    if (!element || !start) return;
+    element.scrollLeft = start.left - (event.clientX - start.x);
+    element.scrollTop = start.top - (event.clientY - start.y);
+  };
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    drag.current = undefined;
+    frame.current?.releasePointerCapture(event.pointerId);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const element = frame.current;
+    if (!element || event.target !== element) return;
+    const step = event.shiftKey ? PAN_STEP * 3 : PAN_STEP;
+    const moves: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    const move = moves[event.key];
+    if (!move) return;
+    event.preventDefault();
+    element.scrollBy({ left: move[0], top: move[1] });
+  };
+
+  const pannable = view !== undefined;
   return (
     <div className="dg">
-      <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
-        <button type="button" className="hit" aria-pressed={zoom === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
-        <button type="button" className="hit" aria-pressed={zoom === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
-      </div>
-      <div ref={frame} className="dg__frame">
-        <svg className="dg__svg" role="group" aria-label={label} width={width} height={height}
-          viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`} data-layout="auto" data-scale={scale.toFixed(2)}>
-          <defs>
-            <marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path d="M0 0 L10 5 L0 10 z" className="dg-arrow" />
-            </marker>
-          </defs>
-          <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} />)}</g>
-          <g>{layout.nodes.map((node) => (
-            <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} badge={overlay?.badges.get(node.id)}
-              interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }} />
-          ))}</g>
-          {overlay !== undefined ? (
-            <g>{layout.nodes.map((node) => {
-              const badge = overlay.badges.get(node.id);
-              return badge !== undefined ? <Badge key={node.id} node={node} badge={badge} scale={scale} /> : null;
-            })}</g>
+      <div className="dg__toolbar">
+        {mode === 'whole' ? <p className="dg__note" id={noteId}>{t('diagram.wholeNote')}</p> : null}
+        <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
+          <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
+          <button type="button" className="hit" aria-pressed={mode === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
+          {offerWhole ? (
+            <button type="button" className="hit" aria-pressed={mode === 'whole'} aria-describedby={mode === 'whole' ? noteId : undefined}
+              onClick={() => { setZoom('whole'); }}>{t('diagram.whole')}</button>
           ) : null}
-        </svg>
+        </div>
+      </div>
+      <div className="dg__stage">
+        <div ref={frame} className={pannable ? 'dg__frame dg__frame--pannable' : 'dg__frame'} onScroll={readView}
+          tabIndex={pannable ? 0 : undefined} role={pannable ? 'region' : undefined} aria-label={pannable ? t('diagram.pan') : undefined}
+          onKeyDown={onKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+          <svg className="dg__svg" role="group" aria-label={label} width={width} height={height}
+            viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`} data-layout="auto" data-scale={scale.toFixed(2)}>
+            <defs>
+              <marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" className="dg-arrow" />
+              </marker>
+            </defs>
+            <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} />)}</g>
+            <g>{layout.nodes.map((node) => (
+              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} badge={overlay?.badges.get(node.id)}
+                interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }} />
+            ))}</g>
+            {overlay !== undefined ? (
+              <g>{layout.nodes.map((node) => {
+                const badge = overlay.badges.get(node.id);
+                return badge !== undefined ? <Badge key={node.id} node={node} badge={badge} scale={scale} /> : null;
+              })}</g>
+            ) : null}
+          </svg>
+        </div>
+        {view !== undefined ? <Minimap layout={layout} view={view} selected={selected} onCentre={centreOn} /> : null}
       </div>
     </div>
   );
