@@ -89,7 +89,7 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
       >
         <span className="sr-only">{`${name}, ${t('host.switch')}`}</span>
         {pill}
-        <span className="service-pill__caret" aria-hidden="true">▾</span>
+        <svg className="service-pill__caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
       </button>
       <div className="host-picker__menu" id={menuId} hidden={!open}>
         <p className="host-picker__title" id={`${menuId}-title`}>{t('host.menuTitle')}</p>

@@ -7,7 +7,7 @@ import { areaOf, areaRoute, formatRoute, useRoute, type Area, type Route } from 
 import { EmptyState, PageHead } from '../components/PageParts';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { DecisionPage } from '../features/decisions/DecisionPage';
-import { DecisionsPage } from '../features/decisions/DecisionsPage';
+import { DecisionLogLocked, DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
@@ -68,7 +68,7 @@ function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
     <div className="frame">
       <NavRail areas={areas} current={area} reviewCount={reviewCount} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : route.name === 'decision' ? <DecisionRefused /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : route.name === 'decision' ? <DecisionLogLocked titleId="decision-refused-title" message="dlog.link.noPermission" /> : <NotAvailable />}
       </main>
     </div>
   );
@@ -105,22 +105,6 @@ function NotAvailable() {
       <PageHead id="unavailable-title" title={t('area.unavailable.title')} subtitle={t('area.unavailable.subtitle')} />
       <article className="card">
         <EmptyState text={t('area.unavailable.body')} action={{ label: t('menu.home'), href: formatRoute({ name: 'home' }) }} />
-      </article>
-    </section>
-  );
-}
-
-/**
- * A decision link opened by someone who may not read the decision log (CKP-042): said in words, and no decision
- * is requested.
- */
-function DecisionRefused() {
-  const { t } = useI18n();
-  return (
-    <section className="workspace" aria-labelledby="decision-refused-title">
-      <PageHead id="decision-refused-title" title={t('decisions.title')} subtitle={t('area.unavailable.subtitle')} />
-      <article className="card" role="note">
-        <EmptyState text={t('dlog.link.noPermission')} action={{ label: t('menu.home'), href: formatRoute({ name: 'home' }) }} />
       </article>
     </section>
   );

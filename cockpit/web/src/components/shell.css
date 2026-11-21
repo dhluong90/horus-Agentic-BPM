@@ -39,7 +39,7 @@ body { background: var(--bg); background-image: none; }
 .service-pill__dot--idle { background: var(--line-strong); }
 .service-pill--button { cursor: pointer; font: inherit; color: inherit; height: 36px; }
 .service-pill--button:hover { background: var(--surface-2); border-color: var(--control); }
-.service-pill__caret { color: var(--muted); font-size: 11px; margin-left: 2px; }
+.service-pill__caret { color: var(--muted); flex: none; margin-left: 2px; }
 .host-picker { position: relative; min-width: 0; flex: 0 1 auto; display: flex; }
 .host-picker__menu[hidden] { display: none; }
 .host-picker__menu {
