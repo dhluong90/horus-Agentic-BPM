@@ -12,7 +12,7 @@ final class ConditionCompileStep implements CompileStep {
 
     @Override
     public void compile(Process process, CompiledProcess.Builder builder) {
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof SequenceFlow flow && flow.conditionExpression() != null
                     && flow.conditionExpression().text() != null) {
                 Condition.parse(flow.conditionExpression().text());

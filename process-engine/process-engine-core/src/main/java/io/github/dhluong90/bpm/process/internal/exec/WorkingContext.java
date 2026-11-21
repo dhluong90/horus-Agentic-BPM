@@ -90,6 +90,29 @@ final class WorkingContext implements ExecutionContext {
         agenda.add(token.id());
     }
 
+    /**
+     * Ends a compensation that walked its scope's stack to the bottom (#67): the scope token is {@code COMPENSATED},
+     * every other live token is cancelled, and the instance is {@code FAILED}.
+     *
+     * @param scopeTokenId the compensated scope
+     */
+    void endCompensation(String scopeTokenId) {
+        Token scope = tree().get(scopeTokenId).orElseThrow(() -> new ExecutionException("TOKEN_NOT_FOUND", null,
+                "No scope token " + scopeTokenId));
+        for (Token live : tree().all()) {
+            if (live.status().live() && !live.id().equals(scopeTokenId)) {
+                update(live.withStatus(TokenStatus.CANCELLED));
+            }
+        }
+        update(scope.withStatus(TokenStatus.COMPENSATED));
+        history.add(new HistoryEntry("COMPENSATED", scope.nodeId(), scope.id(), null, actor, now,
+                Map.of("scopeTokenId", scope.id())));
+        status = InstanceStatus.FAILED;
+        history("INSTANCE_ENDED", null, Map.of("status", "FAILED"));
+        effect(new Effect.EmitEvent(nextId(), "processes.instance.failed.v1",
+                Map.of("instanceId", initial.instanceId())));
+    }
+
     // ---- ExecutionContext ---------------------------------------------------------------------------------
 
     @Override
@@ -265,8 +288,61 @@ final class WorkingContext implements ExecutionContext {
                 status = InstanceStatus.COMPLETED;
                 history("INSTANCE_ENDED", null, Map.of("status", "COMPLETED"));
                 effect(new Effect.EmitEvent(nextId(), "processes.instance.completed.v1", Map.of("instanceId", initial.instanceId())));
+            } else {
+                // A saga block ended (#67): a new flow token leaves the block in the enclosing scope.
+                FlowNode block = process.node(scope.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
+                        scope.nodeId(), "No saga block " + scope.nodeId()));
+                Token next = createToken(TokenKind.FLOW, block.id(), scope.scopeTokenId());
+                history("NODE_COMPLETED", next, Map.of("scopeTokenId", scope.id()));
+                takeOutgoing(next, block);
             }
         }
+    }
+
+    @Override
+    public void enterScope(Token token, FlowNode block) {
+        FlowNode start = process.startOf(block.id()).orElseThrow(() -> new ExecutionException("NO_START_EVENT",
+                block.id(), "Saga block " + block.id() + " has no none start event"));
+        Token scope = createToken(TokenKind.SCOPE, block.id(), token.scopeTokenId());
+        update(token.withStatus(TokenStatus.COMPLETED));
+        history("SCOPE_ENTERED", token, Map.of("scopeTokenId", scope.id()));
+        Token flow = createToken(TokenKind.FLOW, start.id(), scope.id());
+        enqueue(flow);
+    }
+
+    @Override
+    public void compensate(Token failing, String cause) {
+        Token scope = tree().get(failing.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                failing.nodeId(), "Token " + failing.id() + " has no scope"));
+        for (Token live : tree().all()) {
+            if (live.kind() == TokenKind.FLOW && live.status().live()) {
+                // The failing step's own job already failed for good; it is kept as it is for the record.
+                cancelFlow(live, !live.id().equals(failing.id()));
+            }
+        }
+        status = InstanceStatus.COMPENSATING;
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("scopeTokenId", scope.id());
+        details.put("scope", scope.nodeId());
+        details.put("cause", cause == null ? "-" : cause);
+        history.add(new HistoryEntry("COMPENSATION_STARTED", failing.nodeId(), failing.id(),
+                failing.activityInstanceId(), actor, now, details));
+        effect(new Effect.StartCompensation(scope.id(), failing.nodeId(), cause));
+    }
+
+    /** Cancels one live flow token with the task, job or timer it waits on. */
+    private void cancelFlow(Token child, boolean cancelWork) {
+        update(child.withStatus(TokenStatus.CANCELLED));
+        if (cancelWork && child.status() == TokenStatus.WAITING_USER && child.activityInstanceId() != null) {
+            effect(new Effect.CancelUserTask(child.activityInstanceId()));
+        }
+        if (cancelWork && (child.status() == TokenStatus.WAITING_ASYNC || child.status() == TokenStatus.WAITING_TIMER)
+                && child.activityInstanceId() != null) {
+            // The attempt id of an async step is its job id; a running call's TX2 then finds the job
+            // CANCELLED and discards the result (DN-10). The activity instance of a waiting timer is its job.
+            effect(new Effect.CancelJob(child.activityInstanceId()));
+        }
+        history("TOKEN_CANCELLED", child, Map.of());
     }
 
     @Override

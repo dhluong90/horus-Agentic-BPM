@@ -161,7 +161,7 @@ public final class GraphDiffs {
             }
             Map<String, FlowNode> nodes = new HashMap<>();
             List<SequenceFlow> flows = new ArrayList<>();
-            for (FlowElement element : process.flowElements()) {
+            for (FlowElement element : process.allFlowElements()) {
                 if (element instanceof FlowNode node) {
                     nodes.put(node.id(), node);
                 } else if (element instanceof SequenceFlow flow) {

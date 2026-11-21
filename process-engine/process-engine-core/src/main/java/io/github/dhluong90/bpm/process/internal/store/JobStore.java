@@ -21,13 +21,18 @@ public interface JobStore {
     String ASYNC_SERVICE = "ASYNC_SERVICE";
     /** Job kind of an agent step attempt (Async Wait-State, ADR-0008). */
     String ASYNC_AGENT = "ASYNC_AGENT";
+    /**
+     * Job kind of one undo of a compensation walk (#67): run on the async lane, so a remote undo calls its adapter
+     * with no transaction open, keyed by the job id; a local undo runs its handler in the result transaction.
+     */
+    String COMPENSATION = "COMPENSATION";
 
     /**
      * @param jobKind a job kind
      * @return whether jobs of that kind call outside the JVM and are run by the async executor
      */
     static boolean isAsync(String jobKind) {
-        return ASYNC_SERVICE.equals(jobKind) || ASYNC_AGENT.equals(jobKind);
+        return ASYNC_SERVICE.equals(jobKind) || ASYNC_AGENT.equals(jobKind) || COMPENSATION.equals(jobKind);
     }
 
     /**

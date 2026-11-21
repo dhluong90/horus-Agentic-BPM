@@ -248,6 +248,8 @@ public record ProcessEngineProperties(
                 runners.asyncService().toOverrides());
         kinds.put(io.github.dhluong90.bpm.process.internal.store.JobStore.ASYNC_AGENT,
                 runners.asyncAgent().toOverrides());
+        kinds.put(io.github.dhluong90.bpm.process.internal.store.JobStore.COMPENSATION,
+                runners.compensation().toOverrides());
         return new io.github.dhluong90.bpm.process.internal.service.AsyncSettings(jobs.leaseMargin(),
                 adapters.defaultTimeout(), adapters.executorThreads(), roles, kinds);
     }
@@ -322,8 +324,11 @@ public record ProcessEngineProperties(
      *
      * @param asyncService the runner of remote service steps ({@code serviceTask horus:mode="remote"})
      * @param asyncAgent the runner of agent steps
+     * @param compensation the runner of the undos of a compensation walk (#67): its own retry policy, timeout and
+     *     slots, so undos are never queued behind forward steps
      */
-    public record Runners(@DefaultValue Runner asyncService, @DefaultValue Runner asyncAgent) {
+    public record Runners(@DefaultValue Runner asyncService, @DefaultValue Runner asyncAgent,
+            @DefaultValue Runner compensation) {
     }
 
     /**

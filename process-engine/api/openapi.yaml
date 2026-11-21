@@ -661,9 +661,11 @@ paths:
       description: |
         Cancels every live token and open task of the instance in one transaction, writes the `INSTANCE_ENDED`
         history entry and hands `processes.instance.cancelled.v1` to the host publisher, both carrying the actor and
-        the reason. Only a `RUNNING` instance can be cancelled (`409 INVALID_STATE`). Permission `processes:cancel`,
-        which `processes:start` does not grant (PD-103). Cancel makes no adapter call and runs no compensation in
-        0.2.0; compensation on cancel is planned for 1.2.
+        the reason. Only a `RUNNING` instance can be cancelled (`409 INVALID_STATE`). A `COMPENSATING` instance is
+        refused the same way, with a detail that says a compensation is running: an undo is never abandoned half way,
+        so an operator resolves its incidents first (PRE-076). Permission `processes:cancel`, which
+        `processes:start` does not grant (PD-103). Cancel makes no adapter call and runs no compensation; compensation
+        on cancel is planned for 1.2.
       parameters:
         - name: id
           in: path
@@ -1241,8 +1243,12 @@ paths:
         is accepted (`RESOLVED`, `RETRY_SUCCEEDED`, `processes.incident.resolved.v1`) or fails again, which keeps the
         same incident open with the new cause. A repeat with the same key replays the first answer and writes nothing.
 
+        An undo of a compensation walk that failed (`COMPENSATION_FAILED`, PRE-074) runs again under the same job id
+        with a new attempt id; its success resolves the incident and the walk goes on.
+
         Refusals write nothing: a stale `If-Match` is `409 VERSION_CONFLICT`; an incident that is not `OPEN`, one
-        being retried, or an agent step whose memory failed before any call is `409 INVALID_STATE`. One person's
+        being retried, an agent step whose memory failed before any call, or a manual undo
+        (`COMPENSATION_MANUAL_REQUIRED`, which is resolved instead) is `409 INVALID_STATE`. One person's
         action: it runs the same step again and decides nothing. Permission `processes:incident:manage`.
       parameters:
         - $ref: '#/components/parameters/IncidentId'
@@ -1277,8 +1283,10 @@ paths:
         four-eyes` (the default) the incident becomes `RESOLUTION_PENDING` with the proposal and its proposer, and
         nothing moves until a second holder of `processes:incident:manage` approves; `single` is accepted on the
         `dev` profile only and applies the resolution at once. History records `INCIDENT_RESOLUTION_PROPOSED` with the
-        proposer, the reason and the output, and `processes.incident.resolution-proposed.v1` is published. Permission
-        `processes:incident:manage`.
+        proposer, the reason and the output, and `processes.incident.resolution-proposed.v1` is published. For an
+        undo incident (`COMPENSATION_FAILED`, `COMPENSATION_MANUAL_REQUIRED`, PRE-074, PRE-075) the output records how
+        the undo was done by hand, for example a reversal reference; the approval marks the undo done and the
+        compensation walk goes on. Permission `processes:incident:manage`.
       parameters:
         - $ref: '#/components/parameters/IncidentId'
         - $ref: '#/components/parameters/IncidentIfMatch'
@@ -1553,7 +1561,7 @@ components:
         instanceId: { type: string }
         nodeId: { type: string }
         tokenId: { type: [string, 'null'] }
-        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`' }
+        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`; an undo of a compensation walk that failed is `COMPENSATION_FAILED` and a manual undo `COMPENSATION_MANUAL_REQUIRED` (#67): their `nodeId` is the step being undone, their `tokenId` the scope token walked, and their resolution marks the undo done by hand' }
         causeSummary: { type: string, description: Built from codes and numbers only, never from a handler's detail }
         retryCount: { type: integer, minimum: 0 }
         status: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED] }

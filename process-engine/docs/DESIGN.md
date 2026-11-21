@@ -117,8 +117,9 @@ Source: [`diagrams/instance-states.mmd`](diagrams/instance-states.mmd).
 | `RUNNING` | Step transition, incident retry, migration | `pre_instance` row lock | `RUNNING` | `processes.step.completed.v1` |
 | `RUNNING` | Last token reaches an `end` step | None | `COMPLETED` | `processes.instance.completed.v1` |
 | `RUNNING` | `cancel(reason)` | `processes:cancel` (PD-103; `processes:start` no longer grants it); `reason` not blank, at most 2,000 characters | `CANCELLED` | Under the `pre_instance` row lock, open tasks, jobs and timers are cancelled (ADR-0020). History row `INSTANCE_ENDED` whose `details` holds the actor, the reason and `CANCELLED`. `processes.instance.cancelled.v1` carries `cancelledBy` and `reason`. Running a compensation on cancel is not part of 0.2.0 (PE-F-65, 1.2) (`PRE-054`) |
-| `RUNNING` | `onFailure: compensate` exhausted, or `throwCompensation` | Compensation stack not empty | `COMPENSATING` | `processes.compensation.started.v1` |
-| `COMPENSATING` | Stack walked to the bottom | Every handler `DONE` or resolved | `FAILED` | `processes.instance.failed.v1` |
+| `RUNNING` | A step with `onFailure: compensate` fails for good (business error, not retryable, or its last attempt), or `throwCompensation` runs (#67) | None: an empty stack ends at once | `COMPENSATING` | `processes.compensation.started.v1` with the scope token and the stack depth. Every live flow token of the instance is cancelled with its task or job (`PRE-073`) |
+| `COMPENSATING` | `cancel(reason)` | Refused: `409 INVALID_STATE`, the detail says a compensation is running; nothing is written (`PRE-076`) | `COMPENSATING` | None |
+| `COMPENSATING` | Stack of the scope walked to the bottom | Every entry `DONE`, by its job or by an approved resolution | `FAILED` | `processes.instance.failed.v1`; the scope token is `COMPENSATED`, other scope tokens `CANCELLED` |
 
 An open incident does not change the instance status; the affected token stays in its waiting status and the incident row records the cause.
 
@@ -204,7 +205,7 @@ How the slice of #68 implements the table (0.3.0):
 - A retry keeps the job id, so the adapter's idempotency key (`AdapterCall.idempotencyKey()`, `TR-IDEM-04`) is the same and a remote side effect is never repeated; each claim has a new attempt id and completion token. One more attempt, not a new policy: a retry is one person's action because it runs the same step again and decides nothing (PD-126). A local step has no job: the kernel's `RetryStep` command sends the waiting token into its step again.
 - The output a person proposes is checked against the step's output schema (an agent step's `<horus:outputSchema>`; a service step without one only needs a JSON object of at most 256 KB). The proposal row keeps it unmasked, because the step needs it on approval; the incident view and history keep an agent step's output masked by its schema's policy, as its answers are (section 4.1). A service step has no masking policy, so its operator output is recorded as given.
 - The table keeps the control as a second line: `ck_pre_incident_four_eyes` refuses a `four-eyes` resolution whose resolver is its proposer, and `ck_pre_incident_proposal` refuses a pending state without proposer, time and reason (V29).
-- Undo incidents (`COMPENSATION_FAILED`, `COMPENSATION_MANUAL_REQUIRED`) arrive with saga compensation (#67): their resolution marks the undo done by hand with the same proposal and approval. A host `LifecycleGuard` veto of an incident transition (`TR-EXT-06`) is called before any write once the guard SPI exists.
+- Undo incidents (`COMPENSATION_FAILED`, `COMPENSATION_MANUAL_REQUIRED`, #67) hold the compensation walk, not a step: their token is the scope token being walked, and they are commanded while the instance is `COMPENSATING`. A retry of `COMPENSATION_FAILED` runs the undo's job again under the same job id. A `COMPENSATION_MANUAL_REQUIRED` incident has nothing to run, so it offers `resolve` only. An approved resolution of either marks the undo done by hand with the same proposal and approval, and the walk goes on (`PRE-074`, `PRE-075`). A host `LifecycleGuard` veto of an incident transition (`TR-EXT-06`) is called before any write once the guard SPI exists.
 
 ## 4. Transaction model
 
@@ -212,6 +213,7 @@ How the slice of #68 implements the table (0.3.0):
 |---|---|---|
 | `decision`, gateways, `userTask` state changes, `timer` scheduling, `serviceTask` with `mode: local` | Sync: inside the caller's or the scheduler's transaction | Writes only to the host database; atomic with business state |
 | `agentTask`, `serviceTask` with `mode: remote`, remote compensation handlers | Async Wait-State: TX1 claim, call with no connection, TX2 complete | A network call must never hold a connection or a row lock (ADR-0008, `TR-ASY-01`) |
+| Local compensation handlers (#67) | Sync, in the result transaction of their own `COMPENSATION` job | Each undo commits on its own, after the one before it is `DONE` |
 | Definition lifecycle commands, layout writes | Sync, one short transaction each | Database only; validation runs before the transaction opens |
 | BPMN import and export | Parse and convert outside any transaction; one insert transaction | CPU work on up to 1 MB of XML must not hold a connection |
 | Rollup of node statistics | One short scheduler transaction per slice | Database only, no network; bounded by `statement_timeout` |
@@ -233,7 +235,7 @@ The first async step is the remote `serviceTask` (`horus:mode="remote"`, optiona
 - **Late results after a timeout (#55, `PRE-112`).** The attempt check runs before anything else in TX2, so a result for an attempt that is not the job's current claim never reaches the guard, the kernel or the incident code. That covers an attempt whose lease ended, one taken over by a later attempt, a step that completed, and a job that failed with an incident. The result is `DISCARDED` with no row written (`TR-ASY-02`: no state change), only an INFO log line without the result. A repeat gets the same outcome, so a late result is idempotent and can neither reopen a finished step nor close an incident. Only a cancelled job records the late result in history, because the cancel is a state change the caller must be able to correlate (`TR-STD-12`).
 - **Business error of a local step (#55, `PRE-040`).** A `serviceTask` handler that returns `HandlerResult.BusinessError` runs inside the step transaction, so it has no job. The kernel keeps the token on the step in `WAITING_ASYNC` and emits `Effect.RaiseIncident`. The shell opens the incident in the same transaction, after the instance row is saved: `UNHANDLED_BUSINESS_ERROR`, the business code in `cause_summary` and as `businessCode`, `retry_count` 0, and no `jobId`. The call that reached the step (a start, a task completion, a timer or a result) succeeds, and the work done before the step in that transaction is kept. Nothing is retried, and the handler's message stays in the engine log. Before #55 the error rolled the whole transaction back as `STEP_FAILED`, so the start or completion failed and nothing was recorded. Error boundary events (S1) will catch the error before it becomes an incident.
 
-- **Runner per job kind (#363, `PRE-057`).** Each async job kind has its own runner (`AsyncStepRunner`): `ServiceStepRunner` calls the host's `ServiceAdapter` for `ASYNC_SERVICE`, and `AgentStepRunner` calls the host's `AgentAdapter` for `ASYNC_AGENT` (#52). Each runner has its own slots, default timeout, attempts, back-off and guard budget (`runners.<kind>.*`, section 6.5), and every unset value falls back to `adapters.executor-threads`, `adapters.default-timeout`, `jobs.max-attempts` and `jobs.retry-backoff`, so a host that sets nothing runs as before. The executor claims each kind in its own statement (`job_kind = ?`, index `idx_pre_timer_poll_kind`, V9) up to that kind's free slots, so a backlog of agent calls never takes the claims or the slots of remote service calls, and the other way round. The adapter pool has as many threads as all runners have slots. Timers are not a runner of this executor: the timer poller of section 4.4 runs them with `jobs.*`. A runner holds no engine logic: the executor applies the timeout, the transaction guard and the error mapping around it, and a runner never checks its own result.
+- **Runner per job kind (#363, `PRE-057`).** Each async job kind has its own runner (`AsyncStepRunner`): `ServiceStepRunner` calls the host's `ServiceAdapter` for `ASYNC_SERVICE`, `AgentStepRunner` calls the host's `AgentAdapter` for `ASYNC_AGENT` (#52), and a second `ServiceStepRunner` runs the undos of a compensation walk (`COMPENSATION`, #67, section 4.2). Each runner has its own slots, default timeout, attempts, back-off and guard budget (`runners.<kind>.*`, section 6.5), and every unset value falls back to `adapters.executor-threads`, `adapters.default-timeout`, `jobs.max-attempts` and `jobs.retry-backoff`, so a host that sets nothing runs as before. The executor claims each kind in its own statement (`job_kind = ?`, index `idx_pre_timer_poll_kind`, V9) up to that kind's free slots, so a backlog of agent calls never takes the claims or the slots of remote service calls, and the other way round. The adapter pool has as many threads as all runners have slots. Timers are not a runner of this executor: the timer poller of section 4.4 runs them with `jobs.*`. A runner holds no engine logic: the executor applies the timeout, the transaction guard and the error mapping around it, and a runner never checks its own result.
 - **Result check (#363, `PRE-058` to `PRE-060`).** `recordAttempt` (TX2) checks a completed result before it accepts it, with the guard of the job's kind (section 4.1). The executor and the completion API both reach the engine through `recordAttempt`, so a result reported from outside passes the same check, and no other path accepts a result. Remote service results have no guard. A malformed result gets a fresh attempt while `schema-retries` last (answer `ACCEPTED`) and is refused after that; a refused one is never accepted, and the step goes to a review task or its job fails (answer `REFUSED`, always final).
 
 ```mermaid
@@ -376,7 +378,19 @@ sequenceDiagram
 
 ### 4.2 Saga compensation (ADR-0007, `TR-COMP-01` to `TR-COMP-03`)
 
-A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(step_id, attempt_id, handler, input_snapshot)` onto `pre_compensation_stack` under its scope token: the enclosing `saga`'s scope token, or the root scope token outside any `saga` (ADR-0020). On `onFailure: compensate` or `throwCompensation` the stack of the failing or throwing step's scope token is walked newest first, and entries under other scope tokens are untouched (`PRE-044`); each handler call is an async job with its own retry policy and a new `attemptId`, and receives the forward step's `attemptId` as `forwardAttemptId`. `compensate: manual` opens `COMPENSATION_MANUAL_REQUIRED` instead of skipping.
+Implemented in 0.3.0 (#67, `PRE-013`, `PRE-044`, `PRE-073` to `PRE-076`).
+
+- **Model.** A `saga` block is a BPMN `transaction` with its own none start event, steps and end events; its incoming and outgoing flows are in the enclosing container, and no sequence flow crosses its boundary (`FLOW_CROSSES_SAGA`). A step names its undo with `horus:compensate` (a registered name, or `manual`) and its failure action with `horus:onFailure="compensate"`. `throwCompensation` is an `intermediateThrowEvent` with one `compensateEventDefinition` and no `activityRef`, inside a `saga` only (`THROW_COMPENSATION_OUTSIDE_SAGA`). The canonical form nests a block's steps under a `saga` step and writes `compensate` and `onFailure` only when declared, so the hash of a definition without them is unchanged. A local step's undo is a `ServiceTaskHandler` and a remote or agent step's undo a `ServiceAdapter`; both names are checked at `:request-approval` and `:approve` like `PRE-072`.
+- **Scope tokens.** Entering a block creates a `SCOPE` token under the arriving token's scope (ADR-0020); the arriving token ends and a `FLOW` token enters the block's start event. When the last live flow token of the block ends, the scope token is `COMPLETED` and a new flow token leaves the block in the enclosing scope.
+- **Stack.** A completed `serviceTask` or `agentTask` with an undo pushes one `pre_compensation_stack` row (V31) under its scope token before the token moves on, so `seq` is completion order. The row keeps the forward job id (a remote or agent step's job, null for a local step), the accepted forward attempt id, the undo's name and mode (`local`, `remote` or `manual`), and the input snapshot: the forward inputs and, under `forwardResult`, the forward result.
+- **Start.** A step with `onFailure: compensate` whose failure is final, or a `throwCompensation`, starts the compensation of its scope token instead of the incident of `PRE-040`. In the same transaction every live flow token is cancelled with its task or job, the instance is `COMPENSATING`, history records `COMPENSATION_STARTED`, and `processes.compensation.started.v1` carries the scope token and the number of entries to undo. Entries of other scope tokens are never walked (`PRE-044`).
+- **Walk.** Under the `pre_instance` row lock, the walk takes the highest `PENDING` entry of the scope and gives it a `COMPENSATION` job, keyed by its own job id on every retry, with the `runners.compensation` settings. The job runs on the async lane of section 4: a remote undo calls its adapter with no transaction open and receives `idempotencyKey` (the undo's job id), `forwardJobId` and `forwardAttemptId` on `AdapterCall`; a local undo calls no adapter, and its handler runs in the job's result transaction with `forwardAttemptId` on `ServiceCall`. A completed undo is `DONE` (`COMPENSATION_STEP_COMPLETED`) and the next entry follows in the same transaction, so one undo runs at a time, newest first. With no entry left the scope token is `COMPENSATED`, other live tokens are `CANCELLED`, and the instance ends `FAILED` with `processes.instance.failed.v1`.
+- **Failure.** A failed undo is retried like any job of its lane. When it fails for good, the entry is `FAILED` (`COMPENSATION_STEP_FAILED`) and an incident `COMPENSATION_FAILED` names the entry, the forward job and the cause code; the walk pauses and keeps what it undid. `compensate: manual` sets the entry `MANUAL` and opens `COMPENSATION_MANUAL_REQUIRED`; history records `COMPENSATION_STEP_MANUAL` with the forward ids and the input snapshot, masked inputs as keyed hashes. Section 3.6 describes how both are retried and resolved.
+- **Out of scope.** Compensation of a called child process (#92, PD-127: a completed child is undone only by its call step's own handler), compensation on cancel (PE-F-65, 1.2), and BPMN compensation events beyond `throwCompensation` (S2). A definition with a `saga` block is not yet exported back to BPMN.
+
+![Saga compensation walk](images/saga-compensation.svg)
+
+Source: [`diagrams/saga-compensation.mmd`](diagrams/saga-compensation.mmd).
 
 ### 4.3 Business calendars and migration
 
@@ -689,7 +703,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.task.claimed.v1`, `processes.task.unclaimed.v1` | `taskId`, `instanceId`, `nodeId`, `assignee`, `claimedBy` or `unclaimedBy`, `definitionKey`, `version`, `businessKey`; the event id is derived from the task id and the lock version the change reaches (0.2.0) |
 | `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode`, `retryCount`, `status`, `definitionKey`, `version`, `businessKey`; `businessCode` when the code is `UNHANDLED_BUSINESS_ERROR` (#55); `resolved.v1` adds `resolution` and `resolvedBy`, and `proposedBy` and `approvalMode` for `COMPLETED_MANUALLY` (0.3.0, #68) |
 | `processes.incident.retried.v1`, `.resolution-proposed.v1`, `.resolution-rejected.v1` | The incident fields above, plus `retriedBy` and `reason`, `proposedBy` and `approvalMode`, or `rejectedBy` and `proposedBy` (0.3.0, #68). The event id derives from the incident id and the lock version the change reaches |
-| `processes.compensation.started.v1` | `instanceId`, `scopeId`, stack depth |
+| `processes.compensation.started.v1` | `instanceId`, `scopeId` (the scope token), `depth` (entries to undo), `nodeId` and `cause` (the failing step and its code) |
 | `processes.calendar.changed.v1` | `calendarKey`, `changeId`, `version`, `proposedBy`, `approvedBy`, `approval` (`FOUR_EYES` or `SINGLE`); the event id is the change id with `:approved` (0.3.0, #72) |
 
 **Envelope (#86, `PRE-085`).** Every event is handed to the publisher as `ProcessEventPublisher.Event` and serialised by `Event.envelope()` into nine members: `eventId` (26 characters, stable for the transition), `eventType`, `occurredAt` (engine clock), `tenantId`, `correlationId`, `causationId`, `producer` (`horus-process-engine`), `schemaVersion` (`1`) and `payload`. `correlationId` is the `X-Correlation-Id` of the request, set by `EventScopeFilter` for the REST API or by a host through `EventScope.open(...)`; work a job starts uses the request's id when the job was handed to the engine inside one, and otherwise the job id; with no scope it is the `eventId`, so the event starts its own chain. `causationId` is the request's `Idempotency-Key`, or the job id for work a job starts, or null. A correlation stored with a parked job would need a column on `pre_timer`; that is not part of this slice. The Rule Engine puts the event's own fields next to the envelope members; the Process Engine nests them under `payload`, and both carry the same eight envelope members. Each type has a JSON Schema in `process-engine/api/events/` (`additionalProperties: true`), and `EventSchemaCompatibilityTest` compares the files with the baseline copy of the previous release: nothing removed, retyped or newly required.
@@ -730,7 +744,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `jobs.replica-id` | host name plus a random suffix | Name a replica claims jobs under (`pre_timer.locked_by`); must differ between running copies |
 | `jobs.max-attempts`, `jobs.retry-backoff` | `3`, `10s` | A firing that fails rolls back and is due again after the back-off times the attempt number; after the last attempt the job is `FAILED` (it opens an incident, section 3.6) |
 | `adapters.executor-threads` | `16` | Adapter executor size per replica; a job is claimed only when a slot is free (section 4) |
-| `runners.async-service.slots`, `runners.async-agent.slots` | `adapters.executor-threads` | Calls of that kind in flight per replica; a job of the kind is claimed only when one of its own slots is free, so one kind never takes another's (#363, section 4) |
+| `runners.async-service.slots`, `runners.async-agent.slots`, `runners.compensation.slots` | `adapters.executor-threads` | Calls of that kind in flight per replica; a job of the kind is claimed only when one of its own slots is free, so one kind never takes another's (#363, section 4) |
 | `runners.<kind>.default-timeout` | `adapters.default-timeout` | Timeout of a step of that kind that declares none; its lease is this plus `jobs.lease-margin` |
 | `runners.<kind>.max-attempts`, `runners.<kind>.retry-backoff` | `jobs.max-attempts`, `jobs.retry-backoff` | Attempts and back-off of that kind's jobs |
 | `runners.<kind>.guard-budget` | `500ms` | Longest result check (output schema and guardrail) in the result transaction; a slower check refuses the result. At most `10s` |
@@ -1086,23 +1100,28 @@ CREATE TABLE pre_engine_watermark (            -- #110, V26: engine-internal, on
   updated_at      TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE pre_compensation_stack (
-  tenant_id         TEXT        NOT NULL,
-  id                VARCHAR(26) NOT NULL,
-  instance_id       VARCHAR(26) NOT NULL,
-  scope_token_id    VARCHAR(26) NOT NULL,        -- saga scope token, or the root scope token (ADR-0020)
-  seq               INT         NOT NULL,        -- push order within the scope token; walked in descending order
-  step_id           TEXT        NOT NULL,
+CREATE TABLE pre_compensation_stack (          -- #67, V31
+  tenant_id          TEXT        NOT NULL,
+  id                 VARCHAR(26) NOT NULL,
+  instance_id        VARCHAR(26) NOT NULL,
+  scope_token_id     VARCHAR(26) NOT NULL,       -- saga scope token, or the root scope token (ADR-0020)
+  seq                INT         NOT NULL CHECK (seq >= 1), -- push order within the scope token; walked in descending order
+  step_id            TEXT        NOT NULL,
+  forward_job_id     VARCHAR(26),                -- the forward step's job (remote or agent step); null for a local step
   forward_attempt_id VARCHAR(26) NOT NULL,
-  handler           TEXT        NOT NULL,        -- registered handler name, or 'manual'
-  input_snapshot    JSONB       NOT NULL,
-  status            TEXT        NOT NULL CHECK (status IN ('PENDING','RUNNING','DONE','FAILED','MANUAL')),
-  pushed_at         TIMESTAMPTZ NOT NULL,
-  completed_at      TIMESTAMPTZ,
+  handler            TEXT        NOT NULL,       -- registered handler or adapter name, or 'manual'
+  mode               TEXT        NOT NULL CHECK (mode IN ('local','remote','manual')),
+  input_snapshot     JSONB       NOT NULL,       -- forward inputs, and the forward result under forwardResult
+  status             TEXT        NOT NULL CHECK (status IN ('PENDING','RUNNING','DONE','FAILED','MANUAL')),
+  job_id             VARCHAR(26),                -- the undo's own COMPENSATION job, its idempotency key
+  pushed_at          TIMESTAMPTZ NOT NULL,
+  completed_at       TIMESTAMPTZ,
   PRIMARY KEY (tenant_id, id),
-  UNIQUE (tenant_id, instance_id, scope_token_id, seq),
+  CONSTRAINT uq_pre_compensation_stack_seq UNIQUE (tenant_id, instance_id, scope_token_id, seq),
   FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
-  FOREIGN KEY (tenant_id, scope_token_id) REFERENCES pre_token (tenant_id, id)
+  FOREIGN KEY (tenant_id, scope_token_id) REFERENCES pre_token (tenant_id, id),
+  CHECK ((handler = 'manual') = (mode = 'manual')),
+  CHECK (status <> 'RUNNING' OR job_id IS NOT NULL)
 );
 
 CREATE TABLE pre_idempotency (

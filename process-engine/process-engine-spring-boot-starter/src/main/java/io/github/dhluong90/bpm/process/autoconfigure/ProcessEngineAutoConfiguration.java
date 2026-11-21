@@ -206,7 +206,8 @@ public class ProcessEngineAutoConfiguration {
 
     /**
      * Runs async steps outside any transaction, one runner per job kind with its own slots (#363): remote service
-     * steps through the host's {@code ServiceAdapter}s and agent steps through its {@code AgentAdapter}s (#52). The pool has as many daemon threads as all runners have
+     * steps through the host's {@code ServiceAdapter}s, agent steps through its {@code AgentAdapter}s (#52), and the
+     * undos of a compensation walk through the same {@code ServiceAdapter}s on their own lane (#67). The pool has as many daemon threads as all runners have
      * slots, so no claimed call waits for a thread; one daemon thread abandons calls at their timeout. Closed with the
      * context.
      */
@@ -216,8 +217,11 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<Clock> clock, JobSettings settings, AsyncSettings async,
             ObjectProvider<ServiceAdapter> adapters, ObjectProvider<AgentAdapter> agents, ProcessServices services) {
         java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
+        // #67: the undos of a compensation walk have their own lane, on the same ServiceAdapters.
         List<AsyncStepRunner> runners = List.of(new ServiceStepRunner(adaptersByName(adapters)),
-                new AgentStepRunner(agentsByName(agents)));
+                new AgentStepRunner(agentsByName(agents)),
+                new ServiceStepRunner(adaptersByName(adapters), io.github.dhluong90.bpm.process.internal.store.JobStore
+                        .COMPENSATION));
         int threads = AsyncStepExecutor.threadsNeeded(async, settings,
                 runners.stream().map(AsyncStepRunner::jobKind).toList());
         return new AsyncStepExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, async,
