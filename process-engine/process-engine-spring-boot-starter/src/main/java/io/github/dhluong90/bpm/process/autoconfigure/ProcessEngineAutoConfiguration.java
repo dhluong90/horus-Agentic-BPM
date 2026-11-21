@@ -504,24 +504,29 @@ public class ProcessEngineAutoConfiguration {
             services.useMetrics(metrics);
             return metrics;
         }
+
+        /** The gauges are read on {@code metrics.gauge-refresh}, once per replica, never per scrape. */
+        @Bean
+        ProcessMaintenanceScheduler.Task processEngineGaugeRefresh(ProcessEngineMetrics metrics,
+                ProcessEngineProperties properties) {
+            return new ProcessMaintenanceScheduler.Task("gauge-refresh", properties.metrics().gaugeRefresh(),
+                    metrics::refreshGauges);
+        }
     }
 
     /**
-     * Periodic background work: the rollup on {@code stats.rollup-interval} and, with metrics bound, the gauge
-     * refresh on {@code metrics.gauge-refresh}.
+     * Periodic background work: the rollup on {@code stats.rollup-interval}, and any task another bean adds, such as
+     * the gauge refresh of the metrics. This method names no Micrometer type, so a host without Micrometer loads it.
      */
     @Bean
     @ConditionalOnMissingBean
     ProcessMaintenanceScheduler processEngineMaintenance(ObjectProvider<Clock> clock, NodeStatsRollup rollup,
-            ObjectProvider<ProcessEngineMetrics> metrics, ProcessEngineProperties properties) {
+            ObjectProvider<ProcessMaintenanceScheduler.Task> tasks, ProcessEngineProperties properties) {
         ProcessMaintenanceScheduler scheduler = new ProcessMaintenanceScheduler(clock.getIfUnique(Clock::systemUTC));
         if (properties.stats().rollupEnabled()) {
             scheduler.add("node-stats-rollup", properties.stats().rollupInterval(), rollup::run);
         }
-        ProcessEngineMetrics bound = metrics.getIfAvailable();
-        if (bound != null) {
-            scheduler.add("gauge-refresh", properties.metrics().gaugeRefresh(), bound::refreshGauges);
-        }
+        tasks.orderedStream().forEach(scheduler::add);
         return scheduler;
     }
 

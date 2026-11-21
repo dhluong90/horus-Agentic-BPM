@@ -38,7 +38,11 @@ final class ProcessMaintenanceScheduler implements SmartLifecycle {
     }
 
     ProcessMaintenanceScheduler add(String name, Duration interval, Runnable body) {
-        tasks.add(new Task(name, interval, body));
+        return add(new Task(name, interval, body));
+    }
+
+    ProcessMaintenanceScheduler add(Task task) {
+        tasks.add(task);
         return this;
     }
 
