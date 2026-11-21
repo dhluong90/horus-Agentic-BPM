@@ -130,7 +130,7 @@ for (const screen of SCREENS) {
           await mockEngines(page, screen.scenario, { ...screen.seed, locale });
           await screen.override?.(page);
           await page.goto(`./${screen.hash}`);
-          await expect(screen.signedOut === true ? page.getByRole('alert') : page.getByTestId('header-user')).toBeVisible();
+          await expect(screen.signedOut === true ? page.getByTestId('signed-out') : page.getByTestId('header-user')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await expect(page.locator('.skeleton')).toHaveCount(0);
           await screen.prepare?.(page, locale);

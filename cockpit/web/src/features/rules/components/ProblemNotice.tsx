@@ -149,9 +149,9 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
           </dl>
         </div>
       ) : null}
-      {onReload && problem?.code === 'VERSION_CONFLICT' ? (
+      {onReload && (problem?.code === 'VERSION_CONFLICT' || problem?.code === 'CONTENT_CHANGED') ? (
         <button type="button" className="btn btn--small hit" onClick={onReload}>
-          {t('problem.reload')}
+          {problem.code === 'CONTENT_CHANGED' ? t('approval.reload') : t('problem.reload')}
         </button>
       ) : null}
       {onRestart ? (

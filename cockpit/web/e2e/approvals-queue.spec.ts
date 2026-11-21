@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page, type Route } from '@playwright/t
 import { scenarioPermissions, scenarioUser, type Scenario } from '../src/mocks/fixtures';
 import { KYC_V3_HASH } from '../src/mocks/processDemo';
 import { createFakeProcessEngine } from '../src/mocks/processEngine';
+import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
 import { cspViolations, mockHost, mockRuleEngine, rememberLocale } from './mockHost';
 
 /*
@@ -26,6 +27,7 @@ const T = {
     approve: 'Approve', kyc: 'Customer onboarding (KYC) · Version 3', card: 'card-fee · Version 2', self: 'You made this change, so someone else approves it.',
     empty: 'Nothing is waiting for your review.', error: 'The service could not answer. Try again.', partial: 'Process changes could not be read. This list may be incomplete.',
     forbidden: 'You do not have access to approvals on this service.', decision: 'Your decision', ruleApprove: 'Approve and publish', processApprove: 'Approve change',
+    showCurrent: 'Show the current changes',
     ruleChanged: 'The rules changed after you opened this version. Review it again before you decide.',
     processChanged: 'This version changed after you opened it. Check the changes again before you decide.',
     refused: 'You cannot approve a change you wrote or requested.', loading: 'Loading', waiting: '2 waiting',
@@ -35,6 +37,7 @@ const T = {
     approve: 'Phê duyệt', kyc: 'Mở khách hàng mới (KYC) · Phiên bản 3', card: 'card-fee · Phiên bản 2', self: 'Bạn đã tạo thay đổi này, nên người khác sẽ phê duyệt.',
     empty: 'Không có yêu cầu nào chờ bạn xem xét.', error: 'Dịch vụ chưa trả lời được. Hãy thử lại.', partial: 'Không đọc được thay đổi quy trình. Danh sách có thể chưa đủ.',
     forbidden: 'Bạn không có quyền xem phê duyệt trên dịch vụ này.', decision: 'Quyết định của bạn', ruleApprove: 'Phê duyệt và xuất bản', processApprove: 'Duyệt thay đổi',
+    showCurrent: 'Hiện các thay đổi hiện tại',
     ruleChanged: 'Nội dung đã thay đổi sau khi bạn mở phiên bản này. Hãy xem lại trước khi quyết định.',
     processChanged: 'Phiên bản này đã thay đổi sau khi bạn mở. Hãy kiểm tra lại trước khi quyết định.',
     refused: 'Bạn không thể phê duyệt thay đổi do chính mình soạn hoặc gửi.', loading: 'Đang tải', waiting: '2 đang chờ',
@@ -162,7 +165,7 @@ for (const screen of SCREENS) {
           await mockEngines(page, screen.scenario, locale);
           await screen.override?.(page);
           await page.goto(`./${screen.hash}`);
-          await expect(screen.signedOut === true ? page.getByRole('alert') : page.getByTestId('header-user')).toBeVisible();
+          await expect(screen.signedOut === true ? page.getByTestId('signed-out') : page.getByTestId('header-user')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           if (screen.loading !== true) await expect(page.locator('.skeleton')).toHaveCount(0);
           await screen.prepare?.(page, locale);
@@ -259,6 +262,50 @@ test('CKP_003_a_rule_approval_from_the_queue_sends_the_canonical_hash_the_queue_
   await dock(page, 'en').getByRole('button', { name: T.en.ruleApprove }).click();
   await expect.poll(() => sent.length).toBe(1);
   expect(sent[0]).toEqual(expect.objectContaining({ expectedCanonicalHash: hash }));
+});
+
+test('CKP_003_after_CONTENT_CHANGED_the_rule_approval_cannot_be_sent_with_the_stale_hash_until_the_current_changes_are_shown', async ({ page }) => {
+  await page.clock.setFixedTime(NOW);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await mockHost(page, 'processes-approver');
+  const user = scenarioUser('processes-approver');
+  const permissions = scenarioPermissions('processes-approver');
+  // The engine the reviewer opened, then the same rule set with one rule edited under them.
+  const edited = demoSeed();
+  const pending = edited.find((v) => v.ruleSet === 'card-fee' && v.version === 2);
+  if (pending === undefined) throw new Error('the demo seed has card-fee version 2');
+  pending.definition = { ...pending.definition, rules: pending.definition.rules.map((rule) => (rule.id === 'R3' ? { ...rule, then: { fee: '45000 VND', waived: false } } : rule)) };
+  let engine = createFakeEngine(demoSeed());
+  await page.route('**/api/bpm/rules/v1/**', async (route) => {
+    const request = route.request();
+    const reply = engine.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user, permissions });
+    await route.fulfill({ status: reply.status, headers: reply.headers, body: reply.body });
+  });
+  const sent: { expectedCanonicalHash: string }[] = [];
+  page.on('request', (request) => { if (request.url().endsWith('/card-fee/versions/2:approve')) sent.push(request.postDataJSON() as { expectedCanonicalHash: string }); });
+  await page.goto('./#/rules/card-fee/2/changes');
+  const approve = dock(page, 'en').getByRole('button', { name: T.en.ruleApprove });
+  await expect(approve).toBeEnabled();
+  engine = createFakeEngine(edited);
+  await approve.click();
+  await expect(page.getByText(T.en.ruleChanged)).toBeVisible();
+  expect(sent).toHaveLength(1);
+  // Approve stays disabled: a forced click and the keyboard send nothing.
+  await expect(approve).toBeDisabled();
+  await approve.click({ force: true });
+  await approve.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  expect(sent).toHaveLength(1);
+  // Showing the current changes reads the version again and arms Approve with the new hash.
+  await page.getByRole('button', { name: T.en.showCurrent }).click();
+  await expect(approve).toBeEnabled();
+  await expect(page.getByText(T.en.ruleChanged)).toHaveCount(0);
+  await approve.click();
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent[1]?.expectedCanonicalHash).toMatch(/^[0-9a-f]{64}$/);
+  expect(sent[1]?.expectedCanonicalHash).not.toBe(sent[0]?.expectedCanonicalHash);
+  await expect(page.getByText('Version 2 is published.')).toBeVisible();
 });
 
 test('CKP_003_a_forced_self_approval_on_the_review_screen_shows_the_servers_refusal', async ({ page }) => {
