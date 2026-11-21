@@ -465,6 +465,10 @@ paths:
         (`en` and `vi` ship). The message is written from the catalogue and the code alone; it never repeats text of
         the cell, so a masked value is never echoed. `readings` has one entry per rule when the document is valid and
         is empty otherwise; a reading of a condition on a masked input says that the value is masked.
+
+        A `SYNTAX_ERROR` also carries `position`, `expected` (the token or form the parser expected there, by
+        language) and `example` (a short correct expression), when the parser knows what it expected (#419). These come
+        from the catalogue by the kind of error, never from the cell, so a masked value is not echoed.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -1473,6 +1477,58 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:discard:
+    post:
+      tags: [rule-sets]
+      operationId: discardDraft
+      summary: Discard a draft version that is no longer wanted
+      description: |
+        Permission `rules:author`, checked before the body is read. Only the draft's author (`createdBy`) may
+        discard it; anyone else, an approver included, gets `403 PERMISSION_DENIED`. Only a `DRAFT` can be discarded;
+        any other status, a discarded version included, is `409 INVALID_STATE`, so an approved version can never be
+        removed this way (RLE-091, #418). It is not refused when
+        `horus.bpm.rules.authoring.cockpit-drafts` is `false`: it brings in no content.
+
+        Nothing is deleted. The version becomes `DISCARDED` with `lockVersion` incremented; its number is never used
+        again, its document and hashes stay for the audit trail, and it is left out of `GET .../versions` and of the
+        rule set's `latestVersion`. One history entry `DISCARDED` (actor, optional reason, `fromStatus` `DRAFT`) is
+        appended, shown by `GET .../versions/{version}/history` and `GET .../rule-sets/{name}/history`, and one
+        `rules.version.discarded.v1` event is written
+        (`rule-engine/api/schema/rules.version.discarded.v1.schema.json`), in the same transaction.
+
+        `allowedActions` of a draft contains `discard` for its author with `rules:author`, so a screen shows the
+        action only when the engine allows it.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`; a stale `If-Match` is
+        `409 VERSION_CONFLICT`. The reason is optional; one longer than `lifecycle.reason-max-length` (default 2,000
+        characters) is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`. A repeat with the
+        same key returns the original answer.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+            example:
+              reason: Started from the wrong version
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
@@ -2114,7 +2170,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         hitPolicy:
           type: string
           enum: [FIRST, UNIQUE, COLLECT]
@@ -2210,12 +2266,13 @@ components:
         `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
         with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`;
         `retire` on a `PUBLISHED` version with `rules:approve` and no pending retirement; while a
+        `discard` on a `DRAFT` with `rules:author` for its author only (RLE-091); while a
         retirement is pending, `confirm-retire` for a `rules:approve` holder who is not its requester
         and `cancel-retire` for any `rules:approve` holder (`RLE-038`).
         A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
+        enum: [request-publish, discard, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -2329,7 +2386,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         hitPolicy:
           type: string
           enum: [FIRST, UNIQUE, COLLECT]
@@ -2365,13 +2422,13 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED, DISCARDED]
         fromStatus:
           type: [string, 'null']
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED, null]
         toStatus:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         actor: { type: string }
         reason:
           type: [string, 'null']
@@ -2592,7 +2649,7 @@ components:
         reason:
           type: [string, 'null']
           maxLength: 2000
-          description: Optional; why the requester takes the request back. Stored in the history and the event
+          description: Optional; why the requester takes the request back (`:withdraw`) or the author discards the draft (`:discard`). Stored in the history and the event
     FieldChange:
       type: object
       required: [path, from, to, nonAscii]
@@ -2829,6 +2886,20 @@ components:
           additionalProperties: { type: string }
           examples:
             - { en: The cell is not a valid expression., vi: Ô này không phải là biểu thức hợp lệ. }
+        expected:
+          type: object
+          description: |
+            Present on a `SYNTAX_ERROR` whose kind the parser knows: the token or form it expected at `position`, by
+            language code, from the message catalogue. Chosen by the kind of error alone, so it never repeats text of
+            the cell and a masked value is never echoed. A host language without an entry is omitted. New kinds may be
+            added; a client must not depend on the wording.
+          additionalProperties: { type: string }
+          examples:
+            - { en: A closing parenthesis ) to match the opening one., vi: Dấu đóng ngoặc ) khớp với dấu mở ngoặc. }
+        example:
+          type: string
+          description: "Present with `expected`, a short correct expression from the catalogue, the same in every language"
+          examples: ["(balance + 100) > 0"]
     RuleReading:
       type: object
       required: [ruleId, text]
@@ -2892,7 +2963,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         baselineVersion:
           type: [integer, 'null']
           description: The version effective at `evaluatedAt`, or null when nothing is effective
@@ -2947,7 +3018,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         from: { type: string, format: date-time }
         to: { type: string, format: date-time }
         decisionCount:
@@ -3324,7 +3395,7 @@ components:
         eventsTruncated]
       properties:
         version: { type: integer }
-        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED] }
+        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED] }
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo:
           type: [string, 'null']

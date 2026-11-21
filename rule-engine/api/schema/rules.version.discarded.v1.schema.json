@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:rules.version.discarded.v1",
+  "title": "rules.version.discarded.v1",
+  "description": "Written to the Rule Engine outbox in the transaction where the author of a DRAFT version discards it (POST .../versions/{v}:discard, RLE-091). The version becomes DISCARDED and keeps its number and content; nothing was published and nothing is deleted. The outbox row id is the event id. Carries the full event envelope. Additive changes only within v1 (DESIGN section 3.3).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
+    "ruleSet",
+    "version",
+    "actor",
+    "discardedBy",
+    "canonicalHash",
+    "reason"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventId": {
+      "description": "The event id, a ULID; equal to the outbox row id. Consumers de-duplicate by it.",
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "eventType": {
+      "const": "rules.version.discarded.v1"
+    },
+    "occurredAt": {
+      "description": "When the state change committed, ISO 8601 UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "description": "The tenant, from the authenticated context; never from a request body.",
+      "type": "string"
+    },
+    "correlationId": {
+      "description": "The caller's correlation id (X-Correlation-Id, or the one passed to the Java API). When the caller gave none, the event id: the event starts its own chain.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "description": "The id of the command or event that caused this one, or null when a caller's command caused it directly.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "producer": {
+      "description": "rule-engine, a slash and the engine version that wrote the event.",
+      "type": "string",
+      "pattern": "^rule-engine/[0-9A-Za-z.+-]+$"
+    },
+    "schemaVersion": {
+      "description": "Version of the envelope layout; 1 for every .v1 type.",
+      "const": 1,
+      "type": "integer"
+    },
+    "ruleSet": {
+      "description": "Rule set name, kebab-case.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "version": {
+      "description": "Version number of the rule set, not the lock version.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "actor": {
+      "description": "Who sent the command; always equal to discardedBy.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "Why, if the author gave a reason (at most 2,000 characters); null when none was given.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 2000
+    },
+    "discardedBy": {
+      "description": "Who discarded it; always the draft's author and equal to actor.",
+      "type": "string"
+    },
+    "canonicalHash": {
+      "description": "SHA-256 of the discarded draft's canonical document, lower-case hex (ADR-0026); the content stays stored.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "examples": [
+    {
+      "eventId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B3",
+      "eventType": "rules.version.discarded.v1",
+      "occurredAt": "2026-12-12T08:30:00Z",
+      "tenantId": "bank-a",
+      "correlationId": "req-7f3a",
+      "causationId": null,
+      "producer": "rule-engine/0.2.0",
+      "schemaVersion": 1,
+      "ruleSet": "card-fee",
+      "version": 2,
+      "actor": "lan",
+      "reason": "Started from the wrong version",
+      "discardedBy": "lan",
+      "canonicalHash": "8a2d4f6b0c1e3a5c7e9f1b3d5f7a9c1e3b5d7f9a1c3e5b7d9f1a3c5e7b9d1f3a"
+    }
+  ]
+}

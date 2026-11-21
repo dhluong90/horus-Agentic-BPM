@@ -161,7 +161,8 @@ public final class Parser {
         Expr expr = parser.or();
         Token rest = parser.peek();
         if (rest.kind() != Kind.EOF) {
-            throw new ExpressionException("Unexpected '" + rest.text() + "'", rest.position());
+            throw new ExpressionException(SyntaxHint.OPERATOR_OR_END, "Unexpected '" + rest.text() + "'",
+                    rest.position());
         }
         return new Located(expr, parser.positions);
     }
@@ -407,9 +408,9 @@ public final class Parser {
                 expect(Kind.RPAREN, ")");
                 return inner;
             }
-            case LBRACK -> throw new ExpressionException(
+            case LBRACK -> throw new ExpressionException(SyntaxHint.OPERAND,
                     "List values are allowed only after 'in' in this release", token.position());
-            default -> throw new ExpressionException(
+            default -> throw new ExpressionException(SyntaxHint.OPERAND,
                     token.kind() == Kind.EOF ? "Unexpected end of expression" : "Unexpected '" + token.text() + "'",
                     token.position());
         }
@@ -423,7 +424,7 @@ public final class Parser {
         expect(Kind.LPAREN, "(");
         Token argument = next();
         if (argument.kind() != Kind.STRING) {
-            throw new ExpressionException(function.text() + "(...) takes one string literal", argument.position());
+            throw new ExpressionException(SyntaxHint.LITERAL_ARGUMENT, function.text() + "(...) takes one string literal", argument.position());
         }
         expect(Kind.RPAREN, ")");
         try {
@@ -516,12 +517,12 @@ public final class Parser {
             text = first;
             pattern = next();
             if (pattern.kind() != Kind.STRING) {
-                throw new ExpressionException("matches(text, pattern) takes the pattern as a string literal",
+                throw new ExpressionException(SyntaxHint.LITERAL_ARGUMENT, "matches(text, pattern) takes the pattern as a string literal",
                         pattern.position());
             }
         } else {
             if (!(first instanceof Expr.Literal literal && literal.value() instanceof String)) {
-                throw new ExpressionException("matches(text, pattern) takes the pattern as a string literal",
+                throw new ExpressionException(SyntaxHint.LITERAL_ARGUMENT, "matches(text, pattern) takes the pattern as a string literal",
                         function.position());
             }
             if (column == null) {
@@ -588,7 +589,13 @@ public final class Parser {
     private void expect(Kind kind, String text) {
         Token token = peek();
         if (token.kind() != kind) {
-            throw new ExpressionException("Expected '" + text + "'", token.position());
+            SyntaxHint hint = switch (kind) {
+                case LPAREN -> SyntaxHint.OPEN_PAREN;
+                case RPAREN -> SyntaxHint.CLOSE_PAREN;
+                case LBRACK -> SyntaxHint.OPEN_BRACKET;
+                default -> SyntaxHint.CLOSE_BRACKET;
+            };
+            throw new ExpressionException(hint, "Expected '" + text + "'", token.position());
         }
         next();
     }
@@ -621,7 +628,8 @@ public final class Parser {
 
     private void expectWord(String word) {
         if (!acceptWord(word)) {
-            throw new ExpressionException("Expected '" + word + "'", peek().position());
+            throw new ExpressionException("null".equals(word) ? SyntaxHint.KEYWORD_NULL : SyntaxHint.KEYWORD_AND,
+                    "Expected '" + word + "'", peek().position());
         }
     }
 
@@ -655,7 +663,7 @@ public final class Parser {
     private static ExpressionException unexpectedCharacter(String source, int at) {
         char c = source.charAt(at);
         if (c == '.' && at + 1 < source.length() && isAsciiDigit(source.charAt(at + 1))) {
-            return new ExpressionException("A number starts with a digit, for example 0.5", at);
+            return new ExpressionException(SyntaxHint.NUMBER_START, "A number starts with a digit, for example 0.5", at);
         }
         if (FORBIDDEN_CHARACTERS.indexOf(c) >= 0) {
             return new ExpressionException(ExpressionError.FORBIDDEN_CONSTRUCT, "'" + c
@@ -663,15 +671,15 @@ public final class Parser {
                     + " reference or statement", at);
         }
         if (c == '"') {
-            return new ExpressionException("Strings are written in single quotes, for example 'GOLD'", at);
+            return new ExpressionException(SyntaxHint.SINGLE_QUOTES, "Strings are written in single quotes, for example 'GOLD'", at);
         }
         if (c == '=') {
-            return new ExpressionException("Equality is written ==", at);
+            return new ExpressionException(SyntaxHint.EQUALITY, "Equality is written ==", at);
         }
         if (c == '&' || c == '|' || c == '!') {
-            return new ExpressionException("Logic is written with the words and, or and not", at);
+            return new ExpressionException(SyntaxHint.LOGIC_WORDS, "Logic is written with the words and, or and not", at);
         }
-        return new ExpressionException("Unexpected character '" + c + "'", at);
+        return new ExpressionException(SyntaxHint.CHARACTER, "Unexpected character '" + c + "'", at);
     }
 
     /** Characters that write member access or statements in a host language: {@code a.b}, {@code x; y}, {@code {}}. */
@@ -697,7 +705,7 @@ public final class Parser {
                     }
                 }
                 if (i < n && Character.isDigit(source.charAt(i))) {
-                    throw new ExpressionException("Only the digits 0 to 9 are allowed in numbers", i);
+                    throw new ExpressionException(SyntaxHint.NUMBER_DIGITS, "Only the digits 0 to 9 are allowed in numbers", i);
                 }
                 tokens.add(new Token(Kind.NUMBER, source.substring(start, i), start));
             } else if (c == '\'') {
@@ -711,14 +719,15 @@ public final class Parser {
                         if (escaped == 'u') {
                             // \\uXXXX: how the canonical printer writes control and format characters (ADR-0026)
                             if (i + 4 > n || !isHex(source, i)) {
-                                throw new ExpressionException("Invalid \\u escape, expected four hexadecimal digits", i - 2);
+                                throw new ExpressionException(SyntaxHint.STRING_ESCAPE,
+                                        "Invalid \\u escape, expected four hexadecimal digits", i - 2);
                             }
                             text.append((char) Integer.parseInt(source.substring(i, i + 4), 16));
                             i += 4;
                             continue;
                         }
                         if (escaped != '\'' && escaped != '\\') {
-                            throw new ExpressionException("Unknown escape '\\" + escaped + "'", i - 2);
+                            throw new ExpressionException(SyntaxHint.STRING_ESCAPE, "Unknown escape '\\" + escaped + "'", i - 2);
                         }
                         text.append(escaped);
                     } else if (s == '\'') {
@@ -729,7 +738,7 @@ public final class Parser {
                     }
                 }
                 if (!closed) {
-                    throw new ExpressionException("Unterminated string", start);
+                    throw new ExpressionException(SyntaxHint.UNTERMINATED_STRING, "Unterminated string", start);
                 }
                 tokens.add(new Token(Kind.STRING, text.toString(), start));
             } else if (isAsciiLetter(c) || c == '_') {

@@ -45,6 +45,18 @@ public final class PermissionDeniedException extends HorusBpmException {
     }
 
     /**
+     * Only the author of a draft discards it (RLE-091).
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @return the exception
+     */
+    public static PermissionDeniedException notAuthorToDiscard(String ruleSet, int version) {
+        return new PermissionDeniedException("Only the author of " + ruleSet + " v" + version
+                + " may discard it", true);
+    }
+
+    /**
      * A caller whose id is in the namespace the engine reserves for its own actors ({@code system:}, such as the
      * supersession actor), so no host user can act, or appear in the audit trail, under the engine's name.
      *
