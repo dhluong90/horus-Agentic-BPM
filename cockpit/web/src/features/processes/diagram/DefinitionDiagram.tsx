@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { isKnownNodeType, type DiagramGraph } from '../model/bpmnGraph';
 import {
@@ -17,6 +17,7 @@ import {
   type PlacedNode,
   type Point,
 } from '../model/layout';
+import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
 import { NodeIcon } from './NodeIcon';
 
@@ -50,14 +51,26 @@ function defaultMark(points: readonly Point[]): string | undefined {
   return `M${(cx - uy * 6 - ux * 3).toFixed(1)} ${(cy + ux * 6 - uy * 3).toFixed(1)} L${(cx + uy * 6 + ux * 3).toFixed(1)} ${(cy - ux * 6 + uy * 3).toFixed(1)}`;
 }
 
-function Edge({ edge, marker, defaultLabel }: { edge: PlacedEdge; marker: string; defaultLabel: string }) {
-  const mark = edge.isDefault ? defaultMark(edge.points) : undefined;
+/** The glyph that names a mark beside its colour: a diff never rests on colour alone (WCAG 1.4.1). */
+const MARK_GLYPH: Record<Mark, string> = { added: '+', changed: '•', removed: '−' };
+
+function MarkBadge({ mark, x, y }: { mark: Mark; x: number; y: number }) {
+  return (
+    <g className={`dg-mark dg-mark--${mark}`} aria-hidden="true">
+      <circle cx={x} cy={y} r={9} />
+      <text x={x} y={y + 4.5} textAnchor="middle">{MARK_GLYPH[mark]}</text>
+    </g>
+  );
+}
+
+function Edge({ edge, marker, defaultLabel, mark }: { edge: PlacedEdge; marker: string; defaultLabel: string; mark: Mark | undefined }) {
+  const tick = edge.isDefault ? defaultMark(edge.points) : undefined;
   const at = edge.labelAt;
   const pill = edge.label !== undefined ? Math.ceil(edge.label.length * LABEL_CHAR) + 14 : 0;
   return (
-    <g className="dg-edge" data-edge={edge.id}>
-      <path d={path(edge.points)} markerEnd={`url(#${marker})`} />
-      {mark !== undefined ? <path className="dg-edge__default" d={mark}><title>{defaultLabel}</title></path> : null}
+    <g className={mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
+      <path d={path(edge.points)} markerEnd={`url(#${marker}${mark !== undefined ? `-${mark}` : ''})`} />
+      {tick !== undefined ? <path className="dg-edge__default" d={tick}><title>{defaultLabel}</title></path> : null}
       {edge.label !== undefined && at ? (
         <g className="dg-edge__label">
           <rect x={at.x - pill / 2} y={at.y - 10} width={pill} height={20} rx={10} />
@@ -68,13 +81,24 @@ function Edge({ edge, marker, defaultLabel }: { edge: PlacedEdge; marker: string
   );
 }
 
-function TaskNode({ node, kind, label }: { node: PlacedNode; kind: string; label: string }) {
+/** The node's classes and data attributes for its diff mark and selection. */
+function markProps(mark: Mark | undefined, selected: boolean) {
+  return {
+    className: `${mark !== undefined ? ` dg-node--${mark}` : ''}${selected ? ' is-selected' : ''}`,
+    data: mark !== undefined ? { 'data-mark': mark } : {},
+  };
+}
+
+interface NodeProps { node: PlacedNode; label: string; mark: Mark | undefined; selected: boolean }
+
+function TaskNode({ node, kind, label, mark, selected }: NodeProps & { kind: string }) {
   const { padX, padY, nameLine, typeRow } = TASK_TEXT;
   const content = 2 * padY + node.lines.length * nameLine + node.typeLines.length * typeRow;
   const top = node.y + padY + Math.max(0, (node.height - content) / 2);
   const typeTop = top + node.lines.length * nameLine;
+  const extra = markProps(mark, selected);
   return (
-    <g className={`dg-node dg-node--${kind}`} data-node={node.id} data-type={node.type} tabIndex={0} role="img" aria-label={label}>
+    <g className={`dg-node dg-node--${kind}${extra.className}`} data-node={node.id} data-type={node.type} tabIndex={0} role="img" aria-label={label} {...extra.data}>
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={10} />
       <text className="dg-node__name" x={node.x + padX} y={top + 13}>
@@ -84,17 +108,19 @@ function TaskNode({ node, kind, label }: { node: PlacedNode; kind: string; label
       <text className="dg-node__type" x={node.x + padX + TYPE_INDENT} y={typeTop + 13}>
         {node.typeLines.map((line, index) => <tspan key={index} x={node.x + padX + TYPE_INDENT} dy={index === 0 ? 0 : typeRow}>{index < node.typeLines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
+      {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
     </g>
   );
 }
 
-function SymbolNode({ node, label }: { node: PlacedNode; label: string }) {
+function SymbolNode({ node, label, mark, selected }: NodeProps) {
   const centre = symbolCentre(node);
   const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : undefined;
   const intermediate = node.type.startsWith('intermediate');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
+  const extra = markProps(mark, selected);
   return (
-    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}`} data-node={node.id} data-type={node.type} tabIndex={0} role="img" aria-label={label}>
+    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${extra.className}`} data-node={node.id} data-type={node.type} tabIndex={0} role="img" aria-label={label} {...extra.data}>
       <title>{label}</title>
       {node.shape === 'event' ? (
         <>
@@ -111,22 +137,38 @@ function SymbolNode({ node, label }: { node: PlacedNode; label: string }) {
       <text className="dg-node__caption" x={centre.x} y={captionTop + 12} textAnchor="middle">
         {node.lines.map((line, index) => <tspan key={index} x={centre.x} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
+      {mark !== undefined ? <MarkBadge mark={mark} x={centre.x + 20} y={centre.y - 20} /> : null}
     </g>
   );
 }
 
-function Node({ node, typeLabel }: { node: PlacedNode; typeLabel: string }) {
+function Node({ node, typeLabel, mark, markLabel, selected }: { node: PlacedNode; typeLabel: string; mark: Mark | undefined; markLabel: ((mark: Mark) => string) | undefined; selected: boolean }) {
   const known = isKnownNodeType(node.type);
-  const label = `${node.name ?? node.id}, ${typeLabel}`;
+  const label = `${node.name ?? node.id}, ${typeLabel}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
   if (node.shape === 'task' || !known) {
     // A type this cockpit does not draw is laid out and drawn as a dashed box, named in words.
     const kind = node.type === 'serviceTask:agentTask' ? 'agent' : known ? 'task' : 'generic';
-    return <TaskNode node={node} kind={kind} label={label} />;
+    return <TaskNode node={node} kind={kind} label={label} mark={mark} selected={selected} />;
   }
-  return <SymbolNode node={node} label={label} />;
+  return <SymbolNode node={node} label={label} mark={mark} selected={selected} />;
 }
 
-export default function DefinitionDiagram({ graph, label }: { graph: DiagramGraph; label: string }) {
+/**
+ * `marks` draws a change on this diagram (CKP-024): added, changed and removed steps and links, each in its colour
+ * with its glyph, and named in the step's accessible name through `markLabel`. `selected` outlines one step.
+ * `toolbar` sits left of the zoom control; `reserve` is the room kept under the canvas, for a docked decision; `fill`
+ * makes the canvas take that height, so the change list beside it keeps the same frame.
+ */
+export default function DefinitionDiagram({ graph, label, marks, markLabel, selected, toolbar, reserve = BELOW_CANVAS, fill = false }: {
+  graph: DiagramGraph;
+  label: string;
+  marks?: DiagramMarks | undefined;
+  markLabel?: ((mark: Mark) => string) | undefined;
+  selected?: string | undefined;
+  toolbar?: ReactNode;
+  reserve?: number;
+  fill?: boolean;
+}) {
   const { t } = useI18n();
   const marker = useId().replace(/:/g, '');
   const layout = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t)), [graph, t]);
@@ -139,7 +181,10 @@ export default function DefinitionDiagram({ graph, label }: { graph: DiagramGrap
     if (!element) return;
     const measure = () => {
       const top = element.getBoundingClientRect().top + window.scrollY;
-      setCanvas({ width: element.clientWidth, height: Math.max(MIN_CANVAS_HEIGHT, window.innerHeight - top - BELOW_CANVAS) });
+      const height = Math.max(MIN_CANVAS_HEIGHT, window.innerHeight - top - reserve);
+      // Through the CSSOM: the cockpit's CSP allows no inline style attribute.
+      if (fill) element.style.height = `${String(height)}px`;
+      setCanvas({ width: element.clientWidth, height });
     };
     measure();
     window.addEventListener('resize', measure);
@@ -149,27 +194,44 @@ export default function DefinitionDiagram({ graph, label }: { graph: DiagramGrap
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, []);
+  }, [reserve, fill]);
+
+  // A step chosen in the change list is brought into the canvas when the drawing is wider or taller than it.
+  useEffect(() => {
+    if (selected === undefined) return;
+    const node = frame.current?.querySelector(`[data-node="${CSS.escape(selected)}"]`);
+    if (node instanceof Element && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [selected, graph]);
 
   const scale = zoom === 'fit' && canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
   const width = Math.ceil(layout.width * scale);
   const height = Math.ceil(layout.height * scale);
   return (
     <div className="dg">
-      <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
-        <button type="button" className="hit" aria-pressed={zoom === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
-        <button type="button" className="hit" aria-pressed={zoom === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
+      <div className={toolbar !== undefined ? 'dg__bar' : 'dg__bar dg__bar--end'}>
+        {toolbar}
+        <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
+          <button type="button" className="hit" aria-pressed={zoom === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
+          <button type="button" className="hit" aria-pressed={zoom === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
+        </div>
       </div>
-      <div ref={frame} className="dg__frame">
+      <div ref={frame} className={fill ? 'dg__frame dg__frame--fill' : 'dg__frame'}>
         <svg className="dg__svg" role="group" aria-label={label} width={width} height={height}
           viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`} data-layout="auto" data-scale={scale.toFixed(2)}>
           <defs>
             <marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" className="dg-arrow" />
             </marker>
+            {marks !== undefined ? (['added', 'removed'] as const).map((mark) => (
+              <marker key={mark} id={`${marker}-${mark}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" className={`dg-arrow dg-arrow--${mark}`} />
+              </marker>
+            )) : null}
           </defs>
-          <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} />)}</g>
-          <g>{layout.nodes.map((node) => <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} />)}</g>
+          <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
+          <g>{layout.nodes.map((node) => (
+            <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} mark={marks?.nodes.get(node.id)} markLabel={markLabel} selected={selected === node.id} />
+          ))}</g>
         </svg>
       </div>
     </div>
