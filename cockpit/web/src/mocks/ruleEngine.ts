@@ -719,7 +719,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       });
       return json({ ruleSet: name, version: v.version, base: base.version, languages: LANGUAGES, rows, unchangedCount: diff.unchangedCount });
     }
-    const samples = (JSON.parse(request.body || '{}') as { samples?: { inputs: Record<string, Json> }[] }).samples ?? [];
+    const samples = (JSON.parse(request.body || '{}') as { samples?: { label?: string; inputs: Record<string, Json> }[] }).samples ?? [];
     if (samples.length > READINGS_MAX) return tooLarge('samples', samples.length);
     const effective = [...versionsOf(name)].reverse().find((candidate) => candidate.status === 'PUBLISHED');
     const outcome = (version: StoredVersion, inputs: Record<string, Json>) => {
@@ -731,7 +731,8 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       const baseline = effective ? outcome(effective, sample.inputs) : null;
       const changed = baseline === null || simulated.kind !== baseline.kind || JSON.stringify(simulated.then) !== JSON.stringify(baseline.then);
       const strip = (o: ReturnType<typeof outcome>) => ({ kind: o.kind, ruleIds: o.ruleIds, readings: o.readings });
-      return { index, reference: `S${index + 1}`, label: null, changed, simulated: strip(simulated), baseline: baseline ? strip(baseline) : null };
+      // The label is written back as sent; the engine never builds one from the inputs.
+      return { index, reference: `S${String(index + 1)}`, label: sample.label ?? null, changed, simulated: strip(simulated), baseline: baseline ? strip(baseline) : null };
     });
     return json({ ruleSet: name, version: v.version, baselineVersion: effective?.version ?? null, languages: LANGUAGES, results });
   }
@@ -913,4 +914,20 @@ export function readingsSeed(): StoredVersion[] {
   const published = (definition: Definition): StoredVersion => ({ ruleSet: definition.ruleSet, version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(definition, null, 2), definition, ...base });
   const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [] };
   return [...demoSeed(), published(KYC_ROUTING_V1), published(bigTable()), { ...published(empty), status: 'DRAFT', approvedBy: null, approvedAt: null, effectiveFrom: null, requestedBy: null, requestedAt: null, lockVersion: 0 }];
+}
+
+/**
+ * The simulation screen (CKP-004): card-fee v1 in effect and v2 a draft by Lan (R6 added, R3 raised to 35,000 VND,
+ * R4 removed); kyc-routing v1 in effect and v2 a draft that tests a masked national id; new-fees v1 a draft with no rows.
+ */
+export function simulationSeed(): StoredVersion[] {
+  const draft = (definition: Definition, version: number): StoredVersion => ({
+    ruleSet: definition.ruleSet, version, status: 'DRAFT', lockVersion: 0, createdBy: 'lan', createdAt: '2026-11-20T02:00:00Z', requestedBy: null, requestedAt: null,
+    approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(definition, null, 2), definition,
+    history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: 'lan', reason: null, lockVersion: 0, occurredAt: '2026-11-20T02:00:00Z' }],
+  });
+  const [cardFee, , kyc] = demoSeed();
+  const routing = readingsSeed().find((v) => v.ruleSet === 'kyc-routing') as StoredVersion;
+  const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [] };
+  return [cardFee as StoredVersion, draft(CARD_FEE_V2, 2), kyc as StoredVersion, routing, draft(KYC_ROUTING_V1, 2), draft(empty, 1)];
 }

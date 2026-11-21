@@ -9,7 +9,8 @@ export interface TabItem<T extends string> {
 export function Tabs<T extends string>({ label, items, selected, onSelect, children, className }: {
   label: string;
   items: readonly TabItem<T>[];
-  selected: T;
+  /** Undefined when the body shown belongs to none of the tabs: no tab looks active, the first stays reachable. */
+  selected: T | undefined;
   onSelect: (id: T) => void;
   children: ReactNode;
   className?: string;
@@ -20,6 +21,7 @@ export function Tabs<T extends string>({ label, items, selected, onSelect, child
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
     event.preventDefault();
     const index = items.findIndex((item) => item.id === selected);
+    if (index < 0 && event.key === 'ArrowLeft') return;
     const next = items[(index + (event.key === 'ArrowRight' ? 1 : items.length - 1)) % items.length];
     if (next) {
       onSelect(next.id);
@@ -31,12 +33,12 @@ export function Tabs<T extends string>({ label, items, selected, onSelect, child
       <div ref={list} role="tablist" aria-label={label} className="tabs" onKeyDown={onKey}>
         {items.map((item) => (
           <button key={item.id} id={`${base}-${item.id}`} type="button" role="tab" className="tabs__tab hit" aria-selected={item.id === selected}
-            aria-controls={`${base}-panel`} tabIndex={item.id === selected ? 0 : -1} onClick={() => { onSelect(item.id); }}>
+            aria-controls={`${base}-panel`} tabIndex={item.id === (selected ?? items[0]?.id) ? 0 : -1} onClick={() => { onSelect(item.id); }}>
             {item.label}
           </button>
         ))}
       </div>
-      <div id={`${base}-panel`} role="tabpanel" aria-labelledby={`${base}-${selected}`} className="tabs__panel">
+      <div id={`${base}-panel`} role="tabpanel" {...(selected !== undefined ? { 'aria-labelledby': `${base}-${selected}` } : {})} className="tabs__panel">
         {children}
       </div>
     </div>

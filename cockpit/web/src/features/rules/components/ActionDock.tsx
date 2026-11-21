@@ -54,8 +54,11 @@ function EditButton({ version, onEdit }: { version: RuleSetVersion; onEdit: () =
   );
 }
 
-/** Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen. */
-export function HeaderActions({ version, onEdit, newDraft, requestPublish }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action }) {
+/**
+ * Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen: where the
+ * view has its own focal action (the Simulate view's Run), Request publish is drawn secondary.
+ */
+export function HeaderActions({ version, onEdit, newDraft, requestPublish, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action; demoteRequest?: boolean }) {
   const { t } = useI18n();
   const session = useRulesSession();
   // Every edit is of a stored draft: it needs rules:author, and the host may keep changes in its release pipeline.
@@ -67,7 +70,7 @@ export function HeaderActions({ version, onEdit, newDraft, requestPublish }: { v
       <>
         {edit}
         {canRequest ? (
-          <button type="button" className="btn btn--primary" disabled={requestPublish.isPending} aria-busy={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
+          <button type="button" className={demoteRequest ? 'btn' : 'btn btn--primary'} disabled={requestPublish.isPending} aria-busy={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
             {requestPublish.isPending ? t('dock.requesting') : t('dock.requestPublish')}
           </button>
         ) : null}

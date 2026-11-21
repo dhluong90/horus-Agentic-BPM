@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, DraftValidation, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DraftValidation, RuleSetVersion, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -306,5 +306,14 @@ export function useDiffReadings(version: Pick<RuleSetVersion, 'ruleSet' | 'versi
 /** Runs one sample beside the version in effect and reads both outcomes (RLE-093). The engine logs nothing. */
 export function useSimulateReadings(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
   const { client } = useRulesSession();
-  return useMutation({ mutationFn: (inputs: Readonly<Record<string, unknown>>) => client.simulateReadings(version.ruleSet, version.version, [inputs]) });
+  return useMutation({ mutationFn: (inputs: Readonly<Record<string, unknown>>) => client.simulateReadings(version.ruleSet, version.version, [{ inputs }]) });
+}
+
+/**
+ * Runs several samples of a draft beside the version in effect, in one request, and reads every outcome (RLE-093,
+ * CKP-004). A read: no Idempotency-Key, and the engine logs nothing.
+ */
+export function useSimulateSamples(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
+  const { client } = useRulesSession();
+  return useMutation({ mutationFn: (samples: readonly SimulationSample[]) => client.simulateReadings(version.ruleSet, version.version, samples) });
 }

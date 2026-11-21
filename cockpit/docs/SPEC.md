@@ -41,7 +41,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-UI-02`
 - **Milestone:** M1
 - **Given:** `card-fee` v2 is in `DRAFT`.
-- **When:** Analyst pastes 5 sample JSON/CSV rows and runs simulation.
+- **When:** Analyst types or pastes 5 sample rows from a spreadsheet or CSV (an optional name, then one column per input; no JSON is accepted, under the no-raw-JSON rule) and runs simulation.
 - **Then:** UI displays matched rule IDs, output values, and changed-outcome counts (`2 / 5 changed`), while decision log count remains unchanged.
 - **Example:** `5 samples -> shows 2 changed outcomes; Decision Log count unchanged`.
 - **Test ID:** `CKP_004_simulation_displays_outcome_changes_safely`
