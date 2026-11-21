@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- KYC document review (#100): an agent step asks a model, through the Anthropic Messages adapter doc-reviewer-anthropic, to
+     assess an applicant's identity document. The process names the adapter only; the host's configuration says
+     which API, model and prompt version it uses. The answer must meet the output schema, and the guardrail sends a
+     suspicious or uncertain answer to a KYC reviewer. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_kyc-document-review-anthropic"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="kyc-document-review-anthropic" name="KYC document review (Anthropic Messages)" isExecutable="true">
+    <bpmn:startEvent id="start" name="Documents received"/>
+    <bpmn:serviceTask id="assess-documents" name="Assess the documents" horus:type="agentTask"
+                      horus:agent="doc-reviewer-anthropic" horus:timeout="PT10S" horus:resultVariable="assessment">
+      <bpmn:extensionElements>
+        <horus:input name="applicantName" value="${instance.applicantName}"/>
+        <horus:input name="documentText" value="${instance.documentText}"/>
+        <horus:outputSchema>{
+          "type": "object",
+          "required": ["documentType", "nameMatches", "expiryDate", "tamperingSuspected", "confidence"],
+          "additionalProperties": false,
+          "properties": {
+            "documentType": {"type": "string", "enum": ["PASSPORT", "ID_CARD", "UNKNOWN"]},
+            "nameMatches": {"type": "boolean"},
+            "expiryDate": {"type": "string", "maxLength": 10},
+            "tamperingSuspected": {"type": "boolean"},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+          }
+        }</horus:outputSchema>
+        <horus:guardrail decision="kyc-document-guardrails" onViolation="route-to-human" reviewer="role:KYC_REVIEWER"/>
+        <horus:retry max="2" backoff="PT2S"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="open-account" name="Open the account" horus:assignee="role:ACCOUNT_OFFICER" horus:resultVariable="account"/>
+    <bpmn:endEvent id="end" name="Onboarded"/>
+    <bpmn:sequenceFlow id="start__assess" sourceRef="start" targetRef="assess-documents"/>
+    <bpmn:sequenceFlow id="assess__open" sourceRef="assess-documents" targetRef="open-account"/>
+    <bpmn:sequenceFlow id="open__end" sourceRef="open-account" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

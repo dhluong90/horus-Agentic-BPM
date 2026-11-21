@@ -1,0 +1,1 @@
+{"error": {"message": "Invalid schema for response_format 'step_answer'", "type": "invalid_request_error", "param": "response_format", "code": null}}

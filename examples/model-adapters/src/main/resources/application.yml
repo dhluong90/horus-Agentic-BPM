@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: model-adapters
+  datasource:
+    # Credentials come from the environment only; see README.md.
+    url: ${HORUS_DB_URL:jdbc:postgresql://localhost:5432/horus}
+    username: ${HORUS_DB_USERNAME:horus}
+    password: ${HORUS_DB_PASSWORD:}
+
+# The model APIs behind the agent adapters. The address, the model, the prompt version and the key are host
+# configuration: a process definition names the adapter, never the vendor, the model or the key.
+example:
+  model-adapters:
+    adapters:
+      doc-reviewer:
+        api: OPENAI_COMPATIBLE
+        # Any OpenAI-compatible endpoint: a hosted vendor, or a self-hosted server such as http://localhost:11434/v1
+        base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+        model: ${OPENAI_MODEL:gpt-4o-mini}
+        prompt: prompts/kyc-review@p7
+        api-key: ${OPENAI_API_KEY:}
+      doc-reviewer-anthropic:
+        api: ANTHROPIC_MESSAGES
+        base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+        model: ${ANTHROPIC_MODEL:claude-opus-5-5}
+        prompt: prompts/kyc-review@p7
+        api-key: ${ANTHROPIC_API_KEY:}
+
+horus:
+  bpm:
+    host-id: model-adapters
+    processes:
+      security:
+        role-permissions:
+          ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          ROLE_PROCESS_APPROVER: [processes:approve, processes:read]
+          ROLE_RELATIONSHIP_MANAGER: [processes:start, processes:read]
+          ROLE_KYC_REVIEWER: [processes:read, processes:task:work]

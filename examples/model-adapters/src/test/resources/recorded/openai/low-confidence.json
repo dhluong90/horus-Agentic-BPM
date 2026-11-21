@@ -1,0 +1,14 @@
+{
+  "id": "chatcmpl-rec-0002",
+  "object": "chat.completion",
+  "created": 1795665600,
+  "model": "kyc-model-2026-11",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "{\"documentType\": \"PASSPORT\", \"nameMatches\": true, \"expiryDate\": \"2031-05-01\", \"tamperingSuspected\": false, \"confidence\": 0.72}", "refusal": null},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {"prompt_tokens": 412, "completion_tokens": 38, "total_tokens": 450}
+}

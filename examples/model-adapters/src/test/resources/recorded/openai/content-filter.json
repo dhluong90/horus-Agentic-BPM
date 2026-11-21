@@ -1,0 +1,14 @@
+{
+  "id": "chatcmpl-rec-0004",
+  "object": "chat.completion",
+  "created": 1795665600,
+  "model": "kyc-model-2026-11",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "", "refusal": null},
+      "finish_reason": "content_filter"
+    }
+  ],
+  "usage": {"prompt_tokens": 412, "completion_tokens": 38, "total_tokens": 450}
+}
