@@ -5,6 +5,8 @@ import io.github.dhluong90.bpm.rules.api.HistorySimulation;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.rules.api.SimulationResult;
+import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
@@ -36,16 +38,19 @@ import tools.jackson.databind.JsonNode;
 public class SimulationController {
 
     private final RuleEngine engine;
+    private final VersionService versions;
     private final CallerResolver callers;
 
     /**
      * Creates the controller.
      *
      * @param engine the rule engine
+     * @param versions reads the result in plain language
      * @param callers resolves the caller and its permissions
      */
-    public SimulationController(RuleEngine engine, CallerResolver callers) {
+    public SimulationController(RuleEngine engine, VersionService versions, CallerResolver callers) {
         this.engine = Objects.requireNonNull(engine, "engine must not be null");
+        this.versions = Objects.requireNonNull(versions, "versions must not be null");
         this.callers = Objects.requireNonNull(callers, "callers must not be null");
     }
 
@@ -67,6 +72,37 @@ public class SimulationController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
         // Permission first, then a bounded read: a caller without rules:simulate never makes the host buffer a body.
         RestSupport.require(callers, "rules:simulate");
+        return RestSupport.json(HttpStatus.OK,
+                EngineValues.simulation(simulateSamples(name, version, requestBody, contentLength)));
+    }
+
+    /**
+     * {@code POST /rule-sets/{name}/versions/{v}:simulate-readings}, the body of {@code :simulate}: the simulation
+     * result in plain language, each side read in the version that decided it (RLE-093). The sample inputs are not
+     * echoed. Needs {@code rules:simulate} and {@code rules:read}, both checked before the body is read; more samples
+     * than one request reads is {@code 422 READINGS_TOO_LARGE}. Nothing is logged.
+     *
+     * @param name the rule set name
+     * @param version the version to simulate
+     * @param requestBody the body, read up to {@link EngineDefaults#EVALUATE_BODY_MAX_BYTES}
+     * @param contentLength the declared length, or null
+     * @return one reading per sample
+     * @throws IOException when the body cannot be read
+     */
+    @PostMapping("/{name}/versions/{version:\\d+}:simulate-readings")
+    public ResponseEntity<byte[]> simulateReadings(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
+        RestSupport.require(callers, "rules:simulate");
+        RestSupport.require(callers, "rules:read");
+        return RestSupport.json(HttpStatus.OK, RestSupport.simulationReadings(
+                versions.readSimulation(simulateSamples(name, version, requestBody, contentLength))));
+    }
+
+    private SimulationResult simulateSamples(String name, int version, InputStream requestBody, Long contentLength)
+            throws IOException {
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.EVALUATE_BODY_MAX_BYTES);
         JsonNode request = EngineValues.readRequest(body);
         JsonNode samples = request.isObject() ? request.get("samples") : null;
@@ -90,7 +126,7 @@ public class SimulationController {
                 throw new InputInvalidException("samples[" + i + "]: " + e.getMessage());
             }
         }
-        return RestSupport.json(HttpStatus.OK, EngineValues.simulation(engine.simulate(name, version, inputs)));
+        return engine.simulate(name, version, inputs);
     }
 
     /**

@@ -355,6 +355,82 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:validate:
+    post:
+      tags: [rule-sets]
+      operationId: validateDraft
+      summary: Check an edited table of a DRAFT version as a save would, and store nothing
+      description: |
+        Permission `rules:author`, checked before the body is read. The body is the one `PUT
+        .../versions/{version}` takes (YAML or DMN 1.2 to 1.5, at most 1,048,576 bytes, `413 PAYLOAD_TOO_LARGE`;
+        the document's `ruleSet` must equal `{name}`, `400 INPUT_INVALID`) and it goes through the same checks as a
+        save, including the row limit, the step budget and the mask rules (`RLE-049`, `RLE-050`). Unlike a save, a
+        document that fails the checks is answered `200` with `valid: false` and every cell problem in `problems`
+        (at most 100, `problemsTruncated` when more were found), so a grid can mark cells while the author types.
+
+        Writes nothing: no version write, no history entry, no event, no idempotency record. It therefore takes
+        no `Idempotency-Key` and no `If-Match`. The version is read in the caller's tenant only (`404
+        VERSION_NOT_FOUND`, `404 RULE_SET_NOT_FOUND`); a version that is not a `DRAFT` is `409 INVALID_STATE`.
+        When the host sets `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
+        `403 DRAFT_AUTHORING_DISABLED`, as for a save.
+
+        Each problem carries a stable `code` and a `message` in every language of the engine's message catalogue
+        (`en` and `vi` ship). The message is written from the catalogue and the code alone; it never repeats text of
+        the cell, so a masked value is never echoed. `readings` has one entry per rule when the document is valid and
+        is empty otherwise; a reading of a condition on a masked input says that the value is masked.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              type: string
+            example: |
+              schemaVersion: 1
+              ruleSet: card-fee
+              hitPolicy: first
+              inputs:
+                - { name: balance, type: money }
+              outputs:
+                - { name: fee, type: money }
+              rules:
+                - id: R2
+                  when: { balance: "balance + 100 > 0" }
+                  then: { fee: "0 VND" }
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: The result of the check; nothing was stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftValidation'
+              example:
+                ruleSet: card-fee
+                version: 3
+                valid: false
+                problems:
+                  - ruleId: R2
+                    column: balance
+                    code: TYPE_MISMATCH
+                    position: 0
+                    message:
+                      en: The cell mixes values of different types, or is not a true or false condition.
+                      vi: Ô này trộn các giá trị khác kiểu, hoặc không phải là điều kiện đúng hoặc sai.
+                problemsTruncated: false
+                readings: []
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/diff:
     get:
       tags: [rule-sets]
@@ -437,6 +513,112 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/readings:
+    get:
+      tags: [rule-sets]
+      operationId: readVersion
+      summary: Read every row of a version in plain language
+      description: |
+        Permission `rules:read`. Every row of the version as a plain sentence, written by the engine so
+        every host shows the same text (PD-027, `RLE-091`). Each row is read in every language of the
+        message catalogue (`en` and `vi` ship with the engine; a host may add more) and in two styles:
+        `full`, a sentence such as "Rule R1 applies when Balance is at least 50,000,000 VND and segment
+        is VIP. Then fee is 0 VND.", and `short`, such as "Balance >= 50,000,000 VND, segment = VIP -> fee = 0 VND".
+        Numbers and money are grouped for the language, an input is named by its declared label, else its
+        name in words. When the author wrote a sentence for the row and the language (PD-123) and every
+        placeholder in it can be filled from the table (`{ruleId}`, `{ruleSet}`, `{version}`, and
+        `{output.name}` of a literal output), `full` is that sentence and `source` is `TEMPLATE`;
+        otherwise `source` is `GENERATED`. A sentence that needs the value of an input is never used here,
+        because a table holds no input values.
+
+        A masked input, by its declaration or the tenant's `decision-log.mask-default`, is named as masked
+        and its test is never written. The request is bounded: a version of more than 500 rows is
+        `422 READINGS_TOO_LARGE`, never cut short. Writes nothing; the same version gives a byte-identical
+        body. A rule set of another tenant is `404 RULE_SET_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      responses:
+        '200':
+          description: One entry per row, in table order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleSetReadings'
+              example:
+                ruleSet: account-tier
+                version: 1
+                languages: [en, vi]
+                rows:
+                  - ruleId: R1
+                    position: 1
+                    readings:
+                      en:
+                        full: Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Then fee is 0 VND.
+                        short: Balance >= 50,000,000 VND, segment = VIP -> fee = 0 VND
+                        source: GENERATED
+                      vi:
+                        full: Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là VIP. Khi đó fee là 0 VND.
+                        short: Balance >= 50.000.000 VND, segment = VIP -> fee = 0 VND
+                        source: GENERATED
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/diff/readings:
+    get:
+      tags: [rule-sets]
+      operationId: readDiff
+      summary: Read the changed rows of a diff in both versions
+      description: |
+        Permission `rules:read`. The rows `GET .../diff` lists, each read in `{version}` (`current`) and in
+        `base` (`previous`), so a screen strikes the old sentence and adds the new one (`RLE-092`). An
+        `ADDED` row has no `previous`, a `REMOVED` row no `current`. `readingChanged` is false when the
+        row changed but its readings did not, for example a description. Rows that did not change are not
+        read; `unchangedCount` says how many. Each side is read as in `RLE-091`, so a masked input is named
+        as masked and its test is never written, whichever version it is in. More than 500 changed rows is
+        `422 READINGS_TOO_LARGE`. No `base`, or `base` equal to `{version}`, is `400 INPUT_INVALID`; a
+        `base` that does not exist is `404 VERSION_NOT_FOUND`. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - name: base
+          in: query
+          required: true
+          description: The version to compare against, usually the version in effect
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: The readings of the changed rows, in the order of the diff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingsDiff'
+              example:
+                ruleSet: account-tier
+                version: 2
+                base: 1
+                languages: [en, vi]
+                rows:
+                  - ruleId: R1
+                    change: CHANGED
+                    position: 1
+                    basePosition: 1
+                    readingChanged: true
+                    previous:
+                      en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND. Then fee is 0 VND.', short: 'Balance >= 50,000,000 VND -> fee = 0 VND', source: GENERATED }
+                    current:
+                      en: { full: 'Rule R1 applies when Balance is at least 60,000,000 VND. Then fee is 0 VND.', short: 'Balance >= 60,000,000 VND -> fee = 0 VND', source: GENERATED }
+                unchangedCount: 3
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/export:
     get:
@@ -994,6 +1176,64 @@ paths:
                     changed: true
                     simulated: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 30000 } } }
                     baseline: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 50000 } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate-readings:
+    post:
+      tags: [rule-sets]
+      operationId: simulateReadings
+      summary: Run a simulation and read each outcome in plain language
+      description: |
+        Permissions `rules:simulate` and `rules:read`, both checked before the body is read. The body and the
+        simulation are those of `:simulate`; the answer reads each side of every sample in plain language
+        (`RLE-093`): the matched rows as in `RLE-091`, read in the version that decided them (the baseline's
+        rows in the baseline version), then the result, or the sentence of no match or of the failure. Each
+        outcome has a `full` sentence and a `short` form in every language of the catalogue. The sample
+        inputs are not echoed, and a masked input is never written. More than 500 samples is
+        `422 READINGS_TOO_LARGE`. Writes nothing (no decision row, idempotency record or event), so it takes
+        no `Idempotency-Key`; the same version, samples and clock give the same body.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+            example:
+              samples:
+                - inputs: { balance: { currency: VND, amount: 55000000 }, segment: VIP }
+      responses:
+        '200':
+          description: One reading per sample, in the order sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationReadings'
+              example:
+                ruleSet: account-tier
+                version: 2
+                baselineVersion: 1
+                languages: [en, vi]
+                results:
+                  - index: 0
+                    changed: true
+                    simulated:
+                      kind: MATCHED
+                      ruleIds: [R5]
+                      readings:
+                        en: { full: 'Rule R5 always applies; it has no condition. Result: Tier is BASIC; fee is 50,000 VND.', short: 'R5: Tier = BASIC; fee = 50,000 VND', source: GENERATED }
+                    baseline:
+                      kind: MATCHED
+                      ruleIds: [R1]
+                      readings:
+                        en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Result: Tier is GOLD; fee is 0 VND.', short: 'R1: Tier = GOLD; fee = 0 VND', source: GENERATED }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -2360,6 +2600,109 @@ components:
           description: On `CHANGED` only, in canonical member order
           items:
             $ref: '#/components/schemas/FieldChange'
+    ReadingText:
+      type: object
+      required: [full, short, source]
+      properties:
+        full:
+          type: string
+          description: A full sentence
+        short:
+          type: string
+          description: The short form
+        source:
+          type: string
+          enum: [TEMPLATE, GENERATED]
+          description: "`TEMPLATE` when `full` is the author's own sentence for the row (PD-123), else `GENERATED`"
+    ReadingsByLanguage:
+      type: object
+      description: The reading by language code, one entry for every language in `languages`
+      additionalProperties:
+        $ref: '#/components/schemas/ReadingText'
+    RuleSetReadings:
+      type: object
+      required: [ruleSet, version, languages, rows]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer }
+        languages:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [ruleId, position, readings]
+            properties:
+              ruleId: { type: string }
+              position: { type: integer, minimum: 1 }
+              readings: { $ref: '#/components/schemas/ReadingsByLanguage' }
+    ReadingsDiff:
+      type: object
+      required: [ruleSet, version, base, languages, rows, unchangedCount]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer }
+        base: { type: integer }
+        languages:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [ruleId, change, readingChanged, previous, current]
+            properties:
+              ruleId: { type: string }
+              change:
+                type: string
+                enum: [ADDED, REMOVED, CHANGED, MOVED]
+              position: { type: integer, minimum: 1, description: Absent when `REMOVED` }
+              basePosition: { type: integer, minimum: 1, description: Absent when `ADDED` }
+              readingChanged: { type: boolean }
+              previous:
+                $ref: '#/components/schemas/ReadingsByLanguage'
+              current:
+                $ref: '#/components/schemas/ReadingsByLanguage'
+        unchangedCount: { type: integer }
+    OutcomeReading:
+      type: object
+      required: [kind, ruleIds, readings]
+      properties:
+        kind:
+          type: string
+          enum: [MATCHED, NO_MATCH, FAILED]
+        ruleIds:
+          type: array
+          items: { type: string }
+        readings: { $ref: '#/components/schemas/ReadingsByLanguage' }
+    SimulationReadings:
+      type: object
+      required: [ruleSet, version, baselineVersion, languages, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer }
+        baselineVersion:
+          type: [integer, 'null']
+        languages:
+          type: array
+          items: { type: string }
+        results:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [index, changed, simulated, baseline]
+            properties:
+              index: { type: integer, minimum: 0 }
+              changed: { type: boolean }
+              simulated: { $ref: '#/components/schemas/OutcomeReading' }
+              baseline:
+                oneOf:
+                  - $ref: '#/components/schemas/OutcomeReading'
+                  - type: 'null'
     VersionDiff:
       type: object
       required: [ruleSet, version, base, canonicalHash, baseCanonicalHash, sourceHashChanged, effectiveFrom,
@@ -2482,6 +2825,63 @@ components:
             such as `> 600 + tier` is counted from its first character), or null when the problem
             concerns the whole cell or is not in a cell.
           examples: [8]
+    DraftValidation:
+      type: object
+      required: [ruleSet, version, valid, problems, problemsTruncated, readings]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        valid:
+          type: boolean
+          description: True when a save of the same body would be accepted
+        problems:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ValidationProblem'
+        problemsTruncated:
+          type: boolean
+          description: True when more problems were found than `problems` lists
+        readings:
+          type: array
+          description: One entry per rule, in document order, when `valid`; empty otherwise
+          items:
+            $ref: '#/components/schemas/RuleReading'
+    ValidationProblem:
+      type: object
+      required: [ruleId, column, code, position, message]
+      properties:
+        ruleId:
+          type: [string, 'null']
+          description: The rule (row) of the problem, or null for a problem outside the rules
+        column:
+          type: [string, 'null']
+          description: The input or output name (column) of the problem, or null
+        code:
+          type: string
+          description: |
+            A stable code. The codes of `Violation.code`, and for a problem that has none
+            `RULE_INVALID` (a problem of a rule), `COLUMN_INVALID` (a problem of a column) or `DOCUMENT_INVALID`.
+            New codes may be added.
+        position:
+          type: [integer, 'null']
+          minimum: 0
+          description: Zero-based character position in the cell text as written, or null
+        message:
+          type: object
+          description: The problem by language code; every language of the message catalogue is present
+          additionalProperties: { type: string }
+          examples:
+            - { en: The cell is not a valid expression., vi: Ô này không phải là biểu thức hợp lệ. }
+    RuleReading:
+      type: object
+      required: [ruleId, text]
+      properties:
+        ruleId: { type: string }
+        text:
+          type: object
+          description: The plain-language reading of the rule's condition by language code
+          additionalProperties: { type: string }
     EvaluateRequest:
       type: object
       required: [inputs]
@@ -3082,7 +3482,7 @@ components:
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
-            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE]
+            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, READINGS_TOO_LARGE]
         detail: { type: string }
         correlationId: { type: string }
         namespace:

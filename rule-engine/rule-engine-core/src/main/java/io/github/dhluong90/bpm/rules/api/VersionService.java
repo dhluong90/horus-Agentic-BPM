@@ -96,6 +96,23 @@ public interface VersionService {
     RuleSetVersion replaceDraft(String ruleSet, int version, ImportRequest request, WriteOptions options);
 
     /**
+     * Checks an edited table of a draft exactly as {@link #replaceDraft} would, and stores nothing: no version write,
+     * no history entry, no event, no idempotency record (RLE-090). A document that fails the checks is a result with
+     * {@code valid} false and every problem listed, not an exception.
+     *
+     * @param ruleSet the rule set name; must equal the name in the document
+     * @param version the version number
+     * @param request the edited document; its idempotency key is ignored
+     * @return the problems and, for a valid document, the readings of its rules
+     * @throws DraftAuthoringDisabledException when the host turned draft authoring off
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author}
+     * @throws InvalidStateException when the version is not a draft
+     * @throws PayloadTooLargeException when the document is over the import limit
+     * @throws InputInvalidException when the document names another rule set
+     */
+    DraftValidation validateDraft(String ruleSet, int version, ImportRequest request);
+
+    /**
      * Compares two versions of a rule set row by row, from their canonical models (RLE-028, RLE-048). Writes nothing.
      * Needs {@code rules:read}.
      *
@@ -108,6 +125,46 @@ public interface VersionService {
      * @throws VersionNotFoundException when either version does not exist
      */
     VersionDiff diff(String ruleSet, int version, int base);
+
+    /**
+     * Reads every row of a version in plain language (RLE-091): in each language of the message catalogue, a full
+     * sentence and a short form. A masked input is named as masked and its test is never written. Writes nothing.
+     * Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version to read
+     * @return one reading per row, in table order
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when the version does not exist
+     * @throws ReadingsTooLargeException when the version has more rows than one request reads
+     */
+    RuleReadings.RuleSetReadings readings(String ruleSet, int version);
+
+    /**
+     * Reads the rows a diff of two versions lists, each in both versions (RLE-092). Rows that did not change are not
+     * read. Writes nothing. Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version compared
+     * @param base the version it is compared against; must differ from {@code version}
+     * @return the readings of the changed rows
+     * @throws InputInvalidException when {@code base} equals {@code version}
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when either version does not exist
+     * @throws ReadingsTooLargeException when the diff lists more rows than one request reads
+     */
+    RuleReadings.ReadingsDiff readingsDiff(String ruleSet, int version, int base);
+
+    /**
+     * Reads the outcomes of a simulation result in plain language (RLE-093). The matched rows are read in the version
+     * that decided them; the sample inputs are not part of the reading. Writes nothing. Needs {@code rules:read}.
+     *
+     * @param result the result of {@link RuleEngine#simulate}
+     * @return one reading per sample, in the order of the result
+     * @throws VersionNotFoundException when a version the result names no longer exists
+     * @throws ReadingsTooLargeException when the result has more samples than one request reads
+     */
+    RuleReadings.SimulationReadings readSimulation(SimulationResult result);
 
     /**
      * Moves a draft to {@code PENDING_APPROVAL} and records the caller as requester.

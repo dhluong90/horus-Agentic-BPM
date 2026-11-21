@@ -52,6 +52,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
 | 422 | [EVIDENCE_TOO_LARGE](#evidence_too_large) | rules | M3 |
+| 422 | [READINGS_TOO_LARGE](#readings_too_large) | rules | M3 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
 | 422 | [REPLAY_TOO_LARGE](#replay_too_large) | processes | M3 |
@@ -198,6 +199,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 ### EVIDENCE_TOO_LARGE
 `422`. `POST /rule-sets/{name}/evidence` would produce a file over 8,388,608 bytes, or a chosen version has more than 10,000 history events. Export fewer decisions or versions at a time; nothing was written and no export was recorded.
+
+### READINGS_TOO_LARGE
+`422`. A request for plain-language readings covers more than 500 rows (`GET /rule-sets/{name}/versions/{v}/readings`, `GET .../diff/readings`) or 500 samples (`POST .../:simulate-readings`). Nothing is cut short; read one rule set or fewer samples at a time. Nothing was written.
 
 ## Process Engine
 

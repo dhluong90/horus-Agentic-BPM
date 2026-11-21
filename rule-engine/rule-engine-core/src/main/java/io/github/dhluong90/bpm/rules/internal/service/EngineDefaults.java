@@ -63,6 +63,13 @@ public final class EngineDefaults {
     public static final int RULES_MAX = 5_000;
 
     /**
+     * The most rows of one rule set version, changed rows of one diff or samples of one simulation that one readings
+     * request covers (RLE-091 to RLE-093). A request beyond it is refused with {@code 422 READINGS_TOO_LARGE}, never
+     * cut short.
+     */
+    public static final int READINGS_MAX = 500;
+
+    /**
      * Default and ceiling of {@code horus.bpm.rules.query.max-page-size}: items per page of a list read (ADR-0015).
      * A host may lower it, never raise it.
      */

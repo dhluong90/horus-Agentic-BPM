@@ -497,6 +497,60 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `lan PUTs card-fee-r2-zero.yaml on draft v2 with If-Match "0" -> 200, still v2, lockVersion 1, new canonical hash, 1 DRAFT_UPDATED row, 1 draft-updated event; If-Match "0" again -> 409; minh -> 403; drafts off -> 403 DRAFT_AUTHORING_DISABLED`.
 - **Test ID:** `RLE_047_author_replaces_draft_in_place_with_import_checks`
 
+### RLE-090 A draft's edited table is validated as a save would validate it, and nothing is stored
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-02`, `TR-TEN-01`, PD-113
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with `horus.bpm.rules.authoring.cockpit-drafts: true`; `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` from `card-fee.yaml`, `lockVersion 0`; `lan` holds `rules:author`, `dan` holds `rules:read`; a caller of `bank-b` holds `rules:author`. Tenant `bank-a` declares `kyc-routing` v1 `DRAFT` whose input `nationalId` has `mask: true` and whose `R1` tests `nationalId == '079123456789'`.
+- **When:** `lan` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:validate` with (a) `card-fee.yaml` with `R2` writing `fee: "0 VND"`; (b) `card-fee.yaml` with `R2` testing `txCount: ">= tierX"`. Failure cases: the same body for v1; for v9; as `dan`; as the `bank-b` caller; with `ruleSet: fx-margin`; with a body of 1,048,577 bytes; with drafts off. `lan` also validates `kyc-routing`.
+- **Then:**
+  - (a) is `200` with `valid: true`, `problems: []` and one reading per rule, `R1` to `R3`, in `en` and `vi` (`R3`: "Rule R3 always applies; it has no condition. Then fee is 50,000 VND."), written by the same reader as `RLE-091`. (b) is `200` with `valid: false`, `readings: []` and one problem on `ruleId: R2`, `column: txCount`, `code: UNKNOWN_INPUT`, `message.en` "The cell uses a name that is not a declared input." and `message.vi` "Ô này dùng một tên không phải là đầu vào đã khai báo."; a save of the same body is `422 VALIDATION_FAILED` naming the same rule and column, because both run the same checks.
+  - A problem's message is chosen by its code from the message catalogue of the explanations (`en`, `vi`, a host's own languages) and never repeats text of the cell. A problem with no code is `RULE_INVALID`, `COLUMN_INVALID` or `DOCUMENT_INVALID` by where it is. At most 100 problems are listed, with `problemsTruncated` when more were found.
+  - The reading of `kyc-routing` `R1` says that `nationalId` is masked and its test is not shown; the value `079123456789` appears nowhere in the answer.
+  - v1 is `409 INVALID_STATE`; v9 is `404 VERSION_NOT_FOUND`; `dan` is `403 PERMISSION_DENIED`, checked before the body is read; the `bank-b` caller is `404 RULE_SET_NOT_FOUND`; the `fx-margin` file is `400 INPUT_INVALID`; the large body is `413 PAYLOAD_TOO_LARGE`; with drafts off `lan` gets `403 DRAFT_AUTHORING_DISABLED`.
+  - No call writes a version, a history row, an event or an idempotency record, and the call takes no `Idempotency-Key` and no `If-Match`. Every `rle_` table is byte for byte as it was.
+- **Example:** `lan validates card-fee v2 with R2 testing txCount >= tierX -> 200, valid false, R2 / txCount / UNKNOWN_INPUT with an English and a Vietnamese message; 0 rows written`.
+- **Test ID:** `RLE_090_a_cell_problem_is_placed_on_its_rule_and_column_with_a_code_and_both_languages`
+
+### RLE-091 Every row of a version has a plain reading in each language and in two styles
+- **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027, PD-123, PD-077
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; `account-tier` v1 `PUBLISHED` with inputs `balance` (money, label `Balance`), `segment` and `nationalId` (`mask: true`), outputs `tier` (label `Tier`) and `fee`, and rows `R1` (`balance >= 50000000 VND`, `segment == 'VIP'`, then `tier 'GOLD'`, `fee 0 VND`), `R2` (`balance between 10000000 VND and 49999999 VND`, `nationalId == '079123456789'`), `R3` (`segment in ['STAFF', 'PARTNER']`, with the English sentence "Staff and partners hold {output.tier} and pay {output.fee}."), `R4` (`segment == 'MASS'`, with the English sentence "Mass customers: {input.segment}.") and `R5` (no condition). `dan` holds `rules:read`, `teller` holds only `rules:evaluate`, a caller of `bank-b` holds `rules:read`. A version `big-table` has 501 rows.
+- **When:** `dan` sends `GET /api/bpm/rules/v1/rule-sets/account-tier/versions/1/readings`. Failure cases: as `teller`; as the `bank-b` caller; for version 7; for `big-table`.
+- **Then:**
+  - `200` with `languages: ["en", "vi"]` and one entry per row in table order with its `position`. Each entry has, per language, `full`, `short` and `source`. `R1` in `en`: full "Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Then fee is 0 VND; Tier is GOLD.", short "Balance >= 50,000,000 VND, segment = VIP -> fee = 0 VND; Tier = GOLD" (with the signs of the catalogue: at least, at most, not equal, then). In `vi` the numbers are grouped as `50.000.000 VND`.
+  - Numbers, money, booleans and input and output labels are worded by the catalogue and the labels that explain a decision (`RLE-072`); an input without a label is its name in words. The sentences are in the message catalogue (`explain_<language>.properties`), so a host adds a language or overrides a sentence without code.
+  - When the author wrote a sentence for the row and the language and every placeholder in it can be filled from the table (`{ruleId}`, `{ruleSet}`, `{version}`, `{output.name}` of a literal output), `full` is that sentence and `source` is `TEMPLATE`: `R3` in `en` reads "Staff and partners hold SILVER and pay 0 VND." and in `vi` it is `GENERATED`. A sentence that needs the value of an input (`R4`) is not used, because a table holds none: `R4` is `GENERATED`.
+  - `R2` says that the national id is masked and its test is not shown; `079123456789` appears nowhere in the answer. A masked input is by its declaration or by the tenant's `decision-log.mask-default`.
+  - The same request returns the same body. The reading writes no row.
+  - `teller` is `403 PERMISSION_DENIED`; the `bank-b` caller is `404 RULE_SET_NOT_FOUND`; version 7 is `404 VERSION_NOT_FOUND`; `big-table` is `422 READINGS_TOO_LARGE` naming the limit of 500 and the 501 rows, and no row is returned.
+- **Example:** `account-tier v1, R1 -> en: "Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Then fee is 0 VND; Tier is GOLD."; vi: "Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là VIP. Khi đó fee là 0 VND; Tier là GOLD."`
+- **Test ID:** `RLE_091_every_row_reads_in_english_and_vietnamese_as_a_full_sentence_and_a_short_form`
+
+### RLE-092 A diff of two versions has the old and the new reading of each changed row
+- **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027, PD-099
+- **Milestone:** M2
+- **Given:** `account-tier` v1 as in `RLE-091`; v2 raises the threshold of `R1` to `60000000 VND` and drops `R4`; a v3 differs from v1 only in a description of `R5`.
+- **When:** `dan` sends `GET .../rule-sets/account-tier/versions/2/diff/readings?base=1`, then `versions/3/diff/readings?base=1`. Failure cases: no `base`; `base` equal to the version; a diff that lists 501 rows; as `teller`.
+- **Then:**
+  - v2 against v1 lists `R1` (`CHANGED`) and `R4` (`REMOVED`), in the order of `GET .../diff`. `R1` has `previous` with "Balance is at least 50,000,000 VND" and `current` with "Balance is at least 60,000,000 VND" in each language, in both styles, and `readingChanged: true`. `R4` has `previous` and an empty `current`. An `ADDED` row has `current` and an empty `previous`. `unchangedCount` is 3.
+  - v3 against v1 lists `R5` with `readingChanged: false`, so a screen strikes nothing.
+  - Each side is read as in `RLE-091` in its own version, so a masked input is named as masked and its test is never written on either side.
+  - No `base`, or `base` equal to the version, is `400 INPUT_INVALID`; more than 500 listed rows is `422 READINGS_TOO_LARGE`; `teller` is `403`; a version of another tenant is `404 RULE_SET_NOT_FOUND`.
+- **Example:** `account-tier v2 vs v1, R1 -> previous.en.short "Balance >= 50,000,000 VND, segment = VIP -> ..."; current.en.short "Balance >= 60,000,000 VND, segment = VIP -> ..."; readingChanged true`
+- **Test ID:** `RLE_092_a_diff_reads_each_changed_row_in_both_versions`
+
+### RLE-093 A simulation result is read in plain language, each side in the version that decided it
+- **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027
+- **Milestone:** M2
+- **Given:** `account-tier` v1 in force and v2 a `DRAFT` as in `RLE-092`; `analyst` holds `rules:simulate` and `rules:read`; `viewer` holds only `rules:read`.
+- **When:** `analyst` sends `POST .../rule-sets/account-tier/versions/2:simulate-readings` with a sample of a VIP customer whose balance is 55,000,000 VND and whose `nationalId` is `079123456789`, and one of a MASS customer. Failure cases: as `viewer`; as `analyst` without `rules:read`; 501 samples.
+- **Then:**
+  - `200`, one `results` entry per sample in the order sent, with `changed` as `:simulate` reports it. Sample 0 is changed: `baseline` is `MATCHED` on `R1`, read from v1 ("Rule R1 applies when Balance is at least 50,000,000 VND and segment is VIP. Result: Tier is GOLD; fee is 0 VND."), and `simulated` is `MATCHED` on `R5`, read from v2, short form "R5: Tier = BASIC; fee = 50.000 VND" in `vi`. A no-match reads "No rule of account-tier version 1 matched. No output was produced." with the short form "No rule matched"; a failure reads as the explanation of a failed decision with the short form "Failed: EVALUATION_ERROR". With no effective version `baseline` is null.
+  - The inputs of the samples are not echoed: neither `079123456789` nor `55,000,000` is in the answer.
+  - Both permissions are checked before the body is read, so a caller who lacks either is `403 PERMISSION_DENIED` and no body is buffered. 501 samples are `422 READINGS_TOO_LARGE`. Nothing is logged: no decision row, idempotency record or event, and no `Idempotency-Key` is taken.
+- **Example:** `sample VIP 55,000,000 VND -> baseline R1 (Tier GOLD, fee 0 VND), simulated R5 (Tier BASIC, fee 50,000 VND), changed true`
+- **Test ID:** `RLE_093_a_simulation_result_reads_each_side_in_the_version_that_decided_it_and_never_shows_the_inputs`
+
 ### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
 - **Milestone:** M1
