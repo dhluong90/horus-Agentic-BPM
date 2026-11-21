@@ -36,7 +36,7 @@ public final class EngineMeters {
             "DRAFT_AUTHORING_DISABLED", "RATE_LIMITED", "CLOCK_NOT_ALLOWED", "REPLAY_NOT_POSSIBLE",
             "LAST_VERSION_IN_EFFECT", "WARNINGS_NOT_ACKNOWLEDGED", "AUTHOR_UNKNOWN",
             "BATCH_TOO_LARGE", "DMN_UNSUPPORTED_ELEMENT", "CMMN_UNSUPPORTED", "EXPRESSION_LANGUAGE_UNSUPPORTED",
-            "EVIDENCE_TOO_LARGE");
+            "EVIDENCE_TOO_LARGE", "READINGS_TOO_LARGE");
 
     /** How one evaluation call ended. */
     public enum Outcome {

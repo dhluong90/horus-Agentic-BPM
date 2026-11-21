@@ -129,12 +129,33 @@ class ExplainHistoryEvidencePostgresIT {
 
         assertThat(first.version()).isEqualTo(1);
         assertThat(first.text()).isEqualTo(
-                "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND.");
+                "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND.");
         assertThat(again).isEqualTo(first);
         assertThat(statements).noneMatch(sql -> sql.strip().toUpperCase().matches("(?s)^(INSERT|UPDATE|DELETE).*"));
         assertThat(count("SELECT count(*) FROM rle_decision")).isEqualTo(rows);
         caller.as("bank-b", "dan", Set.of("rules:log:read"));
         assertThatThrownBy(() -> engines.decisionLog().explain(d7, List.of())).isInstanceOf(DecisionNotFoundException.class);
+    }
+
+    @Test
+    void RLE_072_template_is_stored_with_the_version_and_read_back_from_it() {
+        // Given a version whose R2 carries a sentence, and a v2 that rewords it after the decision
+        String templated = CARD_FEE.replace("{ id: R2, when: { txCount: \">= 3\" }, then: { fee: \"10000 VND\" } }",
+                "id: R2\n    when: { txCount: \">= 3\" }\n    then: { fee: \"10000 VND\" }\n    explain:\n"
+                        + "      en: \"Your card fee is {output.fee} for {input.txCount} transactions.\"");
+        publish(templated, 1);
+        String d7 = decide(Map.of("nationalId", NATIONAL_ID, "tier", "SILVER", "txCount", 5));
+        publish(templated.replace("Your card fee", "The card fee"), 2);
+        caller.as("bank-a", "dan", Set.of("rules:log:read"));
+        statements.clear();
+
+        // When the decision is explained
+        DecisionExplanation explained = engines.decisionLog().explain(d7, List.of("en"));
+
+        // Then the stored v1 sentence is used, and nothing is written
+        assertThat(explained.text()).isEqualTo("Your card fee is 10,000 VND for 5 transactions.");
+        assertThat(explained.textSource()).isEqualTo("TEMPLATE");
+        assertThat(statements).noneMatch(sql -> sql.strip().toUpperCase().matches("(?s)^(INSERT|UPDATE|DELETE).*"));
     }
 
     @Test
@@ -150,7 +171,7 @@ class ExplainHistoryEvidencePostgresIT {
         assertThat(id.masked()).isTrue();
         assertThat(id.valueJson()).matches("\"hmac:k1:[0-9a-f]{64}\"");
         assertThat(masked.reasons()).extracting(DecisionExplanation.Reason::code).contains("VALUE_MASKED");
-        assertThat(masked.text()).isEqualTo("Quy tắc R1 của card-fee phiên bản 1 khớp vì nationalId đã được che, tức là"
+        assertThat(masked.text()).isEqualTo("Quy tắc R1 của card-fee phiên bản 1 khớp vì national id đã được che, tức là"
                 + " có giá trị, và tier là GOLD, tức là bằng GOLD. Kết quả: fee 0 VND.");
         assertThat(masked.toString()).doesNotContain(NATIONAL_ID);
     }

@@ -120,6 +120,23 @@ A list keeps one entry per matched rule, `null` included, so parallel lists line
 
 Under `unique`, several matching rows fail the decision with `422 UNIQUE_HIT_VIOLATION`: no outputs are returned, and the decision row records that outcome and the matched rule ids. Zero matches is no match, as with `first`: every output is `null` and the decision is logged as `OK` with no matched rules (DMN 1.5). Add a catch-all row if no match must be handled differently. A pricing table where two rows overlap fails loudly instead of quietly charging the first row's price. The example [`loan-pricing.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-engine-only/src/main/resources/rules/loan-pricing.yaml) overlaps on purpose.
 
+### Words for explanations
+
+An input or output can carry a `label`, the name people read in explanations (`label: "Customer tier"`); without one the engine writes the name in words. A row can carry the sentence an explanation uses, per language, and the rule set can carry one for "no match":
+
+```yaml
+explanations:
+  noMatch: { en: "No card fee applies to this account.", vi: "Tài khoản này không thuộc biểu phí thẻ nào." }
+rules:
+  - id: R2
+    when: { txCount: ">= 3" }
+    then: { fee: "10000 VND" }
+    explain:
+      en: "Your card fee is {output.fee} because you made {input.txCount} transactions this month."
+```
+
+Placeholders are `{input.<name>}`, `{output.<name>}`, `{ruleId}`, `{ruleSet}` and `{version}`; a sentence has at most 500 characters. Import refuses a placeholder that is not one of these, and a placeholder of an input with `mask: true`. A row without a sentence is explained by the generated one. The sentences are part of the version, so a change needs the same approval as a change to the rules.
+
 ## 4. Validate
 
 Validation runs on every save and on every publication request. It reports each problem with the row id.

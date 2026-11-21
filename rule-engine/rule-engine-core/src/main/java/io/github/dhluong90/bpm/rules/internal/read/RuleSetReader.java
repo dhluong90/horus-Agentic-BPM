@@ -64,12 +64,12 @@ public final class RuleSetReader {
     private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
     private static final Pattern RULE_ID = Pattern.compile("^[A-Za-z][A-Za-z0-9_-]*$");
     private static final Set<String> ROOT_KEYS = Set.of("schemaVersion", "ruleSet", "description",
-            "expressionLanguage", "timeZone", "hitPolicy", "effectiveFrom", "moneyRounding", "inputs", "outputs",
-            "rules");
+            "expressionLanguage", "timeZone", "hitPolicy", "effectiveFrom", "moneyRounding", "explanations", "inputs",
+            "outputs", "rules");
 
-    private static final Set<String> INPUT_KEYS = Set.of("name", "type", "description", "allowed", "mask");
-    private static final Set<String> OUTPUT_KEYS = Set.of("name", "type", "description", "default", "collect");
-    private static final Set<String> RULE_KEYS = Set.of("id", "description", "when", "then");
+    private static final Set<String> INPUT_KEYS = Set.of("name", "type", "label", "description", "allowed", "mask");
+    private static final Set<String> OUTPUT_KEYS = Set.of("name", "type", "label", "description", "default", "collect");
+    private static final Set<String> RULE_KEYS = Set.of("id", "description", "explain", "when", "then");
 
     private RuleSetReader() {
     }
@@ -215,6 +215,7 @@ public final class RuleSetReader {
             if (!inputNames.add(inputName)) {
                 throw invalid("Duplicate input '" + inputName + "'");
             }
+            label(input, "Input '" + inputName + "'");
             JsonNode mask = input.get("mask");
             if (mask != null && !mask.isBoolean()) {
                 throw invalid("Input '" + inputName + "': mask must be true or false");
@@ -229,6 +230,7 @@ public final class RuleSetReader {
             if (!outputNames.add(outputName)) {
                 throw invalid("Duplicate output '" + outputName + "'");
             }
+            label(output, "Output '" + outputName + "'");
             Cell defaultValue = output.has("default") ? cell(output.get("default")) : null;
             OutputClause.Aggregate aggregate = switch (output.has("collect") ? text(output, "collect") : "none") {
                 case "none" -> OutputClause.Aggregate.NONE;
@@ -270,6 +272,19 @@ public final class RuleSetReader {
                 then.put(entry.getKey(), cell(entry.getValue()));
             }
             rules.add(new Rule(id, when, then));
+        }
+        JsonNode explanations = root.get("explanations");
+        if (explanations != null) {
+            if (!explanations.isObject()) {
+                throw invalid("explanations must be a mapping");
+            }
+            onlyKeys(explanations, Set.of("noMatch"), "explanations");
+        }
+        Map<String, Boolean> declaredMasks = new LinkedHashMap<>();
+        inputs.forEach(clause -> declaredMasks.put(clause.name(), clause.mask()));
+        List<Violation> badTemplates = ExplanationTemplates.checkAll(root, declaredMasks, outputNames);
+        if (!badTemplates.isEmpty()) {
+            throw new ValidationFailedException(badTemplates);
         }
         DecisionTable table = new DecisionTable(hitPolicy, rounding, inputs, outputs, rules);
         return new Definitions(name, language, zone, effectiveFrom, List.of(new Decision(name, name, table)));
@@ -494,6 +509,14 @@ public final class RuleSetReader {
 
     private static String optionalText(JsonNode node, String key, String defaultValue) {
         return node.has(key) ? text(node, key) : defaultValue;
+    }
+
+    /** A label is optional text of 1 to 100 characters. */
+    private static void label(JsonNode clause, String where) {
+        JsonNode label = clause.get("label");
+        if (label != null && (!label.isString() || label.stringValue().isBlank() || label.stringValue().length() > 100)) {
+            throw invalid(where + ": label must be text of 1 to 100 characters");
+        }
     }
 
     private static ValidationFailedException invalid(String detail) {

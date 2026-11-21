@@ -137,6 +137,7 @@ public class DecisionLogController {
         }
         json.put("language", e.language());
         json.put("text", e.text());
+        json.put("textSource", e.textSource());
         return json;
     }
 

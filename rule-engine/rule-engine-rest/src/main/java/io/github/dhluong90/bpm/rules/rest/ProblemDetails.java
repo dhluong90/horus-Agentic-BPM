@@ -64,6 +64,7 @@ public class ProblemDetails {
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BATCH_TOO_LARGE", UNPROCESSABLE),
             Map.entry("EVIDENCE_TOO_LARGE", UNPROCESSABLE),
+            Map.entry("READINGS_TOO_LARGE", UNPROCESSABLE),
             Map.entry("CMMN_UNSUPPORTED", UNPROCESSABLE),
             Map.entry("DMN_UNSUPPORTED_ELEMENT", UNPROCESSABLE),
             Map.entry("EXPRESSION_LANGUAGE_UNSUPPORTED", UNPROCESSABLE),

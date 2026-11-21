@@ -41,6 +41,14 @@
       "enum": ["HALF_EVEN", "HALF_UP", "DOWN", "UP", "FLOOR", "CEILING"],
       "default": "HALF_EVEN"
     },
+    "explanations": {
+      "description": "Sentences the author writes for explaining a decision of this rule set. noMatch is the sentence for a decision in which no row matched, per language. Part of the versioned definition: hashed, diffed and approved with the rules.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "noMatch": { "$ref": "#/$defs/explanationTexts" }
+      }
+    },
     "inputs": {
       "type": "array",
       "items": { "$ref": "#/$defs/input" }
@@ -62,6 +70,20 @@
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
       "maxLength": 64
     },
+    "explanationTexts": {
+      "description": "Explanation sentences by BCP 47 language tag (at most 10 languages, at most 500 characters each). Plain text with the placeholders {input.<name>}, {output.<name>}, {ruleId}, {ruleSet} and {version}; never an expression. A placeholder of an input declared mask: true is refused.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 10,
+      "propertyNames": { "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$" },
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 500 }
+    },
+    "label": {
+      "description": "The name people read in the rule table and in explanations, for example Customer tier. Without it the engine writes the name in words.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
     "valueType": {
       "description": "Scalar types, or list<T> of a scalar type.",
       "type": "string",
@@ -74,6 +96,7 @@
       "properties": {
         "name": { "$ref": "#/$defs/identifier" },
         "type": { "$ref": "#/$defs/valueType" },
+        "label": { "$ref": "#/$defs/label" },
         "description": { "type": "string" },
         "allowed": {
           "description": "Closed set of values for a string input; enables unreachable-row and overlap detection.",
@@ -95,6 +118,7 @@
       "properties": {
         "name": { "$ref": "#/$defs/identifier" },
         "type": { "$ref": "#/$defs/valueType" },
+        "label": { "$ref": "#/$defs/label" },
         "description": { "type": "string" },
         "default": {
           "description": "Value used when a matching row omits this output. Same encoding as a then cell.",
@@ -137,6 +161,7 @@
           "maxLength": 64
         },
         "description": { "type": "string" },
+        "explain": { "$ref": "#/$defs/explanationTexts" },
         "when": { "$ref": "#/$defs/when" },
         "then": {
           "type": "object",
