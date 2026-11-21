@@ -80,6 +80,14 @@ final class ProcessListQueries {
                     + "WHERE tenant_id = ? AND instance_id = ? AND status IN ('OPEN','RESOLUTION_PENDING') "
                     + "ORDER BY created_at, id");
 
+    /**
+     * The first page of the definition versions waiting for a second person, oldest request first, of every key of one
+     * tenant (#31, PRE-190), on {@code idx_pre_definition_pending_page (tenant_id, requested_at, id)} (V35).
+     */
+    static final ListQuery PENDING_APPROVALS = pendingApprovals(false);
+    /** A later page, after the last version of the previous page. */
+    static final ListQuery PENDING_APPROVALS_AFTER = pendingApprovals(true);
+
     /** The first page of the incidents of one status (#68, PRE-080). */
     static final ListQuery INCIDENTS = incidents(false);
     /** A later page, after the last incident of the previous page. */
@@ -313,7 +321,7 @@ final class ProcessListQueries {
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
         List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
-                OPEN_INCIDENTS, INCIDENTS, INCIDENTS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
+                OPEN_INCIDENTS, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
@@ -363,6 +371,19 @@ final class ProcessListQueries {
                 "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? AND status = ? "
                         + (after ? "AND (created_at, id) < (?, ?) " : "")
                         + "ORDER BY created_at DESC, id DESC LIMIT ?");
+    }
+
+    /**
+     * The pending approvals, oldest request first; keyset on {@code (requested_at, id)}, never {@code OFFSET}. The
+     * definition and source are not read. Parameters: tenant, [after requested at, after id], limit.
+     */
+    private static ListQuery pendingApprovals(boolean after) {
+        return new ListQuery(after ? "pending-approvals-after" : "pending-approvals",
+                new Bound.Page("oldest request first on idx_pre_definition_pending_page (tenant_id, requested_at, id)"),
+                "SELECT id, key_name, name, version_num, definition_hash, lock_version, created_by, requested_by, "
+                        + "requested_at FROM pre_definition WHERE tenant_id = ? AND status = 'PENDING_APPROVAL' "
+                        + (after ? "AND (requested_at, id) > (?, ?) " : "")
+                        + "ORDER BY requested_at, id LIMIT ?");
     }
 
     /**

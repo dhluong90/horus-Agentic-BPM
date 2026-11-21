@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.rules.api.AuthorUnknownException;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.DraftValidation;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
+import io.github.dhluong90.bpm.rules.api.PendingApproval;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.rules.api.PreconditionRequiredException;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
@@ -31,6 +32,7 @@ import io.github.dhluong90.bpm.rules.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.rules.api.VersionConflictException;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.VersionActions;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
@@ -76,6 +78,7 @@ public final class DefaultVersionService implements VersionService {
 
     private static final String CURSOR_RULE_SETS = "rule-sets";
     private static final String CURSOR_VERSIONS = "versions";
+    private static final String CURSOR_PENDING = "pending-approvals";
 
     private final EngineContext context;
     private final RuleStore store;
@@ -755,6 +758,34 @@ public final class DefaultVersionService implements VersionService {
             List<VersionSummary> rows = store.listVersions(tenant, ruleSetId, beforeVersion, limit + 1);
             return page(rows, limit, last -> cursorKeys.sign(tenant, ruleSet, CURSOR_VERSIONS,
                     Integer.toString(last.version())));
+        });
+    }
+
+    @Override
+    public Page<PendingApproval> pendingApprovals(PageRequest page) {
+        String tenant = context.tenant();
+        String caller = context.callerWith(PERMISSION_READ);
+        PageRequest request = page == null ? PageRequest.first() : page;
+        int limit = limit(request);
+        // Verified in memory before any transaction: a forged cursor never reaches the database (RLE-039).
+        var after = Cursors.decisionPosition(cursorKeys.verify(tenant, "", CURSOR_PENDING, request.cursor()));
+        java.util.Set<String> permissions = context.permissions();
+        return context.withoutDooming(() -> {
+            List<io.github.dhluong90.bpm.rules.internal.store.PendingVersion> rows =
+                    store.listPendingApprovals(tenant, after, limit + 1);
+            List<PendingApproval> items = rows.stream().limit(limit).map(v -> {
+                List<String> allowed = VersionActions.allowed(VersionStatus.PENDING_APPROVAL, v.createdBy(),
+                        v.requestedBy(), caller, permissions);
+                return new PendingApproval(v.ruleSet(), v.version(), v.canonicalHash(), v.lockVersion(),
+                        v.requestedBy(), v.requestedAt(), allowed,
+                        VersionActions.pendingDenials(v.createdBy(), v.requestedBy(), caller, permissions));
+            }).toList();
+            if (rows.size() <= limit) {
+                return new Page<>(items, null);
+            }
+            var last = rows.get(limit - 1);
+            return new Page<>(items, cursorKeys.sign(tenant, "", CURSOR_PENDING,
+                    Cursors.decisionKey(last.requestedAt(), last.id())));
         });
     }
 

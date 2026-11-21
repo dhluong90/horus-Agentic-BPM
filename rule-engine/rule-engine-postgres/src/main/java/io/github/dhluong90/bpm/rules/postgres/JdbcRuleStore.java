@@ -294,6 +294,21 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     @Override
+    public List<io.github.dhluong90.bpm.rules.internal.store.PendingVersion> listPendingApprovals(String tenantId,
+            io.github.dhluong90.bpm.rules.internal.store.DecisionLog.Position after, int limit) {
+        org.springframework.jdbc.core.RowMapper<io.github.dhluong90.bpm.rules.internal.store.PendingVersion> mapper = (rs, row) ->
+                new io.github.dhluong90.bpm.rules.internal.store.PendingVersion(rs.getString("id"), rs.getString("name"),
+                        rs.getInt("version_num"), rs.getString("canonical_hash"), rs.getLong("lock_version"),
+                        rs.getString("created_by"), rs.getString("requested_by"), instant(rs, "requested_at"));
+        if (after == null) {
+            return RuleListQueries.PENDING_APPROVALS.list(jdbc,
+                    ListQuery.params("tenant", tenantId, "limit", limit), mapper);
+        }
+        return RuleListQueries.PENDING_APPROVALS_AFTER.list(jdbc, ListQuery.params("tenant", tenantId,
+                "afterAt", java.sql.Timestamp.from(after.createdAt()), "afterId", after.id(), "limit", limit), mapper);
+    }
+
+    @Override
     public void appendHistory(HistoryRow row) {
         boolean approved = row.action() == LifecycleAction.APPROVED;
         jdbc.sql("""
