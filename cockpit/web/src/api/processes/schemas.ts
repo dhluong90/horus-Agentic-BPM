@@ -77,11 +77,42 @@ export const task = z
     createdAt: z.string(),
     completedBy: nullableString,
     completedAt: nullableString,
+    dueAt: nullableString,
     allowedActions: z.array(z.string()),
     review: reviewContext.optional(),
   })
   .loose();
 export type Task = z.infer<typeof task>;
+
+/**
+ * How a task stands against its deadline, when the engine says so (PD-111, #81). Until the list carries it, the
+ * queue reads which tasks are overdue from the engine's own `slaBreached=true` query; the browser computes neither.
+ */
+export const SLA_STATES = ['NONE', 'ON_TIME', 'DUE_SOON', 'BREACHED'] as const;
+export type SlaState = (typeof SLA_STATES)[number];
+
+/** One item of `GET /tasks` (listTasks): no variables and no review context. */
+export const taskSummary = z
+  .object({
+    id: z.string(),
+    instanceId: z.string(),
+    definitionKey: z.string(),
+    definitionVersion: z.number().int(),
+    businessKey: nullableString,
+    nodeId: z.string(),
+    name: nullableString,
+    assignee: z.string(),
+    status: z.enum(['OPEN', 'CLAIMED']),
+    lockVersion: z.number().int(),
+    claimedBy: nullableString,
+    createdAt: z.string(),
+    dueAt: nullableString,
+    slaState: z.enum(SLA_STATES).optional().catch(undefined),
+    overdueBy: nullableString,
+  })
+  .loose();
+export type TaskSummary = z.infer<typeof taskSummary>;
+export const taskSummaryPage = page(taskSummary);
 
 /** The part of an instance the review screen reads: who started it (four eyes). */
 export const processInstance = z

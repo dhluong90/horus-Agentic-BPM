@@ -167,7 +167,7 @@ A host that keeps production rule changes in Git can turn off cockpit editing pe
 |---|---|
 | Definitions | Browse versions and see each version as a diagram. A definition with no stored layout is laid out automatically. Available now: the list of definitions and the diagram of the version in effect, laid out left to right, with a step list; a step type the cockpit does not know shows as a dashed box naming its type. Stored layouts follow |
 | Instances | Open an instance and see its diagram with the live token positions, its history timeline, and per step when it ran, how long it took, the attempts and who acted |
-| Inbox | Work one task inbox merged across the hosts in the registry, ordered by due date; claim, complete, reassign; filter to SLA breaches |
+| Tasks | Available now for one host: My tasks, Available to me and, with `processes:task:manage`, All tasks, each in due-time order with overdue tasks marked in words. Claim a task, release it back to the queue, or open it. A supervisor reassigns a task to a colleague's user id with a required reason (1 to 500 characters), which the engine records in the task history; a colleague the engine refuses (missing role or group, or four eyes) is named in a plain sentence and the task stays where it was. Planned: one inbox merged across the hosts in the registry |
 | Task forms | Complete a task through the form it declares, or follow its link to the host's own screen |
 | Agent tasks | Inspect bounded inputs, the JSON Schema verdict, the agent's output and the guardrail rules that fired; approve or override an escalated task with a reason. Available now from the review's link: masked values stay masked, the person who started the case or reported the answer cannot decide it, and an answer with masked values can only be overridden |
 | Incidents | Work one incident list merged across hosts; read cause and retry count; retry or resolve |
@@ -180,6 +180,8 @@ Live counts of active tokens and incidents on each step of a definition diagram 
 ![Where the diagram, token and heatmap overlays get their data](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-diagram-overlay.svg)
 
 The counts come from an index on the live tokens, never from a query over history. The heatmap (M3) reads an hourly rollup that the engine's scheduler fills a few minutes behind real time. Nothing is copied out of your service; for longer analysis, send the engine events to your own data warehouse.
+
+Who may reassign, and why a reason is required, is decided in [PD-110](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/decisions.md#pd-110-reassigning-a-task-needs-a-reason-and-the-manage-permission). Reassigning a role or group task needs the host's `AssigneeDirectory` (see [[Configuration and Extension Points]]); without it every such reassignment is refused.
 
 Behaviour behind these screens is described in [[Process Engine Overview]].
 

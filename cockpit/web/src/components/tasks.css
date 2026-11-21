@@ -1,0 +1,52 @@
+/* Task queue (CKP-046 to CKP-048). Tokens only: the list on the neutral ground, accent for the primary action and the
+   selected row, amber only for an overdue task. */
+
+.tasks__tabs .tabs__panel { padding-top: var(--space-4, 16px); display: flex; flex-direction: column; gap: var(--gap); }
+
+.tasks__grid { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--gap); align-items: start; }
+@media (max-width: 1180px) { .tasks__grid { grid-template-columns: minmax(0, 1fr); } }
+
+.tasks__empty { max-width: 640px; }
+
+.tasks__count { display: flex; align-items: center; gap: 12px; font: var(--type-label); font-weight: 600; color: var(--ink-2); }
+.tasks__count-late { color: var(--warn); }
+
+.tasks__table th, .tasks__table td { padding-top: var(--space-3, 12px); padding-bottom: var(--space-3, 12px); }
+.tasks__table tbody th { min-width: 0; }
+.tasks__name { display: block; font: var(--type-body); font-weight: 600; color: var(--ink); }
+.tasks__table tr.is-selected > :first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.tasks__table tr.is-selected .tasks__name { color: var(--accent); }
+.tasks__case { display: block; margin-top: 2px; font: var(--type-caption); color: var(--muted); font-variant-numeric: tabular-nums; }
+.tasks__assignee { color: var(--ink-2); }
+.tasks__due { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.tasks__soon { font: var(--type-caption); color: var(--ink-2); }
+.tasks__sla { height: 22px; }
+
+.tasks__inspector { position: sticky; top: calc(var(--topbar-h) + 16px); gap: 14px; }
+.tasks__state { display: flex; flex-wrap: wrap; gap: 8px; }
+.tasks__facts { gap: 8px 16px; font: var(--type-label); }
+.tasks__facts dt { color: var(--muted); }
+.tasks__facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.tasks__line { display: flex; gap: 8px; align-items: flex-start; font: var(--type-label); color: var(--ink-2); }
+.tasks__line-icon { color: var(--muted); flex: none; }
+
+.tasks__actions { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.tasks__buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.tasks__why { display: flex; gap: 8px; align-items: flex-start; margin: 0; font: var(--type-label); color: var(--ink-2); }
+
+/* Unavailable is not a colour (styleguide section 3): surface-3 fill, muted text, no border, the reason beside it. */
+.tasks .btn[aria-disabled="true"], .tasks .btn[aria-disabled="true"]:hover, .tasks .btn[aria-disabled="true"]:active,
+.tasks-dialog .btn[aria-disabled="true"], .tasks-dialog .btn[aria-disabled="true"]:hover, .tasks-dialog .btn[aria-disabled="true"]:active,
+.tasks .btn:disabled {
+  background: var(--surface-3); border-color: transparent; color: var(--muted); cursor: not-allowed; box-shadow: none; opacity: 1;
+}
+
+.tasks__notice { align-items: center; }
+
+.tasks-dialog { width: min(520px, calc(100vw - 32px)); }
+.tasks-dialog .field__hint { margin: 0; font: var(--type-caption); color: var(--muted); }
+.tasks-dialog__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tasks-dialog__foot .dialog__actions { margin-top: 0; }
+
+.tasks .badge--warn { background: var(--warn-soft); color: var(--warn); }
+.tasks .badge--neutral { background: var(--surface-3); color: var(--ink-2); }

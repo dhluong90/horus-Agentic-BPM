@@ -6,10 +6,12 @@ import {
   definitionVersion,
   processInstance,
   task,
+  taskSummaryPage,
   type DefinitionSummary,
   type DefinitionVersion,
   type ProcessInstance,
   type Task,
+  type TaskSummary,
 } from './schemas';
 
 type Fetch = typeof fetch;
@@ -19,6 +21,23 @@ export const PROCESSES_BASE = '/api/bpm/processes/v1';
 /** What a reviewer answers on the review task of a refused agent answer: the result and why (#59). */
 export interface TaskAnswer {
   result: Readonly<Record<string, unknown>>;
+  reason: string;
+}
+
+/** What listTasks filters by; each member maps one to one to a query parameter of `GET /tasks`. */
+export interface TaskQuery {
+  /** `mine`, `candidate` and `any` (the last needs processes:task:manage), comma separated by the client. */
+  assignment: readonly ('mine' | 'candidate' | 'any')[];
+  status?: readonly ('OPEN' | 'CLAIMED')[] | undefined;
+  slaBreached?: boolean | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+/** Who takes a task over and why (PD-110): a user id, and a reason of 1 to 500 characters. */
+export interface TaskHandOver {
+  assignee: string;
   reason: string;
 }
 
@@ -38,8 +57,16 @@ export interface ProcessesClient {
   getTask(id: string, signal?: AbortSignal): Promise<Task>;
   /** getInstance: read for who started it (four eyes) */
   getInstance(id: string, signal?: AbortSignal): Promise<ProcessInstance>;
+  /** listTasks: one page in due-time order, tasks without a due time last */
+  listTasks(query: TaskQuery): Promise<Page<TaskSummary>>;
   /** claimTask */
   claimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
+  /** unclaimTask: hand a claimed task back to its candidates */
+  unclaimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
+  /** reassignTask: an open task to a named user, with a reason (processes:task:manage) */
+  reassignTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
+  /** delegateTask: a claimed task to another user, with a reason (processes:task:manage) */
+  delegateTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
   /** completeTask: the reviewer's answer and reason; the engine records HUMAN_OVERRIDE */
   completeTask(id: string, lockVersion: number, answer: TaskAnswer, idempotencyKey: string): Promise<ProcessInstance>;
 }
@@ -74,8 +101,29 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async getInstance(id, signal) {
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/instances/${segment(id)}`, ...withSignal(signal) }, processInstance)).data;
     },
+    async listTasks(request) {
+      const query = new URLSearchParams();
+      query.set('assignment', request.assignment.join(','));
+      if (request.status !== undefined && request.status.length > 0) query.set('status', request.status.join(','));
+      if (request.slaBreached !== undefined) query.set('slaBreached', String(request.slaBreached));
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/tasks?${query.toString()}`, ...withSignal(request.signal) }, taskSummaryPage);
+      return answer.data;
+    },
     async claimTask(id, lockVersion, idempotencyKey) {
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:claim`, headers: command(lockVersion, idempotencyKey) }, task)).data;
+    },
+    async unclaimTask(id, lockVersion, idempotencyKey) {
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:unclaim`, headers: command(lockVersion, idempotencyKey) }, task)).data;
+    },
+    async reassignTask(id, lockVersion, handOver, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ assignee: handOver.assignee, reason: handOver.reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:reassign`, headers: command(lockVersion, idempotencyKey), body }, task)).data;
+    },
+    async delegateTask(id, lockVersion, handOver, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ assignee: handOver.assignee, reason: handOver.reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:delegate`, headers: command(lockVersion, idempotencyKey), body }, task)).data;
     },
     async completeTask(id, lockVersion, answer, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ result: answer.result, reason: answer.reason }) };

@@ -10,6 +10,7 @@ const AREA_TITLE: Record<Exclude<Route['name'], 'home' | 'rule-set' | 'process' 
   approvals: 'menu.approvals',
   decisions: 'menu.decisions',
   processes: 'menu.processes',
+  tasks: 'menu.tasks',
 };
 
 /** Where the user is, over the content: `Rules / card-fee / Version 2`. Nothing on Home. */
@@ -55,7 +56,7 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
         { label: t('rules.version', { version: String(route.version) }) },
       ];
     case 'task':
-      return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, { label: t('review.crumb') }];
+      return [{ label: t('menu.tasks'), href: formatRoute({ name: 'tasks' }) }, { label: t('review.crumb') }];
     case 'decision':
       return [
         { label: t('menu.decisions'), href: formatRoute({ name: 'decisions', query: lastDecisionQuery() }) },
