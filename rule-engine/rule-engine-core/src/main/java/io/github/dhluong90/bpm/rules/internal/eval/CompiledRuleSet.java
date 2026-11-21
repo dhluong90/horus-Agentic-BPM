@@ -14,6 +14,7 @@ import io.github.dhluong90.bpm.expr.internal.ExpressionError;
 import io.github.dhluong90.bpm.expr.internal.ExpressionException;
 import io.github.dhluong90.bpm.expr.internal.RegexLimits;
 import io.github.dhluong90.bpm.expr.internal.Parser;
+import io.github.dhluong90.bpm.expr.spi.FunctionLibrary;
 import io.github.dhluong90.bpm.expr.internal.RequestReads;
 import io.github.dhluong90.bpm.rules.internal.model.Cell;
 import io.github.dhluong90.bpm.rules.internal.model.DecisionTable;
@@ -70,6 +71,8 @@ public final class CompiledRuleSet {
     private final Set<String> inputsInOutputs;
     private final Set<String> inputsRead;
     private final EvaluationLimits evaluationLimits;
+    /** The host functions the cells call, with their version labels, by name (RLE-058). */
+    private final java.util.SortedMap<String, String> hostFunctions;
     /** The most steps one decision on this table can take (no loops: a sum of node counts). */
     private final long worstCaseSteps;
     /** The first rule from which the worst case is over the step budget, or null when it never is. */
@@ -90,6 +93,12 @@ public final class CompiledRuleSet {
         Set<String> read = new java.util.TreeSet<>(referenced);
         rules.forEach(rule -> collectInputs(rule.condition(), read));
         this.inputsRead = java.util.Collections.unmodifiableSet(read);
+        java.util.SortedMap<String, String> called = new java.util.TreeMap<>();
+        rules.forEach(rule -> {
+            collectHostFunctions(rule.condition(), called);
+            rule.thens().forEach(then -> collectHostFunctions(then, called));
+        });
+        this.hostFunctions = java.util.Collections.unmodifiableSortedMap(called);
         this.shared = new Evaluator(table.moneyRounding(), maxStringLength, regexLimits, evaluationLimits);
         this.maxOutputBytes = maxOutputBytes;
         this.evaluationLimits = evaluationLimits;
@@ -175,6 +184,24 @@ public final class CompiledRuleSet {
      */
     public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength,
             RegexLimits regexLimits, EvaluationLimits evaluationLimits) {
+        return compile(model, maxOutputBytes, maxStringLength, regexLimits, evaluationLimits, FunctionLibrary.empty());
+    }
+
+    /**
+     * Compiles a model with size limits, the bounds of {@code matches}, the step budget of one decision and the
+     * functions the host registered (RLE-055, RLE-056): a cell may call a registered function, with the number and
+     * types of arguments it declares; any other call is {@code FORBIDDEN_CONSTRUCT}.
+     *
+     * @param model the decision model
+     * @param maxOutputBytes the largest estimated JSON size of one decision's outputs
+     * @param maxStringLength the longest string {@code +} may build
+     * @param regexLimits the length and time bounds of one regular expression match
+     * @param evaluationLimits the step budget and time backstop of one decision
+     * @param functions the host's functions, never null
+     * @return the compiled rule set
+     */
+    public static CompiledRuleSet compile(Definitions model, int maxOutputBytes, int maxStringLength,
+            RegexLimits regexLimits, EvaluationLimits evaluationLimits, FunctionLibrary functions) {
         DecisionTable table = model.decision().table();
         for (OutputClause output : table.outputs()) {
             checkOutput(table.hitPolicy(), output);
@@ -186,7 +213,7 @@ public final class CompiledRuleSet {
         // The frame is the inputs, then today() and now() (DESIGN 3.2): bound once here, read without a lookup.
         slots.put(Expr.ClockFunction.TODAY.slotName(), table.inputs().size());
         slots.put(Expr.ClockFunction.NOW.slotName(), table.inputs().size() + 1);
-        Problems problems = new Problems(MAX_VIOLATIONS);
+        Problems problems = new Problems(MAX_VIOLATIONS, functions);
         Map<String, Expr> defaults = new LinkedHashMap<>();
         for (OutputClause output : table.outputs()) {
             defaults.put(output.name(), output.defaultValue() == null
@@ -375,7 +402,7 @@ public final class CompiledRuleSet {
             }, null);
         } catch (EvaluationException e) {
             return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", e.getMessage(), List.of(), e.limit()),
-                    e.reason());
+                    e.reason(), e.getCause());
         } catch (ArithmeticException e) {
             // Exponent overflow or underflow in DECIMAL128 arithmetic: a deterministic failure, never a 500.
             return new Evaluation(new DecisionResult.Failed("EVALUATION_ERROR", "Arithmetic out of range"), null);
@@ -387,8 +414,19 @@ public final class CompiledRuleSet {
      *
      * @param outcome the outcome
      * @param reason the reason of a failure that has one, else null
+     * @param cause what a host function threw, for the server log only, never for a response; else null
      */
-    public record Evaluation(DecisionResult.Outcome outcome, String reason) {
+    public record Evaluation(DecisionResult.Outcome outcome, String reason, Throwable cause) {
+
+        /**
+         * An outcome with no failure behind it that the server log needs.
+         *
+         * @param outcome the outcome
+         * @param reason the reason of a failure that has one, else null
+         */
+        public Evaluation(DecisionResult.Outcome outcome, String reason) {
+            this(outcome, reason, null);
+        }
     }
 
     /**
@@ -709,7 +747,7 @@ public final class CompiledRuleSet {
         int shift = source.equals(text.strip()) ? -leadingSpaces(text) : input.length() + 1 - leadingSpaces(text);
         Parser.Located located;
         try {
-            located = Parser.parseLocated(source, name -> slots.getOrDefault(name, -1), input);
+            located = Parser.parseLocated(source, name -> slots.getOrDefault(name, -1), input, problems.functions);
         } catch (ExpressionException e) {
             problems.add(located(ruleId, input, e.error(), e.problem(), e.position() - shift));
             return new Expr.Literal(Boolean.FALSE);
@@ -762,6 +800,22 @@ public final class CompiledRuleSet {
         return inputsRead;
     }
 
+    /**
+     * Returns the host functions the rule set's cells call, each with the version label it was compiled against.
+     *
+     * @return function name to version label, in name order; empty when no cell calls one
+     */
+    public java.util.SortedMap<String, String> hostFunctions() {
+        return hostFunctions;
+    }
+
+    private static void collectHostFunctions(Expr expr, java.util.Map<String, String> into) {
+        if (expr instanceof Expr.HostCall call) {
+            into.put(call.function().name(), call.function().version());
+        }
+        ConditionTypes.childrenOf(expr).forEach(child -> collectHostFunctions(child, into));
+    }
+
     /** Adds the input names an expression reads. Exhaustive on purpose: a new node type must say what it reads. */
     static void collectInputs(Expr expr, Set<String> names) {
         switch (expr) {
@@ -784,6 +838,7 @@ public final class CompiledRuleSet {
             case Expr.IsNull isNull -> collectInputs(isNull.target(), names);
             case Expr.Matches matches -> collectInputs(matches.target(), names);
             case Expr.Call call -> call.args().forEach(arg -> collectInputs(arg, names));
+            case Expr.HostCall call -> call.args().forEach(arg -> collectInputs(arg, names));
             case Expr.Clock ignored -> { }   // the clock is not an input
         }
     }
@@ -818,7 +873,7 @@ public final class CompiledRuleSet {
             case Cell.Expression expression -> {
                 try {
                     Parser.Located located = Parser.parseLocated(expression.source(),
-                            name -> slots.getOrDefault(name, -1), null);
+                            name -> slots.getOrDefault(name, -1), null, problems.functions);
                     ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(located.expr(), inputs);
                     if (operands != null) {
                         problems.add(located(ruleId, output.name(), ExpressionError.TYPE_MISMATCH,
@@ -855,8 +910,11 @@ public final class CompiledRuleSet {
         private final List<Violation> kept = new ArrayList<>();
         private boolean truncated;
 
-        Problems(int cap) {
+        private final FunctionLibrary functions;
+
+        Problems(int cap, FunctionLibrary functions) {
             this.cap = cap;
+            this.functions = functions;
         }
 
         void add(Violation violation) {

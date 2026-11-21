@@ -1,6 +1,8 @@
 package io.github.dhluong90.bpm.expr.internal;
 
 import io.github.dhluong90.bpm.expr.api.Money;
+import io.github.dhluong90.bpm.expr.spi.ExpressionFunction;
+import io.github.dhluong90.bpm.expr.spi.FunctionLibrary;
 import java.math.BigDecimal;
 import java.time.DateTimeException;
 import java.time.LocalDate;
@@ -61,6 +63,7 @@ public final class Parser {
 
     private final String source;
     private final ToIntFunction<String> slots;
+    private final FunctionLibrary functions;
     private final String column;
     private final List<Token> tokens;
     /** Where each node starts; identity keys, because equal subtrees at two places are two nodes. */
@@ -70,9 +73,10 @@ public final class Parser {
     private int index;
     private int depth;
 
-    private Parser(String source, ToIntFunction<String> slots, String column, boolean paths) {
+    private Parser(String source, ToIntFunction<String> slots, String column, boolean paths, FunctionLibrary functions) {
         this.source = source;
         this.slots = slots;
+        this.functions = functions;
         this.column = column;
         this.tokens = lex(source, paths);
     }
@@ -114,7 +118,23 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Located parseLocated(String source, ToIntFunction<String> slots, String column) {
-        return parseLocated(source, slots, column, false);
+        return parseLocated(source, slots, column, false, FunctionLibrary.empty());
+    }
+
+    /**
+     * Parses a rule set cell that may call the functions a host registered (RLE-055). A call of a name that is
+     * neither built in nor in the library is {@link ExpressionError#FORBIDDEN_CONSTRUCT}, as without a library.
+     *
+     * @param source the expression text
+     * @param slots maps an input name to its slot index, or -1 when there is no such input
+     * @param column the input a shorthand cell belongs to, or null
+     * @param functions the host's functions
+     * @return the tree and the position of each node
+     * @throws ExpressionException when the text is not a valid expression
+     */
+    public static Located parseLocated(String source, ToIntFunction<String> slots, String column,
+            FunctionLibrary functions) {
+        return parseLocated(source, slots, column, false, java.util.Objects.requireNonNull(functions, "functions must not be null"));
     }
 
     /**
@@ -128,15 +148,16 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Expr parseWithPaths(String source, ToIntFunction<String> slots) {
-        return parseLocated(source, slots, null, true).expr();
+        return parseLocated(source, slots, null, true, FunctionLibrary.empty()).expr();
     }
 
-    private static Located parseLocated(String source, ToIntFunction<String> slots, String column, boolean paths) {
+    private static Located parseLocated(String source, ToIntFunction<String> slots, String column, boolean paths,
+            FunctionLibrary functions) {
         if (source.length() > MAX_LENGTH) {
             throw new ExpressionException(ExpressionError.EXPRESSION_TOO_LONG,
                     "Expression longer than " + MAX_LENGTH + " characters", MAX_LENGTH);
         }
-        Parser parser = new Parser(source, slots, column, paths);
+        Parser parser = new Parser(source, slots, column, paths, functions);
         Expr expr = parser.or();
         Token rest = parser.peek();
         if (rest.kind() != Kind.EOF) {
@@ -182,6 +203,7 @@ public final class Parser {
             case Expr.IsNull isNull -> height(isNull.target());
             case Expr.Matches matches -> height(matches.target());
             case Expr.Call call -> maxHeight(call.args());
+            case Expr.HostCall call -> maxHeight(call.args());
         };
         if (height > MAX_DEPTH) {
             // Chains of + - * / and or are built in one loop, so the nesting count alone does not bound them.
@@ -414,7 +436,7 @@ public final class Parser {
         }
     }
 
-    /** A call of {@code round} or {@code daysBetween}; any other name is refused. */
+    /** A call of {@code round}, {@code daysBetween} or a function of the host's library; any other name is refused. */
     private Expr call(Token name) {
         Expr.Function function = null;
         for (Expr.Function candidate : Expr.Function.values()) {
@@ -422,7 +444,8 @@ public final class Parser {
                 function = candidate;
             }
         }
-        if (function == null) {
+        ExpressionFunction host = function == null ? functions.find(name.text()).orElse(null) : null;
+        if (function == null && host == null) {
             // Refused before its arguments are read: nothing inside T(java.lang.Runtime) is bound or evaluated (TR-SEC-01).
             throw new ExpressionException(ExpressionError.FORBIDDEN_CONSTRUCT, "Unknown function '" + name.text()
                     + "': only the functions of the expression language can be called, never a method or a class",
@@ -436,6 +459,15 @@ public final class Parser {
             } while (accept(Kind.COMMA));
         }
         expect(Kind.RPAREN, ")");
+        if (host != null) {
+            if (args.size() != host.parameterTypes().size()) {
+                throw new ExpressionException(ExpressionError.TYPE_MISMATCH, name.text() + " takes "
+                        + host.parameterTypes().size() + " argument" + (host.parameterTypes().size() == 1 ? "" : "s")
+                        + " " + host.signature().substring(name.text().length()) + ", found " + args.size(),
+                        name.position());
+            }
+            return at(new Expr.HostCall(host, args), name.position());
+        }
         if (args.size() != 2) {
             throw new ExpressionException(name.text() + " takes 2 arguments, found " + args.size(), name.position());
         }

@@ -1513,7 +1513,9 @@ paths:
 
         An unknown id, or a decision of another tenant, is `404 DECISION_NOT_FOUND`. A decision whose
         logged inputs include a masked value (`mask: true`, stored only as `masked`) cannot be
-        re-evaluated and is `422 REPLAY_NOT_POSSIBLE`, naming the inputs and never their values. A
+        re-evaluated and is `422 REPLAY_NOT_POSSIBLE`, naming the inputs and never their values. So is a
+        decision that called a host function whose version label is not the one now registered: the problem
+        names the function and both labels. A
         logged failure replays as the same `422` problem as at evaluation, with the logged `decisionId`.
       parameters:
         - name: decisionId
@@ -2460,8 +2462,10 @@ components:
             A stable code a client can act on; the message beside it may change. Expression problems
             (`when` and `then` cells): `SYNTAX_ERROR`, `UNKNOWN_INPUT` (a name that is not a declared
             input, for example `creditScoreX`), `TYPE_MISMATCH` (for example `balance + 100` where
-            `balance` is money), `FORBIDDEN_CONSTRUCT` (a method call, member access or class reference
-            such as `T(java.lang.Runtime).getRuntime()`; refused before anything inside it is read),
+            `balance` is money; also a call of a host function with the wrong number or types of arguments),
+            `FORBIDDEN_CONSTRUCT` (a method call, member access or class reference
+            such as `T(java.lang.Runtime).getRuntime()`; refused before anything inside it is read; also a call of
+            a function the host did not register),
             `INVALID_LITERAL`, `INVALID_PATTERN`, `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` (more than
             64 levels, a chain such as `a + a + ...` included). Other cell problems: `UNKNOWN_OUTPUT`,
             `MASKED_INPUT_IN_OUTPUT`. A table whose worst case is over the step budget:
@@ -2495,6 +2499,11 @@ components:
       type: string
       enum: [STEPS, TIME]
       description: |
+        An `EVALUATION_ERROR` whose `detail` starts with `FUNCTION_FAILED` names a host function that threw or
+        returned a value of another type, never the exception; one that starts with `FUNCTION_CHANGED` names a
+        function whose version label is not the one the rule set version was approved with (only when the host
+        sets `evaluation.function-version-change` to `refuse`). Both carry no limit.
+
         Present on an `EVALUATION_ERROR` whose `detail` starts with `EVALUATION_BUDGET_EXCEEDED`, and
         absent otherwise: the limit the decision reached. `STEPS` is the step budget (expression nodes
         visited, 100,000 by default): deterministic, so the same input fails the same way on every

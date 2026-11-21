@@ -97,11 +97,12 @@ public class RuleEngineAutoConfiguration {
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
             ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
+            ObjectProvider<RuleEngineFunctionCheck> functionCheck,
             ObjectProvider<RuleEngineLifecycleSweeper> sweeper,
             ObjectProvider<RuleEnginePartitionMaintenance> maintenance) {
         return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
                 cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable(),
-                maintenance.getIfAvailable());
+                maintenance.getIfAvailable(), functionCheck.getIfAvailable());
     }
 
     /** The decision log gauge, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */

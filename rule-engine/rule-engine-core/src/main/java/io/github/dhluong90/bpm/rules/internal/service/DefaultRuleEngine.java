@@ -82,6 +82,9 @@ public final class DefaultRuleEngine implements RuleEngine {
     /** {@code error_code} of a decision refused because an output reads an input that is masked for the tenant. */
     static final String MASKED_INPUT_IN_OUTPUT = "MASKED_INPUT_IN_OUTPUT";
 
+    /** The reason of a decision refused because a host function changed version (PD-119, {@code refuse}). */
+    static final String FUNCTION_CHANGED = "FUNCTION_CHANGED";
+
     private final EngineContext context;
     private final RuleStore store;
     private final DecisionLog log;
@@ -800,6 +803,12 @@ public final class DefaultRuleEngine implements RuleEngine {
                     + version.ruleSet() + " is masked for this tenant, but an output reads it; the decision is refused"
                     + " so the plain value is not logged");
         }
+        String changed = context.functions().onVersionChange() == HostFunctions.VersionChange.REFUSE
+                ? changedFunction(tenant, version, rules) : null;
+        if (changed != null) {
+            // PD-119 refuse: the function is not the one this version was approved with; no new approval, no decision.
+            return refuse(tenant, caller, onBehalfOf, request, version, now, at, FUNCTION_CHANGED, changed);
+        }
         long started = System.nanoTime();
         CompiledRuleSet.Evaluation evaluation = rules.evaluateWithReason(request.input(), at, requestReads);
         DecisionResult.Outcome outcome = evaluation.outcome();
@@ -807,6 +816,14 @@ public final class DefaultRuleEngine implements RuleEngine {
         boolean pinned = request.version() != null;
         DecisionResult result = new DecisionResult(Ulid.next(now), version.ruleSet(), version.version(), at, now,
                 pinned, outcome);
+        if (evaluation.cause() != null) {
+            // RLE-057: the response and the row name the function only; what it threw stays in the server log.
+            System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.WARNING,
+                    "Host function failed in decision " + result.decisionId() + " of " + version.ruleSet() + " v"
+                            + version.version() + " (tenant " + tenant + ", correlationId "
+                            + (request.correlationId() == null ? result.decisionId() : request.correlationId()) + ")",
+                    evaluation.cause());
+        }
         ArrayNode matched = EngineJson.NODES.arrayNode();
         result.matchedRuleIds().forEach(matched::add);
         String errorCode = outcome instanceof DecisionResult.Failed failed ? failed.code() : null;
@@ -817,8 +834,31 @@ public final class DefaultRuleEngine implements RuleEngine {
                 version.hitPolicy(), errorCode == null ? "OK" : errorCode, reason,
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs(), maskByDefault, key)),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
-                EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned, onBehalfOf));
+                EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned, onBehalfOf,
+                HostFunctions.format(context.functions().currentVersions(rules.hostFunctions().keySet()))));
         return result;
+    }
+
+    /**
+     * Under {@code function-version-change: refuse}: the first function the rule set calls whose registered version is
+     * not the one the version was approved with, as a message; null when none changed. A version approved before its
+     * functions were recorded has no baseline, so it is not refused.
+     */
+    private String changedFunction(String tenant, StoredVersion version, CompiledRuleSet rules) {
+        if (rules.hostFunctions().isEmpty()) {
+            return null;
+        }
+        Map<String, String> approved = context.functions().approvals().approvedWith(tenant, version.ruleSet(),
+                version.version());
+        for (String name : rules.hostFunctions().keySet()) {
+            String now = context.functions().library().find(name).map(f -> f.version()).orElse(null);
+            String then = approved.get(name);
+            if (then != null && !then.equals(now)) {
+                return FUNCTION_CHANGED + ": function " + name + " is version " + now + " now; " + version.ruleSet() + " v" + version.version()
+                        + " was approved with version " + then + ". Approve a new version of the rule set to go on";
+            }
+        }
+        return null;
     }
 
     /** Logs a decision on a version whose stored hash no longer matches its content, and raises the alert. */
@@ -877,6 +917,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                     .orElseThrow(() -> new VersionNotFoundException(logged.ruleSet(), logged.version()));
             DecisionResult.Outcome outcome;
             try {
+                requireSameFunctions(decisionId, logged);
                 CompiledRuleSet rules = compiled(version);
                 DecisionInput input = loggedInput(decisionId, logged, rules.inputs());
                 outcome = rules.evaluate(input, logged.evalClock());
@@ -885,6 +926,19 @@ public final class DefaultRuleEngine implements RuleEngine {
             }
             return new DecisionResult(logged.id(), version.ruleSet(), version.version(), logged.evalClock(),
                     logged.createdAt(), logged.pinned(), outcome);
+        });
+    }
+
+    /**
+     * RLE-058: a decision that called a host function replays only while the function has the version it was made
+     * with, because another version could give another result.
+     */
+    private void requireSameFunctions(String decisionId, DecisionRecord logged) {
+        HostFunctions.parse(logged.functionVersions()).forEach((name, used) -> {
+            String current = context.functions().library().find(name).map(f -> f.version()).orElse(null);
+            if (!used.equals(current)) {
+                throw ReplayNotPossibleException.functionChanged(decisionId, name, used, current);
+            }
         });
     }
 
@@ -932,7 +986,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
         CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
                 context.settings().maxOutputBytes(), context.settings().maxStringLength(),
-                context.settings().regexLimits(), context.settings().evaluationLimits());
+                context.settings().regexLimits(), context.settings().evaluationLimits(), context.functions().library());
         compiled.put(key, fresh);
         return fresh;
     }

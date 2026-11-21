@@ -55,8 +55,8 @@ A PRD capability row that bundles several outcomes is split into several feature
 | RE-F-24 | An author compares two versions over a past period (what-if) | S2 | M3 (cut candidate) | RE 7.3 | | | spec gap | RE-F-22 | PD-031 |
 | RE-F-25 | An author imports and exports rule sets as YAML or JSON | S2 | M1 | RE 7.3 | | | spec gap | RE-F-02 | |
 | RE-F-26 | A host evaluates up to 1 000 items in one batch call | S1 | M2 (cut candidate) | RE 7.3 | | TR-DET-01 | spec gap | RE-F-01 | PD-031, PD-043 |
-| RE-F-27 | A host registers pure functions the expression language can call | S1, S2 | M1 | RE 7.3 | | TR-SEC-01 | spec gap | RE-F-02 | |
-| RE-F-28 | A developer tests rule sets in JUnit and gets a row coverage report in CI | S1 | M1 | RE 7.3 | | TR-QA-01 | spec gap | RE-F-01 | |
+| RE-F-27 | A host registers pure functions the expression language can call | S1, S2 | M1 | RE 7.3 | RLE-055 to RLE-058 | TR-SEC-01 | specified | RE-F-02 | PD-119 |
+| RE-F-28 | A developer tests rule sets in JUnit and gets a row coverage report in CI | S1 | M1 | RE 7.3 | RLE-059, RLE-064, RLE-065 | TR-QA-01 | specified | RE-F-01 | PD-120 |
 | RE-F-29 | Hosts get metrics and events for evaluation, publish and retire | S1 | M1 | RE 7.2 Observability, 7.3 | RLE-010 (published event only) | TR-OBS-02, TR-OBS-04, TR-OBS-06 | spec gap | X-F-07 | |
 | RE-F-30 | An author imports a DMN decision table | S2 | M3 (cut candidate) | RE 8 | | TR-STD-25 | spec gap | RE-F-25 | PD-031, PD-057 |
 | RE-F-31 | The host must set decision log retention, at least 12 months in whole months; outside the `dev` profile the engine refuses to start until it is set; whole monthly partitions older than it are dropped | S3 | M3 (setting, start-up check and purge together, PD-020) | RE 8 | | TR-OPS-04 | spec gap | RE-F-16 | PD-004, PD-020, PD-050 |

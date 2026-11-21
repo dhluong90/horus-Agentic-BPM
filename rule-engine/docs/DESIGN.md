@@ -28,8 +28,8 @@ Source: [`diagrams/components.mmd`](diagrams/components.mmd).
 | `rule-engine-core` | `api`, `spi` and `internal` packages: parser, type checker, compiler, evaluator, `Money`, ports | JDK and Jackson 3 in `internal` only (ADR-0021, `TR-EMB-07`) |
 | `rule-engine-postgres` | `JdbcClient` adapters, Flyway `rle_*`, `LISTEN` and epoch sweep, partition maintenance, outbox relay | core, Spring JDBC, Flyway |
 | `rule-engine-rest` | Controllers under `/api/bpm/rules/v1`, RFC 9457 errors, idempotency filter | core, Spring WebMvc |
-| `rule-engine-test` | In-memory adapters passing the storage contract suite, `TestClock`, `@RuleSetTest`, row coverage report | core |
-| `rule-engine-spring-boot-starter` | Auto-configuration, profile guards, scheduler, Micrometer | all of the above |
+| `rule-engine-test` | `@RuleSetTest`, `@RuleSetClock`, `RuleSetUnderTest`, the row coverage report (section 4.10). Test scope; never auto-configured and never a dependency of the starter | core, JUnit 5 API |
+| `rule-engine-spring-boot-starter` | Auto-configuration, profile guards, scheduler, Micrometer | core, postgres and rest |
 
 Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core` imports no `org.springframework..`, `java.sql..`, `java.net..`, `javax.script..` or `java.lang.reflect.Method`; `rule-engine-postgres` imports no HTTP client or `java.net.http..`; public signatures in `..api..` and `..spi..` use only JDK, engine and JSpecify types (ADR-0011, ADR-0016); `tools.jackson..` is allowed in `..internal..` of the core only and `com.fasterxml.jackson.databind..` nowhere in the core (ADR-0021).
 
@@ -74,6 +74,20 @@ Enforced by ArchUnit (`TR-EMB-03`, `TR-EMB-05`, `TR-SEC-01`): `rule-engine-core`
      Source: [`diagrams/regex-bounds.mmd`](diagrams/regex-bounds.mmd).
    - Money is a HORUS extension with no FEEL type: two money operands whose currencies are fixed by literals and differ are refused at import (`422 VALIDATION_FAILED`, rule and column); otherwise a mismatch is `EVALUATION_ERROR` at run time (`RLE-005`).
    - The differential test of `RLE-021` (`FeelDifferentialTest`) evaluates generated trees here and their FEEL translation in a reference FEEL implementation, in test scope only. Money and the clock readings are not generated; `matches` is, with patterns that the XPath dialect and Java read the same way. It accepts two documented differences: strict error mode (PD-066) fails where FEEL gives `null` for a division by zero; the reference orders strings by UTF-16 unit, so the generators leave out U+E000 to U+FFFF.
+
+### 3.2.1 Host functions in expressions (RE-F-27, PD-119, `RLE-055` to `RLE-058`)
+A host registers named functions that cells call beside the built-ins, through the `RuleFunctionRegistry` SPI (section 4.1). The parser resolves a call by name against the host's `FunctionLibrary` and builds a `HostCall` node; a name that is neither built in nor registered is `FORBIDDEN_CONSTRUCT`, as before. The type checker verifies the argument count and each argument's type against the function's parameter types and takes the result type from the function, so `segmentOf(...) > 3` is a `TYPE_MISMATCH` where `segmentOf` returns a string. A function is a pure calculation: the evaluator hands it an immutable list of argument values and nothing else, so a decision replays from its log entry (`TR-DET-01`, `TR-DET-05`). Data the host looks up is passed as an input, never fetched by a function. Registration is per host; the tenant is never passed, and the library is built once at start-up.
+
+![Host functions](images/host-functions.svg)
+
+Source: [`diagrams/host-functions.mmd`](diagrams/host-functions.mmd).
+
+- **Step budget.** A call costs its declared step cost (1 to 1,000,000), charged before the call and counted in the worst case that import and request-publish check, so a function can never make the budget unbounded (`TR-SEC-01`, `RLE-057`).
+- **Null.** A `null` argument gives `null` and the function is not called (FEEL).
+- **Failure.** An exception, or a result of a type other than the declared one, is `EVALUATION_ERROR` with `error_code = FUNCTION_FAILED`. The decision and the row name the function; the exception, its message and its stack stay in the server log with the `correlationId`, because they can hold an input value.
+- **Registry checks at start-up.** A name registered twice, a built-in name (`round`, `daysBetween`, `today`, `now`, `date`, `datetime`, `matches` and the operator words) or a name outside `^[a-z][A-Za-z0-9]{0,63}$` stops the host, naming the function. The same checks as at import run again at draft replacement, request-publish and approval, so a function the host removed blocks the next step of a draft.
+- **Versions.** Each function has a version label the host changes when its behaviour may change. Approval records the label of each function the version calls (`rle_version_function`, section 5); each decision row records `name@label` of the functions its rule set calls (`rle_decision.function_versions`). After a redeploy with another label, start-up logs one WARN per function naming both labels and the published versions that call it, and `/api/bpm/meta` lists the change to the tenants that own such a version (`evaluation.functions-changed`). A replay of a decision made with another label is `422 REPLAY_NOT_POSSIBLE` naming the function and both labels. `evaluation.function-version-change` (section 4.4) chooses what evaluation does: `warn` goes on; `refuse` fails closed with `FUNCTION_CHANGED` until a new version is approved under four eyes. A version approved before this release has no recorded baseline and is never refused.
+- **No FEEL translation.** A cell that calls a host function has no FEEL form, so such a rule set has no DMN export, and DMN `external` functions stay refused at import.
 
 ### 3.3 Version lifecycle
 
@@ -304,7 +318,7 @@ A pinned evaluation is `evaluate(DecisionRequest.of(ruleSet, input).withVersion(
 ![Replay a logged decision](images/replay-decision.svg)
 
 Source: [`diagrams/replay-decision.mmd`](diagrams/replay-decision.mmd). Replay is a read: it never selects, so a version superseded or retired since the decision still replays, and it adds no decision row.
-`DecisionRequest` carries an optional `decision` (the id of a decision inside the decision model) in its builder before the 1.0 freeze; in M1 it may be absent or equal to the rule set name, anything else is `400 INPUT_INVALID`; from S1 it selects a decision of a DRD (DN-08). `DecisionResult.outcome()` is a sealed type (`Matched`, `NoMatch`, `Failed`). `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` are returned as `Failed` with a `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code (ADR-0016). Outbound SPIs, each with an engine default that is `@ConditionalOnMissingBean` in the starter (ADR-0024, `TR-EXT-02`): `TenantResolver` (default: the `tenancy.claim` attribute of the authenticated principal, session or token; never anything the browser sends, PD-079), `CallerResolver`, `MaskingPolicy` (default: the `masking.*` and `decision-log.*` masking settings of section 4.4; returns the tenant's `MaskingKey`, masking default, strict mode and personal-data names), `RuleFunctionRegistry`, `RuleEventPublisher`, `CurrencyRegistry` (default: ISO 4217 scales from the JDK; a host adds or overrides a currency's scale, for example `XAU`), `DecisionExplainer` (default: the English template of section 4.7) and `LifecycleGuard` (default: allows everything; a host guard may veto a transition with its own code, for example to require a change ticket on retire, and can never make a refused transition succeed, `TR-EXT-06`). Time comes from the host's `java.time.Clock` bean when it has exactly one, otherwise `Clock.systemUTC()`; the starter never registers a `Clock` bean. That clock is the default of `DecisionRequest.clock` and drives partition creation and the health check (`TR-DET-01`).
+`DecisionRequest` carries an optional `decision` (the id of a decision inside the decision model) in its builder before the 1.0 freeze; in M1 it may be absent or equal to the rule set name, anything else is `400 INPUT_INVALID`; from S1 it selects a decision of a DRD (DN-08). `DecisionResult.outcome()` is a sealed type (`Matched`, `NoMatch`, `Failed`). `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` are returned as `Failed` with a `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code (ADR-0016). Outbound SPIs, each with an engine default that is `@ConditionalOnMissingBean` in the starter (ADR-0024, `TR-EXT-02`): `TenantResolver` (default: the `tenancy.claim` attribute of the authenticated principal, session or token; never anything the browser sends, PD-079), `CallerResolver`, `MaskingPolicy` (default: the `masking.*` and `decision-log.*` masking settings of section 4.4; returns the tenant's `MaskingKey`, masking default, strict mode and personal-data names), `RuleFunctionRegistry` (default: every `ExpressionFunction` bean of the host, none otherwise; section 3.2.1), `RuleEventPublisher`, `CurrencyRegistry` (default: ISO 4217 scales from the JDK; a host adds or overrides a currency's scale, for example `XAU`), `DecisionExplainer` (default: the English template of section 4.7) and `LifecycleGuard` (default: allows everything; a host guard may veto a transition with its own code, for example to require a change ticket on retire, and can never make a refused transition succeed, `TR-EXT-06`). Time comes from the host's `java.time.Clock` bean when it has exactly one, otherwise `Clock.systemUTC()`; the starter never registers a `Clock` bean. That clock is the default of `DecisionRequest.clock` and drives partition creation and the health check (`TR-DET-01`).
 
 Permissions are checked in `VersionService` and `RuleEngine` through `CallerResolver`, not only over REST: `rules:author` for import and request-publish, `rules:approve` for approve, `rules:read` for reads, `rules:evaluate` for evaluation, `rules:pin` for an evaluation pinned to a version; the approver must be neither the requester nor the author (`created_by`). Until the shared permission seam (#133) lands, the starter's defaults follow the host contract: `TenantResolver` asks the host's `io.github.dhluong90.bpm.host.spi.TenantResolver`, with the same tenant format and token-claim checks as `/api/bpm/me`, and `CallerResolver` grants `rules:*` authorities plus `horus.bpm.rules.security.role-permissions`, so the services allow exactly what `/api/bpm/me` lists. The seam replaces both defaults without touching the services.
 
@@ -446,6 +460,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `evaluation.regex-timeout-ms` | `50` | Longest time one `matches()` may run, `1` to `1000`: the backstop of the read budget on a slow machine. Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
 | `evaluation.step-budget` | `100000` | Expression nodes one decision may visit, `1` to `1000000` (`TR-SEC-01`, `TR-STD-23`, `RLE-082`). Counted, so the same decision stops at the same step on every machine. Past it the decision fails with `EVALUATION_ERROR`, `error_code = EVALUATION_BUDGET_EXCEEDED`, `limit = STEPS`; import and request-publish refuse a table whose worst case is over it (`RLE-004`). One budget covers one top-level evaluation; each item of a batch has its own. A value outside the range stops start-up naming the property (`RLE-083`) |
 | `evaluation.timeout-ms` | `10000` | Longest time one decision may evaluate, `1` to `30000`: the backstop of the step budget on a slow machine. Past it the decision fails with the same reason and `limit = TIME`; it depends on the machine, so the step budget is the bound that decides (`RLE-082`) |
+| `evaluation.function-version-change` | `warn` | What evaluation does when the version label of a host function is not the one a rule set version was approved with (PD-119, `RLE-058`): `warn` evaluates on, logs one WARN at start-up, lists the change in `/api/bpm/meta` and records the version each decision used; `refuse` fails the decision with `EVALUATION_ERROR`, `error_code = FUNCTION_CHANGED`, until a new version is approved under four eyes. Any other value stops start-up naming the setting |
 | `evaluation.regex-max-input-length` | `4096` | Longest text `matches()` looks at, `1` to `evaluation.max-string-length` (and lowered with it by default). A longer text fails the decision with `EVALUATION_ERROR`, `error_code = REGEX_INPUT_TOO_LONG`, without running the match |
 | `evaluation.max-input-scale` | `34` | Absolute scale bound of number inputs, `0` to `34`, lower only; precision is always at most 34 digits (`EngineDefaults`, ADR-0024) |
 | `evaluation.reject-undeclared-inputs` | `true` | Refuse undeclared input names with `INPUT_INVALID`; undeclared inputs are never logged |
@@ -594,6 +609,19 @@ sequenceDiagram
 | Record | In the export's transaction: one rule set history row `EVIDENCE_EXPORTED` (actor, time, evidence JSON) and one `rules.evidence.exported.v1` event. Every refusal happens before either is written. The idempotency record holds the whole file, so a replay returns the same bytes and writes nothing; the file limit bounds that record |
 | Limits | File at most `EngineDefaults.EVIDENCE_MAX_BYTES` (8,388,608 bytes); a chosen version with more than `EVIDENCE_MAX_EVENTS_PER_VERSION` (10,000) events is refused the same way. Both are `422 EVIDENCE_TOO_LARGE`. Not configurable (PD-116) |
 
+### 4.10 Rule tests and row coverage (`RLE-059`, `RLE-064`, `RLE-065`, PD-120)
+`rule-engine-test` lets a developer test a rule set file without a database. `@RuleSetTest("rules/card-fee.yaml")` on a class makes the extension read the file once before the first test with the engine's own reader (`RuleSetReader`, YAML, JSON or DMN by extension), compile it with `CompiledRuleSet` and refuse a table whose worst case is over the step budget, so a file that fails import fails the class with the same violations as `422 VALIDATION_FAILED` (rule id, column, code, message). A test takes a `RuleSetUnderTest` as a parameter and calls `evaluate(Map)`: the same `requireOnlyDeclared` check as `evaluation.reject-undeclared-inputs` (an undeclared input is `INPUT_INVALID`), then the engine's evaluator at the test's clock, returned as a `DecisionResult` of version 1. The clock is `2027-01-01T00:00:00Z` unless `@RuleSetTest(clock = ...)` or `@RuleSetClock` on a test says otherwise; `today()` is its date in the rule set's `timeZone`. The module has no database, no Spring context, no masking key, no events and one fixed tenant, `test`; the starter does not depend on it and never auto-configures it, so adding the jar to a host cannot replace its storage, tenant resolver or masking.
+
+![Row coverage in a test run](images/rule-coverage.svg)
+
+Source: [`diagrams/rule-coverage.mmd`](diagrams/rule-coverage.mmd).
+
+- **What counts.** A row is covered when a test evaluation returned `Matched` with that row in `matchedRuleIds`. `NoMatch` and every `Failed` outcome (`UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`) cover nothing, because they produced no outputs.
+- **Where it lives.** The collector is a value in the root store of the JUnit extension context, so there is one per run and nothing is static; it closes when the run ends. That close writes `rules-coverage.json` and `rules-coverage.md` to `target/horus-rules-coverage` (`horus.rules.coverage.report-dir`) and prints one summary line per rule set, then applies the threshold. A failure in the close fails the engine, so the Maven build fails.
+- **What the report holds.** Rule sets by name and canonical hash, rows in document order, the tests that matched each row in name order. No time, machine, or input value, so the same tests give the same bytes. A rule set no test loaded is absent.
+- **What fails the build (PD-120).** `horus.rules.coverage.fail-on` in `junit-platform.properties` or as a system property: `none` (default, report only), `unique` (an uncovered row of a `unique` table) or `any` (any uncovered row). An unknown value fails the run naming the setting. A bank sets `any` in its rule set repository to prove every row is tested. Coverage is a development control a bank chooses for its repository; production controls (four eyes, validation, the decision log) do not depend on it.
+- **Out of scope.** Condition or branch coverage within a row, mutation testing, a Maven or Gradle plugin goal, aggregation across modules, coverage of decisions in the production log, and tests against a database (`rule-engine-postgres` keeps its Testcontainers suites).
+
 ### 4.8 Metrics
 
 Micrometer names, exported to Prometheus with the usual suffixes; no tenant, rule set or input value is ever a tag value unless listed.
@@ -734,8 +762,26 @@ CREATE TABLE rle_decision (
   eval_clock       TIMESTAMPTZ NOT NULL,
   duration_micros  BIGINT      NOT NULL,
   log_mode         TEXT        NOT NULL CHECK (log_mode IN ('TRANSACTIONAL','ASYNC')),
+  -- V25 (RLE-058, PD-119): the host functions the rule set calls, 'segmentOf@2027.2', comma separated in name order;
+  -- null when it calls none and for rows written before V25. Additive and nullable, so no row is rewritten.
+  function_versions TEXT       CHECK (function_versions IS NULL OR length(function_versions) BETWEEN 3 AND 8192),
   PRIMARY KEY (tenant_id, created_at, id)
 ) PARTITION BY RANGE (created_at);
+
+-- V26 (RLE-058, PD-119): the function versions a rule set version was approved with, written in the approval
+-- transaction; the baseline of the start-up WARN and of function-version-change = refuse. A version approved before V26
+-- has no rows, so it has no baseline and is never refused. tenant_id leads the key (TR-TEN-01); function names are the
+-- host's. Additive: a new table. Rollback is a new forward migration (DROP TABLE), which loses the baselines.
+CREATE TABLE rle_version_function (
+  tenant_id        TEXT         NOT NULL,
+  version_id       VARCHAR(26)  NOT NULL,
+  function_name    TEXT         NOT NULL CHECK (function_name ~ '^[a-z][A-Za-z0-9]{0,63}$'),
+  function_version TEXT         NOT NULL CHECK (length(function_version) BETWEEN 1 AND 64),
+  recorded_at      TIMESTAMPTZ  NOT NULL,
+  PRIMARY KEY (tenant_id, version_id, function_name),
+  FOREIGN KEY (tenant_id, version_id) REFERENCES rle_version (tenant_id, id)
+);
+CREATE INDEX rle_version_function_by_name ON rle_version_function (function_name, tenant_id, version_id);
 
 -- Catches rows outside every monthly partition, so an insert never fails for lack of a partition.
 CREATE TABLE rle_decision_default PARTITION OF rle_decision DEFAULT;

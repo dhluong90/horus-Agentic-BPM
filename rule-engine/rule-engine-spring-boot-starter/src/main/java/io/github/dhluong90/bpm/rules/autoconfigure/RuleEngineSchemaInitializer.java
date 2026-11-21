@@ -42,6 +42,7 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     private final RuleEngineCursorKeyInitializer cursorKeys;
     private final RuleEnginePartitionMaintenance maintenance;
     private final RuleEngineMaskingCheck maskingCheck;
+    private final RuleEngineFunctionCheck functionCheck;
     private final RuleEngineLifecycleSweeper sweeper;
 
     RuleEngineSchemaInitializer(
@@ -57,6 +58,14 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
             Clock clock, RuleEngineCursorKeyInitializer cursorKeys, RuleEngineMaskingCheck maskingCheck,
             RuleEngineLifecycleSweeper sweeper, RuleEnginePartitionMaintenance maintenance) {
+        this(migrator, partitions, migrate, clock, cursorKeys, maskingCheck, sweeper, maintenance, null);
+    }
+
+    RuleEngineSchemaInitializer(RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate,
+            Clock clock, RuleEngineCursorKeyInitializer cursorKeys, RuleEngineMaskingCheck maskingCheck,
+            RuleEngineLifecycleSweeper sweeper, RuleEnginePartitionMaintenance maintenance,
+            RuleEngineFunctionCheck functionCheck) {
+        this.functionCheck = functionCheck;
         this.sweeper = sweeper;
         this.migrator = Objects.requireNonNull(migrator, "migrator must not be null");
         this.partitions = Objects.requireNonNull(partitions, "partitions must not be null");
@@ -99,6 +108,10 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
             // Before any key is loaded or request served: a host that would log personal data in plain text, or
             // refuse every masked decision, does not start (RLE-035).
             maskingCheck.verify();
+        }
+        if (functionCheck != null) {
+            // RLE-058: one WARN per function whose version changed since a published version was approved.
+            functionCheck.verify();
         }
         if (cursorKeys != null) {
             cursorKeys.start();

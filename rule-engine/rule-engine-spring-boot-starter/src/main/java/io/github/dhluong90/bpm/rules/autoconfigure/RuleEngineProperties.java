@@ -366,11 +366,16 @@ public record RuleEngineProperties(
      *     table whose worst case is over it
      * @param timeoutMs longest time one decision may evaluate, in milliseconds, 1 to 30000; default 10000. The
      *     backstop for a slow machine; the step budget decides first
+     * @param functionVersionChange what evaluation does when the version label of a host function (a registered
+     *     {@code ExpressionFunction}) is not the one a rule set version was approved with: {@code warn} (default)
+     *     evaluates on, logs one WARN at start-up, lists the change in {@code /api/bpm/meta} and records the version
+     *     each decision used; {@code refuse} fails the decision closed with {@code FUNCTION_CHANGED} until a new
+     *     version of the rule set is approved under four eyes (PD-119)
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
             Integer regexMaxReads, Integer regexMaxReadsPerDecision, Long regexMaxReadsPerRequest, Boolean pinRetired,
-            Integer maxBatch, Integer stepBudget, Integer timeoutMs) {
+            Integer maxBatch, Integer stepBudget, Integer timeoutMs, String functionVersionChange) {
     }
 
     /**
