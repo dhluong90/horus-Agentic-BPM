@@ -28,7 +28,10 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * or machine detail, so the same tests give the same bytes. A rule set no test loaded is absent: the report is not a
  * list of the files on the class path. It never contains an input value.
  */
-final class CoverageRun implements AutoCloseable {
+// JUnit 5.12 (Spring Boot 3.5) closes only CloseableResource values in a store; JUnit 6 deprecates it for
+// AutoCloseable. Implementing both writes the report on either line; JUnit closes the value once.
+@SuppressWarnings("deprecation")
+final class CoverageRun implements AutoCloseable, ExtensionContext.Store.CloseableResource {
 
     /** The setting that decides what fails the build: {@code none} (default), {@code unique} or {@code any}. */
     static final String FAIL_ON = "horus.rules.coverage.fail-on";
@@ -71,9 +74,12 @@ final class CoverageRun implements AutoCloseable {
         this.out = Objects.requireNonNull(out, "out must not be null");
     }
 
+    // getOrComputeIfAbsent exists in JUnit 5.12 (Spring Boot 3.5) and 6; JUnit 6 deprecates it for
+    // computeIfAbsent(K, Function, Class), which 5.12 lacks, so the deprecation is accepted.
+    @SuppressWarnings("deprecation")
     static CoverageRun of(ExtensionContext context) {
         return context.getRoot().getStore(ExtensionContext.Namespace.create(CoverageRun.class))
-                .computeIfAbsent(CoverageRun.class, key -> new CoverageRun(
+                .getOrComputeIfAbsent(CoverageRun.class, key -> new CoverageRun(
                         Path.of(context.getConfigurationParameter(REPORT_DIR).orElse(DEFAULT_REPORT_DIR)),
                         context.getConfigurationParameter(FAIL_ON).orElse(null), System.out), CoverageRun.class);
     }
