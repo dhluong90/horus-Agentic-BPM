@@ -65,12 +65,25 @@ final class ProcessListQueries {
             new Bound.ParentKey("instance_id", "the tasks of one instance, at most a few per user task node"),
             "SELECT " + TASK_COLUMNS + " FROM pre_task WHERE tenant_id = ? AND instance_id = ? ORDER BY created_at, id");
 
-    /** The open incidents of one instance, oldest first (#58), on {@code idx_pre_incident_instance} (V13). */
+    static final String INCIDENT_COLUMNS = "tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, "
+            + "cause_summary, retry_count, status, lock_version, created_at, resolved_at, resolution, resolved_by, "
+            + "approval_mode, proposed_by, proposed_at, proposal_reason, proposal_output::text AS proposal_output, "
+            + "retrying";
+
+    /**
+     * The unresolved incidents of one instance ({@code OPEN} and {@code RESOLUTION_PENDING}), oldest first (#58, #68),
+     * on {@code idx_pre_incident_unresolved} (V30).
+     */
     static final ListQuery OPEN_INCIDENTS = new ListQuery("instance-open-incidents",
-            new Bound.ParentKey("instance_id", "the open incidents of one instance, at most one per failed step"),
-            "SELECT tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, cause_summary, "
-                    + "retry_count, status, lock_version, created_at, resolved_at FROM pre_incident "
-                    + "WHERE tenant_id = ? AND instance_id = ? AND status = 'OPEN' ORDER BY created_at, id");
+            new Bound.ParentKey("instance_id", "the unresolved incidents of one instance, at most one per failed step"),
+            "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident "
+                    + "WHERE tenant_id = ? AND instance_id = ? AND status IN ('OPEN','RESOLUTION_PENDING') "
+                    + "ORDER BY created_at, id");
+
+    /** The first page of the incidents of one status (#68, PRE-080). */
+    static final ListQuery INCIDENTS = incidents(false);
+    /** A later page, after the last incident of the previous page. */
+    static final ListQuery INCIDENTS_AFTER = incidents(true);
 
     /** The recorded results of some steps of one instance (V14), by the primary key; parameters: tenant, instance, nodes. */
     static final ListQuery STEP_RESULTS = new ListQuery("instance-step-results",
@@ -300,8 +313,9 @@ final class ProcessListQueries {
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
         List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
-                OPEN_INCIDENTS, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS, RECORDED_ANSWERS_AFTER, REPLAY_CASES,
-                DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
+                OPEN_INCIDENTS, INCIDENTS, INCIDENTS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
+                RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
+                CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB,
@@ -336,6 +350,19 @@ final class ProcessListQueries {
                                         + "AND j.job_kind = 'ASYNC_AGENT' WHERE")
                         + (after ? "AND (h.occurred_at, h.id) > (?, ?) " : "")
                         + "ORDER BY h.occurred_at, h.id LIMIT ?");
+    }
+
+    /**
+     * The incidents of one status, newest first on {@code idx_pre_incident_status (tenant_id, status, created_at DESC,
+     * id DESC)} (V30); keyset on {@code (created_at, id)}, never {@code OFFSET}. Parameters: tenant, status,
+     * [after created at, after id], limit.
+     */
+    private static ListQuery incidents(boolean after) {
+        return new ListQuery(after ? "incidents-after" : "incidents",
+                new Bound.Page("newest first on idx_pre_incident_status (tenant_id, status, created_at DESC, id DESC)"),
+                "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? AND status = ? "
+                        + (after ? "AND (created_at, id) < (?, ?) " : "")
+                        + "ORDER BY created_at DESC, id DESC LIMIT ?");
     }
 
     /**

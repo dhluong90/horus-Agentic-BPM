@@ -105,7 +105,58 @@ final class DecisionExplanations {
             }
         }
         return new DecisionExplanation(row.id(), row.ruleSet(), row.version(), row.hitPolicy(), row.outcome(),
-                row.errorCode(), row.evalClock(), matched, row.outputsJson(), reasons, null, null);
+                row.errorCode(), row.evalClock(), matched, row.outputsJson(), reasons, null, null)
+                .withWording(wording(EngineValues.read(version.canonicalJson()), inputs, declared));
+    }
+
+    /**
+     * The labels, the author's sentences and the recorded values a renderer needs, read from the stored canonical
+     * document and the logged inputs (PD-123). The plain value of a masked input is never available here.
+     */
+    private static DecisionExplanation.Wording wording(JsonNode document, JsonNode inputs,
+            Map<String, InputClause> declared) {
+        Map<String, String> inputLabels = new LinkedHashMap<>();
+        document.path("inputs").forEach(n -> labelOf(n, inputLabels));
+        Map<String, String> outputLabels = new LinkedHashMap<>();
+        document.path("outputs").forEach(n -> labelOf(n, outputLabels));
+        Map<String, Map<String, String>> rowTemplates = new LinkedHashMap<>();
+        document.path("rules").forEach(rule -> {
+            Map<String, String> texts = texts(rule.path("explain"));
+            if (!texts.isEmpty()) {
+                rowTemplates.put(rule.path("id").asString(""), texts);
+            }
+        });
+        Map<String, String> values = new LinkedHashMap<>();
+        java.util.Set<String> masked = new java.util.TreeSet<>();
+        for (Map.Entry<String, InputClause> entry : declared.entrySet()) {
+            JsonNode value = inputs.get(entry.getKey());
+            boolean missing = value == null || value.isNull();
+            values.put(entry.getKey(), missing ? "null" : EngineValues.write(value));
+            if (!missing && value.isString() && MaskingKey.isFingerprint(value.stringValue())
+                    && !Boolean.FALSE.equals(entry.getValue().mask())) {
+                masked.add(entry.getKey());
+            }
+        }
+        return new DecisionExplanation.Wording(inputLabels, outputLabels, rowTemplates,
+                texts(document.path("explanations").path("noMatch")), values, masked);
+    }
+
+    private static void labelOf(JsonNode column, Map<String, String> labels) {
+        if (column.path("label").isString()) {
+            labels.put(column.path("name").asString(""), column.get("label").stringValue());
+        }
+    }
+
+    private static Map<String, String> texts(JsonNode node) {
+        Map<String, String> texts = new LinkedHashMap<>();
+        if (node.isObject()) {
+            node.properties().forEach(e -> {
+                if (e.getValue().isString()) {
+                    texts.put(e.getKey(), e.getValue().stringValue());
+                }
+            });
+        }
+        return texts;
     }
 
     private static int position(DecisionTable table, String ruleId) {

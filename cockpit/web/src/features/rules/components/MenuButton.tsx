@@ -11,7 +11,8 @@ export interface MenuItem {
  * A button that opens a menu (WAI-ARIA menu button): Enter, Space or the arrow keys open it, arrows move,
  * Escape closes and returns focus to the button, a click outside closes it.
  */
-export function MenuButton({ label, trigger, items, className }: { label: string; trigger: ReactNode; items: readonly MenuItem[]; className?: string }) {
+/** `tooltip` shows the button's name on hover and on keyboard focus, for an icon-only trigger such as the row `⋯`. */
+export function MenuButton({ label, trigger, items, className, tooltip }: { label: string; trigger: ReactNode; items: readonly MenuItem[]; className?: string; tooltip?: string }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const button = useRef<HTMLButtonElement>(null);
@@ -43,7 +44,8 @@ export function MenuButton({ label, trigger, items, className }: { label: string
 
   return (
     <span className="menu">
-      <button ref={button} type="button" className={className ?? 'btn btn--quiet'} aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
+      <button ref={button} type="button" className={`${className ?? 'btn btn--quiet'}${tooltip !== undefined && !open ? ' has-tip' : ''}`} aria-label={label}
+        {...(tooltip !== undefined ? { 'data-tip': tooltip } : {})} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
         onClick={() => { setOpen((value) => !value); }}
         onKeyDown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); } }}>
         {trigger}

@@ -5,9 +5,16 @@ package io.github.dhluong90.bpm.process.spi;
  * {@code horus:handler="<name>"}. The engine calls it through this interface only, never by reflection
  * (TR-SEC-01). The starter collects every bean of this type.
  *
- * <p>Transactions: called inside the engine transaction (local mode). It may write to the host database through
- * the same transaction manager, and those writes commit or roll back with the step. It must not call the
- * network; remote steps are the Async Wait-State of ADR-0008, not in this skeleton.
+ * <p>Transactions: called inside the engine transaction (local mode: a step with no {@code horus:mode}, or
+ * {@code horus:mode="local"}). It may write to the host database through the same transaction manager, and those
+ * writes commit or roll back with the step, so a handler needs no idempotency key (PRE-070, PRE-071). It must not call
+ * the network: it holds the instance lock and a connection for its whole duration, and a call above
+ * {@code handlers.slow-call-warning} is logged as {@code process.step.slow}. A call to another system is a remote step
+ * ({@code horus:mode="remote"}, a {@link ServiceAdapter} on the Async Wait-State of ADR-0008).
+ *
+ * <p>Failure: a thrown exception rolls the step back with everything written before it in the same transaction; a
+ * request answers {@code 500 INTERNAL} with a correlation id only, and a job firing is retried after
+ * {@code jobs.retry-backoff} times the attempt, up to {@code jobs.max-attempts}.
  *
  * <p>Implementations must be thread-safe.
  */

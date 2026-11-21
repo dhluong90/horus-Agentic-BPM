@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.rules.postgres;
 
 import io.github.dhluong90.bpm.rules.internal.service.DecisionQuerySettings;
 import io.github.dhluong90.bpm.rules.internal.service.EngineContext;
+import io.github.dhluong90.bpm.rules.internal.service.HostFunctions;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
@@ -106,9 +107,37 @@ public final class PostgresRuleEngines {
     public static RuleEngines create(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, Clock clock, EngineSettings settings, MaskingPolicy masking,
             DecisionQuerySettings querySettings, io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer) {
+        return create(dataSource, transactions, tenants, callers, clock, settings, masking, querySettings, explainer,
+                java.util.List.of(), HostFunctions.VersionChange.WARN);
+    }
+
+    /**
+     * Builds the entry points with the functions the host registered for rule cells (RLE-055 to RLE-058). The versions
+     * each approved rule set version was approved with are kept in {@code rle_version_function}.
+     *
+     * @param dataSource the host's data source
+     * @param transactions the host's transaction manager, wrapped
+     * @param tenants resolves the tenant of a call
+     * @param callers resolves the caller of a call
+     * @param clock the host clock
+     * @param settings validated engine settings
+     * @param masking the masking key and default per tenant
+     * @param querySettings validated bounds of decision log searches
+     * @param explainer writes the text of decision explanations
+     * @param functions the host's functions; none is allowed
+     * @param onVersionChange what evaluation does when a function's version is not the approved one
+     * @return the entry points
+     * @throws IllegalArgumentException naming the function, when a name is registered twice, is a built-in name or is
+     *     not a valid name
+     */
+    public static RuleEngines create(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
+            CallerResolver callers, Clock clock, EngineSettings settings, MaskingPolicy masking,
+            DecisionQuerySettings querySettings, io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer,
+            java.util.Collection<io.github.dhluong90.bpm.expr.spi.ExpressionFunction> functions,
+            HostFunctions.VersionChange onVersionChange) {
         JdbcIdempotencyStore idempotency = new JdbcIdempotencyStore(dataSource);
         EngineContext context = new EngineContext(tenants, callers, clock, transactions, idempotency, settings,
-                masking);
+                masking, HostFunctions.of(functions, new JdbcFunctionVersionStore(dataSource), onVersionChange));
         return RuleEngines.create(context, new JdbcRuleStore(dataSource), new JdbcDecisionLog(dataSource),
                 new JdbcEventOutbox(dataSource), querySettings, explainer);
     }

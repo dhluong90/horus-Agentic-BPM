@@ -172,6 +172,26 @@ What a replay never does: call a model or any adapter, write history or the deci
 
 [`examples/mcp-tool-adapter`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/mcp-tool-adapter) shows an agent step calling one tool of a Model Context Protocol server through `AgentAdapter`, over Streamable HTTP. The process names the tool in a step input and the adapter refuses any tool outside its configured allow-list; the tool call carries the job id as `_meta.idempotencyKey`, so a retry never runs the tool twice; the tool's `structuredContent` is the answer, checked like any other. Server address and token are host configuration. The example is not part of the engine artifacts.
 
+### Calling a model API
+
+[`examples/model-adapters`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/model-adapters) has two reference adapters you can copy as a first adapter: one for OpenAI-compatible Chat Completions, which covers hosted vendors and self-hosted servers such as vLLM or Ollama, and one for Anthropic Messages. Both use the JDK HTTP client and no vendor SDK, and neither is part of the engine artifacts.
+
+- **The host chooses the vendor.** A step names the adapter (`horus:agent="doc-reviewer"`). The API, base address, model, prompt template (`prompts/kyc-review@p7`) and key are host configuration under `example.model-adapters.adapters.<name>`, with the key from the environment.
+- **The prompt carries only the step's inputs.** The versioned template is rendered from the step's bounded inputs; its version is the `promptVersion` label.
+- **Structured output.** The adapter asks for JSON in the step's output schema (`invocation.outputSchema()`), and the engine still checks the answer in the result transaction.
+- **Keyed by the attempt id.** A model call changes nothing on the far side, so each retry is a new call with a new attempt id, sent as `user` or `metadata.user_id`. No tenant id is sent.
+- **Labels.** `model`, `promptVersion`, `usage.inputTokens` and `usage.outputTokens`.
+
+| API answer | Attempt code | Retried |
+|---|---|---|
+| HTTP 400 | `MODEL_REQUEST_INVALID` | no |
+| HTTP 401 or 403 | `MODEL_AUTH_FAILED` | no |
+| HTTP 429 | `MODEL_RATE_LIMITED` | yes, after the step's backoff |
+| HTTP 5xx or 529 | `MODEL_UNAVAILABLE` | yes |
+| No answer within the request timeout | `ADAPTER_TIMEOUT` | yes |
+| A refusal or a content-filter stop | `MODEL_REFUSED` | no |
+| Prose instead of JSON | `AGENT_SCHEMA_INVALID`, from the result check | yes, once |
+
 ### A guardrail is an ordinary rule set
 
 The guardrail is a Rule Engine rule set with hit policy `first` or `unique`. It must declare the output `allow` (boolean) and may declare `reasons` (a string); the engine reads no other output. Its inputs are fields of the agent's answer, so each must be declared in the step's `outputSchema` with a compatible type. Deploying a process definition whose guardrail rule set is missing in your tenant, has no version in effect or breaks this contract fails with `422 GUARDRAIL_CONTRACT_INVALID`, naming the step and the failed check, and nothing is written. The same check runs when approval is requested and at approval, so a guardrail changed after import is caught before the process goes live. Publish the guardrail rule set before you deploy the process. At run time the check fails closed: a decision error counts as `allow: false` with reason `GUARDRAIL_EVALUATION_ERROR` and follows `onViolation`.

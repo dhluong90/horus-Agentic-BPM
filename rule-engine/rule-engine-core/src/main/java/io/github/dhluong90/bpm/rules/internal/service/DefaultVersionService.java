@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.rules.internal.service;
 
 import io.github.dhluong90.bpm.rules.api.AuthorUnknownException;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
+import io.github.dhluong90.bpm.rules.api.DraftValidation;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.rules.api.PreconditionRequiredException;
@@ -85,6 +86,8 @@ public final class DefaultVersionService implements VersionService {
     private final CompiledCache cache;
     private final EngineMeters meters;
     private final Supersession supersession;
+    /** Words problems and readings; the same catalogue as the explanations (PD-077). */
+    private final CatalogueExplainer catalogue;
 
     /**
      * Creates the service.
@@ -96,9 +99,10 @@ public final class DefaultVersionService implements VersionService {
      *     shares the holder that {@link RuleEngines#cursorKeys()} exposes for loading
      * @param cache the compiled cache the evaluation of the same replica uses
      * @param supersession retires superseded versions, shared with the lifecycle sweep
+     * @param catalogue the message catalogue that words problems and readings
      */
     DefaultVersionService(EngineContext context, RuleStore store, EventOutbox outbox, CursorKeys cursorKeys,
-            Supersession supersession, CompiledCache cache, EngineMeters meters) {
+            Supersession supersession, CompiledCache cache, EngineMeters meters, CatalogueExplainer catalogue) {
         this.context = Objects.requireNonNull(context, "context must not be null");
         this.store = Objects.requireNonNull(store, "store must not be null");
         this.outbox = Objects.requireNonNull(outbox, "outbox must not be null");
@@ -106,6 +110,7 @@ public final class DefaultVersionService implements VersionService {
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
         this.supersession = Objects.requireNonNull(supersession, "supersession must not be null");
         this.meters = Objects.requireNonNull(meters, "meters must not be null");
+        this.catalogue = Objects.requireNonNull(catalogue, "catalogue must not be null");
     }
 
     @Override
@@ -264,12 +269,7 @@ public final class DefaultVersionService implements VersionService {
             }
             checkLock(current, opts);
             String sourceText = utf8(source);
-            ParsedRuleSet parsed = checkedDocument(request.format(), source);
-            requireMaskDeclarations(tenant, parsed.canonicalJson());
-            if (!ruleSet.equals(parsed.model().name())) {
-                throw new InputInvalidException("Document names rule set '" + parsed.model().name() + "', not '"
-                        + ruleSet + "'");
-            }
+            ParsedRuleSet parsed = checkedDraftDocument(tenant, ruleSet, request.format(), source);
             StoredVersion updated = current.replaced(parsed.model().decision().table().hitPolicy().name(),
                     parsed.model().effectiveFrom(), parsed.canonicalJson(), parsed.canonicalHash(), request.format(),
                     sourceText, Hashes.sha256(source));
@@ -286,6 +286,50 @@ public final class DefaultVersionService implements VersionService {
                     .put("previousCanonicalHash", current.canonicalHash()));
             return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    /**
+     * The checks a draft's new document passes, shared by {@link #replaceDraft} and {@link #validateDraft} so a
+     * validation can never be kinder or stricter than the save it stands in for (RLE-090).
+     */
+    private ParsedRuleSet checkedDraftDocument(String tenant, String ruleSet, SourceFormat format, byte[] source) {
+        ParsedRuleSet parsed = checkedDocument(format, source);
+        requireMaskDeclarations(tenant, parsed.canonicalJson());
+        if (!ruleSet.equals(parsed.model().name())) {
+            throw new InputInvalidException("Document names rule set '" + parsed.model().name() + "', not '"
+                    + ruleSet + "'");
+        }
+        return parsed;
+    }
+
+    @Override
+    public DraftValidation validateDraft(String ruleSet, int version, ImportRequest request) {
+        Objects.requireNonNull(request, "request must not be null");
+        if (request.size() > RuleSetReader.MAX_SOURCE_BYTES) {
+            throw new PayloadTooLargeException(RuleSetReader.MAX_SOURCE_BYTES);
+        }
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_AUTHOR);
+        if (!context.settings().draftAuthoring()) {
+            throw new DraftAuthoringDisabledException(ruleSet, version);
+        }
+        byte[] source = request.source();
+        return context.withoutDooming(() -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.status() != VersionStatus.DRAFT) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "validate");
+            }
+            try {
+                ParsedRuleSet parsed = checkedDraftDocument(tenant, ruleSet, request.format(), source);
+                boolean maskByDefault = context.masking().maskByDefault(tenant);
+                return new DraftValidation(ruleSet, version, true, List.of(), false,
+                        catalogue.readings(parsed.model(), maskByDefault));
+            } catch (ValidationFailedException refused) {
+                return new DraftValidation(ruleSet, version, false,
+                        refused.violations().stream().map(catalogue::problem).toList(), refused.truncated(),
+                        List.of());
+            }
+        });
     }
 
     @Override
@@ -382,9 +426,13 @@ public final class DefaultVersionService implements VersionService {
             // A version requested before strict mode was turned on is checked again, so it never reaches the
             // append-only decision log with an undeclared input (security review of #308).
             requireMaskDeclarations(tenant, current.canonicalJson());
+            // RLE-056: a call to a function the host removed since the import is refused here too, as at request.
+            recheck(current);
             Acknowledgement acknowledgement = requireAcknowledgement(current, acknowledged);
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());
+            // RLE-058: the function versions the version is approved with are the baseline of a later change.
+            context.functions().approvals().record(tenant, ruleSet, version, compiledFunctions(current), now);
             store.updateVersion(updated, current.lockVersion());
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.APPROVED,
                     current.status(), updated.status(), actor, opts.comment(), updated.lockVersion(), now, null, null,
@@ -821,10 +869,18 @@ public final class DefaultVersionService implements VersionService {
      * Compiles a model with the host's configured limits, the ones evaluation will apply, and refuses a table whose
      * worst-case step count is over the step budget (TR-SEC-01), so it fails here and not on every evaluation.
      */
+    /** The host functions a stored version calls, each with the version label registered now. */
+    private java.util.Map<String, String> compiledFunctions(StoredVersion stored) {
+        EngineSettings settings = context.settings();
+        return CompiledRuleSet.compile(RuleSetReader.readCanonical(stored.canonicalJson()), settings.maxOutputBytes(),
+                settings.maxStringLength(), settings.regexLimits(), settings.evaluationLimits(),
+                context.functions().library()).hostFunctions();
+    }
+
     private void compileForPublication(io.github.dhluong90.bpm.rules.internal.model.Definitions model) {
         EngineSettings settings = context.settings();
         CompiledRuleSet.compile(model, settings.maxOutputBytes(), settings.maxStringLength(), settings.regexLimits(),
-                settings.evaluationLimits()).requireWithinStepBudget();
+                settings.evaluationLimits(), context.functions().library()).requireWithinStepBudget();
     }
 
     @Override

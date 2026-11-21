@@ -55,7 +55,7 @@ final class RuleListQueries {
     static final String DECISION_COLUMNS = """
             tenant_id, id, created_at, rule_set_name, version_num, hit_policy, outcome, error_code,
             masked_inputs::text AS inputs, outputs::text AS outputs, matched_rule_ids::text AS matched, caller_id,
-            correlation_id, eval_clock, duration_micros, pinned, on_behalf_of
+            correlation_id, eval_clock, duration_micros, pinned, on_behalf_of, function_versions
             """;
 
     /** The lifecycle actions a version's history shows; the others belong to the rule set. */
@@ -228,6 +228,28 @@ final class RuleListQueries {
                     ORDER BY v.tenant_id, s.name, v.version_num
                     """);
 
+    /** The host functions one version was approved with, and their version labels (RLE-058). */
+    static final ListQuery VERSION_FUNCTIONS = new ListQuery("version-functions",
+            new Bound.ParentKey("version_id", "the functions one version calls, on the primary key of rle_version_function"),
+            """
+                    SELECT function_name, function_version
+                    FROM rle_version_function
+                    WHERE tenant_id = :tenant AND version_id = :versionId
+                    ORDER BY function_name
+                    """);
+
+    /** The host functions every published version calls, for the start-up function check (RLE-058). */
+    static final ListQuery PUBLISHED_FUNCTION_USES = new ListQuery("published-function-uses",
+            new Bound.Sweep("the functions of the versions in service of every tenant, read once at start-up"),
+            """
+                    SELECT f.tenant_id, r.name, v.version_num, f.function_name, f.function_version
+                    FROM rle_version_function f
+                    JOIN rle_version v ON v.tenant_id = f.tenant_id AND v.id = f.version_id
+                    JOIN rle_rule_set r ON r.tenant_id = v.tenant_id AND r.id = v.rule_set_id
+                    WHERE v.status = 'PUBLISHED'
+                    ORDER BY f.function_name, f.tenant_id, r.name, v.version_num
+                    """);
+
     /** The monthly partitions attached to {@code rle_decision}, for retention (RLE-017); a maintenance sweep only. */
     static final ListQuery DECISION_PARTITIONS = new ListQuery("decision-partitions",
             new Bound.Sweep("the child tables of rle_decision in the catalog, one per month kept, read by the retention sweep"),
@@ -282,7 +304,7 @@ final class RuleListQueries {
     static List<ListQuery> all() {
         return List.of(CACHE_EPOCHS, RULE_SETS, VERSIONS, VERSION_HISTORY, HISTORY_VERSIONS, VERSIONS_BY_NUMBER,
                 HISTORY_OF_VERSIONS, RULE_SET_EVENTS, DECLARED_INPUTS, MASKED_BY_DEFAULT, RETIRE_SUPERSEDED,
-                MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
+                MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, VERSION_FUNCTIONS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
                 DECISIONS_BY_LOGGED_INPUT, DECISION_COUNT, byCorrelation(false, false), byCorrelation(true, true),
                 byInput(false), byInput(true));
     }

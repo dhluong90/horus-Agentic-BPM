@@ -1,6 +1,7 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { readPendingWarnings, type AcknowledgedWarning, type RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
+import type { MessageKey } from '../../../i18n/en';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
 import { toHostError } from '../../../api/hostError';
@@ -13,17 +14,57 @@ export interface Action<TArgs = void> {
   error: unknown;
 }
 
-/** Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen. */
-export function HeaderActions({ version, onEdit, requestPublish }: { version: RuleSetVersion; onEdit: () => void; requestPublish: Action }) {
+/**
+ * Why the user cannot change this version in the grid, in one line; undefined when they can. Only a draft is ever
+ * edited, only by its author (the engine refuses anyone else), and only when the host allows cockpit drafts.
+ */
+export function editBlock(version: RuleSetVersion, session: { can: (permission: string) => boolean; cockpitDrafts: boolean; userId: string }): MessageKey | undefined {
+  // What the version is comes first: a reviewer reads that a pending version cannot change, whoever they are.
+  if (version.status === 'PENDING_APPROVAL') return 'editor.block.pending';
+  if (version.status !== 'DRAFT') return 'editor.block.approved';
+  if (!session.can('rules:author')) return 'editor.block.reader';
+  if (!session.cockpitDrafts) return 'dock.draftsOff';
+  if (version.createdBy !== session.userId) return 'editor.block.notAuthor';
+  return undefined;
+}
+
+/**
+ * Whether the header shows Edit draft for this version, enabled or disabled with its reason: always for a version
+ * waiting for approval, so a reviewer reads whose turn it is; for a draft, to anyone who may author drafts here.
+ */
+export function showsEdit(version: RuleSetVersion, session: { can: (permission: string) => boolean; cockpitDrafts: boolean }): boolean {
+  if (version.status === 'PENDING_APPROVAL') return true;
+  return version.status === 'DRAFT' && session.can('rules:author') && session.cockpitDrafts;
+}
+
+/** Edit draft, disabled with its reason in one line beside it when the user cannot change this version. */
+function EditButton({ version, onEdit }: { version: RuleSetVersion; onEdit: () => void }) {
   const { t } = useI18n();
-  const { can, cockpitDrafts } = useRulesSession();
-  // Editing imports a new draft: it needs rules:author, and the host may keep changes in its release pipeline.
-  const canEdit = can('rules:author') && cockpitDrafts;
+  const session = useRulesSession();
+  const reasonId = useId();
+  const block = editBlock(version, session);
+  return (
+    <span className="rs-head__action">
+      {block !== undefined ? <span id={reasonId} className="reason-line"><span aria-hidden="true">⊘</span> {t(block, { who: version.createdBy ?? '' })}</span> : null}
+      <button type="button" className="btn" disabled={block !== undefined} onClick={onEdit} {...(block !== undefined ? { 'aria-describedby': reasonId } : {})}>
+        <span aria-hidden="true">✎</span> {t('editor.edit')}
+      </button>
+    </span>
+  );
+}
+
+/** Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen. */
+export function HeaderActions({ version, onEdit, newDraft, requestPublish }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action }) {
+  const { t } = useI18n();
+  const session = useRulesSession();
+  // Every edit is of a stored draft: it needs rules:author, and the host may keep changes in its release pipeline.
+  const author = session.can('rules:author') && session.cockpitDrafts;
+  const edit = showsEdit(version, session) ? <EditButton version={version} onEdit={onEdit} /> : null;
   if (version.status === 'DRAFT') {
     const canRequest = version.allowedActions.includes('request-publish');
     return (
       <>
-        {canEdit ? <button type="button" className="btn" onClick={onEdit}><span aria-hidden="true">✎</span> {t('editor.edit')}</button> : null}
+        {edit}
         {canRequest ? (
           <button type="button" className="btn btn--primary" disabled={requestPublish.isPending} aria-busy={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
             {requestPublish.isPending ? t('dock.requesting') : t('dock.requestPublish')}
@@ -32,10 +73,14 @@ export function HeaderActions({ version, onEdit, requestPublish }: { version: Ru
       </>
     );
   }
-  if (version.status === 'PUBLISHED' && canEdit) {
-    return <button type="button" className="btn btn--primary" onClick={onEdit}><span aria-hidden="true">＋</span> {t('editor.newDraft')}</button>;
+  if (version.status === 'PUBLISHED' && author) {
+    return (
+      <button type="button" className="btn btn--primary" disabled={newDraft.isPending} aria-busy={newDraft.isPending} onClick={() => { newDraft.start(); }}>
+        <span aria-hidden="true">＋</span> {newDraft.isPending ? t('editor.creating') : t('editor.newDraft')}
+      </button>
+    );
   }
-  return null;
+  return edit;
 }
 
 /** A line under the header when the host keeps rule changes in its release pipeline. */
@@ -175,7 +220,7 @@ function Step({ title, when }: { title: string; when: string | undefined }) {
   );
 }
 
-/** Who drafted, requested and approved the version, since when it applies, and its content hash. */
+/** Who drafted, requested and approved the version, and since when it applies. The content hash is in History. */
 /** `importedFrom` is the file this version was imported from in this session, when the user imported it here. */
 export function DetailsPanel({ version, importedFrom }: { version: RuleSetVersion; importedFrom?: string | undefined }) {
   const { t, locale } = useI18n();
@@ -198,30 +243,67 @@ export function DetailsPanel({ version, importedFrom }: { version: RuleSetVersio
           <dt>{t('details.rows')}</dt>
           <dd className="tnum">{version.definition.rules.length}</dd>
         </div>
-        <div>
-          <dt>{t('details.hash')}</dt>
-          <dd><span className="mono" title={version.canonicalHash}>{version.canonicalHash.slice(0, 12)}</span></dd>
-        </div>
       </dl>
     </div>
   );
 }
 
-/** The sticky save dock at the bottom of the editor: what is unsaved, what is left to fix, Discard and Save draft. */
-export function EditDock({ unsaved, toFix, saving, onSave, onDiscard, onViewChanges }: { unsaved: number; toFix: number; saving: boolean; onSave: () => void; onDiscard: () => void; onViewChanges: () => void }) {
+/** A save refused because someone else saved first: what they changed, and the way to their version. */
+export interface DockConflict {
+  /** The cells they changed ("R3 Fee"), or empty while their version is read or when no cell differs. */
+  cells: string;
+  /** Whether their version has been read, so Load the latest version can replace the edits. */
+  ready: boolean;
+  onLoad: () => void;
+}
+
+/**
+ * The save dock, always at the bottom of the editor and aligned to the content: what is unsaved, what is left to fix,
+ * whether the engine is checking, Discard and Save draft. A disabled Save says why once, beside it. After a conflict
+ * the dock carries the warning and Load the latest version, so the grid above never moves.
+ */
+export function EditDock({ unsaved, toFix, checking, saving, blocked, conflict, onSave, onDiscard, onViewChanges }: {
+  unsaved: number; toFix: number; checking: boolean; saving: boolean; blocked: MessageKey | undefined; conflict?: DockConflict | undefined;
+  onSave: () => void; onDiscard: () => void; onViewChanges: () => void;
+}) {
   const { t } = useI18n();
+  const reasonId = useId();
+  const conflictId = useId();
+  const unsavedText = unsaved === 1 ? t('editor.unsavedOne') : unsaved > 1 ? t('editor.unsavedCount', { count: String(unsaved) }) : undefined;
+  // With nothing changed the status stays empty: the reason beside Save already says there is nothing to save.
+  const status: ReactNode[] = [
+    unsavedText !== undefined ? <span key="unsaved"><span className="edit-dock__dot" aria-hidden="true" /> {unsavedText}</span> : null,
+    toFix > 0 ? <span key="fix" className="edit-dock__fix">{t('editor.toFix', { count: String(toFix) })}</span> : null,
+    checking ? <span key="checking">{t('editor.checking')}</span> : null,
+  ].filter((part) => part !== null);
+  // The reason beside Save is the one line that explains a disabled Save; with a conflict the warning line does.
+  const reason = blocked !== undefined && !saving && conflict === undefined ? blocked : undefined;
+  const describedBy = conflict !== undefined ? conflictId : reason !== undefined ? reasonId : undefined;
   return (
-    <div className="edit-dock" role="region" aria-label={t('editor.save')}>
-      <p className="edit-dock__status" role="status">
-        {unsaved > 0 ? <span className="edit-dock__dot" aria-hidden="true" /> : null}
-        {unsaved === 1 ? t('editor.unsavedOne') : unsaved > 0 ? t('editor.unsavedCount', { count: String(unsaved) }) : t('editor.noChanges')}
-        {toFix > 0 ? ` · ${t('editor.toFix', { count: String(toFix) })}` : ''}
-        {unsaved > 0 ? <button type="button" className="linkbtn hit edit-dock__view" onClick={onViewChanges}>{t('editor.viewChanges')}</button> : null}
-      </p>
-      <button type="button" className="btn btn--ghost" disabled={saving} onClick={onDiscard}>{t('editor.cancel')}</button>
-      <button type="button" className="btn btn--primary" disabled={unsaved === 0 || saving} aria-busy={saving} onClick={onSave}>
-        {saving ? t('editor.saving') : t('editor.save')}
-      </button>
+    <div className={conflict !== undefined ? 'edit-dock edit-dock--conflict' : 'edit-dock'} role="region" aria-label={t('editor.dockLabel')}>
+      {conflict !== undefined ? (
+        <div className="edit-dock__conflict" role="alert">
+          <p id={conflictId} className="edit-dock__conflict-text">
+            <span aria-hidden="true" className="edit-dock__warn">▲</span> <strong>{t('editor.conflict.title')}</strong>{' '}
+            {conflict.cells !== '' ? t('editor.conflict.cells', { cells: conflict.cells }) : t('editor.conflict.body')}
+          </p>
+          <button type="button" className="btn" disabled={!conflict.ready} aria-busy={!conflict.ready} onClick={conflict.onLoad}>
+            {conflict.ready ? t('editor.conflict.load') : t('editor.conflict.loading')}
+          </button>
+        </div>
+      ) : null}
+      <div className="edit-dock__row">
+        <p className="edit-dock__status" role="status">
+          {status.flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
+          {unsaved > 0 ? <button type="button" className="linkbtn hit edit-dock__view" onClick={onViewChanges}>{t('editor.viewChanges')}</button> : null}
+        </p>
+        {reason !== undefined ? <p id={reasonId} className="reason-line edit-dock__reason"><span aria-hidden="true">⊘</span> {t(reason)}</p> : null}
+        <button type="button" className="btn btn--ghost" disabled={saving} onClick={onDiscard}>{t('editor.cancel')}</button>
+        <button type="button" className="btn btn--primary" disabled={blocked !== undefined || saving} aria-busy={saving}
+          {...(describedBy !== undefined && !saving ? { 'aria-describedby': describedBy } : {})} onClick={onSave}>
+          {saving ? t('editor.saving') : t('editor.save')}
+        </button>
+      </div>
     </div>
   );
 }

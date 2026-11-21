@@ -112,21 +112,19 @@ public final class DefaultDecisionLogService implements DecisionLogService {
                     new IllegalStateException("Decision " + decisionId + " names a version that is not stored"));
             return DecisionExplanations.explain(row, version);
         });
-        String language = language(languages);
-        return explanation.withText(language, explainer.text(explanation, language));
-    }
-
-    /** The first preferred language the explainer writes, else its default. */
-    private String language(List<String> preferred) {
-        java.util.Set<String> available = explainer.languages();
-        if (preferred != null) {
-            for (String language : preferred) {
+        java.util.Set<String> available = explainer.languagesFor(explanation);
+        if (languages != null) {
+            for (String language : languages) {
                 if (language != null && available.contains(language)) {
-                    return language;
+                    var rendered = explainer.render(explanation, language);
+                    return explanation.withText(language, rendered.text(), rendered.source());
                 }
             }
         }
-        return explainer.defaultLanguage();
+        // A language nobody asked for is never an author's: a template of another language is not shown (RLE-072).
+        String fallback = explainer.defaultLanguage();
+        return explanation.withText(fallback, explainer.text(explanation, fallback),
+                io.github.dhluong90.bpm.rules.api.DecisionExplanation.GENERATED);
     }
 
     @Override

@@ -55,8 +55,8 @@ A PRD capability row that bundles several outcomes is split into several feature
 | RE-F-24 | An author compares two versions over a past period (what-if) | S2 | M3 (cut candidate) | RE 7.3 | | | spec gap | RE-F-22 | PD-031 |
 | RE-F-25 | An author imports and exports rule sets as YAML or JSON | S2 | M1 | RE 7.3 | | | spec gap | RE-F-02 | |
 | RE-F-26 | A host evaluates up to 1 000 items in one batch call | S1 | M2 (cut candidate) | RE 7.3 | | TR-DET-01 | spec gap | RE-F-01 | PD-031, PD-043 |
-| RE-F-27 | A host registers pure functions the expression language can call | S1, S2 | M1 | RE 7.3 | | TR-SEC-01 | spec gap | RE-F-02 | |
-| RE-F-28 | A developer tests rule sets in JUnit and gets a row coverage report in CI | S1 | M1 | RE 7.3 | | TR-QA-01 | spec gap | RE-F-01 | |
+| RE-F-27 | A host registers pure functions the expression language can call | S1, S2 | M1 | RE 7.3 | RLE-055 to RLE-058 | TR-SEC-01 | specified | RE-F-02 | PD-119 |
+| RE-F-28 | A developer tests rule sets in JUnit and gets a row coverage report in CI | S1 | M1 | RE 7.3 | RLE-059, RLE-064, RLE-065 | TR-QA-01 | specified | RE-F-01 | PD-120 |
 | RE-F-29 | Hosts get metrics and events for evaluation, publish and retire | S1 | M1 | RE 7.2 Observability, 7.3 | RLE-010 (published event only) | TR-OBS-02, TR-OBS-04, TR-OBS-06 | spec gap | X-F-07 | |
 | RE-F-30 | An author imports a DMN decision table | S2 | M3 (cut candidate) | RE 8 | | TR-STD-25 | spec gap | RE-F-25 | PD-031, PD-057 |
 | RE-F-31 | The host must set decision log retention, at least 12 months in whole months; outside the `dev` profile the engine refuses to start until it is set; whole monthly partitions older than it are dropped | S3 | M3 (setting, start-up check and purge together, PD-020) | RE 8 | | TR-OPS-04 | spec gap | RE-F-16 | PD-004, PD-020, PD-050 |
@@ -90,7 +90,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-05 | A parallel join produces exactly one outgoing token under concurrent arrival on different replicas | S1 | M2 | PE 7.2 Logic | PRE-005 | TR-ASY-03, TR-PERF-05 | specified (PRE-005 should trace `TR-ASY-03`) | | |
 | PE-F-06 | Timers fire once across replicas and recover after a crashed claimant | S1, S2 | M2 | PE 7.2 Logic | PRE-006 | TR-PERF-05, TR-ASY-02 | specified | | |
 | PE-F-07 | Human tasks are assigned by user, role or group and can be claimed, completed, delegated and reassigned | S2 | M2 | PE 7.4 | | TR-IDEM-03 | spec gap | PE-F-03, X-F-06 | |
-| PE-F-08 | Service steps run in the host transaction when local and through the `ServiceAdapter` SPI with the async protocol when remote | S1 | M2 | PE 7.2 API, 7.4 | | TR-ASY-01 | spec gap | PE-F-16 | |
+| PE-F-08 | Service steps run in the host transaction when local and through the `ServiceAdapter` SPI with the async protocol when remote | S1 | M2 | PE 7.2 API, 7.4 | PRE-070, PRE-071, PRE-072 | TR-ASY-01 | specified | PE-F-16 | |
 | PE-F-09 | A `decision` step evaluates a rule set in the host transaction and routes on its outputs | S1 | M2 | PE 7.4 | | TR-EMB-04 | spec gap | RE-F-01, RE-F-20 | |
 | PE-F-10 | Four-eyes: the requester or an earlier actor cannot complete an approval task | S2 | M2 | PE 7.2 Logic | PRE-007 | TR-SEC-04 | specified | PE-F-07 | |
 | PE-F-11 | SLA deadlines respect working hours, holidays and time zone per tenant and do not move when the calendar changes | S2 | M2 | PE 7.2 Logic, 7.2 API | PRE-008, PRE-114 | TR-CAL-01, TR-CAL-02 | specified | | PD-118, PD-131 |
@@ -117,7 +117,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-32 | Hosts get metrics for active instances, incidents and timer lag, and events for start, completion and incident | S1, S2 | M2 | PE 7.2 Observability | PRE-084, PRE-085, PRE-086 | TR-OBS-02, TR-OBS-04, TR-OBS-06 | specified | X-F-07 | |
 | PE-F-33 | Throughput of 1 000 step transitions per second per replica is measured and reported | S1 | M2 | PE 7.4 | PRE-087 | TR-PERF-04 | specified | | PD-026 |
 | PE-F-34 | An MCP tool adapter is available as an example outside the engine artifacts | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
-| PE-F-35 | Reference adapters for common model APIs are available in `examples/` | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
+| PE-F-35 | Reference adapters for common model APIs are available in `examples/` | S3 | M3 | PE 8 | PRE-098, PRE-099 | TR-AGT-04 | specified | PE-F-24 | PD-129 |
 | PE-F-36 | An agent receives bounded context from earlier steps as memory | S3 | M3 | PE 7.4, 8 | PRE-100, PRE-101, PRE-102 | TR-AGT-01, TR-AGT-02, TR-SEC-05 | specified | PE-F-22 | |
 | PE-F-37 | An offline runner replays recorded agent traces and human overrides against a changed guardrail or output schema; prompt changes are replayed through a host harness | S3 | M3 | PE 7.3, 7.4, 8 | | | spec gap | PE-F-22 | PD-014, PD-128 |
 | PE-F-38 | Adopters follow the autonomy ladder (rungs 1 to 3) and eval bar to raise agent autonomy one guardrail version at a time | S3 | M2 | PE 7.3 | PRD 7.3 (guidance, no engine behaviour) | | specified | PE-F-18 | |
@@ -281,16 +281,16 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 | Module | M0 | M1 | M2 | M3 | 1.1 (S1) | 1.2 (S2) | 1.3 (S3) | Later | Total |
 |---|---|---|---|---|---|---|---|---|---|
 | Rule Engine | 0 | 31 (17 / 14 / 0) | 2 (0 / 2 / 0) | 7 (1 / 6 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 4 (0 / 1 / 3) | 49 (18 / 23 / 8) |
-| Process Engine | 0 | 0 | 44 (22 / 22 / 0) | 11 (0 / 11 / 0) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (22 / 33 / 11) |
+| Process Engine | 0 | 0 | 44 (23 / 21 / 0) | 11 (1 / 10 / 0) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (24 / 31 / 11) |
 | Cockpit | 0 | 14 (7 / 7 / 0) | 16 (4 / 12 / 0) | 10 (1 / 9 / 0) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 0 | 3 (0 / 0 / 3) | 45 (12 / 28 / 5) |
 | Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 5 (1 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 4 (0 / 0 / 4) | 30 (12 / 12 / 6) |
-| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (27 / 38 / 0) | 33 (3 / 30 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 13 (0 / 1 / 12) | 190 (64 / 96 / 30) |
+| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (28 / 37 / 0) | 33 (4 / 29 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 13 (0 / 1 / 12) | 190 (66 / 94 / 30) |
 
 ![Features per module per milestone](images/fm-features-per-module.svg)
 
 The same counts as the table. Teal: engines; blue: cockpit; green: cross-cutting; purple: the standards track. Source: [diagrams/fm-features-per-module.mmd](diagrams/fm-features-per-module.mmd).
 
-Totals: 190 features; 64 specified, 96 spec gaps, 30 design previews. PRE-030 (#70) specifies PE-F-50. PD-089 (2026-11-19) moved RE-F-35, withdrawing one's own pending request, from later to M1 as a spec gap: M1 from 57 to 58, later from 13 to 12. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
+Totals: 190 features; 66 specified, 94 spec gaps, 30 design previews. PRE-030 (#70) specifies PE-F-50. PRE-070 to PRE-072 (#63) specify PE-F-08 in M2, and PRE-098 and PRE-099 (#100) specify PE-F-35 in M3. PD-089 (2026-11-19) moved RE-F-35, withdrawing one's own pending request, from later to M1 as a spec gap: M1 from 57 to 58, later from 13 to 12. The cockpit direction (PD-032 to PD-042, decided 2026-11-18) added 24 features, all spec gaps: 2 in M1, 14 in M2 and 8 in M3. It moved RE-F-22, CK-F-11 and CK-F-18 from M2 to M3 and took PE-F-41 off the cut list.
 
 The standards direction (PD-057, decided 2026-11-18) added 27 counted features. Foundations before 1.0: 10 (4 in M1, all Rule Engine; 5 in M2, 4 Process Engine and 1 Cockpit; 1 cross-cutting in M3), of which 8 are specified by SPEC statements already written and 2 are spec gaps. Standards track: 17 new design previews (11 in 1.1, 4 in 1.2, 2 in 1.3) and PE-F-40 moved from later to 1.2, for 18 in the track. No standards feature is a cut candidate: the foundations are the items that are expensive later.
 

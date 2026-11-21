@@ -568,6 +568,12 @@ class RuleEngineAutoConfigurationTest {
         RuleEngineMaskingCheck customMaskingCheck() {
             return new RuleEngineMaskingCheck(() -> { });
         }
+
+        /** No database here: the function start-up check reads the approved versions from PostgreSQL (RLE-058). */
+        @Bean
+        RuleEngineFunctionCheck customFunctionCheck() {
+            return new RuleEngineFunctionCheck(java.util.List::of);
+        }
     }
 
     @Configuration(proxyBeanMethods = false)

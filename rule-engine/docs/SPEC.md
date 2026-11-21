@@ -393,8 +393,8 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1 (generated explanation, PD-027 option 1; author templates are M3, RE-F-19)
 - **Given:** Tenant `bank-a`; `card-fee` v1 (`hitPolicy: first`) with `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 10000 VND`), `R3` (`{} -> fee: 50000 VND`); decision `D7` logged with inputs `tier: "SILVER"`, `txCount: 5`, `matchedRuleIds: ["R2"]`, output `fee: 10000 VND`, clock `2026-11-20T10:00:00Z`. `risk-flags` v1 (`hitPolicy: collect`) and decision `D8` with `matchedRuleIds: ["R1", "R3"]` as in `RLE-003`. v2 of `card-fee` was published after both decisions. Caller `dan` holds `rules:log:read`.
 - **When:** `dan` sends `GET /api/bpm/rules/v1/decisions/D7/explain`, again, and `GET /api/bpm/rules/v1/decisions/D8/explain`. Failure cases: an unknown id; `D7` requested by a caller of tenant `bank-b`.
-- **Then:** The `D7` response names rule set `card-fee`, version 1, hit policy `FIRST`, outcome `OK` and evaluation clock; lists matched row `R2` with one condition entry (input `txCount`, recorded value `5`, test `>= 3`, result `true`) and its output `fee` `{ "currency": "VND", "amount": 10000 }`; carries `reasons` `[ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 1 } } ]`, which the cockpit renders in English or Vietnamese; and carries the English `text`, with numbers written without grouping and money in major units with its currency code, "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND." The second request returns a byte-identical body. The explanation is built from the decision row and the stored version 1 only: v2 does not change it, nothing is re-evaluated and `rle_decision` gains no row. The `D8` response lists `R1` and `R3` in order with their conditions and the aggregated outputs `flags: [HIGH_VELOCITY, NEW_DEVICE]` and `penalty: 15`. The unknown id and the `bank-b` caller get `404 DECISION_NOT_FOUND`.
-- **Example:** `explain D7 -> "Rule R2 of card-fee version 1 matched because txCount is 5, which is at least 3. Result: fee 10000 VND."`
+- **Then:** The `D7` response names rule set `card-fee`, version 1, hit policy `FIRST`, outcome `OK` and evaluation clock; lists matched row `R2` with one condition entry (input `txCount`, recorded value `5`, test `>= 3`, result `true`) and its output `fee` `{ "currency": "VND", "amount": 10000 }`; carries `reasons` `[ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 1 } } ]`, which the cockpit renders in English or Vietnamese; and carries the English `text`, with names in words (`tx count`, or the input's declared `label`) and numbers grouped for the language, money keeping its currency code, "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND."; in `vi` the amount reads `10.000 VND`, and a boolean reads Yes or No (`Có`, `Không`) (#392) The second request returns a byte-identical body. The explanation is built from the decision row and the stored version 1 only: v2 does not change it, nothing is re-evaluated and `rle_decision` gains no row. The `D8` response lists `R1` and `R3` in order with their conditions and the aggregated outputs `flags: [HIGH_VELOCITY, NEW_DEVICE]` and `penalty: 15`. The unknown id and the `bank-b` caller get `404 DECISION_NOT_FOUND`.
+- **Example:** `explain D7 -> "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND."`
 - **Test ID:** `RLE_030_explanation_is_generated_from_log_entry_and_version`
 
 ### RLE-031 Explanations keep masked inputs masked and explain no match, null inputs and failures
@@ -402,9 +402,36 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M1
 - **Given:** Tenant `bank-a`. Rule set `minor-review` v1 (`hitPolicy: first`) with input `nationalId` (`mask: true`) and `age`, rows `R1` (`nationalId is not null and age < 18 -> route: "MANUAL"`) and `R2` (`age >= 18 -> route: "AUTO"`); decision `D11` with `nationalId = "079090001234"` and `age = 16`. Decision `D12` of `card-fee` v1 with no matched row (a version without the catch-all `R3`). Decision `D13` of `null-check` v1 (`RLE-006`) with `income = null`, `tier = null`. Decision `D14` of `loan-pricing` v1 with outcome `UNIQUE_HIT_VIOLATION` and `matchedRuleIds: ["R1", "R2"]` (`RLE-002`).
 - **When:** `GET /api/bpm/rules/v1/decisions/{id}/explain` for `D11` to `D14`, with log capture on.
-- **Then:** `D11`: the condition on `nationalId` shows the recorded value as `hmac:<keyId>:<hex>` with `masked: true`, reason `VALUE_MASKED` and the word "masked" in `text`, the condition on `age` shows `16` against `< 18`, and `079090001234` appears in no response field and no log line. `D12`: "No rule of card-fee version 1 matched. No output was produced." `D13`: the `R2` condition has `missing: true`, reason `VALUE_MISSING` and reads "income has no value", and no row is reported as matched through a condition whose result was `null`. No row that did not match is explained, and no expression is evaluated. `D14`: outcome `UNIQUE_HIT_VIOLATION`, `matched` lists `R1` and `R2` from the stored `matched_rule_ids`, "Rules R1 and R2 of loan-pricing version 1 both matched; this table allows one. No output was produced."
+- **Then:** `D11`: the condition on `nationalId` shows the recorded value as `hmac:<keyId>:<hex>` with `masked: true`, reason `VALUE_MASKED` and the word "masked" in `text` (`national id is masked`), the condition on `age` shows `16` against `< 18`, and `079090001234` appears in no response field and no log line. `D12`: "No rule of card-fee version 1 matched. No output was produced." `D13`: the `R2` condition has `missing: true`, reason `VALUE_MISSING` and reads "income has no value", and no row is reported as matched through a condition whose result was `null`. No row that did not match is explained, and no expression is evaluated. `D14`: outcome `UNIQUE_HIT_VIOLATION`, `matched` lists `R1` and `R2` from the stored `matched_rule_ids`, "Rules R1 and R2 of loan-pricing version 1 both matched; this table allows one. No output was produced."
 - **Example:** `explain D11 -> nationalId shown as hmac:k1:9f4a... (masked), age 16 < 18, route MANUAL; plain value in 0 fields and 0 log lines`.
 - **Test ID:** `RLE_031_explanation_masks_inputs_and_covers_no_match_null_and_failure`
+
+### RLE-072 A decision is explained with the author's sentence in the requested language
+- **Traces to:** `TR-OBS-05`, `TR-DET-05`; PD-123, decided 2026-11-20 (option 1)
+- **Milestone:** M3
+- **Given:** Tenant `bank-a`; `card-fee` v1 with `R2` templated (`explain`) in `en` and `vi`, `R1` without a template, and `explanations.noMatch` in both languages. Decision `D7` matched `R2` with `txCount = 5` and `fee = 10000 VND`; `D8` matched `R1`; `D9` matched nothing. v2, published later, changes the `R2` wording. Caller `dan` holds `rules:log:read`.
+- **When:** `dan` requests `GET /api/bpm/rules/v1/decisions/D7/explain?lang=vi`, then `?lang=en`, then `?lang=th`; then `D8` and `D9` in `en`.
+- **Then:** `D7` in `vi`: `text` is "Phí thẻ của bạn là 10.000 VND vì bạn đã thực hiện 5 giao dịch trong tháng.", `textSource: TEMPLATE`; in `en`: "Your card fee is 10,000 VND because you made 5 transactions this month." Placeholder values are written as in the generated sentence (grouped for the language, `RLE-030`). In `th`, which has no template: the generated sentence in the default language, `textSource: GENERATED`; a template of another language is never shown. `D8`: the generated sentence, `GENERATED`. `D9`: "No card fee applies to this account.", `TEMPLATE`. When several rows matched, the sentences of the rows are joined in rule order by one space, and only when every matched row has one in that language; otherwise the generated sentence explains the whole decision. `reasons` and `matched` are identical to the response without templates; v2 does not change `D7`; a repeated request returns identical bytes and writes nothing.
+- **Example:** `explain D7 lang=vi -> "Phí thẻ của bạn là 10.000 VND vì bạn đã thực hiện 5 giao dịch trong tháng." (TEMPLATE)`
+- **Test ID:** `RLE_072_decision_is_explained_with_the_authors_template`
+
+### RLE-073 A template is checked at import and is part of the approved content
+- **Traces to:** `TR-DET-02`, `TR-SEC-04`, `TR-STD-03`; PD-123
+- **Milestone:** M3
+- **Given:** Caller `lan` holds `rules:author`. A template is plain text with the placeholders `{input.<name>}`, `{output.<name>}`, `{ruleId}`, `{ruleSet}` and `{version}`, per BCP 47 language, in `rules[].explain` and `explanations.noMatch` (which allows `{input.<name>}`, `{ruleSet}` and `{version}` only).
+- **When:** `lan` imports files whose `R2` template uses (a) `{input.txCnt}`, an undeclared input; (b) `{output.fee | upper}`; (c) `{input.nationalId}` where `nationalId` is `mask: true`; (d) a language tag `english`; (e) 501 characters; (f) the valid `card-fee` as v2, where v1 is equal except for the `en` wording of `R2`.
+- **Then:** (a) to (e) are `422 VALIDATION_FAILED` with a violation on `R2` and column `explain`, with codes `UNKNOWN_PLACEHOLDER` (a, b), `MASKED_INPUT_IN_TEMPLATE` (c), `INPUT_INVALID` (d) and `TEMPLATE_TOO_LONG` (e); nothing is stored. (f) imports with a canonical hash different from v1's, and `GET .../versions/2/diff?base=1` lists `R2` as `CHANGED` with the field `/explain/en`. The approver is neither author nor requester (`RLE-009`). Export keeps the templates: DMN carries them as `<horus:explain horus:lang>` and `<horus:noMatch horus:lang>` in `extensionElements`, namespace `urn:horus-bpm:dmn:extensions:v1`, and the round trip keeps the hash (`RLE-045`). At most 500 characters per language and 10 languages per template.
+- **Example:** `{input.txCnt} -> 422 UNKNOWN_PLACEHOLDER on R2, column explain`
+- **Test ID:** `RLE_073_template_is_checked_at_import_and_changes_the_approved_content`
+
+### RLE-074 Templates keep masked values masked, and say what they cannot say
+- **Traces to:** `TR-OBS-05`, `TR-SEC-05`; PD-123
+- **Milestone:** M3
+- **Given:** `decision-log.mask-default: true`. `minor-review` v1 declares `nationalId` with no `mask`, so it is masked by default; `R1`'s template is "Sent to manual review: applicant {input.nationalId} is {input.age}." Decision `D11` has `age = 16`; a decision with `age = null` matches a templated row naming `{input.age}`. `risk-flags` v1 (`collect`) has `R1` and `R3` templated, both matched in `D15`. `loan-pricing` decision `D14` failed with `UNIQUE_HIT_VIOLATION` and its rows have templates.
+- **When:** each is explained in `en`.
+- **Then:** `D11`: "Sent to manual review: applicant (masked) is 16."; a masked value renders the catalogue word `template.masked`, never the fingerprint or the plain value, which appears in no field. The null input renders the catalogue phrase "no value". `D15`: the sentences of `R1` and `R3`, joined in rule order by one space. `D14`: the generated failure sentence of `RLE-031`; templates explain matches and no match only.
+- **Example:** `explain D11 -> "Sent to manual review: applicant (masked) is 16."`
+- **Test ID:** `RLE_074_templates_keep_masked_values_masked_and_fall_back_for_failures`
 
 ### RLE-070 Decisions are found by the host's case reference across the tenant's rule sets
 - **Traces to:** `TR-OBS-01`, `TR-TEN-01`, `TR-SEC-05`
@@ -524,6 +551,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - An approval names the content reviewed (#275): `minh` reads v2 while it is pending at `lockVersion` L; it is sent back, `lan` replaces it and requests publication again. `minh`'s `:approve` with `If-Match: "L"` returns `409 VERSION_CONFLICT`; `:approve` or `:reject` without `If-Match` returns `428 PRECONDITION_REQUIRED`, through REST and the Java API. Neither publishes or records anything; an approval with the current `lockVersion` publishes.
 - **Example:** `lan PUTs card-fee-r2-zero.yaml on draft v2 with If-Match "0" -> 200, still v2, lockVersion 1, new canonical hash, 1 DRAFT_UPDATED row, 1 draft-updated event; If-Match "0" again -> 409; minh -> 403; drafts off -> 403 DRAFT_AUTHORING_DISABLED`.
 - **Test ID:** `RLE_047_author_replaces_draft_in_place_with_import_checks`
+
+### RLE-090 A draft's edited table is validated as a save would validate it, and nothing is stored
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-02`, `TR-TEN-01`, PD-113
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with `horus.bpm.rules.authoring.cockpit-drafts: true`; `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` from `card-fee.yaml`, `lockVersion 0`; `lan` holds `rules:author`, `dan` holds `rules:read`; a caller of `bank-b` holds `rules:author`. Tenant `bank-a` declares `kyc-routing` v1 `DRAFT` whose input `nationalId` has `mask: true` and whose `R1` tests `nationalId == '079123456789'`.
+- **When:** `lan` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:validate` with (a) `card-fee.yaml` with `R2` writing `fee: "0 VND"`; (b) `card-fee.yaml` with `R2` testing `txCount: ">= tierX"`. Failure cases: the same body for v1; for v9; as `dan`; as the `bank-b` caller; with `ruleSet: fx-margin`; with a body of 1,048,577 bytes; with drafts off. `lan` also validates `kyc-routing`.
+- **Then:**
+  - (a) is `200` with `valid: true`, `problems: []` and one reading per rule, `R1` to `R3`, in `en` and `vi` (`R3`: "Rule R3 always applies; it has no condition."). (b) is `200` with `valid: false`, `readings: []` and one problem on `ruleId: R2`, `column: txCount`, `code: UNKNOWN_INPUT`, `message.en` "The cell uses a name that is not a declared input." and `message.vi` "Ô này dùng một tên không phải là đầu vào đã khai báo."; a save of the same body is `422 VALIDATION_FAILED` naming the same rule and column, because both run the same checks.
+  - A problem's message is chosen by its code from the message catalogue of the explanations (`en`, `vi`, a host's own languages) and never repeats text of the cell. A problem with no code is `RULE_INVALID`, `COLUMN_INVALID` or `DOCUMENT_INVALID` by where it is. At most 100 problems are listed, with `problemsTruncated` when more were found.
+  - The reading of `kyc-routing` `R1` says that `nationalId` is masked and its test is not shown; the value `079123456789` appears nowhere in the answer.
+  - v1 is `409 INVALID_STATE`; v9 is `404 VERSION_NOT_FOUND`; `dan` is `403 PERMISSION_DENIED`, checked before the body is read; the `bank-b` caller is `404 RULE_SET_NOT_FOUND`; the `fx-margin` file is `400 INPUT_INVALID`; the large body is `413 PAYLOAD_TOO_LARGE`; with drafts off `lan` gets `403 DRAFT_AUTHORING_DISABLED`.
+  - No call writes a version, a history row, an event or an idempotency record, and the call takes no `Idempotency-Key` and no `If-Match`. Every `rle_` table is byte for byte as it was.
+- **Example:** `lan validates card-fee v2 with R2 testing txCount >= tierX -> 200, valid false, R2 / txCount / UNKNOWN_INPUT with an English and a Vietnamese message; 0 rows written`.
+- **Test ID:** `RLE_090_a_cell_problem_is_placed_on_its_rule_and_column_with_a_code_and_both_languages`
 
 ### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
@@ -846,3 +887,100 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - An unknown `expressionLanguage` or `typeLanguage` is `422 EXPRESSION_LANGUAGE_UNSUPPORTED` with the element, its line and its stage (`not planned`).
 - **Example:** `fees.dmn with BKM and decision service -> 422 DMN_UNSUPPORTED_ELEMENT, 4 entries`.
 - **Test ID:** `RLE_061_dmn_elements_outside_the_stage_are_listed_with_id_line_and_stage_in_document_order`, `RLE_061_a_wire_to_input_data_is_not_a_refusal`, `RLE_061_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `RLE_061_ids_lose_control_characters_and_are_cut_at_200_characters`, `RLE_061_an_unknown_expression_language_is_refused_with_its_line_and_stage`, `RLE_061_each_entry_carries_element_id_line_and_stage`, `RLE_061_a_list_over_100_entries_is_cut_and_says_so`, `RLE_061_dmn_elements_outside_the_stage_are_listed_and_nothing_is_stored`
+
+## Host-Registered Functions (RE-F-27, PD-119)
+
+A host registers named functions that rule cells may call next to the built-in functions. Registration is the typed Java SPI `RuleFunctionRegistry` (DESIGN 4.1): each function declares a name, parameter types, a result type, a version label and a step cost. The functions are pure calculations: a function receives its argument values and nothing else, never the tenant, the caller, the clock or a connection, so a decision replays from its log entry (`TR-DET-01`, `TR-DET-05`). Data the host looks up, such as a customer segment held in core banking, is passed as an input. Functions belong to the host, never to a tenant. The parameter types are `string`, `boolean`, `number` (an `integer` or `decimal` input), `date`, `datetime` and `money`. A rule set that calls a host function has no DMN export, because DMN `external` functions stay refused (`422 DMN_EXTERNAL_FUNCTION_UNSUPPORTED`).
+
+### RLE-055 A registered host function can be called in a rule cell
+- **Traces to:** `TR-SEC-01`, `TR-DET-01`, PD-119, #34
+- **Milestone:** M1
+- **Given:** The host registers `segmentOf(balance: money, tenureMonths: number) -> string`, version `2027.1`, step cost 1. It returns `PRIORITY` when the balance is at least 500,000,000 VND and the tenure is at least 24 months, otherwise `MASS`. Tenant `bank-a` publishes `card-fee` v1 (`first`): `R1` (`segmentOf(balance, tenureMonths) == 'PRIORITY' -> fee: 0 VND`), `R2` (`{} -> fee: 50000 VND`).
+- **When:** Evaluate (a) `{ balance: 600000000 VND, tenureMonths: 36 }`, (b) `{ balance: 600000000 VND, tenureMonths: 12 }`, (c) `{ balance: null, tenureMonths: 36 }`; then replay (a).
+- **Then:**
+  - (a) matches `R1`, `fee: { currency: VND, amount: 0 }`. (b) matches `R2`, fee 50000 VND.
+  - (c) does not call the function: a `null` argument makes the call `null` (FEEL null rule, `RLE-006`), so `R1` does not match and `R2` gives 50000 VND.
+  - Each evaluation writes one decision row. The replay of (a) gives the same rule and fee and writes nothing.
+  - A function never sees a tenant: a caller of `bank-b` has no `card-fee`, and the function is never called for it.
+- **Example:** `segmentOf(600000000 VND, 36) -> PRIORITY -> R1 -> 0 VND; (600000000 VND, 12) -> MASS -> R2 -> 50000 VND; (null, 36) -> null -> R2`.
+- **Test ID:** `RLE_055_a_registered_host_function_is_called_from_a_rule_cell`, `RLE_055_a_function_never_sees_the_tenant_and_functions_are_host_wide`, `RLE_055_a_host_function_prices_a_card_fee_and_an_unregistered_one_is_refused_at_import`
+
+### RLE-056 A call to an unknown function, or with the wrong arguments, is refused at import
+- **Traces to:** `TR-SEC-01`, `TR-DET-02`, PD-119, #34
+- **Milestone:** M1
+- **Given:** The registry of `RLE-055`; caller `lan` holds `rules:author`.
+- **When:** `lan` imports four files: in the first, `R1` calls `riskScore(balance)`, which is not registered; in the second, `segmentOf(tenureMonths, balance)`; in the third, `segmentOf(balance)`; in the fourth, `segmentOf(balance, tenureMonths) > 3`.
+- **Then:**
+  - Each answers `422 VALIDATION_FAILED` with a violation on `R1`, its column and the character position. The first has code `FORBIDDEN_CONSTRUCT` ("Unknown function 'riskScore'"), the code an unknown function has always had.
+  - The others have `TYPE_MISMATCH`, naming the parameter number and its type, or the argument count and the signature. Nothing is stored.
+  - The same check runs at draft replacement, request-publish and approval: a draft imported while `segmentOf` was registered can be neither requested nor approved after the host removes the function, and nothing is approved.
+- **Example:** `riskScore(balance) -> FORBIDDEN_CONSTRUCT; segmentOf(tenureMonths, balance) -> TYPE_MISMATCH "parameter 1 is a money"; segmentOf(balance) -> TYPE_MISMATCH "takes 2 arguments"`.
+- **Test ID:** `RLE_056_unknown_or_ill_typed_function_call_is_refused_at_import`, `RLE_056_the_check_runs_again_at_request_publish_and_approval_after_the_host_removes_the_function`, `RLE_056_postgres_refuses_a_call_to_a_function_the_host_removed_and_approves_nothing`
+
+### RLE-057 A function that fails, or returns the wrong type, fails the decision closed
+- **Traces to:** `TR-SEC-01`, `TR-SEC-08`, PD-119, #34
+- **Milestone:** M1
+- **Given:** `card-fee` v1 of `RLE-055` is published.
+- **When:** The implementation (a) throws `IllegalStateException("upstream timeout")`; (b) returns an `Integer` where a `string` is declared; (c) is registered with step cost 20,000 and `card-fee` is imported again as v2 under a step budget of 10,000; (d) costs 20 steps under a budget of 15 for a version approved at the default budget.
+- **Then:**
+  - In (a) and (b) the outcome is `Failed` with `EVALUATION_ERROR` (`422`), `error_code = FUNCTION_FAILED` on the decision row and no partial outputs. The problem body and the row name the function `segmentOf`, but never carry the exception message, class or stack trace, which could hold an input value. The server log carries them with the `correlationId`.
+  - In (c) the import is refused with `EVALUATION_BUDGET_EXCEEDED` (`RLE-004`), because the worst case counts each call's declared step cost.
+  - In (d) the decision stops with `EVALUATION_BUDGET_EXCEEDED`, because each call counts its declared step cost against the step budget of the decision, at the same step on every machine.
+- **Example:** `segmentOf throws -> 422 EVALUATION_ERROR FUNCTION_FAILED "function segmentOf failed"; step cost 20000 over budget 10000 -> EVALUATION_BUDGET_EXCEEDED at import`.
+- **Test ID:** `RLE_057_a_failing_host_function_fails_the_decision_closed_without_leaking`, `RLE_057_a_function_that_returns_the_wrong_type_fails_closed_and_a_costly_one_is_refused_at_import`, `RLE_057_a_call_counts_its_declared_step_cost_against_the_budget_of_each_decision`
+
+### RLE-058 The registry is checked at start-up, and each decision records the function versions it used
+- **Traces to:** `TR-SEC-01`, `TR-DET-05`, PD-119, #34
+- **Milestone:** M1
+- **Given:** (a) a host that registers `segmentOf` twice; (b) one that registers `round`, a built-in name; (c) one that registers `Segment-Of`, outside `^[a-z][A-Za-z0-9]{0,63}$`; (d) `card-fee` v1 approved and decision `D1` made with `segmentOf` version `2027.1`, after which the host redeploys with version `2027.2`.
+- **When:** The host starts; in (d), `card-fee` is evaluated and `D1` is replayed; then the host starts with `evaluation.function-version-change: refuse`.
+- **Then:**
+  - (a) to (c) fail start-up with a message naming the function; nothing is served.
+  - In (d), start-up logs one WARN naming `segmentOf`, `2027.1`, `2027.2` and the published versions that call it. `/api/bpm/meta` lists the changed function, to the callers of tenants that own a version that calls it. Each new decision row records `segmentOf@2027.2`. The replay of `D1` answers `422 REPLAY_NOT_POSSIBLE` naming the function and both version labels.
+  - With `warn` (the default, PD-119) evaluation goes on. With `refuse` evaluation fails closed with `EVALUATION_ERROR`, `error_code = FUNCTION_CHANGED`, until a new version is approved under four eyes. A version approved before its functions were recorded has no baseline and is never refused.
+- **Example:** `segmentOf 2027.1 -> 2027.2: WARN once, decision row "segmentOf@2027.2", replay of D1 -> 422 REPLAY_NOT_POSSIBLE; refuse -> FUNCTION_CHANGED`.
+- **Test ID:** `RLE_058_registry_is_checked_at_startup_and_decisions_record_function_versions`, `RLE_058_refuse_fails_closed_with_function_changed_until_a_new_version_is_approved`, `RLE_058_postgres_keeps_the_approved_function_versions_and_the_version_each_decision_used`, `RLE_058_postgres_replaces_nothing_it_does_not_own_when_a_version_calls_no_function`, `RLE_058_a_redeploy_with_another_version_warns_once_and_meta_shows_the_change_to_its_tenant`, `RLE_058_a_function_registered_twice_or_a_bad_setting_stops_the_host_naming_it`
+
+## JUnit Rule Tests and Coverage Report (RE-F-28, PD-120)
+
+A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DMN) in a JUnit 5 test and evaluates it in memory: no database, no Spring context, no masking key. The test uses the engine's own reader, compiler and evaluator, so a test result is what production would decide for the same version, inputs and clock (`TR-DET-01`). The extension records which rows each test matched and writes a row coverage report for the whole test run, which CI keeps as an artifact. The ids `RLE-060` and `RLE-061` are used elsewhere in this file, so this feature is `RLE-059`, `RLE-064` and `RLE-065`.
+
+### RLE-059 A rule set file is tested in JUnit with the engine's own evaluation and a fixed clock
+- **Traces to:** `TR-QA-01`, `TR-DET-01`, #35
+- **Milestone:** M1
+- **Given:** `src/test/resources/rules/card-fee.yaml` (`first`): `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 10000 VND`), `R3` (`{} -> fee: 50000 VND`). A test class annotated `@RuleSetTest("rules/card-fee.yaml")` with the default clock `2027-01-01T00:00:00Z`, overridable per class (`clock = "..."`) or per test (`@RuleSetClock("2027-06-30T17:00:00Z")`).
+- **When:** A test calls `rules.evaluate(Map.of("tier", "SILVER", "txCount", 5))` and, in a second test, `rules.evaluate(Map.of("tier", "GOLD", "extra", 1))`.
+- **Then:**
+  - The first returns `matchedRuleIds = [R2]` and `fee = Money.ofMinor("VND", 10000)`, the outcome the engine's evaluator gives for that file, inputs and clock.
+  - The second fails with `INPUT_INVALID` naming `extra`, as `evaluation.reject-undeclared-inputs` does by default.
+  - `today()` reads the fixed clock in the rule set's time zone: at `2027-06-30T17:00:00Z` it is 1 July in `Asia/Ho_Chi_Minh`. Two runs on any JVM give the same results.
+  - A file that fails import fails the test class before any test runs, with the same violations (rule id, column, code, message) as `422 VALIDATION_FAILED`. A file not on the class path fails the class naming the path.
+- **Example:** `card-fee.yaml, {tier: SILVER, txCount: 5} -> R2, fee 10000 VND; {tier: GOLD, extra: 1} -> INPUT_INVALID 'extra'`.
+- **Test ID:** `RLE_059_rule_set_is_evaluated_in_junit_like_the_engine`, `RLE_059_the_default_clock_is_fixed_and_a_class_or_test_may_change_it`, `RLE_059_a_test_with_a_clock_of_its_own_reads_today_in_the_rule_sets_time_zone`, `RLE_059_the_clock_annotation_overrides_the_default_for_one_test`, `RLE_059_a_clock_that_is_not_an_instant_is_refused_naming_where`
+
+### RLE-064 The run writes a row coverage report that names every row no test matched
+- **Traces to:** `TR-QA-01`, #35
+- **Milestone:** M1
+- **Given:** Two test classes over `card-fee.yaml` whose tests match `R1` and `R2` and never `R3`; a third class over `kyc-route.yaml` (`unique`, rows `K1`, `K2`) whose test hits `K1` and `K2` together (`UNIQUE_HIT_VIOLATION`).
+- **When:** The tests run (`mvn test`).
+- **Then:**
+  - `target/horus-rules-coverage/rules-coverage.json` and `rules-coverage.md` list each rule set by name and canonical hash with its rows in document order, each `covered` or `not covered`, and the tests that matched it. The folder is `horus.rules.coverage.report-dir`.
+  - The report reads `card-fee: 2 of 3 rows covered; R3 not covered` and `kyc-route: 0 of 2 rows covered; K1, K2 not covered`. One summary line per rule set is printed.
+  - A row counts as covered only when a test evaluation returned a match with that row in `matchedRuleIds`. A failed evaluation (`UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`) covers nothing, because it produced no outputs.
+  - The same tests give a byte-identical report: no time, machine or input value is in it. A rule set no test loaded is absent; the report is not a list of the files on the class path.
+  - The module is test scope only: the starter never auto-configures it, it has no database, no Spring context and no decision log, and its one tenant is the fixed `test`.
+- **Example:** `card-fee: R1, R2 covered, R3 not; kyc-route: K1 and K2 matched together, neither covered`.
+- **Test ID:** `RLE_064_coverage_report_names_each_row_no_test_matched`, `RLE_064_the_same_tests_give_a_byte_identical_report_and_an_unloaded_rule_set_is_absent`, `RLE_064_a_file_that_fails_import_fails_the_class_with_the_violations_before_any_test_runs`, `RLE_064_the_module_is_test_scope_only_with_no_database_no_spring_context_and_no_auto_configuration`
+
+### RLE-065 The build fails on uncovered rows only when the project sets a threshold
+- **Traces to:** `TR-QA-01`, PD-120, #35
+- **Milestone:** M1
+- **Given:** The run of `RLE-064`, and the setting `horus.rules.coverage.fail-on` (in `junit-platform.properties` or as a system property) with the values `none` (the default), `unique` or `any`.
+- **When:** The run ends with each value.
+- **Then:**
+  - `none` passes and prints one summary line per rule set. This supersedes the earlier rule that an uncovered row in a `unique` table fails the build (PD-120).
+  - `unique` fails the run naming `kyc-route` `K1` and `K2`, because only `unique` tables are held to full coverage.
+  - `any` fails naming `card-fee` `R3` and `kyc-route` `K1`, `K2`.
+  - An unknown value fails the run naming the setting. The report is written in every case.
+- **Example:** `fail-on none -> pass; unique -> kyc-route K1, K2; any -> card-fee R3; kyc-route K1, K2; most -> fails naming horus.rules.coverage.fail-on`.
+- **Test ID:** `RLE_065_uncovered_rows_fail_the_build_only_at_the_configured_threshold`, `RLE_065_a_run_that_covers_every_row_passes_whatever_the_threshold`

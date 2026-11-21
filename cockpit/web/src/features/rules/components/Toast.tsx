@@ -1,14 +1,17 @@
 import { useEffect } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
 
-/** A success message at the bottom right, gone after six seconds (styleguide: alerts). */
-export function Toast({ text, onClose }: { text: string | undefined; onClose: () => void }) {
+/**
+ * A success message at the bottom right, gone after six seconds (styleguide: alerts). A `sticky` message stays until
+ * the user closes it, so a keyboard or screen reader user has time to read it.
+ */
+export function Toast({ text, onClose, sticky = false }: { text: string | undefined; onClose: () => void; sticky?: boolean }) {
   const { t } = useI18n();
   useEffect(() => {
-    if (text === undefined) return;
+    if (text === undefined || sticky) return;
     const timer = window.setTimeout(onClose, 6000);
     return () => { window.clearTimeout(timer); };
-  }, [text, onClose]);
+  }, [text, onClose, sticky]);
   return (
     <div className="toast-host" role="status" aria-live="polite">
       {text !== undefined ? (

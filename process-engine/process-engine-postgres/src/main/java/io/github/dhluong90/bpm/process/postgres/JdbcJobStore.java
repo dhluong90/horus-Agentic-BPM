@@ -160,6 +160,14 @@ public final class JdbcJobStore implements JobStore {
     }
 
     @Override
+    public boolean retryFailed(String tenant, String id, Instant now) {
+        return jdbc.sql("UPDATE pre_timer SET status = 'DUE', next_fire_at = ?, locked_by = NULL, locked_until = NULL, "
+                        + "completed_at = NULL, max_attempts = attempt + 1 "
+                        + "WHERE tenant_id = ? AND id = ? AND status = 'FAILED'")
+                .params(ts(now), tenant, id).update() == 1;
+    }
+
+    @Override
     public Optional<JobRow> findJob(String tenant, String id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ?")
                 .params(tenant, id).query(JdbcJobStore::job).optional();

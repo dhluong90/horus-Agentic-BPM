@@ -16,8 +16,9 @@ let engine = createFakeEngine(demoSeed());
  * A fresh mock Rule Engine with the demo data, or the given versions, for test isolation; optionally with the
  * acknowledgement settings the engine marks warnings by (PD-104, RLE-053), and the audit options (decision log, evidence limit).
  */
-export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}, audit: AuditOptions = {}): void {
+export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}, audit: AuditOptions = {}): ReturnType<typeof createFakeEngine> {
   engine = createFakeEngine(seed, acknowledgement, audit);
+  return engine;
 }
 
 let processEngine = createFakeProcessEngine();

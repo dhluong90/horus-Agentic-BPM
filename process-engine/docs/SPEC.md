@@ -765,6 +765,24 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `isError true -> MCP_TOOL_ERROR, not retryable; text only -> AGENT_SCHEMA_INVALID`.
 - **Test ID:** `PRE_097_*` in `McpToolAdapterTest` and `McpToolAdapterIT` (`examples/mcp-tool-adapter`)
 
+### PRE-098 A reference adapter returns a labelled JSON answer, keyed by the attempt id, that the engine checks when it records it
+- **Traces to:** `TR-AGT-04`, `TR-AGT-03`, `TR-ASY-01`, PD-129, #100
+- **Milestone:** M3
+- **Given:** The example host `examples/model-adapters` registers adapter `doc-reviewer` (OpenAI-compatible Chat Completions) and `doc-reviewer-anthropic` (Anthropic Messages). Each one's configuration sets the API base address, the model, the prompt template `prompts/kyc-review@p7` and an API key read from the environment. A local stub server returns a recorded answer whose JSON content is `{ "documentType": "PASSPORT", "nameMatches": true, "expiryDate": "2031-05-01", "tamperingSuspected": false, "confidence": 0.97 }`.
+- **When:** Step `assess-documents` runs. The stub fails the first call with HTTP 429 and `Retry-After: 2`, and the step runs again after its backoff.
+- **Then:** The request carries the rendered prompt with only the step's bounded inputs, asks for structured output with the step's output schema (`response_format` `json_schema`, or `output_config.format`), and carries the attempt id in the API's `user` or `metadata.user_id` field. The 429 case fails with `MODEL_RATE_LIMITED`, retryable, and the next attempt sends a new attempt id. The answer is returned with labels `model`, `promptVersion: p7`, `usage.inputTokens` and `usage.outputTokens`, and accepted after the schema and guardrail checks. No prompt text, input or key appears in logs; logs show the adapter, the attempt id, the status and the latency. Keys come from host configuration, are masked in `toString()`, and are required for Anthropic Messages; a self-hosted OpenAI-compatible server may need none. No tenant id, instance id or job id is sent to the vendor. No engine module depends on the examples, and they use no vendor SDK.
+- **Example:** `429 then 200 -> attempt 1 MODEL_RATE_LIMITED, attempt 2 accepted, promptVersion p7`.
+- **Test ID:** `PRE_098_*` in `ModelAdapterTest`, `ModelAdaptersIT` and `EngineIndependenceTest` (`examples/model-adapters`)
+
+### PRE-099 Model errors and non-JSON answers map to named codes, and a bad answer never advances the step
+- **Traces to:** `TR-AGT-04`, `TR-AGT-01`, PD-129, #100
+- **Milestone:** M3
+- **Given:** The stub answers (a) HTTP 400; (b) HTTP 401; (c) HTTP 5xx or 529, or no answer within the request timeout; (d) a refusal or a content-filter stop; (e) prose instead of JSON; (f) JSON with `confidence: 0.72`.
+- **When:** Each attempt is recorded.
+- **Then:** (a) `MODEL_REQUEST_INVALID`, not retryable; (b) `MODEL_AUTH_FAILED`, not retryable; (c) `MODEL_UNAVAILABLE` or `ADAPTER_TIMEOUT`, retryable; (d) `MODEL_REFUSED`, not retryable, and the job fails for good; (e) the adapter returns an empty answer and the result check refuses it with `AGENT_SCHEMA_INVALID`, retried once, then the step goes to its reviewer; (f) guardrail `LOW_CONFIDENCE` (rule `R5`), routed to the KYC reviewer (`PRE-059`). In none of them is a result variable written before the result check accepts it. No API error text is kept: the adapter's detail holds at most the HTTP status and the `Retry-After` seconds.
+- **Example:** `content filter stop -> MODEL_REFUSED, not retryable, step not advanced`.
+- **Test ID:** `PRE_099_*` in `ModelAdapterTest` and `ModelAdaptersIT` (`examples/model-adapters`)
+
 ### PRE-107 A CMMN file is refused by name at every BPMN import, before any other check
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
@@ -794,6 +812,37 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`
 
 ---
+
+## Local and Remote Service Steps (#63)
+
+A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registered `ServiceTaskHandler` inside the step transaction; `horus:mode="remote"` parks on the Async Wait-State and calls a registered `ServiceAdapter` with no transaction open (ADR-0008). The remote call keeps the guarantees of #51: the completion token is stored only as its hash, the job id is the idempotency key, and a completion is scoped to its adapter's completer roles.
+
+### PRE-070 One process runs a local step in its transaction and a remote step outside any transaction
+- **Traces to:** `TR-ASY-01`, `TR-IDEM-04`, `TR-SEC-03`, #63
+- **Milestone:** M2
+- **Given:** Definition `loan-disbursement` v1 is active in tenant `bank-a`. Its steps are `reserve-limit` (a `serviceTask` with no `horus:mode`, handler `limits.reserve`), then `post-to-core` (`horus:mode="remote"`, adapter `core-banking`, `horus:timeout="PT10S"`), then `end`. The host pool has 2 connections, and the stub `core-banking` adapter answers after 2 s, first with a retryable failure.
+- **When:** An instance starts with business key `LN-2026-0042` and amount `50,000,000 VND` (minor units, currency `VND`), and a `tenantId` of `bank-b` in its variables; the posting is claimed, fails, and is claimed again after the backoff, and answers `COMPLETED` with `{ "postingRef": "FT26324001" }`.
+- **Then:** The start transaction calls `limits.reserve` with the instance's tenant, instance id, node id, business key, attempt id and only its declared inputs; the handler's own row (a 50,000,000 VND limit reservation) and the token's move to `post-to-core` commit together. The token is `WAITING_ASYNC` with one `ASYNC_SERVICE` job. The adapter runs with no engine transaction open on its thread and no pool connection held. `AdapterCall.idempotencyKey()` is the job id on every retry; the attempt id and the completion token are new on each claim, and neither the token nor its value appears in `pre_timer` or history. The adapter receives the tenant of the locked `pre_instance` row, never the `tenantId` of the variables (`TR-SEC-03`). TX2 records `ASYNC_RESULT_ACCEPTED`, stores `postingRef` and ends the instance. History lists, in order: `NODE_COMPLETED` of `reserve-limit`, `ASYNC_STEP_SCHEDULED`, `ASYNC_RESULT_ACCEPTED` and `INSTANCE_ENDED`. A step with no `horus:mode` is local. Another tenant neither reads the instance (`404 INSTANCE_NOT_FOUND`) nor completes its step (`404 ASYNC_STEP_NOT_FOUND`), and nothing is written.
+- **Example:** `reserve-limit (local, in TX) -> post-to-core (remote, 0 connections held for 2 s) -> COMPLETED, postingRef FT26324001`.
+- **Test ID:** `PRE_070_*` in `ServiceStepModesTest` (`process-engine-postgres`) and `LocalServiceInvokerTest` (`process-engine-core`)
+
+### PRE-071 A local handler that fails rolls back with its step and leaves nothing half done
+- **Traces to:** `TR-ASY-01`, `TR-SEC-08`, `TR-OBS-01`, #63
+- **Milestone:** M2
+- **Given:** The definition of `PRE-070`. Here `limits.reserve` writes its reservation row and then throws `IllegalStateException` with a message that names the customer's national id.
+- **When:** (a) An instance is started through `POST /instances`. (b) The same handler is reached after a timer of `loan-disbursement-scheduled` fires instead.
+- **Then:** (a) The start rolls back: no `pre_instance` row, no reservation row, no history and no job. The caller gets `500 INTERNAL` with a `correlationId` only, never the exception message; the Java API throws an exception naming the handler, the step and the exception class, with the handler's exception as its cause. (b) The firing rolls back. The job is due again after `jobs.retry-backoff` times the attempt (10 s, then 20 s) and becomes `FAILED` after `jobs.max-attempts` (3); the handler ran once per firing and none of its rows committed. A firing that rolled back leaves the instance's committed state unchanged, and the attempt id is derived from it, so every firing presents the same attempt id: it serves for correlation and keys nothing outside the transaction. The incident on `FAILED` follows with #55 and #58. A returned `HandlerResult.Failed` keeps `422 STEP_FAILED`. A local handler takes no idempotency key because its writes commit or roll back with the step. The handler contract states that it must not call the network. A call above `handlers.slow-call-warning` (200 ms) logs `process.step.slow` with the step, the handler and the elapsed time, and never the inputs; the time is read from an injected ticker.
+- **Example:** `handler throws after writing -> 0 rows committed, 500 INTERNAL with correlationId`.
+- **Test ID:** `PRE_071_*` in `ServiceStepModesTest`, `LocalServiceInvokerTest` and `ProcessRestErrorMatrixTest`
+
+### PRE-072 A service step whose mode, handler or adapter is unknown is refused by name
+- **Traces to:** `TR-DEF-04`, `TR-SEC-01`, #63
+- **Milestone:** M2
+- **Given:** A BPMN file with these faults: step `post-to-core` on line 31 with `horus:mode="batch"`; a local step `reserve-limit` naming handler `limits.reserv`, which is not registered; a remote step `notify-partner` naming adapter `partner-hub`, which is not registered; a local step `check-cutoff` with `horus:timeout="PT5S"`.
+- **When:** The file is imported, and a corrected draft that still names the unregistered handler and adapter is sent to `:request-approval`; and a pending version whose adapter the approver's host does not register is sent to `:approve`.
+- **Then:** The import returns `422 VALIDATION_FAILED` listing `MODE_INVALID` for `post-to-core` on line 31 and `TIMEOUT_INVALID` for `check-cutoff`; each entry carries the step id, the line and the problem, and no draft is written. Unregistered handler and adapter names are not checked at import, so a Git pipeline can import a draft before the host registers them; an import that activates at once (dev auto-approve) checks them. `:request-approval` refuses the draft with `422 VALIDATION_FAILED`, naming `reserve-limit -> limits.reserv` (`HANDLER_NOT_REGISTERED`) and `notify-partner -> partner-hub` (`ADAPTER_NOT_REGISTERED`); the version stays `DRAFT`. `:approve` refuses the same way and the version stays `PENDING_APPROVAL`. Names are resolved against the host's typed beans only, never by reflection (`TR-SEC-01`). Agent steps keep their import check (`PRE-061`).
+- **Example:** `horus:mode="batch" line 31 -> 422 VALIDATION_FAILED; unregistered adapter -> approval refused`.
+- **Test ID:** `PRE_072_*` in `ServiceStepModesTest`
 
 ## Business Errors and Late Results (#55)
 
@@ -836,6 +885,95 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The report is `404 ASYNC_STEP_NOT_FOUND` and the read is `404 INSTANCE_NOT_FOUND`. No history row is written, in particular no `LATE_RESULT_DISCARDED`. The incident stays `OPEN`, and the job stays `CANCELLED`.
 - **Example:** `bank-b reports for bank-a's cancelled step -> 404, 0 rows`.
 - **Test ID:** `PRE_113_another_tenant_cannot_report_a_late_result_or_read_a_business_error_incident`
+
+---
+
+## Incidents: Retry and Resolve (#68, PD-126)
+
+### PRE-077 Retrying an incident runs the step again under the same job id and a new attempt id
+- **Traces to:** `TR-OPS-03`, `TR-IDEM-04`, `TR-OBS-01`, #68
+- **Milestone:** M2
+- **Given:** (a) `loan-agent-assessment`: the agent step `assess-documents` answered `MODEL_UNAVAILABLE` (not retryable) on attempt 1, so its job is `FAILED` and incident `INC-1` is `OPEN` at `lockVersion 0`. (b) `loan-disbursement`: the local step `check-limit` answered the business error `LIMIT_EXCEEDED`, so `INC-2` is `OPEN` and the step has no job. Operator `ops.lan` holds `processes:incident:manage`.
+- **When:** `ops.lan` sends `POST /incidents/{id}:retry` with `If-Match: "0"`, an `Idempotency-Key` and `{ "reason": "Model back after maintenance" }`, then repeats the same request.
+- **Then:**
+  - In one transaction under the `pre_instance` row lock, (a)'s job is `DUE` now with exactly one more attempt, and the incident is `retryCount 1`, `lockVersion 1`, `retrying: true`, still `OPEN`. History records `INCIDENT_RETRIED` with the actor and the reason; `processes.incident.retried.v1` is published. REST answers `202`.
+  - The repeat replays the first answer and writes nothing. A second retry while the attempt is due is `409 INVALID_STATE`.
+  - Attempt 2 calls the agent with the same job id as its idempotency key and a new attempt id, and its answer passes the result check in the result transaction. When it is accepted, the incident is `RESOLVED` with `RETRY_SUCCEEDED` and `processes.incident.resolved.v1` is published. When it fails again, the same incident stays `OPEN` with the new cause, `retrying: false`, and no second incident opens.
+  - (b) runs the local handler again in the retry transaction, under a new attempt id: a completed result moves the token on and resolves `INC-2` with `RETRY_SUCCEEDED` in the same transaction; another business error keeps `INC-2` open with the new cause, never the handler's message.
+  - An agent step whose memory failed before any call (`AGENT_MEMORY_*`) is not retried (`409 INVALID_STATE`): the facts it needs are missing, so it is resolved with an output instead.
+- **Example:** `retry INC-1 -> job DUE, attempt 2 under the same job id -> accepted -> RESOLVED RETRY_SUCCEEDED`.
+- **Test ID:** `PRE_077_a_retried_agent_step_runs_under_the_same_job_id_with_a_new_attempt_id_and_resolves_on_success`, `PRE_077_a_retried_agent_step_that_fails_again_keeps_its_incident_open_with_the_new_cause`, `PRE_077_retrying_a_local_step_runs_its_handler_again_and_a_success_resolves_the_incident`, `PRE_077_a_retried_local_step_that_fails_again_keeps_the_same_incident_open_with_the_new_cause`
+
+### PRE-078 Resolving an incident with an operator's output needs a second person, and only the approval moves the token
+- **Traces to:** `TR-OPS-03`, `TR-SEC-11`, `TR-OBS-01`, PD-126, #68
+- **Milestone:** M2
+- **Given:** `INC-2` is `OPEN` on `check-limit` of `DISB-2027-0080`. `INC-3` is `OPEN` on the agent step `assess-documents`, whose output schema requires `riskScore` (integer) and `recommendation` and masks `summary`. `ops.lan` and `ops.minh` hold `processes:incident:manage`; `horus.bpm.processes.incidents.resolve-approval` is `four-eyes` (the default).
+- **When:**
+  - `ops.lan` sends `POST /incidents/INC-2:resolve` with `{ "output": { "approvedLimit": { "amount": "30000000", "currency": "VND" } }, "reason": "Limit raised by credit committee, memo CC-118" }`.
+  - `ops.lan` then approves or rejects her own proposal; `ops.minh` approves it (or, in a second case, rejects it with a reason).
+  - Separately, `ops.lan` proposes `{ "riskScore": "lots", "recommendation": "APPROVE" }` for `INC-3`, and a proposal without a reason, with a reason above `lifecycle.reason-max-length`, or without an output.
+- **Then:**
+  - The proposal is recorded: `INC-2` is `RESOLUTION_PENDING` with `proposedBy ops.lan`, the reason and the output; the token stays on `check-limit`. History records `INCIDENT_RESOLUTION_PROPOSED`; `processes.incident.resolution-proposed.v1` is published. The guardrail is not run on a person's answer.
+  - `ops.lan`'s own approval or rejection is `403 SELF_APPROVAL_FORBIDDEN` and writes nothing.
+  - `ops.minh`'s approval completes the step with the proposed output in one transaction: the token moves on to `disburse`, `INC-2` is `RESOLVED` with `COMPLETED_MANUALLY` and `resolvedBy ops.minh`. History records `INCIDENT_RESOLVED` with the proposer, the approver, the reason and the output; `processes.incident.resolved.v1` carries `resolution`, `resolvedBy` and `proposedBy`. A rejection returns the incident to `OPEN` without the proposal, and the token stays.
+  - `INC-3`'s output is `422 OUTPUT_INVALID` with `paths` such as `$.riskScore: expected integer`, never the value, and nothing is written. An agent step's output is kept masked by its output schema in the proposal view and in history (`summary: ***`), while the step receives it unmasked.
+  - The missing or too long reason and the missing output are `400 INPUT_INVALID`; nothing is written.
+  - The table refuses a `four-eyes` resolution whose resolver is its proposer (`ck_pre_incident_four_eyes`). With `resolve-approval: single`, accepted on the `dev` profile only (start-up is refused elsewhere), the proposer's resolution applies at once and is recorded as `single`.
+- **Example:** `ops.lan proposes approvedLimit 30,000,000 VND -> RESOLUTION_PENDING; ops.lan approves -> 403; ops.minh approves -> COMPLETED_MANUALLY, token on disburse`.
+- **Test ID:** `PRE_078_a_resolution_needs_a_second_person_and_only_the_approval_moves_the_token`, `PRE_078_a_rejected_proposal_leaves_the_incident_open_and_the_token_on_the_step`, `PRE_078_a_resolution_needs_an_output_and_a_reason_within_the_limit`, `PRE_078_single_person_resolution_applies_at_once_and_is_recorded_as_single`, `PRE_078_the_table_refuses_a_four_eyes_resolution_by_its_proposer`, `PRE_078_an_output_that_breaks_the_steps_schema_is_refused_naming_the_path_never_the_value`, `PRE_078_an_approved_agent_output_completes_the_step_and_history_keeps_it_masked`, `PRE_078_single_person_resolution_is_accepted_only_on_the_dev_profile_and_other_values_are_refused`
+
+### PRE-079 A retry or resolution that is stale, repeated or on an ended instance is refused and writes nothing
+- **Traces to:** `TR-IDEM-03`, `TR-IDEM-04`, #68
+- **Milestone:** M2
+- **Given:** `INC-4` on `check-limit` of `DISB-2027-0090`, with `ops.lan`'s proposal pending at `lockVersion 1`.
+- **When:** `ops.minh` approves with `If-Match: "0"`; anyone retries or proposes again while the proposal is pending; `ops.lan` reuses her proposal's `Idempotency-Key` with another output; after the approval, `ops.minh` approves and retries again. In a second instance, `ops.lan` cancels `DISB-2027-0091` while its incident is open.
+- **Then:**
+  - The stale request is `409 VERSION_CONFLICT`.
+  - A retry or proposal on an incident that is not `OPEN`, and any command on a `RESOLVED` incident, is `409 INVALID_STATE`.
+  - The same key with another body is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - None of them writes a row: history, incident, task and idempotency counts are unchanged.
+  - The cancel resolves the open incident with `INSTANCE_CANCELLED` and `resolvedBy ops.lan` in the cancel transaction, with `processes.incident.resolved.v1`.
+- **Example:** `approve with stale If-Match -> 409 VERSION_CONFLICT, 0 rows changed`.
+- **Test ID:** `PRE_079_a_stale_repeated_or_late_command_is_refused_and_writes_nothing`, `PRE_079_cancelling_the_instance_resolves_its_incident_in_the_cancel_transaction`
+
+### PRE-080 Incidents are listed with cause, retry count and next action, in the caller's tenant only
+- **Traces to:** `TR-TEN-01`, `TR-PERF-04`, `PRE-036`, #68
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` has 3 open incidents a minute apart; tenant `bank-b` has `INC-9`.
+- **When:** A `bank-a` operator calls `GET /incidents?status=OPEN&limit=2` and follows the cursor, reads and commands `INC-9`, and a `bank-a` user with only `processes:read` lists, retries and resolves.
+- **Then:**
+  - The list returns the 3 `bank-a` incidents, newest first on `(createdAt, id)`, at most `query.max-page-size` (200) per page, served by `idx_pre_incident_status` and registered with the query-plan check. Each item has `errorCode`, `causeSummary`, `retryCount`, `nodeId`, `instanceId` and `allowedActions` (`retry`, `resolve`, `approve-resolution`, `reject-resolution`) computed for the caller.
+  - The cursor is signed for the tenant and the status: used for another status or by another tenant it is `400 QUERY_INVALID`; an unknown status is `400 QUERY_INVALID`.
+  - `INC-9` is `404 INCIDENT_NOT_FOUND` for the read and for every command, and nothing is written.
+  - The `processes:read` user sees no actions, and both commands are `403 PERMISSION_DENIED`.
+- **Example:** `bank-a lists 3; INC-9 of bank-b -> 404, nothing written`.
+- **Test ID:** `PRE_080_incidents_are_listed_in_the_callers_tenant_only_newest_first_with_a_signed_cursor`, `PRE_080_another_tenants_incident_is_not_found_for_every_command_and_nothing_is_written`, `PRE_080_a_reader_sees_incidents_without_actions_and_cannot_retry_or_resolve`, `PRE_080_the_list_and_one_incident_match_the_contract_with_the_callers_actions`
+
+---
+
+## Reviewed Content (#406, PD-139)
+
+### PRE-177 Approving a definition version names the hash of the content the approver reviewed
+- **Traces to:** `TR-SEC-11`, `TR-DEF-04`, PD-139, #406
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v1 is `PENDING_APPROVAL`, requested by `alice`; `bob` holds `processes:approve` and reviewed it with `definitionHash H`. `horus.bpm.processes.approval.require-content-hash` is `true` (the default).
+- **When:**
+  - (a) `bob` approves with `expectedDefinitionHash: H`.
+  - (b) The content of v1 was replaced after `bob` reviewed it (it now has hash `H2`), and `bob` approves with `H` at the current lock version; then with `H2`.
+  - (c) `bob` approves without a hash, or with a value that is not a hash.
+  - (d) A `bank-b` approver approves `bank-a`'s v1 with `H`.
+  - (e) `bob` repeats (a) under the same `Idempotency-Key`, then sends another hash under that key.
+  - (f) v1 is `ACTIVE`; v2 is pending and differs from v1 in more than 1,000 values. `bob` reads the diff of v2 against the effective v1, then approves v2 naming its `definitionHash`.
+- **Then:**
+  - (a) v1 is `ACTIVE`; the `APPROVED` history row and `processes.definition.approved.v1` carry `reviewedDefinitionHash: H`.
+  - (b) The first is `409 CONTENT_CHANGED` naming `currentDefinitionHash H2` and `currentLockVersion`; nothing is written, published or recorded. The second is accepted.
+  - (c) `400 CONTENT_HASH_REQUIRED` before anything is read, and `400 INPUT_INVALID` for a value that is not 64 lower-case hexadecimal characters; nothing is written. With the setting `false`, accepted on the `dev` profile only (start-up is refused elsewhere), an approval without a hash is accepted and records none.
+  - (d) `404 DEFINITION_NOT_FOUND`; nothing is written.
+  - (e) The repeat replays the first answer; the other hash is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - The check runs under the key lock after the status, four-eyes and lock-version checks, through the Java API and REST alike.
+  - (f) The diff is `truncated` with `approvableHash: null` and no `definitionHash` on either side; the approval is `409 CHANGE_SET_TRUNCATED` and nothing is written, published or recorded. A change list cut off at its limit carries no hash that may be approved.
+- **Example:** `bob approves with H after the content became H2 -> 409 CONTENT_CHANGED (current H2), 0 rows`.
+- **Test ID:** `PRE_177_an_approval_with_the_reviewed_hash_publishes_the_version_and_records_the_hash`, `PRE_177_an_approval_of_content_changed_after_review_is_refused_naming_the_current_hash_and_writes_nothing`, `PRE_177_an_approval_without_a_hash_is_refused_while_the_setting_is_on`, `PRE_177_with_the_dev_relaxation_an_approval_without_a_hash_is_accepted`, `PRE_177_another_tenants_version_is_refused_and_nothing_is_written`, `PRE_177_a_replay_with_another_hash_under_the_same_key_is_a_key_reuse`, `PRE_177_a_truncated_diff_exposes_no_approvable_hash_and_an_approval_against_it_is_refused`, `PRE_177_the_two_approval_refusals_match_the_contract_and_name_the_current_content`, `PRE_177_an_approval_without_the_reviewed_hash_is_accepted_only_on_the_dev_profile`
 
 ---
 

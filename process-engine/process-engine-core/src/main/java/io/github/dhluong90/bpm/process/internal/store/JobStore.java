@@ -250,6 +250,20 @@ public interface JobStore {
     Optional<JobRow> findJob(String tenant, String id);
 
     /**
+     * Makes a {@code FAILED} job due now with one more attempt than it has used, for an operator's retry (#68,
+     * PRE-077). The job id, and with it the remote side's idempotency key, is kept; the lease and its holder are
+     * cleared, so the next claim issues a new attempt id and a new completion token.
+     *
+     * @param tenant the job's tenant
+     * @param id the job
+     * @param now the engine clock
+     * @return whether the job was {@code FAILED} and is now {@code DUE}
+     */
+    default boolean retryFailed(String tenant, String id, Instant now) {
+        throw new UnsupportedOperationException("This engine was built without a job store");
+    }
+
+    /**
      * Cancels the open {@code DEFINITION_EFFECTIVE} jobs of a definition version (PRE-053).
      *
      * @param tenant tenant

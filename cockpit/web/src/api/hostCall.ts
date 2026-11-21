@@ -4,7 +4,7 @@ import { HostCallError, readProblem } from './hostError';
 type Fetch = typeof fetch;
 
 export interface HostRequest {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT';
   path: string;
   /** Extra headers, for example Idempotency-Key or If-Match. */
   headers?: Readonly<Record<string, string>>;

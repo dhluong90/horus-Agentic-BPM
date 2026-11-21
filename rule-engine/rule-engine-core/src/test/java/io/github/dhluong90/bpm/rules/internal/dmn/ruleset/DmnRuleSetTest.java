@@ -44,9 +44,9 @@ class DmnRuleSetTest {
         // Then
         assertThat(parsed.model().name()).isEqualTo("card-fee");
         assertThat(parsed.canonicalJson()).isEqualTo("{\"hitPolicy\":\"first\","
-                + "\"inputs\":[{\"description\":\"Card tier\",\"name\":\"tier\",\"type\":\"string\"},"
-                + "{\"description\":\"Transactions this month\",\"name\":\"txCount\",\"type\":\"integer\"}],"
-                + "\"outputs\":[{\"description\":\"Fee (VND)\",\"name\":\"fee\",\"type\":\"decimal\"}],"
+                + "\"inputs\":[{\"label\":\"Card tier\",\"name\":\"tier\",\"type\":\"string\"},"
+                + "{\"label\":\"Transactions this month\",\"name\":\"txCount\",\"type\":\"integer\"}],"
+                + "\"outputs\":[{\"label\":\"Fee (VND)\",\"name\":\"fee\",\"type\":\"decimal\"}],"
                 + "\"ruleSet\":\"card-fee\","
                 + "\"rules\":[{\"description\":\"Gold customers pay nothing\",\"id\":\"DecisionRule_0fk2x7a\","
                 + "\"then\":{\"fee\":0},\"when\":{\"tier\":\"== 'GOLD'\"}},"

@@ -282,3 +282,41 @@ describe('audit reads and evidence', () => {
     await expect(client.exportEvidence('card-fee', { format: 'csv', versions: [1], decisionIds: [] }, 'key-1')).rejects.toBeInstanceOf(HostCallError);
   });
 });
+
+describe('draft editing calls', () => {
+  it('CKP_006_copy_replace_and_validate_send_the_headers_of_the_contract', async () => {
+    const { sent, fetchImpl } = engineFetch('lan');
+    const client = createRulesClient('', fetchImpl);
+    const draft = await client.copyVersion('card-fee', 1, 'copy-key');
+    expect(draft).toMatchObject({ version: 3, status: 'DRAFT', lockVersion: 0, createdBy: 'lan' });
+    expect(sent[0]).toMatchObject({ method: 'POST', url: '/api/bpm/rules/v1/rule-sets/card-fee/versions?copyOf=1', body: undefined });
+    expect(sent[0]?.headers['idempotency-key']).toBe('copy-key');
+
+    const text = JSON.stringify({ ...draft.definition, rules: draft.definition.rules.map((r) => (r.id === 'R2' ? { ...r, when: { ...r.when, balance: '>=' } } : r)) });
+    const checked = await client.validateDraft('card-fee', 3, { contentType: 'application/yaml', text });
+    expect(checked.valid).toBe(false);
+    expect(checked.problems).toEqual([expect.objectContaining({ ruleId: 'R2', column: 'balance', code: 'SYNTAX_ERROR', message: expect.objectContaining({ vi: 'Ô này không phải là biểu thức hợp lệ.' }) as unknown })]);
+    expect(sent[1]).toMatchObject({ method: 'POST', url: '/api/bpm/rules/v1/rule-sets/card-fee/versions/3:validate' });
+    expect(sent[1]?.headers['idempotency-key']).toBeUndefined();
+    expect(sent[1]?.headers['if-match']).toBeUndefined();
+
+    const saved = await client.replaceDraft('card-fee', 3, 0, { contentType: 'application/yaml', text: JSON.stringify(draft.definition) }, 'save-key');
+    expect(saved).toMatchObject({ version: 3, status: 'DRAFT', lockVersion: 1 });
+    expect(sent[2]).toMatchObject({ method: 'PUT', url: '/api/bpm/rules/v1/rule-sets/card-fee/versions/3' });
+    expect(sent[2]?.headers).toMatchObject({ 'if-match': '"0"', 'idempotency-key': 'save-key', 'content-type': 'application/yaml' });
+
+    const stale: unknown = await client.replaceDraft('card-fee', 3, 0, { contentType: 'application/yaml', text: JSON.stringify(draft.definition) }, 'save-again').catch((e: unknown) => e);
+    expect(stale).toBeInstanceOf(HostCallError);
+    expect((stale as HostCallError).hostError).toMatchObject({ kind: 'problem', status: 409, code: 'VERSION_CONFLICT' });
+  });
+
+  it('CKP_006_an_approved_version_cannot_be_checked_or_replaced', async () => {
+    const { fetchImpl } = engineFetch('lan');
+    const client = createRulesClient('', fetchImpl);
+    const document = { contentType: 'application/yaml' as const, text: '{}' };
+    const checked: unknown = await client.validateDraft('card-fee', 1, document).catch((e: unknown) => e);
+    expect((checked as HostCallError).hostError).toMatchObject({ status: 409, code: 'INVALID_STATE' });
+    const replaced: unknown = await client.replaceDraft('card-fee', 1, 2, document, 'k').catch((e: unknown) => e);
+    expect((replaced as HostCallError).hostError).toMatchObject({ status: 409, code: 'INVALID_STATE' });
+  });
+});

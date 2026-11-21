@@ -1,8 +1,8 @@
 import type { InputMasking, Rule, RuleSetDefinition, RuleSetVersion, VersionDiff } from '../../../api/rules/schemas';
-import { useI18n } from '../../../i18n/I18nProvider';
+import { useI18n, type Locale } from '../../../i18n/I18nProvider';
 import { formatDateTime } from '../model/dates';
 import { cellText, nonAsciiCharacters } from '../model/nonAscii';
-import { columnLabel, readCondition, readOutput } from '../model/reading';
+import { clauseLabel, columnLabel, readCondition, readOutput } from '../model/reading';
 import { changeNotes, flagged, maskRemoved, type ChangeNote } from '../model/masking';
 import { countChanges, pairRows, structureNotes, type PairChange, type RowPair } from '../model/versionDiff';
 import { CellValue } from './CellValue';
@@ -59,19 +59,20 @@ function MaskingFlag({ sentence }: { sentence: string }) {
 }
 
 function ColumnNames({ definition, side, flags }: { definition: RuleSetDefinition; side: Side; flags?: ReadonlyMap<string, string> }) {
+  const { locale } = useI18n();
   return (
     <>
       {definition.inputs.map((input, index) => {
         const sentence = flags?.get(input.name);
         return (
           <th key={`${side}-in-${input.name}`} scope="col" className={index === 0 ? `sbs__start--${side}` : undefined}>
-            {columnLabel(input.name, input.description)}
+            {clauseLabel(input, locale)}
             {sentence !== undefined ? <> <MaskingFlag sentence={sentence} /></> : null}
           </th>
         );
       })}
       {definition.outputs.map((output, index) => (
-        <th key={`${side}-out-${output.name}`} scope="col" className={index === 0 ? 'dt__first-then' : undefined}>{columnLabel(output.name, output.description)}</th>
+        <th key={`${side}-out-${output.name}`} scope="col" className={index === 0 ? 'dt__first-then' : undefined}>{clauseLabel(output, locale)}</th>
       ))}
     </>
   );
@@ -118,15 +119,15 @@ function RowMarks({ pair }: { pair: RowPair }) {
 }
 
 /** A column named in a note reads with the same label as its header: from the version that has the column. */
-function noteColumn(note: { group: 'when' | 'then'; name: string }, from: RuleSetDefinition): string {
+function noteColumn(note: { group: 'when' | 'then'; name: string }, from: RuleSetDefinition, locale: Locale): string {
   const clause = (note.group === 'when' ? from.inputs : from.outputs).find((c) => c.name === note.name);
-  return columnLabel(note.name, clause?.description);
+  return clause ? clauseLabel(clause, locale) : columnLabel(note.name, undefined);
 }
 
 type Translate = ReturnType<typeof useI18n>['t'];
 
 /** One sentence for a note above the table; also the tooltip of a flagged header. */
-function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next: RuleSetDefinition): string {
+function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next: RuleSetDefinition, locale: Locale): string {
   const policy = (value: string) => {
     const upper = value.toUpperCase();
     return t(upper === 'UNIQUE' ? 'policy.UNIQUE' : upper === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST');
@@ -137,17 +138,17 @@ function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next:
     case 'member':
       return note.member === 'description' ? t('changes.note.description') : t('changes.note.member', { member: note.member });
     case 'masking': {
-      const values = { name: noteColumn({ group: 'when', name: note.name }, next), from: t(`masking.${note.from}`), to: t(`masking.${note.to}`) };
+      const values = { name: noteColumn({ group: 'when', name: note.name }, next, locale), from: t(`masking.${note.from}`), to: t(`masking.${note.to}`) };
       return t(note.removed ? 'changes.note.maskRemoved' : 'changes.note.maskChanged', values);
     }
     case 'columnAdded':
       if (note.group === 'when' && note.masking !== undefined) {
-        return t('changes.note.columnAdded.whenMasking', { name: noteColumn(note, next), status: t(`masking.${note.masking}`) });
+        return t('changes.note.columnAdded.whenMasking', { name: noteColumn(note, next, locale), status: t(`masking.${note.masking}`) });
       }
-      return t(`changes.note.columnAdded.${note.group}`, { name: noteColumn(note, next) });
+      return t(`changes.note.columnAdded.${note.group}`, { name: noteColumn(note, next, locale) });
     case 'columnRemoved':
     case 'columnChanged':
-      return t(`changes.note.${note.kind}.${note.group}`, { name: noteColumn(note, note.kind === 'columnRemoved' ? base : next) });
+      return t(`changes.note.${note.kind}.${note.group}`, { name: noteColumn(note, note.kind === 'columnRemoved' ? base : next, locale) });
     case 'columnsReordered':
       return t(`changes.note.columnsReordered.${note.group}`);
   }
@@ -159,7 +160,7 @@ function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next:
  * the cells use the editor's labels and formats. Effective dates and hashes are version metadata in the header.
  */
 export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: RuleSetVersion; next: RuleSetVersion }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const pairs = pairRows(diff, base.definition.rules, next.definition.rules);
   const counts = countChanges(diff);
   const notes = changeNotes(diff, structureNotes(diff));
@@ -167,7 +168,7 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
   const flags = new Map(notes.flatMap((note): [string, string][] => {
     const name = note.kind === 'masking' || (note.kind === 'columnAdded' && note.group === 'when') ? note.name : undefined;
     const item: InputMasking | undefined = name === undefined ? undefined : diff.masking.find((m) => m.input === name);
-    return name !== undefined && flagged(item) ? [[name, noteText(t, note, base.definition, next.definition)]] : [];
+    return name !== undefined && flagged(item) ? [[name, noteText(t, note, base.definition, next.definition, locale)]] : [];
   }));
   const removedMasks = diff.masking.filter(maskRemoved).length;
   const values = { added: String(counts.added), changed: String(counts.changed), moved: String(counts.moved), removed: String(counts.removed), unchanged: String(counts.unchanged) };
@@ -187,7 +188,7 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
       </p>
       {notes.length > 0 ? (
         <ul className="changes__notes" aria-label={t('changes.notesLabel')}>
-          {notes.map((note, index) => <li key={index}>{noteText(t, note, base.definition, next.definition)}</li>)}
+          {notes.map((note, index) => <li key={index}>{noteText(t, note, base.definition, next.definition, locale)}</li>)}
         </ul>
       ) : null}
       <div className="dt-scroll" role="region" tabIndex={0} aria-label={caption}>

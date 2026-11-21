@@ -24,11 +24,44 @@ import java.time.Instant;
  * @param pinned whether the caller named the version instead of the clock selecting it; set by the engine
  * @param onBehalfOf the human an embedded engine evaluated for, or null: set only through the tenant-scoped entry
  *     point (ADR-0027), never from a request
+ * @param functionVersions the host functions the rule set calls, each as {@code name@version} in name order, comma
+ *     separated, with the version label registered when the decision ran (RLE-058); null when it calls none
  */
 public record DecisionRecord(
         String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson, String callerId,
-        String correlationId, Instant evalClock, long durationMicros, boolean pinned, String onBehalfOf) {
+        String correlationId, Instant evalClock, long durationMicros, boolean pinned, String onBehalfOf,
+        String functionVersions) {
+
+    /**
+     * Creates the row of a decision that calls no host function.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param createdAt see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param hitPolicy see the record
+     * @param outcome see the record
+     * @param errorCode see the record
+     * @param maskedInputsJson see the record
+     * @param outputsJson see the record
+     * @param matchedRuleIdsJson see the record
+     * @param callerId see the record
+     * @param correlationId see the record
+     * @param evalClock see the record
+     * @param durationMicros see the record
+     * @param pinned see the record
+     * @param onBehalfOf see the record
+     */
+    public DecisionRecord(String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy,
+            String outcome, String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson,
+            String callerId, String correlationId, Instant evalClock, long durationMicros, boolean pinned,
+            String onBehalfOf) {
+        this(tenantId, id, createdAt, ruleSet, version, hitPolicy, outcome, errorCode, maskedInputsJson, outputsJson,
+                matchedRuleIdsJson, callerId, correlationId, evalClock, durationMicros, pinned, onBehalfOf, null);
+    }
+
 
     /**
      * Creates the row of a decision made for its caller alone.

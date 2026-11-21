@@ -9,7 +9,7 @@ import { formatDateTime } from './model/dates';
 import { createFakeEngine, demoSeed } from '../../mocks/ruleEngine';
 
 /** Engine calls the screens made, in order: method and path. */
-let calls: { method: string; path: string; key: string | null }[] = [];
+let calls: { method: string; path: string; key: string | null; ifMatch: string | null }[] = [];
 let contentTypes: string[] = [];
 
 beforeEach(() => {
@@ -18,7 +18,7 @@ beforeEach(() => {
   mockHost.events.on('request:start', ({ request }) => {
     const path = decodeURIComponent(new URL(request.url).pathname);
     if (path.startsWith('/api/bpm/rules') && request.method === 'POST') contentTypes.push(request.headers.get('Content-Type') ?? '');
-    if (path.startsWith('/api/bpm/rules')) calls.push({ method: request.method, path: path.replace('/api/bpm/rules/v1', ''), key: request.headers.get('Idempotency-Key') });
+    if (path.startsWith('/api/bpm/rules')) calls.push({ method: request.method, path: path.replace('/api/bpm/rules/v1', ''), key: request.headers.get('Idempotency-Key'), ifMatch: request.headers.get('If-Match') });
   });
   return () => { mockHost.events.removeAllListeners(); };
 });
@@ -123,6 +123,9 @@ describe('minimal draft editing', () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
+    // The draft is stored first, as a copy of version 1; the grid edits that draft, never version 1.
+    expect(await screen.findByText('Editing version 3', { selector: '.rs-head__sub' })).toBeInTheDocument();
+    expect(writes().map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions']);
     // Cells edit as values: a tier picker, a comparison and an amount with its currency, Yes or No.
     await user.click(screen.getByRole('button', { name: 'Row R1, Tier: Platinum' }));
     await user.click(screen.getByRole('checkbox', { name: 'Gold' }));
@@ -132,43 +135,44 @@ describe('minimal draft editing', () => {
     await rowAction(user, 'R6', 'Move row R6 down');
     await rowAction(user, 'R6', 'Move row R6 up');
     expect(screen.getByText('Changes in this draft')).toBeInTheDocument();
-    // The breadcrumb names the new draft, never the published version it starts from.
-    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('New draft')).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Version 3 draft')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'View changes' })).toBeInTheDocument();
-    // An operator with no amount is refused by the engine: one plain sentence on the cell.
+    // An operator with no amount: the engine's check marks the cell in plain words, and Save says why it waits.
     await user.clear(screen.getByLabelText('Row R6, Balance', { exact: true }));
-    await user.dblClick(screen.getByRole('button', { name: 'Save draft' }));
-
+    await user.keyboard('{Enter}');
     const cell = await screen.findByLabelText('Row R6, Balance', { exact: true });
     await waitFor(() => { expect(cell).toHaveAttribute('aria-invalid', 'true'); });
-    expect(cell).toHaveAccessibleDescription(/Enter a value\./);
-    // One compact line; the code and reference open from Details at its end.
-    const details = screen.getByRole('button', { name: /Details/ });
-    expect(details).toHaveAttribute('aria-expanded', 'false');
-    await user.click(details);
-    expect(screen.getByTestId('problem-code')).toBeVisible();
-    expect(screen.getByText('1 to fix', { exact: false })).toBeInTheDocument();
+    expect(cell).toHaveAccessibleDescription(/The cell is not a valid expression\./);
+    expect(screen.getByText('1 to fix')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveAccessibleDescription('Fix the marked cells to save.');
     expect(screen.getByRole('button', { name: 'Row R1, Tier: Gold, Platinum' })).toBeInTheDocument();
-    expect(new Set(writes().map((c) => c.key)).size).toBe(1);
 
     await user.type(cell, '20000000');
     expect(cell).toHaveValue('20,000,000');
+    await user.keyboard('{Enter}');
+    await waitFor(() => { expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled(); });
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
-    expect(await versionLine(3)).toBeInTheDocument();
-    expect(screen.getByText('Saved as draft version 3')).toBeInTheDocument();
-    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Version 3 draft')).toBeInTheDocument();
+    expect(await screen.findByText('Draft version 3 saved')).toBeInTheDocument();
+    expect(await versionLine(3)).toHaveTextContent('Version 3 · draft');
     const ids = screen.getAllByRole('rowheader').map((th) => th.textContent);
     expect(ids).toEqual(['R1', 'R2', 'R6', 'R3', 'R4', 'R5']);
     expect(screen.getByText('20,000,000 VND')).toBeInTheDocument();
-    expect(new Set(writes().map((c) => c.path))).toEqual(new Set(['/rule-sets/card-fee/versions']));
-    expect(new Set(writes().map((c) => c.key)).size).toBe(2);
+    // The save replaced draft 3 in place, with the lock version the author loaded.
+    const saves = calls.filter((c) => c.method === 'PUT');
+    expect(saves.map((c) => [c.path, c.ifMatch])).toEqual([['/rule-sets/card-fee/versions/3', '"0"']]);
+    expect(saves[0]?.key).toBeTruthy();
+    // The checks stored nothing: no Idempotency-Key, no If-Match.
+    const checks = calls.filter((c) => c.path.endsWith(':validate'));
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.every((c) => c.key === null && c.ifMatch === null)).toBe(true);
   });
 
   it('CKP_032_request_publish_sends_the_lock_version_and_waits_for_the_engine', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
-    await user.clear(screen.getByLabelText('Row R3, Fee'));
+    await user.clear(await screen.findByLabelText('Row R3, Fee'));
     await user.type(screen.getByLabelText('Row R3, Fee'), '35000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     await user.click(await screen.findByRole('button', { name: 'Request publish' }));
@@ -191,7 +195,7 @@ describe('four eyes', () => {
     const table = await screen.findByRole('table', { name: 'Version 1 and version 2 of card-fee, side by side' });
     expect(screen.getByText('1 added, 1 changed, 1 removed, 3 unchanged')).toBeInTheDocument();
     // The engine compares: one diff request against the version in effect, and no other version is changed.
-    expect(calls.filter((c) => c.path.includes('/diff'))).toEqual([{ method: 'GET', path: '/rule-sets/card-fee/versions/2/diff', key: null }]);
+    expect(calls.filter((c) => c.path.includes('/diff'))).toEqual([{ method: 'GET', path: '/rule-sets/card-fee/versions/2/diff', key: null, ifMatch: null }]);
     const marks = within(table).getAllByRole('rowheader').map((th) => th.textContent.replace(/[＋✎⇅−]/g, '').replace(/\s+/g, ' ').trim());
     expect(marks).toEqual(['R1', 'R2', 'R6 Added', 'R3 Changed', 'R4 Removed', 'R5']);
     expect(within(table).getByText('35,000 VND').closest('td')).toHaveClass('diff-td--mod');
@@ -431,11 +435,6 @@ describe('import of the next version (CKP-030)', () => {
 });
 
 describe('payload limits (413)', () => {
-  const tooLarge = (path: string) => http.post(path, () => HttpResponse.json(
-    { type: 'x', title: 'Content Too Large', status: 413, code: 'PAYLOAD_TOO_LARGE', detail: 'The document is larger than 16384 bytes', correlationId: '01JTOOLARGE0000000000000000' },
-    { status: 413, headers: { 'Content-Type': 'application/problem+json' } },
-  ));
-
   it('RLE_044_an_import_over_the_limit_is_shown_in_plain_words', async () => {
     open('#/rules/card-fee/1');
     await screen.findByRole('button', { name: 'More' });
@@ -449,10 +448,13 @@ describe('payload limits (413)', () => {
 
   it('RLE_044_a_save_over_the_limit_keeps_the_edits', async () => {
     const user = userEvent.setup();
-    mockHost.use(tooLarge('*/api/bpm/rules/v1/rule-sets/card-fee/versions'));
+    mockHost.use(http.put('*/api/bpm/rules/v1/rule-sets/card-fee/versions/3', () => HttpResponse.json(
+      { type: 'x', title: 'Content Too Large', status: 413, code: 'PAYLOAD_TOO_LARGE', detail: 'The document is larger than 1048576 bytes', correlationId: '01JTOOLARGE0000000000000000' },
+      { status: 413, headers: { 'Content-Type': 'application/problem+json' } },
+    )));
     open('#/rules/card-fee/1');
     await user.click(await screen.findByRole('button', { name: 'New draft' }));
-    await user.clear(screen.getByLabelText('Row R3, Fee'));
+    await user.clear(await screen.findByLabelText('Row R3, Fee'));
     await user.type(screen.getByLabelText('Row R3, Fee'), '35000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
     expect(await screen.findByText('The text is too long for the service.')).toBeInTheDocument();

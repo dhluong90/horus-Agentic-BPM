@@ -117,15 +117,45 @@ A `when` entry is a boolean expression. A `then` entry is an expression whose ty
 
 In 0.2.0 the engine evaluates `round` and `daysBetween`; the other functions are planned. An unknown function is refused at import.
 
-Hosts register additional functions through the `RuleFunctionRegistry` SPI. A registered function must be deterministic and side-effect free. The cockpit lists registered functions with their signatures.
+## Host functions
+
+A host registers its own functions for rule cells to call next to the built-in ones. The usual way is an `ExpressionFunction` bean; a `RuleFunctionRegistry` bean replaces the default registry that collects them. Each function declares a name, parameter types, a result type, a version label and a step cost:
+
+```java
+@Bean
+ExpressionFunction segmentOf() {
+  return new ExpressionFunction("segmentOf", List.of(ValueType.MONEY, ValueType.NUMBER), ValueType.STRING,
+      "2027.1", 1, arguments -> {
+        Money balance = (Money) arguments.get(0);
+        BigDecimal tenureMonths = (BigDecimal) arguments.get(1);
+        return balance.minorUnits() >= 500_000_000L && tenureMonths.intValue() >= 24 ? "PRIORITY" : "MASS";
+      });
+}
+```
+
+A card fee cell then reads `segmentOf(balance, tenureMonths) == 'PRIORITY'`. The parameter and result types are `string`, `boolean`, `number` (an `integer` or a `decimal` input), `date`, `datetime` and `money`.
+
+**A function is a pure calculation.** It receives its argument values and nothing else: no tenant, caller, clock, database connection or network. It must give the same result for the same arguments every time and change nothing. Decisions are replayed and simulated from the log, and that only works if the function is pure. The engine cannot prove it; your own code review owns it. When a rule needs data you hold elsewhere, such as a customer segment in core banking, look it up before the call and pass it in as an input.
+
+What the engine checks:
+
+| When | What happens |
+|---|---|
+| Import, draft replacement, request-publish and approval | A call of a name that is not registered is `FORBIDDEN_CONSTRUCT`; the wrong number or types of arguments is `TYPE_MISMATCH`. Each names the rule, the column and the character position. A version that calls a function you removed can be neither requested nor approved |
+| A `null` argument | The call gives `null` and the function is not called |
+| Step budget | A call costs its declared step cost, counted in the worst case that import checks and in each decision |
+| The function throws or returns another type | The decision fails with `EVALUATION_ERROR`, `error_code = FUNCTION_FAILED`. The problem names the function and never the exception, which could hold an input value; the server log has it with the correlation id |
+| Start-up | A name registered twice, the name of a built-in function or a name outside `^[a-z][A-Za-z0-9]{0,63}$` stops the host, naming the function |
+
+Change the version label when the behaviour may change. Approval records the label of each function a version calls, and each decision records `name@version` (the `function_versions` column of the decision log). After you redeploy with another label, start-up logs one warning per function naming both labels and the published versions that call it, `/api/bpm/meta` lists the change for the tenants that own those versions (`evaluation.functions-changed`), and replaying an older decision is `422 REPLAY_NOT_POSSIBLE`. By default evaluation goes on. A bank that treats a function change as a rule change sets `horus.bpm.rules.evaluation.function-version-change` to `refuse`: decisions then fail with `FUNCTION_CHANGED` until a new version of the rule set is approved by a second person. Functions are registered per host, never per tenant. A rule set that calls a host function has no DMN export. The cockpit list of registered functions is not built yet.
 
 ## Errors
 
 | When | Condition | Result |
 |---|---|---|
-| Publication | Syntax error, unknown identifier, type mismatch, unknown function | `422 VALIDATION_FAILED` with the row id; the version stays a draft |
+| Publication | Syntax error, unknown identifier, type mismatch, a call of a function neither built in nor registered by the host | `422 VALIDATION_FAILED` with the row id; the version stays a draft |
 | Publication | Two money literals of different currencies in one cell; a function argument of the wrong type | `422 VALIDATION_FAILED` with the row id |
-| Evaluation | Currency mismatch, division by zero, regex timeout | The decision fails with `EVALUATION_ERROR` (`422` over REST), returns no partial outputs, and is logged with that outcome |
+| Evaluation | Currency mismatch, division by zero, regex timeout, a host function that throws | The decision fails with `EVALUATION_ERROR` (`422` over REST), returns no partial outputs, and is logged with that outcome |
 
 Error codes and HTTP mapping are owned by [[Rule Engine Decision API]].
 

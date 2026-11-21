@@ -26,10 +26,11 @@ import java.util.function.Supplier;
  * @param idempotency idempotency records
  * @param settings validated engine settings
  * @param masking the masking key and default per tenant (RLE-012)
+ * @param functions the host's functions for rule cells (RLE-055 to RLE-058)
  */
 public record EngineContext(
         TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
-        IdempotencyStore idempotency, EngineSettings settings, MaskingPolicy masking) {
+        IdempotencyStore idempotency, EngineSettings settings, MaskingPolicy masking, HostFunctions functions) {
 
     /** Longest idempotency key accepted. */
     static final int MAX_KEY_LENGTH = 200;
@@ -42,6 +43,23 @@ public record EngineContext(
         Objects.requireNonNull(idempotency, "idempotency must not be null");
         Objects.requireNonNull(settings, "settings must not be null");
         Objects.requireNonNull(masking, "masking must not be null");
+        Objects.requireNonNull(functions, "functions must not be null");
+    }
+
+    /**
+     * Creates a context with no host functions.
+     *
+     * @param tenants see the record
+     * @param callers see the record
+     * @param clock see the record
+     * @param transactions see the record
+     * @param idempotency see the record
+     * @param settings see the record
+     * @param masking see the record
+     */
+    public EngineContext(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            IdempotencyStore idempotency, EngineSettings settings, MaskingPolicy masking) {
+        this(tenants, callers, clock, transactions, idempotency, settings, masking, HostFunctions.none());
     }
 
     /**

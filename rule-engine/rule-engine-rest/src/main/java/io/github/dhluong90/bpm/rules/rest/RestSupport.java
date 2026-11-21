@@ -180,6 +180,37 @@ final class RestSupport {
         return key;
     }
 
+    /** The body of {@code :validate}; member order is fixed. */
+    static ObjectNode validation(io.github.dhluong90.bpm.rules.api.DraftValidation result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("valid", result.valid());
+        ArrayNode problems = node.putArray("problems");
+        for (io.github.dhluong90.bpm.rules.api.DraftValidation.Problem p : result.problems()) {
+            ObjectNode item = problems.addObject();
+            item.put("ruleId", p.ruleId());
+            item.put("column", p.column());
+            item.put("code", p.code());
+            if (p.position() == null) {
+                item.putNull("position");
+            } else {
+                item.put("position", p.position());
+            }
+            ObjectNode message = item.putObject("message");
+            new java.util.TreeMap<>(p.message()).forEach(message::put);
+        }
+        node.put("problemsTruncated", result.problemsTruncated());
+        ArrayNode readings = node.putArray("readings");
+        for (io.github.dhluong90.bpm.rules.api.DraftValidation.Reading r : result.readings()) {
+            ObjectNode item = readings.addObject();
+            item.put("ruleId", r.ruleId());
+            ObjectNode text = item.putObject("text");
+            new java.util.TreeMap<>(r.text()).forEach(text::put);
+        }
+        return node;
+    }
+
     /**
      * Writes a version diff (RLE-028, RLE-048). Field values are the canonical JSON the engine computed, embedded as
      * JSON; member order is fixed, so a repeated request returns a byte-identical body.

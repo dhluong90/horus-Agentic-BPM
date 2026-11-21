@@ -151,6 +151,10 @@ public final class DmnReader {
             throw invalid("Decision " + Quote.of(decision.attribute("id").orElse("")) + " has no <decisionTable>", decision);
         }
         readTable(table, feel, doc);
+        ObjectNode noMatch = explainTexts(decision, "noMatch");
+        if (!noMatch.isEmpty()) {
+            doc.putObject("explanations").set("noMatch", noMatch);
+        }
         return doc;
     }
 
@@ -230,7 +234,8 @@ public final class DmnReader {
         node.put("name", name);
         node.put("type", type(expression.attribute("typeRef"), horus(input, "type"),
                 "input '" + name + "'", expression));
-        columnDescription(input, name).ifPresent(d -> node.put("description", d));
+        description(input).ifPresent(d -> node.put("description", d));
+        columnLabel(input, name).ifPresent(l -> node.put("label", l));
         Optional<XmlTree> values = input.child("inputValues");
         if (values.isPresent()) {
             ArrayNode allowed = node.putArray("allowed");
@@ -279,7 +284,8 @@ public final class DmnReader {
         node.put("name", name);
         node.put("type", type(output.attribute("typeRef"), horus(output, "type"),
                 "output '" + name + "'", output));
-        columnDescription(output, name).ifPresent(d -> node.put("description", d));
+        description(output).ifPresent(d -> node.put("description", d));
+        columnLabel(output, name).ifPresent(l -> node.put("label", l));
         return name;
     }
 
@@ -319,6 +325,10 @@ public final class DmnReader {
             description = Optional.of(text);
         }
         description.ifPresent(d -> node.put("description", d));
+        ObjectNode explain = explainTexts(rule, "explain");
+        if (!explain.isEmpty()) {
+            node.set("explain", explain);
+        }
 
         ObjectNode when = node.putObject("when");
         for (int i = 0; i < inputEntries.size(); i++) {
@@ -405,13 +415,24 @@ public final class DmnReader {
         };
     }
 
-    private static Optional<String> columnDescription(XmlTree column, String name) {
-        Optional<String> description = description(column);
-        if (description.isPresent()) {
-            return description;
-        }
-        // A label other than the name is kept as the description, so no author text is lost.
+    /** A label other than the name is the column's display label (#392); one equal to the name says nothing more. */
+    private static Optional<String> columnLabel(XmlTree column, String name) {
         return column.attribute("label").map(String::strip).filter(l -> !l.isEmpty() && !l.equals(name));
+    }
+
+    /** The {@code <horus:explain horus:lang="en">} sentences in the {@code extensionElements} of an element. */
+    private static ObjectNode explainTexts(XmlTree element, String elementName) {
+        ObjectNode texts = EngineJson.NODES.objectNode();
+        for (XmlTree extension : element.children("extensionElements")) {
+            for (XmlTree child : extension.children()) {
+                if (child.namespace().equals(Dmn.HORUS_NAMESPACE) && child.name().equals(elementName)) {
+                    String lang = child.attribute(Dmn.HORUS_NAMESPACE, "lang").orElseThrow(() ->
+                            invalid("<horus:" + elementName + "> needs a horus:lang attribute such as en", child));
+                    texts.put(lang, child.text());
+                }
+            }
+        }
+        return texts;
     }
 
     /** A {@code horus:} extension attribute in {@code urn:horus-bpm:dmn:extensions:v1}. */

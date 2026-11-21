@@ -48,7 +48,7 @@ ArchUnit rules in every build: core imports no `org.springframework..`, `java.sq
 | Layout | `LayoutRevision(definitionId, revision, layout)`. Append-only; never part of the definition hash; node ids must exist in the definition | `pre_definition_layout` |
 | Instance | `ProcessInstance` with its execution tree: one root scope token, one scope token per entered `saga`, and flow tokens that name their scope token (ADR-0020). Pinned to one definition version until migrated. All transitions of one instance serialise on the `pre_instance` row lock | `pre_instance`, `pre_token` |
 | Task | `HumanTask(status, assignment, form, forbiddenUsers, lockVersion)`. Four-eyes is checked in `TaskService`, so Java and REST behave the same | `pre_task` |
-| Incident | `Incident(status, errorCode, retryCount, lockVersion)` | `pre_incident` |
+| Incident | `Incident(status, errorCode, retryCount, lockVersion, pendingResolution, retrying)`. One unresolved incident per waiting token: a retried step that fails again updates it. A resolution with an operator's output is a proposal that a second holder of `processes:incident:manage`, never the proposer, approves (PD-126); the proposer and the resolver differ in the table too (section 3.6) | `pre_incident` |
 | Job | Timer, SLA escalation, async step attempt, compensation attempt or definition effective-date job, with a lease | `pre_timer` |
 
 Value objects: `TenantId`, `DefinitionKey`, `BusinessKey`, `IdempotencyKey`, `AttemptId`, `Money`, `ContentHash`, `NodeId`. All are records with validating constructors.
@@ -66,7 +66,7 @@ Source: [`diagrams/definition-lifecycle.mmd`](diagrams/definition-lifecycle.mmd)
 | `DRAFT` | `updateDraft` | `processes:author` | Same setting; `If-Match` equals `lock_version` | `DRAFT` | Content and hash replaced; `updated_by` recorded |
 | `DRAFT` | `validate` | `processes:author` or `processes:deploy` | None | `DRAFT` | Report only |
 | `DRAFT` | `requestApproval(effectiveFrom)` | `processes:author` or `processes:deploy` | Zero validation errors; `effectiveFrom` absent (means at approval) or not in the past | `PENDING_APPROVAL` | `requested_by`, `requested_at`; `processes.definition.publish-requested.v1` |
-| `PENDING_APPROVAL` | `approve(comment)` | `processes:approve` | Caller is no maker of the version under `lifecycle.approver-must-differ-from` (default `makers`: not the importer or creator, not any editor of the draft, not `requested_by`; PD-096), else `403 SELF_APPROVAL_FORBIDDEN`; no `ACTIVE` version with a higher number (`409 VERSION_SUPERSEDED`); guardrail contract re-checked | `ACTIVE` | `approved_by`, `approved_at`; job `DEFINITION_EFFECTIVE` at `effective_from`; `processes.definition.approved.v1` |
+| `PENDING_APPROVAL` | `approve(expectedDefinitionHash, comment)` | `processes:approve` | `expectedDefinitionHash` names the content reviewed: missing is `400 CONTENT_HASH_REQUIRED` while `approval.require-content-hash` is on (the default; `false` on the `dev` profile only), another hash than the stored one is `409 CONTENT_CHANGED` with `currentDefinitionHash` (PRE-177, PD-139); caller is no maker of the version under `lifecycle.approver-must-differ-from` (default `makers`: not the importer or creator, not any editor of the draft, not `requested_by`; PD-096), else `403 SELF_APPROVAL_FORBIDDEN`; no `ACTIVE` version with a higher number (`409 VERSION_SUPERSEDED`); guardrail contract re-checked | `ACTIVE` | `approved_by`, `approved_at`; job `DEFINITION_EFFECTIVE` at `effective_from`; `processes.definition.approved.v1` |
 | `PENDING_APPROVAL` | `reject(reason)` | `processes:approve` | Caller is not `requested_by` (`403 SELF_APPROVAL_FORBIDDEN`, detail pointing to `:withdraw`; PD-097); reason not blank | `DRAFT` | `decision_comment`; `processes.definition.rejected.v1` |
 | `PENDING_APPROVAL` | `withdraw(reason?)` (`POST .../versions/{v}:withdraw`, 0.3.0; PD-097) | `processes:author`; caller is `requested_by`, anyone else gets `403 PERMISSION_DENIED`; `If-Match`; `Idempotency-Key`; reason optional (at most 2,000 characters) | `DRAFT` | Request cleared; history row `WITHDRAWN`; `processes.definition.withdrawn.v1`; nothing published (`PRE-052`) |
 | `DRAFT` | `importDefinition` in the `dev` profile with `definitions.auto-approve: true` | `processes:deploy` | Profile `dev` active and no other profile, else start-up fails (`TR-SEC-11`) | `ACTIVE` | `approved_by = system:dev-auto-approve`; `approved.v1` |
@@ -86,6 +86,7 @@ How the slice of #47 implements the table (0.2.0):
 - The four-eyes `CHECK` exempts the literal approver `system:dev-auto-approve`. That id is written only by the dev auto-approval and by a self-approval with maker-checker off, and the starter refuses both settings outside the `dev` profile (`PRE-022`). No caller may act under an id starting with `system:` at any entry point: import, lifecycle commands, reads, instance start and task work all answer `403 PERMISSION_DENIED`. So the exemption cannot be reached by naming a user that way, and history and events never credit the engine with a person's work. The engine's own paths (start-up import, job firing) resolve no caller.
 - `maker-checker.enabled: false` (accepted on the `dev` profile only) lets a requester approve their own version; the approval is recorded with approver `system:dev-auto-approve`, so the table's four-eyes `CHECK` still holds, and the history row names the person.
 - A reject clears the request (`requested_by`, `requested_at`, `effective_from`) and keeps the reason in `decision_comment`; the next request records a new requester. The requester cannot reject their own request: `403 SELF_APPROVAL_FORBIDDEN`, pointing to withdraw (PD-097, withdraw is #271), as in the Rule Engine.
+- The approval is bound to the content reviewed (PRE-177, PD-139, #406). The client sends `expectedDefinitionHash`, the `definitionHash` the approver saw; without it the approval is refused before anything is read, and under the key lock, after the status, four-eyes and lock-version checks, a hash that is not the stored one is `409 CONTENT_CHANGED` with the hash and lock version stored now. The hash joins the idempotency request hash, so the same key with another hash is a key reuse. The `APPROVED` history row and `processes.definition.approved.v1` record `reviewedDefinitionHash`. A lock version alone does not bind the approval: a version number can carry other content over time (reject, edit, request again), and a client that refreshed the lock version can still hold a decision made on older content. This mirrors the Rule Engine (RLE-084).
 - The approver differs from every maker of the version (PD-096): the importer or creator (`created_by`), every editor once draft editing exists, and the requester. `horus.bpm.lifecycle.approver-must-differ-from: requester` (the shared host setting) relaxes this to the requester only; the requester can never approve under either value.
 
 A version that a newer version in effect already supersedes is never retired by hand: under the key lock, after the status, permission, reason and lock-version checks, the retire answers `409 INVALID_STATE` with a detail naming the superseding version, and writes nothing. Its effective-date job retires it as usual (`retired_by = system:effective-date`, `superseded_by`), so a caller and a reason are never recorded on that transition (PD-102, as Rule Engine DESIGN 3.3.4).
@@ -179,6 +180,32 @@ Source: [`diagrams/task-states.mmd`](diagrams/task-states.mmd).
 Guards run in this order under the `pre_instance` row lock, and a refused command writes nothing: the task's `lockVersion` against `If-Match` (`409 VERSION_CONFLICT`), the status (`409 INVALID_STATE`), the claimant or the candidate (`403 TASK_NOT_ASSIGNED`), then four eyes (`403 SELF_APPROVAL_FORBIDDEN`). The change itself is a conditional `UPDATE pre_task ... WHERE lock_version = :v AND status = ...` (and `claimed_by = :caller` for unclaim and complete), so a concurrent change that slipped past the read still changes zero rows and is `409`. Claim and unclaim write a `TASK_CLAIMED` or `TASK_UNCLAIMED` history entry and hand their event to the host publisher in the same transaction (section 6.4). `GET /tasks/{id}` answers `allowedActions` for the caller, computed at read time from these guards and never stored with an idempotent answer. Claims do not expire in 0.2.0; delegate, reassign and the form check follow with their slices.
 | `OPEN`, `CLAIMED` | Instance cancelled, or migrated off the step | engine | None | `CANCELLED` |
 
+### 3.6 Incident states (#68, PD-126)
+
+![Incident states](images/incident-states.svg)
+
+Source: [`diagrams/incident-states.mmd`](diagrams/incident-states.mmd).
+
+| From | Command | Permission | Guard | To | Side effect and event |
+|---|---|---|---|---|---|
+| none | A step fails for good: its job is `FAILED` (retries used, not retryable, a business error, an answer refused with `onViolation: fail`, claimed too often), a local handler returns a business error, or an agent step's memory fails | engine | None | `OPEN` | `INCIDENT_RAISED`; `processes.incident.raised.v1`. The token stays on the step |
+| `OPEN` | `retry(reason)` | `processes:incident:manage` | `If-Match`; no retry in flight; the step's job is `FAILED` (`DUE` or `CLAIMED` is `409 INVALID_STATE`); not an `AGENT_MEMORY_*` failure | `OPEN`, `retrying` | The job is `DUE` now with `max_attempts = attempt + 1` and keeps its id, so the remote side deduplicates; a local step's handler runs again in this transaction. `retryCount + 1`; `INCIDENT_RETRIED`; `processes.incident.retried.v1` (`PRE-077`) |
+| `OPEN`, `retrying` | The retried step is accepted, or its refused answer is routed to a reviewer | engine | The result transaction | `RESOLVED`, `RETRY_SUCCEEDED` | `INCIDENT_RESOLVED`; `processes.incident.resolved.v1` |
+| `OPEN`, `retrying` | The retried step fails for good again | engine | The result transaction | `OPEN` | The same row takes the new code and cause; `INCIDENT_RAISED` with `failedAgain: true`; `processes.incident.raised.v1` |
+| `OPEN` | `resolve(output, reason)` under `incidents.resolve-approval: four-eyes` (default) | `processes:incident:manage` | `If-Match`; no retry in flight; reason 1 to `lifecycle.reason-max-length`; the output passes the step's output schema (`422 OUTPUT_INVALID` with paths, never values); the guardrail is not run on a person's answer | `RESOLUTION_PENDING` | Proposal, proposer and mode stored; `INCIDENT_RESOLUTION_PROPOSED`; `processes.incident.resolution-proposed.v1`. The token does not move (`PRE-078`) |
+| `RESOLUTION_PENDING` | `approve-resolution(comment)` | `processes:incident:manage` | Caller is not the proposer (`403 SELF_APPROVAL_FORBIDDEN`); `If-Match` | `RESOLVED`, `COMPLETED_MANUALLY` | The step completes with the proposed output as any result does, and the token moves on; `INCIDENT_RESOLVED` with proposer, approver, reason and output; `processes.incident.resolved.v1` with `resolvedBy` and `proposedBy` |
+| `RESOLUTION_PENDING` | `reject-resolution(reason)` | `processes:incident:manage` | Caller is not the proposer; `If-Match` | `OPEN` | Proposal cleared; `INCIDENT_RESOLUTION_REJECTED`; `processes.incident.resolution-rejected.v1` |
+| `OPEN` | `resolve(output, reason)` under `single` (`dev` profile only; start-up refuses it elsewhere) | `processes:incident:manage` | As the proposal | `RESOLVED`, `COMPLETED_MANUALLY` | Proposed and approved in one transaction, recorded with `approvalMode: single` |
+| `OPEN`, `RESOLUTION_PENDING` | `cancel` of the instance | `processes:cancel` | The cancel transaction | `RESOLVED`, `INSTANCE_CANCELLED` | `INCIDENT_RESOLVED` with the canceller; `processes.incident.resolved.v1` (`PRE-079`) |
+
+How the slice of #68 implements the table (0.3.0):
+
+- Every command reads the incident in the caller's tenant (another tenant's is `404 INCIDENT_NOT_FOUND` and nothing is written), then locks the `pre_instance` row and the incident row in that order, the order every instance transition takes, and checks status, four eyes, lock version, the retry flag and the instance status, so a refused command writes nothing. Each takes a required `Idempotency-Key` and `If-Match`; a replay answers the stored incident and the caller's `allowedActions` are computed again.
+- A retry keeps the job id, so the adapter's idempotency key (`AdapterCall.idempotencyKey()`, `TR-IDEM-04`) is the same and a remote side effect is never repeated; each claim has a new attempt id and completion token. One more attempt, not a new policy: a retry is one person's action because it runs the same step again and decides nothing (PD-126). A local step has no job: the kernel's `RetryStep` command sends the waiting token into its step again.
+- The output a person proposes is checked against the step's output schema (an agent step's `<horus:outputSchema>`; a service step without one only needs a JSON object of at most 256 KB). The proposal row keeps it unmasked, because the step needs it on approval; the incident view and history keep an agent step's output masked by its schema's policy, as its answers are (section 4.1). A service step has no masking policy, so its operator output is recorded as given.
+- The table keeps the control as a second line: `ck_pre_incident_four_eyes` refuses a `four-eyes` resolution whose resolver is its proposer, and `ck_pre_incident_proposal` refuses a pending state without proposer, time and reason (V29).
+- Undo incidents (`COMPENSATION_FAILED`, `COMPENSATION_MANUAL_REQUIRED`) arrive with saga compensation (#67): their resolution marks the undo done by hand with the same proposal and approval. A host `LifecycleGuard` veto of an incident transition (`TR-EXT-06`) is called before any write once the guard SPI exists.
+
 ## 4. Transaction model
 
 | Step kind | Transaction | Why |
@@ -200,7 +227,7 @@ The first async step is the remote `serviceTask` (`horus:mode="remote"`, optiona
 - **Park.** The step transaction moves the token to `WAITING_ASYNC` and inserts one `ASYNC_SERVICE` job, `DUE` now, whose id is the token's activity instance id, with `lease_duration = timeout + jobs.lease-margin` and a payload of the adapter name, the timeout, the business key and the bounded inputs. History records `ASYNC_STEP_SCHEDULED`. Cancelling the token cancels the job in the same transaction. Nothing is called.
 - **TX1.** `AsyncStepExecutor` claims due async jobs, `FOR UPDATE SKIP LOCKED`, one job kind at a time and at most as many as that kind's runner has free slots (see "Runner per job kind" below); the timer claim of section 4.4 never returns async jobs. Each claim increments `attempt`, and the attempt id is derived from the job id and the attempt number, so every claim has a new one. The attempt id is a correlation id and the history key, not a credential: anyone who can read an instance can derive it. TX1 therefore also issues each claim a completion token, 256 random bits from `SecureRandom`, and stores only its SHA-256 in `pre_timer.completion_token_hash` (migration V8).
 - **Call.** `ServiceAdapter.execute(AdapterCall)` runs on the adapter executor with no transaction (the executor refuses to call when one is active, and an ArchUnit rule allows no other caller). The call carries tenant, instance, node, business key, job id, attempt id, completion token, attempt number and deadline. The remote side deduplicates by the job id (`AdapterCall.idempotencyKey()`, `TR-IDEM-04`), which every retry of the step keeps; the attempt id changes on each attempt and is never an idempotency key. `AdapterCall.toString()` masks the token. The guard counts the engine's own transactions on the thread through `TransactionRunner.tracked`, whatever the runner, and also asks the runner (Spring: `TransactionSynchronizationManager`) about a host transaction; a host transaction a non-Spring runner cannot see is not detected. At the deadline the executor interrupts the call and records `ADAPTER_TIMEOUT`.
-- **TX2.** `ProcessServices.recordAttempt` locks the instance row, then the job row, and accepts the result only when the job is `CLAIMED` under that attempt with an unexpired lease. A completed result appends `ASYNC_RESULT_ACCEPTED`, delivers the result to the token and marks the job `DONE`. A failed result appends `ASYNC_ATTEMPT_FAILED` with the code, `retryable` and the reporter (never the detail) and sets the job `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` when it is not retryable, is a business error, or used `jobs.max-attempts`; the token stays on the step and the same transaction opens an incident (#58, `pre_incident`, V13): one `OPEN` row with the code (`UNHANDLED_BUSINESS_ERROR` for a business error), a cause built from codes only, never from the detail, and `retry_count`, the attempts after the first, plus `INCIDENT_RAISED` in history and `processes.incident.raised.v1`. `IncidentService.openIncidents(instanceId)` reads them in the caller's tenant; retry and resolve follow with #68. The incident row, `INCIDENT_RAISED` and the event carry the business code as `businessCode` (#55, `PRE-111`). A job claimed more often than `jobs.max-attempts` (its attempts kept dying with their replica) is failed without a call and records `ASYNC_ATTEMPT_FAILED` with `MAX_ATTEMPTS_REACHED`.
+- **TX2.** `ProcessServices.recordAttempt` locks the instance row, then the job row, and accepts the result only when the job is `CLAIMED` under that attempt with an unexpired lease. A completed result appends `ASYNC_RESULT_ACCEPTED`, delivers the result to the token and marks the job `DONE`. A failed result appends `ASYNC_ATTEMPT_FAILED` with the code, `retryable` and the reporter (never the detail) and sets the job `DUE` after `jobs.retry-backoff` times the attempt, or `FAILED` when it is not retryable, is a business error, or used `jobs.max-attempts`; the token stays on the step and the same transaction opens an incident (#58, `pre_incident`, V13): one `OPEN` row with the code (`UNHANDLED_BUSINESS_ERROR` for a business error), a cause built from codes only, never from the detail, and `retry_count`, the attempts after the first, plus `INCIDENT_RAISED` in history and `processes.incident.raised.v1`. `IncidentService.openIncidents(instanceId)` reads them in the caller's tenant; an operator retries or resolves them as section 3.6 describes (#68). The incident row, `INCIDENT_RAISED` and the event carry the business code as `businessCode` (#55, `PRE-111`). A job claimed more often than `jobs.max-attempts` (its attempts kept dying with their replica) is failed without a call and records `ASYNC_ATTEMPT_FAILED` with `MAX_ATTEMPTS_REACHED`.
 - **Hand-off.** An adapter may answer `Accepted`: the slot is freed, no thread waits, and the job keeps its lease while the remote side works. The remote side reports the result through `AsyncStepService.complete(jobId, attemptId, completionToken, result)` or `POST /async-steps/{jobId}:complete`, on any replica. The tenant comes from the resolver and another tenant's job is `404 ASYNC_STEP_NOT_FOUND` with nothing written. The caller needs `processes:step:complete` and one of the roles `adapters.completer-roles` lists for the job's adapter (the adapter scope, checked before any lock); an adapter without an entry cannot be completed from outside. When the attempt id is the job's latest claim, the presented token is hashed and compared with the stored hash in constant time (`MessageDigest.isEqual`); a mismatch is `403 PERMISSION_DENIED` and writes nothing. The scope is a role list per adapter rather than a permission per adapter because permissions are a closed list that host metadata validates at start-up, while roles are what the identity provider already assigns to a callback client. If no result arrives before the lease ends, the job is claimed again and the adapter called with a new attempt id.
 - **Outcomes.** `REFUSED` for a result its kind's check refused (section 4.1; nothing of it is accepted); `ACCEPTED`; `DUPLICATE` for a repeat of an attempt that is already `DONE` (writes nothing); `DISCARDED` for a lease that ended or an attempt that was taken over (writes nothing) and for a cancelled job (writes `LATE_RESULT_DISCARDED` with the attempt id once per job, fenced by `pre_timer.late_result_at`; repeats are logged at DEBUG only).
 - **Late results after a timeout (#55, `PRE-112`).** The attempt check runs before anything else in TX2, so a result for an attempt that is not the job's current claim never reaches the guard, the kernel or the incident code. That covers an attempt whose lease ended, one taken over by a later attempt, a step that completed, and a job that failed with an incident. The result is `DISCARDED` with no row written (`TR-ASY-02`: no state change), only an INFO log line without the result. A repeat gets the same outcome, so a late result is idempotent and can neither reopen a finished step nor close an incident. Only a cancelled job records the late result in history, because the cancel is a state change the caller must be able to correlate (`TR-STD-12`).
@@ -429,7 +456,7 @@ Standards foundations (ADR-0017):
 
 ### 5.3 Graph diff (PE-F-46)
 
-`GraphDiffs.diff(base, target)` is a pure function of the two models (`PRE-025`, `PRE-176`). Nodes are matched by BPMN id and compared on their canonical form, the form that is hashed and approved, without the members that name the following step (`next`, `default`, a branch's `next`); a changed value is one entry with its JSON Pointer path inside the step and its old and new value, so a changed branch condition is `/branches/i/when` on the gateway. Edges are matched by `(from, to, kind)` where kind is `next`, `branch[i]` (the i-th conditional branch of an exclusive gateway, from 0, in document order), `default` or `fork`. Output: `nodesAdded`, `nodesRemoved` (id, name, type), `nodesChanged` (id, name, type, path, from, to), `edgesAdded`, `edgesRemoved` (sequence flow id, both step ids and names, kind), all sorted, and `truncated` when more than 1,000 changed values were found. Layout is not in the model, so it is never part of the diff, and no XML is returned. `DefinitionService.diff(base, target)` and `diffFromEffective(target)` read both versions of one key in the caller's tenant, of any lifecycle status, through the stored-source integrity check, and write nothing; the REST `ETag` is derived from both definition hashes. Complexity O(N + E) apart from sorting; a 500-node definition diffs in under 5 ms.
+`GraphDiffs.diff(base, target)` is a pure function of the two models (`PRE-025`, `PRE-176`). Nodes are matched by BPMN id and compared on their canonical form, the form that is hashed and approved, without the members that name the following step (`next`, `default`, a branch's `next`); a changed value is one entry with its JSON Pointer path inside the step and its old and new value, so a changed branch condition is `/branches/i/when` on the gateway. Edges are matched by `(from, to, kind)` where kind is `next`, `branch[i]` (the i-th conditional branch of an exclusive gateway, from 0, in document order), `default` or `fork`. Output: `nodesAdded`, `nodesRemoved` (id, name, type), `nodesChanged` (id, name, type, path, from, to), `edgesAdded`, `edgesRemoved` (sequence flow id, both step ids and names, kind), all sorted, and `truncated` when more than 1,000 changed values were found. Layout is not in the model, so it is never part of the diff, and no XML is returned. `DefinitionService.diff(base, target)` and `diffFromEffective(target)` read both versions of one key in the caller's tenant, of any lifecycle status, through the stored-source integrity check, and write nothing; the REST `ETag` is derived from both definition hashes. Complexity O(N + E) apart from sorting; a 500-node definition diffs in under 5 ms. A diff that is `truncated` carries no hash that may be approved (PRE-177, PD-139): the REST answer then omits `definitionHash` on both sides and its `approvableHash` is null; a complete diff sets `approvableHash` to the target's `definitionHash`, which `approve` checks against the stored content. `approve` refuses with `409 CHANGE_SET_TRUNCATED`, writing nothing, when the diff from the effective version to the version approved is truncated, so an approval can never rest on a change list that was cut off. Until the diff is paged, a version with more than 1,000 changed values against the effective one cannot be approved outside the `dev` profile (`approval.require-content-hash=false`); paging the diff lifts this limit.
 
 ### 5.4 Layout (ADR-0013, `TR-DEF-02`, M3)
 
@@ -487,6 +514,44 @@ The first Process Engine slice (pull request #149, on the contract of #139) sett
 | Local handlers and decisions | Run inside the caller's transaction (section 4). Each call is timed, and above `handlers.slow-call-warning` (default 200 ms) a `process.step.slow` warning names the step, the target and the elapsed time, never the inputs. The no-network rule is stated on `ServiceTaskHandler` | Permanent |
 | Dependency on the Rule Engine | `process-engine-core` depends on `bpm-expression` and not on `rule-engine-core` (ADR-0027, 0.2.0). Gateway conditions compile through the `ExpressionLanguage` SPI in an untyped environment. A `businessRuleTask` calls the `DecisionPort` with the instance's tenant, a `DecisionCaller`, the engine clock and the step key (section 4.4); the adapter lives in the process starter, which declares `rule-engine-core` optional and builds it only when the Rule Engine is on the class path and a `RuleEngine` bean exists. Without one, a definition with a `businessRuleTask` is refused at activation with `BPMN_NOT_EXECUTABLE` naming the step | ADR-0027 (0.2.0) |
 
+### 5.9 Local and remote service steps (#63)
+
+A `serviceTask` chooses its mode with `horus:mode`: none or `local` calls a `ServiceTaskHandler` in the step transaction; `remote` parks the token on the Async Wait-State of section 4 and runs a `ServiceAdapter` on the async executor. Any other value is `MODE_INVALID` at import, and `horus:timeout` on a local step is `TIMEOUT_INVALID`; both name the step and its line (`PRE-072`). The handler or adapter name is resolved against the host's typed beans, never by reflection, and only when the version is about to become active (request-approval and approval, or a dev auto-approved import), so a pipeline can import a draft before the host registers the bean.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Caller
+    participant E as Engine (step TX)
+    participant H as limits.reserve (local)
+    participant DB as Host PostgreSQL
+    participant X as Async executor (no TX)
+    participant A as core-banking adapter (remote)
+    C->>E: POST /instances (LN-2026-0042, 50,000,000 VND)
+    E->>DB: lock pre_instance
+    E->>H: handle(ServiceCall: tenant from the instance row, attempt id, bounded inputs)
+    H->>DB: insert reservation (same TX)
+    E->>DB: token WAITING_ASYNC + ASYNC_SERVICE job, commit together
+    E-->>C: 201 RUNNING
+    X->>DB: TX1 claim job, lease, store token hash; commit
+    X->>A: execute(AdapterCall: idempotencyKey = job id, new attempt id)
+    A-->>X: Completed { postingRef: FT26324001 }
+    X->>DB: TX2 ASYNC_RESULT_ACCEPTED, store postingRef, INSTANCE_ENDED
+    alt handler throws
+        H--xE: exception
+        E->>DB: rollback (no instance, no reservation, no history)
+        E-->>C: 500 INTERNAL with correlationId only
+    end
+```
+
+| Concern | Local step | Remote step |
+|---|---|---|
+| Transaction | The caller's or the firing's; the handler's writes commit or roll back with the step | None open during the call; TX1 claims, TX2 records |
+| Key | None needed: nothing outlives a rollback. The attempt id correlates only | The job id (`AdapterCall.idempotencyKey()`), the same on every retry; the attempt id fences late results |
+| Failure | A throw rolls back; a request is `500 INTERNAL`, a firing retries after its backoff; a returned `Failed` is `422 STEP_FAILED` | `ASYNC_ATTEMPT_FAILED`; retry after back-off up to `jobs.max-attempts`; `ADAPTER_TIMEOUT` at `horus:timeout` |
+| Tenant | The locked `pre_instance` row's | The locked `pre_instance` row's; a completion for another tenant's job is `404` |
+| Slow call | `process.step.slow` above `handlers.slow-call-warning`, never the inputs | Bounded by `horus:timeout` |
+
 ## 6. Java API and REST contract
 
 ### 6.1 Java API (`io.github.dhluong90.bpm.process.api`, ADR-0022)
@@ -502,7 +567,8 @@ public interface DefinitionService {
   // 0.2.0 (#47): each lifecycle command takes the idempotency key last; null means none.
   DefinitionVersion requestApproval(DefinitionRef ref, long expectedLockVersion, @Nullable Instant effectiveFrom,
       @Nullable String idempotencyKey);
-  DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, @Nullable String comment, @Nullable String idempotencyKey);
+  DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, @Nullable String expectedDefinitionHash,
+      @Nullable String comment, @Nullable String idempotencyKey);   // 0.3.0 (#406): hash of the content reviewed
   DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, @Nullable String idempotencyKey);
   DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, @Nullable String idempotencyKey);
   Optional<DefinitionVersion> find(DefinitionRef ref);                    // processes:read
@@ -517,6 +583,17 @@ public interface MigrationService {                                        // #7
   MigrationPlan plan(MigrationPlanRequest request);                        // processes:migration:manage
   MigrationPlan find(String migrationId);                                  // processes:migration:manage or processes:read
   MigrationDryRun validate(String migrationId);                            // processes:migration:manage, read-only
+}
+
+public interface IncidentService {                                        // 0.3.0 (#68), section 3.6
+  List<Incident> openIncidents(String instanceId);                        // processes:read; OPEN and RESOLUTION_PENDING
+  Page<Incident> incidents(IncidentQuery query);                          // processes:read; one status, newest first
+  Incident incident(String incidentId);                                   // processes:read
+  Incident retry(String incidentId, long expectedLockVersion, String reason, String idempotencyKey);
+  Incident resolve(String incidentId, long expectedLockVersion, Map<String, Object> output, String reason,
+      String idempotencyKey);
+  Incident approveResolution(String incidentId, long expectedLockVersion, @Nullable String comment, String idempotencyKey);
+  Incident rejectResolution(String incidentId, long expectedLockVersion, String reason, String idempotencyKey);
 }
 
 public interface ProcessQueryService {
@@ -551,7 +628,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `PUT /definitions/{key}/versions/{v}` | `processes:author` | Replace draft content | `If-Match: "<lockVersion>"` | `403 DRAFT_AUTHORING_DISABLED`, `409 VERSION_CONFLICT`, `409 INVALID_STATE` | M2 |
 | `POST /definitions/{key}/versions/{v}:validate` | `processes:author` or `processes:deploy` | Validation report | None | | M2 |
 | `POST /definitions/{key}/versions/{v}:request-approval` | `processes:author` or `processes:deploy` | To `PENDING_APPROVAL` | `Idempotency-Key`, `If-Match` | `422 VALIDATION_FAILED`, `409 INVALID_STATE` | M2 |
-| `POST /definitions/{key}/versions/{v}:approve` | `processes:approve` | To `ACTIVE` | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `409 VERSION_SUPERSEDED`, `409 INVALID_STATE` | M2 |
+| `POST /definitions/{key}/versions/{v}:approve` | `processes:approve` | To `ACTIVE`; body `expectedDefinitionHash` (required by default, PD-139) and `comment` | `Idempotency-Key`, `If-Match` | `400 CONTENT_HASH_REQUIRED`, `409 CONTENT_CHANGED`, `403 SELF_APPROVAL_FORBIDDEN`, `409 VERSION_SUPERSEDED`, `409 INVALID_STATE` | M2 |
 | `POST /definitions/{key}/versions/{v}:reject` | `processes:approve` | Back to `DRAFT`, reason required | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
 | `GET /definitions/{key}/versions/{v}/history` | `processes:read` | Lifecycle history, oldest first: action, statuses, actor, comment, time | None | `404 DEFINITION_NOT_FOUND` | M2 |
 | `POST /definitions/{key}/versions/{v}:retire` | `processes:approve` (`ACTIVE`), `processes:author` (`DRAFT`) | To `RETIRED`; body `{ "reason": "...", "confirmNoVersionInEffect": true }`, reason required for `ACTIVE` (PD-102), the flag only for the last version in effect (PD-101) | `Idempotency-Key`, `If-Match` | `400 INPUT_INVALID`, `409 INVALID_STATE`, `409 LAST_VERSION_IN_EFFECT` | M2 |
@@ -576,8 +653,11 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /agent-replays/{id}/cases` | `processes:agent:replay` | Read report lines in recorded order, keyset-paged, `limit` 1 to 500 | Read only | `404 REPLAY_NOT_FOUND`, `400 QUERY_INVALID` | M3 (#98) |
 | `GET /agent-replays/{id}/cases/{attemptId}/answer` | `processes:agent:replay` | Open one case's recorded answer as history keeps it (masked fields stay masked) | Read only | `404 REPLAY_NOT_FOUND` | M3 (#98) |
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
-| `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
-| `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
+| `GET /incidents?status=` | `processes:read` | Incident list of one status (`OPEN` by default, `RESOLUTION_PENDING`, `RESOLVED`), newest first, with `allowedActions` for the caller; filters by definition key and step follow with the cockpit incident screen | Cursor, at most 200 | `400 QUERY_INVALID` | M2 (0.3.0, #68) |
+| `GET /incidents/{id}` | `processes:read` | One incident, with the pending resolution | `ETag` from `lockVersion` | `404 INCIDENT_NOT_FOUND` | M2 (0.3.0, #68) |
+| `POST /incidents/{id}:retry` | `processes:incident:manage` | Run the failed step again, section 3.6; `202` | `Idempotency-Key`, `If-Match`, both required | `409 INVALID_STATE`, `400 INPUT_INVALID` | M2 (0.3.0, #68) |
+| `POST /incidents/{id}:resolve` | `processes:incident:manage` | Propose the step's output with a reason (PD-126) | `Idempotency-Key`, `If-Match`, both required | `422 OUTPUT_INVALID`, `409 INVALID_STATE`, `400 INPUT_INVALID` | M2 (0.3.0, #68) |
+| `POST /incidents/{id}:approve-resolution`, `:reject-resolution` | `processes:incident:manage` | A second person approves (the token moves on) or rejects (the incident is open again) | `Idempotency-Key`, `If-Match`, both required | `403 SELF_APPROVAL_FORBIDDEN`, `409 INVALID_STATE` | M2 (0.3.0, #68) |
 | `POST /migrations` | `processes:migration:manage` | Create a plan; records the approval its execution needs (section 4.3) | `Idempotency-Key` | `404 DEFINITION_NOT_FOUND`, `409 INVALID_STATE` | M2 (0.3.0, #74) |
 | `GET /migrations/{id}` | `processes:migration:manage` or `processes:read` | Read a plan | Read only | `404 MIGRATION_NOT_FOUND` | M2 (0.3.0, #74) |
 | `POST /migrations/{id}:validate` | `processes:migration:manage` | Dry run; reads only, so no idempotency key and no approval | Read only | `404 MIGRATION_NOT_FOUND` | M2 (0.3.0, #74) |
@@ -589,7 +669,7 @@ Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permi
 
 ### 6.3 Permissions
 
-From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:agent:replay` (replay recorded agent answers against a candidate guardrail and read the reports; held by no role by default, PD-128, #98), `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage`.
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:agent:replay` (replay recorded agent answers against a candidate guardrail and read the reports; held by no role by default, PD-128, #98), `processes:incident:manage` (retry an incident, propose a resolution, and approve or reject another person's proposal; 0.3.0, #68), `processes:migration:manage`, `processes:calendar:manage`.
 
 ### 6.4 Events
 
@@ -598,7 +678,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | Event | Payload beyond the envelope |
 |---|---|
 | `processes.definition.publish-requested.v1` | `definitionKey`, `version`, `definitionHash`, `requestedBy`, `effectiveFrom`, `source` |
-| `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt`, `sourceHash`, `readerVersion` (5.8) |
+| `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt`, `sourceHash`, `readerVersion` (5.8), and `reviewedDefinitionHash` when the approval named one (0.3.0, PD-139) |
 | `processes.definition.rejected.v1` | `definitionKey`, `version`, `rejectedBy`, `reason` |
 | `processes.definition.retired.v1` | `definitionKey`, `version`, `retiredBy` or `supersededBy`; for a manual retirement also `reason`, `approvalMode` (`single` or `four-eyes`), `requestedBy` in `four-eyes` mode, and `noVersionInEffect` (PD-101, PD-102) |
 | `processes.migration.planned.v1` | `migrationId`, `definitionKey`, `sourceVersion`, `targetVersion`, `planHash`, `approval` (`four-eyes` or `single`), `createdBy` (#74); the event id is derived from the plan id |
@@ -607,7 +687,8 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.step.completed.v1` | `instanceId`, `nodeId`, `attemptId`, `durationMs` |
 | `processes.task.created.v1`, `processes.task.completed.v1` | `taskId`, `instanceId`, `nodeId`, assignment, `completedBy` |
 | `processes.task.claimed.v1`, `processes.task.unclaimed.v1` | `taskId`, `instanceId`, `nodeId`, `assignee`, `claimedBy` or `unclaimedBy`, `definitionKey`, `version`, `businessKey`; the event id is derived from the task id and the lock version the change reaches (0.2.0) |
-| `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode`; `businessCode` when the code is `UNHANDLED_BUSINESS_ERROR` (#55) |
+| `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode`, `retryCount`, `status`, `definitionKey`, `version`, `businessKey`; `businessCode` when the code is `UNHANDLED_BUSINESS_ERROR` (#55); `resolved.v1` adds `resolution` and `resolvedBy`, and `proposedBy` and `approvalMode` for `COMPLETED_MANUALLY` (0.3.0, #68) |
+| `processes.incident.retried.v1`, `.resolution-proposed.v1`, `.resolution-rejected.v1` | The incident fields above, plus `retriedBy` and `reason`, `proposedBy` and `approvalMode`, or `rejectedBy` and `proposedBy` (0.3.0, #68). The event id derives from the incident id and the lock version the change reaches |
 | `processes.compensation.started.v1` | `instanceId`, `scopeId`, stack depth |
 | `processes.calendar.changed.v1` | `calendarKey`, `changeId`, `version`, `proposedBy`, `approvedBy`, `approval` (`FOUR_EYES` or `SINGLE`); the event id is the change id with `:approved` (0.3.0, #72) |
 
@@ -628,6 +709,8 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `definitions.auto-approve` | `false` | Approve imported drafts automatically, for start-up imports and for `POST /definitions` imports alike; each auto-approved import is logged at WARN with tenant and definition key. Start-up fails unless `dev` is the only active profile besides `test`, and fails whenever the removed key `definitions-auto-approve` is set at all (`TR-SEC-11`, `PRE-022`) |
 | `lifecycle.approver-must-differ-from` (host property `horus.bpm.lifecycle.approver-must-differ-from`, shared with the Rule Engine) | `makers` | Shared by both engines: host property `horus.bpm.lifecycle.approver-must-differ-from` (PD-096), published as `lifecycle.approver-must-differ-from` in each engine module's `/api/bpm/meta` settings. `makers` (default): the approver differs from every maker of the version, that is the importer or creator, every editor of the draft and the requester. `requester`: the approver differs from the requester only; this relaxes a control, so it is never the default, it is logged at WARN at start-up and recorded on every approval history row. The requester can never approve under either value (`403 SELF_APPROVAL_FORBIDDEN`, with a detail naming why). Implementation: read by `ApproverMustDifferFrom` in `bpm-host-metadata` (the Rule Engine starter can read it too, #273); recorded on the history row as `details.approverMustDifferFrom` |
 | `calendar.approval` | `four-eyes` | PD-131: a business calendar is created or changed only when a second holder of `processes:calendar:manage` approves the proposal (section 4.3). `single` lets the proposer apply it alone, is refused at start-up unless `dev` is the only active profile besides `test`, is logged at WARN and is recorded on every change as `SINGLE` |
+| `approval.require-content-hash` | `true` | PD-139: an approval of a definition version names `expectedDefinitionHash`, the hash of the content reviewed (`400 CONTENT_HASH_REQUIRED` without). `false` is refused at start-up outside the `dev` profile; published as `approval.require-content-hash` in `/api/bpm/meta` |
+| `incidents.resolve-approval` | `four-eyes` | PD-126: resolving an incident with an operator's output is a proposal that a second holder of `processes:incident:manage` approves. `single` applies the proposer's resolution at once and is refused at start-up outside the `dev` profile; published as `incidents.resolve-approval` in `/api/bpm/meta` |
 | `maker-checker.enabled` | `true` | `false` is refused outside the `dev` profile (`TR-SEC-11`); on `dev` it lets a requester approve their own definition version, recorded as approver `system:dev-auto-approve` (section 3.2) |
 | `horus.bpm.lifecycle.retire-approval` (shared host key) | `single` | PD-102: retiring an active definition needs one `processes:approve` holder and a reason; recorded on the history row and `retired.v1`. `four-eyes` is refused at start-up until the four-eyes retirement mode is built. Published as `lifecycle.retire-approval` in `/api/bpm/meta`; read by `RetireApproval` in `bpm-host-metadata` |
 | `horus.bpm.lifecycle.retire-last-version` (shared host key) | `confirm` | PD-101: retiring the last version in effect of a key needs `confirmNoVersionInEffect: true` (`confirm`) or is refused (`refuse`); `four-eyes` is refused at start-up in this release. Published as `lifecycle.retire-last-version` in `/api/bpm/meta`; read by `RetireLastVersion` in `bpm-host-metadata` |
@@ -645,7 +728,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `jobs.timer-lease` | `60s` | Lease of timer, SLA and effective-date jobs, which make no external call (ADR-0008) |
 | `jobs.enabled`, `jobs.poll-interval`, `jobs.batch-size` | `true`, `1s`, `32` | Job poller of this replica (section 4.4): one daemon thread, polls again at once while a poll fired a job; at least one replica must poll |
 | `jobs.replica-id` | host name plus a random suffix | Name a replica claims jobs under (`pre_timer.locked_by`); must differ between running copies |
-| `jobs.max-attempts`, `jobs.retry-backoff` | `3`, `10s` | A firing that fails rolls back and is due again after the back-off times the attempt number; after the last attempt the job is `FAILED` (incidents for jobs follow with `pre_incident`) |
+| `jobs.max-attempts`, `jobs.retry-backoff` | `3`, `10s` | A firing that fails rolls back and is due again after the back-off times the attempt number; after the last attempt the job is `FAILED` (it opens an incident, section 3.6) |
 | `adapters.executor-threads` | `16` | Adapter executor size per replica; a job is claimed only when a slot is free (section 4) |
 | `runners.async-service.slots`, `runners.async-agent.slots` | `adapters.executor-threads` | Calls of that kind in flight per replica; a job of the kind is claimed only when one of its own slots is free, so one kind never takes another's (#363, section 4) |
 | `runners.<kind>.default-timeout` | `adapters.default-timeout` | Timeout of a step of that kind that declares none; its lease is this plus `jobs.lease-margin` |
@@ -877,7 +960,7 @@ CREATE INDEX idx_pre_timer_poll_kind                                            
 CREATE INDEX idx_pre_timer_instance
   ON pre_timer (tenant_id, instance_id) WHERE status IN ('DUE','CLAIMED');
 
-CREATE TABLE pre_incident (                                                     -- 0.2.0 (#58, V13)
+CREATE TABLE pre_incident (                                                     -- 0.2.0 (#58, V13); 0.3.0 (#68, V29)
   tenant_id       TEXT        NOT NULL,
   id              VARCHAR(26) NOT NULL,
   instance_id     VARCHAR(26) NOT NULL,
@@ -887,16 +970,33 @@ CREATE TABLE pre_incident (                                                     
   error_code      TEXT        NOT NULL,
   cause_summary   TEXT        NOT NULL,
   retry_count     INT         NOT NULL DEFAULT 0,
-  status          TEXT        NOT NULL CHECK (status IN ('OPEN','RESOLVED')),
+  status          TEXT        NOT NULL,          -- ck_pre_incident_status: OPEN, RESOLUTION_PENDING, RESOLVED (V29)
   lock_version    BIGINT      NOT NULL DEFAULT 0,
   created_at      TIMESTAMPTZ NOT NULL,
   resolved_at     TIMESTAMPTZ,
+  resolution      TEXT,                          -- RETRY_SUCCEEDED, COMPLETED_MANUALLY, INSTANCE_CANCELLED (V29)
+  resolved_by     TEXT,                          -- approver, canceller, or system:process-engine for a retry
+  approval_mode   TEXT,                          -- four-eyes or single (dev profile only)
+  proposed_by     TEXT,
+  proposed_at     TIMESTAMPTZ,
+  proposal_reason TEXT,
+  proposal_output JSONB,                         -- the output the step completes with on approval
+  retrying        BOOLEAN     NOT NULL DEFAULT false,
   PRIMARY KEY (tenant_id, id),
-  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id)
+  FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
+  CONSTRAINT ck_pre_incident_four_eyes CHECK (approval_mode IS DISTINCT FROM 'four-eyes' OR resolved_by IS NULL
+    OR resolved_by <> proposed_by),
+  CONSTRAINT ck_pre_incident_proposal CHECK (status <> 'RESOLUTION_PENDING' OR (proposed_by IS NOT NULL
+    AND proposed_at IS NOT NULL AND proposal_reason IS NOT NULL))
 );
 CREATE INDEX idx_pre_incident_open ON pre_incident (tenant_id, created_at DESC, id) WHERE status = 'OPEN';
 CREATE INDEX idx_pre_incident_node ON pre_incident (tenant_id, definition_id, node_id) WHERE status = 'OPEN';
 CREATE INDEX idx_pre_incident_instance ON pre_incident (tenant_id, instance_id, created_at, id) WHERE status = 'OPEN';
+-- 0.3.0 (#68, V30, built CONCURRENTLY outside a transaction): the list by status and the unresolved incidents of one
+-- instance. The V13 partial indexes stay for replicas of 0.2.0 during a rolling upgrade.
+CREATE INDEX idx_pre_incident_status ON pre_incident (tenant_id, status, created_at DESC, id DESC);
+CREATE INDEX idx_pre_incident_unresolved ON pre_incident (tenant_id, instance_id, created_at, id)
+  WHERE status IN ('OPEN','RESOLUTION_PENDING');
 
 CREATE TABLE pre_step_result (                                                  -- 0.2.0 (#101, V14): agent memory
   tenant_id            TEXT        NOT NULL,
@@ -1142,6 +1242,8 @@ Source: [`diagrams/cockpit-reads.mmd`](diagrams/cockpit-reads.mmd).
 | Activities of one instance | PK lookup of `pre_instance`, then `idx_pre_history_instance` in the partitions between `started_at` and `ended_at` | About 3 buffer reads per partition probed | Instance alive 3 months: 4 partitions, 12 buffer reads, under 5 ms. Unbounded with 24 months kept: 24 probes and planning over 24 partitions, about 15 ms; with 10 years kept, 120 probes, 50 ms or more | Bound is mandatory (`TR-PERF-08`); 10x the history volume does not change the per-instance cost |
 | Live counts per node | Index-only scan of `idx_pre_token_live` for one `(tenant, definition)` | About 90 bytes per entry: 100,000 live tokens = 9 MB, 1,100 index pages; 20 to 60 ms when pages are all-visible, up to about 150 ms with heap fetches | 500 operators, 20 percent on a diagram, 15 s refresh = 7 requests/s per host; 5 s cache per `(tenant, version)` and about 20 distinct versions in view: at most 4 queries/s x 60 ms = 0.24 busy connections | Above 100,000 tokens the cache TTL becomes 15 s and the response carries `asOf` (`TR-PERF-09`); at 1 million tokens a scan is about 600 ms, so the 15 s TTL limits it to 0.04 busy connections per version |
 | Open incidents per node | `idx_pre_incident_node` | Small: open incidents are hundreds | Under 2 ms | Unchanged |
+| Incident list of one status | `idx_pre_incident_status` range for `(tenant, status)`, `LIMIT 201` ordered by `(created_at DESC, id DESC)`, keyset | About 3 buffer reads per page | Under 2 ms | 10x incidents does not change a page; `RESOLVED` grows with history, and the keyset never scans past one page |
+| Unresolved incidents of one instance | `idx_pre_incident_unresolved` for `(tenant, instance)` | At most one per waiting token | Under 1 ms; also read by every accepted async result to close a retried incident | Unchanged |
 | Window stats per node | PK range on `pre_node_stats_hourly` for `(tenant, definition, bucket_start range)` | 20 nodes x 720 hours (31 days) = 14,400 rows, histograms merged in SQL | About 15 ms | 500 nodes x 720 hours = 360,000 rows, about 200 ms: the 31-day cap holds this; longer windows need a daily rollup (open question 11.4) |
 | Task query, one user | `idx_pre_task_mine` and `idx_pre_task_claimed` for the user, `idx_pre_task_role_due` per role, `idx_pre_task_group` per group, `idx_pre_task_open_due` for `any`; each range `LIMIT page + 1` ordered by `(due_at, id)` after the cursor, then its undated part by id while the page is short, merged in Java (0.3.0, #70) | About 0.3 ms per index range | User with 5 roles and 3 groups: 10 ranges, about 3 ms | 10x open tasks does not change it: each range stops after one page. When one role holds nearly all open tasks the planner may read `idx_pre_task_open_due` and filter by role: still an ordered range scan under the `Limit`, checked in `TaskQueryPostgresIT` |
 | SLA breaches | The same indexes with `due_at < now()` | Same | Same | Same |
@@ -1191,9 +1293,12 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Replica dies before the effective-date job runs | One key, until the lease expires | Lease on `pre_timer` | Another replica claims the job after `jobs.timer-lease`; the previous version stays effective until then because effective selection reads `effective_from`, not the job |
 | Concurrent layout saves | One layout | Duplicate primary key on `revision` | `409 VERSION_CONFLICT`; the cockpit reloads and shows the newer revision |
 | Malicious BPMN (entity expansion, deep nesting) | One request | Reader limits, DTD refused | `422 BPMN_UNSAFE_XML`; no transaction was opened |
-| Host database restored to an earlier point in time (PD-044, `TR-DR-01`, `TR-DR-02`) | Every instance changed after the restore point | Jobs `CLAIMED` with `locked_until` from before the restore; adapter calls whose TX2 was lost | No engine step: start-up adds at most 5 s; expired leases are reclaimed by the normal poller and retried with a new `attemptId`, so adapters must be idempotent by `attemptId`; the host reconciles side effects and consumers tolerate events for state the restore removed. Proven by the 1.0 restore test |
+| Host database restored to an earlier point in time (PD-044, `TR-DR-01`, `TR-DR-02`) | Every instance changed after the restore point | Jobs `CLAIMED` with `locked_until` from before the restore; adapter calls whose TX2 was lost | No engine step: start-up adds at most 5 s; expired leases are reclaimed by the normal poller and retried with a new `attemptId` and the same job id, so adapters must be idempotent by the job id (`AdapterCall.idempotencyKey()`, section 4, `TR-IDEM-04`); the host reconciles side effects and consumers tolerate events for state the restore removed. Proven by the 1.0 restore test |
+| A local handler throws (`PRE-071`) | One step | The exception leaves `ServiceTaskHandler.handle` | The step transaction rolls back with every row the handler and the earlier steps wrote; a request answers `500 INTERNAL` with a `correlationId` only; a job firing is due again after `jobs.retry-backoff` times the attempt and `FAILED` after `jobs.max-attempts`. The attempt id derives from the committed instance state, so a repeated firing presents the same one |
 | Instance cancelled while an adapter call runs | One step | TX2 finds the job `CANCELLED` | Result discarded and recorded once as `LATE_RESULT_DISCARDED` with the attempt id; the external effect, if any, is the host's to reconcile by the job id (DN-10) |
 | Handler returns a business error before S1 | One step | `HandlerResult.BusinessError` | Incident `UNHANDLED_BUSINESS_ERROR` with the code; retry or resolve as any incident (DN-09) |
+| Two operators retry or decide one incident at once | One incident | The second waits on the instance row lock, then sees the new lock version or status | `409 VERSION_CONFLICT` or `409 INVALID_STATE`; the first command stands |
+| A retried step fails again | One step | The result transaction finds the open incident of the token | The same incident takes the new cause and can be retried or resolved again; no second incident |
 | Rollup slice times out | Statistics only | `statement_timeout` | Rollback; watermark unchanged; next run repeats; metric `horus_pre_rollup_lag_seconds` alerts above 15 min |
 | Rollup partition for next month missing | Rollup inserts | Default partition receives rows | Partition job creates months 7 days ahead and moves stragglers |
 | Cockpit drafts turned off in production | Authoring endpoints | Setting | `403 DRAFT_AUTHORING_DISABLED`; imports from the pipeline still create drafts |
@@ -1205,6 +1310,8 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Control | Where | Verified by |
 |---|---|---|
 | Maker-checker for definitions: requester never approves; outside `dev` the starter refuses auto-approve and disabled maker-checker | `DefinitionService`, starter | `PRE-019`, `PRE-022` (`TR-SEC-04`, `TR-SEC-11`) |
+| An approval binds to the content reviewed: no hash, or a hash of other content, is refused; outside `dev` the starter refuses the relaxation | `DefinitionService`, starter | `PRE-177` (PD-139) |
+| An operator's output for a failed step needs a second person; the proposer never approves; the table refuses it too; outside `dev` the starter refuses `single`; outputs are schema-checked and named by path, never by value | `IncidentService`, `pre_incident`, starter | `PRE-078` (PD-126) |
 | Cockpit draft authoring can be turned off per environment | `DefinitionService` | `PRE-023` (`TR-DEF-04`) |
 | Tenant from the resolver; `X-Tenant-Id` accepted only within the token's allowed tenants | Shared tenant resolver (ADR-0014) | `PRE-038` (`TR-SEC-03`) |
 | Another tenant's resource answers `404`; composite foreign keys forbid cross-tenant references | Every query and table | Two-tenant tests (`TR-TEN-01`, `TR-TEN-02`) |

@@ -48,6 +48,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.RouteToReview review -> trigger(review.tokenId(), TokenStatus.WAITING_ASYNC, review.attemptId(),
                     review, ctx);
             case Command.Cancel cancel -> cancel(cancel, ctx);
+            case Command.RetryStep retry -> retry(retry, ctx);
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");
         }
@@ -95,6 +96,19 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         if (command instanceof Command.CompleteTask complete) {
             ctx.addParticipant(complete.actor());
         }
+    }
+
+    /** PRE-077: the waiting token enters its step again; the step's behaviour runs as on first entry. */
+    private void retry(Command.RetryStep retry, WorkingContext ctx) {
+        Token token = ctx.tree().get(retry.tokenId()).orElseThrow(() ->
+                new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + retry.tokenId()));
+        if (token.status() != TokenStatus.WAITING_ASYNC || !retry.attemptId().equals(token.activityInstanceId())) {
+            throw new ExecutionException("INVALID_STATE", token.nodeId(), "Token " + retry.tokenId()
+                    + " does not wait on attempt " + retry.attemptId());
+        }
+        Token active = token.withStatus(TokenStatus.ACTIVE);
+        ctx.update(active);
+        ctx.enqueue(active);
     }
 
     private void cancel(Command.Cancel cancel, WorkingContext ctx) {
@@ -150,6 +164,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.Start s -> s.actor();
             case Command.CompleteTask c -> c.actor();
             case Command.Cancel c -> c.actor();
+            case Command.RetryStep r -> r.actor();
             case Command.VariablesChanged v -> v.actor();
             default -> null;
         };

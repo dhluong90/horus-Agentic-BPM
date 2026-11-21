@@ -403,7 +403,7 @@ class AgentTaskIT {
         // When the rule set loses allow before the approver acts, then approval is refused and nothing changes
         publish(pod, tenant, DECIDES_WITHOUT_ALLOW);
         pod.identity.as(tenant, "minh", "processes:approve", "processes:read");
-        refusedNaming(() -> pod.services.approve(draft.ref(), pending.lockVersion(), "ok", null),
+        refusedNaming(() -> pod.services.approve(draft.ref(), pending.lockVersion(), draft.definitionHash(), "ok", null),
                 "declares no output allow");
         DefinitionVersion after = pod.services.find(draft.ref()).orElseThrow();
         assertThat(after.status()).isEqualTo("PENDING_APPROVAL");
@@ -412,7 +412,7 @@ class AgentTaskIT {
         // And with the compliant rule set back in effect, the second person approves
         publish(pod, tenant, guardrailYaml());
         pod.identity.as(tenant, "minh", "processes:approve", "processes:read");
-        assertThat(pod.services.approve(draft.ref(), pending.lockVersion(), "ok", null).status())
+        assertThat(pod.services.approve(draft.ref(), pending.lockVersion(), draft.definitionHash(), "ok", null).status())
                 .isEqualTo("ACTIVE");
     }
 

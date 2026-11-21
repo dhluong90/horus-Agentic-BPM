@@ -442,6 +442,82 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:validate:
+    post:
+      tags: [rule-sets]
+      operationId: validateDraft
+      summary: Check an edited table of a DRAFT version as a save would, and store nothing
+      description: |
+        Permission `rules:author`, checked before the body is read. The body is the one `PUT
+        .../versions/{version}` takes (YAML or DMN 1.2 to 1.5, at most 1,048,576 bytes, `413 PAYLOAD_TOO_LARGE`;
+        the document's `ruleSet` must equal `{name}`, `400 INPUT_INVALID`) and it goes through the same checks as a
+        save, including the row limit, the step budget and the mask rules (`RLE-049`, `RLE-050`). Unlike a save, a
+        document that fails the checks is answered `200` with `valid: false` and every cell problem in `problems`
+        (at most 100, `problemsTruncated` when more were found), so a grid can mark cells while the author types.
+
+        Writes nothing: no version write, no history entry, no event, no idempotency record. It therefore takes
+        no `Idempotency-Key` and no `If-Match`. The version is read in the caller's tenant only (`404
+        VERSION_NOT_FOUND`, `404 RULE_SET_NOT_FOUND`); a version that is not a `DRAFT` is `409 INVALID_STATE`.
+        When the host sets `horus.bpm.rules.authoring.cockpit-drafts` to `false` the answer is
+        `403 DRAFT_AUTHORING_DISABLED`, as for a save.
+
+        Each problem carries a stable `code` and a `message` in every language of the engine's message catalogue
+        (`en` and `vi` ship). The message is written from the catalogue and the code alone; it never repeats text of
+        the cell, so a masked value is never echoed. `readings` has one entry per rule when the document is valid and
+        is empty otherwise; a reading of a condition on a masked input says that the value is masked.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              type: string
+            example: |
+              schemaVersion: 1
+              ruleSet: card-fee
+              hitPolicy: first
+              inputs:
+                - { name: balance, type: money }
+              outputs:
+                - { name: fee, type: money }
+              rules:
+                - id: R2
+                  when: { balance: "balance + 100 > 0" }
+                  then: { fee: "0 VND" }
+          application/xml:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: The result of the check; nothing was stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DraftValidation'
+              example:
+                ruleSet: card-fee
+                version: 3
+                valid: false
+                problems:
+                  - ruleId: R2
+                    column: balance
+                    code: TYPE_MISMATCH
+                    position: 0
+                    message:
+                      en: The cell mixes values of different types, or is not a true or false condition.
+                      vi: Ô này trộn các giá trị khác kiểu, hoặc không phải là điều kiện đúng hoặc sai.
+                problemsTruncated: false
+                readings: []
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/diff:
     get:
       tags: [rule-sets]
@@ -1622,7 +1698,9 @@ paths:
 
         An unknown id, or a decision of another tenant, is `404 DECISION_NOT_FOUND`. A decision whose
         logged inputs include a masked value (`mask: true`, stored only as `masked`) cannot be
-        re-evaluated and is `422 REPLAY_NOT_POSSIBLE`, naming the inputs and never their values. A
+        re-evaluated and is `422 REPLAY_NOT_POSSIBLE`, naming the inputs and never their values. So is a
+        decision that called a host function whose version label is not the one now registered: the problem
+        names the function and both labels. A
         logged failure replays as the same `422` problem as at evaluation, with the logged `decisionId`.
       parameters:
         - name: decisionId
@@ -1718,8 +1796,11 @@ paths:
         contract: `RULE_MATCHED`, `NO_RULE_MATCHED`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`, `VALUE_MISSING` and
         `VALUE_MASKED`, each with named `params`. `text` is rendered from `reasons` through a message catalogue:
         `lang`, then `Accept-Language`, choose among the catalogues the host has (English and Vietnamese ship),
-        else `explain.default-language`; `language` says which was used. Numbers in `text` have no grouping and
-        money is in major units with its currency code (`10000 VND`); JSON values keep money in minor units. A
+        else `explain.default-language`; `language` says which was used. `text` is the author's sentence of the matched
+        row (or of no match) in that language when the rule set has one, else the generated sentence; `textSource`
+        says which. Names are the declared `label` of an input or output, else the name in words. Numbers and money are
+        grouped for the language and money keeps its currency code (`10,000 VND`, `10.000 VND`); booleans read Yes or
+        No; JSON values keep money in minor units. A
         masked input shows its stored `hmac:<keyId>:<hex>` with `masked: true` (RLE-031); the plain value is never
         available. The same decision always gives the same body. A decision of another tenant is
         `404 DECISION_NOT_FOUND`. Writes nothing.
@@ -2679,11 +2760,16 @@ components:
             A stable code a client can act on; the message beside it may change. Expression problems
             (`when` and `then` cells): `SYNTAX_ERROR`, `UNKNOWN_INPUT` (a name that is not a declared
             input, for example `creditScoreX`), `TYPE_MISMATCH` (for example `balance + 100` where
-            `balance` is money), `FORBIDDEN_CONSTRUCT` (a method call, member access or class reference
-            such as `T(java.lang.Runtime).getRuntime()`; refused before anything inside it is read),
+            `balance` is money; also a call of a host function with the wrong number or types of arguments),
+            `FORBIDDEN_CONSTRUCT` (a method call, member access or class reference
+            such as `T(java.lang.Runtime).getRuntime()`; refused before anything inside it is read; also a call of
+            a function the host did not register),
             `INVALID_LITERAL`, `INVALID_PATTERN`, `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` (more than
             64 levels, a chain such as `a + a + ...` included). Other cell problems: `UNKNOWN_OUTPUT`,
-            `MASKED_INPUT_IN_OUTPUT`. A table whose worst case is over the step budget:
+            `MASKED_INPUT_IN_OUTPUT`. Explanation templates (`explain`, `explanations.noMatch`), with `column` set to
+            `explain`: `UNKNOWN_PLACEHOLDER`, `MASKED_INPUT_IN_TEMPLATE` (a placeholder of an input declared
+            `mask: true`), `TEMPLATE_TOO_LONG` (over 500 characters) and `INPUT_INVALID` (a language tag that is not
+            BCP 47, or more than 10 languages). A table whose worst case is over the step budget:
             `EVALUATION_BUDGET_EXCEEDED`, on the first rule from which it is over, with a null `column`.
             Null for a problem of the document as a whole. New codes may be added.
           examples: [TYPE_MISMATCH]
@@ -2695,6 +2781,63 @@ components:
             such as `> 600 + tier` is counted from its first character), or null when the problem
             concerns the whole cell or is not in a cell.
           examples: [8]
+    DraftValidation:
+      type: object
+      required: [ruleSet, version, valid, problems, problemsTruncated, readings]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        valid:
+          type: boolean
+          description: True when a save of the same body would be accepted
+        problems:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/ValidationProblem'
+        problemsTruncated:
+          type: boolean
+          description: True when more problems were found than `problems` lists
+        readings:
+          type: array
+          description: One entry per rule, in document order, when `valid`; empty otherwise
+          items:
+            $ref: '#/components/schemas/RuleReading'
+    ValidationProblem:
+      type: object
+      required: [ruleId, column, code, position, message]
+      properties:
+        ruleId:
+          type: [string, 'null']
+          description: The rule (row) of the problem, or null for a problem outside the rules
+        column:
+          type: [string, 'null']
+          description: The input or output name (column) of the problem, or null
+        code:
+          type: string
+          description: |
+            A stable code. The codes of `Violation.code`, and for a problem that has none
+            `RULE_INVALID` (a problem of a rule), `COLUMN_INVALID` (a problem of a column) or `DOCUMENT_INVALID`.
+            New codes may be added.
+        position:
+          type: [integer, 'null']
+          minimum: 0
+          description: Zero-based character position in the cell text as written, or null
+        message:
+          type: object
+          description: The problem by language code; every language of the message catalogue is present
+          additionalProperties: { type: string }
+          examples:
+            - { en: The cell is not a valid expression., vi: Ô này không phải là biểu thức hợp lệ. }
+    RuleReading:
+      type: object
+      required: [ruleId, text]
+      properties:
+        ruleId: { type: string }
+        text:
+          type: object
+          description: The plain-language reading of the rule's condition by language code
+          additionalProperties: { type: string }
     EvaluateRequest:
       type: object
       required: [inputs]
@@ -2714,6 +2857,11 @@ components:
       type: string
       enum: [STEPS, TIME]
       description: |
+        An `EVALUATION_ERROR` whose `detail` starts with `FUNCTION_FAILED` names a host function that threw or
+        returned a value of another type, never the exception; one that starts with `FUNCTION_CHANGED` names a
+        function whose version label is not the one the rule set version was approved with (only when the host
+        sets `evaluation.function-version-change` to `refuse`). Both carry no limit.
+
         Present on an `EVALUATION_ERROR` whose `detail` starts with `EVALUATION_BUDGET_EXCEEDED`, and
         absent otherwise: the limit the decision reached. `STEPS` is the step budget (expression nodes
         visited, 100,000 by default): deterministic, so the same input fails the same way on every
@@ -3059,7 +3207,7 @@ components:
     DecisionExplanation:
       type: object
       description: A logged decision explained from its row and its stored version (RLE-030, RLE-031, DESIGN section 4.7)
-      required: [decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched, outputs, reasons, language, text]
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched, outputs, reasons, language, text, textSource]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
@@ -3089,7 +3237,11 @@ components:
           description: The language `text` is written in
         text:
           type: string
-          description: The plain-language explanation rendered from `reasons`; a client never parses it
+          description: The plain-language explanation rendered from `reasons`, or the author's template; a client never parses it
+        textSource:
+          type: string
+          enum: [TEMPLATE, GENERATED]
+          description: '`TEMPLATE` when `text` is the author''s sentence for the requested language; `GENERATED` for the catalogue sentence. Failures are always `GENERATED`'
     ExplainedRow:
       type: object
       required: [ruleId, position, conditions, outputs]

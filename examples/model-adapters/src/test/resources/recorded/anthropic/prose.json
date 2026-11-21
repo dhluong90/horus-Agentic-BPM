@@ -1,0 +1,10 @@
+{
+  "id": "msg_rec_0003",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [{"type": "text", "text": "The passport looks valid and the name matches, so I would approve this applicant."}],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {"input_tokens": 431, "output_tokens": 41}
+}

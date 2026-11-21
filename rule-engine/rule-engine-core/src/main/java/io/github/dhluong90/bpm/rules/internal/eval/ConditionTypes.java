@@ -79,9 +79,37 @@ final class ConditionTypes {
                 Kind text = kindOf(matches.target(), inputs);
                 yield !known(text) || text == Kind.STRING ? null : "matches() tests text, but it is given a " + name(text);
             }
+            case Expr.HostCall call -> hostArgumentProblem(call, inputs);
             default -> null;
         };
         return own == null ? null : new TypeProblem(own, expr);
+    }
+
+    /** RLE-056: each argument of a host function call has the type of its parameter; an unknown type passes. */
+    private static String hostArgumentProblem(Expr.HostCall call, List<InputClause> inputs) {
+        List<io.github.dhluong90.bpm.expr.spi.ValueType> parameters = call.function().parameterTypes();
+        for (int i = 0; i < parameters.size(); i++) {
+            Kind expected = kindOf(parameters.get(i));
+            Kind actual = kindOf(call.args().get(i), inputs);
+            if (known(actual) && actual != expected) {
+                return call.function().name() + ": parameter " + (i + 1) + " is a " + name(expected)
+                        + ", but the argument is a " + name(actual);
+            }
+        }
+        return null;
+    }
+
+    private static Kind kindOf(io.github.dhluong90.bpm.expr.spi.ValueType type) {
+        return switch (type) {
+            case STRING -> Kind.STRING;
+            case BOOLEAN -> Kind.BOOLEAN;
+            case NUMBER -> Kind.NUMBER;
+            case DATE -> Kind.DATE;
+            case DATETIME -> Kind.DATETIME;
+            case MONEY -> Kind.MONEY;
+            case LIST -> Kind.LIST;
+            case ANY -> Kind.UNKNOWN;
+        };
     }
 
     private static String binaryProblem(Expr.Binary binary, List<InputClause> inputs) {
@@ -185,6 +213,8 @@ final class ConditionTypes {
                     comparableProblem(between.target(), between.high(), inputs));
             case Expr.IsNull ignored -> null;
             case Expr.Call ignored -> NOT_BOOLEAN;
+            case Expr.HostCall call -> call.function().resultType() == io.github.dhluong90.bpm.expr.spi.ValueType.BOOLEAN
+                    ? null : NOT_BOOLEAN;
             case Expr.Matches matches -> {
                 Kind text = kindOf(matches.target(), inputs);
                 yield text == Kind.STRING || text == Kind.UNKNOWN || text == Kind.NULL ? null
@@ -286,6 +316,11 @@ final class ConditionTypes {
         };
     }
 
+    /** The direct subexpressions of a node. */
+    static List<Expr> childrenOf(Expr expr) {
+        return children(expr);
+    }
+
     private static List<Expr> children(Expr expr) {
         return switch (expr) {
             case Expr.Literal ignored -> List.of();
@@ -300,6 +335,7 @@ final class ConditionTypes {
             case Expr.Between between -> List.of(between.target(), between.low(), between.high());
             case Expr.IsNull isNull -> List.of(isNull.target());
             case Expr.Call call -> call.args();
+            case Expr.HostCall call -> call.args();
             case Expr.Clock ignored -> List.of();
             case Expr.Matches matches -> List.of(matches.target());
         };
@@ -385,6 +421,7 @@ final class ConditionTypes {
             case Expr.Between ignored -> Kind.BOOLEAN;
             case Expr.IsNull ignored -> Kind.BOOLEAN;
             case Expr.Call ignored -> Kind.NUMBER;
+            case Expr.HostCall call -> kindOf(call.function().resultType());
             case Expr.Matches ignored -> Kind.BOOLEAN;
         };
     }

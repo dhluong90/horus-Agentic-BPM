@@ -38,6 +38,11 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
+| 404 | [INCIDENT_NOT_FOUND](#incident_not_found) | processes | 0.3.0 |
+| 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
+| 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
+| 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
+| 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
@@ -113,7 +118,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `500`. Unexpected failure. The body carries only the fixed `detail` text and the `correlationId`, never a stack trace, class name, SQL or table name. Give the `correlationId` to the host's operators: the server log has the same id with the cause. Send `X-Correlation-Id` with your request to choose the id yourself.
 
 ### PRECONDITION_REQUIRED
-`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command (`PUT` of a draft, `:approve`, `:reject`, `:withdraw` or `:retire`), `If-Match` and `Idempotency-Key` on a Process Engine task completion, or a business key or `Idempotency-Key` on a Process Engine instance start. An approval must name the lock version of the content the approver reviewed. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice. `:simulate` writes nothing and needs neither header.
+`428`. A command that must be conditional was sent without the header it needs: `If-Match` on a Rule Engine command (`PUT` of a draft, `:approve`, `:reject`, `:withdraw` or `:retire`), `If-Match` and `Idempotency-Key` on a Process Engine task completion or incident command, or a business key or `Idempotency-Key` on a Process Engine instance start. An approval must name the lock version of the content the approver reviewed. Read the resource, then send its `ETag` as `If-Match: "<lockVersion>"` (and a new `Idempotency-Key` where asked), so the command cannot overwrite a change you have not seen or run twice. `:simulate` writes nothing and needs neither header.
 
 ## Versions and approvals
 
@@ -193,14 +198,16 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `422`. A `unique` table matched several rows for these inputs (`TR-DET-04`). Zero matches is not this error: it is no match, as with `first`. This is an authoring defect in the published rule set, so retrying never helps (ADR-0010). The decision is still logged with this outcome. Remove the overlap, or switch to `first` if order is intended. The problem body carries `decisionId` and `matchedRuleIds`, for example `"matchedRuleIds": ["R1", "R2"]`; it never carries partial outputs.
 
 ### REPLAY_NOT_POSSIBLE
-`422`. `POST /decisions/{id}:replay` for a decision that used a masked input (`mask: true`) with a value. The decision log keeps such a value only as `masked`, so the decision cannot be evaluated again. `detail` names the inputs, never their values. Explain the decision from its log entry instead. Nothing is written.
+`422`. `POST /decisions/{id}:replay` for a decision that used a masked input (`mask: true`) with a value, or that called a host function whose version label is not the one registered now. The decision log keeps a masked value only as `masked`, so the decision cannot be evaluated again; a function with another version could give another result. `detail` names the inputs, or the function and both version labels, never their values. Explain the decision from its log entry instead. Nothing is written.
 
 ### EVALUATION_ERROR
-`422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED` or `FUNCTION_ERROR`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.
+`422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED`, `FUNCTION_FAILED` or `FUNCTION_CHANGED`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.
 
 - `REGEX_TIMEOUT`: a `matches()` read more than `evaluation.regex-max-reads` characters (default 1,000,000), the `matches()` calls of one decision together read more than `evaluation.regex-max-reads-per-decision` (default 5,000,000; `detail` names that setting), the decisions of one request of many items (a simulation) together read more than `evaluation.regex-max-reads-per-request` (default 50,000,000; `detail` names that setting, and the items after it are reported `REGEX_TIMEOUT: not evaluated`), or a `matches()` ran longer than `evaluation.regex-timeout-ms` (default 50 ms), and was stopped. `detail` starts with `REGEX_TIMEOUT:` and the decision row has `error_code = REGEX_TIMEOUT`. Retrying the same input fails the same way; simplify the pattern (avoid nested quantifiers such as `(a+?)+?`).
 - `REGEX_INPUT_TOO_LONG`: the text given to `matches()` is longer than `evaluation.regex-max-input-length` (default 4,096); the match was not run. `detail` starts with `REGEX_INPUT_TOO_LONG:` and so does the row's `error_code`.
 - `EVALUATION_BUDGET_EXCEEDED`: the decision visited more than 100,000 nodes of its expressions (the step budget), or ran longer than the 10-second backstop. The problem's `limit` says which: `STEPS` is counted, not timed, so the same input fails the same way on every machine and the rule set must change; `TIME` means the machine was slow. `detail` starts with `EVALUATION_BUDGET_EXCEEDED:` and so does the row's `error_code`. Import and `:request-publish` already refuse a table whose worst case is over the budget, so `STEPS` at evaluation means the budget was lowered after the version was approved. A step is one node visited; the exact count of an expression may change between minor releases. One budget covers one top-level evaluation and every decision it requires.
+- `FUNCTION_FAILED`: a function the host registered threw an exception or returned a value of another type than it declared. The problem and the decision row name the function and never the exception. The server log has the exception and the correlation id. Fix the function; the decision fails closed with no outputs.
+- `FUNCTION_CHANGED`: only when the host sets `evaluation.function-version-change` to `refuse`. The function's version label is not the one the rule set version was approved with. Approve a new version of the rule set, by a second person, to go on.
 - `REGEX_TOO_DEEP`: the pattern's backtracking ran out of thread stack, typically an alternation under `*` or `+` such as `(a|b)*c` on a long text. Simplify the pattern or lower `evaluation.regex-max-input-length`.
 
 ### BATCH_TOO_LARGE
@@ -222,6 +229,21 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 ### TASK_NOT_FOUND
 `404`. Unknown task id, or a task of another tenant.
+
+### INCIDENT_NOT_FOUND
+`404`. Unknown incident id, or an incident of another tenant. Nothing is written by a command that answers it.
+
+### CONTENT_HASH_REQUIRED
+`400`. An approval of a process definition version did not name `expectedDefinitionHash`, the `definitionHash` of the content the approver reviewed, while `horus.bpm.processes.approval.require-content-hash` is on (the default, PD-139). Nothing is read or written. Send the hash shown with the version you reviewed. Only the `dev` profile may turn the setting off.
+
+### CONTENT_CHANGED
+`409`. The stored content of the definition version is not the content the approver reviewed: `expectedDefinitionHash` differs from its `definitionHash`. The body carries `currentDefinitionHash` and `currentLockVersion`. Nothing is written, published or recorded. Show the approver the current content and its changes again; never retry with the new hash on your own, because that would approve content nobody reviewed. A change list that was cut off at its limit has no hash to approve, see [CHANGE_SET_TRUNCATED](#change_set_truncated).
+
+### CHANGE_SET_TRUNCATED
+`409`. An approval of a process definition version named a hash, but the change list from the effective version to this one has more than 1,000 changed values and is cut off, so nobody can have reviewed it complete (PD-139). The diff of such a pair has `approvableHash: null` and no `definitionHash` on either side. Nothing is written. Until the diff is paged, such a version can be approved only on the `dev` profile with `horus.bpm.processes.approval.require-content-hash=false`.
+
+### OUTPUT_INVALID
+`422`. The output an operator proposed to resolve an incident breaks the step's output schema. `paths` lists each failing path and rule, for example `$.riskScore: expected integer`, never a value. Nothing is written. Correct the output and propose again.
 
 ### REPLAY_NOT_FOUND
 `404`. Unknown agent replay run, a run of another tenant, or a case the run does not have. Runs are deleted `replay.retention` (30 days) after they were created.

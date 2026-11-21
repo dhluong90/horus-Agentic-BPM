@@ -1,0 +1,37 @@
+# Guardrails on the model's KYC document assessment (#100): a suspicious, mismatched, expired or uncertain answer never
+# opens an account unchecked.
+schemaVersion: 1
+ruleSet: kyc-document-guardrails
+description: Guardrails on the KYC document assessment
+hitPolicy: first
+
+inputs:
+  - { name: documentType,       type: string }
+  - { name: nameMatches,        type: boolean }
+  - { name: tamperingSuspected, type: boolean }
+  - { name: expiryDate,         type: date }
+  - { name: confidence,         type: decimal }
+
+outputs:
+  - { name: allow,   type: boolean }
+  - { name: reasons, type: string }
+
+rules:
+  - id: R1                  # the model could not read the document
+    when: { documentType: "== 'UNKNOWN'" }
+    then: { allow: "false", reasons: "'DOCUMENT_UNREADABLE'" }
+  - id: R2
+    when: { tamperingSuspected: "== true" }
+    then: { allow: "false", reasons: "'TAMPERING_SUSPECTED'" }
+  - id: R3
+    when: { nameMatches: "== false" }
+    then: { allow: "false", reasons: "'NAME_MISMATCH'" }
+  - id: R4                  # expired on the day of the check
+    when: { expiryDate: "< today()" }
+    then: { allow: "false", reasons: "'DOCUMENT_EXPIRED'" }
+  - id: R5
+    when: { confidence: "< 0.8" }
+    then: { allow: "false", reasons: "'LOW_CONFIDENCE'" }
+  - id: R9
+    when: {}
+    then: { allow: "true", reasons: "''" }

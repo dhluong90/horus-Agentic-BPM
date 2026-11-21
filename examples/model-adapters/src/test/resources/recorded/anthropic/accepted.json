@@ -1,0 +1,10 @@
+{
+  "id": "msg_rec_0001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [{"type": "text", "text": "{\"documentType\": \"PASSPORT\", \"nameMatches\": true, \"expiryDate\": \"2031-05-01\", \"tamperingSuspected\": false, \"confidence\": 0.97}"}],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {"input_tokens": 431, "output_tokens": 41}
+}

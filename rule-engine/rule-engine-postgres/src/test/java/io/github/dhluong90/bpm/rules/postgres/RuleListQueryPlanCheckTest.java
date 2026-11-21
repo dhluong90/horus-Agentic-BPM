@@ -130,6 +130,8 @@ class RuleListQueryPlanCheckTest {
         samples.put("retire-superseded", ListQuery.params("tenant", "bank-a", "ruleSet", RULE_SET, "now", now));
         samples.put("masking-key-scopes", ListQuery.params("keyId", "k1"));
         samples.put("live-version-inputs", ListQuery.params());
+        samples.put("version-functions", ListQuery.params("tenant", "bank-a", "versionId", VERSION));
+        samples.put("published-function-uses", ListQuery.params());
         samples.put("settings-seen", ListQuery.params("setting", "x"));
         samples.put("decision-partitions", ListQuery.params());
         samples.put("decision-search", period);

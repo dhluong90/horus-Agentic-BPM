@@ -43,6 +43,20 @@ public final class EvaluationException extends RuntimeException {
     }
 
     /**
+     * Creates the exception with a reason code and the failure that caused it, which is kept for the server log and
+     * never put in the message.
+     *
+     * @param reason the reason code, for example {@code FUNCTION_FAILED}
+     * @param message the detail, without input values and without the cause's message
+     * @param cause what failed, for the log only
+     */
+    public EvaluationException(String reason, String message, Throwable cause) {
+        super(reason + ": " + message, cause);
+        this.reason = reason;
+        this.limit = null;
+    }
+
+    /**
      * Returns the reason code.
      *
      * @return the reason, or null when the failure has none beyond {@code EVALUATION_ERROR}

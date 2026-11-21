@@ -440,12 +440,55 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     @Override
     public List<IncidentRow> openIncidents(String tenant, String instanceId) {
-        return ProcessListQueries.OPEN_INCIDENTS.list(jdbc, List.of(tenant, instanceId),
-                (rs, n) -> new IncidentRow(rs.getString("tenant_id"), rs.getString("id"),
-                        rs.getString("instance_id"), rs.getString("definition_id"), rs.getString("token_id"),
-                        rs.getString("node_id"), rs.getString("error_code"), rs.getString("cause_summary"),
-                        rs.getInt("retry_count"), rs.getString("status"), rs.getLong("lock_version"),
-                        instant(rs, "created_at"), instant(rs, "resolved_at")));
+        return ProcessListQueries.OPEN_INCIDENTS.list(jdbc, List.of(tenant, instanceId), JdbcProcessStore::incident);
+    }
+
+    @Override
+    public java.util.Optional<IncidentRow> lockIncident(String tenant, String id) {
+        return jdbc.sql("SELECT " + ProcessListQueries.INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? "
+                        + "AND id = ? FOR UPDATE")
+                .params(tenant, id).query(JdbcProcessStore::incident).optional();
+    }
+
+    @Override
+    public java.util.Optional<IncidentRow> findIncident(String tenant, String id) {
+        return jdbc.sql("SELECT " + ProcessListQueries.INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? "
+                        + "AND id = ?")
+                .params(tenant, id).query(JdbcProcessStore::incident).optional();
+    }
+
+    @Override
+    public int updateIncident(IncidentRow i) {
+        return jdbc.sql("UPDATE pre_incident SET error_code = ?, cause_summary = ?, retry_count = ?, status = ?, "
+                        + "lock_version = ?, resolved_at = ?, resolution = ?, resolved_by = ?, approval_mode = ?, "
+                        + "proposed_by = ?, proposed_at = ?, proposal_reason = ?, proposal_output = ?::jsonb, "
+                        + "retrying = ? WHERE tenant_id = ? AND id = ? AND lock_version = ?")
+                .params(i.errorCode(), i.causeSummary(), i.retryCount(), i.status(), i.lockVersion(),
+                        i.resolvedAt() == null ? null : ts(i.resolvedAt()), i.resolution(), i.resolvedBy(),
+                        i.approvalMode(), i.proposedBy(), i.proposedAt() == null ? null : ts(i.proposedAt()),
+                        i.proposalReason(), i.proposalOutputJson(), i.retrying(), i.tenantId(), i.id(),
+                        i.lockVersion() - 1)
+                .update();
+    }
+
+    @Override
+    public List<IncidentRow> incidents(String tenant, String status, Instant afterCreatedAt, String afterId,
+            int limit) {
+        if (afterCreatedAt == null) {
+            return ProcessListQueries.INCIDENTS.list(jdbc, List.of(tenant, status, limit), JdbcProcessStore::incident);
+        }
+        return ProcessListQueries.INCIDENTS_AFTER.list(jdbc, List.of(tenant, status, ts(afterCreatedAt), afterId,
+                limit), JdbcProcessStore::incident);
+    }
+
+    private static IncidentRow incident(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+        return new IncidentRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
+                rs.getString("definition_id"), rs.getString("token_id"), rs.getString("node_id"),
+                rs.getString("error_code"), rs.getString("cause_summary"), rs.getInt("retry_count"),
+                rs.getString("status"), rs.getLong("lock_version"), instant(rs, "created_at"),
+                instant(rs, "resolved_at"), rs.getString("resolution"), rs.getString("resolved_by"),
+                rs.getString("approval_mode"), rs.getString("proposed_by"), instant(rs, "proposed_at"),
+                rs.getString("proposal_reason"), rs.getString("proposal_output"), rs.getBoolean("retrying"));
     }
 
     @Override

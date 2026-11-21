@@ -49,6 +49,8 @@ final class FeelTranslation {
             };
             // FEEL matches(input, pattern) is an unanchored XPath search, as v1's
             case Expr.Matches matches -> "matches(" + feel(matches.target()) + ", " + string(matches.pattern()) + ")";
+            case Expr.HostCall call -> throw new IllegalArgumentException(
+                    "no FEEL translation for the host function " + call.function().name() + ": it is host code (RLE-055)");
             case Expr.Clock clock -> throw new IllegalArgumentException(
                     "no FEEL translation for " + clock.function().text() + "(): the differential test has no clock slot");
         };
