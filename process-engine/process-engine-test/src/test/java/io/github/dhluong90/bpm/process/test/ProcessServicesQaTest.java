@@ -570,6 +570,12 @@ class ProcessServicesQaTest {
         }
 
         @Override
+        public int handOverTask(String tenant, String id, long expectedLockVersion, String expectedStatus,
+                String previousClaimant, String newClaimant, Instant at) {
+            return 1;
+        }
+
+        @Override
         public void cancelTask(String tenant, String id) {
         }
 

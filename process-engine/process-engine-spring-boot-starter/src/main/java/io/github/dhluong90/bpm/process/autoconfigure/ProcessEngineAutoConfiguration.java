@@ -30,6 +30,7 @@ import io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner;
 import io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator;
 import io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner;
 import io.github.dhluong90.bpm.process.spi.AgentAdapter;
+import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
@@ -331,7 +332,8 @@ public class ProcessEngineAutoConfiguration {
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
             ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
-            OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar) {
+            OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
+            ObjectProvider<AssigneeDirectory> directory) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -346,7 +348,7 @@ public class ProcessEngineAutoConfiguration {
         SubsetBpmnReader reader = new SubsetBpmnReader(new Limits(properties.definitions().maxBytes(),
                 Limits.DEFAULTS.maxDepth(), Limits.DEFAULTS.maxElements(), Limits.DEFAULTS.maxForeignFragmentBytes(),
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
-        return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
+        ProcessServices services = new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(byName, decisions(beans), properties.handlers().slowCallWarning()), publisher,
@@ -356,6 +358,9 @@ public class ProcessEngineAutoConfiguration {
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
                 adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas, inputMasker,
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
+        // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
+        services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        return services;
     }
 
     @Bean

@@ -357,6 +357,16 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public int handOverTask(String tenant, String id, long expectedLockVersion, String expectedStatus,
+            String previousClaimant, String newClaimant, Instant at) {
+        return jdbc.sql("UPDATE pre_task SET status = 'CLAIMED', claimed_by = ?, claimed_at = ?, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
+                        + "AND status = ? AND claimed_by IS NOT DISTINCT FROM ?")
+                .params(newClaimant, ts(at), tenant, id, expectedLockVersion, expectedStatus, previousClaimant)
+                .update();
+    }
+
+    @Override
     public void cancelTask(String tenant, String id) {
         jdbc.sql("UPDATE pre_task SET status = 'CANCELLED', lock_version = lock_version + 1 "
                         + "WHERE tenant_id = ? AND id = ? AND status IN ('OPEN','CLAIMED')")

@@ -65,6 +65,7 @@ public class ProcessProblemDetails {
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
+            Map.entry("ASSIGNEE_NOT_ALLOWED", HttpStatus.CONFLICT),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("GUARDRAIL_CONTRACT_INVALID", UNPROCESSABLE),

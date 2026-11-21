@@ -250,8 +250,8 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | `processes:approve` | Approve, reject and retire versions; a retirement needs a reason, and the last version in effect needs a confirmation (PD-101, PD-102) |
 | `processes:start` | Start instances |
 | `processes:cancel` | Cancel a running instance, with a reason (PD-103) |
-| `processes:task:work` | Claim, complete and delegate tasks in the caller's own queues |
-| `processes:task:manage` | Reassign any task, recompute SLAs |
+| `processes:task:work` | Claim, unclaim and complete tasks in the caller's own queues |
+| `processes:task:manage` | List every task of the tenant, and reassign an open task or delegate a claimed one to a named user, with a reason (0.3.0, PD-110) |
 | `processes:incident:manage` | Retry an incident, propose its resolution, and approve or reject another person's proposal (0.3.0, PD-126) |
 | `processes:migration:manage` | Create, validate and execute migration plans |
 | `processes:calendar:manage` | Propose, approve and reject changes of business calendars and holidays; a proposer never approves their own |

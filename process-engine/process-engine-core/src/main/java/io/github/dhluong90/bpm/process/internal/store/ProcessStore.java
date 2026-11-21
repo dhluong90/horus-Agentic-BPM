@@ -378,6 +378,16 @@ public interface ProcessStore {
     /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code claimant} */
     int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant);
 
+    /**
+     * Gives a task to a new claimant, the lock version moving by one.
+     *
+     * @param expectedStatus {@code OPEN} for a reassignment, {@code CLAIMED} for a delegation
+     * @param previousClaimant the claimant a delegation must still find, or null for a reassignment
+     * @return rows updated: 1, or 0 when the lock version is stale or the task is no longer in that state
+     */
+    int handOverTask(String tenant, String id, long expectedLockVersion, String expectedStatus,
+            String previousClaimant, String newClaimant, Instant at);
+
     void cancelTask(String tenant, String id);
 
     /**

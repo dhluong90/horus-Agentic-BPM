@@ -43,6 +43,7 @@ Each is an interface with an engine default. Declare a bean of the same type and
 | `CurrencyRegistry` | rules | ISO 4217 scales | You trade a currency without an ISO scale, such as gold |
 | `DecisionExplainer` | rules | Explanation from a message catalogue per language (English and Vietnamese) | You want house wording or another language in API answers |
 | `LifecycleGuard` | both | Allows every transition | You need an extra check, such as a change ticket on retire. A guard can refuse; it can never let through what the engine refuses |
+| `AssigneeDirectory` | processes | Nobody: a role or group task cannot be given to a named user, a task assigned to one user can go to anyone | `:reassign` and `:delegate` must check that the target holds the task's role or group in your user directory. Built: `io.github.dhluong90.bpm.process.spi.AssigneeDirectory`, one bean answering `holdsRole` and `inGroup` for a tenant |
 | `BusinessCalendar` | processes | The tenant's stored calendars, changed under four eyes; elapsed time for a task without `horus:calendar` | Your calendars live in another system, such as core banking. Your bean gets the tenant of the instance and must not depend on the JVM's time zone |
 | `StepRegistry`, `FormRegistry`, `RoleCatalogue` | processes | Empty | You offer handlers, forms and roles to authors |
 | `AgentAdapter`, `ServiceAdapter` | processes | None | Your definitions call models or services |

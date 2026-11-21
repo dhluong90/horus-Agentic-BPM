@@ -685,6 +685,42 @@ public class ProcessController {
         return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
     }
 
+    /**
+     * Assigns an open task to a named user ({@code processes:task:manage}, PD-110). Body: {@code assignee} and the
+     * required {@code reason}. {@code If-Match} carries the task's {@code lockVersion} and {@code Idempotency-Key}
+     * makes a retry safe; both are required.
+     */
+    @PostMapping("/tasks/{id}:reassign")
+    public ResponseEntity<byte[]> reassign(@PathVariable("id") String id, HttpServletRequest http,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        requireTaskPreconditions(ifMatch, idempotencyKey, "reassign");
+        JsonNode request = handOverBody(http);
+        TaskView task = tasks.reassign(id, text(request, "assignee"), text(request, "reason"), lockVersion(ifMatch),
+                idempotencyKey);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /** Hands a claimed task to another user ({@code processes:task:manage}, PD-110). Same body and headers as a reassign. */
+    @PostMapping("/tasks/{id}:delegate")
+    public ResponseEntity<byte[]> delegate(@PathVariable("id") String id, HttpServletRequest http,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        requireTaskPreconditions(ifMatch, idempotencyKey, "delegate");
+        JsonNode request = handOverBody(http);
+        TaskView task = tasks.delegate(id, text(request, "assignee"), text(request, "reason"), lockVersion(ifMatch),
+                idempotencyKey);
+        return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    private static JsonNode handOverBody(HttpServletRequest http) throws IOException {
+        byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        if (body.length == 0) {
+            throw new InputInvalidException("Send a JSON body with assignee and reason");
+        }
+        return parse(body);
+    }
+
     private static void requireTaskPreconditions(String ifMatch, String idempotencyKey, String action) {
         if (ifMatch == null || ifMatch.isBlank()) {
             throw new PreconditionRequiredException("Send If-Match with the task's lockVersion (its ETag), for example "

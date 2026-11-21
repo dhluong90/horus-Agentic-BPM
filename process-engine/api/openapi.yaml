@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
-    reading and cancelling instances, listing, reading, claiming, unclaiming and completing user tasks, the live token
+    reading and cancelling instances, listing, reading, claiming, unclaiming, reassigning, delegating and completing user tasks, the live token
     counts per node and the BPMN export of a version. From 0.2.0
     it also covers the definition lifecycle with four eyes: an import is a `DRAFT`; a person requests
     approval, optionally with an effective date; a second person approves it and it becomes the effective version
@@ -44,7 +44,7 @@ tags:
   - name: instances
     description: Start, list, read and cancel process instances
   - name: tasks
-    description: List, read, claim, unclaim and complete user tasks
+    description: List, read, claim, unclaim, reassign, delegate and complete user tasks
   - name: async-steps
     description: Report the result of a remote step whose adapter handed the call off
   - name: agent-replays
@@ -1058,7 +1058,8 @@ paths:
       summary: Read a user task with the actions the caller may take
       description: |
         The task, its instance and step, its assignment, claim and completion, and `allowedActions`: what this caller
-        may do now (`claim`, `unclaim`, `complete`), from the task status, the caller's assignment and four eyes. The
+        may do now (`claim`, `unclaim`, `complete`, and for a holder of `processes:task:manage` `reassign` on an open task or
+        `delegate` on a claimed one), from the task status, the caller's assignment, permissions and four eyes. The
         `ETag` is the task's `lockVersion`, quoted, to send as `If-Match`. Permission `processes:task:work`.
       parameters:
         - $ref: '#/components/parameters/TaskId'
@@ -1116,6 +1117,82 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:reassign:
+    post:
+      tags: [tasks]
+      operationId: reassignTask
+      summary: Assign an open task to a named user
+      description: |
+        `OPEN` to CLAIMED by the named user (PD-110). Permission `processes:task:manage`; `processes:task:work` is not needed. The
+        body carries the `assignee` (a user id) and a required `reason` of 1 to 500 characters. The target must hold
+        the task's role or belong to its group, as the host's user directory answers; a task assigned to one user can
+        go to anyone. On a four-eyes task the identity that started the instance or completed an earlier task of it
+        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED` and
+        writes nothing. A task in another state, a completed one included, is `409 INVALID_STATE`; a stale `If-Match`
+        is `409 VERSION_CONFLICT`; another tenant's task is `404 TASK_NOT_FOUND`. Writes a `TASK_REASSIGNED`
+        history entry with the actor, the previous and new holder and the reason, and hands
+        `processes.task.reassigned.v1` to the host publisher in the same transaction. A replay with the same
+        `Idempotency-Key` returns the first answer.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/TaskIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskHandOver' }
+            example: { assignee: minh, reason: An is on leave until Monday }
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:delegate:
+    post:
+      tags: [tasks]
+      operationId: delegateTask
+      summary: Hand a claimed task to another user
+      description: |
+        `CLAIMED` to CLAIMED by the named user, who replaces the claimant (PD-110). Permission `processes:task:manage`; `processes:task:work` is not needed. The
+        body carries the `assignee` (a user id) and a required `reason` of 1 to 500 characters. The target must hold
+        the task's role or belong to its group, as the host's user directory answers; a task assigned to one user can
+        go to anyone. On a four-eyes task the identity that started the instance or completed an earlier task of it
+        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED` and
+        writes nothing. A task in another state, a completed one included, is `409 INVALID_STATE`; a stale `If-Match`
+        is `409 VERSION_CONFLICT`; another tenant's task is `404 TASK_NOT_FOUND`. Writes a `TASK_DELEGATED`
+        history entry with the actor, the previous and new holder and the reason, and hands
+        `processes.task.delegated.v1` to the host publisher in the same transaction. A replay with the same
+        `Idempotency-Key` returns the first answer.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/TaskIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskHandOver' }
+            example: { assignee: minh, reason: An is on leave until Monday }
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
@@ -2155,7 +2232,7 @@ components:
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
@@ -2412,9 +2489,16 @@ components:
         allowedActions:
           type: array
           description: What this caller may do now; computed per caller, never stored
-          items: { type: string, enum: [claim, unclaim, complete] }
+          items: { type: string, enum: [claim, unclaim, complete, reassign, delegate] }
         review:
           $ref: '#/components/schemas/ReviewContext'
+    TaskHandOver:
+      type: object
+      required: [assignee, reason]
+      additionalProperties: false
+      properties:
+        assignee: { type: string, minLength: 1, maxLength: 200, description: The user id the task is handed to }
+        reason: { type: string, minLength: 1, maxLength: 500, description: Why; recorded in the history and the event }
     TaskSummary:
       type: object
       required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, status, lockVersion, createdAt]
@@ -3089,7 +3173,7 @@ components:
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
-            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND,
+            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND, ASSIGNEE_NOT_ALLOWED,
             OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }

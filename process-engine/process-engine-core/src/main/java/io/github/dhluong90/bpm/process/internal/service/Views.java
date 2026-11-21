@@ -208,7 +208,7 @@ public final class Views {
             o.set("review", Values.toJson(t.review()));
         }
         ArrayNode actions = o.putArray("allowedActions");
-        for (String action : List.of("claim", "unclaim", "complete")) {
+        for (String action : List.of("claim", "unclaim", "complete", "reassign", "delegate")) {
             if (t.allowedActions().contains(action)) {
                 actions.add(action);
             }
