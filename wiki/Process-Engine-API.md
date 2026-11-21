@@ -2,7 +2,7 @@
 
 Reference for the Process Engine's two surfaces: the in-process Java API and the REST API under `/api/bpm/processes/v1`. The contract file is [`process-engine/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/process-engine/api/openapi.yaml).
 
-**Preview.** The Process Engine ships as a walking skeleton (0.1.0) with the read, cancel and task claim endpoints of 0.2.0. An imported definition is a `DRAFT` until a second person approves it (the definition lifecycle, 0.2.0). On `dev`, `horus.bpm.processes.definitions.auto-approve` activates imports without approval. Forms, delegate and reassign, incidents, asynchronous steps and masking of instance variables are not in this release.
+**Preview.** The Process Engine ships as a walking skeleton (0.1.0) with the read, cancel and task claim endpoints of 0.2.0. An imported definition is a `DRAFT` until a second person approves it (the definition lifecycle, 0.2.0). On `dev`, `horus.bpm.processes.definitions.auto-approve` activates imports without approval. Forms, delegate and reassign and masking of instance variables are not in this release; incidents are retried and resolved by API since 0.3.0.
 
 **Added in 0.2.0.** The intermediate timer catch event (`timeDuration` or `timeDate`) and replica-safe timer jobs: a timer fires once across copies of the host, and a crashed copy's timers are taken over after the lease (see Process Engine Overview, Timers and jobs with leases).
 
@@ -15,7 +15,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /definitions/{key}/versions/{version}` | `DefinitionService.version(key, version)` | `processes:read` | Status, hashes, `approvedBy`, `approvedAt`, `effectiveFrom` and the lifecycle fields (`lockVersion`, `requestedBy`, `retiredBy`, `supersededBy`); no source document. `ETag` is the definition hash; the lifecycle commands take the `lockVersion` field as `If-Match`. This is the `Location` an import returns. `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}/export?format=bpmn` | `DefinitionService.exportDefinition(key, version, SourceFormat.BPMN_XML)` | `processes:read` | BPMN 2.0 XML (`application/bpmn+xml`) of the executable subset with a generated diagram layout. Importing it gives the same `definitionHash`, which is also the `ETag`. Read-only. A version of another tenant is `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:request-approval` | `requestApproval(ref, lockVersion, effectiveFrom, idempotencyKey)` | `processes:author` or `processes:deploy` | `DRAFT` to `PENDING_APPROVAL`; optional `effectiveFrom`, never in the past. `If-Match` required. 0.2.0 |
-| `POST /definitions/{key}/versions/{v}:approve` | `approve(ref, lockVersion, comment, idempotencyKey)` | `processes:approve` | To `ACTIVE`, effective from `effectiveFrom` or now. The requester gets `403 SELF_APPROVAL_FORBIDDEN`; an older version than the active one gets `409 VERSION_SUPERSEDED`. 0.2.0 |
+| `POST /definitions/{key}/versions/{v}:approve` | `approve(ref, lockVersion, expectedDefinitionHash, comment, idempotencyKey)` | `processes:approve` | To `ACTIVE`, effective from `effectiveFrom` or now. Body `{"expectedDefinitionHash": "<definitionHash you reviewed>", "comment": "..."}`. Without the hash `400 CONTENT_HASH_REQUIRED`; when the content changed since you reviewed it `409 CONTENT_CHANGED` with `currentDefinitionHash` (0.3.0, PD-139). The requester gets `403 SELF_APPROVAL_FORBIDDEN`; an older version than the active one gets `409 VERSION_SUPERSEDED`. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:reject` | `reject(ref, lockVersion, reason, idempotencyKey)` | `processes:approve` | Back to `DRAFT`; `reason` required (`400` without). 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:retire` | `retire(ref, lockVersion, reason, confirmNoVersionInEffect, idempotencyKey)` | `processes:approve` (active), `processes:author` (draft) | To `RETIRED`; an active version needs a `reason`; the last version in effect needs `confirmNoVersionInEffect: true` (`409 LAST_VERSION_IN_EFFECT` otherwise); a version a newer version in effect already supersedes is `409 INVALID_STATE`, naming the newer version. Only new starts stop; running instances keep their version. 0.2.0 |
 | `GET /definitions/{key}/versions/{v}/history` | `history(ref)` | `processes:read` | Every transition with actor and comment, oldest first. 0.2.0 |
@@ -28,6 +28,11 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `POST /agent-replays` | `AgentReplayService.start(AgentReplayRequest)` | `processes:agent:replay` | Replays one agent step's recorded answers over a period of at most 31 days against a candidate guardrail version, usually a draft, and an optional candidate output schema. Body `{"definitionKey": "kyc-onboarding", "nodeId": "assess-documents", "from": "2026-11-01", "to": "2026-11-30", "candidate": {"ruleSet": "kyc-document-guardrails", "version": 3}}`. Answers `202` with the queued run; the job poller replays it in pages. Calls no model or adapter and writes no history or decision. See [[Guarded Agent Steps]]. M3 |
 | `GET /agent-replays/{id}`, `GET /agent-replays/{id}/cases` | `AgentReplayService.run(id)`, `.cases(id, page)` | `processes:agent:replay` | The run's status and summary, and its report: one line per recorded answer with the attempt id, the recorded and the candidate outcome, the change, the matched rule ids and the `OVERRIDDEN_BY_REVIEWER` flag, never an output value. M3 |
 | `GET /agent-replays/{id}/cases/{attemptId}/answer` | `AgentReplayService.recordedAnswer(id, attemptId)` | `processes:agent:replay` | One case's recorded answer as history keeps it: masked output fields as `***`, masked inputs as keyed hashes. M3 |
+| `GET /incidents?status=OPEN` | `IncidentService.incidents(IncidentQuery)` | `processes:read` | One status (`OPEN` by default, `RESOLUTION_PENDING`, `RESOLVED`), newest first, keyset pages of at most 200. Each item: `errorCode`, `causeSummary`, `retryCount`, `nodeId`, `instanceId`, `retrying`, `pendingResolution` and `allowedActions` for the caller. 0.3.0 |
+| `GET /incidents/{id}` | `IncidentService.incident(id)` | `processes:read` | One incident; `ETag` is its `lockVersion`. Another tenant's is `404 INCIDENT_NOT_FOUND`. 0.3.0 |
+| `POST /incidents/{id}:retry` | `IncidentService.retry(id, lockVersion, reason, idempotencyKey)` | `processes:incident:manage` | Runs the failed step again: its job is due now with one more attempt under the same job id, or a local step's handler runs again. Body `{"reason": "..."}`. Answers `202`; the incident stays `OPEN` with `retrying: true` until the step is accepted (`RESOLVED`, `RETRY_SUCCEEDED`) or fails again. `If-Match` and `Idempotency-Key` required. 0.3.0 |
+| `POST /incidents/{id}:resolve` | `IncidentService.resolve(id, lockVersion, output, reason, idempotencyKey)` | `processes:incident:manage` | Proposes the output the waiting step completes with. Body `{"output": {...}, "reason": "..."}`; the output must pass the step's output schema (`422 OUTPUT_INVALID`). The incident becomes `RESOLUTION_PENDING`; nothing moves until a second person approves. 0.3.0 |
+| `POST /incidents/{id}:approve-resolution`, `:reject-resolution` | `approveResolution(id, lockVersion, comment, key)`, `rejectResolution(id, lockVersion, reason, key)` | `processes:incident:manage` | A second person, never the proposer (`403 SELF_APPROVAL_FORBIDDEN`), approves: the step completes with the proposed output and the token moves on (`COMPLETED_MANUALLY`); or rejects with a reason: the incident is `OPEN` again. 0.3.0 |
 | `GET /tasks/{id}` | `TaskService.task(id)` | `processes:task:work` | The task with its instance, step, assignment, `fourEyes`, claim and completion, and `allowedActions` for this caller (`claim`, `unclaim`, `complete`). The review task of a refused agent answer also has `review`: the code, reasons, matched rule ids, guardrail decision id, the refused attempt and who reported it, the inputs the agent saw (a masked input as its keyed fingerprint) and the answer masked by the output schema. `ETag` is the task `lockVersion`. Since 0.2.0 |
 | `POST /tasks/{id}:claim` | `TaskService.claim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `OPEN` to `CLAIMED` by the caller, who must be an assignee (`403 TASK_NOT_ASSIGNED`); a four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`). `If-Match` and `Idempotency-Key` required (`428`). Since 0.2.0 |
 | `POST /tasks/{id}:unclaim` | `TaskService.unclaim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `CLAIMED` to `OPEN`; only the claimant (`403 TASK_NOT_ASSIGNED`). Same headers. Since 0.2.0 |
@@ -99,7 +104,31 @@ stateDiagram-v2
 
 Retiring an active version needs `processes:approve` and a reason, in the `single` mode of the shared host setting `horus.bpm.lifecycle.retire-approval`; the history row and `retired.v1` record the mode. It stops new starts only; running instances keep their version. Retiring the last version in effect of a key follows `horus.bpm.lifecycle.retire-last-version`: `confirm` (default) needs `confirmNoVersionInEffect: true`, `refuse` never allows it. A version that a newer version in effect already supersedes, while its effective-date job has not run yet, cannot be retired by hand (`409 INVALID_STATE`, naming the newer version): the job retires it as `system:effective-date`, as the Rule Engine does. The `four-eyes` value of either setting is refused at start-up in this release.
 
-Outside the `dev` profile the starter refuses `definitions.auto-approve: true` and `maker-checker.enabled: false`, and on every profile it refuses the removed key `definitions-auto-approve`.
+An approval names the content the approver reviewed (0.3.0, PD-139): send `expectedDefinitionHash`, the `definitionHash` shown with the version. Without it the approval is `400 CONTENT_HASH_REQUIRED`; when the stored content is no longer what you reviewed it is `409 CONTENT_CHANGED` with the current hash, and nothing is written. A change list between two versions that was cut off at its limit has no hash to approve: read every page of the change set first.
+
+Outside the `dev` profile the starter refuses `definitions.auto-approve: true`, `maker-checker.enabled: false` and `approval.require-content-hash: false`, and on every profile it refuses the removed key `definitions-auto-approve`.
+
+## Incidents (0.3.0)
+
+A step that fails for good opens an incident and the token waits on the step. An operator with `processes:incident:manage` fixes it through the API:
+
+- **Retry** runs the same step again. A remote or agent step keeps its job id, which the remote side uses to deduplicate, and gets a new attempt id; an agent's answer is checked again. A local step's handler runs again at once. A retry is one person's action because it decides nothing.
+- **Resolve** proposes the output the step completes with, with a reason. The output must pass the step's output schema; the guardrail is not run on a person's answer. A second holder of `processes:incident:manage`, never the proposer, approves it, and only then does the token move on; or rejects it, and the incident is open again (PD-126). `horus.bpm.processes.incidents.resolve-approval: single` lets one person resolve, on the `dev` profile only.
+- **Cancel** of the instance resolves its incidents as `INSTANCE_CANCELLED`.
+
+Every command needs `If-Match` (the incident's `lockVersion`) and an `Idempotency-Key`, writes nothing when refused, and is recorded in history with the actor and the reason: `INCIDENT_RETRIED`, `INCIDENT_RESOLUTION_PROPOSED`, `INCIDENT_RESOLUTION_REJECTED`, `INCIDENT_RESOLVED`. The events are `processes.incident.retried.v1`, `.resolution-proposed.v1`, `.resolution-rejected.v1` and `.resolved.v1` (with `resolution`, `resolvedBy` and `proposedBy`).
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> OPEN: step failed for good
+  OPEN --> OPEN: retry, or the retried step fails again
+  OPEN --> RESOLVED: retried step accepted
+  OPEN --> RESOLUTION_PENDING: resolve with output and reason
+  RESOLUTION_PENDING --> OPEN: rejected by a second person
+  RESOLUTION_PENDING --> RESOLVED: approved by a second person
+  OPEN --> RESOLVED: instance cancelled
+```
 
 ## Task lifecycle
 

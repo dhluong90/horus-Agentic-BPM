@@ -245,7 +245,7 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | `processes:cancel` | Cancel a running instance, with a reason (PD-103) |
 | `processes:task:work` | Claim, complete and delegate tasks in the caller's own queues |
 | `processes:task:manage` | Reassign any task, recompute SLAs |
-| `processes:incident:manage` | Retry and resolve incidents |
+| `processes:incident:manage` | Retry an incident, propose its resolution, and approve or reject another person's proposal (0.3.0, PD-126) |
 | `processes:migration:manage` | Create, validate and execute migration plans |
 | `processes:calendar:manage` | Edit business calendars and holidays |
 

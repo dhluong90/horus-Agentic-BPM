@@ -1,0 +1,19 @@
+stateDiagram-v2
+  direction LR
+  [*] --> OPEN: step failed for good (job FAILED, business error, refused answer)
+  OPEN --> OPEN: retry (processes:incident:manage), job DUE again or handler run again
+  OPEN --> OPEN: retried step fails again, new cause
+  OPEN --> RESOLVED: retried step accepted, RETRY_SUCCEEDED
+  OPEN --> RESOLUTION_PENDING: resolve with output and reason (four-eyes)
+  RESOLUTION_PENDING --> OPEN: reject-resolution by a second person
+  RESOLUTION_PENDING --> RESOLVED: approve-resolution by a second person, COMPLETED_MANUALLY
+  OPEN --> RESOLVED: resolve with single (dev profile only)
+  OPEN --> RESOLVED: instance cancelled, INSTANCE_CANCELLED
+  RESOLUTION_PENDING --> RESOLVED: instance cancelled, INSTANCE_CANCELLED
+  RESOLVED --> [*]
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F
+  class OPEN client
+  class RESOLUTION_PENDING engine
+  class RESOLVED obs
