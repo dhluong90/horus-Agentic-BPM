@@ -19,7 +19,7 @@
   var lang = document.documentElement.lang;
   if (!params.has('lang') && (stored === 'en' || stored === 'vi') && stored !== lang) {
     params.set('lang', stored);
-    window.location.replace(window.location.pathname + '?' + params.toString());
+    window.location.replace(window.location.pathname + '?' + params.toString() + window.location.hash);
     return;
   }
 
@@ -59,8 +59,18 @@
       });
     });
 
+    // A cockpit link such as #/decisions/<id> reaches this page with its fragment, which the server never sees.
+    // Carried on the form and language links, it survives sign-in: the redirect after sign-in keeps it.
+    var hash = window.location.hash;
+    if (/^#\/[A-Za-z0-9\/?=&._~-]{0,200}$/.test(hash)) {
+      document.querySelectorAll('[data-lang]').forEach(function (link) { link.setAttribute('href', link.getAttribute('href') + hash); });
+    } else {
+      hash = '';
+    }
+
     var form = document.getElementById('sign-in-form');
     if (form) {
+      if (hash) form.setAttribute('action', form.getAttribute('action') + hash);
       form.addEventListener('submit', function (event) {
         var first = null;
         ['username', 'password'].forEach(function (id) {
