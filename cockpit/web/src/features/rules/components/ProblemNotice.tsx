@@ -110,11 +110,13 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
   const hasDetails = problem?.code !== undefined || correlationId !== undefined || detail !== undefined;
   const [open, setOpen] = useState(false);
   const detailsId = useId();
+  // The content moved on since it was reviewed: nothing failed, the reviewer looks again. Said calmly, as information.
+  const calm = problem?.code === 'CONTENT_CHANGED';
   return (
-    <div className="notice notice--bad notice--line" role="alert">
+    <div className={calm ? 'notice notice--info notice--line' : 'notice notice--bad notice--line'} role={calm ? 'status' : 'alert'}>
       <div className="notice__row">
         <p className="notice__title">
-          <span className="notice__icon" aria-hidden="true">✕</span>
+          <span className="notice__icon" aria-hidden="true">{calm ? '↻' : '✕'}</span>
           {title}
         </p>
         {hasDetails ? (
@@ -147,9 +149,9 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
           </dl>
         </div>
       ) : null}
-      {onReload && problem?.code === 'VERSION_CONFLICT' ? (
+      {onReload && (problem?.code === 'VERSION_CONFLICT' || problem?.code === 'CONTENT_CHANGED') ? (
         <button type="button" className="btn btn--small hit" onClick={onReload}>
-          {t('problem.reload')}
+          {problem.code === 'CONTENT_CHANGED' ? t('approval.reload') : t('problem.reload')}
         </button>
       ) : null}
       {onRestart ? (

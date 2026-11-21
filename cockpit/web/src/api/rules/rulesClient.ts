@@ -13,6 +13,8 @@ import {
   type Page,
   type AcknowledgedWarning,
   type RuleSetSummary,
+  pendingRuleApproval,
+  type PendingRuleApproval,
   type RuleSetVersion,
   type VersionSummary,
   versionDiff,
@@ -84,6 +86,8 @@ export interface EvidenceFile extends ExportedFile {
 export interface RulesClient {
   /** listRuleSets: one page, by name */
   listRuleSets(request?: PageRequest): Promise<Page<RuleSetSummary>>;
+  /** listPendingApprovals: one page of versions waiting for a second person, oldest request first (RLE-190) */
+  listPendingApprovals(request?: PageRequest): Promise<Page<PendingRuleApproval>>;
   /** listVersions: one page, newest first, without definitions */
   listVersions(name: string, request?: PageRequest): Promise<Page<VersionSummary>>;
   /** getVersionHistory: lifecycle entries, oldest first */
@@ -144,6 +148,10 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
   return {
     async listRuleSets(request = {}) {
       const answer = await call({ method: 'GET', path: `${RULES_BASE}/rule-sets${pageQuery(request)}`, ...(request.signal ? { signal: request.signal } : {}) }, page(ruleSetSummary));
+      return answer.data;
+    },
+    async listPendingApprovals(request = {}) {
+      const answer = await call({ method: 'GET', path: `${RULES_BASE}/approvals${pageQuery(request)}`, ...(request.signal ? { signal: request.signal } : {}) }, page(pendingRuleApproval));
       return answer.data;
     },
     async listVersions(name, request = {}) {

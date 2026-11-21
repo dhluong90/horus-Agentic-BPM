@@ -16,6 +16,8 @@ function useKeys() {
   const base = [hostId, tenant, 'processes'] as const;
   return {
     definitions: [...base, 'definitions'] as const,
+    /** The approvals queue's pages (#31): read again after a decision here, so the queue and its count follow. */
+    approvals: [...base, 'approvals'] as const,
     version: (key: string, version: number) => [...base, 'definition', key, version] as const,
     graph: (key: string, version: number) => [...base, 'graph', key, version] as const,
     diff: (key: string, version: number) => [...base, 'diff', key, version] as const,
@@ -97,7 +99,7 @@ function useLifecycle<TArgs>(key: string, send: (version: DefinitionVersion, arg
       send(version, args, keyFor(`${name}:${key}:${String(version.version)}:${String(version.lockVersion ?? 0)}:${JSON.stringify(args)}`)),
     onSuccess: async (stored) => {
       queryClient.setQueryData(keys.version(stored.key, stored.version), stored);
-      await queryClient.invalidateQueries({ queryKey: keys.definitions });
+      await Promise.all([queryClient.invalidateQueries({ queryKey: keys.definitions }), queryClient.invalidateQueries({ queryKey: keys.approvals })]);
     },
   });
 }

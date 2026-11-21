@@ -13,7 +13,7 @@ const DECISION_LOG = 'rules:log:read';
 
 /**
  * The menu (PD-093): Home always; Rules and Approvals for anyone with a rule permission on a host that runs the
- * Rule Engine; Decisions only for those who may read the decision log (an area is hidden, never shown disabled,
+ * Rule Engine, and Approvals also for a process user who may read definitions; Decisions only for those who may read the decision log (an area is hidden, never shown disabled,
  * when it holds data the user may not read); Processes only where a Process Engine is registered. A user with no
  * rule permission sees Home only. Nothing depends on a role name.
  */
@@ -21,9 +21,12 @@ export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
   const modules = new Set(meta.modules.map((module) => module.module));
   const rules = modules.has('rules') && me.permissions.some((permission) => RULE_PERMISSIONS.has(permission));
   const processes = modules.has('processes') && (rules || me.permissions.some((permission) => permission.startsWith('processes:')));
+  // Approvals holds both engines' queues (#31): a process user who may read definitions follows requests there too.
+  const approvals = rules || (modules.has('processes') && me.permissions.includes('processes:read'));
   return [
     'home',
-    ...(rules ? (['rules', 'approvals'] as const) : []),
+    ...(rules ? (['rules'] as const) : []),
+    ...(approvals ? (['approvals'] as const) : []),
     ...(rules && me.permissions.includes(DECISION_LOG) ? (['decisions'] as const) : []),
     ...(processes ? (['processes'] as const) : []),
   ];

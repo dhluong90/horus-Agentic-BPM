@@ -1,18 +1,25 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
-import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
+import type { RuleSetVersion } from '../../api/rules/schemas';
 import { useRulesSession } from '../rules/api/rulesContext';
 
 /**
  * Withdraws the user's own pending request (POST ...:withdraw, PD-089). One Idempotency-Key per intent, so a
  * repeated click or a retry replays the first answer. Lists are read again only after the engine confirms.
  */
+/** The request to take back: the rule set, its version and the lock version the queue read. */
+export interface WithdrawTarget {
+  ruleSet: string;
+  version: number;
+  lockVersion: number;
+}
+
 export function useWithdraw(onDone: (version: RuleSetVersion) => void) {
   const { client, hostId, tenant } = useRulesSession();
   const queryClient = useQueryClient();
   const intent = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   return useMutation({
-    mutationFn: ({ version, reason }: { version: VersionSummary; reason: string | undefined }) => {
+    mutationFn: ({ version, reason }: { version: WithdrawTarget; reason: string | undefined }) => {
       const fingerprint = JSON.stringify([version.ruleSet, version.version, version.lockVersion, reason]);
       if (intent.current?.fingerprint !== fingerprint) intent.current = { fingerprint, key: crypto.randomUUID() };
       return client.withdraw(version.ruleSet, version.version, version.lockVersion, reason, intent.current.key);
