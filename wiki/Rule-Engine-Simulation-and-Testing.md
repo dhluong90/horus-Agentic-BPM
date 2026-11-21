@@ -2,7 +2,7 @@
 
 Check what a draft would decide before anyone approves it, and keep rule sets covered by unit tests in CI.
 
-Simulation against sample inputs over REST and the Java API is built (0.2.0), and so is replaying logged decisions through a draft. The cockpit Simulation screen and the test library describe the 0.1 target; the cockpit replay screen is a Cockpit 0.2 target, and attaching simulation reports to publication requests is a 1.0 target. Milestone scope is owned by the [[Roadmap]].
+Simulation against sample inputs over REST and the Java API is built (0.2.0), and so is replaying logged decisions through a draft. So is the cockpit's Simulate view of a draft; the test library describes the 0.1 target; the cockpit replay screen is a Cockpit 0.2 target, and attaching simulation reports to publication requests is a 1.0 target. Milestone scope is owned by the [[Roadmap]].
 
 ## Before you start
 
@@ -14,7 +14,7 @@ Simulation against sample inputs over REST and the Java API is built (0.2.0), an
 
 ![Simulation versus evaluate](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/simulation-vs-evaluate.svg)
 
-In the cockpit (Sprint 2): open the rule set, choose the draft, open Simulation, paste rows or upload a CSV with one column per input, run. The screen shows outputs and matched rule ids per row.
+In the cockpit: open the rule set, choose the draft and open Simulate. Type a few samples, or paste rows from a spreadsheet or CSV with an optional name and then one column per input, and choose Run simulation. The cockpit sends them in one `:simulate-readings` call, so nothing is logged. The screen says how many results change and shows each sample by its reference (`S1`, `S2`) and name, with the draft's outcome beside the version in effect, read in plain words by the engine. A masked input is typed as dots and never shown in a result; more than 500 samples reads "Run fewer samples".
 
 By API, up to 1,000 customers at once (`simulation.max-inputs`), each run through the draft and through the version in force today. Here `card-fee` v1 is in force and v2 lowers the default fee from 50,000 VND to 30,000 VND:
 

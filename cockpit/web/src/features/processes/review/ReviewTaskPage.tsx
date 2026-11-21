@@ -1,6 +1,8 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { ReviewContext, Task } from '../../../api/processes/schemas';
 import { toHostError } from '../../../api/hostError';
+import { setCrumbTrail } from '../../../app/crumbs';
+import { formatRoute } from '../../../app/route';
 import { CopyButton } from '../../../components/CopyButton';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../../components/PageParts';
 import { useI18n } from '../../../i18n/I18nProvider';
@@ -86,6 +88,7 @@ function Review({ task, review }: { task: Task; review: ReviewContext }) {
   const block = open ? fourEyesBlock(userId, review, instance.data) : undefined;
   const serverViolations = violationsOf(complete.error);
   const built = buildAnswer(review.output, texts);
+  useReviewCrumbs(task);
   return (
     <section className="workspace review" aria-labelledby="review-title">
       <PageHead id="review-title" title={t('review.title')} subtitle={block !== undefined ? t('review.subtitleBlocked') : t('review.subtitle')} action={<TaskStatus task={task} />} />
@@ -110,6 +113,28 @@ function Review({ task, review }: { task: Task; review: ReviewContext }) {
       <ReviewDock task={task} review={review} block={block} mode={mode} onMode={setMode} built={built} complete={complete} otherViolations={serverViolations.other} tried={tried} onTry={() => { setTried(true); }} />
     </section>
   );
+}
+
+/**
+ * The way back from the review: Processes / the process / the case / Agent review. The process crumb waits for its
+ * display name rather than show the key; the case crumb reads "Case APP-1042", or "Case" without a business key.
+ */
+function useReviewCrumbs(task: Task) {
+  const { t } = useI18n();
+  const { can } = useProcessesSession();
+  const definition = useDefinitionVersion(task.definitionKey, task.definitionVersion, can('processes:read'));
+  const processName = definition.data?.name ?? undefined;
+  const caseLabel = task.businessKey ? t('instance.title', { key: task.businessKey }) : t('instance.crumb');
+  const reviewLabel = t('review.crumb');
+  const readable = can('processes:read');
+  useEffect(() => {
+    setCrumbTrail([
+      ...(processName !== undefined ? [{ label: processName, href: formatRoute({ name: 'process', key: task.definitionKey, version: task.definitionVersion, lens: 'cases' }) }] : []),
+      ...(readable ? [{ label: caseLabel, href: formatRoute({ name: 'instance', instanceId: task.instanceId }) }] : []),
+      { label: reviewLabel },
+    ]);
+  }, [processName, caseLabel, reviewLabel, readable, task.definitionKey, task.definitionVersion, task.instanceId]);
+  useEffect(() => () => { setCrumbTrail(undefined); }, []);
 }
 
 /** Which case, step and process the review belongs to, by their names; a key is shown only when no name is known. */
@@ -172,6 +197,7 @@ function SchemaVerdict({ code }: { code: string }) {
 
 function Guardrail({ review }: { review: ReviewContext }) {
   const { t } = useI18n();
+  const engineNode = engineNodeOf(review.reportedBy);
   return (
     <article className="card review-card review-card--guardrail" aria-labelledby="review-why">
       <h2 id="review-why" className="card__title">{t('review.why')}</h2>
@@ -198,14 +224,26 @@ function Guardrail({ review }: { review: ReviewContext }) {
           </div>
         ) : null}
       </dl>
+      {engineNode !== undefined ? (
+        <details className="alert__details review-why__details">
+          <summary>{t('area.error.details')}</summary>
+          <dl>
+            <div><dt>{t('instance.fact.engineNode')}</dt><dd className="mono">{engineNode} <CopyButton value={engineNode} /></dd></div>
+          </dl>
+        </details>
+      ) : null}
     </article>
   );
 }
 
-/** Who reported the refused answer, in words: an engine replica reads "Process Engine (loans-7f9c)". */
+/** The engine node of an `engine:<node>` reporter, kept under Details; a person has none. */
+function engineNodeOf(reportedBy: string | undefined): string | undefined {
+  return reportedBy !== undefined ? /^engine:(.+)$/.exec(reportedBy)?.[1] : undefined;
+}
+
+/** Who reported the refused answer, in words: an engine node reads "Process Engine", never its id. */
 function reporterName(reportedBy: string, t: (key: MessageKey, params?: Record<string, string>) => string): string {
-  const replica = /^engine:(.+)$/.exec(reportedBy);
-  return replica?.[1] !== undefined ? t('review.byEngine', { replica: replica[1] }) : reportedBy;
+  return engineNodeOf(reportedBy) !== undefined ? t('instance.engine') : reportedBy;
 }
 
 function AnswerEditor({ output, texts, onChange, problems, showAll, serverViolations }: {

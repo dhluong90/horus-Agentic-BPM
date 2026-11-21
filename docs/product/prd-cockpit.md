@@ -76,7 +76,7 @@ The cockpit lives in the application layer. Data, logic and observability belong
 | Application | Boot embedded or standalone from one base URL | 0.1 | CKP-001 | TR-UI-01, TR-SEC-09 |
 | Application | Version diff (matrix lens of the change dossier) | 0.1 | CKP-002 | TR-UI-02 |
 | Application | Maker-checker reflected; API `403` surfaced | 0.1 | CKP-003 | TR-SEC-04 |
-| Application | Simulation over sample inputs | 0.1 | CKP-004 | TR-UI-02 |
+| Application | Simulation over sample rows (spreadsheet or CSV, no JSON) | 0.1 | CKP-004 | TR-UI-02 |
 | Application | Decision explorer with masking and explanation | 0.1 | CKP-005 | TR-SEC-05, TR-OBS-05 |
 | Application | Grid editor with inline validation | 0.2 | CKP-006 | TR-DET-02, TR-UI-02 |
 | Application | Agent task inspector | 0.2 | CKP-007 | TR-AGT-01, TR-AGT-02 |

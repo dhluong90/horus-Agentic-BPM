@@ -35,6 +35,7 @@ import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
+import io.github.dhluong90.bpm.process.internal.service.InstanceActivityService;
 import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
 import io.github.dhluong90.bpm.process.internal.service.Migrations;
 import io.github.dhluong90.bpm.process.postgres.JdbcGaugeStore;
@@ -541,6 +542,15 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean
+    InstanceActivityService processEngineInstanceActivities(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ProcessEngineTransactions transactions, JdbcProcessStore store,
+            ProcessEngineProperties properties) {
+        return new InstanceActivityService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), transactions,
+                store, store, properties.query().maxPageSize());
+    }
+
+    @Bean
     @ConditionalOnMissingBean(TaskService.class)
     TaskService processTaskService(ProcessServices services) {
         return services;
@@ -555,8 +565,8 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
     ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts,
-            NodeWindowStatsService windowStats, JdbcProcessStore store) {
-        return new ProcessQueries(services, liveCounts, windowStats, store);
+            NodeWindowStatsService windowStats, InstanceActivityService activities, JdbcProcessStore store) {
+        return new ProcessQueries(services, liveCounts, windowStats, activities, store);
     }
 
     @Bean

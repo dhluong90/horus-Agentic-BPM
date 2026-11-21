@@ -116,7 +116,7 @@ class ErrorMatrixWebMvcTest {
         mvc = MockMvcBuilders.standaloneSetup(
                         new RuleSetController(standIn(VersionService.class), callers),
                         new DecisionController(standIn(RuleEngine.class), standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
-                        new SimulationController(standIn(RuleEngine.class), callers),
+                        new SimulationController(standIn(RuleEngine.class), standIn(VersionService.class), callers),
                         new DecisionLogController(standIn(DecisionLogService.class),
                         standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
                         new RuleSetHistoryController(standIn(io.github.dhluong90.bpm.rules.api.RuleSetHistoryService.class),
@@ -251,6 +251,9 @@ class ErrorMatrixWebMvcTest {
                             s.permissions = Set.of("rules:read", "rules:log:read");
                             s.thrown = new io.github.dhluong90.bpm.rules.api.EvidenceTooLargeException(8_388_608);
                         }),
+                new Case("READINGS_TOO_LARGE", 422,
+                        get("/api/bpm/rules/v1/rule-sets/card-fee/versions/1/readings"),
+                        s -> s.thrown = new io.github.dhluong90.bpm.rules.api.ReadingsTooLargeException("rows", 501, 500)),
                 new Case("VALIDATION_FAILED", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions").contentType("application/yaml").content(yaml),
                         s -> s.thrown = new ValidationFailedException(List.of(new Violation("R3", "fee",

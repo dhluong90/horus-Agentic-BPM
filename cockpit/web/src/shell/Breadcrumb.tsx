@@ -1,4 +1,4 @@
-import { useCrumbLabel } from '../app/crumbs';
+import { useCrumbLabel, useCrumbTrail } from '../app/crumbs';
 import { formatRoute, useRoute, type Route } from '../app/route';
 import { lastDecisionQuery } from '../features/decisions/lastQuery';
 import type { MessageKey } from '../i18n/en';
@@ -12,7 +12,11 @@ export function Breadcrumb() {
   const { t } = useI18n();
   const [route] = useRoute();
   const override = useCrumbLabel();
-  const crumbs = trail(route, t);
+  const pageTrail = useCrumbTrail();
+  // A case and its task know their parents (process, case) only once loaded; the page sets that trail.
+  const crumbs = (route.name === 'instance' || route.name === 'task') && pageTrail !== undefined
+    ? [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, ...pageTrail]
+    : trail(route, t);
   const last = crumbs.at(-1);
   if (override !== undefined && route.name === 'rule-set' && last) crumbs[crumbs.length - 1] = { label: override };
   // A process is named by its display name, which only the page knows; until it loads, the crumb waits rather than show the key.
@@ -49,7 +53,9 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
         { label: route.key },
         { label: t('rules.version', { version: String(route.version) }) },
       ];
+    // Until the page sets its trail, a task or a case leads back to Processes only (its title names it).
     case 'task':
+    case 'instance':
       return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }];
     case 'decision':
       return [{ label: t('menu.decisions'), href: formatRoute({ name: 'decisions', query: lastDecisionQuery() }) }];

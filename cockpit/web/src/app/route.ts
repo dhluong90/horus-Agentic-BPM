@@ -7,8 +7,11 @@ import { useCallback, useSyncExternalStore } from 'react';
  * Rule screens live under #/rules. The older #/rule-sets prefix still parses, so existing links keep working.
  */
 
-/** `edit` is the grid editor of a draft; on any other version it opens the table, read only. */
-export const LENSES = ['table', 'changes', 'history', 'source', 'edit'] as const;
+/**
+ * `edit` is the grid editor of a draft; on any other version it opens the table, read only. `simulate` runs samples
+ * against a draft; on any other version it says simulation is for drafts.
+ */
+export const LENSES = ['table', 'readings', 'changes', 'history', 'source', 'edit', 'simulate'] as const;
 export type Lens = (typeof LENSES)[number];
 
 /**
@@ -29,7 +32,8 @@ export type Route =
   | { name: 'decisions'; query?: DecisionQuery | undefined }
   | { name: 'decision'; decisionId: string }
   | { name: 'processes' }
-  | { name: 'process'; key: string; version: number }
+  | { name: 'process'; key: string; version: number; lens?: 'cases' | undefined }
+  | { name: 'instance'; instanceId: string }
   | { name: 'task'; taskId: string };
 
 /** The menu areas. Every route belongs to exactly one. */
@@ -46,6 +50,7 @@ export function areaOf(route: Route): Area {
     case 'rule-set':
       return 'rules';
     case 'process':
+    case 'instance':
     case 'task':
       return 'processes';
     case 'decision':
@@ -84,9 +89,11 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
     return { name: 'rule-set', ruleSet, version: number, lens: isLens(lens) ? lens : undefined };
   }
   if (area === 'processes' && ruleSet !== undefined) {
-    // #/processes/<key>/<version>: one version's diagram. A key without a version number opens the list.
-    return version !== undefined && /^[1-9]\d*$/.test(version) ? { name: 'process', key: ruleSet, version: Number(version) } : { name: 'processes' };
+    // #/processes/<key>/<version>[/cases]: one version's diagram, or the cases of its key. A key without a version number opens the list.
+    if (version === undefined || !/^[1-9]\d*$/.test(version)) return { name: 'processes' };
+    return lens === 'cases' ? { name: 'process', key: ruleSet, version: Number(version), lens: 'cases' } : { name: 'process', key: ruleSet, version: Number(version) };
   }
+  if (area === 'instances' && ruleSet !== undefined) return { name: 'instance', instanceId: ruleSet };
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'home' || area === 'approvals' || area === 'decisions' || area === 'processes') return { name: area };
   return { name: 'home' };
@@ -122,7 +129,9 @@ export function formatRoute(route: Route): string {
       return `#/${parts.join('/')}`;
     }
     case 'process':
-      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}`;
+      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}${route.lens === 'cases' ? '/cases' : ''}`;
+    case 'instance':
+      return `#/instances/${encodeURIComponent(route.instanceId)}`;
     case 'task':
       return `#/tasks/${encodeURIComponent(route.taskId)}`;
     case 'decisions': {

@@ -43,7 +43,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-024 | `PRE_024_content_hash_excludes_diagram_and_matches_git` | Unit, RFC 8785 vectors, CI hash script | M2 | `TR-DEF-04`, `TR-DEF-02` | Planned |
 | PRE-025 | `PRE_025_graph_diff_reports_nodes_and_edges` (`GraphDiffTest`); `PRE_025_*` in `DefinitionDiffPostgresIT` and `ProcessRestContractTest` | Unit on reader models; Testcontainers over stored versions; WebMvc against `openapi.yaml` | M2 | `TR-DEF-03` | Done (#76) |
 | PRE-026 | `PRE_026_layout_revision_append_only_without_approval` | Concurrency, WebMvc | M3 | `TR-DEF-02` | Planned |
-| PRE-027 | `PRE_027_activities_bounded_by_instance_lifetime` | Testcontainers, plan capture | M2 | `TR-PERF-08`, `TR-OBS-01` | Planned |
+| PRE-027 | `PRE_027_activities_bounded_by_instance_lifetime` | Testcontainers, plan capture | M2 | `TR-PERF-08`, `TR-OBS-01` | Done |
 | PRE-028 | `PRE_028_live_node_counts_from_token_index` | Testcontainers, SQL capture | M2 | `TR-PERF-09` | Planned |
 | PRE-029 | `PRE_029_rollup_bounded_lag_and_no_step_tx_writes`, `PRE_029_a_step_transition_writes_no_statistics_row`, `PRE_029_a_slice_whose_transaction_rolls_back_is_counted_once_on_the_next_run`, `PRE_029_the_window_read_is_tenant_scoped_and_permission_checked_and_writes_nothing` | Two-replica Testcontainers, SQL capture | M3 | `TR-PERF-10` | Done |
 | PRE-030 | `PRE_030_task_query_filters_bounded_by_index`, `PRE_030_*` (`TaskQueryPostgresIT`); `PRE_030_card_officers_list_their_candidate_tasks_by_page_and_a_limit_above_200_is_refused` (`TaskLifecycleIT`) | Testcontainers with 30,000 seeded tasks in two tenants, plan capture of every range; host over HTTP | M2 | `TR-PERF-07`, `TR-TEN-01` | Done (#70) |

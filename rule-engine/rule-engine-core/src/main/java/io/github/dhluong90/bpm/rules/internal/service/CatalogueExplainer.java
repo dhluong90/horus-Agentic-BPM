@@ -6,10 +6,6 @@ import io.github.dhluong90.bpm.rules.api.DecisionExplanation.Condition;
 import io.github.dhluong90.bpm.rules.api.DecisionExplanation.MatchedRow;
 import io.github.dhluong90.bpm.rules.api.DraftValidation;
 import io.github.dhluong90.bpm.rules.api.Violation;
-import io.github.dhluong90.bpm.rules.internal.model.Definitions;
-import io.github.dhluong90.bpm.rules.internal.model.InputClause;
-import io.github.dhluong90.bpm.rules.internal.model.Rule;
-import io.github.dhluong90.bpm.rules.internal.model.When;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.read.ExplanationTemplates;
 import io.github.dhluong90.bpm.rules.spi.DecisionExplainer;
@@ -50,6 +46,8 @@ public final class CatalogueExplainer implements DecisionExplainer {
 
     private static final Pattern LANGUAGE = Pattern.compile("^[a-z]{2,3}$");
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z]+)}");
+    private static final Pattern CODE = Pattern.compile("^[A-Z][A-Z0-9_]*$");
+    private static final String SHORT = "short.";
 
     /** A literal as the normal form prints it: a quoted string, a number or money, a boolean, a date or datetime. */
     private static final String LITERAL = "'(?:[^'\\\\]|\\\\.)*'|-?[0-9]+(?:\\.[0-9]+)?(?: [A-Z]{3})?|true|false"
@@ -58,6 +56,8 @@ public final class CatalogueExplainer implements DecisionExplainer {
     private static final Pattern MEMBERSHIP = Pattern.compile("^(not in|in) \\[((?:" + LITERAL + ")(?:, (?:" + LITERAL
             + "))*)?]$");
     private static final Pattern BETWEEN = Pattern.compile("^between (" + LITERAL + ") and (" + LITERAL + ")$");
+    /** Exactly one literal, such as {@code 50000000 VND} or {@code 'GOLD'}. */
+    static final Pattern WHOLE_LITERAL = Pattern.compile(LITERAL);
     private static final Pattern ONE_LITERAL = Pattern.compile(LITERAL);
     private static final Pattern GROUP = Pattern.compile("^(.*?/any)/([0-9]+)/");
 
@@ -154,7 +154,7 @@ public final class CatalogueExplainer implements DecisionExplainer {
                 : "DOCUMENT_INVALID";
         Map<String, String> message = new LinkedHashMap<>();
         for (String language : new TreeSet<>(catalogues.keySet())) {
-            Words words = words(language);
+            Words words = words(language, DecisionExplanation.Wording.NONE);
             String key = "problem." + code;
             message.put(language, words.has(key) ? words.get(key)
                     : words.get("problem." + (violation.ruleId() != null ? "RULE_INVALID"
@@ -163,53 +163,10 @@ public final class CatalogueExplainer implements DecisionExplainer {
         return new DraftValidation.Problem(violation.ruleId(), violation.column(), code, violation.position(), message);
     }
 
-    /**
-     * Reads each rule of a valid table in every language of the catalogue. A condition on a masked input says that
-     * the value is masked and leaves out the test, so a masked value is never echoed (RLE-090).
-     *
-     * @param model the table
-     * @param maskByDefault whether the tenant masks an input that declares no {@code mask}
-     * @return one reading per rule, in document order
-     */
-    public List<DraftValidation.Reading> readings(Definitions model, boolean maskByDefault) {
-        Set<String> masked = new TreeSet<>();
-        for (InputClause input : model.decision().table().inputs()) {
-            if (input.masked(maskByDefault)) {
-                masked.add(input.name());
-            }
-        }
-        List<DraftValidation.Reading> readings = new ArrayList<>();
-        for (Rule rule : model.decision().table().rules()) {
-            Map<String, String> text = new LinkedHashMap<>();
-            for (String language : new TreeSet<>(catalogues.keySet())) {
-                Words words = words(language);
-                List<String> parts = whenParts(rule.when(), masked, words);
-                text.put(language, parts.isEmpty() ? words.format("reading.always", "ruleId", rule.id())
-                        : words.format("reading.rule", "ruleId", rule.id(), "conditions",
-                                String.join(words.get("join.conditions"), parts)));
-            }
-            readings.add(new DraftValidation.Reading(rule.id(), text));
-        }
-        return readings;
-    }
-
-    private static List<String> whenParts(When when, Set<String> masked, Words words) {
-        List<String> parts = new ArrayList<>();
-        when.cells().forEach((input, test) -> parts.add(masked.contains(input)
-                ? words.format("reading.masked", "input", input)
-                : words.format("reading.condition", "input", input, "test", test(test, words))));
-        if (!when.any().isEmpty()) {
-            parts.add(words.format("any", "alternatives", String.join(words.get("join.alternatives"),
-                    when.any().stream().map(w -> String.join(words.get("join.and"), whenParts(w, masked, words)))
-                            .toList())));
-        }
-        when.all().forEach(w -> parts.addAll(whenParts(w, masked, words)));
-        return parts;
-    }
-
-    private Words words(String language) {
+    /** The catalogue entries of one language, with the wording of the rule set being read. */
+    Words words(String language, DecisionExplanation.Wording wording) {
         return new Words(catalogues.getOrDefault(language, catalogues.get(defaultLanguage)), catalogues.get(ENGLISH),
-                DecisionExplanation.Wording.NONE);
+                wording);
     }
 
     @Override
@@ -351,21 +308,31 @@ public final class CatalogueExplainer implements DecisionExplainer {
         }
         String value = c.masked() ? words.format("value.masked", "input", words.inputName(c.input()))
                 : words.format("value", "input", words.inputName(c.input()), "value", value(EngineValues.read(c.valueJson()), words));
-        String test = c.result() == null ? words.format("test.unknown", "test", c.test()) : test(c.test(), words);
+        String test = c.result() == null ? words.format("test.unknown", "test", c.test()) : test(c.test(), words, "", "");
         return words.format("condition", "value", value, "test", test);
     }
 
-    /** Words a test the normal form prints in one of the simple shapes; any other test is quoted as written. */
-    private static String test(String test, Words words) {
+    /**
+     * Words a test the normal form prints in one of the simple shapes; any other test is quoted as written. The
+     * sentence keys are {@code prefix + "test.ge"} and so on, so the decision explanation ({@code ""}), the full
+     * reading of a row and its short form share one parser; {@code {input}} is filled when the entry has it.
+     */
+    static String test(String test, Words words, String prefix, String input) {
         if ("is null".equals(test)) {
-            return words.get("test.is-null");
+            return words.format(prefix + "test.is-null", "input", input);
         }
         if ("is not null".equals(test)) {
-            return words.get("test.is-not-null");
+            return words.format(prefix + "test.is-not-null", "input", input);
         }
+        boolean readable = !prefix.isEmpty(); // a reading words a code as the table does; an explanation as logged
         Matcher comparison = COMPARISON.matcher(test);
         if (comparison.matches()) {
-            return words.format(COMPARISON_KEYS.get(comparison.group(1)), "operand", literal(comparison.group(2), words));
+            String key = COMPARISON_KEYS.get(comparison.group(1));
+            if (SHORT.equals(prefix) && "test.eq".equals(key) && comparison.group(2).startsWith("'")) {
+                key = "test.eq.text"; // "Gold", not "tier = Gold": the value alone names the case
+            }
+            return words.format(prefix + key, "input", input, "operand",
+                    literal(comparison.group(2), words, readable));
         }
         Matcher membership = MEMBERSHIP.matcher(test);
         if (membership.matches()) {
@@ -373,23 +340,29 @@ public final class CatalogueExplainer implements DecisionExplainer {
             if (membership.group(2) != null) {
                 Matcher one = ONE_LITERAL.matcher(membership.group(2));
                 while (one.find()) {
-                    members.add(literal(one.group(), words));
+                    members.add(literal(one.group(), words, readable));
                 }
             }
-            return words.format("in".equals(membership.group(1)) ? "test.in" : "test.not-in", "operand",
-                    String.join(words.get("join.list"), members));
+            return words.format(prefix + ("in".equals(membership.group(1)) ? "test.in" : "test.not-in"), "input",
+                    input, "operand", String.join(words.get("join.list"), members));
         }
         Matcher between = BETWEEN.matcher(test);
         if (between.matches()) {
-            return words.format("test.between", "low", literal(between.group(1), words), "high", literal(between.group(2), words));
+            return words.format(prefix + "test.between", "input", input, "low", literal(between.group(1), words, readable),
+                    "high", literal(between.group(2), words, readable));
         }
-        return words.format("test.other", "test", test);
+        return words.format(prefix + "test.other", "input", input, "test", test);
     }
 
     /** A literal of a test as a reader would write it: a string without its quotes, a date without its function. */
-    private static String literal(String literal, Words words) {
+    static String literal(String literal, Words words) {
+        return literal(literal, words, false);
+    }
+
+    /** As {@link #literal(String, Words)}; {@code readable} words a code such as {@code GOLD} as the table does. */
+    static String literal(String literal, Words words, boolean readable) {
         if (literal.startsWith("'")) {
-            return unquote(literal);
+            return readable ? codeLabel(unquote(literal)) : unquote(literal);
         }
         if (literal.startsWith("date('") || literal.startsWith("datetime('")) {
             return literal.substring(literal.indexOf('\'') + 1, literal.length() - 2);
@@ -398,6 +371,24 @@ public final class CatalogueExplainer implements DecisionExplainer {
             return words.get("bool." + literal);
         }
         return words.number(literal); // a number, or money such as 50000000 VND, grouped for the language
+    }
+
+    /**
+     * A code as the rule table shows it: {@code GOLD} is {@code Gold}, {@code FIRST_TIME} is {@code First time}. A code
+     * of one or two characters is an abbreviation, such as a country (VN), and other text stays as written, so a
+     * reading and the table beside it always agree.
+     */
+    static String codeLabel(String value) {
+        if (!CODE.matcher(value).matches() || value.length() <= 2) {
+            return value;
+        }
+        String words = value.toLowerCase(java.util.Locale.ROOT).replace('_', ' ');
+        return words.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + words.substring(1);
+    }
+
+    /** A decided output value worded for a reading: a code as the table shows it, anything else as {@link #value}. */
+    static String readableValue(JsonNode node, Words words) {
+        return node != null && node.isString() ? codeLabel(node.stringValue()) : value(node, words);
     }
 
     private static String unquote(String quoted) {
