@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Credit review with a service level (PRE-008): a credit officer reviews the application within four working hours
+     of the bank's calendar vn-banking-hours (Monday to Friday 08:00 to 17:00 Asia/Ho_Chi_Minh, public holidays off). -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-credit-review"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-credit-review" name="Loan credit review" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:userTask id="credit-review" name="Credit review" horus:assignee="role:credit-officer"
+                   horus:resultVariable="review" horus:sla="PT4H" horus:calendar="vn-banking-hours"/>
+    <bpmn:endEvent id="end" name="Reviewed"/>
+    <bpmn:sequenceFlow id="start__review" sourceRef="start" targetRef="credit-review"/>
+    <bpmn:sequenceFlow id="review__end" sourceRef="credit-review" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

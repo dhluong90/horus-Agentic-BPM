@@ -126,7 +126,17 @@ public interface ProcessStore {
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
             String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
-            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt, String reviewJson) {
+            Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt, String reviewJson,
+            Instant dueAt) {
+
+        /** A task without a due time. */
+        public TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId,
+                String nodeId, String name, String assignee, boolean fourEyes, String status, long lockVersion,
+                String claimedBy, Instant claimedAt, String completedBy, Instant createdAt, Instant completedAt,
+                String reviewJson) {
+            this(tenantId, id, instanceId, tokenId, definitionId, nodeId, name, assignee, fourEyes, status,
+                    lockVersion, claimedBy, claimedAt, completedBy, createdAt, completedAt, reviewJson, null);
+        }
 
         /** A task without review context. */
         public TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId,

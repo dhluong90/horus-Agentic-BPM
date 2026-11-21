@@ -26,6 +26,21 @@ public interface ProcessQueryService {
      */
     Page<InstanceSummary> instances(InstanceQuery query);
 
+    /**
+     * Lists tasks of the caller's tenant ordered by {@code dueAt}, then {@code id}; tasks without a due time follow,
+     * by {@code id} (PRE-030). Each range (the caller's user, their claims, each role, each group, or the tenant for
+     * {@code any}) is read through its own index and stops after one page. Needs {@code processes:task:work};
+     * {@code any} also needs {@code processes:task:manage}.
+     *
+     * @param query the filters and the page
+     * @return one page
+     * @throws QueryInvalidException when the limit, the cursor, an assignment, a status or a filter is not valid
+     * @throws PermissionDeniedException when the caller lacks a permission
+     */
+    default Page<TaskSummary> tasks(TaskQuery query) {
+        throw new UnsupportedOperationException("This query service does not list tasks");
+    }
+
 
     /**
      * Counts the live tokens per node of one definition version in the caller's tenant, from the live token index,

@@ -275,12 +275,12 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         String kind = t.assignee().substring(0, colon);
         String value = t.assignee().substring(colon + 1);
         jdbc.sql("INSERT INTO pre_task (tenant_id, id, instance_id, token_id, definition_id, node_id, name, assignee_user, "
-                        + "assignee_role, assignee_group, four_eyes, status, lock_version, created_at, review) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)")
+                        + "assignee_role, assignee_group, four_eyes, status, lock_version, created_at, review, due_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?)")
                 .params(t.tenantId(), t.id(), t.instanceId(), t.tokenId(), t.definitionId(), t.nodeId(), t.name(),
                         kind.equals("user") ? value : null, kind.equals("role") ? value : null,
                         kind.equals("group") ? value : null, t.fourEyes(), t.status(), t.lockVersion(), ts(t.createdAt()),
-                        t.reviewJson())
+                        t.reviewJson(), t.dueAt() == null ? null : ts(t.dueAt()))
                 .update();
     }
 
@@ -335,7 +335,50 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 rs.getString("token_id"), rs.getString("definition_id"), rs.getString("node_id"), rs.getString("name"),
                 assignee, rs.getBoolean("four_eyes"), rs.getString("status"), rs.getLong("lock_version"),
                 rs.getString("claimed_by"), instant(rs, "claimed_at"), rs.getString("completed_by"),
-                instant(rs, "created_at"), instant(rs, "completed_at"), rs.getString("review"));
+                instant(rs, "created_at"), instant(rs, "completed_at"), rs.getString("review"), instant(rs, "due_at"));
+    }
+
+    @Override
+    public List<TaskSummaryRow> datedTasks(String tenant, TaskRange range, String key, List<String> statuses,
+            Instant afterDueAt, String afterId, Instant dueBefore, int limit) {
+        ProcessListQueries.TaskRange r = ProcessListQueries.TaskRange.valueOf(range.name());
+        List<Object> params = new ArrayList<>();
+        params.add(tenant);
+        if (r.keyed()) {
+            params.add(Objects.requireNonNull(key, "key"));
+        }
+        params.add(statuses.toArray(String[]::new));
+        params.add(ts(afterDueAt));
+        params.add(afterId);
+        params.add(ts(dueBefore));
+        params.add(limit);
+        return ProcessListQueries.tasks(r, true).list(jdbc, params, JdbcProcessStore::taskSummary);
+    }
+
+    @Override
+    public List<TaskSummaryRow> undatedTasks(String tenant, TaskRange range, String key, List<String> statuses,
+            String afterId, int limit) {
+        ProcessListQueries.TaskRange r = ProcessListQueries.TaskRange.valueOf(range.name());
+        List<Object> params = new ArrayList<>();
+        params.add(tenant);
+        if (r.keyed()) {
+            params.add(Objects.requireNonNull(key, "key"));
+        }
+        params.add(statuses.toArray(String[]::new));
+        params.add(afterId);
+        params.add(limit);
+        return ProcessListQueries.tasks(r, false).list(jdbc, params, JdbcProcessStore::taskSummary);
+    }
+
+    private static TaskSummaryRow taskSummary(ResultSet rs, int row) throws SQLException {
+        String assignee = rs.getString("assignee_user") != null ? "user:" + rs.getString("assignee_user")
+                : rs.getString("assignee_role") != null ? "role:" + rs.getString("assignee_role")
+                : "group:" + rs.getString("assignee_group");
+        return new TaskSummaryRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
+                rs.getString("node_id"), rs.getString("name"), assignee, rs.getString("status"),
+                rs.getLong("lock_version"), rs.getString("claimed_by"), instant(rs, "created_at"),
+                instant(rs, "due_at"), rs.getString("definition_key"), rs.getInt("definition_ver"),
+                rs.getString("business_key"));
     }
 
     // ---- history and idempotency --------------------------------------------------------------------------

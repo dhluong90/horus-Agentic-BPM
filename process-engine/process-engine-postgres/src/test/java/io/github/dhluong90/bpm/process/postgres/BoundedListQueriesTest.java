@@ -120,7 +120,8 @@ class BoundedListQueriesTest {
                 "definition-history", "instance-tokens", "instance-tasks", "instance-open-incidents", "instance-step-results",
                 "replay-overridden-attempts", "replay-recorded-answers", "replay-recorded-answers-after", "replay-cases",
                 "definition-keys", "definition-keys-after",
-                "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "instances-1",
+                "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "calendar-holidays",
+                "tasks-mine-dated", "tasks-any-undated", "instances-1",
                 "instances-3-key-range-after");
     }
 

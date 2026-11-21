@@ -31,17 +31,49 @@ import java.util.Set;
  * @param review for the review task of a refused agent answer (#52): {@code code}, {@code reasons}, {@code ruleIds},
  *     {@code guardrailDecisionId}, the {@code inputs} the agent saw and its {@code output}, masked by the output
  *     schema's masking policy, with {@code outputFields}; null for every other task
+ * @param dueAt when the task is due, set once at creation from its {@code horus:sla} in working time (PRE-008); null
+ *     for a task without an SLA
  */
 public record TaskView(String id, String instanceId, String definitionKey, int definitionVersion, String businessKey,
         String nodeId, String name, String assignee, boolean fourEyes, String status, long lockVersion,
         String claimedBy, Instant claimedAt, Instant createdAt, String completedBy, Instant completedAt,
-        Set<String> allowedActions, Map<String, Object> review) {
+        Set<String> allowedActions, Map<String, Object> review, Instant dueAt) {
 
     public TaskView {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(status, "status must not be null");
         allowedActions = allowedActions == null ? Set.of() : Set.copyOf(allowedActions);
         review = review == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(review));
+    }
+
+    /**
+     * A task without a due time.
+     *
+     * @param id task id
+     * @param instanceId the instance
+     * @param definitionKey the definition key of the instance
+     * @param definitionVersion the pinned version of the instance
+     * @param businessKey the instance business key, or null
+     * @param nodeId the {@code userTask} id
+     * @param name the step name, or null
+     * @param assignee the assignee
+     * @param fourEyes whether four eyes apply
+     * @param status the status
+     * @param lockVersion optimistic lock version
+     * @param claimedBy the claimant, or null
+     * @param claimedAt when it was claimed, or null
+     * @param createdAt when the task was created
+     * @param completedBy who completed it, or null
+     * @param completedAt when it was completed, or null
+     * @param allowedActions what this caller may do now
+     * @param review the review context, or null
+     */
+    public TaskView(String id, String instanceId, String definitionKey, int definitionVersion, String businessKey,
+            String nodeId, String name, String assignee, boolean fourEyes, String status, long lockVersion,
+            String claimedBy, Instant claimedAt, Instant createdAt, String completedBy, Instant completedAt,
+            Set<String> allowedActions, Map<String, Object> review) {
+        this(id, instanceId, definitionKey, definitionVersion, businessKey, nodeId, name, assignee, fourEyes, status,
+                lockVersion, claimedBy, claimedAt, createdAt, completedBy, completedAt, allowedActions, review, null);
     }
 
     /**
@@ -70,7 +102,7 @@ public record TaskView(String id, String instanceId, String definitionKey, int d
             String claimedBy, Instant claimedAt, Instant createdAt, String completedBy, Instant completedAt,
             Set<String> allowedActions) {
         this(id, instanceId, definitionKey, definitionVersion, businessKey, nodeId, name, assignee, fourEyes, status,
-                lockVersion, claimedBy, claimedAt, createdAt, completedBy, completedAt, allowedActions, null);
+                lockVersion, claimedBy, claimedAt, createdAt, completedBy, completedAt, allowedActions, null, null);
     }
 
     /**
@@ -80,6 +112,6 @@ public record TaskView(String id, String instanceId, String definitionKey, int d
     public TaskView withAllowedActions(Set<String> actions) {
         return new TaskView(id, instanceId, definitionKey, definitionVersion, businessKey, nodeId, name, assignee,
                 fourEyes, status, lockVersion, claimedBy, claimedAt, createdAt, completedBy, completedAt, actions,
-                review);
+                review, dueAt);
     }
 }

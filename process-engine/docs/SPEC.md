@@ -80,11 +80,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-008 BusinessCalendar SPI computes SLA deadlines across weekends and holidays
 - **Traces to:** `TR-CAL-01`, `TR-CAL-02`
 - **Milestone:** M2
-- **Given:** Tenant calendar `vn-banking-hours` (`Mon-Fri 08:00-17:00 Asia/Ho_Chi_Minh`, holiday `2027-01-01`). Task created `2026-12-31T15:00:00+07:00` with `sla: PT4H`.
-- **When:** Engine creates the `userTask` and computes `due_at`.
-- **Then:** Consumes 2 hours (`15:00-17:00` on Dec 31), skips Jan 1 holiday + weekend (Jan 2–3), and sets `due_at = 2027-01-04T10:00:00+07:00`. Later calendar edits do not mutate this already-computed `due_at`.
+- **Given:** Tenant calendar `vn-banking-hours` (`Mon-Fri 08:00-17:00 Asia/Ho_Chi_Minh`, holiday `2027-01-01`). A `userTask` `credit-review` with `horus:sla="PT4H"` and `horus:calendar="vn-banking-hours"`; the engine clock at `2026-12-31T15:00:00+07:00`.
+- **When:** Engine creates the `userTask` and computes `due_at`; later an approved change adds `2027-01-04` as a holiday and a second task is created at the same time.
+- **Then:** Consumes 2 hours (`15:00-17:00` on Dec 31), skips Jan 1 holiday + weekend (Jan 2–3), and sets `due_at = 2027-01-04T10:00:00+07:00`, shown as `dueAt` on the task. The value is computed once, with the engine clock, in the calendar's time zone (never the JVM's), and stored; the later change does not mutate it, and only the second task is due `2027-01-05T10:00:00+07:00`. A task without `horus:calendar` counts elapsed time. A calendar the tenant does not have fails the step with `422 STEP_FAILED` (reason `CALENDAR_NOT_FOUND`) and nothing is written. An `horus:sla` that is not a positive ISO 8601 duration up to 366 days, an invalid calendar key, or a calendar without an SLA is `422 VALIDATION_FAILED` (`SLA_INVALID`) at import.
 - **Example:** `Dec 31 15:00 + PT4H (biz) -> Jan 4 10:00 +07:00`.
-- **Test ID:** `PRE_008_business_calendar_skips_holidays_and_weekends`
+- **Test ID:** `PRE_008_business_calendar_skips_holidays_and_weekends` (unit, `WorkingCalendarTest`, with cases across a clock change, a lunch break, a closing-time end and a seeded property that the due time does not depend on the JVM time zone; and on PostgreSQL, `BusinessCalendarPostgresIT`), `PRE_008_a_later_calendar_change_does_not_move_an_existing_due_time`, `PRE_008_*` in `SubsetBpmnReaderSlaTest`
+
+### PRE-114 A business calendar is created or changed only when a second person approves it
+- **Traces to:** `TR-CAL-01`, `TR-SEC-04`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`, `vn-banking-hours` at version 1; `kim` and `lan` hold `processes:calendar:manage`; `horus.bpm.processes.calendar.approval` at its default `four-eyes` (PD-118 as amended by PD-131).
+- **When:** `kim` proposes the calendar with `2027-01-04` added (against version 1, with a reason) and tries to approve it; `lan` approves it; a second proposal made against version 1 is then approved; a manager of `bank-b` reads the calendar or approves a `bank-a` proposal; the service starts with `calendar.approval=single` under the `prod` profile.
+- **Then:** `kim`'s approval is `403 SELF_APPROVAL_FORBIDDEN` and changes nothing; `lan`'s approval moves the calendar to version 2 and emits `processes.calendar.changed.v1` with `proposedBy=kim` and `approvedBy=lan`; the change record keeps the reason, both people and the old and the new value. The stale proposal is `409 VERSION_CONFLICT` and stays `PENDING`. `bank-b` gets `CALENDAR_NOT_FOUND` and nothing is written. Start-up is refused with `single` outside the `dev` profile; under `dev` alone a proposal applies at once and is recorded as `SINGLE`. The table refuses an approved four-eyes change whose approver is its proposer, whoever writes it.
+- **Example:** `kim proposes, kim approves -> 403; lan approves -> version 2, event names kim and lan`.
+- **Test ID:** `PRE_114_*` in `BusinessCalendarPostgresIT` and `DevOnlyRelaxationTest`
 
 ---
 
@@ -339,11 +348,11 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-030 Task queries by assignee, role, group, due date and SLA breach are bounded
 - **Traces to:** `TR-PERF-07`, `TR-TEN-01`
 - **Milestone:** M2
-- **Given:** `CallerResolver` returns user `minh`, roles `[credit-officer, ops]`, group `[branch-hcm-01]`; 30,000 open tasks for `credit-officer`, 12 claimed by `minh`, 3 overdue.
+- **Given:** `CallerResolver` returns user `minh`, roles `[credit-officer, ops]`, group `[branch-hcm-01]`; 30,000 open tasks for `credit-officer`, 12 claimed by `minh`, 3 overdue; open tasks for `ops` and `branch-hcm-01`, some without a due time; tenant `bank-b` holds tasks for the same names.
 - **When:** `GET /tasks?assignment=mine`, `GET /tasks?assignment=candidate&limit=50`, `GET /tasks?assignment=candidate&slaBreached=true`, and `GET /tasks?limit=500`.
-- **Then:** `mine` returns the 12 tasks ordered by `dueAt`; `candidate` returns 50 tasks across both roles and the group ordered by `(dueAt, id)` with a `nextCursor`; `slaBreached` returns the 3 overdue tasks; `limit=500` returns `400 QUERY_INVALID` naming the maximum 200. The query-plan check shows only partial-index range scans.
+- **Then:** `mine` (tasks declared to the caller or claimed by them) returns the 12 tasks ordered by `dueAt`; `candidate` (open tasks of the caller's roles and groups) returns 50 tasks across both roles and the group ordered by `(dueAt, id)` with a `nextCursor`; `slaBreached` returns the 3 overdue tasks; `limit=500` returns `400 QUERY_INVALID` naming the maximum 200. Tasks without a due time follow the others, by `id`. `role` and `group` narrow `candidate` and `any`, and with `mine` alone are `400 QUERY_INVALID`. `assignment=any` needs `processes:task:manage`. Items carry no variables and no review context. Only the caller's tenant is read: `bank-b`'s tasks never appear, a cursor of another tenant or of other filters is `400 QUERY_INVALID`, and a list writes nothing. Each range (the user, the claims, each role, each group, or the tenant) is read through its own partial index for at most one page and merged; the query-plan check shows only partial-index range scans, in index order, under a `Limit`.
 - **Example:** `candidate limit 50 -> 50 items, nextCursor; limit 500 -> 400 QUERY_INVALID (max 200)`.
-- **Test ID:** `PRE_030_task_query_filters_bounded_by_index`
+- **Test ID:** `PRE_030_task_query_filters_bounded_by_index` (`TaskQueryPostgresIT`), `PRE_030_*` in `TaskQueryPostgresIT` and, over HTTP, `TaskLifecycleIT`
 
 ### PRE-036 Every list query passes the CI query-plan check
 - **Traces to:** `TR-PERF-07`

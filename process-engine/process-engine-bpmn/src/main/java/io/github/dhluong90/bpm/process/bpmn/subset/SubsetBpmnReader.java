@@ -45,6 +45,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
+import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -91,6 +92,9 @@ public final class SubsetBpmnReader {
     private static final String BPMN = BpmnNamespaces.BPMN;
     private static final String HORUS = BpmnNamespaces.HORUS;
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
+    /** The longest SLA a user task may declare: a year of working time is already beyond any service level. */
+    static final java.time.Duration MAX_SLA = java.time.Duration.ofDays(366);
+    private static final int MAX_CALENDAR_KEY = 100;
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
     /** The step id a {@code horus:memory} entry reads from: an id, never an expression or a variable path. */
@@ -863,6 +867,37 @@ public final class SubsetBpmnReader {
             }
         }
 
+        /**
+         * {@code horus:sla} (a positive ISO 8601 duration of working time, at most {@link #MAX_SLA}) and
+         * {@code horus:calendar} (a calendar key) of a user task (PRE-008). A calendar without an SLA is refused,
+         * because it would set nothing.
+         */
+        private java.util.Optional<SlaSpec> sla(String id, int line) {
+            String text = horus("sla");
+            String calendar = horus("calendar");
+            if (text == null) {
+                if (calendar != null) {
+                    invalid.add(new DefinitionProblem("SLA_INVALID", "horus:calendar needs horus:sla, the working "
+                            + "time until the task is due", "userTask", safe(id), line));
+                }
+                return java.util.Optional.empty();
+            }
+            java.time.Duration duration = positiveDuration(text);
+            boolean ok = true;
+            if (duration == null || duration.compareTo(MAX_SLA) > 0) {
+                invalid.add(new DefinitionProblem("SLA_INVALID", "horus:sla is a positive ISO 8601 duration of "
+                        + "working time up to " + MAX_SLA + ", for example PT4H", "userTask", safe(id), line));
+                ok = false;
+            }
+            if (calendar != null && (calendar.length() > MAX_CALENDAR_KEY || !KEY.matcher(calendar).matches())) {
+                invalid.add(new DefinitionProblem("SLA_INVALID", "horus:calendar is a calendar key: lower-case "
+                        + "words joined by hyphens, at most " + MAX_CALENDAR_KEY + " characters", "userTask",
+                        safe(id), line));
+                ok = false;
+            }
+            return ok ? java.util.Optional.of(new SlaSpec(duration, calendar, null)) : java.util.Optional.empty();
+        }
+
         private java.time.Duration positiveDuration(String text) {
             try {
                 java.time.Duration value = java.time.Duration.parse(text.strip());
@@ -913,6 +948,7 @@ public final class SubsetBpmnReader {
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
+            sla(id, line).ifPresent(ext::add);
             Node children = children("userTask", id, false);
             return new UserTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
                     info(ext, children.foreign()));
