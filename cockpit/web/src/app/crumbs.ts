@@ -20,3 +20,25 @@ export function useCrumbLabel(): string | undefined {
     () => undefined,
   );
 }
+
+/*
+ * A whole trail for a screen whose parents only it knows, such as a case: its process name and version come from
+ * the instance it loads. Until the screen sets it, the breadcrumb shows the area alone.
+ */
+export interface Crumb { label: string; href?: string }
+let trail: readonly Crumb[] | undefined;
+const trailListeners = new Set<() => void>();
+
+export function setCrumbTrail(next: readonly Crumb[] | undefined): void {
+  if (next === trail || (next !== undefined && trail !== undefined && JSON.stringify(next) === JSON.stringify(trail))) return;
+  trail = next;
+  for (const listener of trailListeners) listener();
+}
+
+export function useCrumbTrail(): readonly Crumb[] | undefined {
+  return useSyncExternalStore(
+    (onChange) => { trailListeners.add(onChange); return () => { trailListeners.delete(onChange); }; },
+    () => trail,
+    () => undefined,
+  );
+}

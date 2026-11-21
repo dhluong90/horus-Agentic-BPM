@@ -4,7 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import { currentProcessEngine, resetProcessEngine } from '../../mocks/handlers';
 import { setScenario } from '../../mocks/node';
-import { FORM_TASK_ID, MASKED_TASK_ID, REVIEW_TASK_ID } from '../../mocks/processDemo';
+import { INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from '../../mocks/caseDemo';
+import { FORM_TASK_ID, INSTANCE_ID, MASKED_TASK_ID, REVIEW_TASK_ID } from '../../mocks/processDemo';
 
 function open(hash: string) {
   window.location.hash = hash;
@@ -76,6 +77,117 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
   });
 });
 
+describe('CKP-017 instance on its diagram', () => {
+  it('CKP_017_instance_diagram_shows_tokens_and_activities', async () => {
+    setScenario('processes-reviewer');
+    open(`#/instances/${KYC_INSTANCE_ID}`);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Case KYC-2207' })).toBeInTheDocument();
+    const diagram = await screen.findByRole('group', { name: 'Diagram of Case KYC-2207' });
+    // The waiting step carries a token badge in words, not colour alone, and opens first in the inspector.
+    const approve = await within(diagram).findByRole('button', { name: 'Approve high-risk customer Person task, Waiting for a person' });
+    expect(approve).toHaveAttribute('aria-pressed', 'true');
+    const inspector = screen.getByRole('complementary', { name: 'Selected step' });
+    expect(within(inspector).getByText('Waiting for a person')).toBeInTheDocument();
+    expect(within(inspector).getByText('Credit officer')).toBeInTheDocument();
+    expect(within(inspector).getByRole('link', { name: 'Open the task' })).toHaveAttribute('href', '#/tasks/01JD4T7APPR0VE00000000KY07');
+
+    await userEvent.click(within(diagram).getByRole('button', { name: /^Verify identity documents Agent task/ }));
+    expect(within(inspector).getByText('Completed, 2 attempts, 3 min 10 s, by svc-kyc')).toBeInTheDocument();
+    expect(within(inspector).getByText('Completed', { selector: '.badge' })).toBeInTheDocument();
+
+    // The timeline lists the same entries in time order, in words.
+    await userEvent.click(screen.getByRole('tab', { name: 'Timeline' }));
+    const rows = within(screen.getByRole('table', { name: 'History of the case in time order' })).getAllByRole('row').slice(1);
+    expect(rows.map((row) => (row as HTMLTableRowElement).cells.item(1)?.textContent)).toEqual(['Case started', 'Step started', '✕ Attempt failed', 'Step completed', 'Decision made', 'Step started']);
+    expect(rows[3]).toHaveTextContent('Verify identity documents');
+    expect(rows[3]).toHaveTextContent('svc-kyc');
+    // The activities came from the engine's endpoint; nothing is computed from variables.
+    expect(currentProcessEngine().requests.some((request) => request.path.endsWith(`/instances/${KYC_INSTANCE_ID}/activities`))).toBe(true);
+  });
+
+  it('CKP_017_an_incident_shows_on_its_step_with_its_code_one_click_away', async () => {
+    setScenario('processes-reviewer');
+    open(`#/instances/${INCIDENT_INSTANCE_ID}`);
+
+    const diagram = await screen.findByRole('group', { name: 'Diagram of Case APP-1045' });
+    expect(await within(diagram).findByRole('button', { name: 'Assess documents Agent task, Incident: The agent did not answer in time.' })).toHaveAttribute('aria-pressed', 'true');
+    const inspector = screen.getByRole('complementary', { name: 'Selected step' });
+    expect(within(inspector).getByText('The agent did not answer in time.')).toBeInTheDocument();
+    expect(within(inspector).getByText('3 attempts')).toBeInTheDocument();
+    expect(within(inspector).getByText('Process Engine')).toBeInTheDocument();
+    expect(inspector).not.toHaveTextContent('Process Engine (');
+    await userEvent.click(within(inspector).getByText('Details'));
+    expect(within(inspector).getByText('AGENT_TIMEOUT')).toBeVisible();
+    expect(within(inspector).getByText('loans-7f9c')).toBeVisible();
+    expect(diagram).not.toHaveTextContent('AGENT_TIMEOUT');
+  });
+
+  it('CKP_017_a_case_opens_from_the_cases_of_its_process', async () => {
+    setScenario('processes-reviewer');
+    open('#/processes/loan-origination/3');
+
+    await userEvent.click(await screen.findByRole('tab', { name: 'Cases' }));
+    expect(window.location.hash).toBe('#/processes/loan-origination/3/cases');
+    const link = await screen.findByRole('link', { name: 'APP-1042' });
+    expect(link).toHaveAttribute('href', `#/instances/${INSTANCE_ID}`);
+    await userEvent.click(link);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Case APP-1042' })).toBeInTheDocument();
+    expect(await screen.findByText('Loan origination, version 3')).toBeInTheDocument();
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(crumbs).getByRole('link', { name: 'Loan origination' })).toHaveAttribute('href', '#/processes/loan-origination/3/cases');
+  });
+
+  it('CKP_017_a_process_without_cases_says_so', async () => {
+    setScenario('processes-reviewer');
+    open('#/processes/card-dispute/1/cases');
+
+    expect(await screen.findByText('No case of this process has started yet.')).toBeInTheDocument();
+  });
+
+  it('CKP_017_an_engine_without_activities_still_shows_where_the_case_waits', async () => {
+    setScenario('processes-reviewer');
+    resetProcessEngine({ activities: 'missing' });
+    open(`#/instances/${INSTANCE_ID}`);
+
+    const diagram = await screen.findByRole('group', { name: 'Diagram of Case APP-1042' });
+    expect(await within(diagram).findByRole('button', { name: 'Assess documents Agent task, Waiting for a person' })).toBeInTheDocument();
+    expect(await screen.findByText('This service does not report step activity yet.')).toBeInTheDocument();
+    // With nothing to show, the task action is unavailable and says why, not a filled primary link.
+    const inspector = screen.getByRole('complementary', { name: 'Selected step' });
+    expect(within(inspector).queryByRole('link', { name: 'Open the task' })).not.toBeInTheDocument();
+    const action = within(inspector).getByRole('button', { name: 'Open the task' });
+    expect(action).toHaveAttribute('aria-disabled', 'true');
+    expect(action).toHaveAccessibleDescription('Opens once step activity is reported.');
+  });
+
+  it('CKP_017_a_case_reads_in_vietnamese', async () => {
+    setScenario('processes-reviewer');
+    window.localStorage.setItem('horus.cockpit.locale', 'vi');
+    resetProcessEngine({ locale: 'vi' });
+    open(`#/instances/${INSTANCE_ID}`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Hồ sơ APP-1042' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Mở công việc' })).toBeInTheDocument();
+  });
+
+  it('CKP_017_a_user_without_processes_read_is_told_and_no_case_is_requested', async () => {
+    setScenario('processes-task-only');
+    open(`#/instances/${INSTANCE_ID}`);
+
+    expect(await screen.findByText('Your permissions do not include reading cases on this service.')).toBeInTheDocument();
+    expect(currentProcessEngine().requests.some((request) => request.path.includes('/instances/'))).toBe(false);
+  });
+
+  it('CKP_017_an_unknown_case_is_not_found', async () => {
+    setScenario('processes-reviewer');
+    open('#/instances/01JD4I0N0SUCH0000000000000');
+
+    expect(await screen.findByText('This service has no case with this reference.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Back to processes/ })).toHaveAttribute('href', '#/processes');
+  });
+});
+
 describe('CKP-007 agent task inspector', () => {
   it('CKP_007_agent_task_inspector_shows_guardrail_and_override_controls', async () => {
     setScenario('processes-reviewer');
@@ -102,7 +214,14 @@ describe('CKP-007 agent task inspector', () => {
     expect(within(why).getByText('A guardrail rule refused the answer.')).toBeInTheDocument();
     expect(within(why).getByText('Rule R2')).toBeInTheDocument();
     expect(within(why).getByText('Declared income is 38% above the income on the salary slips')).toBeInTheDocument();
-    expect(within(why).getByText('Process Engine (loans-7f9c)')).toBeInTheDocument();
+    // The engine reads as a word; its node id is one click away under Details.
+    expect(within(why).getByText('Process Engine')).toBeInTheDocument();
+    expect(within(why).getByText('loans-7f9c')).not.toBeVisible();
+    // The breadcrumb keeps the way back to the process and the case.
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(await within(crumbs).findByRole('link', { name: 'Loan origination' })).toHaveAttribute('href', '#/processes/loan-origination/3/cases');
+    expect(within(crumbs).getByRole('link', { name: 'Case APP-1042' })).toHaveAttribute('href', `#/instances/${INSTANCE_ID}`);
+    expect(within(crumbs).getByText('Agent review')).toHaveAttribute('aria-current', 'page');
     expect(within(why).getByText('…R2X7')).toHaveAttribute('title', '01JD4G2DEC1S10N0000000R2X7');
 
     // Take the review, then override with a reason.

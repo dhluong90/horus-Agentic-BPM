@@ -46,4 +46,15 @@ describe('routes', () => {
     expect(areaOf({ name: 'rule-sets' })).toBe('rules');
     expect(areaOf({ name: 'decisions' })).toBe('decisions');
   });
+
+  it('CKP_017_a_case_and_the_cases_of_a_process_round_trip_through_the_url', () => {
+    const instance: Route = { name: 'instance', instanceId: '01JD4I9NSTANCE0000000000I9' };
+    expect(formatRoute(instance)).toBe('#/instances/01JD4I9NSTANCE0000000000I9');
+    expect(parseRoute(formatRoute(instance))).toEqual(instance);
+    expect(areaOf(instance)).toBe('processes');
+    const cases: Route = { name: 'process', key: 'loan-origination', version: 3, lens: 'cases' };
+    expect(formatRoute(cases)).toBe('#/processes/loan-origination/3/cases');
+    expect(parseRoute(formatRoute(cases))).toEqual(cases);
+    expect(parseRoute('#/processes/loan-origination/3/other')).toEqual({ name: 'process', key: 'loan-origination', version: 3 });
+  });
 });

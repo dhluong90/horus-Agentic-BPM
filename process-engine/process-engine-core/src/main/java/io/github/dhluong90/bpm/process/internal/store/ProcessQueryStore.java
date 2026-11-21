@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.internal.store;
 
+import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -62,4 +63,30 @@ public interface ProcessQueryStore {
 
     /** @return live token counts per node and status, read through the live token index only */
     List<LiveCount> liveTokenCounts(String tenant, String definitionId);
+
+    /**
+     * The history of one step of one instance, aggregated (PRE-027).
+     *
+     * @param nodeId the step
+     * @param firstEnteredAt its first {@code NODE_ENTERED}, or null
+     * @param lastEnteredAt its last {@code NODE_ENTERED}, or null
+     * @param lastCompletedAt its last {@code NODE_COMPLETED}, or null
+     * @param entries its {@code NODE_ENTERED} count
+     * @param attemptIds its distinct attempt ids
+     * @param lastActor the last non-null actor of its entries, or null
+     */
+    record NodeActivityRow(String nodeId, Instant firstEnteredAt, Instant lastEnteredAt, Instant lastCompletedAt,
+            long entries, long attemptIds, String lastActor) {
+    }
+
+    /**
+     * @return one row per step of the instance, from its history between {@code from} and {@code to} inclusive only
+     */
+    List<NodeActivityRow> nodeActivities(String tenant, String instanceId, Instant from, Instant to);
+
+    /**
+     * @return at most {@code limit} history entries of the instance between {@code from} and {@code to} inclusive,
+     *     oldest first
+     */
+    List<InstanceActivities.Entry> historyEntries(String tenant, String instanceId, Instant from, Instant to, int limit);
 }

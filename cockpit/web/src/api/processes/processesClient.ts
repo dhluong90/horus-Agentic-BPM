@@ -4,10 +4,15 @@ import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
   definitionVersion,
+  instanceActivities,
+  instanceSummaryPage,
+  INSTANCE_STATUSES,
   processInstance,
   task,
   type DefinitionSummary,
   type DefinitionVersion,
+  type InstanceActivities,
+  type InstanceSummary,
   type ProcessInstance,
   type Task,
 } from './schemas';
@@ -36,8 +41,12 @@ export interface ProcessesClient {
   exportBpmn(key: string, version: number, signal?: AbortSignal): Promise<string>;
   /** getTask: the task with the actions this caller may take, and the review context of a refused agent answer */
   getTask(id: string, signal?: AbortSignal): Promise<Task>;
-  /** getInstance: read for who started it (four eyes) */
+  /** getInstance: the instance with its tokens and tasks; the review reads who started it (four eyes) */
   getInstance(id: string, signal?: AbortSignal): Promise<ProcessInstance>;
+  /** listInstances: one page of the instances of one key, every status, newest first */
+  listInstances(request: { definitionKey: string; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<InstanceSummary>>;
+  /** getInstanceActivities: per step what happened, and the history entries in time order */
+  getInstanceActivities(id: string, signal?: AbortSignal): Promise<InstanceActivities>;
   /** claimTask */
   claimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
   /** completeTask: the reviewer's answer and reason; the engine records HUMAN_OVERRIDE */
@@ -73,6 +82,15 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     },
     async getInstance(id, signal) {
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/instances/${segment(id)}`, ...withSignal(signal) }, processInstance)).data;
+    },
+    async listInstances(request) {
+      const query = new URLSearchParams({ status: INSTANCE_STATUSES.join(','), definitionKey: request.definitionKey });
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/instances?${query.toString()}`, ...withSignal(request.signal) }, instanceSummaryPage)).data;
+    },
+    async getInstanceActivities(id, signal) {
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/instances/${segment(id)}/activities`, ...withSignal(signal) }, instanceActivities)).data;
     },
     async claimTask(id, lockVersion, idempotencyKey) {
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:claim`, headers: command(lockVersion, idempotencyKey) }, task)).data;

@@ -28,7 +28,7 @@ describe('embedded shell, case A', () => {
     render(<App />);
 
     expect(await screen.findByTestId('header-user')).toHaveTextContent('Nguyễn Thị Lan');
-    expect(screen.getByTestId('header-host')).toHaveTextContent('Loan origination');
+    expect(screen.getByTestId('header-host')).toHaveTextContent('Retail banking');
     expect(screen.getByTestId('header-tenant')).toHaveTextContent('bank-a');
     expect(screen.getByRole('heading', { level: 1, name: /Nguyễn Thị Lan/ })).toBeInTheDocument();
     // No backend of its own: the registry, then the host's two metadata endpoints, then only engine endpoints, same origin.
@@ -163,7 +163,7 @@ describe('language', () => {
     await userEvent.click(screen.getByRole('button', { name: 'VI' }));
 
     expect(screen.getByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
-    expect(screen.getByTestId('header-host')).toHaveTextContent('Khởi tạo khoản vay');
+    expect(screen.getByTestId('header-host')).toHaveTextContent('Ngân hàng bán lẻ');
     expect(screen.getByRole('link', { name: 'Quy tắc' })).toBeInTheDocument();
     expect(screen.queryByText('Home')).not.toBeInTheDocument();
     expect(document.documentElement.lang).toBe('vi');

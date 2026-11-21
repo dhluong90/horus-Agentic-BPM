@@ -17,6 +17,7 @@ import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
+import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.process.api.PreconditionRequiredException;
@@ -454,6 +455,117 @@ public class ProcessController {
     public ResponseEntity<byte[]> instance(@PathVariable("id") String id) {
         ProcessInstance instance = engine.instance(id);
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
+     * What happened at each step of one instance and its history entries in time order ({@code processes:read},
+     * PRE-027), read only from the history partitions of the instance's lifetime. The {@code ETag} is a hash of the
+     * body, so a matching {@code If-None-Match} gets {@code 304} with no body.
+     */
+    @GetMapping("/instances/{id}/activities")
+    public ResponseEntity<byte[]> activities(@PathVariable("id") String id,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+        int size = ACTIVITY_LIMIT;
+        if (limit != null) {
+            try {
+                size = Integer.parseInt(limit.strip());
+            } catch (NumberFormatException e) {
+                throw new QueryInvalidException("limit must be a whole number");
+            }
+        }
+        InstanceActivities activities = queries.activities(id, size);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("instanceId", activities.instanceId());
+        body.put("startedAt", activities.startedAt().toString());
+        if (activities.endedAt() == null) {
+            body.putNull("endedAt");
+        } else {
+            body.put("endedAt", activities.endedAt().toString());
+        }
+        tools.jackson.databind.node.ArrayNode nodes = body.putArray("nodes");
+        for (InstanceActivities.Node node : activities.nodes()) {
+            ObjectNode item = nodes.addObject();
+            item.put("nodeId", node.nodeId());
+            item.put("state", node.state().name());
+            putTime(item, "enteredAt", node.enteredAt());
+            putTime(item, "completedAt", node.completedAt());
+            if (node.duration() == null) {
+                item.putNull("durationMs");
+            } else {
+                item.put("durationMs", node.duration().toMillis());
+            }
+            item.put("attempts", node.attempts());
+            if (node.actor() == null) {
+                item.putNull("actor");
+            } else {
+                item.put("actor", node.actor());
+            }
+            if (node.incidentCode() == null) {
+                item.putNull("incident");
+            } else {
+                ObjectNode incident = item.putObject("incident");
+                incident.put("code", node.incidentCode());
+                putTime(incident, "openedAt", node.incidentAt());
+            }
+        }
+        tools.jackson.databind.node.ArrayNode entries = body.putArray("entries");
+        for (InstanceActivities.Entry entry : activities.entries()) {
+            ObjectNode item = entries.addObject();
+            item.put("id", entry.id());
+            item.put("type", entry.type());
+            if (entry.nodeId() == null) {
+                item.putNull("nodeId");
+            } else {
+                item.put("nodeId", entry.nodeId());
+            }
+            if (entry.actor() == null) {
+                item.putNull("actor");
+            } else {
+                item.put("actor", entry.actor());
+            }
+            item.put("occurredAt", entry.occurredAt().toString());
+        }
+        body.put("hasMore", activities.hasMore());
+        byte[] bytes = bytes(body);
+        String etag = "\"" + contentHash(bytes) + "\"";
+        if (ifNoneMatch != null && matches(ifNoneMatch, etag)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).header(HttpHeaders.ETAG, etag).build();
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.ETAG, etag).body(bytes);
+    }
+
+    /** Default number of history entries of {@link #activities}; {@code ?limit=} may ask for 1 to the page limit. */
+    static final int ACTIVITY_LIMIT = 200;
+
+    private static void putTime(ObjectNode node, String name, Instant time) {
+        if (time == null) {
+            node.putNull(name);
+        } else {
+            node.put(name, time.toString());
+        }
+    }
+
+    private static String contentHash(byte[] bytes) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+            return java.util.HexFormat.of().formatHex(digest, 0, 16);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every Java runtime", e);
+        }
+    }
+
+    private static boolean matches(String ifNoneMatch, String etag) {
+        for (String candidate : ifNoneMatch.split(",")) {
+            String value = candidate.strip();
+            if (value.startsWith("W/")) {
+                value = value.substring(2);
+            }
+            if (value.equals("*") || value.equals(etag)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
