@@ -421,6 +421,9 @@ class AsyncWaitStateTest {
                 + "'ASYNC_ATTEMPT_FAILED' ORDER BY (details->>'attempt')::int").param(loan).query(String.class).list())
                 .containsExactly("BUREAU_UNAVAILABLE retryable=true final=false",
                         "APPLICANT_UNKNOWN retryable=false final=true");
+        assertThat(TestEngine.jdbc().sql("SELECT error_code || ' retry=' || retry_count || ' ' || status FROM pre_incident "
+                + "WHERE instance_id = ?").param(loan).query(String.class).list()).containsExactly("UNHANDLED_BUSINESS_ERROR retry=1 OPEN");
+        assertThat(history(loan, "INCIDENT_RAISED")).isEqualTo(1);
         assertThat(tokenOn(pod1, loan)).isEqualTo("bureau-score:WAITING_ASYNC");
     }
 
@@ -914,5 +917,8 @@ class AsyncWaitStateTest {
         assertThat(TestEngine.jdbc().sql("SELECT details->>'errorCode' || ' final=' || (details->>'final') FROM "
                 + "pre_history WHERE instance_id = ? AND event_type = 'ASYNC_ATTEMPT_FAILED'").param(loan)
                 .query(String.class).single()).isEqualTo("MAX_ATTEMPTS_REACHED final=true");
+        assertThat(TestEngine.jdbc().sql("SELECT error_code || ' retry=' || retry_count || ' ' || status FROM pre_incident "
+                + "WHERE instance_id = ?").param(loan).query(String.class).list()).containsExactly("MAX_ATTEMPTS_REACHED retry=3 OPEN");
+        assertThat(history(loan, "INCIDENT_RAISED")).isEqualTo(1);
     }
 }
