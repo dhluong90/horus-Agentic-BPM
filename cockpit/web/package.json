@@ -1,6 +1,6 @@
 {
   "name": "@horus-bpm/cockpit-web",
-  "version": "0.2.0-SNAPSHOT",
+  "version": "0.3.0-SNAPSHOT",
   "private": true,
   "description": "HORUS cockpit: static React application for the Rule Engine and Process Engine.",
   "license": "SEE LICENSE IN ../../LICENSE",

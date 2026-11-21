@@ -37,10 +37,11 @@ Selection:
 ## Consequences
 - New column `rle_version.retired_at`, new table `rle_version_history`, new partial index `idx_rle_version_published`, new property `lifecycle.sweep-interval`, new counter `horus.rle.lifecycle.retired`.
 - `SELF_APPROVAL_FORBIDDEN` applies to `:approve` only.
-- `four-eyes` mode (PD-080, M3): columns `retire_requested_by`, `retire_requested_at`, `retire_reason` on `rle_version`; history actions `RETIRE_REQUESTED` and `RETIRE_CANCELLED`; event `rules.version.retire-requested.v1`; endpoints `:confirm-retire` and `:cancel-retire`; verified by `RLE-038`. If cut from M3 it arrives in 1.1, additively. If two of three compliance contacts in K6 require a second person, the default changes to `four-eyes` before 1.0 by a new decision.
+- `four-eyes` mode (PD-080, M3, built in #213 with migration V18): columns `retire_requested_by`, `retire_requested_at`, `retire_reason` and `retire_confirm_no_version` on `rle_version`, and `retire_requested_by` on the `RETIRED` history row; history actions `RETIRE_REQUESTED` and `RETIRE_CANCELLED`; event `rules.version.retire-requested.v1`; endpoints `:confirm-retire` and `:cancel-retire`; verified by `RLE-038`. If cut from M3 it arrives in 1.1, additively. If two of three compliance contacts in K6 require a second person, the default changes to `four-eyes` before 1.0 by a new decision.
 - Verified by `RLE-025`, `RLE-026` (`single` mode), `RLE-027`, `RLE-038` (`four-eyes` mode).
 
 ## History
 - 2026-11-19: decided by the maintainers while closing the design questions of `RLE-025` to `RLE-036`.
 - 2026-11-19: amended by [PD-080](../product/decisions.md#pd-080-second-approver-for-retiring-a-live-rule-version-by-hand): the approval mode of manual retirement is the setting `lifecycle.retire-approval` (`single` default, `four-eyes` in M3); option 2 of "Hand retirement" became the `four-eyes` mode; PD-012 stated as not applying to retirement.
 - 2026-11-20: decision 1 clarified. Retiring a version that is not yet in effect leaves the version in effect serving; only an already-effective version's retirement also retires the older versions it superseded.
+- 2026-11-20: the `four-eyes` mode is built (#213, migration V18). The request records whether it accepted that no version may remain in effect, because the last-version rule (PD-101) is checked again at the confirmation. `:cancel-retire` writes a history row and no event, as the event list of DESIGN section 3.3 states.

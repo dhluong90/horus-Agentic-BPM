@@ -35,6 +35,7 @@ Each is an interface with an engine default. Declare a bean of the same type and
 
 | Extension point | Engine | Default | Replace it when |
 |---|---|---|---|
+| `BpmProblemAuthenticationEntryPoint`, `BpmProblemAccessDeniedHandler` | both | Problem answers built from `horus.bpm.security.challenge`, registered as beans in the public package `io.github.dhluong90.bpm.host.security` | Your chain needs other headers on a refusal; inject the defaults into your chain otherwise ([[Host Metadata and Permissions]]) |
 | `TenantResolver` | both | The `tenancy.claim` attribute (`tenant_id`) of the authenticated principal: a validated token or a server-side session login. Never a value the browser sends, except a switch to a tenant in the user's allowed list | The tenant comes from your user directory, a realm, a path or a subdomain. Built: `io.github.dhluong90.bpm.host.spi.TenantResolver`; a principal's tenant attribute must still match what it returns ([[Host Metadata and Permissions]]) |
 | `EngineAccess` | both | The caller from the host's security, the tenant from `TenantResolver` with the engines' tenant checks, and permissions from authorities and the role mapping | Permissions come from your own entitlement store. Built: `io.github.dhluong90.bpm.host.spi.EngineAccess`; `/api/bpm/me` reports from your bean too, so the cockpit and the engine endpoints still agree ([[Host Metadata and Permissions]]) |
 | `CallerResolver` | both | Principal name | Audit needs another identity |
@@ -60,6 +61,8 @@ Where businesses differ, the engines offer a setting with a safe default instead
 | How the cockpit reads a row | Plain-language sentence | Condition shorthand; your own sentence patterns per language | M1 |
 | Where the cockpit opens | By the user's permissions | A landing area the host sets | M1 |
 | Where the tenant comes from | The authenticated principal | Your own `TenantResolver` bean | M1 |
+| Which claims name the caller's groups and display name | `groups`; `name`, then `preferred_username` | `horus.bpm.security.groups-claim` and `horus.bpm.security.display-name-claims` for Entra ID, ADFS or another identity provider ([[Host Metadata and Permissions]]) | M1 |
+| Which `401` challenge clients get | `Bearer` | `horus.bpm.security.challenge`, sent alike by the endpoints and by the host's chain through the registered `BpmProblemAuthenticationEntryPoint` | M1 |
 | How errors in an expression behave | `strict` for rule sets, `spec` for imported DMN models | Set per model in a new, approved version; guardrails fail closed in every mode | 1.1 (target) |
 | How the decision log is written | In your transaction | Asynchronous, through an outbox, for high-volume paths | M2 |
 | Evidence before a publication request | Not required | A stored simulation report, per rule set | M3 |

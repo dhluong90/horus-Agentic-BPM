@@ -1,5 +1,5 @@
 // Fails when a production dependency of the cockpit (anything that can reach the shipped bundle)
-// has a licence outside Apache 2.0, MIT and BSD. Development tools are not shipped and not checked here.
+// has a licence outside Apache 2.0, MIT, BSD and ISC. Development tools are not shipped and not checked here.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,4 +28,4 @@ if (problems.length > 0) {
   console.error(`\n${problems.length} licence problem(s):\n${problems.join('\n')}`);
   process.exit(1);
 }
-console.log(`\n${packages.length} production packages, all licences allowed (Apache-2.0, MIT, BSD)`);
+console.log(`\n${packages.length} production packages, all licences allowed (Apache-2.0, MIT, BSD, ISC)`);

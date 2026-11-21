@@ -27,11 +27,40 @@ import java.util.Objects;
  *     acknowledgement or on other actions, never null
  * @param maskedByDefaultInputs on {@code APPROVED}: the inputs masked by the tenant's {@code decision-log.mask-default}
  *     rather than by their declaration at approval (PD-104); else empty, never null
+ * @param retireRequestedBy on a {@code RETIRED} entry in {@code four-eyes} mode, who requested the retirement that
+ *     {@code actor} confirmed (RLE-038); otherwise null
  */
 public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus,
         String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
         Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
-        List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
+        List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, String retireRequestedBy) {
+
+    /**
+     * Creates an entry that names no retirement requester.
+     *
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param maskedByDefaultInputs see the record
+     */
+    public VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus, String actor,
+            String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
+            Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
+            List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs) {
+        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy, approvalMode,
+                noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings, maskedByDefaultInputs,
+                null);
+    }
 
     /**
      * Creates an entry without an acknowledgement.

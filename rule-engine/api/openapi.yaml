@@ -6,10 +6,10 @@ info:
     REST API of the Rule Engine, served by the host application under `/api/bpm/rules/v1`.
     This file covers the endpoints implemented so far: import (YAML and DMN), lists and reads,
     export, replace a draft, diff two versions, request publication, approve, reject, withdraw, retire, history,
-    simulate a version over sample inputs, evaluate (at the host clock, at a chosen clock, or pinned to a version),
-    batch evaluation of up to 1,000 items, replay of a logged decision, and decision-log reads (one decision, one rule
-    set's decisions in a period, the decisions of one case reference, and the searches by a plain or a masked input's
-    value).
+    simulate a version over sample inputs or over the logged decisions of a period, evaluate (at the host clock, at a
+    chosen clock, or pinned to a version), batch evaluation of up to 1,000 items, replay of a logged decision, and
+    decision-log reads (one decision, one rule set's decisions in a period, the decisions of one case reference, and
+    the searches by a plain or a masked input's value).
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -828,6 +828,83 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate-history:
+    post:
+      tags: [rule-sets]
+      operationId: simulateHistory
+      summary: Replay logged decisions of a period through a version, without logging anything
+      description: |
+        Permissions `rules:simulate` and `rules:log:read`, both checked before the body is read: the
+        answer is built from logged inputs (`RLE-015`). Reads the caller's tenant's decisions of the
+        rule set made in `[from, to)`, newest first, at most `limit` of them, and evaluates each one
+        twice at its logged clock: with the version it was made with, loaded by number as
+        `POST /decisions/{decisionId}:replay` does, and with this version (normally a `DRAFT`, or a
+        version `PENDING_APPROVAL` an approver is looking at). `changed` follows the rule of
+        `:simulate`: the outcome kind, an output value or the failure code differs. A decision whose
+        masked input had a value is not replayable: it is listed with `maskedInputs` naming the inputs,
+        never their values, and the run goes on. All the decisions of one run share one regular
+        expression read budget (`evaluation.regex-max-reads-per-request`); once it is spent, later
+        items fail with `REGEX_TIMEOUT: not evaluated`.
+
+        The period is at most `query.max-range` (31 days) and the run at most `simulation.max-inputs`
+        (1,000) decisions; both may be lowered by the host. Outside them is `400 QUERY_INVALID`.
+        `truncated` is true when the period held more decisions than were replayed. Writes nothing (no
+        decision row, no idempotency record, no event), so it takes no `Idempotency-Key`. A version of
+        another tenant is `404 VERSION_NOT_FOUND` and no decision is read. The response holds no logged
+        input. Members other than `from`, `to` and `limit` are ignored, including `tenantId`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HistorySimulationRequest'
+            example:
+              from: '2026-11-01T00:00:00Z'
+              to: '2026-12-01T00:00:00Z'
+              limit: 100
+      responses:
+        '200':
+          description: One item per logged decision, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistorySimulationResult'
+              example:
+                ruleSet: card-fee
+                version: 2
+                status: DRAFT
+                from: '2026-11-01T00:00:00Z'
+                to: '2026-12-01T00:00:00Z'
+                decisionCount: 2
+                replayedCount: 1
+                changedCount: 1
+                notReplayableCount: 1
+                truncated: false
+                results:
+                  - decisionId: 01KB2R6Q3C0000000000000001
+                    loggedVersion: 1
+                    evalClock: '2026-11-29T22:00:00Z'
+                    changed: true
+                    maskedInputs: []
+                    simulated: { outcome: MATCHED, matchedRuleIds: [R2], outputs: { fee: { currency: VND, amount: 30000 } } }
+                    logged: { outcome: MATCHED, matchedRuleIds: [R2], outputs: { fee: { currency: VND, amount: 50000 } } }
+                  - decisionId: 01KB2R6Q3C0000000000000000
+                    loggedVersion: 1
+                    evalClock: '2026-11-29T15:00:00Z'
+                    changed: false
+                    maskedInputs: [nationalId]
+                    simulated: null
+                    logged: null
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:retire:
     post:
       tags: [rule-sets]
@@ -862,6 +939,17 @@ paths:
         version, or null). A version that only starts later does not count as in effect. The history
         entry and the event record `noVersionInEffect: true`. The transaction locks the rule set row first,
         so two concurrent retirements of its last versions run one after the other.
+
+        In the mode `lifecycle.retire-approval: four-eyes`, and for the last version in effect under
+        `lifecycle.retire-last-version: four-eyes`, this call only records a retirement request (PD-080,
+        `RLE-038`). The answer is `200` with the version still `PUBLISHED` and serving, `retireRequestedBy`,
+        `retireRequestedAt` and `retireReason` set and `lockVersion` incremented. One history entry
+        `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event
+        (`rule-engine/api/schema/rules.version.retire-requested.v1.schema.json`) are written. The
+        last-version rule applies to the request as above, except under `retire-last-version: four-eyes`,
+        where the second approver is the control. A second request while one is pending is
+        `409 INVALID_STATE`. Another `rules:approve` holder confirms with `:confirm-retire`; any holder
+        withdraws it with `:cancel-retire`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -876,6 +964,98 @@ paths:
               $ref: '#/components/schemas/RetireRequest'
             example:
               reason: Tet promotion ended
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:confirm-retire:
+    post:
+      tags: [rule-sets]
+      operationId: confirmRetire
+      summary: Confirm a pending retirement as the second approver
+      description: |
+        Permission `rules:approve`, checked before the body is read (PD-080, DESIGN section 3.3,
+        `RLE-038`). Only a version with a pending retirement request can be confirmed; otherwise
+        `409 INVALID_STATE`. The requester of the retirement gets `403 SELF_APPROVAL_FORBIDDEN` and
+        nothing changes.
+
+        The version becomes `RETIRED` with the same effects as `:retire` in `single` mode: `retiredAt`
+        set to the transaction's clock, older versions in effect retired as superseded, the cache epoch
+        moved, and evaluation stops selecting it on every replica. The history entry `RETIRED` and the
+        `rules.version.retired.v1` event record `approvalMode: four-eyes`, the confirmer as actor, the
+        requester (`retireRequestedBy` in the history, `requestedBy` in the event) and the reason of the
+        request.
+
+        The last-version rule (PD-101) is checked again at confirmation: when no other version would
+        remain in effect, `retire-last-version: confirm` needs `confirmNoVersionInEffect: true` on the
+        request or on this call, else `409 LAST_VERSION_IN_EFFECT`; `refuse` always answers
+        `409 LAST_VERSION_IN_EFFECT`; `four-eyes` needs nothing more. A version that a newer version in
+        effect now supersedes is `409 INVALID_STATE`.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`, and a stale
+        `If-Match` is `409 VERSION_CONFLICT`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRetireRequest'
+            example: {}
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:cancel-retire:
+    post:
+      tags: [rule-sets]
+      operationId: cancelRetire
+      summary: Withdraw a pending retirement request, with a reason
+      description: |
+        Permission `rules:approve`, checked before the body is read; any holder may cancel, the
+        requester included (DESIGN section 3.3, `RLE-038`). Only a version with a pending retirement
+        request can be cancelled; otherwise `409 INVALID_STATE`. The reason is required: blank, or
+        longer than `lifecycle.reason-max-length` (default 2,000 characters), is `400 INPUT_INVALID`.
+
+        The version stays `PUBLISHED` and serving, its request fields are cleared and `lockVersion`
+        is incremented. One history entry `RETIRE_CANCELLED` records the actor and the reason; no event
+        is written. `Idempotency-Key` and `If-Match` are required as on `:confirm-retire`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelRetireRequest'
+            example:
+              reason: Promotion extended to March
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -1524,6 +1704,20 @@ components:
           type: [string, 'null']
           format: date-time
           description: When the version was retired, by hand or as superseded; null while it is not retired
+        retireRequestedBy:
+          type: [string, 'null']
+          description: |
+            Who requested the pending four-eyes retirement (`RLE-038`); null when none is pending. The
+            version is still `PUBLISHED` and serving while it is pending
+        retireRequestedAt: { type: [string, 'null'], format: date-time }
+        retireReason:
+          type: [string, 'null']
+          description: The reason of the pending retirement request; null when none is pending
+        retireConfirmsNoVersionInEffect:
+          type: boolean
+          description: |
+            True when the pending request accepted that no version may remain in effect (PD-101), so its
+            confirmation needs no `confirmNoVersionInEffect` of its own; false when none is pending
         createdBy:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
@@ -1579,11 +1773,13 @@ components:
         neither the requester nor the author; `reject` on a `PENDING_APPROVAL` with
         `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
         with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`;
-        `retire` on a `PUBLISHED` version with `rules:approve`.
+        `retire` on a `PUBLISHED` version with `rules:approve` and no pending retirement; while a
+        retirement is pending, `confirm-retire` for a `rules:approve` holder who is not its requester
+        and `cancel-retire` for any `rules:approve` holder (`RLE-038`).
         A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject, withdraw, retire]
+        enum: [request-publish, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -1710,6 +1906,9 @@ components:
         requestedAt: { type: [string, 'null'], format: date-time }
         approvedBy: { type: [string, 'null'] }
         approvedAt: { type: [string, 'null'], format: date-time }
+        retireRequestedBy:
+          type: [string, 'null']
+          description: Who requested the pending four-eyes retirement (`RLE-038`); null when none is pending
         allowedActions:
           $ref: '#/components/schemas/AllowedActions'
     VersionPage:
@@ -1730,7 +1929,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
@@ -1751,6 +1950,9 @@ components:
         noVersionInEffect:
           type: [boolean, 'null']
           description: Present on a `RETIRED` entry only; true when the retirement left the rule set with no version in effect (PD-101)
+        retireRequestedBy:
+          type: [string, 'null']
+          description: Present on a `RETIRED` entry only; in `four-eyes` mode the requester whose request the actor confirmed, else null (`RLE-038`)
         lockVersion: { type: integer }
         occurredAt: { type: string, format: date-time }
         canonicalHash:
@@ -1807,6 +2009,24 @@ components:
           description: |
             True to accept that the retirement leaves the rule set with no version in effect (PD-101);
             needed when the version is the last one in effect, unless the host refuses it outright
+    ConfirmRetireRequest:
+      type: object
+      properties:
+        confirmNoVersionInEffect:
+          type: boolean
+          default: false
+          description: |
+            True to accept that the retirement leaves the rule set with no version in effect (PD-101),
+            when the request did not already accept it
+    CancelRetireRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Why the retirement request is withdrawn; stored in the history
     RejectRequest:
       type: object
       required: [reason]
@@ -2081,6 +2301,83 @@ components:
         simulated:
           $ref: '#/components/schemas/SimulatedOutcome'
         baseline:
+          oneOf:
+            - $ref: '#/components/schemas/SimulatedOutcome'
+            - type: 'null'
+    HistorySimulationRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: First instant of the period, inclusive, ISO 8601
+        to:
+          type: string
+          format: date-time
+          description: End of the period, exclusive; after `from` and at most `query.max-range` (31 days) later
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: The most decisions to replay, newest first, 1 to `simulation.max-inputs`; default that maximum
+    HistorySimulationResult:
+      type: object
+      required: [ruleSet, version, status, from, to, decisionCount, replayedCount, changedCount, notReplayableCount,
+        truncated, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        decisionCount:
+          type: integer
+          description: How many logged decisions were read, the length of `results`
+        replayedCount:
+          type: integer
+          description: How many were evaluated through both versions
+        changedCount:
+          type: integer
+          description: How many results have `changed` set
+        notReplayableCount:
+          type: integer
+          description: How many had a masked input with a value, which the log holds only as a fingerprint
+        truncated:
+          type: boolean
+          description: True when the period held more decisions than `limit`; the newest were replayed
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistorySimulatedDecision'
+    HistorySimulatedDecision:
+      type: object
+      required: [decisionId, loggedVersion, evalClock, changed, maskedInputs, simulated, logged]
+      properties:
+        decisionId: { type: string }
+        loggedVersion:
+          type: integer
+          description: The version the decision was made with
+        evalClock:
+          type: string
+          format: date-time
+          description: The logged clock both versions were evaluated at
+        changed:
+          type: boolean
+          description: The outcome kind, an output value or the failure code differs; false when not replayable
+        maskedInputs:
+          type: array
+          items: { type: string }
+          description: Masked inputs that had a value, by name only; empty when the decision was replayed
+        simulated:
+          description: What this version decides; null when the decision is not replayable
+          oneOf:
+            - $ref: '#/components/schemas/SimulatedOutcome'
+            - type: 'null'
+        logged:
+          description: What the logged version decides again, which is what was decided; null when not replayable
           oneOf:
             - $ref: '#/components/schemas/SimulatedOutcome'
             - type: 'null'

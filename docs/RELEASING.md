@@ -193,6 +193,10 @@ grep '\.jar$' SHA256SUMS | sed -E 's#  .*/#  #' | sort | diff - sbom-subjects.tx
 
 For every release, run both commands on the cockpit starter jar from the published Release, plus the first one on a copy with one byte changed, and record the output in the release issue.
 
+## After a release: weekly rescan
+
+A release is scanned again every Monday after it ships, because vulnerabilities are published after release day. The Deploy workflow rebuilds the example image of the latest `vX.Y.Z` tag from that tag's sources and runs today's image gates on it, and scans the `bom-release.json` attached to its GitHub Release, after checking it against `SHA256SUMS`. A high or critical finding fails the run and names the tag; the fix is a patch release with the fixed dependency or base image. Only the latest tag is rescanned. Run it at any time from the Actions tab (Deploy, "Run workflow"). Details are in [DEPLOYING.md, Weekly rescan and JRE update check](DEPLOYING.md#weekly-rescan-and-jre-update-check).
+
 ## Local trial
 
 `BPM_RELEASE_TRIAL=true tools/release/release-build.sh` accepts another Node version and a dirty working tree. `BUILD-INFO.json` and the SBOM then record `"trial": true`, and the log ends with "TRIAL build, not a release". The script refuses trial mode when `CI` or `GITHUB_ACTIONS` is `true`.

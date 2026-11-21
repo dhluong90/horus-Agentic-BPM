@@ -2,6 +2,10 @@ package io.github.dhluong90.bpm.host.autoconfigure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.dhluong90.bpm.host.internal.CorrelationIds;
+import io.github.dhluong90.bpm.host.internal.Problem;
+import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
+import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Test;

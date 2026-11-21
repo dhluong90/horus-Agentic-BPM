@@ -118,14 +118,15 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | `POST /rule-sets/{name}/versions` | New draft, empty or copied from a version | `rules:author` | `Idempotency-Key` |
 | `PUT /rule-sets/{name}/versions/{v}` | Replace a draft's content in place; the draft's author only | `rules:author` | `Idempotency-Key`, `If-Match` (both required) |
 | `POST /rule-sets/{name}/versions/{v}:validate` | Parse and type-check without saving | `rules:author` | |
-| `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]). Replay over logged decisions is M3 | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions/{v}:simulate` | Run a version (normally a draft) over 1 to 1,000 sample inputs beside the version effective now, flagging changed outcomes; writes nothing (see [[Rule Engine Simulation and Testing]]) | `rules:simulate` | None: nothing is written, so no `Idempotency-Key` |
+| `POST /rule-sets/{name}/versions/{v}:simulate-history` | Replay the logged decisions of a period (at most 31 days, at most 1,000 decisions, newest first) through the logged version and this version, both at each logged clock, flagging changed outcomes; writes nothing. `400 QUERY_INVALID` outside the bounds, `404 VERSION_NOT_FOUND` for another tenant's version | `rules:simulate` and `rules:log:read` | None: nothing is written, so no `Idempotency-Key` |
 | `POST /rule-sets/{name}/versions/{v}:request-publish` | Freeze the draft, record the requester | `rules:author` | `Idempotency-Key`, `If-Match` |
 | `POST /rule-sets/{name}/versions/{v}:approve` | Publish; approver must differ from requester. A version with an unmasked personal-data warning needs `"acknowledgedWarnings"` with exactly the `{ code, input }` pairs shown, else `409 WARNINGS_NOT_ACKNOWLEDGED` (PD-104) | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:reject` | Back to draft with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` (required) |
 | `POST /rule-sets/{name}/versions/{v}:withdraw` | The requester takes their own request back; back to draft, reason optional | `rules:author` (requester only) | `Idempotency-Key`, `If-Match` (both required) |
-| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. For the last version in effect, add `"confirmNoVersionInEffect": true` or get `409 LAST_VERSION_IN_EFFECT` (PD-101). In `four-eyes` mode (M3) it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:confirm-retire` | M3, `four-eyes` mode: retire the version a retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN` | `rules:approve` | `Idempotency-Key`, `If-Match` |
-| `POST /rule-sets/{name}/versions/{v}:cancel-retire` | M3: withdraw a pending retirement request, with a reason | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:retire` | Retire a published version, with a reason. For the last version in effect, add `"confirmNoVersionInEffect": true` or get `409 LAST_VERSION_IN_EFFECT` (PD-101). In `four-eyes` mode it records a retirement request and the version keeps serving | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:confirm-retire` | Retire the version a pending retirement request names; the requester gets `403 SELF_APPROVAL_FORBIDDEN`. Body `{ "confirmNoVersionInEffect": true }` when the last version in effect needs it | `rules:approve` | `Idempotency-Key`, `If-Match` |
+| `POST /rule-sets/{name}/versions/{v}:cancel-retire` | Withdraw a pending retirement request, with a reason; the version stays published | `rules:approve` | `Idempotency-Key`, `If-Match` |
 | `GET /rule-sets/{name}/versions/{v}/export` | YAML, JSON or DMN 1.5 export | `rules:read` | |
 | `POST /rule-sets/{name}/versions:import` | Create a draft from YAML or JSON | `rules:author` | `Idempotency-Key` |
 | `GET /decisions/{id}` | One decision as logged, with `evalClock`, `clockChosen` and `pinned`; masked inputs are `hmac:<keyId>:<hex>`. Another tenant's decision is `404 DECISION_NOT_FOUND` | `rules:log:read` | |
@@ -274,7 +275,7 @@ Decision rows record `outcome` as `OK`, `UNIQUE_HIT_VIOLATION` or `EVALUATION_ER
 | `rules.version.published.v1` | `:approve` | `ruleSet`, `version`, `canonicalHash`, `effectiveFrom`, `requestedBy`, `approvedBy` |
 | `rules.version.rejected.v1` | `:reject` | `ruleSet`, `version`, `rejectedBy`, `reason` |
 | `rules.version.withdrawn.v1` | `:withdraw` | `ruleSet`, `version`, `withdrawnBy`, `reason` (null when none was given) |
-| `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode (M3) | `ruleSet`, `version`, `requestedBy`, `reason` |
+| `rules.version.retire-requested.v1` | `:retire` in `four-eyes` mode | `ruleSet`, `version`, `requestedBy`, `reason` |
 | `rules.version.retired.v1` | `:retire` in `single` mode, `:confirm-retire`, or superseded | `ruleSet`, `version`, `retiredBy` (`system:supersession`, the `lifecycle.system-actor`, when superseded; the confirmer in `four-eyes` mode), `reason` (`SUPERSEDED` when superseded), `supersededBy` (version, or null), `approvalMode` (`single`, `four-eyes` or `system`), `requestedBy` (the requester in `four-eyes` mode, else null), `retiredAt`, `noVersionInEffect` |
 | `rules.decision.evaluated.v1` | every decision, off by default (`events.decision-evaluated`) | `decisionId`, `ruleSet`, `version`, `outcome` |
 

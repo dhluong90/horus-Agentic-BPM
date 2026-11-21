@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: HORUS Agentic BPM host contract
-  version: 1.1.0
+  version: 1.2.0
   summary: What a host's engines are, and who the caller is.
   description: |
     Every host that embeds an engine serves these two endpoints once, whatever engines it runs
@@ -13,8 +13,11 @@ info:
     url: https://polyformproject.org/licenses/noncommercial/1.0.0/
 servers:
   - url: /
+# Alternatives: a bearer token or the host's session cookie. The host's own security chain decides which it
+# accepts; the engines add no authentication of their own.
 security:
   - bearer: []
+  - session: []
 paths:
   /api/bpm/meta:
     get:
@@ -89,6 +92,14 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    session:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+      description: |
+        The host's session cookie, after the host's own sign-in. The cookie name is host-defined;
+        `JSESSIONID` is the servlet default. State-changing calls made with the session also send the
+        host's CSRF token. The engines read the caller from the host's security context either way.
   parameters:
     IfNoneMatch:
       name: If-None-Match
@@ -138,7 +149,9 @@ components:
         client must not repeat the sign-in more than once, because the same account gets the same token.
       headers:
         WWW-Authenticate:
-          description: '`Bearer` by default (`horus.bpm.security.challenge`).'
+          description: |
+            The host's `horus.bpm.security.challenge`, `Bearer` by default, the same value whether the
+            host's security chain or the endpoint itself refuses the call.
           schema: { type: string }
       content:
         application/problem+json:

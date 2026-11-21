@@ -11,7 +11,7 @@ The engines are held to numbered, testable requirements with ids such as `TR-EMB
 
 ## Supported versions (`TR-EMB-02`)
 
-Every pull request builds and tests the engines on this matrix; the run is green only if every leg is green.
+Every pull request builds and tests the engines on the first five legs of this matrix; pushes to `main`, the nightly run and manual runs add the two PostgreSQL 16 legs. A run is green only if every leg is green.
 
 | Java | Spring Boot | PostgreSQL in CI | Status |
 |---|---|---|---|
@@ -20,11 +20,13 @@ Every pull request builds and tests the engines on this matrix; the run is green
 | 25 | 4.x | 14 | Supported |
 | 25 | 3.5.x, 3.5.16 or later | 18 | Tested until 1.0 |
 | 21 | 4.0.x (latest patch) | 16 | Until 4.0 leaves open-source support on 31 Dec 2026 (ADR-0011) |
+| 25 | 4.x | 16 | Supported; not on pull requests |
+| 21 | 3.5.x, 3.5.16 or later | 16 | Tested until 1.0; not on pull requests |
 
 On Spring Boot 3.5 the engine works with the same jars and the same host code; only starter names differ (`spring-boot-starter-web` and `flyway-core` instead of `spring-boot-starter-webmvc` and `spring-boot-starter-flyway`). The `ruleEngine` health component is the same on both lines: same name, status rules and details, replaced by a host bean named `ruleEngineHealthIndicator` and switched off with `management.health.ruleEngine.enabled=false`. One difference remains:
 - The engine's Jackson 3 sits next to your Jackson 2, which stays at the version Spring Boot 3.5 manages (`TR-EMB-07`). Both share `jackson-annotations`, and Jackson 3 needs a recent one, so Spring Boot 3.5 patches before 3.5.16 are not supported.
 
-PostgreSQL 14 and later is supported; CI covers 14 and the newest release.
+PostgreSQL 14 and later is supported; CI covers 14, 16 and the newest release (18).
 
 ## Requirement groups
 

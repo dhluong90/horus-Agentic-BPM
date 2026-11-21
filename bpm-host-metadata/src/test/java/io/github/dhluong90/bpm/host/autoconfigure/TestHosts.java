@@ -2,9 +2,12 @@ package io.github.dhluong90.bpm.host.autoconfigure;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
+import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
+import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import java.util.List;
 import java.util.Map;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.context.ApplicationContext;
@@ -47,19 +50,26 @@ final class TestHosts {
         return new ModuleDescriptor("rules", "0.1.3", "v1", List.of(), Map.of(), RULES_PERMISSIONS, rolePermissions);
     }
 
-    /** A host whose security chain wires the engine's problem responses for /api/bpm/**, as the wiki shows. */
+    /**
+     * A host whose security chain wires the engine's problem responses for /api/bpm/**, as the wiki shows: it injects
+     * the registered beans, so the chain sends the challenge of {@code horus.bpm.security.challenge}.
+     */
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration
     @EnableWebSecurity
     static class HostSecurity {
 
         @Bean
-        SecurityFilterChain hostSecurity(HttpSecurity http) {
+        SecurityFilterChain hostSecurity(HttpSecurity http, ObjectProvider<BpmProblemAuthenticationEntryPoint> entryPoint,
+                ObjectProvider<BpmProblemAccessDeniedHandler> accessDenied) {
             var bpm = PathPatternRequestMatcher.withDefaults().matcher("/api/bpm/**");
             http.authorizeHttpRequests(requests -> requests.anyRequest().authenticated())
                     .exceptionHandling(exceptions -> exceptions
-                            .defaultAuthenticationEntryPointFor(new BpmProblemAuthenticationEntryPoint(), bpm)
-                            .defaultAccessDeniedHandlerFor(new BpmProblemAccessDeniedHandler(), bpm));
+                            // Without an engine module the beans are absent; the tests of that case need a chain too
+                            .defaultAuthenticationEntryPointFor(
+                                    entryPoint.getIfAvailable(BpmProblemAuthenticationEntryPoint::new), bpm)
+                            .defaultAccessDeniedHandlerFor(
+                                    accessDenied.getIfAvailable(BpmProblemAccessDeniedHandler::new), bpm));
             return http.build();
         }
     }

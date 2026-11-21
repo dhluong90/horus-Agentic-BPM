@@ -34,4 +34,33 @@ public final class InvalidStateException extends HorusBpmException {
         return new InvalidStateException("retire is not allowed on " + ruleSet + " v" + version + ": v" + supersededBy
                 + " is in effect and supersedes it, so it no longer serves and retires on its own");
     }
+
+    /**
+     * A retirement is already pending for the version (RLE-038).
+     *
+     * @param ruleSet the rule set
+     * @param version the version
+     * @param requestedBy who requested it
+     * @return the exception
+     */
+    public static InvalidStateException retirePending(String ruleSet, int version, String requestedBy) {
+        return new InvalidStateException("retire is not allowed on " + ruleSet + " v" + version + ": a retirement"
+                + " requested by " + requestedBy + " is pending; confirm it with :confirm-retire or cancel it with"
+                + " :cancel-retire");
+    }
+
+    /**
+     * No retirement is pending for the version, so there is nothing to confirm or cancel (RLE-038).
+     *
+     * @param ruleSet the rule set
+     * @param version the version
+     * @param status its status
+     * @param command the command, {@code confirm-retire} or {@code cancel-retire}
+     * @return the exception
+     */
+    public static InvalidStateException noRetirePending(String ruleSet, int version, VersionStatus status,
+            String command) {
+        return new InvalidStateException(command + " is not allowed on " + ruleSet + " v" + version + " in status "
+                + status + ": no retirement is pending");
+    }
 }

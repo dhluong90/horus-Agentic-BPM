@@ -542,7 +542,7 @@ class RuleEnginePostgresIT {
         }
     }
 
-    /** Records the SQL of every prepared statement, to count the engine's inserts. */
+    /** Records the SQL of every prepared statement and of every plain statement executed, to count the engine's writes. */
     static final class SqlCapturingDataSource extends DelegatingDataSource {
         private final List<String> statements;
 
@@ -559,12 +559,32 @@ class RuleEnginePostgresIT {
                         if (method.getName().startsWith("prepare") && args != null && args[0] instanceof String sql) {
                             statements.add(sql);
                         }
-                        try {
-                            return method.invoke(connection, args);
-                        } catch (java.lang.reflect.InvocationTargetException e) {
-                            throw e.getCause();
+                        Object result = invoke(method, connection, args);
+                        if (result instanceof java.sql.Statement plain && method.getName().equals("createStatement")) {
+                            return capturing(plain);
                         }
+                        return result;
                     });
+        }
+
+        /** A plain statement (DDL, a statement without parameters) records the SQL it executes. */
+        private java.sql.Statement capturing(java.sql.Statement plain) {
+            return (java.sql.Statement) Proxy.newProxyInstance(getClass().getClassLoader(),
+                    new Class<?>[] {java.sql.Statement.class}, (proxy, method, args) -> {
+                        if (method.getName().startsWith("execute") && args != null && args.length > 0
+                                && args[0] instanceof String sql) {
+                            statements.add(sql);
+                        }
+                        return invoke(method, plain, args);
+                    });
+        }
+
+        private static Object invoke(java.lang.reflect.Method method, Object target, Object[] args) throws Throwable {
+            try {
+                return method.invoke(target, args);
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                throw e.getCause();
+            }
         }
     }
 }

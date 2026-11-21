@@ -7,7 +7,7 @@
   <parent>
     <groupId>io.github.dhluong90.bpm</groupId>
     <artifactId>examples-parent</artifactId>
-    <version>0.2.0-SNAPSHOT</version>
+    <version>0.3.0-SNAPSHOT</version>
   </parent>
 
   <artifactId>example-rule-engine-only</artifactId>
@@ -75,6 +75,12 @@
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- HostImportsTest: the sample host imports only the engines' public packages. -->
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

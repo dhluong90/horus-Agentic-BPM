@@ -433,11 +433,13 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "processEngineModuleDescriptor")
     ModuleDescriptor processEngineModuleDescriptor(ProcessEngineProperties properties, Environment environment) {
-        return new ModuleDescriptor("processes", ProcessEngineModule.engineVersion(), "v1", List.of(),
-                Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
+        return ModuleDescriptor.builder("processes", ProcessEngineModule.engineVersion(), "v1")
+                .settings(Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
                         RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
-                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()),
-                PERMISSIONS, properties.security().rolePermissions());
+                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()))
+                .permissions(PERMISSIONS)
+                .rolePermissions(properties.security().rolePermissions())
+                .build();
     }
 
     /**
