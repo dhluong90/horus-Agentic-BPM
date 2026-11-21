@@ -96,6 +96,23 @@ public interface VersionService {
     RuleSetVersion replaceDraft(String ruleSet, int version, ImportRequest request, WriteOptions options);
 
     /**
+     * Checks an edited table of a draft exactly as {@link #replaceDraft} would, and stores nothing: no version write,
+     * no history entry, no event, no idempotency record (RLE-090). A document that fails the checks is a result with
+     * {@code valid} false and every problem listed, not an exception.
+     *
+     * @param ruleSet the rule set name; must equal the name in the document
+     * @param version the version number
+     * @param request the edited document; its idempotency key is ignored
+     * @return the problems and, for a valid document, the readings of its rules
+     * @throws DraftAuthoringDisabledException when the host turned draft authoring off
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author}
+     * @throws InvalidStateException when the version is not a draft
+     * @throws PayloadTooLargeException when the document is over the import limit
+     * @throws InputInvalidException when the document names another rule set
+     */
+    DraftValidation validateDraft(String ruleSet, int version, ImportRequest request);
+
+    /**
      * Compares two versions of a rule set row by row, from their canonical models (RLE-028, RLE-048). Writes nothing.
      * Needs {@code rules:read}.
      *
