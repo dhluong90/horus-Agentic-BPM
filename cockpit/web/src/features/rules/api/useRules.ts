@@ -1,8 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
+import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DraftValidation, RuleSetVersion, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -26,6 +27,8 @@ function useKeys() {
     source: (name: string, version: number) => [...rules, name, 'source', version] as const,
     // The content hash and lock version of the version read are part of the key: a diff is never reused for other content.
     diff: (name: string, version: number, hash: string, lockVersion: number, base: number) => [...rules, name, 'diff', version, hash, lockVersion, base] as const,
+    // The checked text is the key: an answer is only ever shown for the table it was given.
+    check: (name: string, version: number, text: string) => [...rules, name, 'check', version, text] as const,
   };
 }
 
@@ -85,7 +88,7 @@ export function useSource(name: string, version: number, enabled: boolean) {
  * same request repeated (a double click after a fast answer, a retry after a timeout) reuses its
  * Idempotency-Key, so the engine replays the first answer instead of creating a second version.
  */
-export function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Promise<TResult>, onSuccess: (result: TResult) => Promise<void> | void) {
+export function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) => Promise<TResult>, onSuccess: (result: TResult) => Promise<void> | void, onError?: (error: unknown) => Promise<void> | void) {
   const running = useRef(false);
   const last = useRef<{ fingerprint: string; key: string } | undefined>(undefined);
   const mutation = useMutation({
@@ -95,6 +98,7 @@ export function useSingleFlight<TArgs, TResult>(run: (args: TArgs, key: string) 
       return run(args, last.current.key);
     },
     onSuccess,
+    ...(onError ? { onError } : {}),
     onSettled: () => {
       running.current = false;
     },
@@ -139,6 +143,64 @@ export function useSaveDraft(name: string, onDone: (version: RuleSetVersion) => 
       onDone(version);
     },
   );
+}
+
+/**
+ * Creates the next draft as a copy of `copyOf` (RLE-062), so the grid always edits a stored draft and never the
+ * version it starts from.
+ */
+export function useCopyVersion(name: string, onDone: (version: RuleSetVersion) => void) {
+  const { client } = useRulesSession();
+  const refresh = useRefreshVersions();
+  return useSingleFlight(
+    (copyOf: number, key) => client.copyVersion(name, copyOf, key),
+    async (version) => {
+      await refresh();
+      onDone(version);
+    },
+  );
+}
+
+/**
+ * Saves the edited table into the draft (replaceDraft), bound to the lock version the author loaded. A stale lock
+ * version is the engine's 409 VERSION_CONFLICT; it is never retried with a newer one.
+ */
+export function useReplaceDraft(onDone: (version: RuleSetVersion) => void) {
+  const { client } = useRulesSession();
+  const refresh = useRefreshVersions();
+  return useSingleFlight(
+    ({ ruleSet, version, lockVersion, document }: { ruleSet: string; version: number; lockVersion: number; document: RuleDocument }, key) =>
+      client.replaceDraft(ruleSet, version, lockVersion, document, key),
+    async (version) => {
+      await refresh();
+      onDone(version);
+    },
+    // A stale lock version: read the version again, so the author can load what the other person saved.
+    async (error) => {
+      const hostError = error instanceof HostCallError ? error.hostError : undefined;
+      if (hostError?.kind === 'problem' && hostError.code === 'VERSION_CONFLICT') await refresh();
+    },
+  );
+}
+
+/**
+ * The engine's check of the committed table (RLE-090). Stores nothing, so it is a read keyed by the text: a late
+ * answer for an older table can never mark the cells of a newer one. While a new table is checked the previous
+ * answer stays on screen, flagged as a placeholder.
+ */
+export function useDraftCheck(ruleSet: string, version: number, document: RuleDocument | undefined) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery<DraftValidation>({
+    queryKey: keys.check(ruleSet, version, document?.text ?? ''),
+    queryFn: ({ signal }) => client.validateDraft(ruleSet, version, document ?? { contentType: 'application/yaml', text: '' }, signal),
+    enabled: document !== undefined,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useRequestPublish(onDone: (version: RuleSetVersion) => void) {

@@ -14,3 +14,19 @@ const PATTERNS: readonly [RegExp, MessageKey][] = [
 export function cellSentence(engineMessage: string): MessageKey {
   return PATTERNS.find(([pattern]) => pattern.test(engineMessage))?.[1] ?? 'cellError.other';
 }
+
+/** A format hint for a refused cell, with its parameters. */
+export interface CellHint { key: MessageKey; params: Readonly<Record<string, string>> }
+
+/**
+ * What to type in a refused cell whose amount field is empty: an amount, with the cell's saved value as the example
+ * when it had one. This is a format hint drawn from the column's type and the editor's own field, never a business
+ * value: the engine's sentence stays beside it as the detail. Undefined when the amount field is not empty, so the
+ * engine's sentence is shown alone.
+ */
+export function emptyAmountHint(model: { kind: string; amount?: string; currency?: string | undefined }, example: string | undefined, currency: string | undefined): CellHint | undefined {
+  if ((model.kind !== 'compare' && model.kind !== 'money') || (model.amount ?? '').trim() !== '') return undefined;
+  if (example !== undefined) return { key: 'cellHint.amountExample', params: { example } };
+  const code = model.currency ?? currency;
+  return code !== undefined ? { key: 'cellHint.amountIn', params: { currency: code } } : { key: 'cellHint.number', params: {} };
+}

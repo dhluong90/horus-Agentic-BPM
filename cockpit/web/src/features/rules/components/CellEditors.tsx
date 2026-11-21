@@ -11,7 +11,12 @@ import { groupWhileTyping } from '../model/money';
 export interface CellProps {
   /** Spoken name of the cell, for example "Row R2, Tier". */
   label: string;
+  /** The column's name alone ("Balance"), for the hint of a wildcard cell. */
+  column?: string;
+  /** What to do about the cell's problem, in one line. */
   error: string | undefined;
+  /** The engine's own sentence, shown under the line when the line is the cockpit's format hint. */
+  detail?: string | undefined;
   errorId: string;
 }
 
@@ -29,36 +34,42 @@ function canonicalAmount(typed: string, locale: Locale): string {
   return plain.replace(/[^\d.-]/g, '');
 }
 
-function ErrorLine({ error, errorId }: Pick<CellProps, 'error' | 'errorId'>) {
+function ErrorLine({ error, detail, errorId }: Pick<CellProps, 'error' | 'detail' | 'errorId'>) {
   if (error === undefined) return null;
   return (
     <span id={errorId} className="cell-error">
       <span aria-hidden="true">✕</span> {error}
+      {detail !== undefined ? <>{' '}<span className="cell-error__detail">{detail}</span></> : null}
     </span>
   );
 }
 
-function Frame({ error, errorId, children }: Pick<CellProps, 'error' | 'errorId'> & { children: ReactNode }) {
+function Frame({ error, detail, errorId, children }: Pick<CellProps, 'error' | 'detail' | 'errorId'> & { children: ReactNode }) {
   return (
     <div className={error !== undefined ? 'cell-edit cell-edit--bad' : 'cell-edit'}>
       {children}
-      <ErrorLine error={error} errorId={errorId} />
+      <ErrorLine error={error} detail={detail} errorId={errorId} />
     </div>
   );
 }
 
-/** A wildcard: a quiet dashed "—" that becomes a condition when chosen. */
-function Wildcard({ label, onStart, describedBy }: { label: string; onStart: () => void; describedBy: string | undefined }) {
+/**
+ * A wildcard: a quiet dashed "—" that becomes a condition when chosen. On hover and focus it says what the dash means
+ * for this column ("Balance: any value"), so a wildcard never reads as a cell that cannot be edited.
+ */
+function Wildcard({ label, column, onStart, describedBy }: { label: string; column: string | undefined; onStart: () => void; describedBy: string | undefined }) {
   const { t } = useI18n();
+  const hint = column !== undefined ? t('editor.anyOf', { column }) : t('editor.anyValue');
   return (
-    <button type="button" className="cell-any-edit" aria-label={t('editor.anyCell', { cell: label })} title={t('editor.any')}
+    <button type="button" className="cell-any-edit" aria-label={t('editor.anyCell', { cell: label })} title={hint}
       {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})} onClick={onStart}>
       <span aria-hidden="true">—</span>
+      <span aria-hidden="true" className="cell-any-edit__hint">{hint}</span>
     </button>
   );
 }
 
-export function ChoiceEditor({ label, error, errorId, model, options, onText }: CellProps & { model: CellModel; options: readonly string[]; onText: (text: string) => void }) {
+export function ChoiceEditor({ label, error, detail, errorId, model, options, onText }: CellProps & { model: CellModel; options: readonly string[]; onText: (text: string) => void }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -77,7 +88,7 @@ export function ChoiceEditor({ label, error, errorId, model, options, onText }: 
   };
   const describedBy = error !== undefined ? errorId : undefined;
   return (
-    <Frame error={error} errorId={errorId}>
+    <Frame error={error} detail={detail} errorId={errorId}>
       <span className="picker">
         <button ref={trigger} type="button" className={values.length === 0 ? 'picker__trigger picker__trigger--any' : 'picker__trigger'}
           aria-label={values.length === 0 ? label : `${label}: ${values.map(valueLabel).join(', ')}`}
@@ -103,7 +114,7 @@ export function ChoiceEditor({ label, error, errorId, model, options, onText }: 
   );
 }
 
-export function CompareEditor({ label, error, errorId, model, currency, onText }: CellProps & { model: CellModel; currency: string | undefined; onText: (text: string) => void }) {
+export function CompareEditor({ label, column, error, detail, errorId, model, currency, onText }: CellProps & { model: CellModel; currency: string | undefined; onText: (text: string) => void }) {
   const { t, locale } = useI18n();
   const amountRef = useRef<HTMLInputElement>(null);
   // After a wildcard turns into a comparison, the amount field takes the focus once.
@@ -117,8 +128,8 @@ export function CompareEditor({ label, error, errorId, model, currency, onText }
   const describedBy = error !== undefined ? errorId : undefined;
   if (model.kind !== 'compare') {
     return (
-      <Frame error={error} errorId={errorId}>
-        <Wildcard label={label} describedBy={describedBy} onStart={() => { focusAmount.current = true; onText(writeConditionCell({ kind: 'compare', op: '≥', amount: '', currency })); }} />
+      <Frame error={error} detail={detail} errorId={errorId}>
+        <Wildcard label={label} column={column} describedBy={describedBy} onStart={() => { focusAmount.current = true; onText(writeConditionCell({ kind: 'compare', op: '≥', amount: '', currency })); }} />
       </Frame>
     );
   }
@@ -127,7 +138,7 @@ export function CompareEditor({ label, error, errorId, model, currency, onText }
   };
   const shownCurrency = model.currency ?? currency;
   return (
-    <Frame error={error} errorId={errorId}>
+    <Frame error={error} detail={detail} errorId={errorId}>
       <span className="compare">
         <select className="compare__op" aria-label={t('editor.comparison', { cell: label })} value={model.op}
           onChange={(e) => { if (e.target.value === 'any') onText(''); else write({ op: e.target.value as Operator }); }}>
@@ -145,11 +156,11 @@ export function CompareEditor({ label, error, errorId, model, currency, onText }
   );
 }
 
-export function MoneyEditor({ label, error, errorId, model, onText }: CellProps & { model: Extract<CellModel, { kind: 'money' }>; onText: (text: string) => void }) {
+export function MoneyEditor({ label, error, detail, errorId, model, onText }: CellProps & { model: Extract<CellModel, { kind: 'money' }>; onText: (text: string) => void }) {
   const { locale } = useI18n();
   const describedBy = error !== undefined ? errorId : undefined;
   return (
-    <Frame error={error} errorId={errorId}>
+    <Frame error={error} detail={detail} errorId={errorId}>
       <label className="amount amount--money">
         <input className="amount__input tnum" inputMode="decimal" aria-label={label} aria-invalid={error !== undefined} placeholder={label.split(', ').at(-1)}
           {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})}
@@ -161,14 +172,14 @@ export function MoneyEditor({ label, error, errorId, model, onText }: CellProps 
 }
 
 /** Yes or No; in a condition a third choice clears it to any value. */
-export function BoolToggle({ label, error, errorId, value, condition, onText }: CellProps & { value: boolean | undefined; condition: boolean; onText: (text: string) => void }) {
+export function BoolToggle({ label, error, detail, errorId, value, condition, onText }: CellProps & { value: boolean | undefined; condition: boolean; onText: (text: string) => void }) {
   const { t } = useI18n();
   const write = (next: boolean | undefined) => {
     if (next === undefined) onText('');
     else onText(condition ? writeConditionCell({ kind: 'bool', value: next }) : String(next));
   };
   return (
-    <Frame error={error} errorId={errorId}>
+    <Frame error={error} detail={detail} errorId={errorId}>
       <span className="seg seg--cell" role="group" aria-label={label}>
         <button type="button" className="hit" aria-pressed={value === true} onClick={() => { write(true); }}>{t('table.yes')}</button>
         <button type="button" className="hit" aria-pressed={value === false} onClick={() => { write(false); }}>{t('table.no')}</button>
@@ -178,10 +189,10 @@ export function BoolToggle({ label, error, errorId, value, condition, onText }: 
   );
 }
 
-export function TextEditor({ label, error, errorId, text, mono, onText }: CellProps & { text: string; mono: boolean; onText: (text: string) => void }) {
+export function TextEditor({ label, error, detail, errorId, text, mono, onText }: CellProps & { text: string; mono: boolean; onText: (text: string) => void }) {
   const describedBy = error !== undefined ? errorId : undefined;
   return (
-    <Frame error={error} errorId={errorId}>
+    <Frame error={error} detail={detail} errorId={errorId}>
       <input className={mono ? 'cell-input mono' : 'cell-input'} value={text} title={text} aria-label={label} aria-invalid={error !== undefined} spellCheck={false}
         {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})} onChange={(e) => { onText(e.target.value); }} />
     </Frame>

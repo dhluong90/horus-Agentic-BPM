@@ -5,7 +5,7 @@ import { useRulesSession } from '../api/rulesContext';
 import { useEvaluate } from '../api/useRules';
 import { groupWhileTyping, toMinorUnits } from '../model/money';
 import { valueLabel } from '../model/cells';
-import { columnLabel, readResult } from '../model/reading';
+import { clauseLabel, readResult } from '../model/reading';
 import { CopyButton } from '../../../components/CopyButton';
 import { ValueText } from './CellValue';
 import { ProblemNotice } from './ProblemNotice';
@@ -62,7 +62,7 @@ function Field({ input, value, currency, invalid, onChange, onCurrency }: {
 }) {
   const { t, locale } = useI18n();
   const id = useId();
-  const label = columnLabel(input.name, input.description);
+  const label = clauseLabel(input, locale);
   const common = { id, className: 'field__input', 'aria-invalid': invalid };
   let control;
   if (input.allowed || input.type === 'boolean') {
@@ -164,7 +164,7 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
             <dl className="try__tiles">
               {definition.outputs.filter((o) => o.name in result.outputs).map((output) => (
                 <div key={output.name} className="try__tile">
-                  <dt>{columnLabel(output.name, output.description)}</dt>
+                  <dt>{clauseLabel(output, locale)}</dt>
                   <dd className="tnum"><ValueText value={readResult(result.outputs[output.name], locale)} /></dd>
                 </div>
               ))}

@@ -17,6 +17,8 @@ import {
   type VersionSummary,
   versionDiff,
   type VersionDiff,
+  draftValidation,
+  type DraftValidation,
 } from './schemas';
 import {
   decisionExplanation,
@@ -100,6 +102,12 @@ export interface RulesClient {
   importRuleSet(document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** importVersion: the next draft version of an existing rule set */
   importVersion(name: string, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** importVersion with copyOf and no body: the next draft is a byte-for-byte copy of version `copyOf` (RLE-062) */
+  copyVersion(name: string, copyOf: number, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** replaceDraft: the edited document replaces a DRAFT in place, bound to the lock version the author loaded */
+  replaceDraft(name: string, version: number, lockVersion: number, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** validateDraft: the checks of a save, answered as cell problems; stores nothing, so no key and no If-Match (RLE-090) */
+  validateDraft(name: string, version: number, document: RuleDocument, signal?: AbortSignal): Promise<DraftValidation>;
   /** requestPublish */
   requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string): Promise<RuleSetVersion>;
   /** approve; `reviewedHash` is the canonicalHash of the content the reviewer saw, never re-read at approval time (RLE-084); `acknowledgedWarnings` are the exact { code, input } pairs the approver accepted (PD-104, RLE-053) */
@@ -207,6 +215,32 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
           body: { contentType: document.contentType, text: document.text },
         },
         ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async copyVersion(name, copyOf, idempotencyKey) {
+      const answer = await call(
+        { method: 'POST', path: `${RULES_BASE}/rule-sets/${segment(name)}/versions?copyOf=${String(copyOf)}`, headers: { 'Idempotency-Key': idempotencyKey } },
+        ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async replaceDraft(name, version, lockVersion, document, idempotencyKey) {
+      const answer = await call(
+        {
+          method: 'PUT',
+          path: versionPath(name, version),
+          headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
+          body: { contentType: document.contentType, text: document.text },
+        },
+        ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async validateDraft(name, version, document, signal) {
+      const answer = await call(
+        { method: 'POST', path: `${versionPath(name, version)}:validate`, body: { contentType: document.contentType, text: document.text }, ...(signal ? { signal } : {}) },
+        draftValidation,
       );
       return answer.data;
     },

@@ -7,7 +7,8 @@ import { useCallback, useSyncExternalStore } from 'react';
  * Rule screens live under #/rules. The older #/rule-sets prefix still parses, so existing links keep working.
  */
 
-export const LENSES = ['table', 'changes', 'history', 'source'] as const;
+/** `edit` is the grid editor of a draft; on any other version it opens the table, read only. */
+export const LENSES = ['table', 'changes', 'history', 'source', 'edit'] as const;
 export type Lens = (typeof LENSES)[number];
 
 /**

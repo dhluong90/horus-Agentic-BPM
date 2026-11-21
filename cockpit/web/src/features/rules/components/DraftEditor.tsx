@@ -1,15 +1,16 @@
-import type { Dispatch } from 'react';
+import { useRef, type Dispatch, type FocusEvent, type KeyboardEvent } from 'react';
 import type { InputClause, OutputClause, RuleSetDefinition } from '../../../api/rules/schemas';
-import { useI18n } from '../../../i18n/I18nProvider';
-import { columnCurrency, inputKind, outputKind, readConditionCell, readOutputCell } from '../model/cells';
-import { cellSentence } from '../model/cellMessages';
+import { useI18n, type Translate } from '../../../i18n/I18nProvider';
+import { emptyAmountHint } from '../model/cellMessages';
+import { columnCurrency, inputKind, outputKind, readConditionCell, readOutputCell, type CellModel } from '../model/cells';
 import type { DraftAction, DraftState } from '../model/draft';
 import type { ErrorPlace } from '../model/engineErrors';
-import { columnLabel } from '../model/reading';
+import { clauseLabel, readCondition, readOutput, type CellReading } from '../model/reading';
 import type { EditableRow } from '../model/table';
 import { BoolToggle, ChoiceEditor, CompareEditor, MoneyEditor, TextEditor } from './CellEditors';
 import { TableHead } from './DecisionTable';
 import { MenuButton } from './MenuButton';
+import { cellMove, nextFocus } from '../model/gridKeys';
 
 function messagesFor(errors: readonly ErrorPlace[], row: EditableRow, column: string | undefined): string[] {
   return errors.flatMap((e) => {
@@ -18,36 +19,55 @@ function messagesFor(errors: readonly ErrorPlace[], row: EditableRow, column: st
   });
 }
 
-/** One plain sentence for a refused cell; the engine's own words stay in the notice's Details. */
-function useSentence(): (messages: string[]) => string | undefined {
-  const { t } = useI18n();
-  return (messages) => (messages.length === 0 ? undefined : t(cellSentence(messages[0] ?? '')));
+/** The first problem of a cell or row; the count of the rest is in the save dock. */
+const first = (messages: string[]): string | undefined => messages[0];
+
+/** The amount of a saved cell as an example ("50,000,000 VND"), when the cell had one. */
+function exampleOf(reading: CellReading): string | undefined {
+  const value = reading.kind === 'compare' || reading.kind === 'value' ? reading.value : undefined;
+  return value?.kind === 'text' && /\d/.test(value.text) ? value.text : undefined;
 }
 
-function ConditionCell({ row, input, definition, error, dispatch }: { row: EditableRow; input: InputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
-  const { t } = useI18n();
-  const label = t('editor.cellLabel', { row: row.id, column: columnLabel(input.name, input.description) });
+/**
+ * What a refused cell says: what to type when its amount field is empty, with the engine's sentence as the detail;
+ * otherwise the engine's sentence alone. The engine's SYNTAX_ERROR sentence is generic, so the hint says what to do.
+ */
+function cellProblem(engine: string | undefined, model: CellModel, example: string | undefined, currency: string | undefined, t: Translate): { error: string | undefined; detail: string | undefined } {
+  if (engine === undefined) return { error: undefined, detail: undefined };
+  const hint = emptyAmountHint(model, example, currency);
+  return hint === undefined ? { error: engine, detail: undefined } : { error: t(hint.key, hint.params), detail: engine };
+}
+
+function ConditionCell({ row, input, definition, error: engine, dispatch }: { row: EditableRow; input: InputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
+  const { t, locale } = useI18n();
+  const column = clauseLabel(input, locale);
+  const label = t('editor.cellLabel', { row: row.id, column });
   const errorId = `err-${row.key}-${input.name}`;
   const kind = inputKind(input);
   const text = row.when[input.name] ?? '';
   const model = readConditionCell(text, kind);
+  const currency = kind === 'money' ? columnCurrency(definition, 'when', input.name) : undefined;
+  const { error, detail } = cellProblem(engine, model, exampleOf(readCondition(row.original?.when[input.name], locale)), currency, t);
   const onText = (next: string) => { dispatch({ type: 'edit-cell', key: row.key, part: 'when', column: input.name, text: next }); };
-  const common = { label, error, errorId };
+  const common = { label, error, detail, errorId, column };
   if (model.kind === 'raw' || kind === 'raw' || kind === 'text') return <TextEditor {...common} text={text} mono onText={onText} />;
   if (kind === 'choice') return <ChoiceEditor {...common} model={model} options={(input.allowed ?? []).map(String)} onText={onText} />;
   if (kind === 'bool') return <BoolToggle {...common} value={model.kind === 'bool' ? model.value : undefined} condition onText={onText} />;
-  return <CompareEditor {...common} model={model} currency={kind === 'money' ? columnCurrency(definition, 'when', input.name) : undefined} onText={onText} />;
+  return <CompareEditor {...common} model={model} currency={currency} onText={onText} />;
 }
 
-function OutputCell({ row, output, definition, error, dispatch }: { row: EditableRow; output: OutputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
-  const { t } = useI18n();
-  const label = t('editor.cellLabel', { row: row.id, column: columnLabel(output.name, output.description) });
+function OutputCell({ row, output, definition, error: engine, dispatch }: { row: EditableRow; output: OutputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
+  const { t, locale } = useI18n();
+  const column = clauseLabel(output, locale);
+  const label = t('editor.cellLabel', { row: row.id, column });
   const errorId = `err-${row.key}-${output.name}`;
   const kind = outputKind(output);
   const text = row.then[output.name] ?? '';
-  const model = readOutputCell(text, kind, kind === 'money' ? columnCurrency(definition, 'then', output.name) : undefined);
+  const currency = kind === 'money' ? columnCurrency(definition, 'then', output.name) : undefined;
+  const model = readOutputCell(text, kind, currency);
+  const { error, detail } = cellProblem(engine, model, exampleOf(readOutput(row.original?.then[output.name], locale)), currency, t);
   const onText = (next: string) => { dispatch({ type: 'edit-cell', key: row.key, part: 'then', column: output.name, text: next }); };
-  const common = { label, error, errorId };
+  const common = { label, error, detail, errorId, column };
   if (model.kind === 'money') return <MoneyEditor {...common} model={model} onText={onText} />;
   if (kind === 'bool' && (model.kind === 'bool' || model.kind === 'any')) return <BoolToggle {...common} value={model.kind === 'bool' ? model.value : undefined} condition={false} onText={onText} />;
   if (model.kind === 'text') return <TextEditor {...common} text={model.text} mono={false} onText={(value) => { onText(value === '' ? '' : `'${value.replaceAll("'", "\\'")}'`); }} />;
@@ -59,6 +79,7 @@ function RowMenu({ row, index, count, dispatch }: { row: EditableRow; index: num
   return (
     <MenuButton
       label={t('editor.rowActions', { id: row.id })}
+      tooltip={t('editor.rowActions', { id: row.id })}
       className="iconbtn iconbtn--small hit"
       trigger={<span aria-hidden="true">⋯</span>}
       items={[
@@ -71,7 +92,14 @@ function RowMenu({ row, index, count, dispatch }: { row: EditableRow; index: num
   );
 }
 
-/** The draft editor: typed cells, one ⋯ menu per row, and the engine's errors as sentences on their cells. */
+/** The value a cell had when it took the focus, so Escape can put it back. */
+interface Held { key: string; part: 'when' | 'then'; column: string; text: string }
+
+/**
+ * The grid editor of a draft: typed cells, one ⋯ menu per row, and the engine's problems on their cells.
+ * Arrow keys move between cells, Enter commits a cell and Escape puts back the value it had. A commit (Enter,
+ * leaving a cell, a row action) is what the engine checks; nothing is stored before Save draft.
+ */
 export function DraftEditor({ definition, draft, dispatch, errors }: {
   definition: RuleSetDefinition;
   draft: DraftState;
@@ -79,33 +107,78 @@ export function DraftEditor({ definition, draft, dispatch, errors }: {
   errors: readonly ErrorPlace[];
 }) {
   const { t } = useI18n();
-  const sentence = useSentence();
+  const held = useRef<Held | undefined>(undefined);
+  const cellOf = (target: EventTarget | null) => (target instanceof HTMLElement ? target.closest<HTMLTableCellElement>('td[data-cell]') : null);
+  const rowText = (key: string, part: 'when' | 'then', column: string) => draft.rows.find((r) => r.key === key)?.[part][column] ?? '';
+  const onFocus = (event: FocusEvent<HTMLTableElement>) => {
+    const cell = cellOf(event.target);
+    const [key = '', part, column = ''] = (cell?.dataset['cell'] ?? '').split('|');
+    if (cell && (part === 'when' || part === 'then') && (held.current?.key !== key || held.current.part !== part || held.current.column !== column)) {
+      held.current = { key, part, column, text: rowText(key, part, column) };
+    }
+  };
+  const onBlur = (event: FocusEvent<HTMLTableElement>) => {
+    const from = cellOf(event.target);
+    if (from && cellOf(event.relatedTarget) !== from) {
+      held.current = undefined;
+      dispatch({ type: 'commit' });
+    }
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLTableElement>) => {
+    if (event.defaultPrevented || !(event.target instanceof HTMLElement)) return;
+    const target = event.target;
+    if (event.key === 'Enter' && target instanceof HTMLInputElement && target.type !== 'checkbox') {
+      event.preventDefault();
+      dispatch({ type: 'commit' });
+      return;
+    }
+    if (event.key === 'Escape' && held.current !== undefined && !target.closest('.picker__list')) {
+      const { key, part, column, text } = held.current;
+      event.preventDefault();
+      dispatch({ type: 'edit-cell', key, part, column, text });
+      dispatch({ type: 'commit' });
+      return;
+    }
+    const move = cellMove(event.key, target, event.altKey || event.ctrlKey || event.metaKey || event.shiftKey);
+    if (move === undefined) return;
+    const next = nextFocus(event.currentTarget, target, move);
+    if (next) {
+      event.preventDefault();
+      next.focus();
+    }
+  };
   return (
     <div className="dt-scroll" role="region" tabIndex={0} aria-label={t('editor.tableLabel')}>
-      <table className="dt dt--edit">
+      <table className="dt dt--edit" aria-describedby="grid-keys" onFocus={onFocus} onBlur={onBlur} onKeyDown={onKeyDown}>
         <TableHead definition={definition} extra={t('editor.actions')} />
         <tbody>
           {draft.rows.map((row, index) => {
-            const rowError = sentence(messagesFor(errors, row, undefined));
+            const rowError = first(messagesFor(errors, row, undefined));
             return (
               <tr key={row.key} className={[row.original === undefined ? 'dt__row--new' : '', rowError !== undefined ? 'dt__row--bad' : ''].join(' ').trim() || undefined}>
                 <th scope="row" className="dt__rowhead">
                   <span className="row-id">{row.id}</span>
                   {row.original === undefined ? <span className="change-mark change-mark--added"><span aria-hidden="true">+</span> {t('editor.newRow')}</span> : null}
-                  {rowError !== undefined ? <span className="cell-error">{rowError}</span> : null}
+                  {rowError !== undefined ? <span className="cell-error"><span aria-hidden="true">✕</span> {rowError}</span> : null}
                 </th>
-                {definition.inputs.map((input) => (
-                  <td key={input.name}>
-                    {row.groups[input.name] !== undefined ? (
-                      <span className="cell-raw">{t('table.group')}</span>
-                    ) : (
-                      <ConditionCell row={row} input={input} definition={definition} error={sentence(messagesFor(errors, row, input.name))} dispatch={dispatch} />
-                    )}
-                  </td>
-                ))}
+                {definition.inputs.map((input) => {
+                  const error = first(messagesFor(errors, row, input.name));
+                  return (
+                    <td key={input.name} data-cell={`${row.key}|when|${input.name}`}>
+                      {row.groups[input.name] !== undefined ? (
+                        <>
+                          <span className="cell-raw">{t('table.group')}</span>
+                          {error !== undefined ? <span className="cell-error"><span aria-hidden="true">✕</span> {error}</span> : null}
+                        </>
+                      ) : (
+                        <ConditionCell row={row} input={input} definition={definition} error={error} dispatch={dispatch} />
+                      )}
+                    </td>
+                  );
+                })}
                 {definition.outputs.map((output, outputIndex) => (
-                  <td key={output.name} className={outputIndex === 0 ? 'dt__first-then' : undefined}>
-                    <OutputCell row={row} output={output} definition={definition} error={sentence(messagesFor(errors, row, output.name))} dispatch={dispatch} />
+                  <td key={output.name} data-cell={`${row.key}|then|${output.name}`} className={outputIndex === 0 ? 'dt__first-then' : undefined}>
+                    <OutputCell row={row} output={output} definition={definition} error={first(messagesFor(errors, row, output.name))} dispatch={dispatch} />
                   </td>
                 ))}
                 <td className="dt__actions">
@@ -120,6 +193,7 @@ export function DraftEditor({ definition, draft, dispatch, errors }: {
         <button type="button" className="btn" onClick={() => { dispatch({ type: 'add' }); }}>
           <span aria-hidden="true">＋</span> {t('editor.addRow')}
         </button>
+        <p id="grid-keys" className="editor-foot__keys">{t('editor.keys')}</p>
       </div>
     </div>
   );
