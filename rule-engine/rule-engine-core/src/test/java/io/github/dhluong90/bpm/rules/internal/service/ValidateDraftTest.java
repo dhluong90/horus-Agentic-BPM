@@ -45,9 +45,10 @@ class ValidateDraftTest {
     RuleSetVersion lansDraftV2() {
         caller.become("bank-a", "lan", AUTHOR);
         versions.importRuleSet(ImportRequest.yaml(CardFee.yaml()));
-        versions.requestPublish("card-fee", 1, WriteOptions.none());
+        RuleSetVersion requested = versions.requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob", APPROVER);
-        versions.approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        versions.approve("card-fee", 1, new WriteOptions(null, requested.lockVersion(), null)
+                .expectingContent(requested.canonicalHash()));
         caller.become("bank-a", "lan", AUTHOR);
         return versions.importVersion("card-fee", ImportRequest.yaml(CardFee.yaml()));
     }

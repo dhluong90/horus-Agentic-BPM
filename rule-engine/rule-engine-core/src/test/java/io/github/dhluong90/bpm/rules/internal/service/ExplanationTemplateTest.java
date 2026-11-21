@@ -12,6 +12,7 @@ import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.VersionDiff;
 import io.github.dhluong90.bpm.rules.api.Violation;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.read.RuleSetReader;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
@@ -85,9 +86,10 @@ class ExplanationTemplateTest {
         } else {
             engines.versionService().importVersion(name, ImportRequest.yaml(source));
         }
-        long lock = engines.versionService().requestPublish(name, version, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = engines.versionService().requestPublish(name, version, WriteOptions.none());
         caller.become("bank-a", "minh");
-        engines.versionService().approve(name, version, new WriteOptions(null, lock, null));
+        engines.versionService().approve(name, version, new WriteOptions(null, requested.lockVersion(), null)
+                .expectingContent(requested.canonicalHash()));
     }
 
     String decide(RuleEngines engines, String ruleSet, Map<String, Object> inputs) {

@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.Violation;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
 import io.github.dhluong90.bpm.rules.internal.store.FunctionVersionStore;
@@ -82,9 +83,10 @@ class HostFunctionsTest {
     void publish(RuleEngines engines, String yaml) {
         caller.become("bank-a", "lan");
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
-        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        RuleSetVersion requested = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bao");
-        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, requested.lockVersion(), null)
+                .expectingContent(requested.canonicalHash()));
         caller.become("bank-a", "teller-01");
     }
 
@@ -182,10 +184,11 @@ class HostFunctionsTest {
         assertThat(requested.violations().getFirst().code()).isEqualTo("FORBIDDEN_CONSTRUCT");
 
         // requested while the function was registered, approved after the host removed it
-        withFunction.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        RuleSetVersion pending = withFunction.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bao");
         ValidationFailedException approved = catchThrowableOfType(ValidationFailedException.class,
-                () -> withoutFunction.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)));
+                () -> withoutFunction.versionService().approve("card-fee", 1, new WriteOptions(null,
+                        pending.lockVersion(), null).expectingContent(pending.canonicalHash())));
         assertThat(approved.violations().getFirst().code()).isEqualTo("FORBIDDEN_CONSTRUCT");
         assertThat(approvals.approvedWith("bank-a", "card-fee", 1)).as("nothing was approved").isEmpty();
     }
