@@ -3313,8 +3313,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                     throw new TenantNotAllowedException("The caller's tenant is not the instance's tenant");
                                 }
                             }
-                            var result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
-                                    decisionCaller, clock.instant());
+                            long invokedAt = System.nanoTime();
+                            io.github.dhluong90.bpm.process.internal.exec.StepResult result;
+                            try {
+                                result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
+                                        decisionCaller, clock.instant());
+                            } catch (RuntimeException e) {
+                                // PRE-071 rolls the step back by propagating the handler's exception; PRE-084 still
+                                // reports it, at once, as the one failed step of the result it would have carried.
+                                metrics.stepApplied("ASYNC_RESULT", "FAILED",
+                                        Duration.ofNanos(System.nanoTime() - invokedAt));
+                                throw e;
+                            }
                             if (call.kind() == ServiceKind.DECISION
                                     && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
                                 history.add(new HistoryEntry("DECISION_EVALUATED", call.nodeId(), call.tokenId(),
