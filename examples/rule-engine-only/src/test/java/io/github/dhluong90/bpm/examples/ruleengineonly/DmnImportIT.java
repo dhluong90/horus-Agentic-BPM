@@ -129,13 +129,14 @@ class DmnImportIT {
 
     @Test
     void RLE_095_a_reserved_name_is_refused_over_http_with_its_stage_and_nothing_is_stored() throws Exception {
-        // Given dmn-ready-fee written with the reserved hit policy priority
+        // Given dmn-ready-priority, a rule set of its own, written with the reserved hit policy priority
         byte[] priority = FEE_YAML.replace("hitPolicy: first", "hitPolicy: priority")
+                .replace("ruleSet: dmn-ready-fee", "ruleSet: dmn-ready-priority")
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
         // When alice imports it
         Reply refused = send("alice", "POST", "/rule-sets", priority, "application/yaml");
-        Reply lookup = send("alice", "GET", "/rule-sets/dmn-ready-fee", null, null);
+        Reply lookup = send("alice", "GET", "/rule-sets/dmn-ready-priority", null, null);
 
         // Then 422 VALIDATION_FAILED names the policy and stage S1, and no rule set exists
         assertThat(refused.status()).isEqualTo(422);
