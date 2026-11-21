@@ -19,6 +19,19 @@ What `main` holds for the next release. It is still a 0.x release, so it makes n
 - **Behaviour change: a job that fails for good opens an incident.** When an asynchronous job fails for good (retries used up, a business error, an agent answer refused with `onViolation: fail`, or a job claimed too often), the engine opens one `OPEN` row in `pre_incident` in the same transaction, records `INCIDENT_RAISED` in history and emits `processes.incident.raised.v1`. The token stays on the step in `WAITING_ASYNC`. The incident carries its own code (`AGENT_TIMEOUT`, `AGENT_SCHEMA_INVALID`, `UNHANDLED_BUSINESS_ERROR`, `MAX_ATTEMPTS_REACHED`), the number of retries and a cause built from codes only. `IncidentService.openIncidents(instanceId)` reads them in the caller's tenant. Retry and resolve by API are not in this release; resolving will need a second person (PD-126).
 - **Upgrade note (PD-130): decision log retention is off unless set.** With `horus.bpm.rules.decision-log.retention` unset, every decision is kept, nothing is dropped, start-up is not stopped, and a WARN is logged at every start-up. Set it to `keep-forever` to keep everything without the warning, or to whole months of at least 12, such as `P12M`; a shorter period, a period in days or an unknown value stops start-up naming the property. A later release will require the setting.
 - **Breaking change: the host security handlers moved to a public package.** `BpmProblemAuthenticationEntryPoint` and `BpmProblemAccessDeniedHandler` are now in `io.github.dhluong90.bpm.host.security` (were `io.github.dhluong90.bpm.host.autoconfigure`). Change the imports. The module also registers one bean of each, built from `horus.bpm.security.challenge`; inject them into the host's filter chain instead of calling the constructors, so the chain and the engine endpoints send the same `WWW-Authenticate` challenge.
+- **More migrations:** Process Engine `V14__pre_step_result` (agent memory, one new table), `V17__pre_agent_replay` (two new tables for offline replay runs and their report lines) and `V18__pre_agent_replay_masked_input` (one `NOT NULL` column with a constant default on `pre_agent_replay`); V15 and V16 are unused. Rule Engine `V21__rle_version_copied_from` (two nullable `copied_from` columns, on `rle_version` and `rle_version_history`, with two checks) and `V24__rle_version_history_rule_set_events`, a Java migration that runs outside a transaction: it adds rule set rows (action `EVIDENCE_EXPORTED`) to `rle_version_history` and builds `idx_rle_version_history_rule_set` with `CREATE INDEX CONCURRENTLY`, so run it on a direct connection, not through a pooler in transaction mode; V22 and V23 are unused. All are additive.
+- **New endpoints.** Process Engine: `POST /agent-replays`, `GET /agent-replays/{id}`, `GET /agent-replays/{id}/cases` and `GET /agent-replays/{id}/cases/{attemptId}/answer` (offline replay of recorded agent answers against a candidate guardrail; no model, adapter or network is called). Rule Engine: `POST /rule-sets/{name}/versions?copyOf={v}` (restore an earlier version as the next draft, keeping its canonical hash and recording `copiedFrom`; it still needs four-eyes approval, PD-121), `GET /decisions/{id}/explain`, `GET /rule-sets/{name}/history` and `POST /rule-sets/{name}/evidence` (CSV or JSON, optional `Idempotency-Key`, SHA-256 in the file, in `Content-Digest` and in `X-Evidence-Sha256`, at most 100 decisions, `422 EVIDENCE_TOO_LARGE` over 8 MB, event `rules.evidence.exported.v1`).
+- **New permission `processes:agent:replay`.** Starting and reading agent replays needs it; `processes:read` is not enough. Grant it to the people who test guardrail changes.
+- **New settings.** Process Engine `replay.page-size` (500), `replay.max-cases` (50,000; more is `422 REPLAY_TOO_LARGE`) and `replay.retention` (`P30D`). Rule Engine `evaluation.step-budget` (100,000, from 1 to 1,000,000) and `evaluation.timeout-ms` (10,000, from 1 to 30,000): a decision past them fails with `EVALUATION_ERROR`, reason `EVALUATION_BUDGET_EXCEEDED`, and a value outside its range stops start-up naming the property.
+- **Replay of masked inputs.** A recorded answer whose candidate guardrail or schema would need the value of a masked field (including a type change, a combinator or pattern, or an answer the recorded schema refused) is reported `NOT_REPLAYED` with the code `MASKED_INPUT_REQUIRED` and counted apart in the summary.
+
+### Business errors, late results and agent memory
+
+**Behaviour change:** a local handler's business error no longer fails the call with `STEP_FAILED`. The call succeeds, the step waits, and an incident `UNHANDLED_BUSINESS_ERROR` opens with the business code (#55). An agent or remote step's business error fails its job on the first attempt.
+
+A result that arrives after its attempt timed out, after another attempt took over, after the step completed or after the job failed is discarded, writes nothing and never reopens the step.
+
+An agent step can declare `<horus:memory>` to receive declared fields of earlier agent steps' results in the same instance (#101). Process Engine migration `V14__pre_step_result` adds one table. New settings: `agents.memory.max-entries` (16) and `agents.memory.max-bytes` (16384). `AgentInvocation` gains the `memory()` component.
 
 ## 0.2.0
 
@@ -44,14 +57,6 @@ New in the same artifact: `expr.spi.ExpressionLanguage`, `CompiledExpression`, `
 ### Decision steps of a process
 
 A business rule task is evaluated as the engine identity `system:process-engine`, on behalf of the user who triggered the step (none after a timer), in the instance's tenant, at the engine clock of the step, with an idempotency key derived from the instance, the step and the attempt. The task worker needs no `rules:evaluate`. A retried step replays the logged decision and writes no second row. The decision log shows the user as `onBehalfOf` (Java `DecisionLogEntry` and `LoggedDecision`, and the REST decision log). Migration `V17__rle_decision_on_behalf_of` adds the nullable column `rle_decision.on_behalf_of`.
-
-### Business errors, late results and agent memory
-
-**Behaviour change:** a local handler's business error no longer fails the call with `STEP_FAILED`. The call succeeds, the step waits, and an incident `UNHANDLED_BUSINESS_ERROR` opens with the business code (#55). An agent or remote step's business error fails its job on the first attempt.
-
-A result that arrives after its attempt timed out, after another attempt took over, after the step completed or after the job failed is discarded, writes nothing and never reopens the step.
-
-An agent step can declare `<horus:memory>` to receive declared fields of earlier agent steps' results in the same instance (#101). Process Engine migration `V14__pre_step_result` adds one table. New settings: `agents.memory.max-entries` (16) and `agents.memory.max-bytes` (16384). `AgentInvocation` gains the `memory()` component.
 
 ## 0.1.0
 
