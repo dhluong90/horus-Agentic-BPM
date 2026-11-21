@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.github.dhluong90.bpm</groupId>
+    <artifactId>examples-parent</artifactId>
+    <version>0.3.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>example-guarded-agent-process</artifactId>
+  <name>Example host: guarded agent process</name>
+  <description>A Spring Boot service where an agent step assesses a loan application's documents, a rule set guards its answer, and a compliance reviewer reviews the answers the guardrail refuses.</description>
+
+  <dependencies>
+    <!-- The host's own stack. Starters whose name differs between Spring Boot lines are in the profiles below. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- The two dependencies a host adds for the engines. -->
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-spring-boot-starter</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>process-engine-spring-boot-starter</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!--
+      No cockpit dependency: this example serves the engine APIs the cockpit reads. Add
+      io.github.dhluong90.bpm:cockpit-spring-boot-starter to review tasks and see the case on its diagram in the
+      browser (README.md).
+    -->
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <engine.version>${project.version}</engine.version>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <!--
+    TR-EMB-02: the same host on both Spring Boot lines. Only starter names differ; the host code does not.
+    Spring Boot 4.x is the default; -Dspring-boot.line=3.5 selects 3.5.x (parent POM).
+  -->
+  <profiles>
+    <profile>
+      <id>host-spring-boot-4</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>!3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-flyway</artifactId>
+        </dependency>
+      </dependencies>
+    </profile>
+    <profile>
+      <id>host-spring-boot-3.5</id>
+      <activation>
+        <property>
+          <name>spring-boot.line</name>
+          <value>3.5</value>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>org.flywaydb</groupId>
+          <artifactId>flyway-core</artifactId>
+        </dependency>
+        <!--
+          ADR-0021 and TR-EMB-07: the engine core will bring Jackson 3 as a compile dependency. Until the
+          first parsing feature adds it to rule-engine-core, the 3.5 host declares it here the same way,
+          so the coexistence test runs against the real resolution: Jackson 3 beside the host's Jackson 2.
+        -->
+        <dependency>
+          <groupId>tools.jackson.core</groupId>
+          <artifactId>jackson-databind</artifactId>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
+</project>

@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: guarded-agent-process
+  datasource:
+    # Credentials come from the environment only; see README.md.
+    url: ${HORUS_DB_URL:jdbc:postgresql://localhost:5432/horus}
+    username: ${HORUS_DB_USERNAME:horus}
+    password: ${HORUS_DB_PASSWORD:}
+
+server:
+  port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+horus:
+  bpm:
+    host-id: guarded-agent-process
+    rules:
+      decision-log:
+        # How long decisions are kept, in whole months, at least 12. Left empty, every decision is kept and start-up
+        # warns; see README.md.
+        retention: ${HORUS_DECISION_LOG_RETENTION:}
+      security:
+        role-permissions:
+          # The agent step's guardrail is evaluated in the result transaction as the engine; nobody evaluates it.
+          ROLE_COMPLIANCE_REVIEWER: [rules:read]
+    processes:
+      security:
+        role-permissions:
+          ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          ROLE_TELLER: [processes:start, processes:read]
+          # Reviews the agent answers the guardrail refuses: four eyes, never the identity that sent the loan.
+          ROLE_COMPLIANCE_REVIEWER: [processes:read, processes:task:work]
+          ROLE_UNDERWRITER: [processes:read, processes:task:work]

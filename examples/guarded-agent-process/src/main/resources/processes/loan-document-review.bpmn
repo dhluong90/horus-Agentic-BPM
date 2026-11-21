@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The guarded agent journey (#66). An agent reads a loan application's documents and proposes a risk score and a
+     recommendation. The answer must meet the output schema, and the bank's rule set loan-document-guardrails checks
+     it: a risk score of 70 or more never moves on unchecked, it opens a four-eyes review task for a compliance
+     reviewer. Every loan then goes to an underwriter. The agent never decides alone. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-document-review"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-document-review" name="Loan document review" isExecutable="true">
+    <bpmn:startEvent id="start" name="Documents received"/>
+    <bpmn:serviceTask id="assess-documents" name="Assess the documents" horus:type="agentTask"
+                      horus:agent="documents.assess" horus:timeout="PT30S" horus:resultVariable="assessment">
+      <bpmn:extensionElements>
+        <horus:input name="applicationId" value="${instance.applicationId}"/>
+        <horus:input name="requestedAmount" value="${instance.amountMinor}"/>
+        <horus:input name="documentCount" value="${instance.documentCount}"/>
+        <horus:outputSchema>{
+          "type": "object",
+          "required": ["riskScore", "recommendation"],
+          "additionalProperties": false,
+          "properties": {
+            "riskScore": {"type": "integer", "minimum": 0, "maximum": 100},
+            "recommendation": {"type": "string", "enum": ["APPROVE", "REFER", "DECLINE"]},
+            "summary": {"type": "string", "maxLength": 500, "mask": true}
+          }
+        }</horus:outputSchema>
+        <horus:guardrail decision="loan-document-guardrails" onViolation="route-to-human"
+                         reviewer="role:COMPLIANCE_REVIEWER"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="underwrite" name="Underwrite the loan" horus:assignee="role:UNDERWRITER"
+                   horus:resultVariable="decision"/>
+    <bpmn:endEvent id="end" name="Decided"/>
+    <bpmn:sequenceFlow id="start__assess" sourceRef="start" targetRef="assess-documents"/>
+    <bpmn:sequenceFlow id="assess__underwrite" sourceRef="assess-documents" targetRef="underwrite"/>
+    <bpmn:sequenceFlow id="underwrite__end" sourceRef="underwrite" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_loan-document-review">
+    <bpmndi:BPMNPlane id="Plane_loan-document-review" bpmnElement="loan-document-review">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start">
+        <dc:Bounds x="152" y="102" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="assess-documents_di" bpmnElement="assess-documents">
+        <dc:Bounds x="250" y="80" width="100" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="underwrite_di" bpmnElement="underwrite">
+        <dc:Bounds x="420" y="80" width="100" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end">
+        <dc:Bounds x="592" y="102" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="start__assess_di" bpmnElement="start__assess">
+        <di:waypoint x="188" y="120"/>
+        <di:waypoint x="250" y="120"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="assess__underwrite_di" bpmnElement="assess__underwrite">
+        <di:waypoint x="350" y="120"/>
+        <di:waypoint x="420" y="120"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="underwrite__end_di" bpmnElement="underwrite__end">
+        <di:waypoint x="520" y="120"/>
+        <di:waypoint x="592" y="120"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
