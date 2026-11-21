@@ -1,0 +1,13 @@
+flowchart LR
+  Q["GET /tasks?assignment=mine,candidate"]:::client --> R["Resolve tenant and caller<br/>processes:task:work"]:::engine
+  R --> M1["Declared to minh<br/>idx_pre_task_mine"]:::engine
+  R --> M2["Claimed by minh<br/>idx_pre_task_claimed"]:::engine
+  R --> C1["Role credit-officer<br/>idx_pre_task_role_due"]:::engine
+  R --> C2["Role ops<br/>idx_pre_task_role_due"]:::engine
+  R --> C3["Group branch-hcm-01<br/>idx_pre_task_group"]:::engine
+  M1 & M2 & C1 & C2 & C3 --> P["Each range: ORDER BY due_at, id<br/>LIMIT page + 1 after the cursor"]:::engine
+  P --> J["Merge, drop duplicates,<br/>dated by due time, then undated by id"]:::engine
+  J --> O["Page of at most 200<br/>signed nextCursor"]:::obs
+  classDef client fill:#E3F2FD,stroke:#1565C0,color:#16231F
+  classDef engine fill:#E0F2F1,stroke:#00796B,stroke-width:2px,color:#16231F
+  classDef obs fill:#ECEFF1,stroke:#546E7A,color:#16231F

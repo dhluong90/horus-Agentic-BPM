@@ -43,7 +43,7 @@ class RestoreVersionTest {
     final TestCaller caller = new TestCaller("bank-a", "lan");
     final UnmaskedPersonalDataTest.Policy policy = new UnmaskedPersonalDataTest.Policy();
     final RuleEngines engines = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-            EngineSettings.defaults(), policy), stores, stores, stores);
+            EngineSettings.defaults().withRequireContentHash(false), policy), stores, stores, stores);
     final VersionService versions = engines.versionService();
 
     /** The card fee of a SILVER customer with 3 or more transactions. */
@@ -207,7 +207,7 @@ class RestoreVersionTest {
         // and bank-a's card-fee v1 and v2
         // (the approval of a warning needs no acknowledgement on the host that published it before the warning existed)
         VersionService lenient = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults().withAcknowledgeWarnings(List.of()), policy), stores, stores, stores)
+                EngineSettings.defaults().withRequireContentHash(false).withAcknowledgeWarnings(List.of()), policy), stores, stores, stores)
                 .versionService();
         publish(lenient, "bank-b", "kyc-routing", UnmaskedPersonalDataTest.KYC_ROUTING,
                 Instant.parse("2027-01-11T00:00:00Z"));
@@ -252,7 +252,7 @@ class RestoreVersionTest {
         // Given v1 approved under the default budget, then a host that lowers evaluation.step-budget to 5
         publish("bank-a", cardFee("10000 VND"), Instant.parse("2027-01-11T00:00:00Z"));
         RuleEngines tight = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults().withEvaluationLimits(
+                EngineSettings.defaults().withRequireContentHash(false).withEvaluationLimits(
                         new io.github.dhluong90.bpm.expr.internal.EvaluationLimits(5, 1000)), policy), stores, stores,
                 stores);
 

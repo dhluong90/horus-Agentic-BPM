@@ -11,6 +11,7 @@ import io.github.dhluong90.bpm.rules.api.HistorySimulation;
 import io.github.dhluong90.bpm.rules.api.HistorySimulationResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
@@ -98,9 +99,10 @@ class HistorySimulationPostgresIT {
     void givenNovemberHistoryAndDraft(String tenant) {
         caller.as(tenant, "lan", AUTHOR);
         tellers.versionService().importRuleSet(ImportRequest.yaml(cardFee("50000 VND")));
-        long lock = tellers.versionService().requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
+        RuleSetVersion lockRequested = tellers.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        long lock = lockRequested.lockVersion();
         caller.as(tenant, "minh", APPROVER);
-        tellers.versionService().approve("card-fee", 1, new WriteOptions(null, lock, null));
+        tellers.versionService().approve("card-fee", 1, new WriteOptions(null, lock, null).expectingContent(lockRequested.canonicalHash()));
         caller.as(tenant, "teller", TELLER);
         for (int i = 0; i < 100; i++) {
             clock.set(NOV_01.plus(Duration.ofHours(7 * i + 1)));

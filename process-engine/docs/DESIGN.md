@@ -353,7 +353,27 @@ A completed `serviceTask` or `agentTask` with a `compensate` handler pushes `(st
 
 ### 4.3 Business calendars and migration
 
-`BusinessCalendar` (`add`, `isBusinessTime`) computes `due_at` from working hours, time zone and holidays per tenant (`TR-CAL-01`, `TR-CAL-02`). `MigrationService` validates a plan as a dry run, then executes in batches of 100 instances, one `pre_instance` lock at a time; it updates `pre_instance.definition_id` and every token's `definition_id` in the same transaction (`TR-MIG-01`, `TR-MIG-02`). Explicit step mappings are M3 (`TR-MIG-03`).
+`BusinessCalendar` (`add`, `isBusinessTime`) computes `due_at` from working hours, time zone and holidays per tenant (`TR-CAL-01`, `TR-CAL-02`). Implemented in 0.3.0 (#72, `PRE-008`, `PRE-114`):
+
+- A `userTask` declares `horus:sla` (a positive ISO 8601 duration of working time, at most 366 days) and optionally `horus:calendar` (a calendar key), checked at import (`SLA_INVALID`) and kept in the canonical form only when present, so the hash of a definition without an SLA is unchanged.
+- When the shell creates the task, inside the step transaction, it calls the SPI once with the tenant of the locked instance row (never a request value), the engine clock's time and the duration, and stores the answer in `pre_task.due_at`; `dueAt` is on the task and on task list items. Nothing recomputes it, so a later calendar change never moves an existing deadline. Without `horus:calendar` the SPI counts elapsed time. A calendar the tenant does not have, or one with no working time within 3,660 days, fails the step (`422 STEP_FAILED`, reason `CALENDAR_NOT_FOUND` or `CALENDAR_NO_WORKING_TIME`) and nothing is written.
+- The arithmetic is the value type `WorkingCalendar`: a zone, working-hour ranges per weekday to the minute (`08:00-17:00`, up to `24:00`, at most 8 ranges a day, no overlap), and holiday dates. It walks local days in the calendar's zone and converts each range to instants with the zone rules, so working time is real elapsed time across a clock change and the JVM's default zone never matters. It is pure and deterministic; a seeded property checks it over five default zones.
+- The engine's default `BusinessCalendar` reads the tenant's calendar from `pre_calendar` and `pre_holiday` in the step transaction. A host that keeps calendars elsewhere registers its own bean, and the stored calendars are then not consulted.
+- Calendars are created and changed through `CalendarService`, with four eyes by default (PD-118 as amended by PD-131). A holder of `processes:calendar:manage` proposes the whole calendar against the version it read (0 for a new one) with a reason; a second holder approves or rejects it. Only the approval applies it, under the calendar row lock and only when the version is still the one proposed against (`409 VERSION_CONFLICT` otherwise); the proposer is refused (`403 SELF_APPROVAL_FORBIDDEN`). Approval emits `processes.calendar.changed.v1` with both people. `pre_calendar_change` is the record: reason, proposer, decider, old and new value; its `CHECK` refuses an approved four-eyes row whose decider is its proposer, whoever writes it. `calendar.approval=single` lets the proposer apply a change alone and is refused at start-up unless the `dev` profile is active on its own. The REST endpoints, the `/meta` flag and the cockpit editor follow with #125, on this service.
+
+![Calendar change and task due time](images/calendar-change.svg)
+
+Source: [`diagrams/calendar-change.mmd`](diagrams/calendar-change.mmd).
+
+`MigrationService` (#74) works in three steps; the first two ship in 0.3.0.
+
+1. **Plan.** `plan(key, sourceVersion, targetVersion)` checks that the target is `ACTIVE` and the source `ACTIVE` or `RETIRED` in the caller's tenant, reads both models through the stored-source integrity check, and writes one `pre_migration` row, one `PLANNED` row of `pre_migration_history` and `processes.migration.planned.v1` in one transaction, idempotent on its key. The plan records `planHash` (SHA-256 over the key and both definition ids and hashes) and the approval its execution needs, fixed at creation from `migration.approval`: `four-eyes` by default; `single` only when the `dev` profile is active on its own, otherwise start-up is refused (PD-114 as amended by PD-131, `PRE-174`). Planning moves nothing.
+2. **Dry run.** `validate(id)` only reads; it writes no row of any table and needs no approval (`PRE-014`). It reads the live tokens per step of the source version from `idx_pre_token_live`, maps each step onto the target by identical id (`SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another step type), and for each conflicting step counts the waiting running instances and lists the first `migration.dry-run-sample-size` ids in id order on `idx_pre_token_live_node_instance` (V24). A target no longer `ACTIVE` is the conflict `TARGET_NOT_ACTIVE`. It counts the running instances and lists those that would move on `idx_pre_instance_running_definition` (V25). The report carries `planHash` and `validUntil` (`migration.dry-run-validity` after `checkedAt`), which a later execution is bound to.
+3. **Execute** (M2, `PRE-015`, not built yet). The holder of `processes:migration:manage` proposes an execution with a reason against a dry run of the same `planHash` younger than `migration.dry-run-validity`; a second holder, never the proposer, approves; only the approval moves instances, in batches of `migration.batch-size`, one `pre_instance` lock at a time, updating `pre_instance.definition_id` and every token's `definition_id` in the same transaction (`TR-MIG-01`, `TR-MIG-02`). Explicit step mappings are M3 (`TR-MIG-03`).
+
+![Migration plan and dry run](images/migration-dry-run.svg)
+
+Source: [`diagrams/migration-dry-run.mmd`](diagrams/migration-dry-run.mmd).
 
 ### 4.4 Jobs and timers across replicas (`PRE-006`, `TR-PERF-05`, `TR-ASY-02`)
 
@@ -409,7 +429,7 @@ Standards foundations (ADR-0017):
 
 ### 5.3 Graph diff (PE-F-46)
 
-`GraphDiff diff(base, target)` is a pure function. Nodes are matched by step `id`; edges by `(from, to, kind)` where kind is `next`, `branch[i]`, `default` or `fork`. Output: `nodesAdded`, `nodesRemoved`, `nodesChanged` (each with JSON Pointer paths and old and new values), `edgesAdded`, `edgesRemoved`. Layout is never part of the diff. Complexity O(N + E); a 500-node definition diffs in under 5 ms.
+`GraphDiffs.diff(base, target)` is a pure function of the two models (`PRE-025`, `PRE-176`). Nodes are matched by BPMN id and compared on their canonical form, the form that is hashed and approved, without the members that name the following step (`next`, `default`, a branch's `next`); a changed value is one entry with its JSON Pointer path inside the step and its old and new value, so a changed branch condition is `/branches/i/when` on the gateway. Edges are matched by `(from, to, kind)` where kind is `next`, `branch[i]` (the i-th conditional branch of an exclusive gateway, from 0, in document order), `default` or `fork`. Output: `nodesAdded`, `nodesRemoved` (id, name, type), `nodesChanged` (id, name, type, path, from, to), `edgesAdded`, `edgesRemoved` (sequence flow id, both step ids and names, kind), all sorted, and `truncated` when more than 1,000 changed values were found. Layout is not in the model, so it is never part of the diff, and no XML is returned. `DefinitionService.diff(base, target)` and `diffFromEffective(target)` read both versions of one key in the caller's tenant, of any lifecycle status, through the stored-source integrity check, and write nothing; the REST `ETag` is derived from both definition hashes. Complexity O(N + E) apart from sorting; a 500-node definition diffs in under 5 ms.
 
 ### 5.4 Layout (ADR-0013, `TR-DEF-02`, M3)
 
@@ -487,9 +507,16 @@ public interface DefinitionService {
   DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, @Nullable String idempotencyKey);
   Optional<DefinitionVersion> find(DefinitionRef ref);                    // processes:read
   List<DefinitionHistoryEntry> history(DefinitionRef ref);                // processes:read, oldest first
-  GraphDiff diff(DefinitionRef base, DefinitionRef target);
+  GraphDiff diff(DefinitionRef base, DefinitionRef target);                // processes:read, read-only (#76)
+  GraphDiff diffFromEffective(DefinitionRef target);                       // base: the effective version
   LayoutRevision saveLayout(DefinitionRef ref, int expectedRevision, Layout layout);
   Optional<LayoutRevision> latestLayout(DefinitionRef ref);
+}
+
+public interface MigrationService {                                        // #74
+  MigrationPlan plan(MigrationPlanRequest request);                        // processes:migration:manage
+  MigrationPlan find(String migrationId);                                  // processes:migration:manage or processes:read
+  MigrationDryRun validate(String migrationId);                            // processes:migration:manage, read-only
 }
 
 public interface ProcessQueryService {
@@ -528,7 +555,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /definitions/{key}/versions/{v}:reject` | `processes:approve` | Back to `DRAFT`, reason required | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
 | `GET /definitions/{key}/versions/{v}/history` | `processes:read` | Lifecycle history, oldest first: action, statuses, actor, comment, time | None | `404 DEFINITION_NOT_FOUND` | M2 |
 | `POST /definitions/{key}/versions/{v}:retire` | `processes:approve` (`ACTIVE`), `processes:author` (`DRAFT`) | To `RETIRED`; body `{ "reason": "...", "confirmNoVersionInEffect": true }`, reason required for `ACTIVE` (PD-102), the flag only for the last version in effect (PD-101) | `Idempotency-Key`, `If-Match` | `400 INPUT_INVALID`, `409 INVALID_STATE`, `409 LAST_VERSION_IN_EFFECT` | M2 |
-| `GET /definitions/{key}/versions/{v}/diff?base=` | `processes:read` | Graph diff; `base` defaults to the effective version | `ETag` | | M2 |
+| `GET /definitions/{key}/versions/{v}/diff?base=` | `processes:read` | Graph diff of two stored versions (section 5.3); `base` defaults to the effective version | `ETag`, `If-None-Match` answers `304` | `404 DEFINITION_NOT_FOUND`, `404 NO_EFFECTIVE_VERSION` | M2 (0.3.0, #76) |
 | `GET /definitions/{key}/versions/{v}/export?format=json\|yaml\|bpmn` | `processes:read` | Export; `bpmn` is M3 | | | M2, M3 |
 | `GET`, `PUT /definitions/{key}/versions/{v}/layout` | `processes:read`, `processes:author` | Latest layout; save a new revision | `If-Match: "<revision>"` on `PUT` | `409 VERSION_CONFLICT`, `422 LAYOUT_INVALID` | M3 |
 | `GET /definitions/{key}/versions/{v}/layout/revisions` | `processes:read` | Revision list with author and time | Cursor | | M3 |
@@ -540,7 +567,7 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `GET /instances/{id}` | `processes:read` | State, tokens, masked variables | `ETag` | `404 INSTANCE_NOT_FOUND` | M2 |
 | `GET /instances/{id}/activities` | `processes:read` | Per node: entered, completed, duration, attempts, actor, incident; bounded by the instance's lifetime | Cursor, at most 200, `ETag` | `404 INSTANCE_NOT_FOUND` | M2 |
 | `POST /instances/{id}:cancel` | `processes:cancel` (PD-103) | Cancel; body `{ "reason": "..." }`, required, at most 2,000 characters | `Idempotency-Key`, `If-Match` | `400 INPUT_INVALID`, `409 INVALID_STATE` | M2 |
-| `GET /tasks?assignment=&status=&role=&group=&dueBefore=&slaBreached=` | `processes:task:work`; `any` needs `processes:task:manage` | Task query (section 8.2): `assignment` is one or more of `mine`, `candidate`, `any`; `status` one or more of `OPEN`, `CLAIMED`; ordered by `(dueAt, id)` | Cursor, at most 200, `ETag` | `400 QUERY_INVALID` | M2 |
+| `GET /tasks?assignment=&status=&role=&group=&dueBefore=&slaBreached=` | `processes:task:work`; `any` needs `processes:task:manage` | Task query (section 8.2, `PRE-030`): `assignment` is one or more of `mine` (declared to the caller or claimed by them), `candidate` (open tasks of the caller's roles and groups), `any` (the tenant), default `mine,candidate`; `status` one or more of `OPEN`, `CLAIMED`, default both; `role` and `group` narrow `candidate` and `any` (with `mine` alone `400`); `slaBreached=true` keeps tasks due before the engine clock; ordered by `(dueAt, id)`, tasks without a due time last by `id`; items carry no variables and no review | Cursor, at most 200 | `400 QUERY_INVALID`, `403 PERMISSION_DENIED` | M2 (0.3.0, #70) |
 | `GET /tasks/{id}`, `GET /tasks/{id}/form` | `processes:task:work` | Task context and resolved form | `ETag` | `404 TASK_NOT_FOUND` | M2 |
 | `POST /tasks/{id}:claim`, `:unclaim`, `:complete` | `processes:task:work` | Section 3.5 | `Idempotency-Key`, `If-Match` | `403 SELF_APPROVAL_FORBIDDEN`, `422 FORM_VALIDATION_FAILED` | M2 |
 | `POST /async-steps/{jobId}:complete` | `processes:step:complete` | Report the result of a remote step attempt whose adapter answered `Accepted`; body `attemptId`, `completionToken`, `status` (`COMPLETED`, `FAILED`, `BUSINESS_ERROR`), `output` or `errorCode` and `retryable`; answers `outcome` `ACCEPTED`, `DUPLICATE` or `DISCARDED` (section 4); the caller also needs a completer role of the step's adapter | A repeat is `DUPLICATE`; the lease fences late results; the remote call is deduplicated by the job id | `403 PERMISSION_DENIED` (no completer role, wrong token), `404 ASYNC_STEP_NOT_FOUND` | M2 (0.2.0) |
@@ -551,9 +578,12 @@ public sealed interface HandlerResult permits HandlerResult.Completed, HandlerRe
 | `POST /tasks/{id}:delegate`, `:reassign` | `processes:task:manage` | Section 3.5 | `Idempotency-Key`, `If-Match` | | M2 |
 | `GET /incidents?status=OPEN&definitionKey=&nodeId=` | `processes:read` | Incident list | Cursor, at most 200, `ETag` | | M2 |
 | `POST /incidents/{id}:retry`, `:resolve` | `processes:incident:manage` | Retry or resolve | `Idempotency-Key`, `If-Match` | `409 INVALID_STATE` | M2 |
-| `POST /migrations`, `/{id}:validate`, `/{id}:execute` | `processes:migration:manage` | Plan, dry run, execute | `Idempotency-Key` | | M2 |
+| `POST /migrations` | `processes:migration:manage` | Create a plan; records the approval its execution needs (section 4.3) | `Idempotency-Key` | `404 DEFINITION_NOT_FOUND`, `409 INVALID_STATE` | M2 (0.3.0, #74) |
+| `GET /migrations/{id}` | `processes:migration:manage` or `processes:read` | Read a plan | Read only | `404 MIGRATION_NOT_FOUND` | M2 (0.3.0, #74) |
+| `POST /migrations/{id}:validate` | `processes:migration:manage` | Dry run; reads only, so no idempotency key and no approval | Read only | `404 MIGRATION_NOT_FOUND` | M2 (0.3.0, #74) |
+| `POST /migrations/{id}:execute` | `processes:migration:manage`, a second holder approves | Propose and approve an execution (PD-131) | `Idempotency-Key` | `409 DRY_RUN_REQUIRED` | M2 |
 
-Implemented in 0.2.0 (`PRE-049`, `PRE-050`, `PRE-051`): `GET /tasks/{id}`, `POST /tasks/{id}:claim` and `:unclaim` (`If-Match` and `Idempotency-Key` required), `GET /definitions`, `GET /definitions/{key}/versions/{v}` without `include` (its `ETag` is the definition hash), `GET /instances`, `POST /instances/{id}:cancel` (`processes:cancel`; both `If-Match` and `Idempotency-Key` required, `428` without; reason required), besides the import, start, read and complete of 0.1.0. List cursors are signed with HMAC-SHA256 over tenant, filters and the last key, with one random key per database in `pre_engine_key` (section 7), so a cursor issued to another tenant or for other filters is `400 QUERY_INVALID`.
+Implemented in 0.2.0 (`PRE-049`, `PRE-050`, `PRE-051`), with `GET /tasks` (#70, `PRE-030`) and `dueAt` on `GET /tasks/{id}` (#72) in 0.3.0: `GET /tasks/{id}`, `POST /tasks/{id}:claim` and `:unclaim` (`If-Match` and `Idempotency-Key` required), `GET /definitions`, `GET /definitions/{key}/versions/{v}` without `include` (its `ETag` is the definition hash), `GET /instances`, `POST /instances/{id}:cancel` (`processes:cancel`; both `If-Match` and `Idempotency-Key` required, `428` without; reason required), besides the import, start, read and complete of 0.1.0. List cursors are signed with HMAC-SHA256 over tenant, filters and the last key, with one random key per database in `pre_engine_key` (section 7), so a cursor issued to another tenant or for other filters is `400 QUERY_INVALID`.
 
 Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permission), `403 TENANT_NOT_ALLOWED` (ADR-0014), `409 VERSION_CONFLICT` where `If-Match` applies, `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` and `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1` where `Idempotency-Key` applies (ADR-0006), `500 INTERNAL` with `correlationId` only. Bodies are RFC 9457 with `code`; `type` URIs follow ADR-0010. `lockVersion` travels as `If-Match: "<lockVersion>"` and `ETag`; `version` always means the definition version number. `/api/bpm/meta` and `/api/bpm/me` are host-level endpoints owned by [`cockpit/docs/DESIGN.md`](../../cockpit/docs/DESIGN.md) section 6; this engine contributes its feature flags there.
 
@@ -571,6 +601,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt`, `sourceHash`, `readerVersion` (5.8) |
 | `processes.definition.rejected.v1` | `definitionKey`, `version`, `rejectedBy`, `reason` |
 | `processes.definition.retired.v1` | `definitionKey`, `version`, `retiredBy` or `supersededBy`; for a manual retirement also `reason`, `approvalMode` (`single` or `four-eyes`), `requestedBy` in `four-eyes` mode, and `noVersionInEffect` (PD-101, PD-102) |
+| `processes.migration.planned.v1` | `migrationId`, `definitionKey`, `sourceVersion`, `targetVersion`, `planHash`, `approval` (`four-eyes` or `single`), `createdBy` (#74); the event id is derived from the plan id |
 | `processes.instance.cancelled.v1` | `instanceId`, `definitionKey`, `version`, `businessKey`, `cancelledBy`, `reason` (PD-103) |
 | `processes.instance.started.v1`, `.completed.v1`, `.failed.v1` | `instanceId`, `definitionKey`, `version`, `businessKey` |
 | `processes.step.completed.v1` | `instanceId`, `nodeId`, `attemptId`, `durationMs` |
@@ -578,6 +609,13 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.task.claimed.v1`, `processes.task.unclaimed.v1` | `taskId`, `instanceId`, `nodeId`, `assignee`, `claimedBy` or `unclaimedBy`, `definitionKey`, `version`, `businessKey`; the event id is derived from the task id and the lock version the change reaches (0.2.0) |
 | `processes.incident.raised.v1`, `processes.incident.resolved.v1` | `incidentId`, `instanceId`, `nodeId`, `errorCode`; `businessCode` when the code is `UNHANDLED_BUSINESS_ERROR` (#55) |
 | `processes.compensation.started.v1` | `instanceId`, `scopeId`, stack depth |
+| `processes.calendar.changed.v1` | `calendarKey`, `changeId`, `version`, `proposedBy`, `approvedBy`, `approval` (`FOUR_EYES` or `SINGLE`); the event id is the change id with `:approved` (0.3.0, #72) |
+
+**Envelope (#86, `PRE-085`).** Every event is handed to the publisher as `ProcessEventPublisher.Event` and serialised by `Event.envelope()` into nine members: `eventId` (26 characters, stable for the transition), `eventType`, `occurredAt` (engine clock), `tenantId`, `correlationId`, `causationId`, `producer` (`horus-process-engine`), `schemaVersion` (`1`) and `payload`. `correlationId` is the `X-Correlation-Id` of the request, set by `EventScopeFilter` for the REST API or by a host through `EventScope.open(...)`; work a job starts uses the request's id when the job was handed to the engine inside one, and otherwise the job id; with no scope it is the `eventId`, so the event starts its own chain. `causationId` is the request's `Idempotency-Key`, or the job id for work a job starts, or null. A correlation stored with a parked job would need a column on `pre_timer`; that is not part of this slice. The Rule Engine puts the event's own fields next to the envelope members; the Process Engine nests them under `payload`, and both carry the same eight envelope members. Each type has a JSON Schema in `process-engine/api/events/` (`additionalProperties: true`), and `EventSchemaCompatibilityTest` compares the files with the baseline copy of the previous release: nothing removed, retyped or newly required.
+
+`processes.step.completed.v1` is published once per node a transition completes, inside the step's transaction, with `durationMs` from the token's entry at the node (the entry in the same transition, or `pre_token.entered_at` for a step that waited). `processes.incident.resolved.v1`, `processes.instance.failed.v1` and `processes.compensation.started.v1` have schemas and are emitted when the engine has a resolve operation, a path to `FAILED` and compensation.
+
+**Metrics (#86, `PRE-084`).** The starter binds `horus.pre.*` meters to the host's `MeterRegistry` when Micrometer is present. The core calls the `ProcessMetrics` SPI only after the transaction commits (`TransactionRunner.afterCommit`), so a rolled-back start or step is never counted; a failed step is the one exception, reported at once. Tag values are checked against fixed sets (`stepKind`: `START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL`; `outcome`; job `kind`; the engine error codes) and anything else is `OTHER`. Gauges (`instances.active`, `incidents.open`, `jobs.due.oldest.age{kind}`) are read by one bounded query set per `metrics.gauge-refresh` on each replica, never per scrape: the counts are index-only scans of the partial indexes `idx_pre_instance_running_definition` (V25, #401) and `idx_pre_incident_open`, and the oldest due job is the first entry of `idx_pre_timer_poll_kind` per kind. They count every tenant together, so a shared registry leaks no tenant's volume.
 
 `processes.definition.deployed.v1` from the earlier baseline is removed: deploy now creates a draft, and no release has shipped.
 
@@ -589,6 +627,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `definitions.startup-tenants` | empty | Tenants the start-up import runs for; there is no principal at start-up, so the tenant is explicit. Empty means no start-up import |
 | `definitions.auto-approve` | `false` | Approve imported drafts automatically, for start-up imports and for `POST /definitions` imports alike; each auto-approved import is logged at WARN with tenant and definition key. Start-up fails unless `dev` is the only active profile besides `test`, and fails whenever the removed key `definitions-auto-approve` is set at all (`TR-SEC-11`, `PRE-022`) |
 | `lifecycle.approver-must-differ-from` (host property `horus.bpm.lifecycle.approver-must-differ-from`, shared with the Rule Engine) | `makers` | Shared by both engines: host property `horus.bpm.lifecycle.approver-must-differ-from` (PD-096), published as `lifecycle.approver-must-differ-from` in each engine module's `/api/bpm/meta` settings. `makers` (default): the approver differs from every maker of the version, that is the importer or creator, every editor of the draft and the requester. `requester`: the approver differs from the requester only; this relaxes a control, so it is never the default, it is logged at WARN at start-up and recorded on every approval history row. The requester can never approve under either value (`403 SELF_APPROVAL_FORBIDDEN`, with a detail naming why). Implementation: read by `ApproverMustDifferFrom` in `bpm-host-metadata` (the Rule Engine starter can read it too, #273); recorded on the history row as `details.approverMustDifferFrom` |
+| `calendar.approval` | `four-eyes` | PD-131: a business calendar is created or changed only when a second holder of `processes:calendar:manage` approves the proposal (section 4.3). `single` lets the proposer apply it alone, is refused at start-up unless `dev` is the only active profile besides `test`, is logged at WARN and is recorded on every change as `SINGLE` |
 | `maker-checker.enabled` | `true` | `false` is refused outside the `dev` profile (`TR-SEC-11`); on `dev` it lets a requester approve their own definition version, recorded as approver `system:dev-auto-approve` (section 3.2) |
 | `horus.bpm.lifecycle.retire-approval` (shared host key) | `single` | PD-102: retiring an active definition needs one `processes:approve` holder and a reason; recorded on the history row and `retired.v1`. `four-eyes` is refused at start-up until the four-eyes retirement mode is built. Published as `lifecycle.retire-approval` in `/api/bpm/meta`; read by `RetireApproval` in `bpm-host-metadata` |
 | `horus.bpm.lifecycle.retire-last-version` (shared host key) | `confirm` | PD-101: retiring the last version in effect of a key needs `confirmNoVersionInEffect: true` (`confirm`) or is refused (`refuse`); `four-eyes` is refused at start-up in this release. Published as `lifecycle.retire-last-version` in `/api/bpm/meta`; read by `RetireLastVersion` in `bpm-host-metadata` |
@@ -615,8 +654,18 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `runners.<kind>.schema-retries` | `1` for `async-agent`, `0` for `async-service` | Fresh attempts for a result that breaks its output schema before it is refused with `AGENT_SCHEMA_INVALID`; counted apart from `max-attempts`. `0` to `5` |
 | `adapters.completer-roles` | none | Per adapter name, the roles that may complete its steps through the completion API on top of `processes:step:complete` (section 4); an adapter without an entry cannot be completed from outside; a name that is no registered adapter stops start-up |
 | `migration.batch-size` | `100` | Instances per migration batch, one instance lock at a time (section 4.3); may be lowered only |
+| `migration.approval` | `four-eyes` | The approval a new migration plan records for its execution (PD-131): `four-eyes`, a second holder of `processes:migration:manage` approves; `single` is accepted only when the `dev` profile is active on its own, otherwise start-up is refused, and is logged at WARN. Published as `migration.approval` in `/api/bpm/meta` |
+| `migration.dry-run-sample-size` | `100` | Most instance ids a dry run lists per conflict and for the instances that would move, 1 to 500; may be lowered only |
+| `migration.dry-run-validity` | `PT1H` | How long an execution may rely on a dry run of the same plan (PD-114); at most `PT1H`, may be lowered only |
 | `tokens.cleanup-after`, `tokens.cleanup-batch` | unset (keep), `10000` | When set, the scheduler deletes `pre_token` rows of instances ended longer ago, in batches; history keeps every transition (open question 11.3) |
 | `stats.live-cache-large-threshold` | `100000` | Token count above which `stats.live-cache-ttl-large` applies |
+| `stats.rollup-enabled` | `true` | This replica runs the hourly node statistics rollup (`PRE-029`); at least one replica must. Several may: one writer takes each slice |
+| `stats.rollup-interval`, `stats.rollup-lag` | `PT5M`, `PT5M` | Time between runs, and how far behind now the rollup stays so slow step transactions have committed; the statistics are at most lag plus interval behind (10 minutes) |
+| `stats.rollup-max-slice`, `stats.rollup-max-run` | `PT1M`, `PT60S` | History one slice transaction reads (1 second to 10 minutes), and how long a run takes slices before the next run continues from the watermark (1 second to 10 minutes) |
+| `stats.rollup-initial-backfill` | `PT1H` | How far back the first run starts on a database with no watermark (0 to 31 days) |
+| `metrics.enabled` | `true` | Bind the `horus.pre.*` meters when Micrometer is present |
+| `metrics.gauge-refresh` | `PT30S` | How often each replica reads the gauges; 1 second to 1 hour |
+| `metrics.definition-key-tag` | `false` | Tag the instance counters with `definitionKey`; off because the number of keys is the host's |
 | `query.max-range` | `P31D` | Longest time range of a list query (ADR-0015); may be lowered only |
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `lifecycle.reason-max-length` | `2000` | Longest reason a cancellation accepts (PD-103); may be lowered, never raised |
@@ -625,7 +674,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `replay.page-size`, `replay.max-cases`, `replay.retention` | `500`, `50000`, `P30D` | Offline agent replay (section 4.1, #98): answers per worker transaction (1 to 1,000), most answers per run (may be lowered, never raised), how long a run and its report are kept (1 hour to 366 days) |
 | `tenancy.claim`, `tenancy.dev-tenant` | `tenant_id`, unset | Shared with the Rule Engine under `horus.bpm.*`; session-principal default resolver (ADR-0014 decision 6, PD-079) |
 
-Extension points (ADR-0024, `TR-EXT-02`), each with an engine default registered `@ConditionalOnMissingBean`: `TenantResolver`, `CallerResolver`, `BusinessCalendar` (default 24x7), `StepRegistry`, `FormRegistry`, `RoleCatalogue` (default none), `AgentAdapter` and `ServiceAdapter` (no default; required only by definitions that use them), `OutputSchemaValidator` (default: the JSON Schema subset of section 4.1, #363), `MessageAdapter` (S2), the process event publisher, and `LifecycleGuard` (default allows everything; a host guard may veto a definition, task or incident transition with its own code and can never make a refused transition succeed, `TR-EXT-06`). Approval rules, assignees, SLA durations, escalation targets, retries, timeouts and guardrails are per definition, not engine settings.
+Extension points (ADR-0024, `TR-EXT-02`), each with an engine default registered `@ConditionalOnMissingBean`: `TenantResolver`, `CallerResolver`, `BusinessCalendar` (default: the stored calendars of section 4.3; a task without `horus:calendar` counts elapsed time), `StepRegistry`, `FormRegistry`, `RoleCatalogue` (default none), `AgentAdapter` and `ServiceAdapter` (no default; required only by definitions that use them), `OutputSchemaValidator` (default: the JSON Schema subset of section 4.1, #363), `MessageAdapter` (S2), the process event publisher, and `LifecycleGuard` (default allows everything; a host guard may veto a definition, task or incident transition with its own code and can never make a refused transition succeed, `TR-EXT-06`). Approval rules, assignees, SLA durations, escalation targets, retries, timeouts and guardrails are per definition, not engine settings.
 
 ## 7. Storage model (`process-engine-postgres`)
 
@@ -782,9 +831,12 @@ CREATE TABLE pre_task (
   FOREIGN KEY (tenant_id, instance_id) REFERENCES pre_instance (tenant_id, id),
   FOREIGN KEY (tenant_id, token_id) REFERENCES pre_token (tenant_id, id)
 );
+-- 0.3.0 (#72, V21): due_at; (#70, V22, built CONCURRENTLY): one partial index per range of the task query
 CREATE INDEX idx_pre_task_mine
-  ON pre_task (tenant_id, assignee_user, due_at, id) WHERE status IN ('OPEN','CLAIMED');
-CREATE INDEX idx_pre_task_role
+  ON pre_task (tenant_id, assignee_user, due_at, id) WHERE status IN ('OPEN','CLAIMED') AND assignee_user IS NOT NULL;
+CREATE INDEX idx_pre_task_claimed
+  ON pre_task (tenant_id, claimed_by, due_at, id) WHERE status = 'CLAIMED';
+CREATE INDEX idx_pre_task_role_due   -- replaces V1's idx_pre_task_role, which ordered by created_at
   ON pre_task (tenant_id, assignee_role, due_at, id) WHERE status = 'OPEN' AND assignee_role IS NOT NULL;
 CREATE INDEX idx_pre_task_group
   ON pre_task (tenant_id, assignee_group, due_at, id) WHERE status = 'OPEN' AND assignee_group IS NOT NULL;
@@ -907,9 +959,9 @@ CREATE TABLE pre_history_default PARTITION OF pre_history DEFAULT;
 CREATE TABLE pre_history_2027_01 PARTITION OF pre_history
   FOR VALUES FROM ('2027-01-01 00:00:00+00') TO ('2027-02-01 00:00:00+00');   -- created by the scheduler 7 days ahead
 CREATE INDEX idx_pre_history_instance ON pre_history (tenant_id, instance_id, occurred_at, id);
-CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices
+CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices (#110, V27: parent ON ONLY, built CONCURRENTLY and attached on every existing partition; new partitions inherit it)
 
-CREATE TABLE pre_node_stats_hourly (
+CREATE TABLE pre_node_stats_hourly (                                              -- #110, V26
   tenant_id         TEXT        NOT NULL,
   definition_id     VARCHAR(26) NOT NULL,
   bucket_start      TIMESTAMPTZ NOT NULL,        -- hour, UTC
@@ -927,7 +979,7 @@ CREATE TABLE pre_node_stats_hourly (
 ) PARTITION BY RANGE (bucket_start);
 CREATE TABLE pre_node_stats_hourly_default PARTITION OF pre_node_stats_hourly DEFAULT;
 
-CREATE TABLE pre_engine_watermark (            -- engine-internal, one row per sweep job, no tenant data
+CREATE TABLE pre_engine_watermark (            -- #110, V26: engine-internal, one row per sweep job, no tenant data
   job_name        TEXT        PRIMARY KEY,       -- 'node-stats'
   watermark       TIMESTAMPTZ NOT NULL,
   updated_by      TEXT        NOT NULL,
@@ -972,12 +1024,57 @@ CREATE TABLE pre_engine_key (
   created_at  TIMESTAMPTZ NOT NULL
 );
 
+-- 0.3.0 (#74, V23 to V25): migration plans. A plan moves nothing; the dry run only reads. Execution states follow.
+CREATE TABLE pre_migration (
+  tenant_id            TEXT        NOT NULL,
+  id                   VARCHAR(26) NOT NULL,
+  definition_key       TEXT        NOT NULL,
+  source_definition_id VARCHAR(26) NOT NULL,
+  source_version       INT         NOT NULL CHECK (source_version >= 1),
+  target_definition_id VARCHAR(26) NOT NULL,
+  target_version       INT         NOT NULL CHECK (target_version >= 1),
+  plan_hash            CHAR(64)    NOT NULL,     -- key, both definition ids and hashes
+  approval             TEXT        NOT NULL CHECK (approval IN ('four-eyes','single')),
+  status               TEXT        NOT NULL CHECK (status IN ('PLANNED')),
+  created_by           TEXT        NOT NULL,
+  created_at           TIMESTAMPTZ NOT NULL,
+  lock_version         BIGINT      NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, source_definition_id) REFERENCES pre_definition (tenant_id, id),
+  FOREIGN KEY (tenant_id, target_definition_id) REFERENCES pre_definition (tenant_id, id),
+  CHECK (source_definition_id <> target_definition_id)
+);
+CREATE INDEX idx_pre_migration_definition ON pre_migration (tenant_id, definition_key, created_at DESC, id);
+
+CREATE TABLE pre_migration_history (            -- append-only, triggers refuse UPDATE, DELETE and TRUNCATE
+  tenant_id    TEXT        NOT NULL,
+  id           VARCHAR(26) NOT NULL,
+  migration_id VARCHAR(26) NOT NULL,
+  action       TEXT        NOT NULL CHECK (action IN ('PLANNED')),
+  actor_id     TEXT        NOT NULL,
+  details      JSONB       NOT NULL DEFAULT '{}',
+  occurred_at  TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, migration_id) REFERENCES pre_migration (tenant_id, id)
+);
+
+-- V24 and V25, each CREATE INDEX CONCURRENTLY outside a transaction, re-runnable after a failed build:
+CREATE INDEX idx_pre_token_live_node_instance ON pre_token (tenant_id, definition_id, current_node_id, instance_id)
+  WHERE status IN ('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT');
+CREATE INDEX idx_pre_instance_running_definition ON pre_instance (tenant_id, definition_id, id)
+  WHERE status = 'RUNNING';
+
+-- 0.3.0 (#72, V20). Changed only through pre_calendar_change (section 4.3).
 CREATE TABLE pre_calendar (
   tenant_id       TEXT        NOT NULL,
   id              VARCHAR(26) NOT NULL,
   calendar_key    TEXT        NOT NULL,
   timezone        TEXT        NOT NULL,
-  weekly_hours    JSONB       NOT NULL,
+  weekly_hours    JSONB       NOT NULL,          -- {"MONDAY": ["08:00-17:00"], ...}
+  lock_version    BIGINT      NOT NULL,          -- 1 after creation, one more per approved change
+  updated_by      TEXT        NOT NULL,          -- proposer of the change in force
+  approved_by     TEXT        NOT NULL,          -- its approver
+  updated_at      TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (tenant_id, id),
   UNIQUE (tenant_id, calendar_key)
 );
@@ -992,6 +1089,27 @@ CREATE TABLE pre_holiday (
   UNIQUE (tenant_id, calendar_id, holiday_date),
   FOREIGN KEY (tenant_id, calendar_id) REFERENCES pre_calendar (tenant_id, id)
 );
+
+CREATE TABLE pre_calendar_change (
+  tenant_id        TEXT        NOT NULL,
+  id               VARCHAR(26) NOT NULL,
+  calendar_key     TEXT        NOT NULL,
+  status           TEXT        NOT NULL CHECK (status IN ('PENDING','APPROVED','REJECTED')),
+  approval         TEXT        NOT NULL CHECK (approval IN ('FOUR_EYES','SINGLE')),
+  base_version     BIGINT      NOT NULL,         -- 0 for a new calendar
+  previous_value   JSONB,                        -- zone, week, holidays before; null for a new calendar
+  proposed_value   JSONB       NOT NULL,
+  reason           TEXT        NOT NULL,
+  proposed_by      TEXT        NOT NULL,
+  proposed_at      TIMESTAMPTZ NOT NULL,
+  decided_by       TEXT,
+  decided_at       TIMESTAMPTZ,
+  decision_comment TEXT,
+  PRIMARY KEY (tenant_id, id),
+  CHECK ((status = 'PENDING') = (decided_by IS NULL AND decided_at IS NULL)),
+  CONSTRAINT ck_pre_calendar_change_four_eyes CHECK (status <> 'APPROVED' OR approval = 'SINGLE' OR decided_by <> proposed_by)
+);
+CREATE INDEX idx_pre_calendar_change_key ON pre_calendar_change (tenant_id, calendar_key, proposed_at, id);
 ```
 
 Migration rules (`TR-OPS-01`, `TR-OPS-02`): forward-only scripts in `pre_schema_history`; every DDL statement runs with `SET lock_timeout = '5s'`; indexes on populated tables are created `CONCURRENTLY` in their own script; columns are added nullable or with a constant default, back-filled in batches of 10,000, then constrained in the next minor release. Partition creation creates the monthly table standalone with a matching `CHECK` constraint and then runs `ATTACH PARTITION`, which takes only `SHARE UPDATE EXCLUSIVE` on the parent.
@@ -1010,6 +1128,7 @@ Targets, not measurements, on the reference shape of the architecture overview s
 | Pages | Keyset cursor, default 50, at most 200; `limit` above 200 is `400 QUERY_INVALID`; no `OFFSET`; no exact totals, a count is shown as "200+" | REST tests |
 | Time per read | Read-only transaction with `SET LOCAL statement_timeout = '2s'` | Fault test with a slowed database |
 | History | `pre_history` is read only for one instance, bounded by its lifetime, or by the rollup job in one-minute slices. Never `GROUP BY` over history on a request path | ArchUnit rule on the query registry; query-plan check |
+| Registered queries | Every multi-row read is a `ListQuery` in `ProcessListQueries` with its bound: `Page` (`ORDER BY ... LIMIT ?`), `ParentKey` (`tenant_id = ?` and the parent key), `ParentKeys` (`tenant_id = ?` and `key = ANY (?)`), or `EngineSweep` for the engine's own scheduled reads across tenants (the rollup slice and the metric gauges), which takes no tenant from a caller, returns nothing to one, and carries a time range on both ends, a `LIMIT`, or a single count. The constructor refuses SQL that does not keep its bound | ArchUnit: no multi-row `JdbcClient` read outside `ListQuery` (`BoundedListQueriesTest`); `ListQueryPlanCheckTest`: `EXPLAIN` of each registered query on a seeded database with sequential scans off shows no sequential scan and the index condition its bound needs; the rollup slice has an index condition on both ends of `occurred_at` (`PRE-036`) |
 | Counters | No counter is updated inside a step transaction | Code review rule; SQL capture test of a transition shows no `UPDATE` of a statistics table |
 
 ![Bounded cockpit reads](images/cockpit-reads.svg)
@@ -1024,9 +1143,13 @@ Source: [`diagrams/cockpit-reads.mmd`](diagrams/cockpit-reads.mmd).
 | Live counts per node | Index-only scan of `idx_pre_token_live` for one `(tenant, definition)` | About 90 bytes per entry: 100,000 live tokens = 9 MB, 1,100 index pages; 20 to 60 ms when pages are all-visible, up to about 150 ms with heap fetches | 500 operators, 20 percent on a diagram, 15 s refresh = 7 requests/s per host; 5 s cache per `(tenant, version)` and about 20 distinct versions in view: at most 4 queries/s x 60 ms = 0.24 busy connections | Above 100,000 tokens the cache TTL becomes 15 s and the response carries `asOf` (`TR-PERF-09`); at 1 million tokens a scan is about 600 ms, so the 15 s TTL limits it to 0.04 busy connections per version |
 | Open incidents per node | `idx_pre_incident_node` | Small: open incidents are hundreds | Under 2 ms | Unchanged |
 | Window stats per node | PK range on `pre_node_stats_hourly` for `(tenant, definition, bucket_start range)` | 20 nodes x 720 hours (31 days) = 14,400 rows, histograms merged in SQL | About 15 ms | 500 nodes x 720 hours = 360,000 rows, about 200 ms: the 31-day cap holds this; longer windows need a daily rollup (open question 11.4) |
-| Task query, one user | `idx_pre_task_mine`, `idx_pre_task_role` per role, `idx_pre_task_group` per group, each `LIMIT 51` ordered by `(due_at, id)`, merged in Java | About 0.3 ms per index range | User with 5 roles and 3 groups: 9 ranges, about 3 ms | 10x open tasks does not change it: each range stops after 51 rows |
+| Task query, one user | `idx_pre_task_mine` and `idx_pre_task_claimed` for the user, `idx_pre_task_role_due` per role, `idx_pre_task_group` per group, `idx_pre_task_open_due` for `any`; each range `LIMIT page + 1` ordered by `(due_at, id)` after the cursor, then its undated part by id while the page is short, merged in Java (0.3.0, #70) | About 0.3 ms per index range | User with 5 roles and 3 groups: 10 ranges, about 3 ms | 10x open tasks does not change it: each range stops after one page. When one role holds nearly all open tasks the planner may read `idx_pre_task_open_due` and filter by role: still an ordered range scan under the `Limit`, checked in `TaskQueryPostgresIT` |
 | SLA breaches | The same indexes with `due_at < now()` | Same | Same | Same |
 | Federated cockpit load | 10 hosts, 500 operators, inbox refresh 30 s, incidents 60 s | 500 / 30 = 17 inbox and 8 incident requests/s per host; about 3 ms and 1 ms of database time | 0.06 busy connections per host. `ETag` and `304` save payload and serialisation, not the query | 2,000 operators: 67 inbox requests/s, 0.2 busy connections. The limit is the identity provider and the browser, see the cockpit design section 9 |
+
+![Task query ranges](images/task-query.svg)
+
+Source: [`diagrams/task-query.mmd`](diagrams/task-query.mmd).
 
 ### 8.3 Rollup job math (PE-F-49, `TR-PERF-10`)
 
@@ -1100,7 +1223,7 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | 11.2 | Should the approver also differ from every identity that edited the draft, for both engines? | **Decided 2026-11-20 (PD-096):** yes. The approver differs from every maker (importer or creator, every editor, requester) under `lifecycle.approver-must-differ-from`, default `makers`; section 3.2 and `PRE-019` | Closed |
 | 11.3 | Remove tokens of instances ended more than 30 days ago? `pre_token` is not an audit table; history keeps every transition | Made configurable on 2026-11-19 (`tokens.cleanup-after`, unset by default, ADR-0024); recommended value `P30D` | Maintainers, M2 |
 | 11.4 | Windows longer than 31 days for the heatmap need a daily rollup table | Defer to after 1.0 unless a pilot asks | Architect, M3 |
-| 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | DDL before M2 execution work | Maintainers, M2 |
+| 11.5 | Migration plan storage (`pre_migration`) has no DDL yet | **Closed 2026-11-21 (#74):** `pre_migration` and `pre_migration_history` (V23), dry-run indexes V24 and V25 (section 7); execution states widen the status `CHECK` with the execution feature | Closed |
 | 11.6 | Which JSON library major `*-core` uses (ADR-0011) | **Decided** 2026-11-19 (PD-071 option 1, ADR-0021): Jackson 3 in `internal` only; engine REST bodies use the engine's mapper (`PRE-045`). Condition: the Spring Boot 3.5 coexistence test passes in Sprint 1, or option 3 (no JSON library in the core) returns | Closed; the condition is checked by the maintainers in the first parsing pull request |
 | 11.7 | P2: scope tokens in M2 (ADR-0020) | **Decided** 2026-11-19 (PD-059 option 1): applied in sections 3.4, 4.2 and 7 (`PRE-044`, `TR-STD-29`) | Closed |
 | 11.8 | P3: BPMN semantic model as the in-memory model (ADR-0018) | **Decided** 2026-11-19 (PD-060 option 2): applied in section 5.1 (`PRE-043`, `TR-STD-28`) | Closed |

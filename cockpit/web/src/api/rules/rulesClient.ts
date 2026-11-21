@@ -86,8 +86,8 @@ export interface RulesClient {
   listVersions(name: string, request?: PageRequest): Promise<Page<VersionSummary>>;
   /** getVersionHistory: lifecycle entries, oldest first */
   getHistory(name: string, version: number, signal?: AbortSignal): Promise<HistoryEntry[]>;
-  /** reject: back to DRAFT with a required reason */
-  reject(name: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** reject: back to DRAFT with a required reason; `reviewedHash` is the canonicalHash of the content the reviewer saw (RLE-084) */
+  reject(name: string, version: number, lockVersion: number, reviewedHash: string, reason: string, idempotencyKey: string): Promise<RuleSetVersion>;
   /** withdraw: the requester takes their own request back to DRAFT, with an optional reason (RLE-046, PD-089) */
   withdraw(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
   /** getVersion */
@@ -102,8 +102,8 @@ export interface RulesClient {
   importVersion(name: string, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** requestPublish */
   requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string): Promise<RuleSetVersion>;
-  /** approve; `acknowledgedWarnings` are the exact { code, input } pairs the approver accepted (PD-104, RLE-053) */
-  approve(name: string, version: number, lockVersion: number, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly AcknowledgedWarning[]): Promise<RuleSetVersion>;
+  /** approve; `reviewedHash` is the canonicalHash of the content the reviewer saw, never re-read at approval time (RLE-084); `acknowledgedWarnings` are the exact { code, input } pairs the approver accepted (PD-104, RLE-053) */
+  approve(name: string, version: number, lockVersion: number, reviewedHash: string, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly AcknowledgedWarning[]): Promise<RuleSetVersion>;
   /** searchDecisions: one page, newest first (RLE-029); writes nothing */
   searchDecisions(search: DecisionSearch): Promise<DecisionLogPage>;
   /** getDecision: one logged decision, masked inputs as their keyed hash */
@@ -149,13 +149,13 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/history`, ...(signal ? { signal } : {}) }, versionHistory);
       return answer.data.data;
     },
-    async reject(name, version, lockVersion, reason, idempotencyKey) {
+    async reject(name, version, lockVersion, reviewedHash, reason, idempotencyKey) {
       const answer = await call(
         {
           method: 'POST',
           path: `${versionPath(name, version)}:reject`,
           headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
-          body: { contentType: 'application/json', text: JSON.stringify({ reason }) },
+          body: { contentType: 'application/json', text: JSON.stringify({ reason, expectedCanonicalHash: reviewedHash }) },
         },
         ruleSetVersion,
       );
@@ -217,9 +217,10 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       );
       return answer.data;
     },
-    async approve(name, version, lockVersion, comment, idempotencyKey, acknowledgedWarnings = []) {
-      // Members are sent only when they carry something, so an approval without either has no body, as before.
+    async approve(name, version, lockVersion, reviewedHash, comment, idempotencyKey, acknowledgedWarnings = []) {
+      // The reviewed hash is always sent: the engine refuses an approval that names no content (RLE-084).
       const payload = {
+        expectedCanonicalHash: reviewedHash,
         ...(comment !== undefined && comment !== '' ? { comment } : {}),
         ...(acknowledgedWarnings.length > 0 ? { acknowledgedWarnings } : {}),
       };
@@ -228,7 +229,7 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
           method: 'POST',
           path: `${versionPath(name, version)}:approve`,
           headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
-          ...(Object.keys(payload).length > 0 ? { body: { contentType: 'application/json', text: JSON.stringify(payload) } } : {}),
+          body: { contentType: 'application/json', text: JSON.stringify(payload) },
         },
         ruleSetVersion,
       );

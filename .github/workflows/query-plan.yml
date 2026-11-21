@@ -1,9 +1,11 @@
 name: Query plan
 
-# PRE-036 (TR-PERF-07): every list query of the Process Engine store is registered with a declared bound, and its
-# plan on a seeded PostgreSQL is served by an index. The job fails when a multi-row read bypasses the registry
-# (ArchUnit), when a query's SQL breaks its bound, or when a plan scans an engine table in full. It runs on the
-# oldest and the newest PostgreSQL the engines support, because the planner differs between them.
+# PRE-036 and RLE-085 (TR-PERF-07): every list query of the Process Engine store and of the Rule Engine store is
+# registered with a declared bound, and its plan on a seeded PostgreSQL is served by an index. A job fails when a
+# multi-row read bypasses the registry (ArchUnit), when a query's SQL breaks its bound, or when a plan scans an
+# engine table in full; the Rule Engine job also fails when a decision log search reads more monthly partitions than
+# its period spans. Each runs on the oldest and the newest PostgreSQL the engines support, because the planner
+# differs between them.
 # A separate workflow from ci.yml, so it can be read and rerun on its own; ci.yml runs the same tests in verify.
 on:
   pull_request:
@@ -12,6 +14,9 @@ on:
       - process-engine/process-engine-core/src/main/**
       - pom.xml
       - process-engine/pom.xml
+      - rule-engine/rule-engine-postgres/**
+      - rule-engine/rule-engine-core/src/main/**
+      - rule-engine/pom.xml
       - .github/workflows/query-plan.yml
   push:
     branches: [main]
@@ -20,6 +25,9 @@ on:
       - process-engine/process-engine-core/src/main/**
       - pom.xml
       - process-engine/pom.xml
+      - rule-engine/rule-engine-postgres/**
+      - rule-engine/rule-engine-core/src/main/**
+      - rule-engine/pom.xml
       - .github/workflows/query-plan.yml
   workflow_dispatch:
 
@@ -99,5 +107,70 @@ jobs:
           path: |
             process-engine/process-engine-postgres/target/surefire-reports/
             ${{ runner.temp }}/query-plan.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  query-plan-rule-engine:
+    name: Rule Engine list queries are bounded, PostgreSQL ${{ matrix.postgres }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "18"]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: PostgreSQL ${{ matrix.postgres }} image, pinned by digest
+        env:
+          PINNED: ${{ env[format('POSTGRES_{0}_IMAGE', matrix.postgres)] }}
+          VERSION: ${{ matrix.postgres }}
+        run: |
+          if [ -z "$PINNED" ]; then
+            echo "::error title=PostgreSQL image not pinned::No POSTGRES_${VERSION}_IMAGE in the env of query-plan.yml."
+            exit 1
+          fi
+          docker pull "$PINNED"
+          echo "POSTGRES_IMAGE=$PINNED" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-query-plan-re-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-query-plan-re-
+            maven-${{ runner.os }}-boot-4.x-
+            maven-${{ runner.os }}-
+
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
+      - name: Registry, bounds and query plans (RLE-085)
+        run: |
+          set -o pipefail
+          if ! tools/mvn-retry.sh -B -ntp -pl rule-engine/rule-engine-postgres -am test \
+              -Dtest='BoundedRuleListQueriesTest,RuleListQueryPlanCheckTest' -Dsurefire.failIfNoSpecifiedTests=false \
+              -Dbpm.test.postgres.image="$POSTGRES_IMAGE" 2>&1 | tee "$RUNNER_TEMP/query-plan-rule-engine.log"; then
+            message="$(grep -E 'sequential scan of|full scan of|no Limit|no index condition|no sample parameters|should not call|declares|monthly partitions|31-day' \
+              "$RUNNER_TEMP/query-plan-rule-engine.log" | head -n 5 | tr '\n' ' ')"
+            echo "::error file=rule-engine/rule-engine-postgres/src/main/java/io/github/dhluong90/bpm/rules/postgres/RuleListQueries.java,title=Unbounded list query::${message:-see the step log}"
+            exit 1
+          fi
+
+      - name: Upload the test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: query-plan-rule-engine-pg-${{ matrix.postgres }}
+          path: |
+            rule-engine/rule-engine-postgres/target/surefire-reports/
+            ${{ runner.temp }}/query-plan-rule-engine.log
           if-no-files-found: ignore
           retention-days: 14

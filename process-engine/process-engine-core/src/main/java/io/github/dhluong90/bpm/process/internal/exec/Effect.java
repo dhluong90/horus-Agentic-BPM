@@ -63,10 +63,20 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param assignee user:, role: or group: assignee
      * @param fourEyes four-eyes rule
      * @param context masked context for the task
+     * @param sla the step's {@code horus:sla} and {@code horus:calendar}, or null for a task without a due time; the
+     *     shell turns it into the task's due time once, with the engine clock (PRE-008)
      */
-    record CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee, boolean fourEyes, Map<String, Object> context) implements Effect {
+    record CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee, boolean fourEyes,
+            Map<String, Object> context, io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec sla)
+            implements Effect {
         public CreateUserTask {
             context = context == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(context));
+        }
+
+        /** A task without a due time. */
+        public CreateUserTask(String taskId, String tokenId, String nodeId, String name, String assignee,
+                boolean fourEyes, Map<String, Object> context) {
+            this(taskId, tokenId, nodeId, name, assignee, fourEyes, context, null);
         }
     }
 

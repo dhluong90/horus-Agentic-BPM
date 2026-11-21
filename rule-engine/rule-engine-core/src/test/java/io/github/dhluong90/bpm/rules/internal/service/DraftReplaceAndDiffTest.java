@@ -51,7 +51,7 @@ class DraftReplaceAndDiffTest {
 
     RuleEngines engines(boolean draftAuthoring) {
         RuleEngines engines = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults().withDraftAuthoring(draftAuthoring)), stores, stores, stores);
+                EngineSettings.defaults().withRequireContentHash(false).withDraftAuthoring(draftAuthoring)), stores, stores, stores);
         engines.cursorKeys().load();
         return engines;
     }

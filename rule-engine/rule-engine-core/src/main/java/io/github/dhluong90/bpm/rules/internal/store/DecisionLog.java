@@ -98,6 +98,21 @@ public interface DecisionLog {
             Instant from, Instant to, Position after, int limit, Duration statementTimeout);
 
     /**
+     * Counts the decisions of one rule set and tenant with {@code from <= createdAt < to}, stopping at
+     * {@code atMost}, from at most the monthly partitions of the period. The count is bounded, so a period of a very
+     * busy table never makes the database read it all (RLE-077).
+     *
+     * @param tenantId the tenant
+     * @param ruleSet the rule set name
+     * @param from the first instant, inclusive
+     * @param to the end, exclusive
+     * @param atMost the count at which to stop
+     * @param statementTimeout the longest the read may run
+     * @return the number of decisions, at most {@code atMost}
+     */
+    long countInPeriod(String tenantId, String ruleSet, Instant from, Instant to, int atMost, Duration statementTimeout);
+
+    /**
      * A keyset position in the decision log.
      *
      * @param createdAt the row time

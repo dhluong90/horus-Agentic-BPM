@@ -78,10 +78,11 @@ class FourEyesRetirementTest {
         int number = service.findRuleSet("tet-fee-waiver").isPresent()
                 ? service.importVersion("tet-fee-waiver", ImportRequest.yaml(document)).version()
                 : service.importRuleSet(ImportRequest.yaml(document)).version();
-        long reviewed = service.requestPublish("tet-fee-waiver", number, WriteOptions.none()).lockVersion();
+        RuleSetVersion reviewed = service.requestPublish("tet-fee-waiver", number, WriteOptions.none());
         clock.set(approvedAt);
         caller.become("bank-a", "minh", APPROVER);
-        return service.approve("tet-fee-waiver", number, new WriteOptions(null, reviewed, null));
+        return service.approve("tet-fee-waiver", number,
+                new WriteOptions(null, reviewed.lockVersion(), null).expectingContent(reviewed.canonicalHash()));
     }
 
     DecisionResult evaluate(RuleEngines pod) {

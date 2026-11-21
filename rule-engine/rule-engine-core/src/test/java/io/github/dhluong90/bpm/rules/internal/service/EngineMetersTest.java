@@ -234,9 +234,10 @@ class EngineMetersTest {
         } else {
             engines.versionService().importVersion(ruleSet, ImportRequest.yaml(yaml));
         }
-        long lock = engines.versionService().requestPublish(ruleSet, version, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = engines.versionService().requestPublish(ruleSet, version, WriteOptions.none());
         caller.become("bank-a", "bob");
-        return engines.versionService().approve(ruleSet, version, new WriteOptions(null, lock, null));
+        return engines.versionService().approve(ruleSet, version,
+                new WriteOptions(null, requested.lockVersion(), null).expectingContent(requested.canonicalHash()));
     }
 
     private static byte[] withDefaultFee(long fee) {

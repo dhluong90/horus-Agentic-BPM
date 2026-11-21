@@ -87,7 +87,7 @@ class MaskedInputsPostgresIT {
     RuleEngines engines(MaskingPolicy policy) {
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         return PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                EngineSettings.defaults(), policy);
+                EngineSettings.defaults().withRequireContentHash(false), policy);
     }
 
     /** A host policy with one key per tenant, each declared under its tenant, as a vault-backed policy would. */
@@ -189,7 +189,7 @@ class MaskedInputsPostgresIT {
         publish("bank-a");
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         RuleEngines withoutKeyForA = PostgresRuleEngines.create(db, transactions, caller, caller,
-                Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults(),
+                Clock.fixed(NOW, ZoneOffset.UTC), EngineSettings.defaults().withRequireContentHash(false),
                 tenant -> tenant.equals("bank-b") ? Optional.of(MaskingKey.of(KEY_B)) : Optional.empty());
 
         engines.maskingCheck().verify(List.of());

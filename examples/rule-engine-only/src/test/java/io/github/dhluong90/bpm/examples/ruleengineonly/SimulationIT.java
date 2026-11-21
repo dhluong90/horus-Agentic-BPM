@@ -191,10 +191,13 @@ class SimulationIT {
     private void publishV1(String name) throws Exception {
         assertThat(send(TestTokens.bearer("alice"), "/rule-sets", "application/yaml",
                 renamed("/rules/card-fee.yaml", name)).status()).isEqualTo(201);
-        assertThat(send(TestTokens.bearer("alice"), "/rule-sets/" + name + "/versions/1:request-publish", null, null)
+        Reply requested = send(TestTokens.bearer("alice"), "/rule-sets/" + name + "/versions/1:request-publish", null, null);
+        assertThat(requested.status()).isEqualTo(200);
+        // The approval names the content reviewed (RLE-084): the hash the request answered with.
+        byte[] reviewed = ("{\"expectedCanonicalHash\":\"" + requested.json().path("canonicalHash").asString() + "\"}")
+                .getBytes(StandardCharsets.UTF_8);
+        assertThat(send(TestTokens.bearer("bob"), "/rule-sets/" + name + "/versions/1:approve", "application/json", reviewed)
                 .status()).isEqualTo(200);
-        assertThat(send(TestTokens.bearer("bob"), "/rule-sets/" + name + "/versions/1:approve", null, null).status())
-                .isEqualTo(200);
     }
 
     private long decisionRows() {

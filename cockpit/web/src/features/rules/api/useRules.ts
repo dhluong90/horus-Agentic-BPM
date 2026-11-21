@@ -157,9 +157,10 @@ export function useApprove(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    // Never retried on a refusal: a 409 WARNINGS_NOT_ACKNOWLEDGED goes back to the approver (PD-104).
-    ({ version, comment, acknowledgedWarnings = [] }: { version: VersionSummary; comment: string; acknowledgedWarnings?: readonly AcknowledgedWarning[] }, key) =>
-      client.approve(version.ruleSet, version.version, version.lockVersion, comment, key, acknowledgedWarnings),
+    // Never retried on a refusal: a 409 WARNINGS_NOT_ACKNOWLEDGED goes back to the approver (PD-104), and a 409 CONTENT_CHANGED to the reviewer (RLE-084).
+    // `reviewedHash` is the hash of the content on screen when the reviewer opened it, never read again here.
+    ({ version, reviewedHash, comment, acknowledgedWarnings = [] }: { version: VersionSummary; reviewedHash: string; comment: string; acknowledgedWarnings?: readonly AcknowledgedWarning[] }, key) =>
+      client.approve(version.ruleSet, version.version, version.lockVersion, reviewedHash, comment, key, acknowledgedWarnings),
     async (version) => {
       await refresh();
       onDone(version);
@@ -171,7 +172,7 @@ export function useReject(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    ({ version, reason }: { version: VersionSummary; reason: string }, key) => client.reject(version.ruleSet, version.version, version.lockVersion, reason, key),
+    ({ version, reviewedHash, reason }: { version: VersionSummary; reviewedHash: string; reason: string }, key) => client.reject(version.ruleSet, version.version, version.lockVersion, reviewedHash, reason, key),
     async (version) => {
       await refresh();
       onDone(version);

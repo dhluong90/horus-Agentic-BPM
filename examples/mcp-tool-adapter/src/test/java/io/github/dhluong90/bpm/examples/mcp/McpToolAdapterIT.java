@@ -153,10 +153,11 @@ class McpToolAdapterIT {
                 identity.caller = "lan";
                 ruleSets.importRuleSet(io.github.dhluong90.bpm.rules.api.ImportRequest.yaml(
                         resource("rules/customer-risk-guardrails.yaml")));
-                long requested = ruleSets.requestPublish("customer-risk-guardrails", 1, WriteOptions.none())
-                        .lockVersion();
+                var requested = ruleSets.requestPublish("customer-risk-guardrails", 1, WriteOptions.none());
                 identity.caller = "minh";
-                ruleSets.approve("customer-risk-guardrails", 1, new WriteOptions(null, requested, null));
+                // The approval names the lock version and the content it reviewed (RLE-084)
+                ruleSets.approve("customer-risk-guardrails", 1, new WriteOptions(null, requested.lockVersion(), null)
+                        .expectingContent(requested.canonicalHash()));
                 identity.caller = "pia";
                 definitions.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,
                         resource("processes/customer-risk-scoring.bpmn"), null));

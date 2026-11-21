@@ -26,6 +26,21 @@ public interface ProcessQueryService {
      */
     Page<InstanceSummary> instances(InstanceQuery query);
 
+    /**
+     * Lists tasks of the caller's tenant ordered by {@code dueAt}, then {@code id}; tasks without a due time follow,
+     * by {@code id} (PRE-030). Each range (the caller's user, their claims, each role, each group, or the tenant for
+     * {@code any}) is read through its own index and stops after one page. Needs {@code processes:task:work};
+     * {@code any} also needs {@code processes:task:manage}.
+     *
+     * @param query the filters and the page
+     * @return one page
+     * @throws QueryInvalidException when the limit, the cursor, an assignment, a status or a filter is not valid
+     * @throws PermissionDeniedException when the caller lacks a permission
+     */
+    default Page<TaskSummary> tasks(TaskQuery query) {
+        throw new UnsupportedOperationException("This query service does not list tasks");
+    }
+
 
     /**
      * Counts the live tokens per node of one definition version in the caller's tenant, from the live token index,
@@ -39,4 +54,20 @@ public interface ProcessQueryService {
      * @throws DefinitionNotFoundException when the version does not exist in the caller's tenant
      */
     NodeCounts liveNodeCounts(String definitionKey, int version);
+
+    /**
+     * Reads the hourly rollup of one definition version in the caller's tenant: counts and typical durations per node
+     * over whole hours, with the rollup watermark and its lag. Needs {@code processes:read}. The range is widened to
+     * whole hours and may be at most {@code query.max-range}. Never reads history.
+     *
+     * @param definitionKey the process key
+     * @param version the version number
+     * @param from start of the window, or null for 24 hours before {@code to}
+     * @param to end of the window, or null for now
+     * @return the figures
+     * @throws DefinitionNotFoundException when the version does not exist in the caller's tenant
+     * @throws QueryInvalidException when {@code from} is not before {@code to}, or the range is longer than
+     *     {@code query.max-range}
+     */
+    NodeWindowStats nodeWindowStats(String definitionKey, int version, java.time.Instant from, java.time.Instant to);
 }

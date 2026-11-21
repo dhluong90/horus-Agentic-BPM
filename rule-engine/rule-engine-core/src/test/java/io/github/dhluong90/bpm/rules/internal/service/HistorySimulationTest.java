@@ -17,6 +17,7 @@ import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
+import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
@@ -67,9 +68,10 @@ class HistorySimulationTest {
         int number = versions.findRuleSet(ruleSet).isPresent()
                 ? versions.importVersion(ruleSet, ImportRequest.yaml(document)).version()
                 : versions.importRuleSet(ImportRequest.yaml(document)).version();
-        long lock = versions.requestPublish(ruleSet, number, WriteOptions.none()).lockVersion();
+        RuleSetVersion requested = versions.requestPublish(ruleSet, number, WriteOptions.none());
         caller.become(tenant, "minh", APPROVER);
-        versions.approve(ruleSet, number, new WriteOptions(null, lock, null));
+        versions.approve(ruleSet, number,
+                new WriteOptions(null, requested.lockVersion(), null).expectingContent(requested.canonicalHash()));
     }
 
     void draft(String tenant, String ruleSet, byte[] document) {

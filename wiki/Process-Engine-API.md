@@ -14,6 +14,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /definitions` | `ProcessQueryService.definitions(PageRequest)` | `processes:read` | One item per key, ordered by key: `latestVersion`, `latestStatus`, `effectiveVersion` (the version a start uses now, or `null`), `lastChangedAt`. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}` | `DefinitionService.version(key, version)` | `processes:read` | Status, hashes, `approvedBy`, `approvedAt`, `effectiveFrom` and the lifecycle fields (`lockVersion`, `requestedBy`, `retiredBy`, `supersededBy`); no source document. `ETag` is the definition hash; the lifecycle commands take the `lockVersion` field as `If-Match`. This is the `Location` an import returns. `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
 | `GET /definitions/{key}/versions/{version}/export?format=bpmn` | `DefinitionService.exportDefinition(key, version, SourceFormat.BPMN_XML)` | `processes:read` | BPMN 2.0 XML (`application/bpmn+xml`) of the executable subset with a generated diagram layout. Importing it gives the same `definitionHash`, which is also the `ETag`. Read-only. A version of another tenant is `404 DEFINITION_NOT_FOUND`. Since 0.2.0 |
+| `GET /definitions/{key}/versions/{version}/diff?base=` | `DefinitionService.diff(base, target)`, `.diffFromEffective(target)` | `processes:read` | Steps and links added, removed and changed between two stored versions of one key, of any status, so an approver compares a pending version with the effective one before signing. `base` defaults to the effective version (`404 NO_EFFECTIVE_VERSION` without one). Every element carries its BPMN id and readable name; layout and XML are never returned. At most 1,000 changed values, then `truncated: true`. `ETag` from both definition hashes; `If-None-Match` answers `304`. Another tenant's version is `404 DEFINITION_NOT_FOUND`. Read-only. 0.3.0 |
 | `POST /definitions/{key}/versions/{v}:request-approval` | `requestApproval(ref, lockVersion, effectiveFrom, idempotencyKey)` | `processes:author` or `processes:deploy` | `DRAFT` to `PENDING_APPROVAL`; optional `effectiveFrom`, never in the past. `If-Match` required. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:approve` | `approve(ref, lockVersion, comment, idempotencyKey)` | `processes:approve` | To `ACTIVE`, effective from `effectiveFrom` or now. The requester gets `403 SELF_APPROVAL_FORBIDDEN`; an older version than the active one gets `409 VERSION_SUPERSEDED`. 0.2.0 |
 | `POST /definitions/{key}/versions/{v}:reject` | `reject(ref, lockVersion, reason, idempotencyKey)` | `processes:approve` | Back to `DRAFT`; `reason` required (`400` without). 0.2.0 |
@@ -21,6 +22,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /definitions/{key}/versions/{v}/history` | `history(ref)` | `processes:read` | Every transition with actor and comment, oldest first. 0.2.0 |
 | `POST /instances` | `ProcessEngine.start(StartRequest)` | `processes:start` | Needs a `businessKey` or an `Idempotency-Key` (`428` without either). `201` for a new instance, `200` when one exists for the business key |
 | `GET /instances/{id}` | `ProcessEngine.instance(id)` | `processes:read` | Execution tree (root scope token and flow tokens) and tasks; variables unmasked in 0.1.0 |
+| `GET /definitions/{key}/versions/{version}/node-stats?mode=window&from=&to=` | `ProcessQueryService.nodeWindowStats(key, version, from, to)` | `processes:read` | Counts and typical durations per step over whole hours, from the hourly rollup of the caller's tenant: entered, completed, failed, incidents, mean, median and 95th percentile (each within 19 percent). The range is at most `query.max-range` (31 days, `400 QUERY_INVALID`); the answer names the rollup watermark (`asOf`) and its lag, at most about 10 minutes. Never reads history. Since 0.3.0 |
 | `GET /definitions/{key}/versions/{version}/node-stats?mode=live` | `ProcessQueryService.liveNodeCounts(key, version)` | `processes:read` | Live tokens per step and status, with `asOf` and an `ETag`; read from the live token index, never from history. Each replica caches an answer for `stats.live-cache-ttl` (5 s), or `stats.live-cache-ttl-large` (15 s) above `stats.live-cache-large-threshold` (100,000 live tokens). Only `mode=live` (`400` otherwise); a version not in the caller's tenant is `404 DEFINITION_NOT_FOUND`. Open incidents per step follow with incidents. Since 0.2.0 |
 | `GET /instances` | `ProcessQueryService.instances(InstanceQuery)` | `processes:read` | `status` (comma separated, `RUNNING` when absent), `definitionKey`, `startedFrom` (inclusive) and `startedTo` (exclusive), at most 31 days apart; with one bound the other is 31 days away. Newest first. Items carry no variables, tokens or tasks. Since 0.2.0 |
 | `POST /instances/{id}:cancel` | `ProcessEngine.cancel(id, lockVersion, reason, idempotencyKey)` | `processes:cancel` | Its own permission: `processes:start` does not grant it (PD-103), and `/api/bpm/me` lists it so a client shows Cancel only to its holders. `If-Match` (the instance `ETag`) and `Idempotency-Key` are required (`428`). Body `{"reason": "..."}`, required, at most `lifecycle.reason-max-length` (2,000) characters; the reason and the actor are on the `INSTANCE_ENDED` history entry and on `processes.instance.cancelled.v1`. Cancels every live token and open task; `409 INVALID_STATE` when the instance is not running. Cancel makes no adapter call and runs no compensation in 0.2.0; compensation on cancel is planned for 1.2. Since 0.2.0 |
@@ -28,7 +30,11 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `POST /agent-replays` | `AgentReplayService.start(AgentReplayRequest)` | `processes:agent:replay` | Replays one agent step's recorded answers over a period of at most 31 days against a candidate guardrail version, usually a draft, and an optional candidate output schema. Body `{"definitionKey": "kyc-onboarding", "nodeId": "assess-documents", "from": "2026-11-01", "to": "2026-11-30", "candidate": {"ruleSet": "kyc-document-guardrails", "version": 3}}`. Answers `202` with the queued run; the job poller replays it in pages. Calls no model or adapter and writes no history or decision. See [[Guarded Agent Steps]]. M3 |
 | `GET /agent-replays/{id}`, `GET /agent-replays/{id}/cases` | `AgentReplayService.run(id)`, `.cases(id, page)` | `processes:agent:replay` | The run's status and summary, and its report: one line per recorded answer with the attempt id, the recorded and the candidate outcome, the change, the matched rule ids and the `OVERRIDDEN_BY_REVIEWER` flag, never an output value. M3 |
 | `GET /agent-replays/{id}/cases/{attemptId}/answer` | `AgentReplayService.recordedAnswer(id, attemptId)` | `processes:agent:replay` | One case's recorded answer as history keeps it: masked output fields as `***`, masked inputs as keyed hashes. M3 |
-| `GET /tasks/{id}` | `TaskService.task(id)` | `processes:task:work` | The task with its instance, step, assignment, `fourEyes`, claim and completion, and `allowedActions` for this caller (`claim`, `unclaim`, `complete`). The review task of a refused agent answer also has `review`: the code, reasons, matched rule ids, guardrail decision id, the refused attempt and who reported it, the inputs the agent saw (a masked input as its keyed fingerprint) and the answer masked by the output schema. `ETag` is the task `lockVersion`. Since 0.2.0 |
+| `GET /tasks` | `ProcessQueryService.tasks(TaskQuery)` | `processes:task:work`; `assignment=any` also needs `processes:task:manage` | `assignment`: one or more of `mine` (declared to you or claimed by you), `candidate` (open tasks of your roles and groups), `any` (the whole tenant); `mine,candidate` when absent. `status`: `OPEN`, `CLAIMED` or both (default). `role`, `group`: narrow `candidate` and `any` to one role or group (with `mine` alone, `400 QUERY_INVALID`). `dueBefore`, and `slaBreached=true` for tasks whose due time has passed. Ordered by `dueAt`, then `id`; tasks without a due time come last, by `id`. At most 200 per page (`limit` above 200 is `400 QUERY_INVALID`). Items carry no variables and no review context. See [Task lists](#task-lists). Since 0.3.0 |
+| `POST /migrations` | `MigrationService.plan(MigrationPlanRequest)` | `processes:migration:manage` | Plans moving the running instances of `sourceVersion` to the active `targetVersion` of one key. Body `{"definitionKey": "loan-review", "sourceVersion": 1, "targetVersion": 2}`; any other field is `400`. Answers `201` with `approval: {"mode": "four-eyes", "secondPersonRequired": true}`: executing the plan will need a second holder of the permission (`single` only on the `dev` profile). Moves nothing. `Idempotency-Key` returns the first plan. A retired target is `409 INVALID_STATE`. 0.3.0 |
+| `GET /migrations/{id}` | `MigrationService.find(id)` | `processes:migration:manage` or `processes:read` | The plan. Another tenant's plan is `404 MIGRATION_NOT_FOUND`. 0.3.0 |
+| `POST /migrations/{id}:validate` | `MigrationService.validate(id)` | `processes:migration:manage` | Dry run: which running instances would move and which steps have no counterpart in the target. Reads only, needs no approval and no idempotency key. See Migration dry run below. 0.3.0 |
+| `GET /tasks/{id}` | `TaskService.task(id)` | `processes:task:work` | The task with its instance, step, assignment, `fourEyes`, claim and completion, `dueAt` (since 0.3.0), and `allowedActions` for this caller (`claim`, `unclaim`, `complete`). The review task of a refused agent answer also has `review`: the code, reasons, matched rule ids, guardrail decision id, the refused attempt and who reported it, the inputs the agent saw (a masked input as its keyed fingerprint) and the answer masked by the output schema. `ETag` is the task `lockVersion`. Since 0.2.0 |
 | `POST /tasks/{id}:claim` | `TaskService.claim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `OPEN` to `CLAIMED` by the caller, who must be an assignee (`403 TASK_NOT_ASSIGNED`); a four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`). `If-Match` and `Idempotency-Key` required (`428`). Since 0.2.0 |
 | `POST /tasks/{id}:unclaim` | `TaskService.unclaim(id, lockVersion, idempotencyKey)` | `processes:task:work` | `CLAIMED` to `OPEN`; only the claimant (`403 TASK_NOT_ASSIGNED`). Same headers. Since 0.2.0 |
 | `POST /tasks/{id}:complete` | `TaskService.complete(id, result, lockVersion, idempotencyKey)`, or with a `reason` | `processes:task:work` | Body `{"result": {...}, "reason": "..."}`; `reason` is optional and recorded only on the review task of a refused agent answer, with the reviewer's answer and what changed (`HUMAN_OVERRIDE`, since 0.2.0). Only the claimant completes: an `OPEN` task is `409 INVALID_STATE` (claim it first, since 0.2.0), a task claimed by someone else is `403 TASK_NOT_ASSIGNED`. `If-Match` (the task's `lockVersion`) and `Idempotency-Key` are required (`428`). A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing. A four-eyes task refuses the starter and earlier completers (`403 SELF_APPROVAL_FORBIDDEN`) |
@@ -71,7 +77,7 @@ Every endpoint answers errors as RFC 9457 problem details with a `code`:
 | 400 | `INPUT_INVALID`, `QUERY_INVALID` |
 | 401 | `UNAUTHENTICATED` |
 | 403 | `PERMISSION_DENIED`, `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN`, `TENANT_NOT_ALLOWED` |
-| 404 | `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` |
+| 404 | `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`, `MIGRATION_NOT_FOUND` |
 | 409 | `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
 | 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`, `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` |
@@ -118,6 +124,49 @@ stateDiagram-v2
 
 Every change carries the task's `lockVersion` as `If-Match` and advances it by one: a claim of a task at `"0"` answers `ETag: "1"`, which the completion then sends. Two officers who read the same version and act at once get one `200` and one `409 VERSION_CONFLICT`, and only one transition and history entry is written. Read `GET /tasks/{id}` for the current `ETag` and the actions this caller may take.
 
+## Task lists
+
+A team lead and an officer see their queues from `GET /tasks`. Example: Minh holds the roles `credit-officer` and `ops` and the group `branch-hcm-01`.
+
+```
+GET /api/bpm/processes/v1/tasks?assignment=candidate&limit=50          # open tasks of both roles and the group
+GET /api/bpm/processes/v1/tasks?assignment=candidate&slaBreached=true  # the ones already late
+GET /api/bpm/processes/v1/tasks?assignment=mine                        # the ones he claimed
+```
+
+```json
+{
+  "data": [
+    {"id": "01JD2R7Q4M8S3N6V0B5C9X1Z2A", "instanceId": "01JD2R7Q0D3F6H9K2M5P8R1T4V",
+     "definitionKey": "loan-credit-review", "definitionVersion": 2, "businessKey": "LN-2027-000123",
+     "nodeId": "credit-review", "name": "Credit review", "assignee": "role:credit-officer",
+     "status": "OPEN", "lockVersion": 0, "claimedBy": null,
+     "createdAt": "2026-12-31T08:00:00Z", "dueAt": "2027-01-04T03:00:00Z"}
+  ],
+  "nextCursor": "eyJ...",
+  "hasNext": true
+}
+```
+
+Each range (your user, your claims, each role, each group) is read through its own index for one page and the pages are merged, so a queue of 30,000 tasks answers as fast as one of 30. Pass `nextCursor` back as `cursor`; it is signed for your tenant and these filters, so another tenant's cursor, or one from other filters, is `400 QUERY_INVALID`.
+
+![Task query ranges](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/task-query.svg)
+
+## Due times on working hours
+
+A user task with `horus:sla` is due after that much working time in the tenant's calendar named by `horus:calendar`:
+
+```xml
+<bpmn:userTask id="credit-review" name="Credit review" horus:assignee="role:credit-officer"
+               horus:resultVariable="review" horus:sla="PT4H" horus:calendar="vn-banking-hours"/>
+```
+
+With `vn-banking-hours` set to Monday to Friday 08:00 to 17:00 Asia/Ho_Chi_Minh and 1 January 2027 off, a task created on Thursday 31 December 2026 at 15:00 +07:00 is due on Monday 4 January 2027 at 10:00 +07:00: two hours count on Thursday, Friday is a holiday, the weekend is skipped, and two more hours count on Monday. The due time is set once, with the engine clock, and is never moved by a later calendar change. Without `horus:calendar` the SLA counts elapsed time. A calendar your tenant does not have fails the step (`422 STEP_FAILED`, reason `CALENDAR_NOT_FOUND`) and nothing is written.
+
+Calendars are stored per tenant and changed through `CalendarService` in Java: a holder of `processes:calendar:manage` proposes the whole calendar, with a reason, against the version they read (0 for a new one); a second holder approves it. The proposer cannot approve (`403 SELF_APPROVAL_FORBIDDEN`), and an approval over a calendar that changed since the proposal is `409 VERSION_CONFLICT`. The approval emits `processes.calendar.changed.v1` naming both people, and the change record keeps the old and the new value. `horus.bpm.processes.calendar.approval: single` lets one person apply a change and is accepted only in the `dev` profile. The calendar endpoints and the cockpit editor follow in a later release. A host that keeps calendars in its own system registers a `BusinessCalendar` bean instead.
+
+![Calendar change and task due time](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/calendar-change.svg)
+
 ## Live counts per step
 
 Example: three card applications wait for an officer.
@@ -128,6 +177,64 @@ GET /api/bpm/processes/v1/definitions/card-fee-review/versions/1/node-stats?mode
 200 {"definitionKey":"card-fee-review","version":1,"mode":"live","asOf":"2026-11-20T09:30:00Z",
      "nodes":{"officer-review":{"WAITING_USER":3}}}
 ```
+
+## Compare two versions
+
+Example: v2 of KYC onboarding adds a fraud check and gives the approval to a credit officer.
+
+```
+GET /api/bpm/processes/v1/definitions/kyc-onboarding/versions/2/diff?base=1
+
+200 {"definitionKey":"kyc-onboarding","identical":false,
+     "nodesAdded":[{"id":"fraud-check","name":"Fraud check","type":"serviceTask"}],
+     "nodesRemoved":[],
+     "nodesChanged":[{"id":"approve","name":"Approve","type":"userTask","path":"/assignee/role","from":"ops","to":"credit-officer"}],
+     "edgesAdded":[{"id":"fraud__approve","from":"fraud-check","to":"approve","kind":"next",...},
+                   {"id":"verify__fraud","from":"verify-docs","to":"fraud-check","kind":"next",...}],
+     "edgesRemoved":[{"id":"verify__approve","from":"verify-docs","to":"approve","kind":"next",...}],
+     "truncated":false, ...}
+```
+
+Steps are matched by BPMN id and compared on the canonical form that is hashed and approved; `path` is a JSON Pointer inside the step, so a changed branch condition is `/branches/0/when` on its gateway. Links are matched by `(from, to, kind)`, with kind `next`, `branch[i]`, `default` or `fork`. Moving boxes changes nothing. The same two versions always give the same body.
+
+## Migration dry run
+
+Example: 500 loans run on `loan-review` v1; v2 removes the step `legacy-review`, where 50 of them wait.
+
+```
+POST /api/bpm/processes/v1/migrations            {"definitionKey":"loan-review","sourceVersion":1,"targetVersion":2}
+201 {"id":"01J...","status":"PLANNED","approval":{"mode":"four-eyes","secondPersonRequired":true},"planHash":"..."}
+
+POST /api/bpm/processes/v1/migrations/01J...:validate
+200 {"valid":false,"instances":{"running":500,"movable":450,"blocked":50},
+     "conflicts":[{"code":"STEP_NOT_IN_TARGET","nodeId":"legacy-review","name":"Legacy committee review",
+                   "instances":{"count":50,"instanceIds":["01J..."],"truncated":false}}],
+     "movable":{"count":450,"instanceIds":["01J...", "... 100 ids"],"truncated":true},
+     "checkedAt":"2027-03-01T02:00:00Z","validUntil":"2027-03-01T03:00:00Z", ...}
+```
+
+Every step of the source version that holds live tokens maps by identical id: `SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another kind of step. A target that is no longer active is `TARGET_NOT_ACTIVE`. The dry run writes nothing, so running it again is always safe. Executing a plan follows in a later release; it will need a fresh dry run of the same `planHash` and a second person's approval.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `horus.bpm.processes.migration.approval` | `four-eyes` | The approval a new plan records for its execution. `single` is accepted only when the `dev` profile is active on its own; start-up is refused otherwise |
+| `horus.bpm.processes.migration.dry-run-sample-size` | `100` | Most instance ids listed per conflict and for the instances that would move, 1 to 500; may be lowered only |
+| `horus.bpm.processes.migration.dry-run-validity` | `PT1H` | How long an execution may rely on a dry run; at most one hour, may be lowered only |
+
+## Hourly figures per step
+
+Example: the same version over one hour, from the rollup.
+
+```
+GET /api/bpm/processes/v1/definitions/card-fee-review/versions/1/node-stats?mode=window&from=2026-11-20T10:00:00Z&to=2026-11-20T11:00:00Z
+
+200 {"definitionKey":"card-fee-review","version":1,"mode":"window","from":"2026-11-20T10:00:00Z","to":"2026-11-20T11:00:00Z",
+     "asOf":"2026-11-20T10:50:00Z","lagSeconds":600,
+     "nodes":{"officer-review":{"entered":1200,"completed":1200,"failed":0,"incidents":0,"slaBreaches":0,
+                                "meanMs":5400000,"p50Ms":4800000,"p95Ms":9900000}}}
+```
+
+The rollup runs on every replica that has `stats.rollup-enabled` (the default). Replicas take turns: one writer takes each slice of history, so two replicas never count the same stretch twice.
 
 ## Export a definition as BPMN
 
@@ -157,7 +264,13 @@ A start or a completion runs every synchronous step, up to the next user task or
 
 ## Events and the listener contract
 
-Every state change hands an event (`processes.instance.started.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.task.claimed.v1`, `processes.task.unclaimed.v1`, `processes.definition.publish-requested.v1`, `processes.definition.approved.v1`, `processes.definition.rejected.v1`, `processes.definition.retired.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+Every state change hands an event (`processes.instance.started.v1`, `processes.step.completed.v1`, `processes.incident.raised.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.task.claimed.v1`, `processes.task.unclaimed.v1`, `processes.definition.publish-requested.v1`, `processes.definition.approved.v1`, `processes.definition.rejected.v1`, `processes.definition.retired.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+
+Each event is in the standard envelope: `eventId`, `eventType`, `occurredAt`, `tenantId`, `correlationId` (the request's `X-Correlation-Id`), `causationId` (its `Idempotency-Key`, or the job id), `producer`, `schemaVersion` and `payload`. The payload holds ids, keys, versions and codes, never a variable. The JSON Schema of each type is in `process-engine/api/events/`, and a change within `.v1` only adds. `Event.envelope()` gives the map to write into a host outbox row.
+
+## Metrics
+
+With Micrometer on the classpath, the starter registers `horus.pre.instances.started|completed|failed`, `horus.pre.incidents.raised{errorCode}`, `horus.pre.instances.active`, `horus.pre.incidents.open`, `horus.pre.timer.lag`, `horus.pre.step.duration{stepKind,outcome}`, `horus.pre.async.attempts{kind,outcome}` and `horus.pre.jobs.due.oldest.age{kind}`. Counters move after commit only. Tags take engine values only, never a tenant, business key, instance id or variable; `definitionKey` is a tag only with `horus.bpm.processes.metrics.definition-key-tag=true`. Gauges are read once per `metrics.gauge-refresh` (30 s) on each replica, not per scrape. CI publishes a throughput report against the target of 1,000 transitions per second; it is reported, never a gate.
 
 ```mermaid
 sequenceDiagram

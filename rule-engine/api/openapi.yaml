@@ -157,6 +157,93 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}:compare:
+    post:
+      tags: [rule-sets]
+      operationId: compareVersions
+      summary: Compare two versions over the logged decisions of a past period
+      description: |
+        Permission `rules:simulate` (it evaluates versions that may not be approved) and
+        `rules:log:read` (it reads logged inputs); a caller with only one of them is
+        `403 PERMISSION_DENIED`, checked before the body is read (`RLE-075`, `RLE-076`, `RLE-077`, PD-124).
+
+        The engine reads the caller's tenant's logged decisions of the rule set made in
+        `[from, to)`, evaluates each one's logged inputs, at its logged clock, through both versions in
+        memory, and answers outcome counts per side, the totals of the numeric and money outputs side by
+        side, and the most common output changes. Either version may be in any status, so a draft can be
+        compared with the version in force. Writes nothing (no decision row, idempotency record, event or
+        history entry), so it takes no `Idempotency-Key`; the same versions, period and log give the same
+        body. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`. Members other than the four are
+        ignored, a `tenantId` included.
+
+        What changed is as in `:simulate`: the outcome kind, an output value or the failure code differs.
+        The response holds aggregates only (counts, totals and output transitions), never an input, a
+        decision id or a fingerprint, so it can go into a committee pack without customer data. A total is
+        an exact decimal written as text, in minor units for a money output and by currency; a sum of many
+        amounts can pass what a JSON number holds without loss.
+
+        A decision that cannot be evaluated again is counted, never guessed. A masked input a version
+        reads has only a fingerprint in the log: the decision is reported under `skipped.MASKED_INPUT`,
+        and a logged `null` is compared, because it is the real input. An input a version reads that an
+        older decision does not hold is `skipped.MISSING_INPUT`. A masked input that neither version reads
+        does not prevent re-evaluation. `decisionsCompared` counts what was evaluated, and the totals
+        cover those decisions only.
+
+        A period holding more decisions than `simulation.max-history-decisions` (default 50,000, from 1
+        to 200,000) is `422 HISTORY_TOO_LARGE`, naming the decisions found (`found`, with `atLeast: true`
+        when the count stopped at the ceiling) and the setting. The engine never takes a sample, so a
+        total is never partial; the committee narrows the period. A period over `query.max-range` (31
+        days), a missing or reversed period, or `base` equal to `candidate` is `400 QUERY_INVALID`. A
+        version that does not exist is `404 VERSION_NOT_FOUND`; a rule set of another tenant is
+        `404 RULE_SET_NOT_FOUND`. Each version is integrity-checked and compiled before any decision is
+        read: `422 VALIDATION_FAILED` otherwise. When `evaluation.regex-max-reads-per-request` is spent
+        part-way, the run is refused whole with `422 EVALUATION_ERROR` and `REGEX_TIMEOUT` in the detail,
+        and returns no partial totals.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComparisonRequest'
+            example:
+              base: 1
+              candidate: 2
+              from: '2027-01-01T00:00:00Z'
+              to: '2027-02-01T00:00:00Z'
+      responses:
+        '200':
+          description: How the two versions would have decided the period
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComparisonResult'
+              example:
+                ruleSet: card-fee
+                base: 1
+                candidate: 2
+                from: '2027-01-01T00:00:00Z'
+                to: '2027-02-01T00:00:00Z'
+                baseCanonicalHash: 2674b8c42ad716768d834febffd2303ad070d0a26fb83313203817e2fe84389c
+                candidateCanonicalHash: b16479af30b31ce73238804610c618008517fd7a994ffc4669caca0300c5bab7
+                decisionsCompared: 10000
+                changedCount: 5000
+                outcomes:
+                  base: { MATCHED: 10000, NO_MATCH: 0, FAILED: 0 }
+                  candidate: { MATCHED: 10000, NO_MATCH: 0, FAILED: 0 }
+                totals:
+                  - { output: fee, currency: VND, base: '280000000', candidate: '180000000', difference: '-100000000' }
+                transitions:
+                  - { output: fee, from: { currency: VND, amount: 50000 }, to: { currency: VND, amount: 30000 }, count: 5000 }
+                skipped: {}
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions:
     get:
       tags: [rule-sets]
@@ -751,10 +838,25 @@ paths:
         `If-Match` is required and must be the `lockVersion` of the version the approver reviewed:
         without it the answer is `428 PRECONDITION_REQUIRED`, and a stale value is
         `409 VERSION_CONFLICT`, with nothing published. A version can be sent back, replaced in place
-        and requested again under the same number, so the lock version is what ties an approval to
-        the content reviewed (#275). A client that receives `409 VERSION_CONFLICT` here must show the
-        approver the current version (its content and diff) again and let them decide; it must never
-        retry automatically with the new `ETag`, because that would approve content nobody reviewed.
+        and requested again under the same number, and a client that refreshes the version can send the
+        new lock version with a decision made on older content. So the body can also name the content
+        itself: `expectedCanonicalHash` is the `canonicalHash` of the version the approver reviewed
+        (`RLE-084`, #275). It is required: with `horus.bpm.rules.approval.require-content-hash` on, the
+        default (PD-139), a body without it is `400 CONTENT_HASH_REQUIRED`, answered before anything is
+        read. Only a host on the `dev` profile may set it to false, and then the field is optional. When
+        it differs from the `canonicalHash` of the version now stored, the answer is
+        `409 CONTENT_CHANGED`, not `VERSION_CONFLICT`, even when `If-Match` carries the current lock
+        version. It is checked right after the lock version, before strict mode and the acknowledgement.
+        Nothing is written: no status change, no history row, no event, and no idempotency record that a
+        retry could replay. The problem carries `currentCanonicalHash` and `currentLockVersion`, so a
+        client can say "changed since you opened it" and offer the current content. A value that is not
+        64 lower-case hexadecimal characters is `400 INPUT_INVALID`. The field is part of the
+        idempotency request hash. A client that receives `409 CONTENT_CHANGED` must show the approver
+        the current version (its content and diff) again and let them decide; it must never retry with
+        the new hash on its own, because that would approve content nobody reviewed. It must send the
+        hash of the content the approver saw when they opened the version, never one read again at
+        approval time. A client that refreshes and retries on `409 VERSION_CONFLICT` therefore cannot
+        re-bind a decision to new content.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -762,16 +864,19 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatchRequired'
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [expectedCanonicalHash]
               properties:
                 comment:
                   type: string
                   maxLength: 2000
                   description: Optional; stored in the history. Longer than `lifecycle.reason-max-length` (default 2,000 characters) is `400 INPUT_INVALID`
+                expectedCanonicalHash:
+                  $ref: '#/components/schemas/ExpectedCanonicalHash'
                 acknowledgedWarnings:
                   type: array
                   maxItems: 100
@@ -780,6 +885,7 @@ paths:
                     $ref: '#/components/schemas/AcknowledgedWarning'
             example:
               comment: Fees checked against the tariff
+              expectedCanonicalHash: 3f7a1c0e9d2b4a68c5e1f0a7b9d3c2e4f6a8b0d1c3e5f7a9b1d3c5e7f9a0b2c4
               acknowledgedWarnings:
                 - { code: UNMASKED_PERSONAL_DATA, input: nationalId }
       responses:
@@ -809,8 +915,11 @@ paths:
         A blank reason, or one longer than `lifecycle.reason-max-length` (default 2,000
         characters), is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`.
         `If-Match` is required, as for `:approve`: `428 PRECONDITION_REQUIRED` without it,
-        `409 VERSION_CONFLICT` when stale. On `409 VERSION_CONFLICT` a client shows the current
-        version again and never retries automatically with the new `ETag`.
+        `409 VERSION_CONFLICT` when stale. The body must also carry `expectedCanonicalHash`, as for
+        `:approve` (`RLE-084`): without it the answer is `400 CONTENT_HASH_REQUIRED`, and a value that
+        differs from the `canonicalHash` of the version now stored is `409 CONTENT_CHANGED`, checked
+        after the lock version, with nothing written. On `409 CONTENT_CHANGED` a client shows the
+        current version again and never retries automatically with the new hash.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -2286,6 +2395,116 @@ components:
           minLength: 1
           maxLength: 2000
           description: Why the version goes back to its author; stored in the history and the event
+        expectedCanonicalHash:
+          $ref: '#/components/schemas/ExpectedCanonicalHash'
+    ExpectedCanonicalHash:
+      type: string
+      pattern: '^[0-9a-f]{64}$'
+      description: >-
+        The `canonicalHash` of the version the caller reviewed, as it was shown when the reviewer opened it. Required
+        on `:approve` and `:reject` unless the host turned `approval.require-content-hash` off (dev profile only,
+        PD-139): a missing value is `400 CONTENT_HASH_REQUIRED`. A decision on a version whose stored content has
+        another hash is `409 CONTENT_CHANGED` with nothing written (`RLE-084`)
+    ComparisonRequest:
+      type: object
+      required: [base, candidate, from, to]
+      properties:
+        base:
+          type: integer
+          minimum: 1
+          description: The version the committee knows, in any status
+        candidate:
+          type: integer
+          minimum: 1
+          description: The version that would replace it, in any status; not equal to `base` (`400 QUERY_INVALID`)
+        from:
+          type: string
+          format: date-time
+          description: First instant of the period, inclusive
+        to:
+          type: string
+          format: date-time
+          description: End of the period, exclusive; after `from` and at most `query.max-range` (31 days) later
+    ComparisonResult:
+      type: object
+      required: [ruleSet, base, candidate, from, to, baseCanonicalHash, candidateCanonicalHash, decisionsCompared,
+        changedCount, outcomes, totals, transitions, skipped]
+      properties:
+        ruleSet: { type: string }
+        base: { type: integer }
+        candidate: { type: integer }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        baseCanonicalHash: { type: string, description: The `canonicalHash` of the base version }
+        candidateCanonicalHash: { type: string, description: The `canonicalHash` of the candidate version }
+        decisionsCompared:
+          type: integer
+          format: int64
+          description: Logged decisions evaluated through both versions; the totals cover these only
+        changedCount:
+          type: integer
+          format: int64
+          description: How many of them changed, as in `:simulate`, the outcome kind, an output value or the failure code
+        outcomes:
+          type: object
+          required: [base, candidate]
+          description: Counts per outcome kind for each side
+          properties:
+            base: { $ref: '#/components/schemas/OutcomeCounts' }
+            candidate: { $ref: '#/components/schemas/OutcomeCounts' }
+        totals:
+          type: array
+          description: The sums of the numeric and money outputs, by output and currency
+          items:
+            type: object
+            required: [output, currency, base, candidate, difference]
+            properties:
+              output: { type: string }
+              currency:
+                type: [string, 'null']
+                description: ISO 4217 code of a money output, null for a number
+              base:
+                type: string
+                pattern: '^-?[0-9]+(\.[0-9]+)?$'
+                description: Sum under the base version; minor units for money, an exact decimal text
+              candidate:
+                type: string
+                pattern: '^-?[0-9]+(\.[0-9]+)?$'
+              difference:
+                type: string
+                pattern: '^-?[0-9]+(\.[0-9]+)?$'
+                description: '`candidate` minus `base`'
+        transitions:
+          type: array
+          maxItems: 20
+          description: The most common output changes, by count, then by output and value
+          items:
+            type: object
+            required: [output, from, to, count]
+            properties:
+              output: { type: string }
+              from: { description: The value under the base version, null when the output was absent }
+              to: { description: The value under the candidate version, null when the output is absent }
+              count: { type: integer, format: int64 }
+        skipped:
+          type: object
+          description: Decisions that could not be evaluated again, by reason; a reason with none is absent
+          properties:
+            MASKED_INPUT:
+              type: integer
+              format: int64
+              description: A version reads a masked input whose value the log holds only as a fingerprint
+            MISSING_INPUT:
+              type: integer
+              format: int64
+              description: A version reads an input the logged decision does not hold
+    OutcomeCounts:
+      type: object
+      required: [MATCHED, NO_MATCH, FAILED]
+      properties:
+        MATCHED: { type: integer, format: int64 }
+        NO_MATCH: { type: integer, format: int64 }
+        FAILED: { type: integer, format: int64 }
     WithdrawRequest:
       type: object
       properties:
@@ -3067,14 +3286,31 @@ components:
           type: string
           enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TENANT_NOT_ALLOWED,
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
-            VERSION_CONFLICT, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
+            VERSION_CONFLICT, CONTENT_CHANGED, CONTENT_HASH_REQUIRED, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
-            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE]
+            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE]
         detail: { type: string }
         correlationId: { type: string }
+        currentCanonicalHash:
+          type: string
+          description: Present on `VERSION_CONFLICT` or `CONTENT_CHANGED` of a decision on a version, the `canonicalHash` of the version now stored (`RLE-084`)
+        currentLockVersion:
+          type: integer
+          format: int64
+          description: Present on `VERSION_CONFLICT` or `CONTENT_CHANGED` of a decision on a version, the `lockVersion` now stored (`RLE-084`)
+        found:
+          type: integer
+          format: int64
+          description: Present on `HISTORY_TOO_LARGE`, the logged decisions the period holds (`RLE-077`)
+        atLeast:
+          type: boolean
+          description: Present on `HISTORY_TOO_LARGE`, true when the count stopped at the ceiling of 200,000 and the period may hold more
+        maxHistoryDecisions:
+          type: integer
+          description: Present on `HISTORY_TOO_LARGE`, the `simulation.max-history-decisions` in force
         namespace:
           type: string
           description: Present on `CMMN_UNSUPPORTED`, the namespace of the root element

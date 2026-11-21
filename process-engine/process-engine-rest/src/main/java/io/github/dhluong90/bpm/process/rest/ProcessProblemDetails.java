@@ -22,7 +22,8 @@ import org.springframework.web.context.request.WebRequest;
 import tools.jackson.databind.node.ObjectNode;
 
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
-@RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class})
+@RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class,
+        MigrationController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
@@ -48,6 +49,7 @@ public class ProcessProblemDetails {
             Map.entry("ASYNC_STEP_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("MIGRATION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_TOO_LARGE", UNPROCESSABLE),
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),

@@ -205,11 +205,27 @@ class HistorySimulationIT {
                 .replace("ruleSet: card-fee", "ruleSet: " + name).getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Reads a resource as the same caller; an approval reads the version first to name the content it decides on. */
+    private Reply get(String bearer, String path) throws Exception {
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:"
+                        + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
+                .header("Authorization", bearer).GET().build(), HttpResponse.BodyHandlers.ofString());
+        return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
+                response.body());
+    }
+
     private Reply send(String bearer, String path, byte[] json) throws Exception {
         return send(bearer, path, "application/json", json);
     }
 
     private Reply send(String bearer, String path, String contentType, byte[] body) throws Exception {
+        if (ReviewedContent.decides(path)) {
+            byte[] bound = ReviewedContent.withHash(path, body, p -> get(bearer, p).body());
+            if (bound != body && contentType == null) {
+                contentType = "application/json";
+            }
+            body = bound;
+        }
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", bearer)

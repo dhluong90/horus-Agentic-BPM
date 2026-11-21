@@ -133,9 +133,10 @@ class PoolerTransactionModePostgresIT {
         // When alice imports card-fee and requests publication, and bob approves it at lock version 1
         caller.as("bank-a", "alice");
         engines.versionService().importRuleSet(ImportRequest.yaml(RuleEnginePostgresIT.cardFee()));
-        long lock = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
+        RuleSetVersion lockRequested = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        long lock = lockRequested.lockVersion();
         caller.as("bank-a", "bob");
-        RuleSetVersion v1 = engines.versionService().approve("card-fee", 1, new WriteOptions(null, lock, null));
+        RuleSetVersion v1 = engines.versionService().approve("card-fee", 1, new WriteOptions(null, lock, null).expectingContent(lockRequested.canonicalHash()));
 
         // Then v1 is published
         assertThat(v1.status()).isEqualTo(VersionStatus.PUBLISHED);
@@ -162,9 +163,10 @@ class PoolerTransactionModePostgresIT {
                 .replace("\"50000 VND\"", "\"60000 VND\"")
                 .replace("hitPolicy: first", "effectiveFrom: \"" + later + "\"\nhitPolicy: first");
         engines.versionService().importVersion("card-fee", ImportRequest.yaml(v2.getBytes(StandardCharsets.UTF_8)));
-        long lock2 = engines.versionService().requestPublish("card-fee", 2, WriteOptions.none()).lockVersion();
+        RuleSetVersion lock2Requested = engines.versionService().requestPublish("card-fee", 2, WriteOptions.none());
+        long lock2 = lock2Requested.lockVersion();
         caller.as("bank-a", "bob");
-        engines.versionService().approve("card-fee", 2, new WriteOptions(null, lock2, null));
+        engines.versionService().approve("card-fee", 2, new WriteOptions(null, lock2, null).expectingContent(lock2Requested.canonicalHash()));
         clock.set(later.plusSeconds(1));
 
         // Then the epoch check runs through the pooler, the sweep retires v1 once, and a Silver card with 1 transaction
@@ -231,9 +233,10 @@ class PoolerTransactionModePostgresIT {
         // (default fee 60,000 VND) is imported
         caller.as("bank-c", "alice");
         fourEyes.versionService().importRuleSet(ImportRequest.yaml(RuleEnginePostgresIT.cardFee()));
-        long lock = fourEyes.versionService().requestPublish("card-fee", 1, WriteOptions.none()).lockVersion();
+        RuleSetVersion lockRequested = fourEyes.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        long lock = lockRequested.lockVersion();
         caller.as("bank-c", "bob");
-        long published = fourEyes.versionService().approve("card-fee", 1, new WriteOptions(null, lock, null))
+        long published = fourEyes.versionService().approve("card-fee", 1, new WriteOptions(null, lock, null).expectingContent(lockRequested.canonicalHash()))
                 .lockVersion();
         caller.as("bank-c", "teller-01");
         fourEyes.ruleEngine().evaluate("card-fee", DecisionInput.of(Map.of("tier", "SILVER", "txCount", 5)));

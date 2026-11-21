@@ -56,9 +56,11 @@ class DevRuleSetSeeder {
         }
         RuleSetVersion requested = as("seed-author", "rules:author",
                 () -> versions.requestPublish(RULE_SET, draft.version(), WriteOptions.none()));
-        // An approval names the lock version it was decided on (#234): here, the version the seed author requested.
+        // An approval names the lock version it was decided on (#234) and the content it reviewed (#275): here, the
+        // version and the canonical hash the seed author's request produced.
         RuleSetVersion published = as("seed-approver", "rules:approve",
-                () -> versions.approve(RULE_SET, draft.version(), new WriteOptions(null, requested.lockVersion(), null)));
+                () -> versions.approve(RULE_SET, draft.version(),
+                        new WriteOptions(null, requested.lockVersion(), null).expectingContent(requested.canonicalHash())));
         LOG.info("Rule set " + RULE_SET + " v" + published.version() + " " + published.status()
                 + " (requested by seed-author, approved by seed-approver)");
     }

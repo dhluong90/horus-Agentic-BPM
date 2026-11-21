@@ -64,7 +64,7 @@ class DraftReplaceAndDiffPostgresIT {
         new RuleEngineSchemaMigrator(db).migrate();
         jdbc = JdbcClient.create(db);
         RuleEngines engines = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                who, who, CLOCK, EngineSettings.defaults().withDraftAuthoring(true));
+                who, who, CLOCK, EngineSettings.defaults().withRequireContentHash(false).withDraftAuthoring(true));
         engines.cursorKeys().load();
         versions = engines.versionService();
     }

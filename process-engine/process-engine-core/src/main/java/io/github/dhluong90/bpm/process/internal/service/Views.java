@@ -201,6 +201,7 @@ public final class Views {
         putNullable(o, "claimedBy", t.claimedBy());
         putNullable(o, "claimedAt", t.claimedAt() == null ? null : t.claimedAt().toString());
         o.put("createdAt", t.createdAt().toString());
+        putNullable(o, "dueAt", t.dueAt() == null ? null : t.dueAt().toString());
         putNullable(o, "completedBy", t.completedBy());
         putNullable(o, "completedAt", t.completedAt() == null ? null : t.completedAt().toString());
         if (t.review() != null) {
@@ -230,7 +231,8 @@ public final class Views {
                 n.get("fourEyes").booleanValue(), n.get("status").stringValue(), n.get("lockVersion").longValue(),
                 text(n, "claimedBy"), instant(n, "claimedAt"), Instant.parse(n.get("createdAt").stringValue()),
                 text(n, "completedBy"), instant(n, "completedAt"), java.util.Set.of(),
-                n.has("review") && n.get("review").isObject() ? Values.readMap(n.get("review").toString()) : null);
+                n.has("review") && n.get("review").isObject() ? Values.readMap(n.get("review").toString()) : null,
+                instant(n, "dueAt"));
     }
 
     /** @param d summary @return JSON tree */
@@ -256,6 +258,21 @@ public final class Views {
         putNullable(o, "startedBy", i.startedBy());
         o.put("startedAt", i.startedAt().toString());
         putNullable(o, "endedAt", i.endedAt() == null ? null : i.endedAt().toString());
+        return o;
+    }
+
+    /** @param t a task list item @return JSON tree; no variables and no review context */
+    public static ObjectNode taskSummary(io.github.dhluong90.bpm.process.api.TaskSummary t) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("id", t.id()).put("instanceId", t.instanceId()).put("definitionKey", t.definitionKey())
+                .put("definitionVersion", t.definitionVersion());
+        putNullable(o, "businessKey", t.businessKey());
+        o.put("nodeId", t.nodeId());
+        putNullable(o, "name", t.name());
+        o.put("assignee", t.assignee()).put("status", t.status()).put("lockVersion", t.lockVersion());
+        putNullable(o, "claimedBy", t.claimedBy());
+        o.put("createdAt", t.createdAt().toString());
+        putNullable(o, "dueAt", t.dueAt() == null ? null : t.dueAt().toString());
         return o;
     }
 

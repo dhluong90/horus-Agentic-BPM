@@ -295,6 +295,51 @@ class TaskLifecycleIT {
 
     // ---- helpers ------------------------------------------------------------------------------------------
 
+    // ---- list (PRE-030) -------------------------------------------------------------------------------------
+
+    @Test
+    void PRE_030_card_officers_list_their_candidate_tasks_by_page_and_a_limit_above_200_is_refused() throws Exception {
+        // Given two open reviews for the card officer role of bank-a
+        String first = openTask("tuan", "IT-T-LIST-1");
+        String second = openTask("tuan", "IT-T-LIST-2");
+
+        // When an lists his candidate tasks one to a page, and pages on with the cursor
+        HttpResponse<String> page = send("an", "GET", "/api/bpm/processes/v1/tasks?assignment=candidate&limit=1",
+                null, Map.of());
+        assertThat(page.statusCode()).as(page.body()).isEqualTo(200);
+        JsonNode body = JSON.readTree(page.body());
+
+        // Then each page holds one task without variables or review, and the pages together hold both
+        assertThat(body.get("data")).hasSize(1);
+        assertThat(body.get("hasNext").booleanValue()).isTrue();
+        JsonNode item = body.get("data").get(0);
+        assertThat(item.get("assignee").stringValue()).isEqualTo("role:CARD_OFFICER");
+        assertThat(item.has("review")).isFalse();
+        assertThat(item.has("variables")).isFalse();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        String cursor = null;
+        do {
+            HttpResponse<String> next = send("an", "GET", "/api/bpm/processes/v1/tasks?assignment=candidate&limit=1"
+                    + (cursor == null ? "" : "&cursor=" + cursor), null, Map.of());
+            JsonNode n = JSON.readTree(next.body());
+            n.get("data").forEach(t -> seen.add(t.get("id").stringValue()));
+            cursor = n.get("nextCursor").isNull() ? null : n.get("nextCursor").stringValue();
+        } while (cursor != null);
+        assertThat(seen).contains(first, second);
+
+        // And 500 at once is refused naming the maximum; the whole queue needs task manage; bank-b sees none of it
+        HttpResponse<String> tooMany = send("an", "GET", "/api/bpm/processes/v1/tasks?limit=500", null, Map.of());
+        assertThat(problem(tooMany)).isEqualTo("400 QUERY_INVALID");
+        assertThat(JSON.readTree(tooMany.body()).get("detail").stringValue()).contains("200");
+        assertThat(problem(send("an", "GET", "/api/bpm/processes/v1/tasks?assignment=any", null, Map.of())))
+                .isEqualTo("403 PERMISSION_DENIED");
+        HttpResponse<String> other = send("zoe", "GET", "/api/bpm/processes/v1/tasks?assignment=candidate&limit=200",
+                null, Map.of());
+        assertThat(other.statusCode()).as(other.body()).isEqualTo(200);
+        JSON.readTree(other.body()).get("data").forEach(t -> assertThat(t.get("id").stringValue())
+                .isNotIn(first, second));
+    }
+
     private String openTask(String submitter, String applicationId) throws Exception {
         HttpResponse<String> submitted = send(submitter, "POST", "/api/cards/applications",
                 "{\"applicationId\":\"" + applicationId + "\",\"customerId\":\"C-002\"}",

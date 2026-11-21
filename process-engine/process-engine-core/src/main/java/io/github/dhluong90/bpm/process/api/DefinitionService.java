@@ -146,4 +146,29 @@ public interface DefinitionService {
      * @throws DefinitionIntegrityException when the stored source no longer gives the recorded hash
      */
     DefinitionExport exportDefinition(String key, int version, SourceFormat format);
+
+    /**
+     * Compares two stored versions of one definition key in the caller's tenant (PRE-025, PRE-176): the steps and
+     * links added, removed and changed, computed from the stored, hash-checked definitions of any lifecycle status.
+     * Needs {@code processes:read}. Read-only: nothing is stored and no event is published. The same two versions
+     * always give the same diff; layout is never part of it.
+     *
+     * @param base the version compared from
+     * @param target the version compared to, of the same key
+     * @return the diff
+     * @throws DefinitionNotFoundException when the tenant has no such version (also for another tenant's version)
+     * @throws InputInvalidException when the two versions belong to different keys
+     * @throws DefinitionIntegrityException when a stored source no longer gives its recorded hash
+     */
+    GraphDiff diff(DefinitionRef base, DefinitionRef target);
+
+    /**
+     * Compares a stored version with the effective version of its key, as {@link #diff(DefinitionRef, DefinitionRef)}.
+     *
+     * @param target the version compared to
+     * @return the diff from the effective version to {@code target}
+     * @throws NoEffectiveVersionException when the key has no effective version
+     * @throws DefinitionNotFoundException when the tenant has no such version
+     */
+    GraphDiff diffFromEffective(DefinitionRef target);
 }

@@ -88,6 +88,7 @@ import io.github.dhluong90.bpm.process.internal.store.ProcessStore.InstanceRow;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore.StoredDefinition;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore.TaskRow;
 import io.github.dhluong90.bpm.process.internal.store.TransactionRunner;
+import io.github.dhluong90.bpm.process.spi.BusinessCalendar;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
 import io.github.dhluong90.bpm.process.spi.ProcessEventPublisher;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
@@ -192,8 +193,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final AgentLabelLimits labelLimits;
     /** Bounds of the memory agent steps receive from earlier steps (#101). */
     private final AgentMemoryLimits memoryLimits;
+    private final BusinessCalendar calendar;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
+    /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
+            io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE;
+    /** The kind of the async job the current thread's result transaction handles, for the attempt metric. */
+    private static final ThreadLocal<String[]> ATTEMPT_KIND = new ThreadLocal<>();
 
     /**
      * @param memorySources the steps a later agent step reads as memory (#101); only their results are kept
@@ -476,6 +483,48 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
             io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits,
             AgentMemoryLimits memoryLimits) {
+        this(tenants, callers, clock, transactions, store, readers, writers, invoker, publisher, settings, behaviors,
+                expressions, jobs, jobSettings, async, adapters, agents, outputSchemas, inputMasker, labelLimits,
+                memoryLimits, BusinessCalendar.ELAPSED);
+    }
+
+    /**
+     * The full form with the business calendar that sets task due times (PRE-008); see the other constructors for
+     * the parameters they share.
+     *
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store storage
+     * @param readers definition readers by source format
+     * @param writers definition writers by export format (PRE-034)
+     * @param invoker local handlers and decisions
+     * @param publisher event publisher
+     * @param settings validated settings
+     * @param behaviors registered behaviours
+     * @param expressions expression evaluator
+     * @param jobs job storage ({@code pre_timer})
+     * @param jobSettings lease and attempts of the jobs this engine schedules
+     * @param async lease margin, default timeout and runner settings of async steps (ADR-0008, #363)
+     * @param adapters names of the host's {@code ServiceAdapter}s
+     * @param agents names of the host's {@code AgentAdapter}s
+     * @param outputSchemas checks async results and agent steps' schemas
+     * @param inputMasker makes the audit copy of masked agent inputs and memory (#59, #101)
+     * @param labelLimits bounds of agent answer labels ({@code agents.labels.*}, #59)
+     * @param memoryLimits bounds of agent step memory ({@code agents.memory.*}, #101)
+     * @param calendar working time of the tenants' calendars, called once per task with an SLA
+     */
+    public ProcessServices(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            ProcessStore store, Map<SourceFormat, Function<byte[], Process>> readers,
+            Map<SourceFormat, Function<Process, byte[]>> writers, LocalServiceInvoker invoker,
+            ProcessEventPublisher publisher, EngineSettings settings, BehaviorRegistry behaviors,
+            ExpressionEvaluator expressions, JobStore jobs, JobSettings jobSettings, AsyncSettings async,
+            java.util.Set<String> adapters, java.util.Set<String> agents,
+            io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas,
+            io.github.dhluong90.bpm.process.spi.InputMasker inputMasker, AgentLabelLimits labelLimits,
+            AgentMemoryLimits memoryLimits, BusinessCalendar calendar) {
+        this.calendar = Objects.requireNonNull(calendar, "calendar must not be null");
         this.memoryLimits = Objects.requireNonNull(memoryLimits, "memoryLimits must not be null");
         this.inputMasker = Objects.requireNonNull(inputMasker, "inputMasker must not be null");
         this.labelLimits = Objects.requireNonNull(labelLimits, "labelLimits must not be null");
@@ -979,6 +1028,46 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(base, "base must not be null");
+        Objects.requireNonNull(target, "target must not be null");
+        if (!base.key().equals(target.key())) {
+            throw new InputInvalidException("A diff compares two versions of one definition key");
+        }
+        // Read-only (PRE-176): no transaction is opened and nothing is written; every read filters by tenant, so
+        // another tenant's version is not found.
+        StoredDefinition from = storedVersion(tenant, base);
+        StoredDefinition to = storedVersion(tenant, target);
+        return GraphDiffs.diff(to.key(), side(from), storedProcess(from), side(to), storedProcess(to));
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiff diffFromEffective(DefinitionRef target) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(target, "target must not be null");
+        StoredDefinition to = storedVersion(tenant, target);
+        StoredDefinition from = store.effectiveDefinition(tenant, target.key(), clock.instant())
+                .orElseThrow(() -> new NoEffectiveVersionException("Definition " + target.key()
+                        + " has no effective version to compare with; pass base"));
+        return GraphDiffs.diff(to.key(), side(from), storedProcess(from), side(to), storedProcess(to));
+    }
+
+    private StoredDefinition storedVersion(String tenant, DefinitionRef ref) {
+        if (!isKey(ref.key())) {
+            throw new DefinitionNotFoundException("No definition " + safe(ref.key()) + " v" + ref.version());
+        }
+        return store.definitionVersion(tenant, ref.key(), ref.version()).orElseThrow(() ->
+                new DefinitionNotFoundException("No definition " + ref.key() + " v" + ref.version() + " in this tenant"));
+    }
+
+    private static io.github.dhluong90.bpm.process.api.GraphDiff.Side side(StoredDefinition d) {
+        return new io.github.dhluong90.bpm.process.api.GraphDiff.Side(d.version(), d.status(), d.definitionHash());
+    }
+
+    @Override
     public DefinitionExport exportDefinition(String key, int version, SourceFormat format) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -1097,6 +1186,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     + "pre_engine_key; run the engine migrations, and give the database user SELECT and INSERT on it", e);
         }
         cursors = new Cursors(key);
+    }
+
+    /**
+     * The task list over a query store, sharing this engine's resolvers, clock, transactions, page limit and cursor
+     * key (PRE-030).
+     */
+    TaskQueries taskQueries(io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore queryStore) {
+        return new TaskQueries(tenants, callers, clock, transactions, queryStore, this::cursors, settings.maxPageSize());
     }
 
     private Cursors cursors() {
@@ -1342,8 +1439,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         InstanceState state = new InstanceState(row.id(), row.tenantId(), row.definitionId(), row.businessKey(),
                 InstanceStatus.valueOf(row.status()), tokens, Values.readMap(row.variablesJson()),
                 participants(tenant, row), row.sequence());
-        run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()),
-                new RunAs.EngineWork(tenant, TIMER_ACTOR));
+        try (io.github.dhluong90.bpm.process.spi.EventScope ignored = jobScope(job.id())) {
+            run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()),
+                    new RunAs.EngineWork(tenant, TIMER_ACTOR));
+        }
+        Duration lag = job.nextFireAt() == null ? Duration.ZERO : Duration.between(job.nextFireAt(), clock.instant());
+        Duration reported = lag.isNegative() ? Duration.ZERO : lag;
+        transactions.afterCommit(() -> metrics.timerLag(reported));
         return true;
     }
 
@@ -1405,6 +1507,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // The adapter scope never changes for a job, so it is checked before any lock is taken.
         JobRow peek = jobs.findJob(tenant, jobId).filter(j -> JobStore.isAsync(j.jobKind()))
                 .orElseThrow(() -> new AsyncStepNotFoundException("No async step " + jobId));
+        String[] kindOut = ATTEMPT_KIND.get();
+        if (kindOut != null) {
+            kindOut[0] = peek.jobKind();
+        }
         if (!async.mayComplete(target(peek), callers.currentRoles())) {
             throw new PermissionDeniedException("Not a completer of this step's adapter (adapters.completer-roles)");
         }
@@ -1456,6 +1562,31 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private StepCompletion.Outcome recordAttempt(String tenant, String jobId, String attemptId, Presented presented,
             StepResult result, String reportedBy) {
+        String[] kind = new String[1];
+        String[] outer = ATTEMPT_KIND.get() == null ? null : ATTEMPT_KIND.get();
+        ATTEMPT_KIND.set(kind);
+        StepCompletion.Outcome outcome;
+        try (io.github.dhluong90.bpm.process.spi.EventScope ignored = jobScope(jobId)) {
+            outcome = recordAttemptCore(tenant, jobId, attemptId, presented, result, reportedBy);
+        } finally {
+            if (outer == null) {
+                ATTEMPT_KIND.remove();
+            } else {
+                ATTEMPT_KIND.set(outer);
+            }
+        }
+        if (kind[0] != null) {
+            // A failed or business-error result that the retry policy accepted is counted as FAILED (PRE-084).
+            String label = outcome == StepCompletion.Outcome.ACCEPTED && !(result instanceof StepResult.Completed)
+                    ? "FAILED" : outcome.name();
+            String jobKind = kind[0];
+            transactions.afterCommit(() -> metrics.asyncAttempt(jobKind, label));
+        }
+        return outcome;
+    }
+
+    private StepCompletion.Outcome recordAttemptCore(String tenant, String jobId, String attemptId,
+            Presented presented, StepResult result, String reportedBy) {
         Objects.requireNonNull(tenant, "tenant must not be null");
         try {
             return transactions.inTransaction(() -> recordInTransaction(tenant, jobId, attemptId, presented, result,
@@ -2179,7 +2310,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return new TaskView(t.id(), t.instanceId(), row.definitionKey(), row.definitionVersion(), row.businessKey(),
                 t.nodeId(), t.name(), t.assignee(), t.fourEyes(), t.status(), t.lockVersion(), t.claimedBy(),
                 t.claimedAt(), t.createdAt(), t.completedBy(), t.completedAt(), java.util.Set.of(),
-                t.reviewJson() == null ? null : Values.readMap(t.reviewJson()));
+                t.reviewJson() == null ? null : Values.readMap(t.reviewJson()), t.dueAt());
     }
 
     /** What this caller may do now; computed per caller, never stored with an idempotent answer. */
@@ -2198,6 +2329,39 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Installs the sink of the engine's measurements. Called once while the engine is wired, before the first request;
+     * the engine never calls the sink inside a transaction that can still roll back, except for a failed step.
+     *
+     * @param sink the sink, or null for none
+     */
+    public void useMetrics(io.github.dhluong90.bpm.process.spi.ProcessMetrics sink) {
+        this.metrics = sink == null ? io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE : sink;
+    }
+
+    /** Counts instance and incident events once their transaction has committed (PRE-084). */
+    private void countCommitted(ProcessEventPublisher.Event event) {
+        io.github.dhluong90.bpm.process.spi.ProcessMetrics sink = metrics;
+        if (sink == io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE) {
+            return;
+        }
+        Object key = event.payload().get("definitionKey");
+        String definitionKey = key == null ? null : key.toString();
+        Runnable count = switch (event.type()) {
+            case "processes.instance.started.v1" -> () -> sink.instanceStarted(definitionKey);
+            case "processes.instance.completed.v1" -> () -> sink.instanceCompleted(definitionKey);
+            case "processes.instance.failed.v1" -> () -> sink.instanceFailed(definitionKey);
+            case "processes.incident.raised.v1" -> {
+                Object code = event.payload().get("errorCode");
+                yield () -> sink.incidentRaised(code == null ? null : code.toString());
+            }
+            default -> null;
+        };
+        if (count != null) {
+            transactions.afterCommit(count);
+        }
+    }
+
+    /**
      * Hands an event to the publisher inside the transaction. A slow listener holds the instance lock and a
      * connection, so the call is timed and logged above {@code handlers.slow-call-warning} with the event type,
      * instance and duration only, never the payload. A listener exception rolls the transaction back and is reported
@@ -2206,7 +2370,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void publish(ProcessEventPublisher.Event event, String instanceId) {
         long started = System.nanoTime();
         try {
-            publisher.publish(event);
+            publisher.publish(event.withContext(io.github.dhluong90.bpm.process.spi.EventScope.correlationId(),
+                    io.github.dhluong90.bpm.process.spi.EventScope.causationId()));
+            countCommitted(event);
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "process.event.listener.failed type={0} instance={1} exception={2}",
                     event.type(), instanceId, e.getClass().getName());
@@ -2353,6 +2519,69 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     // ---- shell --------------------------------------------------------------------------------------------
 
+    /**
+     * The event scope of work a job starts: the job is the cause, and the correlation is the caller's when the job was
+     * handed to the engine inside a request, otherwise the job id, so every event of one job shares one chain.
+     */
+    private static io.github.dhluong90.bpm.process.spi.EventScope jobScope(String jobId) {
+        String correlation = io.github.dhluong90.bpm.process.spi.EventScope.correlationId();
+        return io.github.dhluong90.bpm.process.spi.EventScope.open(correlation == null ? jobId : correlation, jobId);
+    }
+
+    /** The engine command kinds, which are the {@code stepKind} of the step duration metric (a fixed set). */
+    private static String stepKind(Command command) {
+        return switch (command) {
+            case Command.Start s -> "START";
+            case Command.CompleteTask c -> "COMPLETE_TASK";
+            case Command.JobDue j -> "JOB_DUE";
+            case Command.AsyncResult a -> "ASYNC_RESULT";
+            case Command.Cancel c -> "CANCEL";
+            default -> "OTHER";
+        };
+    }
+
+    /**
+     * One {@code processes.step.completed.v1} per node completed by a transition, inside the transaction of the step
+     * (PRE-085). {@code durationMs} runs from the token's entry at the node to now: from the entry recorded in the same
+     * transition, or from the token row when the step waited in an earlier transaction. The payload holds ids and the
+     * duration, never a variable or a step output (PRE-086).
+     */
+    private void publishStepsCompleted(InstanceRow row, InstanceState state, List<HistoryEntry> entries) {
+        Map<String, Instant> entered = null;
+        for (HistoryEntry e : entries) {
+            if (!"NODE_COMPLETED".equals(e.type()) || e.nodeId() == null || e.tokenId() == null) {
+                continue;
+            }
+            Instant since = null;
+            for (HistoryEntry earlier : entries) {
+                if ("NODE_ENTERED".equals(earlier.type()) && e.tokenId().equals(earlier.tokenId())
+                        && e.nodeId().equals(earlier.nodeId())) {
+                    since = earlier.occurredAt();
+                }
+            }
+            if (since == null) {
+                if (entered == null) {
+                    entered = store.tokenEnteredAt(state.tenantId(), state.instanceId());
+                }
+                since = entered.get(e.tokenId());
+            }
+            long durationMs = since == null ? 0 : Math.max(0, Duration.between(since, e.occurredAt()).toMillis());
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("instanceId", state.instanceId());
+            payload.put("nodeId", e.nodeId());
+            payload.put("attemptId", e.attemptId());
+            payload.put("durationMs", durationMs);
+            payload.put("definitionKey", row.definitionKey());
+            payload.put("version", row.definitionVersion());
+            if (row.businessKey() != null) {
+                payload.put("businessKey", row.businessKey());
+            }
+            publish(new ProcessEventPublisher.Event(Ids.child(e.tokenId() + "/" + e.nodeId() + "/" + e.attemptId(),
+                    e.occurredAt().toEpochMilli()), "processes.step.completed.v1", state.tenantId(), e.occurredAt(),
+                    payload), state.instanceId());
+        }
+    }
+
     private void run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first, RunAs as) {
         Compiled compiled = compiled(definition);
         InstanceState state = initial;
@@ -2374,15 +2603,30 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     throw new ExecutionException("STEP_LIMIT", null, "More than " + EngineDefaults.MAX_COMMANDS_PER_CALL
                             + " steps in one call; the process loops without a wait state");
                 }
-                Transition t = compiled.kernel().apply(state, queue.poll(), clock);
+                Command command = queue.poll();
+                long appliedAt = System.nanoTime();
+                Transition t;
+                try {
+                    t = compiled.kernel().apply(state, command, clock);
+                } catch (RuntimeException e) {
+                    metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
+                    throw e;
+                }
+                Duration kernelTime = Duration.ofNanos(System.nanoTime() - appliedAt);
+                String commandKind = stepKind(command);
+                transactions.afterCommit(() -> metrics.stepApplied(commandKind, "OK", kernelTime));
                 state = t.state();
                 history.addAll(t.history());
                 for (Effect effect : t.effects()) {
                     switch (effect) {
-                        case Effect.CreateUserTask task -> newTasks.add(new TaskRow(state.tenantId(), task.taskId(),
-                                state.instanceId(), task.tokenId(), definition.id(), task.nodeId(), task.name(),
-                                task.assignee(), task.fourEyes(), "OPEN", 0, null, null, null, clock.instant(), null,
-                                task.context().isEmpty() ? null : Values.write(task.context())));
+                        case Effect.CreateUserTask task -> {
+                            Instant created = clock.instant();
+                            newTasks.add(new TaskRow(state.tenantId(), task.taskId(), state.instanceId(),
+                                    task.tokenId(), definition.id(), task.nodeId(), task.name(), task.assignee(),
+                                    task.fourEyes(), "OPEN", 0, null, null, null, created, null,
+                                    task.context().isEmpty() ? null : Values.write(task.context()),
+                                    dueAt(state.tenantId(), task, created)));
+                        }
                         case Effect.CancelUserTask cancel -> cancelledTasks.add(cancel.taskId());
                         case Effect.ScheduleJob job -> newJobs.add(JobRow.due(state.tenantId(), job.jobId(),
                                 state.instanceId(), definition.id(), job.tokenId(), job.jobKind(), job.nodeId(),
@@ -2551,6 +2795,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 effect.getClass().getSimpleName() + " is not supported in this release");
                     }
                 }
+                // After the transition's own events (started, task created), so a consumer reads them in order.
+                publishStepsCompleted(row, state, t.history());
             }
         } catch (ExecutionException e) {
             if ("SELF_APPROVAL_FORBIDDEN".equals(e.code())) {
@@ -2582,6 +2828,26 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         recorded.values().forEach(store::recordStepResult);
         store.appendHistory(tenant, state.instanceId(), definition.id(), history);
         newIncidents.forEach(site -> raiseIncident(site, now));
+    }
+
+    /**
+     * The due time of a new task (PRE-008): its SLA in working time of its calendar, from its creation on the engine
+     * clock, computed once and stored; a later calendar change never moves it. The calendar is read for the tenant of
+     * the instance row. An unknown calendar, or one without working time ahead, fails the step and nothing is written.
+     */
+    private Instant dueAt(String tenant, Effect.CreateUserTask task, Instant created) {
+        if (task.sla() == null) {
+            return null;
+        }
+        try {
+            return calendar.add(tenant, task.sla().calendar(), created, task.sla().duration());
+        } catch (io.github.dhluong90.bpm.process.api.CalendarNotFoundException e) {
+            throw new StepFailedException(task.nodeId(), e.code(), "the task's calendar " + task.sla().calendar()
+                    + " does not exist in this tenant");
+        } catch (IllegalStateException e) {
+            throw new StepFailedException(task.nodeId(), "CALENDAR_NO_WORKING_TIME", "the task's calendar "
+                    + task.sla().calendar() + " has no working time ahead");
+        }
     }
 
     /**
@@ -2617,6 +2883,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * Interim form of ADR-0026 decision 4: a version runs and exports from its stored source, so the source must be
      * the one that was validated and hashed at import. Any difference refuses the version.
      */
+    /**
+     * The model of a stored version, read through the same integrity check as a run or an export. Engine-internal:
+     * the migration dry run reads both versions of a plan with it.
+     *
+     * @param definition the stored version
+     * @return its model
+     * @throws DefinitionIntegrityException when the stored source no longer gives its recorded hash
+     */
+    public Process storedModel(StoredDefinition definition) {
+        return storedProcess(definition);
+    }
+
     private Process storedProcess(StoredDefinition definition) {
         Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
         byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);

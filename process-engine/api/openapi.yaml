@@ -5,13 +5,14 @@ info:
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
-    reading and cancelling instances, reading, claiming, unclaiming and completing a user task, the live token
+    reading and cancelling instances, listing, reading, claiming, unclaiming and completing user tasks, the live token
     counts per node and the BPMN export of a version. From 0.2.0
     it also covers the definition lifecycle with four eyes: an import is a `DRAFT`; a person requests
     approval, optionally with an effective date; a second person approves it and it becomes the effective version
     on that date, retiring the previous one; a reject sends it back to `DRAFT` with a reason. The requester can
     never approve (`403 SELF_APPROVAL_FORBIDDEN`), and an older version is never approved over a newer active one
-    (`409 VERSION_SUPERSEDED`). The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
+    (`409 VERSION_SUPERSEDED`). It also covers the graph diff between two stored versions, and migration plans with
+    their dry run; executing a plan follows in a later release. The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
     features that implement them.
 
     Every body is read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings
@@ -38,11 +39,13 @@ tags:
   - name: instances
     description: Start, list, read and cancel process instances
   - name: tasks
-    description: Read, claim, unclaim and complete user tasks
+    description: List, read, claim, unclaim and complete user tasks
   - name: async-steps
     description: Report the result of a remote step whose adapter handed the call off
   - name: agent-replays
     description: Replay recorded agent answers against a candidate guardrail or output schema
+  - name: migrations
+    description: Plan moving running instances to another version, and check the plan with a dry run
 paths:
   /definitions:
     post:
@@ -317,7 +320,7 @@ paths:
     get:
       tags: [definitions]
       operationId: getNodeStats
-      summary: Live tokens per node of one definition version
+      summary: Live tokens or hourly figures per node of one definition version
       description: |
         Counts the live tokens (`ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_EVENT`) at each
         node of the version, in the caller's tenant only, from the live token index and never from history
@@ -325,8 +328,13 @@ paths:
         (5 seconds), or `stats.live-cache-ttl-large` (15 seconds) when the version had more than
         `stats.live-cache-large-threshold` (100,000) live tokens; a cached answer keeps its `asOf`. A version that
         does not exist in the caller's tenant is `404 DEFINITION_NOT_FOUND`, also when it exists in another tenant.
-        Only `mode=live` in this release; the window mode follows with the hourly rollup. Open incidents per node
-        follow with the incident table. Permission `processes:read`.
+        `mode=window` returns counts and typical durations per node over whole hours, read from the hourly rollup of
+        the caller's tenant and never from history (PRE-029): entered, completed, failed, incidents, SLA breaches, the
+        mean, and the median and 95th percentile within 19 percent. The range `from` to `to` (default: the 24 hours
+        before now) is widened to whole hours and may be at most `query.max-range` (31 days), otherwise
+        `400 QUERY_INVALID`. The answer names the rollup watermark (`asOf`) and how far behind it is (`lagSeconds`),
+        which is at most about ten minutes while the rollup runs. A node with no activity in the window is absent.
+        Open incidents per node follow with the incident table. Permission `processes:read`.
       parameters:
         - name: key
           in: path
@@ -340,7 +348,17 @@ paths:
           in: query
           required: false
           description: Any other value is `400 INPUT_INVALID`
-          schema: { type: string, enum: [live], default: live }
+          schema: { type: string, enum: [live, window], default: live }
+        - name: from
+          in: query
+          required: false
+          description: Start of the window, `mode=window` only; widened down to the hour. Default 24 hours before `to`
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          required: false
+          description: End of the window, `mode=window` only; widened up to the hour. Default now
+          schema: { type: string, format: date-time }
       responses:
         '200':
           description: The live counts
@@ -350,15 +368,107 @@ paths:
               schema: { type: string }
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/NodeCounts' }
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/NodeCounts'
+                  - $ref: '#/components/schemas/NodeWindowStats'
+              examples:
+                live:
+                  value:
+                    definitionKey: kyc-onboarding
+                    version: 2
+                    mode: live
+                    asOf: '2026-11-20T09:30:00Z'
+                    nodes:
+                      approve: { WAITING_USER: 40 }
+                      assess-documents: { WAITING_ASYNC: 7 }
+                window:
+                  value:
+                    definitionKey: kyc-onboarding
+                    version: 2
+                    mode: window
+                    from: '2026-11-20T10:00:00Z'
+                    to: '2026-11-20T11:00:00Z'
+                    asOf: '2026-11-20T10:50:00Z'
+                    lagSeconds: 600
+                    nodes:
+                      approve: { entered: 1200, completed: 1200, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 5400000, p50Ms: 4800000, p95Ms: 9900000 }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/diff:
+    get:
+      tags: [definitions]
+      operationId: getDefinitionDiff
+      summary: Steps and links added, removed and changed between two versions
+      description: |
+        Compares two stored versions of one key in the caller's tenant (PRE-025, PRE-176), computed by the engine
+        from the stored, hash-checked definitions of any lifecycle status, so an approver can compare a pending
+        version with the effective one before signing. A document sent by the client is never compared. Steps are
+        matched by BPMN id and compared on their canonical form, the form that is hashed and approved; a changed
+        value is listed with its JSON Pointer `path` inside the step and its old and new value. Links are matched by
+        `(from, to, kind)`, where `kind` is `next`, `branch[i]` (the i-th conditional branch of an exclusive gateway,
+        from 0), `default` or `fork`. Every element carries its BPMN id and readable name. Layout is never part of
+        the diff and no XML is returned. Every list is sorted, so the same two versions always give the same body.
+        At most 1,000 changed values are listed, with `truncated: true` beyond.
+
+        `base` defaults to the effective version of the key; without one the answer is `404 NO_EFFECTIVE_VERSION`.
+        A version that does not exist in the caller's tenant is `404 DEFINITION_NOT_FOUND`, also when it exists in
+        another tenant. Read-only. Permission `processes:read`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+          example: kyc-onboarding
+        - name: version
+          in: path
+          required: true
+          description: The version compared to
+          schema: { type: integer, minimum: 1 }
+          example: 2
+        - name: base
+          in: query
+          required: false
+          description: The version compared from; the effective version when absent
+          schema: { type: integer, minimum: 1 }
+          example: 1
+        - name: If-None-Match
+          in: header
+          required: false
+          description: An `ETag` of an earlier answer; when it still matches, the answer is `304` without a body
+          schema: { type: string }
+      responses:
+        '200':
+          description: The diff
+          headers:
+            ETag:
+              description: Derived from the definition hashes of both versions, quoted
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GraphDiff' }
               example:
                 definitionKey: kyc-onboarding
-                version: 2
-                mode: live
-                asOf: '2026-11-20T09:30:00Z'
-                nodes:
-                  approve: { WAITING_USER: 40 }
-                  assess-documents: { WAITING_ASYNC: 7 }
+                base: { version: 1, status: ACTIVE, definitionHash: 3f1c0b9e5d7a4b2c8e6f0a1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3 }
+                target: { version: 2, status: PENDING_APPROVAL, definitionHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b }
+                identical: false
+                nodesAdded: [{ id: fraud-check, name: Fraud check, type: serviceTask }]
+                nodesRemoved: []
+                nodesChanged: [{ id: approve, name: Approve, type: userTask, path: /assignee/role, from: ops, to: credit-officer }]
+                edgesAdded:
+                  - { id: verify__fraud, from: verify-docs, fromName: Verify documents, to: fraud-check, toName: Fraud check, kind: next }
+                  - { id: fraud__approve, from: fraud-check, fromName: Fraud check, to: approve, toName: Approve, kind: next }
+                edgesRemoved:
+                  - { id: verify__approve, from: verify-docs, fromName: Verify documents, to: approve, toName: Approve, kind: next }
+                truncated: false
+        '304':
+          description: The `If-None-Match` value still matches; no body
+          headers:
+            ETag:
+              schema: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -612,6 +722,74 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks:
+    get:
+      tags: [tasks]
+      operationId: listTasks
+      summary: List the caller's tasks by assignment, due time and missed deadline
+      description: |
+        `assignment` is one or more of `mine` (declared to the caller or claimed by them), `candidate` (open tasks of
+        the caller's roles and groups) and `any` (every task of the tenant; needs `processes:task:manage`), comma
+        separated; `mine,candidate` when absent. `status` is one or more of `OPEN` and `CLAIMED`; both when absent.
+        `role` and `group` narrow `candidate` and `any` to one role or group; with `mine` alone they are
+        `400 QUERY_INVALID`. `dueBefore` keeps tasks due before that time; `slaBreached=true` keeps tasks whose due
+        time has passed on the engine clock. Ordered by `dueAt`, then `id`; tasks without a due time follow, by `id`.
+        Every range is read through its own index and stops after one page, so a long queue never slows the list.
+        Items carry no variables and no review context; read one task for those, masked. Permission
+        `processes:task:work`.
+      parameters:
+        - name: assignment
+          in: query
+          required: false
+          schema: { type: string, example: 'mine,candidate' }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: 'OPEN' }
+        - name: role
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - name: group
+          in: query
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 200 }
+        - name: dueBefore
+          in: query
+          required: false
+          schema: { type: string, format: date-time }
+        - name: slaBreached
+          in: query
+          required: false
+          schema: { type: boolean }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of tasks
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskSummaryPage' }
+              example:
+                data:
+                  - id: 01JD2R7Q4M8S3N6V0B5C9X1Z2A
+                    instanceId: 01JD2R7Q0D3F6H9K2M5P8R1T4V
+                    definitionKey: loan-origination
+                    definitionVersion: 2
+                    businessKey: LN-2027-000123
+                    nodeId: credit-review
+                    name: Credit review
+                    assignee: 'role:credit-officer'
+                    status: OPEN
+                    lockVersion: 0
+                    createdAt: '2026-12-31T08:00:00Z'
+                    dueAt: '2027-01-04T03:00:00Z'
+                nextCursor: eyJhZnRlciI6Ii4uLiJ9
+                hasNext: true
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /tasks/{id}:
     get:
@@ -869,6 +1047,100 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /migrations:
+    post:
+      tags: [migrations]
+      operationId: createMigrationPlan
+      summary: Plan moving the running instances of one version to another
+      description: |
+        Creates a plan to move the running instances of `sourceVersion` to `targetVersion` of the same key in the
+        caller's tenant. Steps are mapped by identical id; explicit step mappings arrive with a later release, and a
+        body with any other field is `400 INPUT_INVALID`. Creating a plan moves nothing. It writes the plan, one
+        history row and `processes.migration.planned.v1` in one transaction.
+
+        The plan records the approval its execution needs, fixed when it is created (PRE-174): `four-eyes`, so a
+        second holder of `processes:migration:manage`, never the proposer, approves the execution. `single` is
+        recorded only when the host sets `migration.approval=single`, which start-up accepts only on the `dev`
+        profile alone. Executing a plan follows in a later release.
+
+        The target must be `ACTIVE` and the source `ACTIVE` or `RETIRED`, otherwise `409 INVALID_STATE`; the same
+        version twice is `400 INPUT_INVALID`; a version the caller's tenant does not have is
+        `404 DEFINITION_NOT_FOUND` (PRE-175). Permission `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationPlanRequest' }
+            example: { definitionKey: loan-review, sourceVersion: 1, targetVersion: 2 }
+      responses:
+        '201':
+          description: The plan
+          headers:
+            Location: { schema: { type: string }, description: The plan's address }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationPlan' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:
+    get:
+      tags: [migrations]
+      operationId: getMigrationPlan
+      summary: Read a migration plan
+      description: |
+        The plan with its status and the approval its execution needs. Permission `processes:migration:manage` or
+        `processes:read`; another tenant's plan is `404 MIGRATION_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+      responses:
+        '200':
+          description: The plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationPlan' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:validate:
+    post:
+      tags: [migrations]
+      operationId: validateMigrationPlan
+      summary: Dry run of a migration plan
+      description: |
+        Reports what would happen if the plan's running instances moved now (PRE-014). It only reads: no instance,
+        token, history or plan row changes, so it needs no approval and takes no idempotency key.
+
+        Every step of the source version that holds live tokens is mapped onto the target by identical id:
+        `SAME_ID`, `STEP_NOT_IN_TARGET` (the target has no step with that id) or `STEP_TYPE_CHANGED` (it has one of
+        another type). Each step that is not `SAME_ID` is a conflict with the number of running instances waiting
+        there and their ids. A target that is no longer active is the conflict `TARGET_NOT_ACTIVE`. The plan is
+        `valid` only without conflicts. `movable` counts and lists the instances that would move. Each id list holds
+        at most `migration.dry-run-sample-size` (100) ids in id order, with `truncated: true` when there are more.
+
+        `planHash` and `validUntil` (`migration.dry-run-validity`, one hour, after `checkedAt`) bind a later
+        execution to this check (PD-114). Another tenant's plan is `404 MIGRATION_NOT_FOUND` (PRE-175). Permission
+        `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+      responses:
+        '200':
+          description: The dry-run report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationDryRun' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -919,6 +1191,11 @@ components:
       required: false
       description: Items per page, 1 to `query.max-page-size` (200); 50 when absent. Outside the range is `400 QUERY_INVALID`.
       schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    MigrationId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 26 }
     ReplayId:
       name: id
       in: path
@@ -974,7 +1251,7 @@ components:
       description: >-
         RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`
         or `QUERY_INVALID` (a list limit, cursor or range). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`,
-        `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `ASYNC_STEP_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
+        `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
@@ -1078,6 +1355,10 @@ components:
         claimedBy: { type: [string, 'null'] }
         claimedAt: { type: [string, 'null'], format: date-time }
         createdAt: { type: string, format: date-time }
+        dueAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the task is due, counted in working time from its creation; fixed then, never moved
         completedBy: { type: [string, 'null'] }
         completedAt: { type: [string, 'null'], format: date-time }
         allowedActions:
@@ -1086,6 +1367,32 @@ components:
           items: { type: string, enum: [claim, unclaim, complete] }
         review:
           $ref: '#/components/schemas/ReviewContext'
+    TaskSummary:
+      type: object
+      required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, status, lockVersion, createdAt]
+      properties:
+        id: { type: string }
+        instanceId: { type: string }
+        definitionKey: { type: string }
+        definitionVersion: { type: integer }
+        businessKey: { type: [string, 'null'] }
+        nodeId: { type: string }
+        name: { type: [string, 'null'] }
+        assignee: { type: string, description: 'user:<id>, role:<role> or group:<group>' }
+        status: { type: string, enum: [OPEN, CLAIMED] }
+        lockVersion: { type: integer }
+        claimedBy: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        dueAt: { type: [string, 'null'], format: date-time }
+    TaskSummaryPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/TaskSummary' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     ReviewContext:
       type: object
       description: >-
@@ -1253,6 +1560,38 @@ components:
           additionalProperties:
             type: object
             additionalProperties: { type: integer, minimum: 1 }
+    NodeWindowStats:
+      type: object
+      required: [definitionKey, version, mode, from, to, nodes]
+      properties:
+        definitionKey: { type: string }
+        version: { type: integer, minimum: 1 }
+        mode: { type: string, enum: [window] }
+        from: { type: string, format: date-time, description: Start of the first hour covered }
+        to: { type: string, format: date-time, description: End of the last hour covered }
+        asOf:
+          type: [string, 'null']
+          format: date-time
+          description: The rollup watermark; history before it is counted. Null before the first rollup run
+        lagSeconds:
+          type: [integer, 'null']
+          minimum: 0
+          description: Seconds between the watermark and now. Null before the first rollup run
+        nodes:
+          type: object
+          description: Node id to its figures
+          additionalProperties:
+            type: object
+            required: [entered, completed, failed, incidents, slaBreaches]
+            properties:
+              entered: { type: integer, minimum: 0 }
+              completed: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+              incidents: { type: integer, minimum: 0 }
+              slaBreaches: { type: integer, minimum: 0 }
+              meanMs: { type: [integer, 'null'], description: Mean completed duration; null without a completion }
+              p50Ms: { type: [integer, 'null'], description: Median within 19 percent; null without a completion }
+              p95Ms: { type: [integer, 'null'], description: 95th percentile within 19 percent; null without a completion }
     AgentReplayRequest:
       type: object
       required: [definitionKey, nodeId, from, to, candidate]
@@ -1341,6 +1680,148 @@ components:
           description: >-
             Present on a refusal of a standard: the stage of the coverage table that adds the element, or
             `not planned`; `S0` is an element of the current stage that this release has not finished
+    GraphDiff:
+      type: object
+      required: [definitionKey, base, target, identical, nodesAdded, nodesRemoved, nodesChanged, edgesAdded, edgesRemoved, truncated]
+      properties:
+        definitionKey: { type: string }
+        base: { $ref: '#/components/schemas/GraphDiffSide' }
+        target: { $ref: '#/components/schemas/GraphDiffSide' }
+        identical: { type: boolean, description: True when both versions have the same steps, values and links }
+        nodesAdded:
+          type: array
+          description: Steps only the target has, sorted by id
+          items: { $ref: '#/components/schemas/GraphDiffNode' }
+        nodesRemoved:
+          type: array
+          description: Steps only the base has, sorted by id
+          items: { $ref: '#/components/schemas/GraphDiffNode' }
+        nodesChanged:
+          type: array
+          description: One entry per changed value of a step both versions have, sorted by id then path
+          items:
+            type: object
+            required: [id, name, type, path, from, to]
+            properties:
+              id: { type: string, description: BPMN id of the step }
+              name: { type: [string, 'null'], description: Readable name in the target }
+              type: { type: [string, 'null'], description: Step type in the target }
+              path: { type: string, description: JSON Pointer inside the step's canonical form, for example /assignee/role }
+              from: { description: The value in the base, or null when the base has none }
+              to: { description: The value in the target, or null when the target has none }
+        edgesAdded:
+          type: array
+          description: Links only the target has, sorted by from, to and kind
+          items: { $ref: '#/components/schemas/GraphDiffEdge' }
+        edgesRemoved:
+          type: array
+          description: Links only the base has, sorted by from, to and kind
+          items: { $ref: '#/components/schemas/GraphDiffEdge' }
+        truncated: { type: boolean, description: True when more than 1,000 changed values were found }
+    GraphDiffSide:
+      type: object
+      required: [version, status, definitionHash]
+      properties:
+        version: { type: integer, minimum: 1 }
+        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, RETIRED] }
+        definitionHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+    GraphDiffNode:
+      type: object
+      required: [id, name, type]
+      properties:
+        id: { type: string, description: BPMN id of the step }
+        name: { type: [string, 'null'] }
+        type: { type: string, description: 'Step type in the canonical form, for example userTask' }
+    GraphDiffEdge:
+      type: object
+      required: [id, from, fromName, to, toName, kind]
+      properties:
+        id: { type: [string, 'null'], description: BPMN id of the sequence flow in its version }
+        from: { type: string }
+        fromName: { type: [string, 'null'] }
+        to: { type: string }
+        toName: { type: [string, 'null'] }
+        kind: { type: string, pattern: '^(next|default|fork|branch\[[0-9]+\])$' }
+    MigrationPlanRequest:
+      type: object
+      required: [definitionKey, sourceVersion, targetVersion]
+      additionalProperties: false
+      properties:
+        definitionKey: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+        sourceVersion: { type: integer, minimum: 1, description: The version the instances run on }
+        targetVersion: { type: integer, minimum: 1, description: The active version they would move to }
+    MigrationApproval:
+      type: object
+      required: [mode, secondPersonRequired]
+      properties:
+        mode: { type: string, enum: [four-eyes, single], description: '`single` only on the dev profile' }
+        secondPersonRequired: { type: boolean }
+    MigrationPlan:
+      type: object
+      required: [id, definitionKey, sourceVersion, targetVersion, status, planHash, approval, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        definitionKey: { type: string }
+        sourceVersion: { type: integer, minimum: 1 }
+        targetVersion: { type: integer, minimum: 1 }
+        status: { type: string, enum: [PLANNED] }
+        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        approval: { $ref: '#/components/schemas/MigrationApproval' }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    MigrationInstanceSample:
+      type: object
+      required: [count, instanceIds, truncated]
+      properties:
+        count: { type: integer, minimum: 0 }
+        instanceIds: { type: array, maxItems: 500, items: { type: string } }
+        truncated: { type: boolean }
+    MigrationDryRun:
+      type: object
+      required: [migrationId, planHash, definitionKey, sourceVersion, targetVersion, valid, checkedAt, validUntil, approval, instances, nodes, conflicts, movable]
+      properties:
+        migrationId: { type: string }
+        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        definitionKey: { type: string }
+        sourceVersion: { type: integer, minimum: 1 }
+        targetVersion: { type: integer, minimum: 1 }
+        valid: { type: boolean }
+        checkedAt: { type: string, format: date-time }
+        validUntil: { type: string, format: date-time }
+        approval: { $ref: '#/components/schemas/MigrationApproval' }
+        instances:
+          type: object
+          required: [running, movable, blocked]
+          properties:
+            running: { type: integer, minimum: 0 }
+            movable: { type: integer, minimum: 0 }
+            blocked: { type: integer, minimum: 0 }
+        nodes:
+          type: array
+          description: Each step of the source version with live tokens, sorted by id
+          items:
+            type: object
+            required: [nodeId, name, type, liveTokens, mapping, targetNodeId, targetType]
+            properties:
+              nodeId: { type: string }
+              name: { type: [string, 'null'] }
+              type: { type: [string, 'null'] }
+              liveTokens: { type: integer, minimum: 1 }
+              mapping: { type: string, enum: [SAME_ID, STEP_NOT_IN_TARGET, STEP_TYPE_CHANGED] }
+              targetNodeId: { type: [string, 'null'] }
+              targetType: { type: [string, 'null'] }
+        conflicts:
+          type: array
+          description: What blocks the plan, sorted by code and step id
+          items:
+            type: object
+            required: [code, nodeId, name, instances]
+            properties:
+              code: { type: string, enum: [STEP_NOT_IN_TARGET, STEP_TYPE_CHANGED, TARGET_NOT_ACTIVE] }
+              nodeId: { type: [string, 'null'] }
+              name: { type: [string, 'null'] }
+              instances: { $ref: '#/components/schemas/MigrationInstanceSample' }
+        movable: { $ref: '#/components/schemas/MigrationInstanceSample' }
     Problem:
       type: object
       required: [type, title, status, code, correlationId]
@@ -1356,7 +1837,7 @@ components:
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
-            REPLAY_TOO_LARGE, INTERNAL]
+            REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:

@@ -106,6 +106,30 @@ Expected output lists each rule set with rows never matched by any test, for exa
 
 Given the same version, inputs and clock, outputs and matched rule ids are identical on every run and every JVM (TR-DET-01 in [[Technical Requirements]]). A test that observes otherwise has found a bug; report it as described in [[Contributing]].
 
+## Compare two versions over last month
+
+A pricing committee decides on totals, not on single cases. `POST /rule-sets/card-fee:compare` takes the decisions the engine really made in a past period (at most 31 days) and decides each one again, at its logged time, through two versions in memory: the one in force and a draft, say. It needs both `rules:simulate` and `rules:log:read`, because it runs versions that may not be approved and reads logged inputs. It writes nothing.
+
+```bash
+curl -s -X POST http://localhost:8080/api/bpm/rules/v1/rule-sets/card-fee:compare \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{ "base": 1, "candidate": 2, "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z" }'
+```
+
+Expected: `200` with `decisionsCompared`, `changedCount`, `outcomes` per side, `totals` and `transitions`. For 10,000 January decisions where v2 lowers the default fee from 50,000 to 30,000 VND:
+
+```json
+{ "decisionsCompared": 10000, "changedCount": 5000,
+  "totals": [ { "output": "fee", "currency": "VND", "base": "280000000", "candidate": "180000000", "difference": "-100000000" } ],
+  "transitions": [ { "output": "fee", "from": { "currency": "VND", "amount": 50000 }, "to": { "currency": "VND", "amount": 30000 }, "count": 5000 } ],
+  "skipped": {} }
+```
+
+- **Totals** are exact decimals written as text, in minor units for money, per currency. They cover the compared decisions only.
+- **What is skipped.** A masked input is stored only as a fingerprint, so a decision whose masked value one of the versions reads cannot be decided again: it is counted under `skipped.MASKED_INPUT`. A logged `null` is compared. An input a version reads that an older decision never held is `skipped.MISSING_INPUT`. A masked input neither version reads does not matter.
+- **Too many decisions.** A period holding more than `simulation.max-history-decisions` (default 50,000, up to 200,000) is `422 HISTORY_TOO_LARGE`, with `found` saying how many. The engine never takes a sample, because sampled totals look exact and are not. Narrow the period.
+- **The response holds counts, totals and changes only**, never an input, a decision id or a fingerprint, so it can go into a committee pack.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -113,6 +137,8 @@ Given the same version, inputs and clock, outputs and matched rule ids are ident
 | `403 PERMISSION_DENIED` on `:simulate` | Caller lacks `rules:simulate`; nothing was evaluated | Grant the permission to the author and approver roles |
 | `404 VERSION_NOT_FOUND` on `:simulate` | The version does not exist in your tenant (another tenant's version gives the same answer) | Check the rule set name, the version number and the signed-in tenant |
 | `400 INPUT_INVALID` naming `samples[3]` | That sample has an input the version does not declare, a value of the wrong type, or a number out of bounds; or there are no samples or more than `simulation.max-inputs` | Fix that sample, or split the samples |
+| `422 HISTORY_TOO_LARGE` on `:compare` | The period holds more decisions than `simulation.max-history-decisions` | Narrow the period, or raise the setting up to 200,000; the engine never samples |
+| `403 PERMISSION_DENIED` on `:compare` | Caller lacks `rules:simulate` or `rules:log:read`; it needs both | Grant both to the committee role |
 | `409 INVALID_STATE` on `/decisions/{ruleSet}/versions/{v}:evaluate` for a draft | A pinned evaluation is logged, so it accepts only approved versions (`PUBLISHED` or `RETIRED`); a draft never enters the decision log | Simulate the draft with `POST /rule-sets/{name}/versions/{v}:simulate`, which writes no decision row |
 | `403 CLOCK_NOT_ALLOWED` when sending `clock` | `clock` requires `rules:simulate`, on `:evaluate` and on `/versions/{v}:evaluate` alike | Grant the permission to the simulation role, or leave `clock` out to use the host clock |
 | Simulation rows appear in the Decisions screen | The call went to an `:evaluate` endpoint, which logs every decision | Use `:simulate` for drafts and what-if runs; it writes no decision row |

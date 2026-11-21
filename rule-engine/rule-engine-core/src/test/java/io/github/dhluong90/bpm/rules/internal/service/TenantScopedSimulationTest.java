@@ -54,7 +54,7 @@ class TenantScopedSimulationTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2027-01-20T03:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults()),
+                    stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores);
     final TenantScopedRuleEngine scoped = new OneTimeEmbeddedEngineGrant((DefaultRuleEngine) engines.ruleEngine(),
             Map.of("system:process-engine", TenantScopedSimulationTest.class.getName()), type -> Optional.empty())

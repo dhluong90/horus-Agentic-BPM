@@ -93,7 +93,8 @@ class RuleEngineModuleDescriptorTest {
                         Map.entry("lifecycle.approver-must-differ-from", "makers"),
                         Map.entry("lifecycle.retire-approval", "single"),
                         Map.entry("lifecycle.retire-last-version", "confirm"),
-                        Map.entry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA")));
+                        Map.entry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA"),
+                        Map.entry("approval.require-content-hash", true)));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=single")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsEntry("lifecycle.retire-approval", "single"));

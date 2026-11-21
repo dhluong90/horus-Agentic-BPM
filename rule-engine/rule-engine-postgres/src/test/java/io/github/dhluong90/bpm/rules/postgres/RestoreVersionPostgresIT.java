@@ -54,7 +54,7 @@ class RestoreVersionPostgresIT {
         new RuleEngineSchemaMigrator(db).migrate();
         jdbc = JdbcClient.create(db);
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
-        engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults());
+        engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();
     }
 

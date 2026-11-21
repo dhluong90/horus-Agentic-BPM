@@ -39,7 +39,7 @@ class SimulationTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults()),
+                    stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores);
 
     /** The default fee goes down: a customer who falls through to R3 pays 30,000 VND instead of 50,000 VND. */
@@ -162,7 +162,7 @@ class SimulationTest {
         // Given a host that allows 3 samples per simulation
         RuleEngines lowered = RuleEngines.create(
                 new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                        stores, stores, EngineSettings.defaults().withSimulationMaxInputs(3)),
+                        stores, stores, EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxInputs(3)),
                 stores, stores, stores);
         caller.become("bank-a", "pricing-approver", SIMULATOR);
 
@@ -170,7 +170,7 @@ class SimulationTest {
         assertThatThrownBy(() -> lowered.ruleEngine().simulate("card-fee", 2, fiveCustomers()))
                 .isInstanceOf(InputInvalidException.class).hasMessageContaining("1 to 3 input sets");
         assertThat(lowered.ruleEngine().simulate("card-fee", 2, fiveCustomers().subList(0, 3)).samples()).hasSize(3);
-        assertThatThrownBy(() -> EngineSettings.defaults().withSimulationMaxInputs(1001))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withSimulationMaxInputs(1001))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("horus.bpm.rules.simulation.max-inputs");
     }
 

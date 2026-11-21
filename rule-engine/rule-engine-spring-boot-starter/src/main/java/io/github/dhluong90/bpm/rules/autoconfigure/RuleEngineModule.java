@@ -35,6 +35,9 @@ final class RuleEngineModule {
     /** The warning codes an approval must acknowledge (PD-104, RLE-053), comma-separated; empty when none. */
     static final String ACKNOWLEDGE_WARNINGS = "lifecycle.acknowledge-warnings";
 
+    /** Whether an approval or rejection must name the reviewed content hash (RLE-084), published for clients. */
+    static final String REQUIRE_CONTENT_HASH = "approval.require-content-hash";
+
     /** The masking default in force for the caller's tenant (PD-099 mitigation 4, RLE-052). */
     static final String MASK_DEFAULT = "decision-log.mask-default";
 
@@ -79,6 +82,24 @@ final class RuleEngineModule {
      */
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
             String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings) {
+        return descriptor(rolePermissions, cockpitDrafts, retireApproval, retireLastVersion, acknowledgeWarnings,
+                io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.REQUIRE_CONTENT_HASH);
+    }
+
+    /**
+     * The descriptor for this host.
+     *
+     * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
+     * @param acknowledgeWarnings the validated {@code lifecycle.acknowledge-warnings}
+     * @param requireContentHash the validated {@code approval.require-content-hash}
+     * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
+     */
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings,
+            boolean requireContentHash) {
         // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
         // the retirement mode in force (PD-080). The approver rule is always makers here, whatever the host sets
         // (#273): V2 rle_version_four_eyes refuses an approval by the author in the database.
@@ -88,6 +109,7 @@ final class RuleEngineModule {
         settings.put(RETIRE_APPROVAL, retireApproval);
         settings.put(RETIRE_LAST_VERSION, retireLastVersion);
         settings.put(ACKNOWLEDGE_WARNINGS, String.join(",", acknowledgeWarnings));
+        settings.put(REQUIRE_CONTENT_HASH, requireContentHash);
         return ModuleDescriptor.builder("rules", engineVersion(), "v1")
                 .features(FEATURES)
                 .settings(settings)

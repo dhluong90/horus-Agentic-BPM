@@ -11,17 +11,34 @@ import java.util.List;
  *     withdrawal (optional)
  * @param correlationId optional correlation id carried by the event the command writes; not part of the idempotent
  *     request, so a replay with another correlation id still returns the original result
+ * @param expectedCanonicalHash on {@code approve} and {@code reject}: the {@code canonicalHash} of the version the
+ *     caller reviewed; optional (null: not checked). When it differs from the stored version's hash the command is
+ *     {@code VERSION_CONFLICT}, even with the current lock version (RLE-084, #275)
  * @param acknowledgedWarnings on {@code approve} only: the warnings the approver was shown and accepts, as
  *     {@code { code, input }} pairs, for example {@code UNMASKED_PERSONAL_DATA} on {@code nationalId} (RLE-053, PD-104);
  *     empty when none, never null. The approval is accepted only when this set equals the set the engine recomputes
  */
 public record WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId,
-        List<AcknowledgedWarning> acknowledgedWarnings) {
+        String expectedCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings) {
 
     private static final WriteOptions NONE = new WriteOptions(null, null, null);
 
     public WriteOptions {
         acknowledgedWarnings = acknowledgedWarnings == null ? List.of() : List.copyOf(acknowledgedWarnings);
+    }
+
+    /**
+     * Creates options without an expected content hash.
+     *
+     * @param idempotencyKey see the record
+     * @param expectedLockVersion see the record
+     * @param comment see the record
+     * @param correlationId see the record
+     * @param acknowledgedWarnings see the record
+     */
+    public WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId,
+            List<AcknowledgedWarning> acknowledgedWarnings) {
+        this(idempotencyKey, expectedLockVersion, comment, correlationId, null, acknowledgedWarnings);
     }
 
     /**
@@ -33,7 +50,7 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      * @param correlationId see the record
      */
     public WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId) {
-        this(idempotencyKey, expectedLockVersion, comment, correlationId, List.of());
+        this(idempotencyKey, expectedLockVersion, comment, correlationId, null, List.of());
     }
 
     /**
@@ -73,7 +90,8 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      * @return the options
      */
     public WriteOptions withCorrelationId(String id) {
-        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, id, acknowledgedWarnings);
+        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, id, expectedCanonicalHash,
+                acknowledgedWarnings);
     }
 
     /**
@@ -83,6 +101,18 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      * @return the options
      */
     public WriteOptions acknowledging(List<AcknowledgedWarning> warnings) {
-        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, warnings);
+        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash,
+                warnings);
+    }
+
+    /**
+     * Returns a copy that approves or rejects only the content with this hash (RLE-084).
+     *
+     * @param canonicalHash the {@code canonicalHash} of the version the caller reviewed
+     * @return the options
+     */
+    public WriteOptions expectingContent(String canonicalHash) {
+        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, canonicalHash,
+                acknowledgedWarnings);
     }
 }

@@ -35,7 +35,7 @@ class CompiledCacheTest {
     final EditorApiTest.MovableClock clock = new EditorApiTest.MovableClock(NOW);
 
     RuleEngines replica(int maxEntries) {
-        EngineSettings settings = new EngineSettings(maxEntries, Duration.ofHours(24), 34, true);
+        EngineSettings settings = new EngineSettings(maxEntries, Duration.ofHours(24), 34, true).withRequireContentHash(false);
         return RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores, settings),
                 stores, stores, stores);
     }

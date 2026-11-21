@@ -89,6 +89,8 @@ class RuleEngineServicesConfiguration {
             MaskingPolicy masking, Environment environment, DecisionExplainer explainer) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
+        requireDevProfileForUnboundApprovals(settings, environment);
+        warnIfApprovalsAreNotBoundToContent(settings);
         return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                 RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
                 properties.toQuerySettings(), explainer));
@@ -120,6 +122,42 @@ class RuleEngineServicesConfiguration {
                 + " and does not list " + VersionWarning.UNMASKED_PERSONAL_DATA + ": a version whose input looks like"
                 + " personal data and is logged unmasked can be approved without the approver accepting it on the"
                 + " record (PD-104). The setting is shown in /api/bpm/meta.");
+        return true;
+    }
+
+    /**
+     * {@code approval.require-content-hash=false} is accepted only when {@code dev} is an active profile on its own,
+     * optionally with {@code test} (PD-139): any other profile stops start-up.
+     *
+     * @param settings the validated settings
+     * @param environment the environment
+     */
+    static void requireDevProfileForUnboundApprovals(EngineSettings settings, Environment environment) {
+        if (settings.requireContentHash()) {
+            return;
+        }
+        java.util.List<String> active = java.util.List.of(environment.getActiveProfiles());
+        boolean ok = active.contains("dev") && active.stream().allMatch(p -> p.equals("dev") || p.equals("test"));
+        if (!ok) {
+            throw new IllegalStateException("horus.bpm.rules.approval.require-content-hash=false relaxes a control and"
+                    + " is accepted only when the dev profile is active on its own (optionally with test); active"
+                    + " profiles are " + active + " (PD-139, RLE-084).");
+        }
+    }
+
+    /**
+     * Turning {@code approval.require-content-hash} off relaxes a control (RLE-084): allowed, but never silently.
+     *
+     * @param settings the validated settings
+     * @return whether the warning was logged
+     */
+    static boolean warnIfApprovalsAreNotBoundToContent(EngineSettings settings) {
+        if (settings.requireContentHash()) {
+            return false;
+        }
+        LOG.warn("horus.bpm.rules.approval.require-content-hash is false: an approval or rejection that does not name"
+                + " expectedCanonicalHash is applied to whatever content is stored at that lock version, not the"
+                + " content the reviewer saw (RLE-084). The setting is shown in /api/bpm/meta.");
         return true;
     }
 

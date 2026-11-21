@@ -280,6 +280,13 @@ class ProcessRestErrorMatrixTest {
         }
 
         @Override
+        public io.github.dhluong90.bpm.process.api.NodeWindowStats nodeWindowStats(String definitionKey, int version,
+                java.time.Instant from, java.time.Instant to) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public DefinitionVersion importDefinition(ImportRequest request) {
             maybeFail();
             throw new UnsupportedOperationException();
@@ -329,6 +336,18 @@ class ProcessRestErrorMatrixTest {
 
         @Override
         public List<DefinitionHistoryEntry> history(DefinitionRef ref) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiff diffFromEffective(DefinitionRef target) {
             maybeFail();
             throw new UnsupportedOperationException();
         }

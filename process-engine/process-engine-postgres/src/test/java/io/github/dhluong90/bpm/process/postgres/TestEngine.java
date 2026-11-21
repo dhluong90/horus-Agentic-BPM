@@ -48,10 +48,16 @@ final class TestEngine {
         volatile Set<String> permissions = Set.of("processes:deploy", "processes:start", "processes:read",
                 "processes:task:work");
         volatile Set<String> roles = Set.of();
+        volatile Set<String> groups = Set.of();
 
         @Override
         public Set<String> currentRoles() {
             return roles;
+        }
+
+        @Override
+        public Set<String> currentGroups() {
+            return groups;
         }
 
         @Override
@@ -69,6 +75,7 @@ final class TestEngine {
             caller = callerId;
             permissions = Set.of(perms);
             roles = Set.of();
+            groups = Set.of();
             return this;
         }
     }
@@ -102,6 +109,10 @@ final class TestEngine {
     }
 
     final ProcessServices services;
+    /** The stored business calendars of this replica (#72), whose working time sets task due times. */
+    final io.github.dhluong90.bpm.process.internal.service.Calendars calendars;
+    /** The task list and the other read models of this replica (PRE-030). */
+    final io.github.dhluong90.bpm.process.api.ProcessQueryService queries;
     final JobExecutor jobs;
     /** Async step executor of this replica; its pools are closed by {@link #close()}. */
     final io.github.dhluong90.bpm.process.internal.service.AsyncStepExecutor async;
@@ -116,6 +127,7 @@ final class TestEngine {
     private final ProcessEngineTransactions replicaTransactions;
     private final TestClock replicaClock;
     private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator replicaSchemas;
+    private final ProcessEventPublisher replicaPublisher;
 
     private TestEngine(Builder b) {
         DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
@@ -136,18 +148,22 @@ final class TestEngine {
                 b.retireLastVersion);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
+        this.replicaPublisher = publisher;
         if (b.withRuleEngine) {
             migrateRuleEngine(ds, transactionManager, b.clock.instant());
             this.rules = io.github.dhluong90.bpm.rules.postgres.PostgresRuleEngines.create(ds,
                     new io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions(transactionManager), ruleIdentity,
-                    ruleIdentity, b.clock, io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
+                    ruleIdentity, b.clock, io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults().withRequireContentHash(false));
         } else {
             this.rules = null;
         }
         // The decision port is the process starter's, supplied by its tests: only that class may claim the Rule
         // Engine's tenant-scoped entry point (ADR-0027, #336). Without one, a business rule task is not executable.
         this.decisions = b.decisionPort == null ? Optional.empty() : Optional.of(b.decisionPort.apply(rules));
-        this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, new JdbcProcessStore(ds),
+        this.calendars = new io.github.dhluong90.bpm.process.internal.service.Calendars(() -> id.tenant, id, b.clock,
+                tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval);
+        JdbcProcessStore processStore = new JdbcProcessStore(ds);
+        this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
                 Map.of(SourceFormat.BPMN_XML, reader::read), Map.of(),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
                         decisions, Duration.ofSeconds(5)),
@@ -156,7 +172,13 @@ final class TestEngine {
                         .map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name), b.extraAdapterNames.stream())
                         .collect(Collectors.toSet()), b.agents.stream()
                         .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
-                b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits);
+                b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits, calendars.businessCalendar());
+        this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
+                new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
+                        tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
+                new io.github.dhluong90.bpm.process.internal.service.NodeWindowStatsService(() -> id.tenant, id, b.clock,
+                        tx, processStore, new JdbcNodeStatsStore(ds), Duration.ofDays(31)),
+                processStore);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
         List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();
         runners.add(new io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner(b.adapters.stream()
@@ -190,6 +212,20 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.internal.service.EngineDefaults.MAX_RANGE);
     }
 
+    /**
+     * The migration plans of this replica (#74), on the same store, transactions, clock and event publisher.
+     *
+     * @param settings migration settings
+     * @return the migration service
+     */
+    io.github.dhluong90.bpm.process.internal.service.Migrations migrations(
+            io.github.dhluong90.bpm.process.internal.service.MigrationSettings settings) {
+        Identity id = identity;
+        return new io.github.dhluong90.bpm.process.internal.service.Migrations(() -> id.tenant, id, replicaClock,
+                replicaTransactions, new JdbcProcessStore(replicaDataSource), new JdbcMigrationStore(replicaDataSource),
+                services::storedModel, replicaPublisher, settings, EngineDefaults.IDEMPOTENCY_RETENTION);
+    }
+
     /** Stops this replica's adapter executor. */
     void close() {
         async.close();
@@ -221,6 +257,8 @@ final class TestEngine {
         private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
+        private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
+                io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
                 new io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator();
         private io.github.dhluong90.bpm.process.spi.InputMasker inputMasker =
@@ -307,6 +345,12 @@ final class TestEngine {
         /** Uses this data source (already migrated through {@link TestEngine#dataSource()}) instead of the shared one. */
         Builder dataSource(DataSource value) {
             dataSource = value;
+            return this;
+        }
+
+        /** Who applies a calendar change: four eyes by default, single as the dev profile allows. */
+        Builder calendarApproval(io.github.dhluong90.bpm.process.internal.service.Calendars.Approval value) {
+            calendarApproval = value;
             return this;
         }
 
@@ -431,7 +475,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
+                + "TRUNCATE pre_node_stats_hourly, pre_engine_watermark, pre_migration_history, pre_migration, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
                 + "pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();

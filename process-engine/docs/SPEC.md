@@ -80,11 +80,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-008 BusinessCalendar SPI computes SLA deadlines across weekends and holidays
 - **Traces to:** `TR-CAL-01`, `TR-CAL-02`
 - **Milestone:** M2
-- **Given:** Tenant calendar `vn-banking-hours` (`Mon-Fri 08:00-17:00 Asia/Ho_Chi_Minh`, holiday `2027-01-01`). Task created `2026-12-31T15:00:00+07:00` with `sla: PT4H`.
-- **When:** Engine creates the `userTask` and computes `due_at`.
-- **Then:** Consumes 2 hours (`15:00-17:00` on Dec 31), skips Jan 1 holiday + weekend (Jan 2–3), and sets `due_at = 2027-01-04T10:00:00+07:00`. Later calendar edits do not mutate this already-computed `due_at`.
+- **Given:** Tenant calendar `vn-banking-hours` (`Mon-Fri 08:00-17:00 Asia/Ho_Chi_Minh`, holiday `2027-01-01`). A `userTask` `credit-review` with `horus:sla="PT4H"` and `horus:calendar="vn-banking-hours"`; the engine clock at `2026-12-31T15:00:00+07:00`.
+- **When:** Engine creates the `userTask` and computes `due_at`; later an approved change adds `2027-01-04` as a holiday and a second task is created at the same time.
+- **Then:** Consumes 2 hours (`15:00-17:00` on Dec 31), skips Jan 1 holiday + weekend (Jan 2–3), and sets `due_at = 2027-01-04T10:00:00+07:00`, shown as `dueAt` on the task. The value is computed once, with the engine clock, in the calendar's time zone (never the JVM's), and stored; the later change does not mutate it, and only the second task is due `2027-01-05T10:00:00+07:00`. A task without `horus:calendar` counts elapsed time. A calendar the tenant does not have fails the step with `422 STEP_FAILED` (reason `CALENDAR_NOT_FOUND`) and nothing is written. An `horus:sla` that is not a positive ISO 8601 duration up to 366 days, an invalid calendar key, or a calendar without an SLA is `422 VALIDATION_FAILED` (`SLA_INVALID`) at import.
 - **Example:** `Dec 31 15:00 + PT4H (biz) -> Jan 4 10:00 +07:00`.
-- **Test ID:** `PRE_008_business_calendar_skips_holidays_and_weekends`
+- **Test ID:** `PRE_008_business_calendar_skips_holidays_and_weekends` (unit, `WorkingCalendarTest`, with cases across a clock change, a lunch break, a closing-time end and a seeded property that the due time does not depend on the JVM time zone; and on PostgreSQL, `BusinessCalendarPostgresIT`), `PRE_008_a_later_calendar_change_does_not_move_an_existing_due_time`, `PRE_008_*` in `SubsetBpmnReaderSlaTest`
+
+### PRE-114 A business calendar is created or changed only when a second person approves it
+- **Traces to:** `TR-CAL-01`, `TR-SEC-04`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`, `vn-banking-hours` at version 1; `kim` and `lan` hold `processes:calendar:manage`; `horus.bpm.processes.calendar.approval` at its default `four-eyes` (PD-118 as amended by PD-131).
+- **When:** `kim` proposes the calendar with `2027-01-04` added (against version 1, with a reason) and tries to approve it; `lan` approves it; a second proposal made against version 1 is then approved; a manager of `bank-b` reads the calendar or approves a `bank-a` proposal; the service starts with `calendar.approval=single` under the `prod` profile.
+- **Then:** `kim`'s approval is `403 SELF_APPROVAL_FORBIDDEN` and changes nothing; `lan`'s approval moves the calendar to version 2 and emits `processes.calendar.changed.v1` with `proposedBy=kim` and `approvedBy=lan`; the change record keeps the reason, both people and the old and the new value. The stale proposal is `409 VERSION_CONFLICT` and stays `PENDING`. `bank-b` gets `CALENDAR_NOT_FOUND` and nothing is written. Start-up is refused with `single` outside the `dev` profile; under `dev` alone a proposal applies at once and is recorded as `SINGLE`. The table refuses an approved four-eyes change whose approver is its proposer, whoever writes it.
+- **Example:** `kim proposes, kim approves -> 403; lan approves -> version 2, event names kim and lan`.
+- **Test ID:** `PRE_114_*` in `BusinessCalendarPostgresIT` and `DevOnlyRelaxationTest`
 
 ---
 
@@ -146,7 +155,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Call `POST /api/bpm/processes/v1/migrations/{id}:validate` without mapping `legacy-review`.
 - **Then:** Returns dry-run report listing 50 unmapped instances at `legacy-review` and marks plan invalid; 0 rows in `pre_instance` are modified. Resolving them by an explicit mapping for a renamed step or by cancellation is M3 (`TR-MIG-03`) and is not part of this statement.
 - **Example:** `Validate v1->v2 missing legacy-review -> conflict report, 0 instances mutated`.
-- **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`
+- **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`, `PRE_014_a_step_kept_under_its_id_as_another_step_type_is_a_conflict`, `PRE_014_a_plan_whose_steps_all_map_is_valid_and_lists_every_instance_that_would_move`, `PRE_014_every_registered_dry_run_query_is_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_counts_are_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_reads_return_the_seeded_rows_of_one_tenant_and_version`, `PRE_014_the_dry_run_report_matches_the_contract`
 
 ### PRE-015 Batched migration isolates per-instance failures without stalling healthy instances
 - **Traces to:** `TR-MIG-02`
@@ -253,7 +262,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** `GET /definitions/kyc-onboarding/versions/2/diff?base=1`.
 - **Then:** `nodesAdded: [fraud-check]`; `nodesChanged: [{id: approve, path: /assignee/role, from: ops, to: credit-officer}]`; `edgesRemoved: [verify-docs->approve]`; `edgesAdded: [verify-docs->fraud-check, fraud-check->approve]`; nothing about positions.
 - **Example:** `diff v1..v2 -> +fraud-check, ~approve.assignee.role, -1 edge, +2 edges`.
-- **Test ID:** `PRE_025_graph_diff_reports_nodes_and_edges`
+- **Test ID:** `PRE_025_graph_diff_reports_nodes_and_edges`, `PRE_025_the_diff_of_two_stored_drafts_lists_the_added_step_the_changed_role_and_the_links`, `PRE_025_the_graph_diff_body_and_its_etag_match_the_contract`
 
 ### PRE-026 Layout revisions are append-only, need no approval and never change the definition
 - **Traces to:** `TR-DEF-02`
@@ -339,11 +348,11 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### PRE-030 Task queries by assignee, role, group, due date and SLA breach are bounded
 - **Traces to:** `TR-PERF-07`, `TR-TEN-01`
 - **Milestone:** M2
-- **Given:** `CallerResolver` returns user `minh`, roles `[credit-officer, ops]`, group `[branch-hcm-01]`; 30,000 open tasks for `credit-officer`, 12 claimed by `minh`, 3 overdue.
+- **Given:** `CallerResolver` returns user `minh`, roles `[credit-officer, ops]`, group `[branch-hcm-01]`; 30,000 open tasks for `credit-officer`, 12 claimed by `minh`, 3 overdue; open tasks for `ops` and `branch-hcm-01`, some without a due time; tenant `bank-b` holds tasks for the same names.
 - **When:** `GET /tasks?assignment=mine`, `GET /tasks?assignment=candidate&limit=50`, `GET /tasks?assignment=candidate&slaBreached=true`, and `GET /tasks?limit=500`.
-- **Then:** `mine` returns the 12 tasks ordered by `dueAt`; `candidate` returns 50 tasks across both roles and the group ordered by `(dueAt, id)` with a `nextCursor`; `slaBreached` returns the 3 overdue tasks; `limit=500` returns `400 QUERY_INVALID` naming the maximum 200. The query-plan check shows only partial-index range scans.
+- **Then:** `mine` (tasks declared to the caller or claimed by them) returns the 12 tasks ordered by `dueAt`; `candidate` (open tasks of the caller's roles and groups) returns 50 tasks across both roles and the group ordered by `(dueAt, id)` with a `nextCursor`; `slaBreached` returns the 3 overdue tasks; `limit=500` returns `400 QUERY_INVALID` naming the maximum 200. Tasks without a due time follow the others, by `id`. `role` and `group` narrow `candidate` and `any`, and with `mine` alone are `400 QUERY_INVALID`. `assignment=any` needs `processes:task:manage`. Items carry no variables and no review context. Only the caller's tenant is read: `bank-b`'s tasks never appear, a cursor of another tenant or of other filters is `400 QUERY_INVALID`, and a list writes nothing. Each range (the user, the claims, each role, each group, or the tenant) is read through its own partial index for at most one page and merged; the query-plan check shows only partial-index range scans, in index order, under a `Limit`.
 - **Example:** `candidate limit 50 -> 50 items, nextCursor; limit 500 -> 400 QUERY_INVALID (max 200)`.
-- **Test ID:** `PRE_030_task_query_filters_bounded_by_index`
+- **Test ID:** `PRE_030_task_query_filters_bounded_by_index` (`TaskQueryPostgresIT`), `PRE_030_*` in `TaskQueryPostgresIT` and, over HTTP, `TaskLifecycleIT`
 
 ### PRE-036 Every list query passes the CI query-plan check
 - **Traces to:** `TR-PERF-07`
@@ -882,3 +891,94 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - C: refused at import. Memory reads only the recorded results of steps in the same instance, in the instance's tenant. Two loans of the same definition each receive their own facts, and a result recorded under another tenant with the same ids is never read.
 - **Example:** `idNumber without includeMasked -> 422; with it -> sent, hashed in history, visible in the approval diff`.
 - **Test ID:** `PRE_102_a_masked_field_without_include_masked_is_refused_at_import`, `PRE_102_a_masked_field_without_include_masked_is_refused_by_the_import_check`, `PRE_102_include_masked_sends_the_plain_value_and_the_audit_copy_keeps_only_the_fingerprint`, `PRE_102_include_masked_sends_the_plain_value_hashes_it_in_history_and_shows_in_the_canonical_form`, `PRE_102_memory_is_in_the_canonical_form_and_the_export_reads_back_to_the_same_hash`, `PRE_102_memory_reads_only_the_results_of_its_own_instance_and_tenant`, `PRE_102_memory_that_reads_a_variable_or_another_instance_is_refused_at_import`
+
+---
+
+## Migration Plans and Graph Diff (#74, #76)
+
+### PRE-174 A migration plan records four-eyes for its execution; one person only on the dev profile
+- **Traces to:** `TR-MIG-01`, `TR-SEC-04`, `TR-SEC-11`, PD-114, PD-131, #74
+- **Milestone:** M2
+- **Given:** `loan-review` v1 retired with running loans, v2 active; `thu` holds `processes:migration:manage`.
+- **When:** `thu` creates a plan v1 to v2 with `Idempotency-Key: plan-1`, repeats it, reuses the key for v2 to v1, and a host starts with `migration.approval=single` on the `prod` profile and on the `dev` profile alone.
+- **Then:**
+  - The plan is `PLANNED` with `approval: four-eyes` and `secondPersonRequired: true`; one `pre_migration` row, one `PLANNED` history row naming `thu` and the approval, and `processes.migration.planned.v1` are written in one transaction. No instance, token, task or history row changes.
+  - Its dry run reports the same approval. The repeat returns the first plan and writes nothing; the reused key is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - Start-up on `prod` is refused naming `horus.bpm.processes.migration.approval=single` and the dev profile; on `dev` alone it starts with a WARN and plans record `single`.
+  - A retired target is `409 INVALID_STATE`, the same version twice `400 INPUT_INVALID`, and a caller without `processes:migration:manage` `403 PERMISSION_DENIED`; nothing is written.
+  - `migration.dry-run-sample-size` (default 100, at most 500) and `migration.dry-run-validity` (default and at most `PT1H`) may be lowered only.
+- **Example:** `plan v1->v2 -> approval four-eyes, 1 plan row, 1 history row, 0 instance rows changed; single on prod -> start-up refused`.
+- **Test ID:** `PRE_174_a_plan_records_four_eyes_with_its_history_row_and_event_and_moves_nothing`, `PRE_174_a_single_person_plan_is_recorded_only_with_the_dev_setting`, `PRE_174_a_plan_needs_an_active_target_another_version_and_the_permission`, `PRE_174_migration_defaults_are_four_eyes_100_ids_and_one_hour`, `PRE_174_single_person_migration_is_refused_at_start_up_outside_the_dev_profile`, `PRE_174_an_unknown_approval_and_raised_dry_run_bounds_are_refused_naming_the_property`, `PRE_174_a_plan_answers_201_with_the_four_eyes_approval`
+
+### PRE-175 Another tenant can neither plan, dry-run nor read a migration, and nothing is written
+- **Traces to:** `TR-TEN-01`, `TR-MIG-01`, #74
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`'s plan over its running `loan-review` loans; tenant `bank-b` has its own `loan-review` loans.
+- **When:** A client of `bank-b` with `processes:migration:manage` and `processes:read` reads and dry-runs `bank-a`'s plan and plans `bank-a`'s versions; each tenant then dry-runs its own plan.
+- **Then:** The read and the dry run are `404 MIGRATION_NOT_FOUND`, and the plan is `404 DEFINITION_NOT_FOUND`. Every engine table holds the same rows and no event is published. Each tenant's report counts and lists only its own instances. A body naming a tenant, or a step mapping, is `400 INPUT_INVALID`. A plan row cannot reference another tenant's definition, and the plan history refuses `UPDATE`, `DELETE` and `TRUNCATE`.
+- **Example:** `bank-b validates bank-a's plan -> 404, 0 rows; bank-a 4 running, bank-b 7 running, each sees its own`.
+- **Test ID:** `PRE_175_another_tenant_can_neither_plan_dry_run_nor_read_a_plan_and_nothing_is_written`, `PRE_175_each_tenant_dry_runs_only_its_own_instances`, `PRE_175_plan_rows_are_tenant_keyed_and_the_history_is_append_only`, `PRE_175_migration_problems_match_the_contract`
+
+### PRE-176 The graph diff is deterministic and bounded, names steps by id and name, and never crosses tenants
+- **Traces to:** `TR-DEF-03`, `TR-TEN-01`, #76
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v1 and v2 of `PRE-025` in tenant `bank-a`; the same v2 with its flows written first and every box moved again; a loan gateway whose branch condition changes from 500 million to 1 billion VND and whose default moves to the committee; two versions of 600 review steps, each renamed and given to another role.
+- **When:** The diff is computed again, with the inputs swapped, for each pair, and by a client of `bank-b`.
+- **Then:**
+  - The same pair always gives the same diff; element order and layout change nothing. Swapping the versions gives the mirror image.
+  - Every step carries its BPMN id, readable name and type, and every link its sequence flow id, both step ids and names, and its kind; no XML or position is returned.
+  - The changed condition is `/branches/0/when` on the gateway; the moved default is one link removed and one added, of kind `default`.
+  - At most 1,000 changed values are listed, sorted by step id then path, with `truncated: true` beyond.
+  - `bank-b` gets `404 DEFINITION_NOT_FOUND` for `bank-a`'s versions, `404 NO_EFFECTIVE_VERSION` without a base when its key has no effective version, and `403 PERMISSION_DENIED` without `processes:read`. A stored source that no longer gives its hash is `DEFINITION_INTEGRITY_FAILED`. Nothing is written.
+- **Example:** `diff(v1, v2) == diff(v1, v2 reordered); 1,200 changes -> 1,000 listed, truncated`.
+- **Test ID:** `PRE_176_the_same_versions_always_give_the_same_diff_whatever_the_element_order_or_layout`, `PRE_176_swapping_the_versions_gives_the_mirror_image`, `PRE_176_branches_are_links_by_kind_and_a_changed_condition_is_a_value_of_the_gateway`, `PRE_176_at_most_a_thousand_changed_values_are_listed_and_the_rest_set_truncated`, `PRE_176_another_tenants_versions_are_not_found_and_nothing_is_written`, `PRE_176_a_diff_needs_the_read_permission_one_key_and_an_untampered_source`, `PRE_176_graph_diff_problems_match_the_contract`
+
+---
+
+## Metrics, Events and Throughput (#86)
+
+### PRE-084 Metrics count only committed work, carry bounded tags and never a tenant or a business value
+- **Traces to:** `TR-OBS-02`
+- **Milestone:** M2
+- **Given:** A host with a `SimpleMeterRegistry`. Six starts of `loan-disbursement` are attempted and one rolls back because its local handler throws. Of the five that start, three complete, one waits at its user task, and one is running with an open incident whose code is the host's business code `LIMIT_EXCEEDED`. A timer fires 4 s after its due time.
+- **When:** The registry is read after `metrics.gauge-refresh` (default `PT30S`).
+- **Then:**
+  - Counters: `horus.pre.instances.started` = 5, because the rolled-back start is not counted (counters move after commit only); `horus.pre.instances.completed` = 3; `horus.pre.instances.failed` counts an instance that ends `FAILED`; `horus.pre.incidents.raised{errorCode}` = 1 under `UNHANDLED_BUSINESS_ERROR`.
+  - Gauges, refreshed by one bounded query set per `metrics.gauge-refresh` on each replica and never per scrape: `horus.pre.instances.active` = 2, `horus.pre.incidents.open` = 1, `horus.pre.jobs.due.oldest.age{kind}` in seconds.
+  - Timers and counters: `horus.pre.timer.lag` records 4 s; `horus.pre.step.duration{stepKind,outcome}` with the engine command kinds `START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL` and outcomes `OK` and `FAILED`; `horus.pre.async.attempts{kind,outcome}` with outcomes `ACCEPTED`, `REFUSED`, `FAILED`, `DISCARDED` and `DUPLICATE`.
+  - Tags take only engine values from fixed sets; a value outside a set, a host business code included, is `OTHER`. No tag holds a tenant, business key, instance id, user or variable.
+  - `definitionKey` is a tag of the instance counters only when `metrics.definition-key-tag: true` (default `false`).
+- **Example:** `6 attempted, 1 rolled back -> started = 5, active = 2; tags contain no tenant`.
+- **Test ID:** `PRE_084_metrics_count_only_committed_work_and_carry_only_engine_values`
+
+### PRE-085 Every state change hands one enveloped event to the host inside its transaction
+- **Traces to:** `TR-OBS-04`, `TR-OBS-06`
+- **Milestone:** M2
+- **Given:** An instance that starts, completes a step and completes; a second instance cancelled under a request with `X-Correlation-Id: REQ-7781` and `Idempotency-Key: cancel-DISB-0002`; a third at an incident; a fourth whose start rolls back.
+- **When:** A recording publisher collects the events of committed transactions.
+- **Then:**
+  - It receives `processes.instance.started.v1`, `processes.step.completed.v1`, `processes.incident.raised.v1`, `processes.instance.completed.v1` and `processes.instance.cancelled.v1`, with the task events; `processes.incident.resolved.v1` and `processes.instance.failed.v1` have schemas and are emitted when the engine has a resolve operation and a path to `FAILED`.
+  - Each event is handed over in the transaction of its change; the rolled-back start hands over events that never commit.
+  - Each event has the envelope `eventId` (26 characters), `eventType`, `occurredAt` (engine clock), `tenantId`, `correlationId`, `causationId`, `producer` (`horus-process-engine`), `schemaVersion` (1) and `payload`.
+  - `correlationId` is the request's, or for work a job starts the request's when there is one and otherwise the job id; with no scope it is the `eventId`. `causationId` is the command's `Idempotency-Key` or the job id, or null.
+  - Each type validates against its JSON Schema under `process-engine/api/events/`, and a compatibility test against the baseline schemas allows additive changes only. An idempotent replay publishes nothing.
+- **Example:** `cancel -> processes.instance.cancelled.v1 with causationId = cancel-DISB-0002`.
+- **Test ID:** `PRE_085_every_state_change_hands_one_enveloped_event_to_the_host_inside_its_transaction`
+
+### PRE-086 Event payloads carry ids and codes, never variables or masked values
+- **Traces to:** `TR-SEC-05`
+- **Milestone:** M2
+- **Given:** An instance with variable `nationalId` and business key `DISB-ACC-0001`.
+- **When:** Every event of `PRE-085` is serialised.
+- **Then:** No payload contains a variable value, task result, step output, masked value or handler message. Payloads hold the ids, keys, versions, codes and actors listed in section 6.4 of `process-engine/docs/DESIGN.md`; the business key appears only in the events that list it there.
+- **Example:** `instance.started.v1 payload = { instanceId, definitionKey, version, businessKey }, no nationalId`.
+- **Test ID:** `PRE_086_event_payloads_carry_ids_and_codes_never_variables_or_masked_values`
+
+### PRE-087 CI reports step throughput against 1,000 transitions per second, without gating
+- **Traces to:** `TR-PERF-04`
+- **Milestone:** M2
+- **Given:** The load test in `process-engine/process-engine-postgres` on Testcontainers PostgreSQL with history on, one replica, a 10-transition definition (exclusive gateway, local service steps, a one-second timer, the shortest the engine accepts, fired as the injected clock moves, a parallel fork and join, end), a warm-up and a measured period.
+- **When:** The CI job `throughput-report` runs on `main` with a 1-minute warm-up and a 5-minute measurement.
+- **Then:** It publishes `throughput-report.json` and `.md` with the sustained transitions per second, the p50, p95 and p99 time of one engine call, the most pool connections in use, the runner's vCPU count and memory, and the PostgreSQL version. A result below 1,000 per second, or more than 20 % below the previous `main` report, is a warning in the report and the job summary. It never fails the build (PD-026).
+- **Example:** `1,180 transitions/s, p95 7 ms, 4 vCPU runner -> report published, no gate`.
+- **Test ID:** `PRE_087_throughput_report_is_written_and_never_gates`

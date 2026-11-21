@@ -461,9 +461,19 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return view(v, request, marks);
     }
     if (v.status !== 'PENDING_APPROVAL') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
-    const body = request.body === '' ? {} : (JSON.parse(request.body) as { comment?: string; reason?: string });
+    const body = request.body === '' ? {} : (JSON.parse(request.body) as { comment?: string; reason?: string; expectedCanonicalHash?: string });
+    // RLE-084: as the engine, a decision names the content it reviewed, and a stale hash is CONTENT_CHANGED, never a retry.
+    if (body.expectedCanonicalHash === undefined) return problem(400, 'CONTENT_HASH_REQUIRED', 'expectedCanonicalHash is required: send the canonicalHash of the version the reviewer saw');
+    const contentChanged = (): FakeResponse | undefined => {
+      const stored = hash(JSON.stringify(v.definition));
+      if (body.expectedCanonicalHash === stored) return undefined;
+      const changed = problem(409, 'CONTENT_CHANGED', `The content of ${v.ruleSet} v${String(v.version)} changed since it was reviewed`);
+      return { ...changed, body: JSON.stringify({ ...(JSON.parse(changed.body) as object), currentCanonicalHash: stored, currentLockVersion: v.lockVersion }) };
+    };
     if (action === 'reject') {
       if (v.requestedBy === request.user || v.createdBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN', `The requester or author of ${v.ruleSet} v${String(v.version)} cannot reject it`);
+      const staleReject = contentChanged();
+      if (staleReject) return staleReject;
       const reason = (body.reason ?? '').trim();
       if (reason === '') return problem(400, 'INPUT_INVALID', 'reason is required and must not be blank');
       if (reason.length > 2000) return problem(400, 'INPUT_INVALID', 'reason is longer than 2000 characters');
@@ -472,6 +482,8 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return view(v, request, marks);
     }
     if (v.requestedBy === request.user || v.createdBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN', `The requester or author of ${v.ruleSet} v${String(v.version)} cannot approve it`);
+    const staleApprove = contentChanged();
+    if (staleApprove) return staleApprove;
     // PD-104, RLE-053: the sent { code, input } pairs must equal, as a set, the pairs that need an acknowledgement.
     const needed = warningsOf(v.definition, marks).filter((warning) => warning.requiresAcknowledgement);
     const pairKey = (pair: { code?: unknown; input?: unknown }) => `${String(pair.code)}\u0000${String(pair.input)}`;

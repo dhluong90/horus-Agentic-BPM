@@ -4,6 +4,8 @@ import io.github.dhluong90.bpm.rules.api.BatchRequest;
 import io.github.dhluong90.bpm.rules.api.BatchResult;
 import io.github.dhluong90.bpm.rules.api.BatchTooLargeException;
 import io.github.dhluong90.bpm.rules.api.ClockNotAllowedException;
+import io.github.dhluong90.bpm.rules.api.ComparisonRequest;
+import io.github.dhluong90.bpm.rules.api.ComparisonResult;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
@@ -90,6 +92,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final DecisionQuerySettings querySettings;
     private final EngineMeters meters;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
+    private final HistoryComparisons comparisons;
 
     /**
      * Creates the engine with a selection cache of its own.
@@ -124,6 +127,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         this.cache = Objects.requireNonNull(cache, "cache must not be null");
         this.querySettings = Objects.requireNonNull(querySettings, "querySettings must not be null");
         this.meters = Objects.requireNonNull(meters, "meters must not be null");
+        this.comparisons = new HistoryComparisons(context, store, log, querySettings, this::validated);
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -353,6 +357,17 @@ public final class DefaultRuleEngine implements RuleEngine {
                     context.settings().maxInputScale(), context.settings().maxStringLength()));
         }
         return context.withoutDooming(() -> doSimulate(tenant, ruleSet, version, samples));
+    }
+
+    @Override
+    public ComparisonResult compare(String ruleSet, ComparisonRequest request) {
+        String tenant = context.tenant();
+        // Permission first, both of them: it evaluates versions that may not be approved (rules:simulate) and it reads
+        // logged inputs (rules:log:read); a caller with one of them never makes the engine read or evaluate anything.
+        context.callerWith(PERMISSION_SIMULATE);
+        context.callerWith(PERMISSION_LOG_READ);
+        comparisons.requireValid(request);
+        return context.withoutDooming(() -> comparisons.compare(tenant, ruleSet, request));
     }
 
     private SimulationResult doSimulate(String tenant, String ruleSet, int number, List<DecisionInput> samples) {

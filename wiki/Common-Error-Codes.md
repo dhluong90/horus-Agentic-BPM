@@ -22,6 +22,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 |---|---|---|---|
 | 400 | [INPUT_INVALID](#input_invalid) | both | M1 |
 | 400 | [QUERY_INVALID](#query_invalid) | both | M1 |
+| 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | rules | 0.3.0 |
 | 401 | [UNAUTHENTICATED](#unauthenticated) | both | M1 |
 | 403 | [PERMISSION_DENIED](#permission_denied) | both | M1 |
 | 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
@@ -36,7 +37,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [INSTANCE_NOT_FOUND](#instance_not_found) | processes | M2 |
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
+| 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
+| 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
@@ -51,6 +54,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [EVALUATION_ERROR](#evaluation_error) | rules | M1 |
 | 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
+| 422 | [HISTORY_TOO_LARGE](#history_too_large) | rules | 0.3.0 |
 | 422 | [EVIDENCE_TOO_LARGE](#evidence_too_large) | rules | M3 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
@@ -90,8 +94,14 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ### IDEMPOTENCY_KEY_REUSE_MISMATCH
 `422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
 
+### CONTENT_HASH_REQUIRED
+`400`. `:approve` or `:reject` did not send `expectedCanonicalHash`, the `canonicalHash` of the content the reviewer saw, and `horus.bpm.rules.approval.require-content-hash` is on (the default, `RLE-084`, PD-139). Send the hash the reviewer's screen showed when they opened the version. Nothing is written. A host on the `dev` profile can turn the requirement off; any other profile refuses to start with it off.
+
+### CONTENT_CHANGED
+`409`. The `expectedCanonicalHash` on `:approve` or `:reject` is not the hash of the content now stored: the version was withdrawn, replaced and requested again under the same number, even though `If-Match` may carry the current lock version. Nothing is written, and the problem carries `currentCanonicalHash` and `currentLockVersion`. Show the reviewer the current content and diff and let them decide again; never retry on your own with the new hash, because that would approve content nobody reviewed (`RLE-084`).
+
 ### VERSION_CONFLICT
-`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A client that receives `409 VERSION_CONFLICT` on `:approve` or `:reject` must show the approver the current version (its content and diff) again and let them decide; it must never retry automatically with the new `ETag`, because that would approve content nobody reviewed.
+`409`. `If-Match` no longer matches: someone changed the draft, task, incident or layout after you read it. Reload and apply your change again. A stale lock version on `:approve` or `:reject` is refused with this code too, and the problem names the version now stored in `currentCanonicalHash` and `currentLockVersion`. A changed content hash is a different code, [CONTENT_CHANGED](#content_changed), so a client that refreshes and retries on `VERSION_CONFLICT` cannot re-bind a decision to content nobody reviewed.
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
@@ -196,6 +206,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### BATCH_TOO_LARGE
 `422`. `:evaluate-batch` with more than `evaluation.max-batch` items (1,000 at most). Split the batch; nothing was evaluated or written.
 
+### HISTORY_TOO_LARGE
+`422`. `POST /rule-sets/{name}:compare` over a period that holds more logged decisions than `simulation.max-history-decisions` (default 50,000, at most 200,000). `found` says how many the period holds (with `atLeast: true` when the count stopped at 200,000) and `maxHistoryDecisions` the setting in force. The comparison never takes a sample, so totals are never partial; narrow the period. Nothing was evaluated or written.
+
 ### EVIDENCE_TOO_LARGE
 `422`. `POST /rule-sets/{name}/evidence` would produce a file over 8,388,608 bytes, or a chosen version has more than 10,000 history events. Export fewer decisions or versions at a time; nothing was written and no export was recorded.
 
@@ -212,6 +225,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 ### REPLAY_NOT_FOUND
 `404`. Unknown agent replay run, a run of another tenant, or a case the run does not have. Runs are deleted `replay.retention` (30 days) after they were created.
+
+### MIGRATION_NOT_FOUND
+`404`. Unknown migration plan id, or a plan of another tenant (`GET /migrations/{id}`, `POST /migrations/{id}:validate`). Nothing is written.
 
 ### REPLAY_TOO_LARGE
 `422`. The period of an agent replay holds more recorded answers than `horus.bpm.processes.replay.max-cases` (50,000). The body carries `cases` and `limit`. Nothing is written. Choose a shorter period.

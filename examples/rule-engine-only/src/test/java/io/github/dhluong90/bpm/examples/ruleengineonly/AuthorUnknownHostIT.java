@@ -69,8 +69,9 @@ class AuthorUnknownHostIT {
             clearAuthor("bank-a", "card-fee", 1);
 
             // When bob approves with If-Match
-            Reply refused = send(port, bob, "POST", BASE + "/versions/1:approve", "{\"comment\":\"reviewed\"}",
-                    lock, "ap-1");
+            Reply refused = send(port, bob, "POST", BASE + "/versions/1:approve",
+                    "{\"comment\":\"reviewed\",\"expectedCanonicalHash\":\"" + requested.json().path("canonicalHash").asString()
+                            + "\"}", lock, "ap-1");
 
             // Then 409 AUTHOR_UNKNOWN as problem details, and v1 stays pending, unchanged and without approve
             assertThat(refused.status()).isEqualTo(409);
@@ -88,12 +89,14 @@ class AuthorUnknownHostIT {
 
             // And: bob rejects it, alice imports the change again, and bob approves the new version
             assertThat(send(port, bob, "POST", BASE + "/versions/1:reject",
-                    "{\"reason\":\"author unknown, submit again\"}", lock, "rj-1").status()).isEqualTo(200);
+                    "{\"reason\":\"author unknown, submit again\",\"expectedCanonicalHash\":\""
+                            + requested.json().path("canonicalHash").asString() + "\"}", lock, "rj-1").status()).isEqualTo(200);
             assertThat(send(port, alice, "POST", BASE + "/versions", CARD_FEE, null, "im-2").status()).isEqualTo(201);
             Reply again = send(port, alice, "POST", BASE + "/versions/2:request-publish", null, null, "rp-2");
             assertThat(again.json().path("createdBy").asString()).isEqualTo("alice");
-            Reply approved = send(port, bob, "POST", BASE + "/versions/2:approve", "{\"comment\":\"reviewed\"}",
-                    again.json().path("lockVersion").asLong(), "ap-2");
+            Reply approved = send(port, bob, "POST", BASE + "/versions/2:approve",
+                    "{\"comment\":\"reviewed\",\"expectedCanonicalHash\":\"" + again.json().path("canonicalHash").asString()
+                            + "\"}", again.json().path("lockVersion").asLong(), "ap-2");
             assertThat(approved.status()).isEqualTo(200);
             assertThat(approved.json().path("status").asString()).isEqualTo("PUBLISHED");
         }

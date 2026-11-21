@@ -178,19 +178,17 @@ Java API methods take the same keys as parameters (ADR-0006). The idempotency re
 A `saga` block groups steps that compensate together: each entered block gets its own scope token, and a failure inside it runs only the compensations recorded under that block, newest first (ADR-0020). Steps outside any block compensate under the instance's scope. `throwCompensation` ends a block explicitly. Compensation handlers are Async Wait-State steps themselves. Every compensation is a history row (ADR-0007).
 
 ## Business calendar for SLA
-```yaml
-- id: approve-loan
-  type: userTask
-  assignee: { role: credit-officer }
-  sla: { duration: PT4H, calendar: vn-banking-hours, escalateTo: { role: credit-manager } }
+```xml
+<bpmn:userTask id="credit-review" horus:assignee="role:credit-officer" horus:resultVariable="review"
+               horus:sla="PT4H" horus:calendar="vn-banking-hours"/>
 ```
 ```java
 public interface BusinessCalendar {
-  Instant add(Instant from, Duration businessDuration, String calendarId, String tenantId);
-  boolean isBusinessTime(Instant at, String calendarId, String tenantId);
+  Instant add(String tenantId, String calendarKey, Instant start, Duration workingTime);
+  boolean isBusinessTime(String tenantId, String calendarKey, Instant at);
 }
 ```
-The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`, editable in the cockpit. A 24x7 calendar is built in. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`).
+The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`. A calendar is created or changed by a proposal that a second holder of `processes:calendar:manage` approves (four eyes by default; one person only in the `dev` profile). A task without `horus:calendar` counts elapsed time. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`). Escalation of an overdue task (`escalateTo`) follows in a later release. See [[Process Engine API]] for an example.
 
 ## Instance migration
 ![Instance migration](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/instance-migration.svg)
@@ -247,6 +245,6 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | `processes:task:manage` | Reassign any task, recompute SLAs |
 | `processes:incident:manage` | Retry and resolve incidents |
 | `processes:migration:manage` | Create, validate and execute migration plans |
-| `processes:calendar:manage` | Edit business calendars and holidays |
+| `processes:calendar:manage` | Propose, approve and reject changes of business calendars and holidays; a proposer never approves their own |
 
 Four-eyes is enforced in `TaskService`: a task with `fourEyes: true` refuses the identity that started the instance and every identity that completed an earlier task of it, at claim and again at completion, with `403 SELF_APPROVAL_FORBIDDEN`, whatever the caller's permissions (`PRE-007`). The check at completion catches a claimant who completed a parallel task after claiming. See [[Multi Tenancy and Security]].
