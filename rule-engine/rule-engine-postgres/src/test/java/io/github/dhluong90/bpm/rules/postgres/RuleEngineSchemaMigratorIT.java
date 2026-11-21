@@ -35,8 +35,8 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("19");
-        assertThat(result.migrationsExecuted()).isEqualTo(15);
+        assertThat(result.currentVersion()).isEqualTo("20");
+        assertThat(result.migrationsExecuted()).isEqualTo(16);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -124,10 +124,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("19");
-        assertThat(result.migrationsExecuted()).isEqualTo(15);
+        assertThat(result.currentVersion()).isEqualTo("20");
+        assertThat(result.migrationsExecuted()).isEqualTo(16);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "18", "19");
+                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "18", "19", "20");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -140,12 +140,12 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("19");
-        assertThat(second.currentVersion()).isEqualTo("19");
+        assertThat(second.initialVersion()).isEqualTo("20");
+        assertThat(second.currentVersion()).isEqualTo("20");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("19");
+        assertThat(migrator.currentVersion()).contains("20");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(15L);
+                .isEqualTo(16L);
     }
 
     @Test
@@ -277,12 +277,12 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 15));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 16));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("19", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("20", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

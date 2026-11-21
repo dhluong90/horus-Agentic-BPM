@@ -217,6 +217,12 @@
       "properties": {
         "agent": { "description": "Adapter registered in the host.", "type": "string", "minLength": 1 },
         "inputs": { "$ref": "#/$defs/inputs" },
+        "maskedInputs": {
+          "description": "Inputs the agent receives in plain text but history and the review task keep only as keyed fingerprints (hmac:<keyId>:<hex>), or *** when no masking key is configured. Each name must be one of inputs.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
         "outputSchema": { "description": "The JSON Schema the agent output must satisfy, inline, so the definition hash and its approval cover it. The engine default supports a subset (type, properties, required, additionalProperties true or false, enum, const, the numeric bounds, minLength, maxLength, items, minItems, maxItems, and the annotations title, description, default, examples and mask); any other keyword is refused at import.", "type": "object" },
         "guardrails": {
           "type": "object",

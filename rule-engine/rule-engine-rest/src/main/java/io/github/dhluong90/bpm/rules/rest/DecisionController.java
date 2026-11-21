@@ -1,15 +1,21 @@
 package io.github.dhluong90.bpm.rules.rest;
 
+import io.github.dhluong90.bpm.rules.api.BatchRequest;
+import io.github.dhluong90.bpm.rules.api.BatchResult;
+import io.github.dhluong90.bpm.rules.api.CorrelationSearch;
+import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionLogEntry;
 import io.github.dhluong90.bpm.rules.api.DecisionLogQuery;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.DecisionSearch;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.InputSearch;
 import io.github.dhluong90.bpm.rules.api.Page;
 import io.github.dhluong90.bpm.rules.api.PageRequest;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
+import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import io.github.dhluong90.bpm.rules.internal.json.EngineValues;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
@@ -18,7 +24,10 @@ import java.io.InputStream;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +39,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
@@ -60,19 +70,29 @@ public class DecisionController {
 
     /**
      * {@code GET /decisions?ruleSet=&from=&to=}: one rule set's decisions in a period of at most
-     * {@code query.max-range}, newest first, keyset-paged (RLE-029). Writes nothing.
+     * {@code query.max-range}, newest first, keyset-paged (RLE-029). With {@code correlationId} it is the search by
+     * the host's case reference across the tenant's rule sets, {@code ruleSet} then optional (RLE-070). Writes
+     * nothing.
      */
     @GetMapping
     public ResponseEntity<byte[]> search(
             @RequestParam(value = "ruleSet", required = false) String ruleSet,
+            @RequestParam(value = "correlationId", required = false) String correlationId,
             @RequestParam(value = "from", required = false) String from,
             @RequestParam(value = "to", required = false) String to,
             @RequestParam(value = "limit", required = false) String limit,
             @RequestParam(value = "cursor", required = false) String cursor) {
         RestSupport.require(callers, "rules:log:read");
+        PageRequest page = new PageRequest(RestSupport.limit(limit), cursor);
+        if (correlationId != null) {
+            CorrelationSearch search = new CorrelationSearch(correlationId, ruleSet, instant("from", from),
+                    instant("to", to));
+            return RestSupport.json(HttpStatus.OK, RestSupport.page(log.searchByCorrelationId(search, page),
+                    EngineValues::decisionLogEntry));
+        }
         DecisionSearch search = DecisionSearch.of(ruleSet, instant("from", from), instant("to", to));
-        Page<DecisionLogEntry> page = log.search(search, new PageRequest(RestSupport.limit(limit), cursor));
-        return RestSupport.json(HttpStatus.OK, RestSupport.page(page, EngineValues::decisionLogEntry));
+        Page<DecisionLogEntry> result = log.search(search, page);
+        return RestSupport.json(HttpStatus.OK, RestSupport.page(result, EngineValues::decisionLogEntry));
     }
 
     private static Instant instant(String name, String value) {
@@ -120,6 +140,85 @@ public class DecisionController {
             throw new InputInvalidException("version must be at least 1");
         }
         return evaluate(ruleSet, version, "rules:pin", requestBody, contentLength, idempotencyKey, correlationId);
+    }
+
+    /**
+     * {@code POST /decisions/{ruleSet}:evaluate-batch}: up to {@code evaluation.max-batch} items evaluated in order
+     * against one version selected at {@code clock} (default the host clock), one logged decision per item, in one
+     * transaction (RLE-067 to RLE-069). Always {@code 200} once the batch is accepted: an item that failed is a
+     * {@code problem} entry and does not stop the others. A tenant in the body is ignored.
+     */
+    @PostMapping("/{ruleSet}:evaluate-batch")
+    public ResponseEntity<byte[]> evaluateBatch(
+            @PathVariable("ruleSet") String ruleSet,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId)
+            throws IOException {
+        RestSupport.require(callers, "rules:evaluate");
+        // A declared length over the limit is refused before the body is read (RLE-068).
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.BATCH_BODY_MAX_BYTES);
+        String correlation = ProblemDetails.correlationId(correlationId);
+        JsonNode request = EngineValues.readRequest(body);
+        if (!request.isObject()) {
+            throw new InputInvalidException("Request body must be a JSON object");
+        }
+        JsonNode items = request.get("items");
+        if (items == null || !items.isArray()) {
+            throw new InputInvalidException("items must be an array of {inputs, correlationId}");
+        }
+        List<BatchRequest.Item> parsed = new ArrayList<>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            JsonNode item = items.get(i);
+            if (!item.isObject()) {
+                throw new InputInvalidException("items[" + i + "] must be an object with inputs");
+            }
+            JsonNode itemCorrelation = item.get("correlationId");
+            if (itemCorrelation != null && !itemCorrelation.isNull() && !itemCorrelation.isString()) {
+                throw new InputInvalidException("items[" + i + "].correlationId must be a string");
+            }
+            DecisionInput input;
+            try {
+                input = EngineValues.inputsFromJson(item.get("inputs"));
+            } catch (InputInvalidException e) {
+                throw new InputInvalidException("items[" + i + "]: " + e.getMessage());
+            }
+            parsed.add(new BatchRequest.Item(input,
+                    itemCorrelation == null || itemCorrelation.isNull() ? null : itemCorrelation.stringValue()));
+        }
+        BatchRequest batch = new BatchRequest(ruleSet, parsed, idempotencyKey, clock(request.get("clock")));
+        return RestSupport.json(HttpStatus.OK, batch(engine.evaluateBatch(batch), correlation));
+    }
+
+    /** The response of a batch: the version and clock, the counts, and one result or problem per item. */
+    private static ObjectNode batch(BatchResult result, String correlation) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("evalClock", result.clock().toString());
+        node.put("succeeded", result.succeeded());
+        node.put("failed", result.failed());
+        ArrayNode results = node.putArray("results");
+        for (BatchResult.Item item : result.items()) {
+            ObjectNode entry = results.addObject().put("index", item.index());
+            if (item.decision() == null) {
+                entry.set("problem", ProblemDetails.body(item.code(), ProblemDetails.STATUS.get(item.code()),
+                        item.detail(), correlation));
+            } else if (item.decision().outcome() instanceof DecisionResult.Failed failed) {
+                ObjectNode problem = ProblemDetails.body(failed.code(), ProblemDetails.UNPROCESSABLE, failed.detail(),
+                        correlation);
+                problem.put("decisionId", item.decision().decisionId());
+                problem.set("matchedRuleIds", EngineValues.value(failed.matchedRuleIds()));
+                if (failed.limit() != null) {
+                    problem.put("limit", failed.limit());
+                }
+                entry.set("problem", problem);
+            } else {
+                entry.set("decision", EngineValues.decision(item.decision()));
+            }
+        }
+        return node;
     }
 
     /**

@@ -15,6 +15,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
+import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -172,6 +173,62 @@ class SubsetBpmnReaderAgentTaskTest {
                 + " horus:mode=\"remote\"", spec))).extracting(DefinitionProblem::code).contains("AGENT_TASK_INVALID");
         assertThat(problems(agentStep("horus:agent=\"documents.assess\" horus:timeout=\"PT0S\"", spec)))
                 .extracting(DefinitionProblem::code).contains("TIMEOUT_INVALID");
+    }
+
+    // ---- PRE-011 the step's retry policy, PRE-012 masked inputs ------------------------------------------------
+
+    @Test
+    void PRE_011_an_agent_step_reads_its_retry_policy_and_the_hash_covers_it() {
+        String spec = "<horus:outputSchema>" + SCHEMA + "</horus:outputSchema>" + GUARDRAIL;
+        Process retried = reader.read(agentStep("horus:agent=\"documents.assess\" horus:timeout=\"PT1S\"",
+                spec + "<horus:retry max=\"2\" backoff=\"PT1S\"/>"));
+        Process plain = reader.read(agentStep("horus:agent=\"documents.assess\" horus:timeout=\"PT1S\"", spec));
+
+        // max 2 is three attempts in all, with one second before each retry
+        RetryPolicy retry = step(retried).extensions().first(RetryPolicy.class).orElseThrow();
+        assertThat(retry).isEqualTo(new RetryPolicy(2, Duration.ofSeconds(1)));
+        assertThat(retry.attempts()).isEqualTo(3);
+        assertThat(step(plain).extensions().first(RetryPolicy.class)).isEmpty();
+        String canonical = CanonicalProcessWriter.canonicalText(retried);
+        assertThat(canonical).contains("\"retry\":{\"backoff\":\"PT1S\",\"max\":2}");
+        assertThat(Hashes.sha256(canonical)).isNotEqualTo(Hashes.sha256(CanonicalProcessWriter.canonicalText(plain)));
+        // The export reads back to the same canonical form
+        assertThat(CanonicalProcessWriter.canonicalText(reader.read(writer.write(retried)))).isEqualTo(canonical);
+    }
+
+    @Test
+    void PRE_011_an_invalid_retry_policy_is_refused_naming_the_step() {
+        String spec = "<horus:outputSchema>" + SCHEMA + "</horus:outputSchema>" + GUARDRAIL;
+        for (String retry : List.of("<horus:retry backoff=\"PT1S\"/>", "<horus:retry max=\"21\"/>",
+                "<horus:retry max=\"-1\"/>", "<horus:retry max=\"2\" backoff=\"one second\"/>",
+                "<horus:retry max=\"2\" backoff=\"PT0S\"/>", "<horus:retry max=\"1\"/><horus:retry max=\"2\"/>")) {
+            assertThat(problems(agentStep("horus:agent=\"documents.assess\"", spec + retry))).as(retry)
+                    .anySatisfy(p -> {
+                        assertThat(p.code()).isEqualTo("RETRY_INVALID");
+                        assertThat(p.elementId()).isEqualTo("assess-documents");
+                    });
+        }
+    }
+
+    @Test
+    void PRE_012_a_masked_input_is_read_and_the_hash_covers_it() {
+        String spec = "<horus:input name=\"applicationId\" value=\"${instance.applicationId}\"/>"
+                + "<horus:input name=\"nationalId\" value=\"${instance.nationalId}\" mask=\"true\"/>"
+                + "<horus:outputSchema>" + SCHEMA + "</horus:outputSchema>" + GUARDRAIL;
+        Process masked = reader.read(agentStep("horus:agent=\"documents.assess\"", spec));
+        Process unmasked = reader.read(agentStep("horus:agent=\"documents.assess\"",
+                spec.replace(" mask=\"true\"", "")));
+
+        assertThat(step(masked).extensions().all(InputMapping.class)).containsExactly(
+                new InputMapping("applicationId", "${instance.applicationId}", false),
+                new InputMapping("nationalId", "${instance.nationalId}", true));
+        String canonical = CanonicalProcessWriter.canonicalText(masked);
+        assertThat(canonical).contains("\"maskedInputs\":[\"nationalId\"]");
+        assertThat(Hashes.sha256(canonical))
+                .isNotEqualTo(Hashes.sha256(CanonicalProcessWriter.canonicalText(unmasked)));
+        assertThat(CanonicalProcessWriter.canonicalText(reader.read(writer.write(masked)))).isEqualTo(canonical);
+        assertThat(problems(agentStep("horus:agent=\"documents.assess\"", spec.replace("mask=\"true\"",
+                "mask=\"yes\"")))).extracting(DefinitionProblem::code).contains("INPUT_INVALID");
     }
 
     @Test

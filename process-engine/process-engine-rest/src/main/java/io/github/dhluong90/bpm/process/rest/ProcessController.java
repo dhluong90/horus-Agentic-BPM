@@ -482,7 +482,14 @@ public class ProcessController {
         byte[] body = boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
         JsonNode request = body.length == 0 ? EngineJson.NODES.objectNode() : parse(body);
         Map<String, Object> result = Views.variables(request.get("result"));
-        ProcessInstance instance = tasks.complete(id, result, lockVersion(ifMatch), idempotencyKey);
+        JsonNode reason = request.get("reason");
+        if (reason != null && !reason.isNull() && !reason.isString()) {
+            throw new InputInvalidException("reason must be a string");
+        }
+        // The reason of a reviewer's answer to a refused agent answer, recorded with the override (#59).
+        ProcessInstance instance = reason == null || reason.isNull()
+                ? tasks.complete(id, result, lockVersion(ifMatch), idempotencyKey)
+                : tasks.complete(id, result, reason.stringValue(), lockVersion(ifMatch), idempotencyKey);
         return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
     }
 

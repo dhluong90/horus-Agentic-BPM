@@ -1,0 +1,6 @@
+<definitions xmlns="http://www.omg.org/spec/CMMN/20151109/MODEL" id="claim-case" name="Claim case">
+  <case id="c1" name="Claim">
+    <!-- one case file per claim -->
+    <casePlanModel id="cpm1" name="Claim file"/>
+  </case>
+</definitions>

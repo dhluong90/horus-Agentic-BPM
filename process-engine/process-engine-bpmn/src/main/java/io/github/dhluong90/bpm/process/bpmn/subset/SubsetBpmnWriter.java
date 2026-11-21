@@ -21,6 +21,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
+import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
@@ -154,7 +155,8 @@ public final class SubsetBpmnWriter {
         if (!inputs.isEmpty() || agent != null) {
             xml.line(3, "<bpmn:extensionElements>");
             for (InputMapping input : inputs) {
-                xml.line(4, "<horus:input name=" + attr(input.name()) + " value=" + attr(input.value()) + "/>");
+                xml.line(4, "<horus:input name=" + attr(input.name()) + " value=" + attr(input.value())
+                        + (input.mask() ? " mask=\"true\"" : "") + "/>");
             }
             if (agent != null && agent.outputSchema() != null) {
                 xml.line(4, "<horus:outputSchema>" + text(agent.outputSchema()) + "</horus:outputSchema>");
@@ -163,6 +165,11 @@ public final class SubsetBpmnWriter {
                 xml.line(4, "<horus:guardrail" + optional("decision", guardrail.decision())
                         + optional("onViolation", guardrail.onViolation()) + optional("reviewer", guardrail.reviewer())
                         + "/>");
+            }
+            RetryPolicy retry = agent == null ? null : node.extensions().first(RetryPolicy.class).orElse(null);
+            if (retry != null) {
+                xml.line(4, "<horus:retry" + optional("max", String.valueOf(retry.max()))
+                        + optional("backoff", retry.backoff() == null ? null : retry.backoff().toString()) + "/>");
             }
             xml.line(3, "</bpmn:extensionElements>");
         }

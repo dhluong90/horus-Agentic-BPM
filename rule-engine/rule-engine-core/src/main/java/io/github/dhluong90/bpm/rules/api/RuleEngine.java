@@ -83,6 +83,38 @@ public interface RuleEngine {
     }
 
     /**
+     * Evaluates up to {@code evaluation.max-batch} items of one rule set in one call (RLE-067). One version is
+     * selected for the whole batch at the request clock. Every evaluated item is a logged decision with its own id; an
+     * item that fails does not stop the others. The rows commit or roll back with the caller's transaction, or all
+     * together in the call's own.
+     *
+     * @param request the rule set and items
+     * @return one entry per item, in order
+     * @throws InputInvalidException when there are no items
+     * @throws BatchTooLargeException when there are more items than {@code evaluation.max-batch}
+     * @throws ClockNotAllowedException when the request sets a clock and the caller lacks {@code rules:simulate}
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws NoEffectiveVersionException when no published version is effective at the clock
+     * @throws IdempotencyKeyReuseException when the key was used with a different batch
+     * @throws IdempotencyInFlightException when a request with the same key is still running
+     * @throws UnsupportedOperationException from an implementation other than the engine's
+     */
+    default BatchResult evaluateBatch(BatchRequest request) {
+        throw new UnsupportedOperationException("evaluateBatch is not supported by " + getClass().getName());
+    }
+
+    /**
+     * Evaluates a batch at the engine clock with no correlation ids or idempotency key.
+     *
+     * @param ruleSet the rule set name
+     * @param inputs the items' inputs
+     * @return one entry per item, in order
+     */
+    default BatchResult evaluateBatch(String ruleSet, java.util.List<DecisionInput> inputs) {
+        return evaluateBatch(BatchRequest.of(ruleSet, inputs.stream().map(BatchRequest.Item::of).toList()));
+    }
+
+    /**
      * Replays real logged decisions of a rule set through a stored version, without logging anything (RLE-015). Each
      * decision the caller's tenant made in the period is evaluated twice at its logged clock: with the version it was
      * made with, loaded by number as {@link #replay(String)} does, and with the simulated version. The result counts

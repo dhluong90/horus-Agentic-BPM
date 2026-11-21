@@ -31,4 +31,19 @@ public interface DecisionPort {
      */
     DecisionOutcome evaluate(String tenantId, DecisionCaller caller, String decisionRef, Map<String, Object> inputs,
             Instant evaluationTime, String idempotencyKey, String correlationId);
+
+    /**
+     * Describes the version of a rule set in effect at an instant, in a tenant, without evaluating it: used at import
+     * and approval to check that a guardrail rule set meets its contract (PRE-016). Reads only. The default cannot
+     * describe anything, so a definition that needs a contract is refused (fail closed).
+     *
+     * @param tenantId the tenant resolved from the authenticated context; never from a request body
+     * @param decisionRef the rule set name
+     * @param at the engine clock
+     * @return the signature, or why there is none; never throws for a missing rule set
+     */
+    default DecisionSignature signature(String tenantId, String decisionRef, Instant at) {
+        return new DecisionSignature.Unavailable("SIGNATURE_UNAVAILABLE",
+                "The host's decision engine cannot describe rule set " + decisionRef);
+    }
 }

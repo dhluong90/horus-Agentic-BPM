@@ -351,6 +351,27 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public void insertIncident(IncidentRow i) {
+        jdbc.sql("INSERT INTO pre_incident (tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, "
+                        + "cause_summary, retry_count, status, lock_version, created_at, resolved_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                .params(i.tenantId(), i.id(), i.instanceId(), i.definitionId(), i.tokenId(), i.nodeId(), i.errorCode(),
+                        i.causeSummary(), i.retryCount(), i.status(), i.lockVersion(), ts(i.createdAt()),
+                        i.resolvedAt() == null ? null : ts(i.resolvedAt()))
+                .update();
+    }
+
+    @Override
+    public List<IncidentRow> openIncidents(String tenant, String instanceId) {
+        return ProcessListQueries.OPEN_INCIDENTS.list(jdbc, List.of(tenant, instanceId),
+                (rs, n) -> new IncidentRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("instance_id"), rs.getString("definition_id"), rs.getString("token_id"),
+                        rs.getString("node_id"), rs.getString("error_code"), rs.getString("cause_summary"),
+                        rs.getInt("retry_count"), rs.getString("status"), rs.getLong("lock_version"),
+                        instant(rs, "created_at"), instant(rs, "resolved_at")));
+    }
+
+    @Override
     public java.util.Set<String> historyActors(String tenant, String instanceId, String eventType) {
         return java.util.Set.copyOf(ProcessListQueries.HISTORY_ACTORS.list(jdbc, List.of(tenant, instanceId, eventType),
                 (rs, row) -> rs.getString("actor_id")));

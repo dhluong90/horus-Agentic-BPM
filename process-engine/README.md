@@ -105,10 +105,13 @@ AgentAdapter documentAssessor(AssessorClient client) {
         public String name() { return "documents.assess"; }
         public AdapterResult execute(AgentInvocation call) {
             // A retry is a new generation: key the model call by the attempt id, side effects by the job id.
-            return AdapterResult.completed(client.assess(call.inputs(), call.modelCallKey()));
+            // outputSchema() is the step's schema without its mask annotations, for structured output.
+            Assessment answer = client.assess(call.inputs(), call.outputSchema(), call.modelCallKey());
+            return AdapterResult.completed(answer.output(), Map.of("model", answer.model(),
+                    "usage.inputTokens", answer.inputTokens(), "usage.outputTokens", answer.outputTokens()));
         }
     };
 }
 ```
 
-The agent runs on its own runner (`runners.async-agent.*` above). An answer that breaks the schema is asked again once (`schema-retries`, default 1) and then refused with `AGENT_SCHEMA_INVALID`. The history keeps the answer masked: a value is kept only where the schema declares the field and does not mark it `mask: true`. The review task carries why the answer was refused, the inputs and the masked answer (`review` in the task view). `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos. The proof is `AgentTaskIT` and, end to end over HTTP, `GuardedAgentTaskIT` in `examples/rule-and-process`.
+The agent runs on its own runner (`runners.async-agent.*` above). An answer that breaks the schema is asked again once (`schema-retries`, default 1) and then refused with `AGENT_SCHEMA_INVALID`. The history keeps the answer masked: a value is kept only where the schema declares the field and does not mark it `mask: true`. The review task carries why the answer was refused, the inputs and the masked answer (`review` in the task view). The guardrail rule set must be published before the process is deployed: import, request-approval and approval refuse a guardrail that is missing in the tenant or breaks the contract (`422 GUARDRAIL_CONTRACT_INVALID`, PRE-016). A step may declare `<horus:retry max="2" backoff="PT1S"/>`; when no retry is left (a timeout is `AGENT_TIMEOUT`), the job fails and an incident opens in `pre_incident` (V13), read with `IncidentService.openIncidents`. An input marked `mask="true"` reaches the agent but history and the review task keep only its keyed fingerprint, made with the Rule Engine's masking key (`horus.bpm.masking.hmac-key`, from an environment variable or secret store) or `***` without one. The labels of `AdapterResult.completed(output, labels)` are recorded in history, bounded by `agents.labels.max-count` (16), `max-key-length` (64) and `max-value-length` (256). A reviewer's answer is recorded as `HUMAN_OVERRIDE` with the reason and what changed. `StubAgentAdapter` in `process-engine-test` answers with canned outputs for tests and demos, and `AgentInvocations.builder()` builds an invocation for your adapter's own tests. The proof is `AgentTaskIT` and, end to end over HTTP, `GuardedAgentTaskIT` in `examples/rule-and-process`.

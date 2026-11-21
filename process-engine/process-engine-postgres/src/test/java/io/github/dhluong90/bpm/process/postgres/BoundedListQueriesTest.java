@@ -106,7 +106,7 @@ class BoundedListQueriesTest {
         List<String> names = ProcessListQueries.all().stream().map(ListQuery::name).toList();
 
         assertThat(names).doesNotHaveDuplicates().contains("live-token-counts", "lock-definition-versions",
-                "definition-history", "instance-tokens", "instance-tasks", "definition-keys", "definition-keys-after",
+                "definition-history", "instance-tokens", "instance-tasks", "instance-open-incidents", "definition-keys", "definition-keys-after",
                 "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "instances-1",
                 "instances-3-key-range-after");
     }

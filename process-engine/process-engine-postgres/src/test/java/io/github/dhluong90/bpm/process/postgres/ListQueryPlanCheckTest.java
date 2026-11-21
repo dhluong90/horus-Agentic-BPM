@@ -101,6 +101,14 @@ class ListQueryPlanCheckTest {
                             + "'credit-review', 'DUE', ?::timestamptz + (g || ' minutes')::interval, interval '30 seconds', ? "
                             + "FROM generate_series(1, 2000) g")
                     .params(tenant, p, p, p, p, T, T).update();
+            // An open incident on every tenth application, the credit-review step failed for good
+            seed.sql("INSERT INTO pre_incident (tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, "
+                            + "cause_summary, status, created_at) SELECT ?, ? || 'IC' || lpad(g::text, 23, '0'), "
+                            + "? || 'IN' || lpad(g::text, 23, '0'), ? || 'DEF' || lpad('2', 22, '0'), "
+                            + "? || 'TF' || lpad(g::text, 23, '0'), 'credit-review', 'ADAPTER_FAILED', "
+                            + "'ADAPTER_FAILED after 3 attempts', CASE WHEN g % 20 = 0 THEN 'RESOLVED' ELSE 'OPEN' END, ? "
+                            + "FROM generate_series(10, 5000, 10) g")
+                    .params(tenant, p, p, p, p, T).update();
             // 20,000 history rows, the table a careless report would group over
             seed.sql("INSERT INTO pre_history (tenant_id, occurred_at, id, instance_id, definition_id, event_type, node_id, "
                             + "details) SELECT ?, ?::timestamptz - (g || ' seconds')::interval, ? || 'HI' || lpad(g::text, 23, '0'), "
@@ -131,6 +139,7 @@ class ListQueryPlanCheckTest {
         samples.put("definition-history", List.of("bank-a", DEFINITION));
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));
         samples.put("instance-tasks", List.of("bank-a", INSTANCE));
+        samples.put("instance-open-incidents", List.of("bank-a", INSTANCE));
         samples.put("definition-keys", List.of(T, "bank-a", 50));
         samples.put("definition-keys-after", List.of(T, "bank-a", "card-dispute", 50));
         samples.put("claim-timers", List.of(T, T, 20, "replica-1", T));

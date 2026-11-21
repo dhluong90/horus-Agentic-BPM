@@ -4,11 +4,13 @@ import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
 import io.github.dhluong90.bpm.process.internal.service.DecisionCaller;
 import io.github.dhluong90.bpm.process.internal.service.DecisionOutcome;
 import io.github.dhluong90.bpm.process.internal.service.DecisionPort;
+import io.github.dhluong90.bpm.process.internal.service.DecisionSignature;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.DecisionRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionResult;
 import io.github.dhluong90.bpm.rules.api.HorusBpmException;
 import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
+import io.github.dhluong90.bpm.rules.embedded.RuleSetSignature;
 import io.github.dhluong90.bpm.rules.embedded.TenantScopedRuleEngine;
 import java.time.Instant;
 import java.util.Map;
@@ -96,5 +98,28 @@ final class RuleEngineDecisionPort implements DecisionPort {
             case DecisionResult.Failed f -> new DecisionOutcome.Failed(f.code(), f.detail() + " (decision "
                     + result.decisionId() + ")");
         };
+    }
+
+    /**
+     * PRE-016: the hit policy, inputs and outputs of the guardrail rule set's version in effect, read through the
+     * tenant-scoped entry point in the tenant the engine resolved. Without the entry point, or when the Rule Engine
+     * refuses (rule set missing, no version in effect, integrity failure), the answer is {@code Unavailable} and the
+     * definition is refused.
+     */
+    @Override
+    public DecisionSignature signature(String tenantId, String decisionRef, Instant at) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        Objects.requireNonNull(at, "at must not be null");
+        if (engineWork.isEmpty()) {
+            return new DecisionSignature.Unavailable("TENANT_NOT_ALLOWED", "The host's Rule Engine has no "
+                    + "tenant-scoped entry point for the Process Engine");
+        }
+        try {
+            RuleSetSignature found = engineWork.get().signature(tenantId, decisionRef, at);
+            return new DecisionSignature.Found(found.ruleSet(), found.version(), found.hitPolicy(), found.inputs(),
+                    found.outputs(), found.rejectsUndeclaredInputs());
+        } catch (HorusBpmException e) {
+            return new DecisionSignature.Unavailable(e.code(), e.getMessage());
+        }
     }
 }

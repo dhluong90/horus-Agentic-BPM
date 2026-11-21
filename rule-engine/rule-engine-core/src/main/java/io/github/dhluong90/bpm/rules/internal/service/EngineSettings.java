@@ -44,6 +44,8 @@ import java.util.List;
  * @param acknowledgeWarnings {@code horus.bpm.rules.lifecycle.acknowledge-warnings}: the warning codes an approval
  *     must acknowledge (RLE-053, PD-104), at most {@value EngineDefaults#ACKNOWLEDGE_WARNINGS_MAX}, each a code this
  *     release raises ({@code VersionWarning.CODES}); default {@code [UNMASKED_PERSONAL_DATA]}; may be empty
+ * @param maxBatch {@code horus.bpm.rules.evaluation.max-batch}, 1 to {@value EngineDefaults#BATCH_MAX_ITEMS}: the most items
+ *     one {@code :evaluate-batch} accepts (RLE-068); may be lowered, never raised
  * @param evaluationLimits the step budget and time backstop of one decision (TR-SEC-01); null means the defaults. The
  *     same limits apply at evaluation and to the worst-case check of import and request-publish
  */
@@ -51,9 +53,10 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         boolean rejectUndeclaredInputs, int queryMaxPageSize, int reasonMaxLength, int maxOutputBytes,
         int maxStringLength, int maxRows, RegexLimits regexLimits, boolean draftAuthoring, boolean pinRetired,
         String systemActor, String retireApproval, String retireLastVersion, int simulationMaxInputs,
-        List<String> acknowledgeWarnings, EvaluationLimits evaluationLimits) {
+        List<String> acknowledgeWarnings, EvaluationLimits evaluationLimits, int maxBatch) {
 
     public EngineSettings {
+        requireLowerOnly("horus.bpm.rules.evaluation.max-batch", maxBatch, EngineDefaults.BATCH_MAX_ITEMS);
         if (regexLimits == null) {
             throw new IllegalArgumentException("regexLimits must not be null");
         }
@@ -144,7 +147,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         this(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs, queryMaxPageSize,
                 reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring, pinRetired,
                 systemActor, retireApproval, retireLastVersion, simulationMaxInputs, acknowledgeWarnings,
-                EvaluationLimits.defaults());
+                EvaluationLimits.defaults(), EngineDefaults.BATCH_MAX_ITEMS);
     }
 
     /**
@@ -213,7 +216,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
                 pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
-                codes, evaluationLimits);
+                codes, evaluationLimits, maxBatch);
     }
 
     /**
@@ -393,7 +396,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, reject, queryMaxPageSize,
                 reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring, pinRetired,
                 systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -411,7 +414,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
                         : new RegexLimits(regexLimits.timeoutMillis(), stringLength, regexLimits.maxReads(),
                                 regexLimits.maxReadsPerDecision(), regexLimits.maxReadsPerRequest()),
                 draftAuthoring, pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -436,7 +439,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, limits, draftAuthoring,
                 pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -449,7 +452,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, enabled,
                 pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -462,7 +465,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits,
                 draftAuthoring, allowed, systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -476,7 +479,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
                 pinRetired, actor, approval, retireLastVersion, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -489,7 +492,7 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
                 pinRetired, systemActor, retireApproval, mode, simulationMaxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
     }
 
     /**
@@ -502,7 +505,20 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
                 pinRetired, systemActor, retireApproval, retireLastVersion, maxInputs,
-                acknowledgeWarnings, evaluationLimits);
+                acknowledgeWarnings, evaluationLimits, maxBatch);
+    }
+
+    /**
+     * Returns a copy with {@code evaluation.max-batch} set.
+     *
+     * @param items the most items of one batch evaluation, 1 to {@value EngineDefaults#BATCH_MAX_ITEMS}
+     * @return the settings
+     */
+    public EngineSettings withMaxBatch(int items) {
+        return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
+                queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
+                pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs,
+                acknowledgeWarnings, evaluationLimits, items);
     }
 
     /**
@@ -515,6 +531,6 @@ public record EngineSettings(int cacheMaxEntries, Duration idempotencyRetention,
         return new EngineSettings(cacheMaxEntries, idempotencyRetention, maxInputScale, rejectUndeclaredInputs,
                 queryMaxPageSize, reasonMaxLength, maxOutputBytes, maxStringLength, maxRows, regexLimits, draftAuthoring,
                 pinRetired, systemActor, retireApproval, retireLastVersion, simulationMaxInputs, acknowledgeWarnings,
-                limits);
+                limits, maxBatch);
     }
 }

@@ -64,6 +64,13 @@ final class ProcessListQueries {
             new Bound.ParentKey("instance_id", "the tasks of one instance, at most a few per user task node"),
             "SELECT " + TASK_COLUMNS + " FROM pre_task WHERE tenant_id = ? AND instance_id = ? ORDER BY created_at, id");
 
+    /** The open incidents of one instance, oldest first (#58), on {@code idx_pre_incident_instance} (V13). */
+    static final ListQuery OPEN_INCIDENTS = new ListQuery("instance-open-incidents",
+            new Bound.ParentKey("instance_id", "the open incidents of one instance, at most one per failed step"),
+            "SELECT tenant_id, id, instance_id, definition_id, token_id, node_id, error_code, cause_summary, "
+                    + "retry_count, status, lock_version, created_at, resolved_at FROM pre_incident "
+                    + "WHERE tenant_id = ? AND instance_id = ? AND status = 'OPEN' ORDER BY created_at, id");
+
     /** The first page of definition keys. */
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
@@ -86,7 +93,7 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, DEFINITION_KEYS,
+        return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, OPEN_INCIDENTS, DEFINITION_KEYS,
                 DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true));

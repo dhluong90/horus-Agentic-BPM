@@ -148,7 +148,7 @@ final class TestEngine {
                         .map(io.github.dhluong90.bpm.process.spi.ServiceAdapter::name), b.extraAdapterNames.stream())
                         .collect(Collectors.toSet()), b.agents.stream()
                         .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
-                b.outputSchemas);
+                b.outputSchemas, b.inputMasker, b.labelLimits);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
         List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();
         runners.add(new io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner(b.adapters.stream()
@@ -201,6 +201,10 @@ final class TestEngine {
         private DataSource dataSource;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
                 new io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator();
+        private io.github.dhluong90.bpm.process.spi.InputMasker inputMasker =
+                io.github.dhluong90.bpm.process.spi.InputMasker.REDACT;
+        private io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits labelLimits =
+                io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits.DEFAULTS;
 
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
@@ -279,6 +283,16 @@ final class TestEngine {
         /** Uses this data source (already migrated through {@link TestEngine#dataSource()}) instead of the shared one. */
         Builder dataSource(DataSource value) {
             dataSource = value;
+            return this;
+        }
+
+        Builder inputMasker(io.github.dhluong90.bpm.process.spi.InputMasker value) {
+            inputMasker = value;
+            return this;
+        }
+
+        Builder labelLimits(io.github.dhluong90.bpm.process.internal.service.AgentLabelLimits value) {
+            labelLimits = value;
             return this;
         }
 
@@ -388,7 +402,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
+                + "TRUNCATE pre_incident, pre_timer, pre_history, pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();
     }

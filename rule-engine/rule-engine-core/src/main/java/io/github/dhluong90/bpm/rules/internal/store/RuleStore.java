@@ -261,6 +261,17 @@ public interface RuleStore {
     List<VersionInputs> liveVersionInputs();
 
     /**
+     * Lists the declared inputs of every version of one rule set of a tenant, in any status, newest version first, at
+     * most 1,000 versions. Read by the plain-input search to learn whether an input is declared, of which type and
+     * whether it is masked (RLE-071); a rule set the tenant does not have gives an empty list.
+     *
+     * @param tenantId the tenant
+     * @param ruleSet the rule set name
+     * @return the {@code inputs} array of each version's canonical document, as JSON text
+     */
+    List<String> declaredInputs(String tenantId, String ruleSet);
+
+    /**
      * Returns the check value recorded for a masking key id, recording {@code checkValue} first when the id is not
      * known yet. Every replica gets the same answer: the first insert wins and later ones read it. Engine-internal,
      * used once at start-up outside any request; a check value is not secret.

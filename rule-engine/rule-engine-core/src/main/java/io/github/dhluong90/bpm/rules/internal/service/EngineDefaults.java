@@ -126,6 +126,19 @@ public final class EngineDefaults {
     public static final int SIMULATION_MAX_SAMPLES = 1_000;
 
     /**
+     * Default and ceiling of {@code evaluation.max-batch}: the most items one {@code :evaluate-batch} accepts
+     * (RLE-068). May be lowered, never raised.
+     */
+    public static final int BATCH_MAX_ITEMS = 1_000;
+
+    /**
+     * Largest {@code :evaluate-batch} body, in bytes (4 MiB, RLE-068). A safety bound of the REST layer, not a
+     * setting; a larger body is {@code 413 PAYLOAD_TOO_LARGE}, refused before it is read when the declared length
+     * says so.
+     */
+    public static final int BATCH_BODY_MAX_BYTES = 4_194_304;
+
+    /**
      * How long a replica keeps the cursor key before reading it again from {@code rle_engine_key}. Deleting the row
      * rotates the key; every replica uses the new key within this time, and one that meets a cursor it cannot
      * verify re-reads at once. A bound of the engine, not a setting.

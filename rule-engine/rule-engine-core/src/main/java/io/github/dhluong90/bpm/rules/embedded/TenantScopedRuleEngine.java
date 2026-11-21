@@ -66,4 +66,20 @@ public interface TenantScopedRuleEngine {
      */
     DecisionResult evaluate(String tenantId, String onBehalfOf, java.time.Instant evaluationTime,
             DecisionRequest request);
+
+    /**
+     * Describes the version of a rule set effective at an instant, in the given tenant: its hit policy and its declared
+     * inputs and outputs, never its rules. Reads only; writes no decision. Used by the calling engine to check that a
+     * rule set it will rely on meets its contract before it accepts a definition that names it (PRE-016).
+     *
+     * @param tenantId the tenant, resolved by the calling engine from the authenticated context or its stored
+     *     aggregate; not blank
+     * @param ruleSet the rule set name
+     * @param at the instant that selects the version in force
+     * @return the signature of the effective version
+     * @throws IllegalArgumentException when the tenant is blank or the instant is null
+     * @throws RuleSetNotFoundException when the tenant has no such rule set ({@code RULE_SET_NOT_FOUND})
+     * @throws NoEffectiveVersionException when no published version is effective ({@code NO_EFFECTIVE_VERSION})
+     */
+    RuleSetSignature signature(String tenantId, String ruleSet, java.time.Instant at);
 }

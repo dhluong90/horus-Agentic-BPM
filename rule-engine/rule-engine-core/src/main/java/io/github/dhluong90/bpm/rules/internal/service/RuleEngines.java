@@ -61,7 +61,7 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
                 new DefaultVersionService(context, store, outbox, keys, supersession, cache, meters), keys,
                 new DefaultDecisionLogService(context, log, outbox), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),
-                new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, keys, querySettings),
+                new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, store, keys, querySettings),
                 cache, meters);
     }
 

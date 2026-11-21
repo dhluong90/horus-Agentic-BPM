@@ -533,6 +533,21 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     @Override
+    public List<String> declaredInputs(String tenantId, String ruleSet) {
+        // Tenant first, then the rule set by its unique name; at most 1,000 versions, newest first (RLE-071).
+        return jdbc.sql("""
+                SELECT (v.canonical_json -> 'inputs')::text AS inputs
+                FROM rle_version v
+                JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                WHERE v.tenant_id = :tenant AND s.tenant_id = :tenant AND s.name = :ruleSet
+                ORDER BY v.version_num DESC
+                LIMIT 1000
+                """)
+                .param("tenant", tenantId).param("ruleSet", ruleSet)
+                .query(String.class).list();
+    }
+
+    @Override
     public Map<String, String> settingsSeen(String setting) {
         // Engine-internal, across tenants on purpose: read once at start-up, outside any request (RLE-052).
         Map<String, String> seen = new java.util.TreeMap<>();

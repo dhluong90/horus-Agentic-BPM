@@ -335,10 +335,12 @@ public record RuleEngineProperties(
      *     the ceiling, which is 1000 items times the per-decision ceiling
      * @param pinRetired whether a pinned evaluation ({@code rules:pin}) may name a {@code RETIRED} version; default
      *     false. Replay of a logged decision is not affected
+     * @param maxBatch most items one {@code :evaluate-batch} accepts, 1 to 1000; default 1000. Lower only
      */
     public record Evaluation(Integer maxInputScale, Boolean rejectUndeclaredInputs, Integer maxOutputBytes,
             Integer maxStringLength, Integer maxRows, Integer regexTimeoutMs, Integer regexMaxInputLength,
-            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Long regexMaxReadsPerRequest, Boolean pinRetired) {
+            Integer regexMaxReads, Integer regexMaxReadsPerDecision, Long regexMaxReadsPerRequest, Boolean pinRetired,
+            Integer maxBatch) {
     }
 
     /**
@@ -443,6 +445,7 @@ public record RuleEngineProperties(
                 .withLifecycle(
                         lifecycle.systemActor() == null ? EngineDefaults.SYSTEM_ACTOR : lifecycle.systemActor(),
                         EngineDefaults.RETIRE_APPROVAL)
+                .withMaxBatch(evaluation.maxBatch() == null ? EngineDefaults.BATCH_MAX_ITEMS : evaluation.maxBatch())
                 .withSimulationMaxInputs(
                         simulation.maxInputs() == null ? EngineDefaults.SIMULATION_MAX_SAMPLES : simulation.maxInputs())
                 .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
