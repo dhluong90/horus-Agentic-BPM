@@ -92,6 +92,15 @@ final class RuleListQueries {
                     LIMIT :limit
                     """);
 
+    /**
+     * The first page of the versions waiting for a second person, oldest request first, of every rule set of one
+     * tenant (#31, RLE-190), on {@code idx_rle_version_pending (tenant_id, requested_at, id)} (V30); keyset on
+     * {@code (requested_at, id)}, never {@code OFFSET}. The definition and source are not read.
+     */
+    static final ListQuery PENDING_APPROVALS = pendingApprovals(false);
+    /** A later page, after the last version of the previous page. */
+    static final ListQuery PENDING_APPROVALS_AFTER = pendingApprovals(true);
+
     /** The lifecycle actions of one version, oldest first. */
     static final ListQuery VERSION_HISTORY = new ListQuery("version-history",
             new Bound.ParentKey("version_id", "the lifecycle actions of one version, on idx_rle_version_history_version"),
@@ -302,11 +311,25 @@ final class RuleListQueries {
 
     /** Every registered query; a decision log search registers its smallest and its fullest form. */
     static List<ListQuery> all() {
-        return List.of(CACHE_EPOCHS, RULE_SETS, VERSIONS, VERSION_HISTORY, HISTORY_VERSIONS, VERSIONS_BY_NUMBER,
+        return List.of(CACHE_EPOCHS, RULE_SETS, VERSIONS, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, VERSION_HISTORY, HISTORY_VERSIONS, VERSIONS_BY_NUMBER,
                 HISTORY_OF_VERSIONS, RULE_SET_EVENTS, DECLARED_INPUTS, MASKED_BY_DEFAULT, RETIRE_SUPERSEDED,
                 MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, VERSION_FUNCTIONS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
                 DECISIONS_BY_LOGGED_INPUT, DECISION_COUNT, byCorrelation(false, false), byCorrelation(true, true),
                 byInput(false), byInput(true));
+    }
+
+    /** Parameters: tenant, [afterAt, afterId], limit. */
+    private static ListQuery pendingApprovals(boolean after) {
+        return new ListQuery(after ? "pending-approvals-after" : "pending-approvals",
+                new Bound.Page("oldest request first on idx_rle_version_pending (tenant_id, requested_at, id)"),
+                """
+                        SELECT v.id, s.name, v.version_num, v.canonical_hash, v.lock_version, v.created_by,
+                          v.requested_by, v.requested_at
+                        FROM rle_version v
+                        JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                        WHERE v.tenant_id = :tenant AND v.status = 'PENDING_APPROVAL'
+                        """ + (after ? "  AND (v.requested_at, v.id) > (:afterAt, :afterId)\n" : "")
+                        + "ORDER BY v.requested_at, v.id\nLIMIT :limit\n");
     }
 
     /**

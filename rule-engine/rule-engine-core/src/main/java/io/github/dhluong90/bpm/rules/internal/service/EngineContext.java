@@ -102,6 +102,11 @@ public record EngineContext(
         return callers.currentPermissions().contains(permission);
     }
 
+    /** The permissions of the current caller, for a list that shows what the caller may do. */
+    java.util.Set<String> permissions() {
+        return callers.currentPermissions();
+    }
+
     String caller() {
         String caller = callers.currentCallerId();
         if (caller == null || caller.isBlank()) {

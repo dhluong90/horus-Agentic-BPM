@@ -71,9 +71,9 @@ class RuleListQueryPlanCheckTest {
                             + "canonical_json, canonical_hash, source_format, source_document, source_hash, lock_version, "
                             + "requested_by, requested_at, approved_by, approved_at, created_by, created_at) "
                             + "SELECT ?, ? || 'VR' || lpad((s * 10 + v)::text, 22, '0'), ? || 'RS' || lpad(s::text, 22, '0'), v, "
-                            + "CASE WHEN v = 4 THEN 'PUBLISHED' ELSE 'DRAFT' END, 'FIRST', ?, "
+                            + "CASE WHEN v = 4 THEN 'PUBLISHED' WHEN v = 3 AND s <= 10 THEN 'PENDING_APPROVAL' ELSE 'DRAFT' END, 'FIRST', ?, "
                             + "'{\"inputs\":[{\"name\":\"tier\"}]}'::jsonb, repeat('a', 64), 'JSON', '{}', repeat('b', 64), 1, "
-                            + "CASE WHEN v = 4 THEN 'ana' END, CASE WHEN v = 4 THEN ?::timestamptz END, "
+                            + "CASE WHEN v >= 3 THEN 'ana' END, CASE WHEN v >= 3 THEN ?::timestamptz + (s || ' minutes')::interval END, "
                             + "CASE WHEN v = 4 THEN 'minh' END, CASE WHEN v = 4 THEN ?::timestamptz END, 'ana', ? "
                             + "FROM generate_series(1, 40) s, generate_series(1, 4) v")
                     .params(tenant, p, p, at, at, at, at).update();
@@ -120,6 +120,9 @@ class RuleListQueryPlanCheckTest {
         samples.put("cache-epochs", ListQuery.params("tenant", "bank-a", "names", List.of("rule-set-0001", "rule-set-0002")));
         samples.put("rule-sets", ListQuery.params("tenant", "bank-a", "after", "rule-set-0010", "limit", 50, "now", now));
         samples.put("versions", ListQuery.params("tenant", "bank-a", "ruleSetId", RULE_SET, "before", 4, "limit", 50));
+        samples.put("pending-approvals", ListQuery.params("tenant", "bank-a", "limit", 51));
+        samples.put("pending-approvals-after", ListQuery.params("tenant", "bank-a", "afterAt", now,
+                "afterId", "A" + "VR" + "%022d".formatted(0), "limit", 51));
         samples.put("version-history", ListQuery.params("tenant", "bank-a", "versionId", VERSION));
         samples.put("history-versions", ListQuery.params("tenant", "bank-a", "ruleSetId", RULE_SET, "before", 4, "limit", 50));
         samples.put("versions-by-number", ListQuery.params("tenant", "bank-a", "ruleSetId", RULE_SET, "numbers", List.of(1, 2)));
@@ -189,6 +192,30 @@ class RuleListQueryPlanCheckTest {
         assertThat(partitions(plan(RuleListQueries.DECISION_SEARCH, across)))
                 .containsExactly("rle_decision_2027_01", "rle_decision_2027_02");
         assertThat(partitions(plan(RuleListQueries.DECISION_SEARCH, january))).containsExactly("rle_decision_2027_01");
+    }
+
+    @Test
+    void RLE_190_the_pending_approvals_pages_read_the_partial_index_in_order_without_a_sort() {
+        // Given the first and a later page of the pending approvals list, planned the way a large queue is: the
+        // seed holds few pending rows, where a bitmap scan and a small sort are the cheaper plan
+        Map<String, Map<String, Object>> samples = samples();
+        jdbc.sql("SET enable_bitmapscan = off").update();
+        try {
+            for (String name : List.of("pending-approvals", "pending-approvals-after")) {
+                ListQuery query = RuleListQueries.all().stream().filter(q -> q.name().equals(name)).findFirst()
+                        .orElseThrow();
+                List<JsonNode> nodes = new ArrayList<>();
+                collect(plan(query, samples.get(name)), nodes);
+
+                // Then the plan walks idx_rle_version_pending (V30) in (requested_at, id) order: no Sort node, and the
+                // keyset position is an index condition, not a filter
+                assertThat(nodes).as(name).anySatisfy(n -> assertThat(n.path("Index Name").asString(""))
+                        .isEqualTo("idx_rle_version_pending"));
+                assertThat(nodes).as(name).noneMatch(n -> n.path("Node Type").asString("").equals("Sort"));
+            }
+        } finally {
+            jdbc.sql("RESET enable_bitmapscan").update();
+        }
     }
 
     @Test
