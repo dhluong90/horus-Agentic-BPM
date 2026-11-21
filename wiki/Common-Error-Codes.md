@@ -221,7 +221,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `422`. `POST /rule-sets/{name}/evidence` would produce a file over 8,388,608 bytes, or a chosen version has more than 10,000 history events. Export fewer decisions or versions at a time; nothing was written and no export was recorded.
 
 ### READINGS_TOO_LARGE
-`422`. A request for plain-language readings covers more than 500 rows (`GET /rule-sets/{name}/versions/{v}/readings`, `GET .../diff/readings`) or 500 samples (`POST .../:simulate-readings`). Nothing is cut short; read one rule set or fewer samples at a time. Nothing was written.
+`422`. A request for plain-language readings covers more than 500 rows (`GET /rule-sets/{name}/versions/{v}/readings`, `GET .../diff/readings`) or 500 samples (`POST .../:simulate-readings`). Nothing is cut short; read one rule set or fewer samples at a time. Nothing was written. `:validate` never answers it: a valid draft of any legal size is `200`, with `readingsTruncated: true` above 500 rows.
 
 ## Process Engine
 

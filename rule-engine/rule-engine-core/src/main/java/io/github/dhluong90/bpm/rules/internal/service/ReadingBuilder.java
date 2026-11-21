@@ -205,12 +205,21 @@ final class ReadingBuilder {
         }
 
         /**
+         * Whether the table has no more rows than one readings request covers.
+         *
+         * @return true when it can be read
+         */
+        boolean readable() {
+            return rules.size() <= EngineDefaults.READINGS_MAX;
+        }
+
+        /**
          * Refuses a table with more rows than one request reads.
          *
          * @throws ReadingsTooLargeException when the table is larger than {@link EngineDefaults#READINGS_MAX}
          */
         void requireReadable() {
-            if (rules.size() > EngineDefaults.READINGS_MAX) {
+            if (!readable()) {
                 throw new ReadingsTooLargeException("rows", rules.size(), EngineDefaults.READINGS_MAX);
             }
         }

@@ -298,6 +298,9 @@ export const draftValidation = z
     problems: z.array(validationProblem),
     problemsTruncated: z.boolean(),
     readings: z.array(ruleReading),
+    /** True when the draft is valid but too large for readings: `readings` is then empty and `readingsReason` says why. */
+    readingsTruncated: z.boolean().optional(),
+    readingsReason: z.string().nullable().optional(),
   })
   .loose();
 export type DraftValidation = z.infer<typeof draftValidation>;

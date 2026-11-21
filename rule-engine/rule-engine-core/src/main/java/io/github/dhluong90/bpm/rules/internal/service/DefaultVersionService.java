@@ -330,7 +330,11 @@ public final class DefaultVersionService implements VersionService {
                 boolean maskByDefault = context.masking().maskByDefault(tenant);
                 ReadingBuilder.Table table = reader.table(ruleSet, version, parsed.model(),
                         EngineValues.read(parsed.canonicalJson()), maskByDefault);
-                table.requireReadable();
+                if (!table.readable()) {
+                    // a legal draft of up to RULES_MAX rows is valid whatever its size: only its readings are left out
+                    return new DraftValidation(ruleSet, version, true, List.of(), false, List.of(), true,
+                            DraftValidation.TABLE_TOO_LARGE);
+                }
                 return new DraftValidation(ruleSet, version, true, List.of(), false, table.rows().stream()
                         .map(row -> new DraftValidation.Reading(row.ruleId(), row.readings().entrySet().stream()
                                 .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey,

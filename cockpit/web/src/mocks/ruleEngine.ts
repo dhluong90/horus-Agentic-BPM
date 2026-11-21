@@ -507,7 +507,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (!checked.ok) {
       const refused = JSON.parse(checked.response.body) as { code?: string };
       if (refused.code !== 'VALIDATION_FAILED') return checked.response;
-      return json({ ruleSet: v.ruleSet, version: v.version, valid: false, problems: [{ ruleId: null, column: null, code: 'DOCUMENT_INVALID', position: null, message: PROBLEM_CATALOGUE['DOCUMENT_INVALID'] }], problemsTruncated: false, readings: [] });
+      return json({ ruleSet: v.ruleSet, version: v.version, valid: false, problems: [{ ruleId: null, column: null, code: 'DOCUMENT_INVALID', position: null, message: PROBLEM_CATALOGUE['DOCUMENT_INVALID'] }], problemsTruncated: false, readings: [], readingsTruncated: false, readingsReason: null });
     }
     const found = validate(checked.document);
     const problems = found.slice(0, PROBLEM_LIMIT).map((f) => ({
@@ -515,11 +515,13 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       message: PROBLEM_CATALOGUE[f.code] ?? PROBLEM_CATALOGUE[f.column !== null ? 'RULE_INVALID' : 'DOCUMENT_INVALID'],
     }));
     // The engine reads a valid draft with the reader of RLE-091 and answers each row's full sentence.
-    const readings = found.length > 0 ? [] : checked.document.rules.map((rule) => {
+    // A table of more than READINGS_MAX rows is still valid: only its readings are left out, with a reason.
+    const tooLarge = found.length === 0 && checked.document.rules.length > READINGS_MAX;
+    const readings = found.length > 0 || tooLarge ? [] : checked.document.rules.map((rule) => {
       const read = readRule(rule, checked.document);
       return { ruleId: rule.id, text: { en: read.en.full, vi: read.vi.full } };
     });
-    return json({ ruleSet: v.ruleSet, version: v.version, valid: found.length === 0, problems, problemsTruncated: found.length > PROBLEM_LIMIT, readings });
+    return json({ ruleSet: v.ruleSet, version: v.version, valid: found.length === 0, problems, problemsTruncated: found.length > PROBLEM_LIMIT, readings, readingsTruncated: tooLarge, readingsReason: tooLarge ? 'TABLE_TOO_LARGE' : null });
   }
 
   /** replaceDraft: only the draft's author, with the lock version they loaded; a refused document stores nothing. */

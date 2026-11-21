@@ -208,6 +208,12 @@ final class RestSupport {
             ObjectNode text = item.putObject("text");
             new java.util.TreeMap<>(r.text()).forEach(text::put);
         }
+        node.put("readingsTruncated", result.readingsTruncated());
+        if (result.readingsReason() == null) {
+            node.putNull("readingsReason");
+        } else {
+            node.put("readingsReason", result.readingsReason());
+        }
         return node;
     }
 

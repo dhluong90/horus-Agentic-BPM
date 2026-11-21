@@ -310,6 +310,16 @@ describe('draft editing calls', () => {
     expect((stale as HostCallError).hostError).toMatchObject({ kind: 'problem', status: 409, code: 'VERSION_CONFLICT' });
   });
 
+  it('CKP_006_a_valid_draft_of_501_rows_is_valid_with_its_readings_left_out_not_refused', async () => {
+    const { fetchImpl } = engineFetch('lan');
+    const client = createRulesClient('', fetchImpl);
+    const base = await client.copyVersion('card-fee', 1, 'copy-big');
+    const rules = Array.from({ length: 501 }, (_, i) => ({ id: `R${String(i + 1)}`, when: { tier: `== 'T${String(i + 1)}'` }, then: { fee: '10000 VND' } }));
+    const text = JSON.stringify({ ...base.definition, rules });
+    const checked = await client.validateDraft('card-fee', base.version, { contentType: 'application/yaml', text });
+    expect(checked).toMatchObject({ valid: true, problems: [], readings: [], readingsTruncated: true, readingsReason: 'TABLE_TOO_LARGE' });
+  });
+
   it('CKP_006_an_approved_version_cannot_be_checked_or_replaced', async () => {
     const { fetchImpl } = engineFetch('lan');
     const client = createRulesClient('', fetchImpl);

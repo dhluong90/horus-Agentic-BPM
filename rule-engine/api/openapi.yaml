@@ -464,7 +464,14 @@ paths:
         Each problem carries a stable `code` and a `message` in every language of the engine's message catalogue
         (`en` and `vi` ship). The message is written from the catalogue and the code alone; it never repeats text of
         the cell, so a masked value is never echoed. `readings` has one entry per rule when the document is valid and
-        is empty otherwise; a reading of a condition on a masked input says that the value is masked.
+        has at most 500 rows, and is empty otherwise; a reading of a condition on a masked input says that the value
+        is masked.
+
+        What the answer can be, exactly: `200` with `valid: true` and the readings; `200` with `valid: true`,
+        `readings: []`, `readingsTruncated: true` and `readingsReason: TABLE_TOO_LARGE` for a valid table of 501 to
+        5,000 rows; `200` with `valid: false`, the problems and `readings: []`. It is never `422 READINGS_TOO_LARGE`
+        (only the readings endpoints answer that). `readingsTruncated` is false and `readingsReason` null in the
+        other two cases.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -511,6 +518,8 @@ paths:
                       vi: Ô này trộn các giá trị khác kiểu, hoặc không phải là điều kiện đúng hoặc sai.
                 problemsTruncated: false
                 readings: []
+                readingsTruncated: false
+                readingsReason: null
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -3070,7 +3079,7 @@ components:
           examples: [8]
     DraftValidation:
       type: object
-      required: [ruleSet, version, valid, problems, problemsTruncated, readings]
+      required: [ruleSet, version, valid, problems, problemsTruncated, readings, readingsTruncated, readingsReason]
       properties:
         ruleSet: { type: string }
         version: { type: integer, minimum: 1 }
@@ -3087,9 +3096,20 @@ components:
           description: True when more problems were found than `problems` lists
         readings:
           type: array
-          description: One entry per rule, in document order, when `valid`; empty otherwise
+          description: |
+            One entry per rule, in document order, when `valid` and the table has at most 500 rows; empty
+            otherwise (when not `valid`, or when `readingsTruncated` is true)
           items:
             $ref: '#/components/schemas/RuleReading'
+        readingsTruncated:
+          type: boolean
+          description: |
+            True when the document is `valid` but has more than 500 rows, so `readings` is left out. The
+            validation itself is never refused for size: a draft may have up to 5,000 rows.
+        readingsReason:
+          type: [string, 'null']
+          enum: [TABLE_TOO_LARGE, null]
+          description: Why `readings` is left out; `TABLE_TOO_LARGE`, or null when `readingsTruncated` is false
     ValidationProblem:
       type: object
       required: [ruleId, column, code, position, message]
