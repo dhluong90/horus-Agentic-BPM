@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
 import io.github.dhluong90.bpm.process.api.MigrationPlan;
 import io.github.dhluong90.bpm.process.api.MigrationService;
+import io.github.dhluong90.bpm.process.api.IncidentService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
@@ -54,6 +55,7 @@ import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
 import io.github.dhluong90.bpm.process.rest.AgentReplayController;
 import io.github.dhluong90.bpm.process.rest.MigrationController;
+import io.github.dhluong90.bpm.process.rest.IncidentController;
 import io.github.dhluong90.bpm.process.rest.ProcessController;
 import io.github.dhluong90.bpm.process.rest.ProcessProblemDetails;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
@@ -110,7 +112,7 @@ public class ProcessEngineAutoConfiguration {
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
             "processes:step:complete", "processes:agent:replay", "processes:task:manage", "processes:calendar:manage",
-            "processes:migration:manage");
+            "processes:migration:manage", "processes:incident:manage");
     /** Setting published in {@code /api/bpm/meta}: the approval a migration plan's execution needs (PD-131). */
     static final String MIGRATION_APPROVAL_SETTING = "migration.approval";
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
@@ -425,6 +427,18 @@ public class ProcessEngineAutoConfiguration {
             LOG.warn("Migration plans are executed by one person (horus.bpm.processes.migration.approval=single, dev "
                     + "profile): no second person approves moving running instances.");
         }
+        if (!properties.approval().requireContentHash()) {
+            // PD-139: an approval that names no reviewed content is a relaxation of maker-checker.
+            requireDevProfileOnly(environment, "horus.bpm.processes.approval.require-content-hash=false");
+            LOG.warn("Process definition approvals need not name the reviewed content (horus.bpm.processes.approval"
+                    + ".require-content-hash=false, dev profile).");
+        }
+        if (properties.incidents().toSetting() == EngineSettings.ResolveApproval.SINGLE) {
+            // PD-126: one person resolving an incident with an output of their choosing is a maker-checker gap.
+            requireDevProfileOnly(environment, "horus.bpm.processes.incidents.resolve-approval=single");
+            LOG.warn("Incidents are resolved by one person (horus.bpm.processes.incidents.resolve-approval=single, "
+                    + "dev profile).");
+        }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
             LOG.warn("Maker-checker for process definitions is off (horus.bpm.processes.maker-checker.enabled, dev "
@@ -533,6 +547,12 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(IncidentService.class)
+    IncidentService processIncidentService(ProcessServices services) {
+        return services;
+    }
+
+    @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
     ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts,
             NodeWindowStatsService windowStats, JdbcProcessStore store) {
@@ -628,6 +648,8 @@ public class ProcessEngineAutoConfiguration {
                 .settings(Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
                         RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
                         RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value(),
+                        "approval.require-content-hash", properties.approval().requireContentHash(),
+                        "incidents.resolve-approval", properties.incidents().resolveApproval(),
                         MIGRATION_APPROVAL_SETTING, properties.migration().approval()))
                 .permissions(PERMISSIONS)
                 .rolePermissions(properties.security().rolePermissions())
@@ -679,6 +701,12 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         io.github.dhluong90.bpm.process.rest.EventScopeFilter processEngineEventScopeFilter() {
             return new io.github.dhluong90.bpm.process.rest.EventScopeFilter();
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        IncidentController processEngineIncidentController(IncidentService incidents) {
+            return new IncidentController(incidents);
         }
 
         @Bean

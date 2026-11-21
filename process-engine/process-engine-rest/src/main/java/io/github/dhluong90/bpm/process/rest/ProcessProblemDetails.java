@@ -23,7 +23,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
 @RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class,
-        MigrationController.class})
+        MigrationController.class, IncidentController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
@@ -34,6 +34,10 @@ public class ProcessProblemDetails {
     static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
+            Map.entry("CONTENT_HASH_REQUIRED", HttpStatus.BAD_REQUEST),
+            Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
+            Map.entry("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("OUTPUT_INVALID", UNPROCESSABLE),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),
             Map.entry("TASK_NOT_ASSIGNED", HttpStatus.FORBIDDEN),
@@ -97,6 +101,13 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException g ->
                     body.set("problems", Views.problems(g.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
+            case io.github.dhluong90.bpm.process.api.ContentChangedException c -> body
+                    .put("currentDefinitionHash", c.currentDefinitionHash())
+                    .put("currentLockVersion", c.currentLockVersion());
+            case io.github.dhluong90.bpm.process.api.OutputInvalidException o -> {
+                tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
+                o.paths().forEach(paths::add);
+            }
             case io.github.dhluong90.bpm.process.api.ReplayTooLargeException r ->
                     body.put("cases", r.cases()).put("limit", r.limit());
             case io.github.dhluong90.bpm.process.api.FormValidationException f -> {

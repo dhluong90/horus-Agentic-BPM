@@ -73,7 +73,7 @@ class DefinitionLifecycleTest {
     }
 
     private DefinitionVersion approveByBob(DefinitionVersion v) {
-        return as("bob", APPROVER, () -> engine.services.approve(v.ref(), v.lockVersion(), "checked", null));
+        return as("bob", APPROVER, () -> engine.services.approve(v.ref(), v.lockVersion(), v.definitionHash(), "checked", null));
     }
 
     /** Imports a variant and takes it through request (alice) and approval (bob), effective now. */
@@ -129,7 +129,7 @@ class DefinitionLifecycleTest {
 
         // When alice approves her own request through the Java API
         engine.identity.as("bank-a", "alice", AUTHOR);
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, "k-alice"))
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, "k-alice"))
                 // Then it is refused with the REST code and writes nothing
                 .isInstanceOf(SelfApprovalForbiddenException.class)
                 .extracting(e -> ((ProcessException) e).code()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
@@ -140,7 +140,7 @@ class DefinitionLifecycleTest {
 
         // When the importer approves (default rule: makers)
         engine.identity.as("bank-a", "pipeline", "processes:deploy", "processes:approve", "processes:read");
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null))
                 // Then it is refused as well, naming why, and nothing is written
                 .isInstanceOf(SelfApprovalForbiddenException.class).hasMessageContaining("importer");
         assertThat(stored(2).lockVersion()).isEqualTo(pending.lockVersion());
@@ -162,7 +162,7 @@ class DefinitionLifecycleTest {
 
         // When the importer approves
         engine.identity.as("bank-a", "pipeline", "processes:deploy", "processes:approve", "processes:read");
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null))
                 // Then it is refused as a maker (PD-096) and nothing is written
                 .isInstanceOf(SelfApprovalForbiddenException.class)
                 .hasMessageContaining("approver-must-differ-from");
@@ -182,10 +182,10 @@ class DefinitionLifecycleTest {
         DefinitionVersion pending = relaxed.services.requestApproval(v1.ref(), v1.lockVersion(), null, null);
 
         // When the requester approves, then the importer
-        assertThatThrownBy(() -> relaxed.services.approve(pending.ref(), pending.lockVersion(), null, null))
+        assertThatThrownBy(() -> relaxed.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         relaxed.identity.as("bank-a", "pipeline", "processes:deploy", "processes:approve", "processes:read");
-        DefinitionVersion approved = relaxed.services.approve(pending.ref(), pending.lockVersion(), null, null);
+        DefinitionVersion approved = relaxed.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null);
 
         // Then the importer's approval stands, and the approval row records the relaxation
         assertThat(approved.status()).isEqualTo("ACTIVE");
@@ -502,7 +502,7 @@ class DefinitionLifecycleTest {
 
         // When bob approves
         failing.identity.as("bank-a", "bob", APPROVER);
-        assertThatThrownBy(() -> failing.services.approve(pending.ref(), pending.lockVersion(), null, null))
+        assertThatThrownBy(() -> failing.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null))
                 .isInstanceOf(EventListenerFailedException.class);
 
         // Then the version stays pending and no approval was written
@@ -519,7 +519,7 @@ class DefinitionLifecycleTest {
 
         engine.identity.as("bank-b", "carol", APPROVER);
         assertThat(engine.services.find(pending.ref())).isEmpty();
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null))
                 .isInstanceOf(DefinitionNotFoundException.class);
         assertThatThrownBy(() -> engine.services.reject(pending.ref(), pending.lockVersion(), "not ours", null))
                 .isInstanceOf(DefinitionNotFoundException.class);
@@ -534,10 +534,10 @@ class DefinitionLifecycleTest {
         DefinitionVersion pending = request(v1, null);
 
         engine.identity.as("bank-a", "bob", APPROVER);
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), v1.lockVersion(), null, null))
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), v1.lockVersion(), pending.definitionHash(), null, null))
                 .isInstanceOf(VersionConflictException.class);
-        DefinitionVersion first = engine.services.approve(pending.ref(), pending.lockVersion(), null, "approve-kyc-1");
-        DefinitionVersion replay = engine.services.approve(pending.ref(), pending.lockVersion(), null, "approve-kyc-1");
+        DefinitionVersion first = engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, "approve-kyc-1");
+        DefinitionVersion replay = engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, "approve-kyc-1");
 
         assertThat(replay).isEqualTo(first);
         assertThat(count("SELECT count(*) FROM pre_definition_history WHERE action = 'APPROVED'")).isEqualTo(1);
@@ -552,7 +552,7 @@ class DefinitionLifecycleTest {
                 .isInstanceOf(PermissionDeniedException.class);
         DefinitionVersion pending = request(v1, null);
         engine.identity.as("bank-a", "carol", "processes:author", "processes:read");
-        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), null, null))
+        assertThatThrownBy(() -> engine.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null))
                 .isInstanceOf(PermissionDeniedException.class);
     }
 
@@ -564,7 +564,7 @@ class DefinitionLifecycleTest {
         dev.identity.as("bank-a", "alice", AUTHOR);
         DefinitionVersion pending = dev.services.requestApproval(v1.ref(), v1.lockVersion(), null, null);
 
-        DefinitionVersion approved = dev.services.approve(pending.ref(), pending.lockVersion(), null, null);
+        DefinitionVersion approved = dev.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null);
 
         assertThat(approved.status()).isEqualTo("ACTIVE");
         assertThat(approved.approvedBy()).isEqualTo("system:dev-auto-approve");
@@ -722,7 +722,7 @@ class DefinitionLifecycleTest {
         strict.identity.as("bank-a", "alice", AUTHOR);
         DefinitionVersion pending = strict.services.requestApproval(v1.ref(), v1.lockVersion(), null, null);
         strict.identity.as("bank-a", "bob", APPROVER);
-        DefinitionVersion active = strict.services.approve(pending.ref(), pending.lockVersion(), null, null);
+        DefinitionVersion active = strict.services.approve(pending.ref(), pending.lockVersion(), pending.definitionHash(), null, null);
 
         assertThatThrownBy(() -> strict.services.retire(active.ref(), active.lockVersion(), "stop it", true, null))
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.LastVersionInEffectException.class)

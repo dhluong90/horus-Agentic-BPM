@@ -164,6 +164,8 @@ class ListQueryPlanCheckTest {
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));
         samples.put("instance-tasks", List.of("bank-a", INSTANCE));
         samples.put("instance-open-incidents", List.of("bank-a", INSTANCE));
+        samples.put("incidents", List.of("bank-a", "OPEN", 50));
+        samples.put("incidents-after", List.of("bank-a", "OPEN", T, "AIC" + "%023d".formatted(500), 50));
         samples.put("instance-step-results", List.of("bank-a", INSTANCE, new String[] {"credit-review", "kyc-agent"}));
         samples.put("replay-overridden-attempts", List.of("bank-a", new String[] {INSTANCE, "AIN" + "%023d".formatted(43)},
                 new String[] {"AAT" + "%023d".formatted(42)}));

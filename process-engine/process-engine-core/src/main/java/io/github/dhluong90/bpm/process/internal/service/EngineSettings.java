@@ -21,10 +21,28 @@ import java.util.Objects;
  * @param approverRule {@code horus.bpm.lifecycle.approver-must-differ-from}, the shared host setting (PD-096):
  *     {@code MAKERS}, the default, or the relaxation {@code REQUESTER}
  * @param retireLastVersion {@code horus.bpm.lifecycle.retire-last-version} (PD-101)
+ * @param requireContentHash {@code approval.require-content-hash}: an approval must name the hash of the content the
+ *     approver reviewed (PD-139, PRE-177); {@code false} is accepted on the {@code dev} profile only
+ * @param resolveApproval {@code incidents.resolve-approval}: whether resolving an incident with an operator's output
+ *     needs a second person (PD-126, PRE-078); {@code SINGLE} is accepted on the {@code dev} profile only
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
         Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength, boolean makerChecker,
-        ApproverRule approverRule, RetireLastVersionRule retireLastVersion) {
+        ApproverRule approverRule, RetireLastVersionRule retireLastVersion, boolean requireContentHash,
+        ResolveApproval resolveApproval) {
+
+    /** Who resolves an incident with an operator's output (PD-126, {@code incidents.resolve-approval}). */
+    public enum ResolveApproval {
+        /** A proposal by one holder of {@code processes:incident:manage}, approved by another. The default. */
+        FOUR_EYES,
+        /** The proposer's resolution applies at once. A relaxation accepted on the {@code dev} profile only. */
+        SINGLE;
+
+        /** @return the setting value, {@code four-eyes} or {@code single} */
+        public String value() {
+            return name().toLowerCase(java.util.Locale.ROOT).replace('_', '-');
+        }
+    }
 
     /**
      * What retiring the last version in effect of a key needs (PD-101, {@code horus.bpm.lifecycle.retire-last-version}).
@@ -83,6 +101,52 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         if (retireLastVersion == null) {
             retireLastVersion = RetireLastVersionRule.CONFIRM;
         }
+        if (resolveApproval == null) {
+            resolveApproval = ResolveApproval.FOUR_EYES;
+        }
+    }
+
+    /**
+     * Settings with the strict defaults of PD-126 and PD-139: approvals name the reviewed hash, and resolving an
+     * incident needs a second person.
+     *
+     * @param definitionsAutoApprove see the record
+     * @param maxNodes see the record
+     * @param maxBytes see the record
+     * @param idempotencyRetention see the record
+     * @param slowCallWarning see the record
+     * @param maxPageSize see the record
+     * @param maxRange see the record
+     * @param reasonMaxLength see the record
+     * @param makerChecker see the record
+     * @param approverRule see the record
+     * @param retireLastVersion see the record
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength, boolean makerChecker,
+            ApproverRule approverRule, RetireLastVersionRule retireLastVersion) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, maxPageSize, maxRange,
+                reasonMaxLength, makerChecker, approverRule, retireLastVersion, true, ResolveApproval.FOUR_EYES);
+    }
+
+    /**
+     * @param require see {@link #requireContentHash()}
+     * @return a copy with the content-hash rule set
+     */
+    public EngineSettings withRequireContentHash(boolean require) {
+        return new EngineSettings(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning,
+                maxPageSize, maxRange, reasonMaxLength, makerChecker, approverRule, retireLastVersion, require,
+                resolveApproval);
+    }
+
+    /**
+     * @param approval see {@link #resolveApproval()}
+     * @return a copy with the incident resolution rule set
+     */
+    public EngineSettings withResolveApproval(ResolveApproval approval) {
+        return new EngineSettings(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning,
+                maxPageSize, maxRange, reasonMaxLength, makerChecker, approverRule, retireLastVersion,
+                requireContentHash, approval);
     }
 
     /**

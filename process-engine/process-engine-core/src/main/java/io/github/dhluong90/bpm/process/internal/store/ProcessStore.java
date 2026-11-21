@@ -86,7 +86,7 @@ public interface ProcessStore {
     }
 
     /**
-     * Incident row ({@code pre_incident}, #58): a step whose job failed for good.
+     * Incident row ({@code pre_incident}, #58, #68): a step that failed for good, and how it was resolved.
      *
      * @param tenantId tenant
      * @param id ULID
@@ -97,10 +97,18 @@ public interface ProcessStore {
      * @param errorCode the error code
      * @param causeSummary built from codes only, never from an adapter's detail
      * @param retryCount attempts after the first
-     * @param status {@code OPEN} or {@code RESOLVED}
+     * @param status {@code OPEN}, {@code RESOLUTION_PENDING} or {@code RESOLVED}
      * @param lockVersion optimistic lock version
      * @param createdAt when it was opened
      * @param resolvedAt when it was resolved, or null
+     * @param resolution {@code RETRY_SUCCEEDED}, {@code COMPLETED_MANUALLY} or {@code INSTANCE_CANCELLED}, or null
+     * @param resolvedBy who resolved it, or null
+     * @param approvalMode {@code four-eyes} or {@code single} for a proposal, or null
+     * @param proposedBy the proposer of a resolution, or null
+     * @param proposedAt when it was proposed, or null
+     * @param proposalReason the proposer's reason, or null
+     * @param proposalOutputJson the output the step completes with on approval, or null
+     * @param retrying whether a retry is in flight
      */
     /**
      * The latest recorded result of a step that a later agent step reads as memory (#101, {@code pre_step_result}).
@@ -120,7 +128,52 @@ public interface ProcessStore {
 
     record IncidentRow(String tenantId, String id, String instanceId, String definitionId, String tokenId,
             String nodeId, String errorCode, String causeSummary, int retryCount, String status, long lockVersion,
-            Instant createdAt, Instant resolvedAt) {
+            Instant createdAt, Instant resolvedAt, String resolution, String resolvedBy, String approvalMode,
+            String proposedBy, Instant proposedAt, String proposalReason, String proposalOutputJson,
+            boolean retrying) {
+
+        /** A new or pre-#68 row: no resolution, no proposal, no retry in flight. */
+        public IncidentRow(String tenantId, String id, String instanceId, String definitionId, String tokenId,
+                String nodeId, String errorCode, String causeSummary, int retryCount, String status, long lockVersion,
+                Instant createdAt, Instant resolvedAt) {
+            this(tenantId, id, instanceId, definitionId, tokenId, nodeId, errorCode, causeSummary, retryCount, status,
+                    lockVersion, createdAt, resolvedAt, null, null, null, null, null, null, null, false);
+        }
+
+        /** @return a copy one lock version on, with this status and retry flag */
+        public IncidentRow next(String newStatus, int newRetryCount, boolean newRetrying) {
+            return new IncidentRow(tenantId, id, instanceId, definitionId, tokenId, nodeId, errorCode, causeSummary,
+                    newRetryCount, newStatus, lockVersion + 1, createdAt, resolvedAt, resolution, resolvedBy,
+                    approvalMode, proposedBy, proposedAt, proposalReason, proposalOutputJson, newRetrying);
+        }
+
+        /** @return a copy one lock version on that failed again with this cause, no retry in flight */
+        public IncidentRow failedAgain(String newErrorCode, String newCauseSummary) {
+            return new IncidentRow(tenantId, id, instanceId, definitionId, tokenId, nodeId, newErrorCode,
+                    newCauseSummary, retryCount, status, lockVersion + 1, createdAt, resolvedAt, resolution, resolvedBy,
+                    approvalMode, proposedBy, proposedAt, proposalReason, proposalOutputJson, false);
+        }
+
+        /** @return a copy one lock version on with this proposal, {@code RESOLUTION_PENDING} */
+        public IncidentRow proposed(String by, Instant at, String reason, String outputJson, String mode) {
+            return new IncidentRow(tenantId, id, instanceId, definitionId, tokenId, nodeId, errorCode, causeSummary,
+                    retryCount, "RESOLUTION_PENDING", lockVersion + 1, createdAt, resolvedAt, resolution, resolvedBy,
+                    mode, by, at, reason, outputJson, false);
+        }
+
+        /** @return a copy one lock version on without its proposal, {@code OPEN} again */
+        public IncidentRow proposalRejected() {
+            return new IncidentRow(tenantId, id, instanceId, definitionId, tokenId, nodeId, errorCode, causeSummary,
+                    retryCount, "OPEN", lockVersion + 1, createdAt, resolvedAt, null, null, null, null, null, null,
+                    null, false);
+        }
+
+        /** @return a copy one lock version on, {@code RESOLVED} with this resolution */
+        public IncidentRow resolved(String how, String by, Instant at) {
+            return new IncidentRow(tenantId, id, instanceId, definitionId, tokenId, nodeId, errorCode, causeSummary,
+                    retryCount, "RESOLVED", lockVersion + 1, createdAt, at, how, by, approvalMode, proposedBy,
+                    proposedAt, proposalReason, proposalOutputJson, false);
+        }
     }
 
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
@@ -277,6 +330,52 @@ public interface ProcessStore {
      * @return the instance's open incidents, oldest first
      */
     List<IncidentRow> openIncidents(String tenant, String instanceId);
+
+    /**
+     * Locks one incident ({@code FOR UPDATE}) in the caller's tenant (#68). The caller holds the instance row lock
+     * first, the order every instance transition takes.
+     *
+     * @param tenant tenant
+     * @param id incident id
+     * @return the row, or empty when the tenant has no such incident
+     */
+    default java.util.Optional<IncidentRow> lockIncident(String tenant, String id) {
+        throw new UnsupportedOperationException("incidents are not supported by this store");
+    }
+
+    /**
+     * @param tenant tenant
+     * @param id incident id
+     * @return the row, unlocked, or empty when the tenant has no such incident
+     */
+    default java.util.Optional<IncidentRow> findIncident(String tenant, String id) {
+        throw new UnsupportedOperationException("incidents are not supported by this store");
+    }
+
+    /**
+     * Writes an incident row whose {@code lockVersion} is one higher than the stored one.
+     *
+     * @param updated the row with its new lock version
+     * @return 1 when written, 0 when the stored lock version was not {@code updated.lockVersion() - 1}
+     */
+    default int updateIncident(IncidentRow updated) {
+        throw new UnsupportedOperationException("incidents are not supported by this store");
+    }
+
+    /**
+     * A page of the tenant's incidents of one status, newest first on {@code (created_at, id)} (PRE-080).
+     *
+     * @param tenant tenant
+     * @param status the status
+     * @param afterCreatedAt keyset: the {@code createdAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id, or null
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<IncidentRow> incidents(String tenant, String status, Instant afterCreatedAt, String afterId,
+            int limit) {
+        throw new UnsupportedOperationException("incidents are not supported by this store");
+    }
 
     /**
      * @param tenant tenant

@@ -145,7 +145,7 @@ final class TestEngine {
         EngineSettings settings = new EngineSettings(b.autoApprove, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
                 EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, EngineDefaults.MAX_PAGE_SIZE,
                 EngineDefaults.MAX_RANGE, EngineDefaults.MAX_REASON_LENGTH, b.makerChecker, b.approverRule,
-                b.retireLastVersion);
+                b.retireLastVersion, b.requireContentHash, b.resolveApproval);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
         this.replicaPublisher = publisher;
@@ -243,6 +243,8 @@ final class TestEngine {
         private Duration retryBackoff = Duration.ofSeconds(10);
         private boolean autoApprove = true;
         private boolean makerChecker = true;
+        private boolean requireContentHash = true;
+        private EngineSettings.ResolveApproval resolveApproval = EngineSettings.ResolveApproval.FOUR_EYES;
         private EngineSettings.ApproverRule approverRule = EngineSettings.ApproverRule.MAKERS;
         private EngineSettings.RetireLastVersionRule retireLastVersion = EngineSettings.RetireLastVersionRule.CONFIRM;
         private List<ServiceTaskHandler> handlers = List.of();
@@ -305,6 +307,18 @@ final class TestEngine {
 
         Builder makerChecker(boolean value) {
             makerChecker = value;
+            return this;
+        }
+
+        /** {@code approval.require-content-hash} (PD-139); {@code false} is the dev-profile relaxation. */
+        Builder requireContentHash(boolean value) {
+            requireContentHash = value;
+            return this;
+        }
+
+        /** {@code incidents.resolve-approval} (PD-126); {@code SINGLE} is the dev-profile relaxation. */
+        Builder resolveApproval(EngineSettings.ResolveApproval value) {
+            resolveApproval = value;
             return this;
         }
 

@@ -11,8 +11,12 @@ info:
     approval, optionally with an effective date; a second person approves it and it becomes the effective version
     on that date, retiring the previous one; a reject sends it back to `DRAFT` with a reason. The requester can
     never approve (`403 SELF_APPROVAL_FORBIDDEN`), and an older version is never approved over a newer active one
-    (`409 VERSION_SUPERSEDED`). It also covers the graph diff between two stored versions, and migration plans with
-    their dry run; executing a plan follows in a later release. The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
+    (`409 VERSION_SUPERSEDED`). An approval names the hash of the content the approver reviewed
+    (`expectedDefinitionHash`, PD-139): without it the answer is `400 CONTENT_HASH_REQUIRED`, and when the stored
+    content is not the content reviewed it is `409 CONTENT_CHANGED` with the current hash. It also covers the graph
+    diff between two stored versions, and migration plans with their dry run; executing a plan follows in a later
+    release. It also covers incidents: an operator lists them, retries a failed step, or proposes a resolution that a
+    second person approves (PD-126). The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
     features that implement them.
 
     Every body is read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings
@@ -46,6 +50,8 @@ tags:
     description: Replay recorded agent answers against a candidate guardrail or output schema
   - name: migrations
     description: Plan moving running instances to another version, and check the plan with a dry run
+  - name: incidents
+    description: List incidents, retry a failed step, and resolve one with a second person's approval
 paths:
   /definitions:
     post:
@@ -218,6 +224,16 @@ paths:
         instances keep their version. Publishes `processes.definition.approved.v1`. The guardrail contract of every
         `agentTask` is checked again, as at import (`422 GUARDRAIL_CONTRACT_INVALID`; the version stays pending).
         Permission `processes:approve`.
+
+        The approval is bound to the content the approver reviewed (PRE-177, PD-139). `expectedDefinitionHash` is the
+        `definitionHash` of the version as the approver saw it. While `horus.bpm.processes.approval.require-content-hash`
+        is `true` (the default; `false` is accepted on the `dev` profile only) an approval without it is
+        `400 CONTENT_HASH_REQUIRED` and nothing is read. When the stored content is not the content reviewed the
+        answer is `409 CONTENT_CHANGED` with `currentDefinitionHash` and `currentLockVersion`, and nothing is written,
+        published or recorded; the check runs after the status, four-eyes and lock-version checks. The approval's
+        history row and `processes.definition.approved.v1` record `reviewedDefinitionHash`. A change list between two
+        versions that was cut off at its limit carries no hash that may be approved: a client offers Approve only once
+        it has shown the complete change set.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -230,7 +246,17 @@ paths:
             schema:
               type: object
               properties:
+                expectedDefinitionHash:
+                  type: [string, 'null']
+                  pattern: '^[0-9a-f]{64}$'
+                  description: >-
+                    The `definitionHash` of the version the approver reviewed; required while
+                    `approval.require-content-hash` is on. Not 64 lower-case hexadecimal characters is
+                    `400 INPUT_INVALID`
                 comment: { type: [string, 'null'], maxLength: 2000 }
+            example:
+              expectedDefinitionHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b
+              comment: Reviewed with the credit committee, memo CC-118
       responses:
         '200': { $ref: '#/components/responses/Definition' }
         '400': { $ref: '#/components/responses/Problem' }
@@ -1141,6 +1167,204 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /incidents:
+    get:
+      tags: [incidents]
+      operationId: listIncidents
+      summary: List the incidents of one status, newest first
+      description: |
+        The incidents of the caller's tenant only (PRE-080), newest first on `(createdAt, id)`, keyset-paged with a
+        signed cursor bound to the tenant and the status; at most `query.max-page-size` (200) per page. Each item has
+        the error code, a cause built from codes only, the retry count, the step, the instance and `allowedActions`
+        computed for the caller (empty without `processes:incident:manage`). Read only. Permission `processes:read`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: '`OPEN` when absent. Another value is `400 QUERY_INVALID`.'
+          schema: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED], default: OPEN }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of incidents
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /incidents/{id}:
+    get:
+      tags: [incidents]
+      operationId: getIncident
+      summary: Read one incident with the actions the caller may take
+      description: |
+        Another tenant's incident is `404 INCIDENT_NOT_FOUND`. A pending resolution shows the proposed output as
+        history keeps it: an agent step's output masked by its output schema. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+      responses:
+        '200': { $ref: '#/components/responses/Incident' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /incidents/{id}:retry:
+    post:
+      tags: [incidents]
+      operationId: retryIncident
+      summary: Run the failed step again
+      description: |
+        PRE-077. In one transaction under the instance's row lock the step's job is due now with one more attempt
+        and keeps its job id, so the remote side deduplicates the call; the next claim has a new attempt id, and an
+        agent's result passes the result check again. A local step whose handler returned a business error runs its
+        handler again in this transaction. History records `INCIDENT_RETRIED` with the actor and the reason, and
+        `processes.incident.retried.v1` is published. The incident stays `OPEN` with `retrying: true` until the step
+        is accepted (`RESOLVED`, `RETRY_SUCCEEDED`, `processes.incident.resolved.v1`) or fails again, which keeps the
+        same incident open with the new cause. A repeat with the same key replays the first answer and writes nothing.
+
+        Refusals write nothing: a stale `If-Match` is `409 VERSION_CONFLICT`; an incident that is not `OPEN`, one
+        being retried, or an agent step whose memory failed before any call is `409 INVALID_STATE`. One person's
+        action: it runs the same step again and decides nothing. Permission `processes:incident:manage`.
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+        - $ref: '#/components/parameters/IncidentIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentReason' }
+            example: { reason: Core banking back after maintenance }
+      responses:
+        '202': { $ref: '#/components/responses/Incident' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /incidents/{id}:resolve:
+    post:
+      tags: [incidents]
+      operationId: resolveIncident
+      summary: Propose the output the waiting step completes with
+      description: |
+        PRE-078, PD-126. `output` is checked against the step's output schema now; a violation is
+        `422 OUTPUT_INVALID` with each failing path in `paths`, never a value, and nothing is written. The guardrail
+        is not run, because a person supplied the answer. Under `horus.bpm.processes.incidents.resolve-approval:
+        four-eyes` (the default) the incident becomes `RESOLUTION_PENDING` with the proposal and its proposer, and
+        nothing moves until a second holder of `processes:incident:manage` approves; `single` is accepted on the
+        `dev` profile only and applies the resolution at once. History records `INCIDENT_RESOLUTION_PROPOSED` with the
+        proposer, the reason and the output, and `processes.incident.resolution-proposed.v1` is published. Permission
+        `processes:incident:manage`.
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+        - $ref: '#/components/parameters/IncidentIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [output, reason]
+              properties:
+                output:
+                  type: object
+                  additionalProperties: true
+                  description: The step's result, a JSON object; money as `{currency, amount}`
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 2000
+                  description: Required; at most `lifecycle.reason-max-length` (2,000) characters, else `400 INPUT_INVALID`
+            example:
+              output: { approvedLimit: { amount: '30000000', currency: VND } }
+              reason: Limit raised by credit committee, memo CC-118
+      responses:
+        '200': { $ref: '#/components/responses/Incident' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /incidents/{id}:approve-resolution:
+    post:
+      tags: [incidents]
+      operationId: approveIncidentResolution
+      summary: Approve a proposed resolution as a second person
+      description: |
+        PRE-078. The waiting step completes with the proposed output and the token moves on, in one transaction under
+        the instance's row lock. The incident is `RESOLVED` with `COMPLETED_MANUALLY`; history records
+        `INCIDENT_RESOLVED` with the proposer, the approver, the reason and the output, and
+        `processes.incident.resolved.v1` carries `resolution`, `resolvedBy` and `proposedBy`. The proposer is refused
+        with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written. No pending resolution is `409 INVALID_STATE`.
+        Permission `processes:incident:manage`.
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+        - $ref: '#/components/parameters/IncidentIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: [string, 'null'], maxLength: 2000 }
+            example: { comment: Checked against memo CC-118 }
+      responses:
+        '200': { $ref: '#/components/responses/Incident' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /incidents/{id}:reject-resolution:
+    post:
+      tags: [incidents]
+      operationId: rejectIncidentResolution
+      summary: Reject a proposed resolution as a second person
+      description: |
+        PRE-078. The proposal is dropped and the incident is `OPEN` again; the token stays on the step. History
+        records `INCIDENT_RESOLUTION_REJECTED` with the reason and `processes.incident.resolution-rejected.v1` is
+        published. The proposer is refused with `403 SELF_APPROVAL_FORBIDDEN`. Permission
+        `processes:incident:manage`.
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+        - $ref: '#/components/parameters/IncidentIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentReason' }
+            example: { reason: 'Memo CC-118 approves 25,000,000 VND, not 30,000,000' }
+      responses:
+        '200': { $ref: '#/components/responses/Incident' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -1148,6 +1372,19 @@ components:
       scheme: bearer
       description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
   parameters:
+    IncidentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 26 }
+    IncidentIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The incident's `lockVersion` (its `ETag`), quoted. Missing is `428 PRECONDITION_REQUIRED`; stale is
+        `409 VERSION_CONFLICT`.
+      schema: { type: string, example: '"0"' }
     DefinitionKey:
       name: key
       in: path
@@ -1218,6 +1455,15 @@ components:
         `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`. Remembered for `idempotency-retention` (24 hours).
       schema: { type: string, minLength: 1, maxLength: 200 }
   responses:
+    Incident:
+      description: The incident after the call
+      headers:
+        ETag:
+          description: The incident's `lockVersion`, quoted; send it as `If-Match`
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Incident' }
     Definition:
       description: The definition version after the call
       headers:
@@ -1249,16 +1495,17 @@ components:
           schema: { $ref: '#/components/schemas/ProcessInstance' }
     Problem:
       description: >-
-        RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`
-        or `QUERY_INVALID` (a list limit, cursor or range). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`,
-        `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
+        RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`,
+        `QUERY_INVALID` (a list limit, cursor or range) or `CONTENT_HASH_REQUIRED` (an approval that names no reviewed
+        content). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`,
+        `INCIDENT_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
-        `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` or `FORM_VALIDATION_FAILED`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
+        `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
         back), with a correlation id only.
       headers:
@@ -1272,6 +1519,65 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    IncidentReason:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Required; at most `lifecycle.reason-max-length` (2,000) characters, else `400 INPUT_INVALID`
+    Incident:
+      type: object
+      required: [id, instanceId, nodeId, tokenId, errorCode, causeSummary, retryCount, status, lockVersion, retrying,
+        createdAt, resolvedAt, resolution, resolvedBy, pendingResolution, allowedActions]
+      properties:
+        id: { type: string }
+        instanceId: { type: string }
+        nodeId: { type: string }
+        tokenId: { type: [string, 'null'] }
+        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`' }
+        causeSummary: { type: string, description: Built from codes and numbers only, never from a handler's detail }
+        retryCount: { type: integer, minimum: 0 }
+        status: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED] }
+        lockVersion: { type: integer, minimum: 0 }
+        retrying: { type: boolean, description: A retry is in flight; neither a retry nor a resolution is offered }
+        createdAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+        resolution:
+          type: [string, 'null']
+          enum: [RETRY_SUCCEEDED, COMPLETED_MANUALLY, INSTANCE_CANCELLED, null]
+        resolvedBy: { type: [string, 'null'] }
+        pendingResolution:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/PendingResolution'
+        allowedActions:
+          type: array
+          description: Computed for the caller; empty without `processes:incident:manage`
+          items: { type: string, enum: [retry, resolve, approve-resolution, reject-resolution] }
+    PendingResolution:
+      type: object
+      required: [proposedBy, proposedAt, reason, output, approvalMode]
+      properties:
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        reason: { type: [string, 'null'] }
+        output:
+          type: object
+          additionalProperties: true
+          description: As history keeps it; an agent step's output is masked by its output schema
+        approvalMode: { type: [string, 'null'], enum: [four-eyes, single, null] }
+    IncidentPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/Incident' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     AsyncStepResult:
       type: object
       required: [attemptId, completionToken, status]
@@ -1837,7 +2143,8 @@ components:
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
-            REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, INTERNAL]
+            REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, INCIDENT_NOT_FOUND,
+            OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:
@@ -1863,6 +2170,12 @@ components:
           description: >-
             Present on `FORM_VALIDATION_FAILED`: each failing path and rule, for example `$.riskScore: expected
             integer`, never a value
+          items: { type: string }
+        currentDefinitionHash: { type: string, description: 'Present on `CONTENT_CHANGED`, the hash of the content stored now' }
+        currentLockVersion: { type: integer, description: 'Present on `CONTENT_CHANGED`, the lock version stored now' }
+        paths:
+          type: array
+          description: 'Present on `OUTPUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required`, never a value'
           items: { type: string }
         definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
         version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }

@@ -77,7 +77,8 @@ class DefinitionLifecycleIT {
         assertThat(pending.get("requestedBy").stringValue()).isEqualTo("lan");
 
         // When lan approves her own request
-        HttpResponse<String> self = send("lan", "POST", v + ":approve", "", "\"1\"", "application/json");
+        String hash = pending.get("definitionHash").stringValue();
+        HttpResponse<String> self = send("lan", "POST", v + ":approve", reviewed(hash), "\"1\"", "application/json");
 
         // Then it is refused and nothing is written
         assertThat(self.statusCode()).isEqualTo(403);
@@ -88,8 +89,8 @@ class DefinitionLifecycleIT {
 
         // When minh approves without If-Match, then with the lock version
         assertThat(send("minh", "POST", v + ":approve", "", null, "application/json").statusCode()).isEqualTo(428);
-        HttpResponse<String> approved = send("minh", "POST", v + ":approve", "{\"comment\":\"documents step checked\"}",
-                "\"1\"", "application/json");
+        HttpResponse<String> approved = send("minh", "POST", v + ":approve", "{\"expectedDefinitionHash\":\"" + hash
+                + "\",\"comment\":\"documents step checked\"}", "\"1\"", "application/json");
 
         // Then it is active, approved by minh, and the history names both people
         JsonNode body = json(approved, 200);
@@ -124,8 +125,10 @@ class DefinitionLifecycleIT {
         JsonNode v4 = importKyc("Review identity documents, fourth", 201);
         String p4 = BASE + "/kyc-onboarding/versions/" + v4.get("version").intValue();
         json(send("lan", "POST", p4 + ":request-approval", "", "\"0\"", "application/json"), 200);
-        json(send("minh", "POST", p4 + ":approve", "", "\"1\"", "application/json"), 200);
-        HttpResponse<String> overtake = send("minh", "POST", p3 + ":approve", "", "\"3\"", "application/json");
+        json(send("minh", "POST", p4 + ":approve", reviewed(v4.get("definitionHash").stringValue()), "\"1\"",
+                "application/json"), 200);
+        HttpResponse<String> overtake = send("minh", "POST", p3 + ":approve", reviewed(v3.get("definitionHash")
+                .stringValue()), "\"3\"", "application/json");
 
         // Then the older version is refused and stays pending
         assertThat(overtake.statusCode()).isEqualTo(409);
@@ -175,5 +178,10 @@ class DefinitionLifecycleIT {
 
     private static String basic(String user) {
         return "Basic " + Base64.getEncoder().encodeToString((user + ":it-pass").getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The body of an approval that names the content reviewed (PRE-177). */
+    private static String reviewed(String definitionHash) {
+        return "{\"expectedDefinitionHash\":\"" + definitionHash + "\"}";
     }
 }
