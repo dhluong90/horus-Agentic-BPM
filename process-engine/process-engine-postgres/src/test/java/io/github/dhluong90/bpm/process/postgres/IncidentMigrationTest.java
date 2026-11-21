@@ -57,7 +57,7 @@ class IncidentMigrationTest {
         incidentsOfTheLastRelease(jdbc);
 
         // When V29 and V30 run with the migrator's settings
-        int applied = new ProcessEngineSchemaMigrator(ds).migrate();
+        int applied = flyway(ds, "30").migrate().migrationsExecuted;
 
         // Then the rows keep their state, have no resolution and no retry in flight, and both indexes are valid
         assertThat(applied).isEqualTo(2);

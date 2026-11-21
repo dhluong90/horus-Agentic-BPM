@@ -2033,10 +2033,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * Opens one {@code OPEN} incident in the current transaction, with {@code INCIDENT_RAISED} in history and
      * {@code processes.incident.raised.v1}. The token stays on the step.
      */
-    private void raiseIncident(IncidentSite site, Instant now) {
+    private String raiseIncident(IncidentSite site, Instant now) {
         InstanceRow row = store.findInstance(site.tenantId(), site.instanceId()).orElse(null);
         if (row == null) {
-            return;
+            return null;
         }
         String code = site.errorCode() == null || site.errorCode().isBlank() ? "STEP_FAILED" : site.errorCode();
         String cause = site.summary().length() > 500 ? site.summary().substring(0, 500) : site.summary();
@@ -2095,6 +2095,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 "processes.incident.raised.v1", site.tenantId(), now, payload), row.id());
         LOG.log(System.Logger.Level.WARNING, "process.incident.raised tenant={0} instance={1} node={2} code={3}"
                 + " retryCount={4}", site.tenantId(), site.instanceId(), site.nodeId(), code, retries);
+        return id;
+    }
+
+    /**
+     * Opens an incident on an instance that a migration could not move (#90), in the current transaction: one
+     * {@code OPEN} row, {@code INCIDENT_RAISED} in history and {@code processes.incident.raised.v1}. The instance stays
+     * on its version and its token on its step. The summary is built from codes and step ids only.
+     *
+     * @return the incident id, or null when the instance no longer exists
+     */
+    String raiseMigrationIncident(String tenant, String instanceId, String definitionId, String tokenId, String nodeId,
+            String errorCode, String summary, Instant now) {
+        return raiseIncident(new IncidentSite(tenant, instanceId, definitionId, tokenId, nodeId, null, null, 0,
+                errorCode, null, summary), now);
     }
 
     @Override

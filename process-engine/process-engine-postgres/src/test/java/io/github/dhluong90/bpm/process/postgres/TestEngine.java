@@ -226,6 +226,55 @@ final class TestEngine {
                 services::storedModel, replicaPublisher, settings, EngineDefaults.IDEMPOTENCY_RETENTION);
     }
 
+    /**
+     * The diagram layout service of this replica (#102), on the same store, transactions, clock and event publisher.
+     *
+     * @return the layout service
+     */
+    io.github.dhluong90.bpm.process.internal.service.Layouts layouts() {
+        Identity id = identity;
+        return new io.github.dhluong90.bpm.process.internal.service.Layouts(() -> id.tenant, id, replicaClock,
+                replicaTransactions, new JdbcProcessStore(replicaDataSource), new JdbcLayoutStore(replicaDataSource),
+                services::storedModel, replicaPublisher, EngineDefaults.IDEMPOTENCY_RETENTION);
+    }
+
+    /**
+     * The proposal and approval of migration executions of this replica (#90).
+     *
+     * @param settings migration settings
+     * @return the execution service
+     */
+    io.github.dhluong90.bpm.process.internal.service.MigrationExecutions migrationExecutions(
+            io.github.dhluong90.bpm.process.internal.service.MigrationSettings settings) {
+        Identity id = identity;
+        JdbcProcessStore processStore = new JdbcProcessStore(replicaDataSource);
+        JdbcMigrationStore migrationStore = new JdbcMigrationStore(replicaDataSource);
+        io.github.dhluong90.bpm.process.internal.service.Migrations plans =
+                new io.github.dhluong90.bpm.process.internal.service.Migrations(() -> id.tenant, id, replicaClock,
+                        replicaTransactions, processStore, migrationStore, services::storedModel, replicaPublisher,
+                        settings, EngineDefaults.IDEMPOTENCY_RETENTION);
+        return new io.github.dhluong90.bpm.process.internal.service.MigrationExecutions(() -> id.tenant, id,
+                replicaClock, replicaTransactions, processStore, migrationStore, plans, replicaPublisher, settings,
+                EngineDefaults.IDEMPOTENCY_RETENTION);
+    }
+
+    /**
+     * The migration runner of this replica (#90), which holds plans under this replica's id.
+     *
+     * @param settings migration settings
+     * @param owner the lease holder, normally the replica id
+     * @param checkpoint a hook after each instance, which tests use to stop the runner as a crash would
+     * @return the runner
+     */
+    io.github.dhluong90.bpm.process.internal.service.MigrationRunner migrationRunner(
+            io.github.dhluong90.bpm.process.internal.service.MigrationSettings settings, String owner,
+            io.github.dhluong90.bpm.process.internal.service.MigrationRunner.Checkpoint checkpoint) {
+        return new io.github.dhluong90.bpm.process.internal.service.MigrationRunner(owner, replicaClock,
+                replicaTransactions, new JdbcProcessStore(replicaDataSource),
+                new JdbcMigrationStore(replicaDataSource), services::storedModel, services, replicaPublisher, settings,
+                checkpoint);
+    }
+
     /** Stops this replica's adapter executor. */
     void close() {
         async.close();
@@ -489,7 +538,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_node_stats_hourly, pre_engine_watermark, pre_migration_history, pre_migration, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
+                + "TRUNCATE pre_node_stats_hourly, pre_engine_watermark, pre_migration_instance, pre_migration_history, pre_migration, pre_definition_layout, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
                 + "pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();

@@ -506,27 +506,36 @@ public record ProcessEngineProperties(
      *     1 to 500; may be lowered, never raised
      * @param dryRunValidity how long an execution may rely on a dry run of the same plan, at most {@code PT1H}; may be
      *     lowered only
+     * @param batchSize instances the migration runner reads at a time, 1 to 100; may be lowered only
+     * @param lease how long a runner holds a plan without renewing it, {@code PT10S} to {@code PT10M}; a crashed
+     *     runner's plan is taken over after this time
+     * @param lockWait how long the runner waits for an instance row another transaction holds when it opens the incident
+     *     of a failed instance, {@code PT1S} to {@code PT30S}
      */
     public record Migration(
             @DefaultValue("four-eyes") String approval,
             @DefaultValue("100") int dryRunSampleSize,
-            @DefaultValue("PT1H") Duration dryRunValidity) {
+            @DefaultValue("PT1H") Duration dryRunValidity,
+            @DefaultValue("100") int batchSize,
+            @DefaultValue("PT2M") Duration lease,
+            @DefaultValue("PT5S") Duration lockWait) {
 
         public Migration {
             try {
-                toSettings(approval, dryRunSampleSize, dryRunValidity);
+                toSettings(approval, dryRunSampleSize, dryRunValidity, batchSize, lease, lockWait);
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
             }
         }
 
         MigrationSettings toSettings() {
-            return toSettings(approval, dryRunSampleSize, dryRunValidity);
+            return toSettings(approval, dryRunSampleSize, dryRunValidity, batchSize, lease, lockWait);
         }
 
-        private static MigrationSettings toSettings(String approval, int sampleSize, Duration validity) {
+        private static MigrationSettings toSettings(String approval, int sampleSize, Duration validity, int batchSize,
+                Duration lease, Duration lockWait) {
             return new MigrationSettings(io.github.dhluong90.bpm.process.api.MigrationPlan.Approval.of(approval),
-                    sampleSize, validity);
+                    sampleSize, validity, batchSize, lease, lockWait);
         }
     }
 

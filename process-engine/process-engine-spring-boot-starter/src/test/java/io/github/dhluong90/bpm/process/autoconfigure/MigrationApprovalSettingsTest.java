@@ -70,4 +70,27 @@ class MigrationApprovalSettingsTest {
                 "horus.bpm.processes.migration.dry-run-validity", "PT15M")).migration().toSettings())
                 .isEqualTo(new MigrationSettings(MigrationPlan.Approval.FOUR_EYES, 20, Duration.ofMinutes(15)));
     }
+
+    @Test
+    void PRE_190_the_runner_settings_default_to_batches_of_100_a_two_minute_lease_and_a_five_second_lock_wait() {
+        MigrationSettings settings = bind(Map.of()).migration().toSettings();
+
+        assertThat(settings.batchSize()).isEqualTo(100);
+        assertThat(settings.lease()).isEqualTo(Duration.ofMinutes(2));
+        assertThat(settings.lockWait()).isEqualTo(Duration.ofSeconds(5));
+        assertThat(bind(Map.of("horus.bpm.processes.migration.batch-size", "25",
+                "horus.bpm.processes.migration.lease", "PT30S", "horus.bpm.processes.migration.lock-wait", "PT2S"))
+                .migration().toSettings()).isEqualTo(new MigrationSettings(MigrationPlan.Approval.FOUR_EYES, 100,
+                Duration.ofHours(1), 25, Duration.ofSeconds(30), Duration.ofSeconds(2)));
+    }
+
+    @Test
+    void PRE_190_a_raised_batch_size_and_a_lease_or_lock_wait_out_of_range_are_refused_naming_the_property() {
+        assertThatThrownBy(() -> bind(Map.of("horus.bpm.processes.migration.batch-size", "101")))
+                .rootCause().hasMessageContaining("migration.batch-size must be 1 to 100");
+        assertThatThrownBy(() -> bind(Map.of("horus.bpm.processes.migration.lease", "PT5S")))
+                .rootCause().hasMessageContaining("migration.lease must be between PT10S and PT10M");
+        assertThatThrownBy(() -> bind(Map.of("horus.bpm.processes.migration.lock-wait", "PT1M")))
+                .rootCause().hasMessageContaining("migration.lock-wait must be between PT1S and PT30S");
+    }
 }

@@ -45,6 +45,7 @@ import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcLayoutStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcMigrationStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcCalendarStore;
@@ -258,13 +259,18 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
             matchIfMissing = true)
     ProcessJobPoller processEngineJobPoller(JobExecutor executor, AsyncStepExecutor async, AgentReplays replays,
+            io.github.dhluong90.bpm.process.internal.service.MigrationRunner migrationRunner,
             ProcessEngineProperties properties) {
-        // One poll runs the timers, starts the async attempts there are free adapter slots for, and replays one page
-        // of an offline agent replay (#98).
-        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce(),
+        // One poll runs the timers, starts the async attempts there are free adapter slots for, replays one page of an
+        // offline agent replay (#98), and runs up to ten batches of one approved migration (#90).
+        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce()
+                + migrationRunner.runDue(MIGRATION_BATCHES_PER_POLL),
                 executor.replicaId(),
                 properties.jobs().pollInterval(), Clock.systemUTC());
     }
+
+    /** Batches of one migration a poll runs before it gives the plan back, so several plans take turns. */
+    static final int MIGRATION_BATCHES_PER_POLL = 10;
 
     /** Bean name of the job poller health contributor on both Spring Boot lines ({@code processEngineJobs}). */
     static final String JOBS_HEALTH_BEAN = "processEngineJobsHealthIndicator";
@@ -522,13 +528,65 @@ public class ProcessEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(MigrationService.class)
-    MigrationService processEngineMigrations(ObjectProvider<TenantResolver> tenants,
+    Migrations processEngineMigrations(ObjectProvider<TenantResolver> tenants,
             ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
             JdbcProcessStore store, JdbcMigrationStore migrations, ProcessServices services,
             ProcessEventPublisher publisher, ProcessEngineProperties properties) {
         return new Migrations(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
                 clock.getIfUnique(Clock::systemUTC), transactions, store, migrations, services::storedModel, publisher,
                 properties.migration().toSettings(), properties.idempotencyRetention());
+    }
+
+    /**
+     * Executing a migration plan (#90): propose with a reason, approve as a second person. The proposal and the
+     * approval repeat the dry run on the server.
+     */
+    @Bean
+    @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.MigrationExecutionService.class)
+    io.github.dhluong90.bpm.process.api.MigrationExecutionService processEngineMigrationExecutions(
+            ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
+            ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
+            JdbcMigrationStore migrationStore, Migrations migrations, ProcessEventPublisher publisher,
+            ProcessEngineProperties properties) {
+        return new io.github.dhluong90.bpm.process.internal.service.MigrationExecutions(
+                tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
+                transactions, store, migrationStore, migrations, publisher, properties.migration().toSettings(),
+                properties.idempotencyRetention());
+    }
+
+    /**
+     * The runner that moves the instances of an approved migration in batches (#90). It claims a plan under a lease, so
+     * one replica works on a plan at a time, and a crashed replica's plan is taken over after the lease. It runs inside
+     * the job poller, so {@code jobs.enabled=false} also stops it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    io.github.dhluong90.bpm.process.internal.service.MigrationRunner processEngineMigrationRunner(
+            ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
+            JdbcMigrationStore migrationStore, ProcessServices services, ProcessEventPublisher publisher,
+            JobExecutor executor, ProcessEngineProperties properties) {
+        return new io.github.dhluong90.bpm.process.internal.service.MigrationRunner(executor.replicaId(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, migrationStore, services::storedModel,
+                services, publisher, properties.migration().toSettings(),
+                io.github.dhluong90.bpm.process.internal.service.MigrationRunner.Checkpoint.NONE);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcLayoutStore processEngineLayoutStore(DataSource dataSource) {
+        return new JdbcLayoutStore(dataSource);
+    }
+
+    /** Diagram layout revisions, stored apart from the definition and its hash (#102). */
+    @Bean
+    @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.LayoutService.class)
+    io.github.dhluong90.bpm.process.api.LayoutService processEngineLayouts(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, JdbcLayoutStore layouts, ProcessServices services,
+            ProcessEventPublisher publisher, ProcessEngineProperties properties) {
+        return new io.github.dhluong90.bpm.process.internal.service.Layouts(tenants.getIfUnique(() -> () -> null),
+                callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC), transactions, store, layouts,
+                services::storedModel, publisher, properties.idempotencyRetention());
     }
 
     @Bean
@@ -695,6 +753,20 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         MigrationController processEngineMigrationController(MigrationService migrations) {
             return new MigrationController(migrations);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.MigrationExecutionController processEngineMigrationExecutionController(
+                io.github.dhluong90.bpm.process.api.MigrationExecutionService executions) {
+            return new io.github.dhluong90.bpm.process.rest.MigrationExecutionController(executions);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.LayoutController processEngineLayoutController(
+                io.github.dhluong90.bpm.process.api.LayoutService layouts) {
+            return new io.github.dhluong90.bpm.process.rest.LayoutController(layouts);
         }
 
         @Bean
