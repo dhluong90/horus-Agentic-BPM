@@ -93,7 +93,7 @@ class ExplainHistoryEvidencePostgresIT {
         host = new TransactionTemplate(manager);
         jdbc = JdbcClient.create(plain);
         engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                EngineSettings.defaults(), MaskingPolicy.withKey(MaskingKey.of(KEY)), DecisionQuerySettings.defaults());
+                EngineSettings.defaults().withRequireContentHash(false), MaskingPolicy.withKey(MaskingKey.of(KEY)), DecisionQuerySettings.defaults());
         engines.cursorKeys().load();
     }
 

@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.rest;
 
+import io.github.dhluong90.bpm.rules.api.ComparisonRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.HistorySimulation;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
@@ -142,6 +143,56 @@ public class SimulationController {
             return Instant.parse(node.stringValue());
         } catch (DateTimeParseException e) {
             throw new QueryInvalidException(member + " must be an ISO 8601 instant, such as 2026-11-01T00:00:00Z");
+        }
+    }
+
+    /**
+     * {@code POST /rule-sets/{name}:compare}, body {@code {"base": 1, "candidate": 2, "from": "...", "to": "..."}}: the
+     * two versions compared over the logged decisions of a past period (RLE-075 to RLE-077). It needs both
+     * {@code rules:simulate} and {@code rules:log:read}, writes nothing and takes no {@code Idempotency-Key}.
+     * Members other than the four are ignored, a {@code tenantId} included.
+     *
+     * @param name the rule set name
+     * @param requestBody the body, read up to {@link EngineDefaults#COMMAND_BODY_MAX_BYTES}
+     * @param contentLength the declared length, or null
+     * @return the outcome counts, totals and transitions
+     * @throws IOException when the body cannot be read
+     */
+    @PostMapping("/{name}:compare")
+    public ResponseEntity<byte[]> compare(
+            @PathVariable("name") String name,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
+        // Both permissions first, then a bounded read: a caller without either never makes the host buffer a body.
+        RestSupport.require(callers, "rules:simulate");
+        RestSupport.require(callers, "rules:log:read");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        JsonNode request = EngineValues.readRequest(body);
+        if (!request.isObject()) {
+            throw new InputInvalidException("Request body must be a JSON object with base, candidate, from and to");
+        }
+        return RestSupport.json(HttpStatus.OK, EngineValues.comparison(engine.compare(name, new ComparisonRequest(
+                versionNumber(request, "base"), versionNumber(request, "candidate"), requiredInstant(request, "from"),
+                requiredInstant(request, "to")))));
+    }
+
+    private static int versionNumber(JsonNode request, String member) {
+        JsonNode value = request.get(member);
+        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt() || value.asInt() < 1) {
+            throw new InputInvalidException(member + " must be a version number, a whole number of 1 or more");
+        }
+        return value.asInt();
+    }
+
+    private static java.time.Instant requiredInstant(JsonNode request, String member) {
+        JsonNode value = request.get(member);
+        if (value == null || !value.isString() || value.stringValue().isBlank()) {
+            throw new QueryInvalidException(member + " is required");
+        }
+        try {
+            return java.time.Instant.parse(value.stringValue());
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new QueryInvalidException(member + " must be an ISO 8601 instant such as 2027-01-01T00:00:00Z");
         }
     }
 }

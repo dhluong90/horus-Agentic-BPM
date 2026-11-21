@@ -116,6 +116,7 @@ class ErrorMatrixWebMvcTest {
         mvc = MockMvcBuilders.standaloneSetup(
                         new RuleSetController(standIn(VersionService.class), callers),
                         new DecisionController(standIn(RuleEngine.class), standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
+                        new SimulationController(standIn(RuleEngine.class), callers),
                         new DecisionLogController(standIn(DecisionLogService.class),
                         standIn(io.github.dhluong90.bpm.rules.api.DecisionLogQuery.class), callers),
                         new RuleSetHistoryController(standIn(io.github.dhluong90.bpm.rules.api.RuleSetHistoryService.class),
@@ -161,6 +162,19 @@ class ErrorMatrixWebMvcTest {
                 new Case("VERSION_CONFLICT", 409,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:request-publish").header("If-Match", "\"1\""),
                         s -> s.thrown = new VersionConflictException("Expected lock version 1, found 2")),
+                new Case("CONTENT_HASH_REQUIRED", 400,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"1\""),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.ContentHashRequiredException();
+                        }),
+                new Case("CONTENT_CHANGED", 409,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"3\""),
+                        s -> {
+                            s.permissions = APPROVER;
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.ContentChangedException(
+                                    "changed since it was reviewed", "a".repeat(64), 3L);
+                        }),
                 new Case("INVALID_STATE", 409,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve").header("If-Match", "\"1\""),
                         s -> {
@@ -221,6 +235,15 @@ class ErrorMatrixWebMvcTest {
                         post("/api/bpm/rules/v1/decisions/card-fee:evaluate-batch").contentType("application/json")
                                 .content("{\"items\":[{\"inputs\":{\"tier\":\"GOLD\",\"txCount\":5}}]}"),
                         s -> s.thrown = new io.github.dhluong90.bpm.rules.api.BatchTooLargeException(1001, 1000)),
+                new Case("HISTORY_TOO_LARGE", 422,
+                        post("/api/bpm/rules/v1/rule-sets/card-fee:compare").contentType("application/json")
+                                .content("{\"base\":1,\"candidate\":2,\"from\":\"2027-01-01T00:00:00Z\","
+                                        + "\"to\":\"2027-02-01T00:00:00Z\"}"),
+                        s -> {
+                            s.permissions = Set.of("rules:read", "rules:simulate", "rules:log:read");
+                            s.thrown = new io.github.dhluong90.bpm.rules.api.HistoryTooLargeException("card-fee", 10_000,
+                                    false, 5_000);
+                        }),
                 new Case("EVIDENCE_TOO_LARGE", 422,
                         post("/api/bpm/rules/v1/rule-sets/card-fee/evidence").contentType("application/json")
                                 .content("{\"format\":\"csv\",\"versions\":[1]}"),

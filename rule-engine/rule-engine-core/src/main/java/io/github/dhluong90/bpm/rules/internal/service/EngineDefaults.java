@@ -126,6 +126,22 @@ public final class EngineDefaults {
     public static final int SIMULATION_MAX_SAMPLES = 1_000;
 
     /**
+     * Default of {@code simulation.max-history-decisions}: the most logged decisions one comparison over a past period
+     * reads (RLE-077, PD-124). About 100,000 evaluations, a few seconds of one thread. A larger period is refused,
+     * never sampled, so a total is never partial.
+     */
+    public static final int SIMULATION_MAX_HISTORY_DECISIONS = 50_000;
+
+    /**
+     * Default of {@code approval.require-content-hash}: an approval or a rejection must name the content it reviewed
+     * (RLE-084, #275). Required from the first release, because making a field required later breaks clients.
+     */
+    public static final boolean REQUIRE_CONTENT_HASH = true;
+
+    /** Ceiling of {@code simulation.max-history-decisions}: it may be raised to this, never above. */
+    public static final int SIMULATION_MAX_HISTORY_DECISIONS_CEILING = 200_000;
+
+    /**
      * Default and ceiling of {@code evaluation.max-batch}: the most items one {@code :evaluate-batch} accepts
      * (RLE-068). May be lowered, never raised.
      */

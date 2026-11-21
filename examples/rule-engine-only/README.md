@@ -164,13 +164,20 @@ H=localhost:8080/api/bpm/rules/v1
 
    ```bash
    curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:request-publish
-   # 200 {"status":"PENDING_APPROVAL","requestedBy":"hoa",...}
+   # 200 {"status":"PENDING_APPROVAL","requestedBy":"hoa","canonicalHash":"596414cd...f9142",...}
+   ```
+
+   A decision names the content it was made on. The approver reads the version, keeps its `canonicalHash`, and sends it back as `expectedCanonicalHash`. Without it `:approve` and `:reject` answer `400 CONTENT_HASH_REQUIRED` (`approval.require-content-hash`, on by default), and if the content changed since, `409 CONTENT_CHANGED`. The later steps read the hash once into `$HASH`:
+
+   ```bash
+   HASH=$(curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1 | jq -r .canonicalHash)
    ```
 
 3. Hoa tries to approve her own request and is refused:
 
    ```bash
-   curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"'
+   curl -s -w '\nHTTP %{http_code}\n' -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
+     -H 'Content-Type: application/json' -d '{"expectedCanonicalHash":"'$HASH'"}'
    # {"type":"...","title":"Forbidden","status":403,"code":"SELF_APPROVAL_FORBIDDEN","detail":"The requester or author of card-fee v1 cannot approve it",...}
    # HTTP 403
    ```
@@ -179,7 +186,7 @@ H=localhost:8080/api/bpm/rules/v1
 
    ```bash
    curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/1:approve -H 'If-Match: "1"' \
-     -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff"}'
+     -H 'Content-Type: application/json' -d '{"comment":"Fees checked against the tariff","expectedCanonicalHash":"'$HASH'"}'
    # 200 {"status":"PUBLISHED","requestedBy":"hoa","approvedBy":"minh",...}
    ```
 
@@ -424,7 +431,9 @@ curl -s -u tuan:demo-only -X POST $B/decisions/card-fee:evaluate -H 'Content-Typ
    sed 's/"50000 VND"/"60000 VND"/' examples/rule-engine-only/src/main/resources/rules/card-fee.yaml > /tmp/card-fee-v2.yaml
    curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions -H 'Content-Type: application/yaml' --data-binary @/tmp/card-fee-v2.yaml
    curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"'
+   HASH=$(curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/2 | jq -r .canonicalHash)
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"' \
+     -H 'Content-Type: application/json' -d '{"expectedCanonicalHash":"'$HASH'"}'
    ```
 
 2. Copy B answers with v2 within a second, without a restart:
@@ -542,7 +551,9 @@ R=examples/rule-engine-only/src/main/resources/rules
      --data-binary @$R/card-fee-december.yaml
    # 201 {"ruleSet":"card-fee","version":2,"status":"DRAFT","effectiveFrom":"2026-12-01T00:00:00Z",...}
    curl -s -u hoa:demo-only -X POST $H/rule-sets/card-fee/versions/2:request-publish
-   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"'
+   HASH=$(curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/2 | jq -r .canonicalHash)
+   curl -s -u minh:demo-only -X POST $H/rule-sets/card-fee/versions/2:approve -H 'If-Match: "1"' \
+     -H 'Content-Type: application/json' -d '{"expectedCanonicalHash":"'$HASH'"}'
    # 200 {"version":2,"status":"PUBLISHED","effectiveFrom":"2026-12-01T00:00:00Z",...}
    ```
 
@@ -627,7 +638,9 @@ Wait one second and send the same request again: once the first has finished, th
    curl -s -u hoa:demo-only -X POST $H/rule-sets -H 'Content-Type: application/yaml' \
      --data-binary @examples/rule-engine-only/src/main/resources/rules/tet-fee-waiver.yaml
    curl -s -u hoa:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:request-publish
-   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:approve -H 'If-Match: "1"'
+   HASH=$(curl -s -u minh:demo-only $H/rule-sets/tet-fee-waiver/versions/1 | jq -r .canonicalHash)
+   curl -s -u minh:demo-only -X POST $H/rule-sets/tet-fee-waiver/versions/1:approve -H 'If-Match: "1"' \
+     -H 'Content-Type: application/json' -d '{"expectedCanonicalHash":"'$HASH'"}'
    # 200 {"version":1,"status":"PUBLISHED","lockVersion":2,...}
    curl -s -u tuan:demo-only -X POST $H/decisions/tet-fee-waiver:evaluate -H 'Content-Type: application/json' \
      -d '{"inputs":{"channel":"CARD"}}'
@@ -713,7 +726,9 @@ curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -H 'Content-Type: applicati
 
 curl -s -b lan -c lan -H "X-XSRF-TOKEN: $(xsrf lan)" -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:request-publish
-curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -X POST \
+HASH=$(curl -s -b minh localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1 | jq -r .canonicalHash)
+curl -s -b minh -c minh -H "X-XSRF-TOKEN: $(xsrf minh)" -H 'If-Match: "1"' -H 'Content-Type: application/json' \
+  -d '{"expectedCanonicalHash":"'$HASH'"}' -X POST \
   localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/1:approve
 # {"ruleSet":"card-fee","version":1,"status":"PUBLISHED",...,"requestedBy":"lan",...,"approvedBy":"minh",...}
 

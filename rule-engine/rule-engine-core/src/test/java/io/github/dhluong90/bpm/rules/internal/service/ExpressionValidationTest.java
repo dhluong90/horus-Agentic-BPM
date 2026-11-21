@@ -56,7 +56,7 @@ class ExpressionValidationTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
     final RuleEngines engines = RuleEngines.create(
-            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults()), stores, stores, stores);
+            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults().withRequireContentHash(false)), stores, stores, stores);
     final VersionService versions = engines.versionService();
 
     {
@@ -367,7 +367,7 @@ class ExpressionValidationTest {
         versions.importRuleSet(ImportRequest.yaml(tariff("first", 200)));
 
         // When the host runs with a step budget of 5,000 and the author asks for publication
-        VersionService lowered = enginesWith(EngineSettings.defaults()
+        VersionService lowered = enginesWith(EngineSettings.defaults().withRequireContentHash(false)
                 .withEvaluationLimits(new EvaluationLimits(5_000, EvaluationLimits.TIMEOUT_MILLIS))).versionService();
         ValidationFailedException e = catchThrowableOfType(ValidationFailedException.class,
                 () -> lowered.requestPublish("card-tariff", 1, WriteOptions.none()));
@@ -384,7 +384,7 @@ class ExpressionValidationTest {
 
     @Test
     void TR_SEC_01_a_host_with_a_higher_budget_imports_the_large_tariff() {
-        VersionService roomy = enginesWith(EngineSettings.defaults()
+        VersionService roomy = enginesWith(EngineSettings.defaults().withRequireContentHash(false)
                 .withEvaluationLimits(new EvaluationLimits(200_000, EvaluationLimits.TIMEOUT_MILLIS))).versionService();
 
         roomy.importRuleSet(ImportRequest.yaml(tariff("unique", 5_000)));

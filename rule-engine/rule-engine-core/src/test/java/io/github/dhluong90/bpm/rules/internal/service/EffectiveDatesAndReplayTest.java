@@ -67,7 +67,7 @@ class EffectiveDatesAndReplayTest {
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
     final RuleEngines engines = RuleEngines.create(
-            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults(),
+            new EngineContext(caller, caller, clock, stores, stores, EngineSettings.defaults().withRequireContentHash(false),
                     // A masked input is logged as its keyed fingerprint, so the tenant needs a key (RLE-012).
                     io.github.dhluong90.bpm.rules.spi.MaskingPolicy.withKey(io.github.dhluong90.bpm.rules.api.MaskingKey
                             .of("replay-test-key-of-32-bytes-long".getBytes(StandardCharsets.UTF_8)))),
@@ -368,7 +368,7 @@ class EffectiveDatesAndReplayTest {
 
         // When the host turns evaluation.pin-retired on, Then the pin is accepted and logged
         RuleEngine allowing = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults().withPinRetired(true)), stores, stores, stores).ruleEngine();
+                EngineSettings.defaults().withRequireContentHash(false).withPinRetired(true)), stores, stores, stores).ruleEngine();
         caller.become("bank-a", "pricing", PRICING);
         assertThat(allowing.evaluate(DecisionRequest.of("card-fee", STANDARD).withVersion(1)).version()).isEqualTo(1);
         assertThat(stores.decisions).hasSize(rows + 1);

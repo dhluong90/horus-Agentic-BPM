@@ -60,7 +60,7 @@ class SizeLimitsTest {
     @Test
     void collected_outputs_beyond_the_default_max_output_bytes_fail_with_a_logged_evaluation_error() {
         // Given 20 rows, each repeating a 60,000-character input: about 3.6 MB of output at the defaults
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         publish(engines, echoTable(), "echo");
 
         // When
@@ -78,7 +78,7 @@ class SizeLimitsTest {
 
     @Test
     void a_lowered_max_output_bytes_applies_and_smaller_outputs_still_pass() {
-        RuleEngines engines = engines(EngineSettings.defaults().withSizeLimits(500, 65_536, 5_000));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withSizeLimits(500, 65_536, 5_000));
         publish(engines, echoTable(), "echo");
 
         DecisionResult small = engines.ruleEngine().evaluate("echo", DecisionInput.of(Map.of("note", "ok")));
@@ -91,7 +91,7 @@ class SizeLimitsTest {
 
     @Test
     void string_plus_beyond_max_string_length_fails_before_the_string_is_built() {
-        RuleEngines engines = engines(EngineSettings.defaults().withSizeLimits(1_048_576, 10, 5_000));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withSizeLimits(1_048_576, 10, 5_000));
         publish(engines, """
                 schemaVersion: 1
                 ruleSet: concat
@@ -115,7 +115,7 @@ class SizeLimitsTest {
 
     @Test
     void a_string_input_beyond_max_string_length_is_input_invalid_and_logs_nothing() {
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         publish(engines, echoTable(), "echo");
 
         assertThatThrownBy(() -> engines.ruleEngine().evaluate("echo", DecisionInput.of(Map.of("note", "x".repeat(65_537)))))
@@ -142,7 +142,7 @@ class SizeLimitsTest {
         for (int i = 0; i < 5_000; i++) {
             yaml.append("  - { id: B").append(i).append(", when: {}, then: { shortest: \"note + 'a'\", longest: \"note + 'b'\", rows: \"note + 'c'\" } }\n");
         }
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         publish(engines, yaml.toString(), "big-aggregates");
 
         // When
@@ -158,7 +158,7 @@ class SizeLimitsTest {
 
     @Test
     void aggregate_folding_keeps_the_strict_null_and_currency_rules() {
-        RuleEngines engines = engines(EngineSettings.defaults());
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false));
         publish(engines, """
                 schemaVersion: 1
                 ruleSet: fold-rules
@@ -201,7 +201,7 @@ class SizeLimitsTest {
 
     @Test
     void TR_EXT_03_a_rule_set_with_more_rules_than_max_rows_is_refused_at_import() {
-        RuleEngines engines = engines(EngineSettings.defaults().withSizeLimits(1_048_576, 65_536, 19));
+        RuleEngines engines = engines(EngineSettings.defaults().withRequireContentHash(false).withSizeLimits(1_048_576, 65_536, 19));
 
         assertThatThrownBy(() -> engines.versionService().importRuleSet(
                 ImportRequest.yaml(echoTable().getBytes(StandardCharsets.UTF_8))))

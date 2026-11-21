@@ -72,7 +72,7 @@ class AcknowledgeWarningsTest {
     }
 
     VersionService versions() {
-        return versions(EngineSettings.defaults());
+        return versions(EngineSettings.defaults().withRequireContentHash(false));
     }
 
     /** A rule set imported and requested by lan in a tenant; returns the pending version. */
@@ -287,7 +287,7 @@ class AcknowledgeWarningsTest {
     @Test
     void RLE_053_a_host_that_lists_no_code_marks_no_warning() {
         // Given a host whose lifecycle.acknowledge-warnings is empty
-        VersionService versions = versions(EngineSettings.defaults().withAcknowledgeWarnings(List.of()));
+        VersionService versions = versions(EngineSettings.defaults().withRequireContentHash(false).withAcknowledgeWarnings(List.of()));
 
         // When
         RuleSetVersion pending = pending(versions, "bank-a");
@@ -326,7 +326,7 @@ class AcknowledgeWarningsTest {
     @Test
     void RLE_053_without_the_code_in_the_setting_no_acknowledgement_is_needed() {
         // Given a host whose lifecycle.acknowledge-warnings is empty
-        VersionService versions = versions(EngineSettings.defaults().withAcknowledgeWarnings(List.of()));
+        VersionService versions = versions(EngineSettings.defaults().withRequireContentHash(false).withAcknowledgeWarnings(List.of()));
         RuleSetVersion pending = pending(versions, "bank-a");
 
         // When bob approves without acknowledgedWarnings: published, with an empty acknowledgement
@@ -334,10 +334,10 @@ class AcknowledgeWarningsTest {
                 .isEqualTo(VersionStatus.PUBLISHED);
         assertThat(approvalRow(versions).acknowledgedWarnings()).isEmpty();
         // And a setting naming a code this release never raises stops start-up, naming the property
-        assertThatThrownBy(() -> EngineSettings.defaults().withAcknowledgeWarnings(List.of("SOMETHING_ELSE")))
+        assertThatThrownBy(() -> EngineSettings.defaults().withRequireContentHash(false).withAcknowledgeWarnings(List.of("SOMETHING_ELSE")))
                 .hasMessageContaining("horus.bpm.rules.lifecycle.acknowledge-warnings")
                 .hasMessageContaining("SOMETHING_ELSE");
-        assertThat(EngineSettings.defaults().acknowledgeWarnings()).containsExactly(UNMASKED);
+        assertThat(EngineSettings.defaults().withRequireContentHash(false).acknowledgeWarnings()).containsExactly(UNMASKED);
     }
 
     @Test
@@ -356,7 +356,7 @@ class AcknowledgeWarningsTest {
 
         // When the host restarts with bank-c no longer masking by default
         policy.maskByDefault.remove("bank-c");
-        List<String> lines = engines(EngineSettings.defaults()).maskingCheck().recordMaskDefaults(Set.of(),
+        List<String> lines = engines(EngineSettings.defaults().withRequireContentHash(false)).maskingCheck().recordMaskDefaults(Set.of(),
                 JAN_15.plusSeconds(60));
 
         // Then the change line is followed by one WARN naming the first 20 versions and "and 2 more"

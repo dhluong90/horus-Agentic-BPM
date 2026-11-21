@@ -301,7 +301,7 @@ class GuardedAgentTaskIT {
             RuleSetVersion requested = as("risk-author", "rules:author",
                     () -> ruleSets.requestPublish(ruleSet, draft.version(), WriteOptions.none()));
             as("risk-approver", "rules:approve", () -> ruleSets.approve(ruleSet, draft.version(),
-                    new WriteOptions(null, requested.lockVersion(), null)));
+                    new WriteOptions(null, requested.lockVersion(), null).expectingContent(requested.canonicalHash())));
         } catch (RuleSetExistsException e) {
             // published by an earlier test in this context
         }

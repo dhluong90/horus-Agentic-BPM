@@ -118,7 +118,7 @@ class BatchAndCaseSearchPostgresIT {
                 Duration.ofDays(7));
         host = new TransactionTemplate(manager);
         engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                EngineSettings.defaults(), MaskingPolicy.withKey(MaskingKey.of(new byte[32])));
+                EngineSettings.defaults().withRequireContentHash(false), MaskingPolicy.withKey(MaskingKey.of(new byte[32])));
         engines.cursorKeys().load();
     }
 

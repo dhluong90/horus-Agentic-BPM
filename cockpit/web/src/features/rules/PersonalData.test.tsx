@@ -53,7 +53,7 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
     await waitFor(() => { expect(approve).toBeEnabled(); });
     await user.click(approve);
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
-    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ acknowledgedWarnings: [
+    expect(bodies.map((body) => JSON.parse(body) as unknown)).toMatchObject([{ acknowledgedWarnings: [
       { code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' },
       { code: 'UNMASKED_PERSONAL_DATA', input: 'email' },
     ] }]);
@@ -114,7 +114,7 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
     await waitFor(() => { expect(approve).toBeEnabled(); });
     await user.click(approve);
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
-    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ acknowledgedWarnings: [{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' }] }]);
+    expect(bodies.map((body) => JSON.parse(body) as unknown)).toMatchObject([{ acknowledgedWarnings: [{ code: 'UNMASKED_PERSONAL_DATA', input: 'nationalId' }] }]);
   });
 
   it('CKP_037_masking_changes_read_as_sentences_above_the_table_with_a_marker_on_the_header', async () => {
@@ -147,7 +147,7 @@ describe('personal data on the approval screen (PD-099, PD-104)', () => {
     expect(screen.queryByText(/Mask removed/)).not.toBeInTheDocument();
     await user.click(within(card).getByRole('button', { name: 'Approve and publish' }));
     expect(await screen.findByText('Version 2 is published.')).toBeInTheDocument();
-    expect(bodies).toEqual(['']);
+    expect(bodies.map((body) => JSON.parse(body) as unknown)).toEqual([{ expectedCanonicalHash: expect.stringMatching(/^[0-9a-f]{64}$/) as unknown }]);
   });
 
   it('CKP_037_a_host_that_needs_no_acceptance_shows_the_warning_without_the_box', async () => {

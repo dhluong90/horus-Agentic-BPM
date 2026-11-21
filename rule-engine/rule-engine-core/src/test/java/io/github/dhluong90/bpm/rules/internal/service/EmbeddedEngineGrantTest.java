@@ -37,7 +37,7 @@ class EmbeddedEngineGrantTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults()),
+                    stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores);
 
     OneTimeEmbeddedEngineGrant grantFor(Class<?> claimant) {
@@ -70,7 +70,7 @@ class EmbeddedEngineGrantTest {
     void TR_TEN_01_a_host_that_builds_its_own_rule_engine_is_refused_too() {
         // Given a second RuleEngines built by host code over the same adapters
         RuleEngines own = RuleEngines.create(new EngineContext(caller, caller, Clock.systemUTC(), stores, stores,
-                EngineSettings.defaults()), stores, stores, stores);
+                EngineSettings.defaults().withRequireContentHash(false)), stores, stores, stores);
 
         // When, then
         assertThatThrownBy(() -> own.openEmbeddedEngineGrant().claim("system:process-engine", this))

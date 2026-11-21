@@ -59,7 +59,7 @@ class EditorApiPostgresIT {
         new RuleEngineSchemaMigrator(db).migrate();
         RuleEngineTransactions transactions = new RuleEngineTransactions(new DataSourceTransactionManager(db));
         jdbc = JdbcClient.create(db);
-        RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults());
+        RuleEngines engines = PostgresRuleEngines.create(db, transactions, caller, caller, clock, EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();   // as the starter does at start-up, after the migrations
         versions = engines.versionService();
     }
@@ -222,7 +222,7 @@ class EditorApiPostgresIT {
         DataSource db = freshDatabase();
         new RuleEngineSchemaMigrator(db).migrate();
         RuleEngines engines = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                who, who, clock, EngineSettings.defaults());
+                who, who, clock, EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();
         VersionService service = engines.versionService();
         JdbcClient sql = JdbcClient.create(db);
@@ -274,7 +274,7 @@ class EditorApiPostgresIT {
         DataSource db = freshDatabase();
         new RuleEngineSchemaMigrator(db).migrate();
         RuleEngines engines = PostgresRuleEngines.create(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)),
-                who, who, clock, EngineSettings.defaults());
+                who, who, clock, EngineSettings.defaults().withRequireContentHash(false));
         engines.cursorKeys().load();
         VersionService service = engines.versionService();
         JdbcClient sql = JdbcClient.create(db);
@@ -579,7 +579,7 @@ class EditorApiPostgresIT {
 
     RuleEngines engines(DataSource db, DataSourceTransactionManager manager) {
         return PostgresRuleEngines.create(db, new RuleEngineTransactions(manager), caller, caller, clock,
-                EngineSettings.defaults());
+                EngineSettings.defaults().withRequireContentHash(false));
     }
 
     /** V3 backfills one CREATED row per version that existed before it, so their history starts at creation. */

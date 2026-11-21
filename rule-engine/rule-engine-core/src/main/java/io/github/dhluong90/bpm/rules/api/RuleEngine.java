@@ -83,6 +83,34 @@ public interface RuleEngine {
     }
 
     /**
+     * Compares two versions of a rule set over the decisions actually made in a past period (RLE-075 to RLE-077): each
+     * logged decision of the rule set in the period is evaluated again, at its logged clock, through both versions in
+     * memory. The result holds outcome counts, output totals side by side and the most common changes; it holds no
+     * input, decision id or fingerprint. Writes nothing: no decision row, idempotency record, event or history entry.
+     *
+     * <p>A decision that cannot be evaluated again is counted, never guessed: a masked input a version reads has only a
+     * fingerprint in the log ({@code MASKED_INPUT}), and an input a version reads may be absent from an older decision
+     * ({@code MISSING_INPUT}). A period holding more than {@code simulation.max-history-decisions} decisions is refused,
+     * never sampled (PD-124). Both versions may be in any status. The caller needs {@code rules:simulate} and
+     * {@code rules:log:read}; the tenant is the caller's.
+     *
+     * @param ruleSet the rule set name
+     * @param request the two versions and the period
+     * @return the comparison
+     * @throws PermissionDeniedException when the caller lacks either permission
+     * @throws QueryInvalidException when the period is missing, reversed or longer than {@code query.max-range}, or
+     *     when the versions are equal
+     * @throws RuleSetNotFoundException when the caller's tenant has no such rule set
+     * @throws VersionNotFoundException when a version does not exist
+     * @throws ValidationFailedException when a version no longer matches its hash or does not compile
+     * @throws HistoryTooLargeException when the period holds more decisions than one comparison reads
+     * @throws EvaluationErrorException when the regular expression read budget of the request is spent
+     */
+    default ComparisonResult compare(String ruleSet, ComparisonRequest request) {
+        throw new UnsupportedOperationException("compare is not supported by " + getClass().getName());
+    }
+
+    /**
      * Evaluates up to {@code evaluation.max-batch} items of one rule set in one call (RLE-067). One version is
      * selected for the whole batch at the request clock. Every evaluated item is a logged decision with its own id; an
      * item that fails does not stop the others. The rows commit or roll back with the caller's transaction, or all

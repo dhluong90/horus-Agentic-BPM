@@ -145,8 +145,10 @@ class MultiReplicaCacheIT {
                 "/rule-sets/card-fee/versions/" + version + ":request-publish", null, null);
         assertThat(requested.statusCode()).isEqualTo(200);
         String etag = requested.headers().firstValue("ETag").orElseThrow();
-        assertThat(send(copy, "bob", "/rule-sets/card-fee/versions/" + version + ":approve", null, null, etag)
-                .statusCode()).isEqualTo(200);
+        String reviewed = JSON.readTree(requested.body()).path("canonicalHash").asString();
+        assertThat(send(copy, "bob", "/rule-sets/card-fee/versions/" + version + ":approve",
+                ("{\"expectedCanonicalHash\":\"" + reviewed + "\"}").getBytes(StandardCharsets.UTF_8),
+                "application/json", etag).statusCode()).isEqualTo(200);
     }
 
     private static int evaluatedVersion(ConfigurableApplicationContext copy) throws Exception {

@@ -40,7 +40,7 @@ class AuthorUnknownTest {
     @BeforeEach
     void setUp() {
         RuleEngines engines = RuleEngines.create(new EngineContext(caller, caller, Clock.fixed(JAN_15, ZoneOffset.UTC),
-                stores, stores, EngineSettings.defaults()), stores, stores, stores);
+                stores, stores, EngineSettings.defaults().withRequireContentHash(false)), stores, stores, stores);
         engines.cursorKeys().load();
         versions = engines.versionService();
         caller.become("bank-a", "lan", AUTHOR);

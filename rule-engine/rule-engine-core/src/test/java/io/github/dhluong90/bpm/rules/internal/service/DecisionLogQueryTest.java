@@ -36,7 +36,7 @@ class DecisionLogQueryTest {
     final TestCaller caller = new TestCaller("bank-a", "dan");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2027-02-10T00:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults()),
+                    stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
             stores, stores, stores);
 
     @BeforeEach

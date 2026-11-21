@@ -90,7 +90,7 @@ class CaseSearchTest {
             }
         };
         RuleEngines engines = RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores,
-                EngineSettings.defaults(), masking), stores, stores, stores);
+                EngineSettings.defaults().withRequireContentHash(false), masking), stores, stores, stores);
         engines.cursorKeys().load();
         return engines;
     }
