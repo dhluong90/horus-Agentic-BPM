@@ -38,11 +38,14 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
+| 404 | [LAYOUT_NOT_FOUND](#layout_not_found) | processes | 0.3.0 |
 | 404 | [INCIDENT_NOT_FOUND](#incident_not_found) | processes | 0.3.0 |
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
 | 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
 | 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
 | 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
+| 422 | [LAYOUT_INVALID](#layout_invalid) | processes | 0.3.0 |
+| 409 | [DRY_RUN_REQUIRED](#dry_run_required) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
@@ -249,7 +252,16 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `404`. Unknown agent replay run, a run of another tenant, or a case the run does not have. Runs are deleted `replay.retention` (30 days) after they were created.
 
 ### MIGRATION_NOT_FOUND
-`404`. Unknown migration plan id, or a plan of another tenant (`GET /migrations/{id}`, `POST /migrations/{id}:validate`). Nothing is written.
+`404`. Unknown migration plan id, or a plan of another tenant (`GET /migrations/{id}`, `POST /migrations/{id}:validate`, `:execute`, `:approve`, `:reject`, `/execution`, `/instances`). Nothing is written.
+
+### DRY_RUN_REQUIRED
+`409`. A migration is proposed or approved without a passing dry run. The engine runs the dry run itself: the plan has conflicts (the detail gives their number), or the dry run of the proposal is older than `migration.dry-run-validity` when the second person approves. Nothing is written. Resolve the conflicts, or propose the execution again, then approve.
+
+### LAYOUT_NOT_FOUND
+`404`. The version has no such layout revision (`GET .../layout?revision=n`). A version with no layout at all answers `204`, not an error.
+
+### LAYOUT_INVALID
+`422`. A layout document breaks the layout schema, or names a step the definition version does not have. `paths` lists each problem as a path and a reason, for example `$.nodes.ghost-step names a step that is not in the definition`, never a value. Nothing is written. Correct the document and save again over the same `If-Match`.
 
 ### REPLAY_TOO_LARGE
 `422`. The period of an agent replay holds more recorded answers than `horus.bpm.processes.replay.max-cases` (50,000). The body carries `cases` and `limit`. Nothing is written. Choose a shorter period.

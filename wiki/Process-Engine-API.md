@@ -34,6 +34,14 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `POST /migrations` | `MigrationService.plan(MigrationPlanRequest)` | `processes:migration:manage` | Plans moving the running instances of `sourceVersion` to the active `targetVersion` of one key. Body `{"definitionKey": "loan-review", "sourceVersion": 1, "targetVersion": 2}`; any other field is `400`. Answers `201` with `approval: {"mode": "four-eyes", "secondPersonRequired": true}`: executing the plan will need a second holder of the permission (`single` only on the `dev` profile). Moves nothing. `Idempotency-Key` returns the first plan. A retired target is `409 INVALID_STATE`. 0.3.0 |
 | `GET /migrations/{id}` | `MigrationService.find(id)` | `processes:migration:manage` or `processes:read` | The plan. Another tenant's plan is `404 MIGRATION_NOT_FOUND`. 0.3.0 |
 | `POST /migrations/{id}:validate` | `MigrationService.validate(id)` | `processes:migration:manage` | Dry run: which running instances would move and which steps have no counterpart in the target. Reads only, needs no approval and no idempotency key. See Migration dry run below. 0.3.0 |
+| `POST /migrations/{id}:execute` | `MigrationExecutionService.propose(id, reason, key)` | `processes:migration:manage` | Proposes moving the running instances, with a `reason`. The engine runs the dry run itself; a plan with a conflict is `409 DRY_RUN_REQUIRED`. Answers `202` with the proposal and its `ETag`; nothing moves until a second holder approves. `Idempotency-Key` returns the first answer. 0.3.0 |
+| `POST /migrations/{id}:approve` | `MigrationExecutionService.approve(id, lockVersion, key)` | `processes:migration:manage` | A second holder, never the proposer (`403 SELF_APPROVAL_FORBIDDEN`), approves with `If-Match` set to the proposal's `lockVersion`. The dry run is repeated and must still pass and be fresh (`409 DRY_RUN_REQUIRED`). The plan becomes `APPROVED` and the runner moves the instances. 0.3.0 |
+| `POST /migrations/{id}:reject` | `MigrationExecutionService.reject(id, lockVersion, reason, key)` | `processes:migration:manage` | A second holder rejects the proposal with a reason; the plan may be proposed again. 0.3.0 |
+| `GET /migrations/{id}/execution` | `MigrationExecutionService.execution(id)` | `processes:migration:manage` or `processes:read` | Proposal, approval and exact progress: total, migrated, failed, skipped. 0.3.0 |
+| `GET /migrations/{id}/instances?outcome=&after=&limit=` | `MigrationExecutionService.outcomes(id, outcome, after, limit)` | `processes:migration:manage` or `processes:read` | What happened to each instance, in id order; a failure carries its code and its incident id. 0.3.0 |
+| `GET /definitions/{key}/versions/{version}/layout?revision=` | `LayoutService.latestLayout(ref)`, `.layoutRevision(ref, n)` | `processes:read` | The diagram layout of a version: the latest revision, or the one named. `ETag` is the revision; a version without a layout answers `204` with `ETag: "0"`. Another tenant's version is `404 DEFINITION_NOT_FOUND`. 0.3.0 |
+| `PUT /definitions/{key}/versions/{version}/layout` | `LayoutService.saveLayout(ref, expectedRevision, json, key)` | `processes:author` | Appends a layout revision over the one in `If-Match`. Needs no approval and never changes the definition, its status, hash or lock version. A step id the version lacks is `422 LAYOUT_INVALID`; a stale `If-Match` is `409 VERSION_CONFLICT`. At most 256 KB. 0.3.0 |
+| `GET /definitions/{key}/versions/{version}/layout/revisions` | `LayoutService.layoutRevisions(ref, after, limit)` | `processes:read` | Every revision with author and time, oldest first, without the documents. 0.3.0 |
 | `GET /incidents?status=OPEN` | `IncidentService.incidents(IncidentQuery)` | `processes:read` | One status (`OPEN` by default, `RESOLUTION_PENDING`, `RESOLVED`), newest first, keyset pages of at most 200. Each item: `errorCode`, `causeSummary`, `retryCount`, `nodeId`, `instanceId`, `retrying`, `pendingResolution` and `allowedActions` for the caller. 0.3.0 |
 | `GET /incidents/{id}` | `IncidentService.incident(id)` | `processes:read` | One incident; `ETag` is its `lockVersion`. Another tenant's is `404 INCIDENT_NOT_FOUND`. 0.3.0 |
 | `POST /incidents/{id}:retry` | `IncidentService.retry(id, lockVersion, reason, idempotencyKey)` | `processes:incident:manage` | Runs the failed step again: its job is due now with one more attempt under the same job id, or a local step's handler runs again. Body `{"reason": "..."}`. Answers `202`; the incident stays `OPEN` with `retrying: true` until the step is accepted (`RESOLVED`, `RETRY_SUCCEEDED`) or fails again. `If-Match` and `Idempotency-Key` required. 0.3.0 |
@@ -242,13 +250,52 @@ POST /api/bpm/processes/v1/migrations/01J...:validate
      "checkedAt":"2027-03-01T02:00:00Z","validUntil":"2027-03-01T03:00:00Z", ...}
 ```
 
-Every step of the source version that holds live tokens maps by identical id: `SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another kind of step. A target that is no longer active is `TARGET_NOT_ACTIVE`. The dry run writes nothing, so running it again is always safe. Executing a plan follows in a later release; it will need a fresh dry run of the same `planHash` and a second person's approval.
+Every step of the source version that holds live tokens maps by identical id: `SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another kind of step. A target that is no longer active is `TARGET_NOT_ACTIVE`. The dry run writes nothing, so running it again is always safe. Executing the plan is described under Migration execution below.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `horus.bpm.processes.migration.approval` | `four-eyes` | The approval a new plan records for its execution. `single` is accepted only when the `dev` profile is active on its own; start-up is refused otherwise |
 | `horus.bpm.processes.migration.dry-run-sample-size` | `100` | Most instance ids listed per conflict and for the instances that would move, 1 to 500; may be lowered only |
 | `horus.bpm.processes.migration.dry-run-validity` | `PT1H` | How long an execution may rely on a dry run; at most one hour, may be lowered only |
+
+## Migration execution
+
+A plan moves instances only after two people have said so, and only in bounded batches. Example: the plan above, with the 50 loans at `legacy-review` first sent on to `review`.
+
+```
+POST /api/bpm/processes/v1/migrations/01J...:execute   {"reason":"Add the audit sample after officer review, change CHG-2041"}
+202 {"status":"PROPOSED","lockVersion":1,"proposedBy":"thu","progress":{"total":500,"migrated":0,"failed":0,"skipped":0}, ...}
+
+POST /api/bpm/processes/v1/migrations/01J...:approve   If-Match: "1"        (a second holder; thu gets 403 SELF_APPROVAL_FORBIDDEN)
+200 {"status":"APPROVED","approvedBy":"lan", ...}
+
+GET /api/bpm/processes/v1/migrations/01J.../execution
+200 {"status":"COMPLETED_WITH_FAILURES","progress":{"total":500,"migrated":499,"failed":1,"skipped":0}, ...}
+
+GET /api/bpm/processes/v1/migrations/01J.../instances?outcome=FAILED
+200 {"items":[{"instanceId":"01J...","outcome":"FAILED","code":"STEP_NOT_IN_TARGET","incidentId":"01J...", ...}],"nextAfter":null}
+```
+
+- The engine runs the dry run itself, when the plan is proposed and again when it is approved; the proposal's dry run must be no older than `migration.dry-run-validity`. A plan with a conflict, or a stale dry run, is `409 DRY_RUN_REQUIRED` and nothing is written.
+- Only the approval makes the plan runnable. The table refuses a running plan without an approver and a four-eyes approval by the proposer. With `migration.approval=single` (the `dev` profile only) the proposer's proposal is approved at once and the history records `single`.
+- A runner on each replica takes one approved plan at a time under a lease and moves its instances in batches of `migration.batch-size`, one instance lock at a time. Each moved instance has its row, tokens, open tasks, due jobs and recorded results pointed at the target version, and one `MIGRATED` history row naming the approver, the proposer and the reason. The cursor and the counts are committed with each instance, so a crashed replica's plan is taken over when its lease ends and continues after the last moved instance. Nothing is moved twice.
+- An instance that cannot move (a step the target does not keep, or a row another transaction holds) stays on its version, gets an incident `MIGRATION_FAILED` and an outcome `FAILED`; the rest go on. The plan ends `COMPLETED`, or `COMPLETED_WITH_FAILURES` with an incident for each failure.
+- The runner runs inside the job poller, so `jobs.enabled=false` also stops it.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `horus.bpm.processes.migration.batch-size` | `100` | Instances the runner reads at a time, 1 to 100; may be lowered only |
+| `horus.bpm.processes.migration.lease` | `PT2M` | How long a runner holds a plan without renewing it, `PT10S` to `PT10M`; it renews after every instance |
+
+## Diagram layout
+
+The position of boxes on a diagram is stored apart from the definition. `PUT .../layout` appends a revision with `If-Match` set to the revision the client saw (`"0"` when there is none). It needs `processes:author` and no approval, because a layout cannot change behaviour: the version's `definitionHash`, status and `lockVersion` stay as they were, so tidying a diagram needs no new approval. Revisions are never changed or deleted and each records who saved it and when. A layout may list only some of the steps; the cockpit places the rest. A step that is not in the definition is `422 LAYOUT_INVALID` with each problem in `paths`. The layout of another tenant's version is `404 DEFINITION_NOT_FOUND`.
+
+```
+PUT /api/bpm/processes/v1/definitions/kyc-onboarding/versions/2/layout     If-Match: "3"
+    {"schemaVersion":1,"nodes":{"start":{"x":40,"y":120},"verify-docs":{"x":200,"y":100,"width":140,"height":80}}}
+200 {"revision":4,"createdBy":"carol","definitionHash":"9a8b...","layoutHash":"c41e...", ...}     ETag: "4"
+```
 
 ## Hourly figures per step
 

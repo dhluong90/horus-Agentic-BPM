@@ -134,4 +134,51 @@ class MigrationPlanSchemaMigrationTest {
         assertThatThrownBy(() -> jdbc.sql("TRUNCATE pre_migration_history").update())
                 .hasMessageContaining("append-only");
     }
+
+    @Test
+    void TR_OPS_01_V33_and_V34_add_the_layout_table_and_widen_the_plan_checks_without_touching_existing_plans() {
+        // Given a database at V30 with a plan made by the last release and its history row
+        DataSource ds = TestEngine.emptySchema("mig_v34_plan");
+        JdbcClient jdbc = JdbcClient.create(ds);
+        flyway(ds, "30").migrate();
+        twoLoans(jdbc);
+        jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
+                + "definition_hash, source_format, source_document, source_hash, node_count, source, created_by, "
+                + "created_at, effective_from, approved_by, approved_at) VALUES ('bank-a', 'DEFMIG0000000000000000002', "
+                + "'loan-review', 2, 'ACTIVE', 'Loan review', '{}', repeat('c', 64), 'BPMN_XML', '<definitions/>', "
+                + "repeat('d', 64), 3, 'IMPORT', 'lan', now(), now(), 'minh', now())").update();
+        jdbc.sql("INSERT INTO pre_migration (tenant_id, id, definition_key, source_definition_id, source_version, "
+                + "target_definition_id, target_version, plan_hash, approval, status, created_by, created_at) VALUES "
+                + "('bank-a', 'MIG0000000000000000000001', 'loan-review', 'DEFMIG0000000000000000001', 1, "
+                + "'DEFMIG0000000000000000002', 2, repeat('e', 64), 'four-eyes', 'PLANNED', 'thu', now())").update();
+
+        // When V33 and V34 run with the migrator's settings
+        int applied = flyway(ds, "34").migrate().migrationsExecuted;
+
+        // Then the plan is as it was, with empty execution columns, and the new checks hold
+        assertThat(applied).isEqualTo(2);
+        assertThat(jdbc.sql("SELECT status || ':' || total_count || ':' || cursor_instance_id || ':' || "
+                + "coalesce(lease_owner, 'none') || ':' || coalesce(approved_by, 'none') FROM pre_migration")
+                .query(String.class).single()).isEqualTo("PLANNED:0::none:none");
+        assertThatThrownBy(() -> jdbc.sql("UPDATE pre_migration SET status = 'RUNNING'").update())
+                .hasMessageContaining("ck_pre_migration_approved");
+        assertThatThrownBy(() -> jdbc.sql("UPDATE pre_migration SET status = 'DONE'").update())
+                .hasMessageContaining("ck_pre_migration_status");
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO pre_migration_history (tenant_id, id, migration_id, action, "
+                + "actor_id, occurred_at) VALUES ('bank-a', 'MIGH000000000000000000009', 'MIG0000000000000000000001', "
+                + "'EXECUTED', 'thu', now())").update()).hasMessageContaining("ck_pre_migration_history_action");
+        jdbc.sql("INSERT INTO pre_migration_history (tenant_id, id, migration_id, action, actor_id, occurred_at) "
+                + "VALUES ('bank-a', 'MIGH000000000000000000002', 'MIG0000000000000000000001', 'PROPOSED', 'thu', now())")
+                .update();
+        // and the layout table refuses to change or delete a revision
+        jdbc.sql("INSERT INTO pre_definition_layout (tenant_id, definition_id, revision, layout_json, layout_hash, "
+                + "definition_hash, source, created_by, created_at) VALUES ('bank-a', 'DEFMIG0000000000000000001', 1, "
+                + "'{}', repeat('a', 64), repeat('b', 64), 'API', 'carol', now())").update();
+        assertThatThrownBy(() -> jdbc.sql("UPDATE pre_definition_layout SET created_by = 'dave'").update())
+                .hasMessageContaining("append-only");
+        assertThatThrownBy(() -> jdbc.sql("INSERT INTO pre_definition_layout (tenant_id, definition_id, revision, "
+                + "layout_json, layout_hash, definition_hash, source, created_by, created_at) VALUES ('bank-b', "
+                + "'DEFMIG0000000000000000001', 1, '{}', repeat('a', 64), repeat('b', 64), 'API', 'mallory', now())")
+                .update()).hasMessageContaining("foreign key");
+    }
 }

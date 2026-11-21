@@ -123,9 +123,15 @@ class MigrationQueryPlanPostgresIT {
         assertThat(plan).as(name + " plan " + plan).anyMatch(n -> INDEXES.get(name).stream().anyMatch(n::endsWith));
     }
 
+    /** The queries of the execution runner (#90), whose plans ListQueryPlanCheckTest checks. */
+    private static final java.util.Set<String> EXECUTION_QUERIES = java.util.Set.of("migration-batch",
+            "migration-instance-tokens", "migration-outcomes", "migration-outcomes-of",
+            "migration-failures-without-incident");
+
     @Test
     void PRE_014_every_registered_dry_run_query_is_answered_by_an_index_on_a_seeded_database() {
-        List<ListQuery> dryRun = ProcessListQueries.all().stream().filter(q -> q.name().startsWith("migration-")).toList();
+        List<ListQuery> dryRun = ProcessListQueries.all().stream().filter(q -> q.name().startsWith("migration-")
+                && !EXECUTION_QUERIES.contains(q.name())).toList();
         assertThat(dryRun.stream().map(ListQuery::name).collect(Collectors.toSet()))
                 .as("every registered dry-run query has sample parameters here").isEqualTo(PARAMS.keySet());
         for (ListQuery query : dryRun) {

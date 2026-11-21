@@ -158,13 +158,54 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`, `PRE_014_a_step_kept_under_its_id_as_another_step_type_is_a_conflict`, `PRE_014_a_plan_whose_steps_all_map_is_valid_and_lists_every_instance_that_would_move`, `PRE_014_every_registered_dry_run_query_is_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_counts_are_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_reads_return_the_seeded_rows_of_one_tenant_and_version`, `PRE_014_the_dry_run_report_matches_the_contract`
 
 ### PRE-015 Batched migration isolates per-instance failures without stalling healthy instances
-- **Traces to:** `TR-MIG-02`
+- **Traces to:** `TR-MIG-02`, #90
 - **Milestone:** M2
-- **Given:** Validated migration plan `v1 -> v2` across 250 running instances where instance `#120` hits a transient lock conflict or mapping invariant error.
-- **When:** Execute `POST /api/bpm/processes/v1/migrations/{id}:execute`.
-- **Then:** 249 healthy instances pin to `v2` with `MIGRATED` `pre_history` rows; instance `#120` gets an incident without rolling back the other 249 instances.
-- **Example:** `250 instances (1 corrupt) -> 249 migrated to v2, 1 incident raised`.
-- **Test ID:** `PRE_015_migration_execute_isolates_instance_failure`
+- **Given:** Approved migration plan `v1 -> v2` (`PRE-190`) across 250 running instances, `migration.batch-size` 100. Since the dry run, instance `#120`'s token has reached a step the target does not keep (a mapping invariant error). In a second case another transaction holds the row lock of one instance (a transient lock conflict). In a third, one instance ends after the batch was read.
+- **When:** The runner executes the plan, in batches, one instance lock at a time.
+- **Then:** 249 healthy instances pin to `v2`: `pre_instance`, every token, open task, due job and recorded result point at the `v2` row, and each has one `MIGRATED` `pre_history` row naming the approver, the proposer, the reason and both versions. Instance `#120` stays on `v1`, with one `OPEN` incident `MIGRATION_FAILED` on its step and an outcome `FAILED` with the code `STEP_NOT_IN_TARGET`, without rolling back the other 249 instances. The lock conflict is `FAILED` with `LOCK_CONFLICT` and an incident, the other instances move; the instance that ended is `SKIPPED` with `NOT_RUNNING` and has no incident. The plan ends `COMPLETED_WITH_FAILURES` (`COMPLETED` when nothing failed) with exact counts of migrated, failed and skipped, and publishes `processes.migration.completed.v1`. A moved instance goes on to a step that only `v2` has. A second run moves and writes nothing.
+- **Example:** `250 instances (1 corrupt) -> 249 migrated to v2, 1 incident raised, plan COMPLETED_WITH_FAILURES 249/1/0`.
+- **Test ID:** `PRE_015_migration_execute_isolates_instance_failure`, `PRE_015_a_moved_loan_continues_on_the_new_version`, `PRE_015_a_loan_another_transaction_holds_is_a_failure_with_an_incident_and_the_others_move`, `PRE_015_a_loan_that_ended_before_the_runner_reached_it_is_skipped_not_failed`
+
+### PRE-190 An execution is proposed with a reason and runs only after a second holder approves it
+- **Traces to:** `TR-MIG-01`, `TR-SEC-04`, `TR-SEC-11`, PD-114, PD-131, #90
+- **Milestone:** M2
+- **Given:** `loan-review` v1 retired with 5 running loans, v2 active; a plan v1 to v2 created by `thu`; `thu` and `lan` hold `processes:migration:manage`; `migration.dry-run-validity` is one hour.
+- **When:** `thu` proposes the execution with the reason `Add the audit sample after officer review, change CHG-2041` and then tries to approve and to reject it; the runner polls; `lan` approves with a stale and then with the right `If-Match`; in other cases the reason is blank, the caller lacks the permission, a loan has since reached a step `v2` lacks, `lan` approves 61 minutes after the proposal, and `lan` rejects instead.
+- **Then:**
+  - The engine runs the dry run itself at the proposal and at the approval; a plan with a conflict is `409 DRY_RUN_REQUIRED` naming the number of conflicts, as is an approval whose proposal's dry run is older than the validity, and nothing is written. A proposal whose dry run has expired may be proposed again.
+  - The proposal is `PROPOSED` with proposer, reason and time, `lockVersion` 1, and `processes.migration.proposed.v1`; it moves nothing and the runner finds nothing to run. `thu`'s own approval or rejection is `403 SELF_APPROVAL_FORBIDDEN` and changes nothing; a stale `If-Match` is `409 VERSION_CONFLICT`; a blank reason is `400 INPUT_INVALID`; a caller without the permission is `403 PERMISSION_DENIED`.
+  - `lan`'s approval makes the plan `APPROVED` with both people, in one transaction with its history row and `processes.migration.approved.v1`; only now does the runner move instances. A rejection with a reason makes it `REJECTED`, moves nothing, and the plan may be proposed again.
+  - With `migration.approval=single`, accepted on the `dev` profile only, the proposal is approved by the proposer at once and the history row records `single`. A repeat of a command with the same `Idempotency-Key` returns the first answer and writes nothing; the same key with another reason is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - The table refuses a `RUNNING` or `APPROVED` plan without an approver and a four-eyes plan whose approver is its proposer, whoever writes the row.
+- **Example:** `thu proposes, thu approves -> 403; lan approves -> APPROVED, runner moves 5; plan with 1 blocked loan -> 409 DRY_RUN_REQUIRED`.
+- **Test ID:** `PRE_190_a_second_holder_approves_and_only_the_approval_lets_the_runner_move_instances`, `PRE_190_a_rejected_proposal_moves_nothing_and_may_be_proposed_again`, `PRE_190_a_proposal_needs_a_reason_a_passing_dry_run_and_the_permission`, `PRE_190_the_dry_run_must_still_be_fresh_and_still_pass_when_the_second_person_approves`, `PRE_190_single_person_execution_is_approved_at_once_and_recorded_as_single`, `PRE_190_a_proposal_is_idempotent_and_a_key_is_not_reused_for_another_reason`, `PRE_190_the_table_refuses_a_running_plan_nobody_approved_and_a_four_eyes_approval_by_the_proposer`, `PRE_190_execution_bodies_and_problems_match_the_contract`
+
+### PRE-191 Another tenant can neither propose, approve nor read an execution, and nothing is written
+- **Traces to:** `TR-TEN-01`, `TR-MIG-01`, #90
+- **Milestone:** M2
+- **Given:** `bank-a`'s plan with a proposal over 3 running loans; `bank-b` has 4 running loans of its own and its own approved plan.
+- **When:** A manager of `bank-b` proposes, approves, rejects, reads and lists the outcomes of `bank-a`'s plan; the runner then polls twice.
+- **Then:** Each is `404 MIGRATION_NOT_FOUND`; every engine table holds the same rows and no event is published. A runner pass takes the plan of one tenant and moves only that tenant's loans: `bank-a` ends with 3 outcome rows and `bank-b` with 4, and neither tenant's progress counts the other's. The tenant of a plan is read from its row, never from a request.
+- **Example:** `bank-b approves bank-a's proposal -> 404, 0 rows; bank-a 3 moved, bank-b 4 moved`.
+- **Test ID:** `PRE_191_another_tenant_can_neither_propose_approve_nor_read_a_migration_and_nothing_is_written`
+
+### PRE-192 A crashed runner's plan is taken over after its lease and continues after the last committed instance
+- **Traces to:** `TR-MIG-02`, `TR-OPS-01`, #90
+- **Milestone:** M2
+- **Given:** An approved plan over 60 loans, `migration.batch-size` 25, `migration.lease` two minutes; the runner on `pod-a` stops after its 40th loan as a crash would.
+- **When:** `pod-b` polls at once, and again after the lease has ended.
+- **Then:** After the crash 40 loans are moved, the plan is `RUNNING` and `pod-a` holds the lease, so `pod-b` takes nothing. After the lease `pod-b` moves the 20 loans after the last committed one. Every loan has exactly one `MIGRATED` history row and one outcome row, the counts are 60/0/0, the plan is `COMPLETED`. The cursor, the counts and the lease are written in the transaction of each loan, so no state exists in which a loan is moved and not counted.
+- **Example:** `crash after 40 of 60 -> pod-b at +2 min moves 20, 60 MIGRATED rows, none twice`.
+- **Test ID:** `PRE_192_a_crashed_runner_is_taken_over_after_its_lease_and_continues_after_the_last_committed_instance`
+
+### PRE-193 One runner writes a plan at a time, and a runner that lost its lease writes nothing more
+- **Traces to:** `TR-MIG-02`, `TR-TEN-01`, #90
+- **Milestone:** M2
+- **Given:** An approved plan over 30 loans. Case 1: `pod-a` is slow; after its 5th loan its lease ends, `pod-b` takes the plan and finishes it, and `pod-a` then goes on with its batch. Case 2: `pod-b` polls while `pod-a` holds the lease.
+- **When:** `pod-a` reaches its 6th loan, which `pod-b` has already moved; `pod-b` polls during `pod-a`'s run.
+- **Then:** `pod-a` stops: its transaction is rolled back because it no longer holds the lease, and it counts nothing. `pod-b` did the other 25 loans. 30 `MIGRATED` rows, 30 outcome rows, counts 30/0/0, no loan moved or counted twice. In case 2 `pod-b` finds nothing to run while the lease is held. The claim is `FOR UPDATE SKIP LOCKED` on the plan row.
+- **Example:** `pod-a loses its lease after 5 -> pod-b moves 25, pod-a writes nothing more; 30 rows in all`.
+- **Test ID:** `PRE_193_one_writer_per_plan_a_runner_that_lost_its_lease_writes_nothing_more`, `PRE_193_two_runners_never_take_the_same_plan`
 
 ---
 
@@ -253,6 +294,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Both are imported as drafts, and the published hashing reference (RFC 8785 then SHA-256, `diagram` removed) is run on the file in CI.
 - **Then:** Both drafts carry the same `definitionHash`, equal to the hash computed in CI; the graph diff between them is empty.
 - **Example:** `hash(yaml with diagram) == hash(json reordered, no diagram) == ci_hash(file)`.
+- **Scope today:** The engine reads BPMN XML only; the `process-definition.v1` JSON and YAML reader is `PRE-043`. Until it ships the case runs on a BPMN file with a `BPMNDI` diagram, the same file with its attributes in another order and every box moved, and the file without any diagram, imported by two tenants. The stored definition holds no diagram, all three carry the hash that an independent run of the published reference (diagram removed, RFC 8785, SHA-256) gives for the stored document, a moved diagram is no new version, and a layout saved afterwards leaves the hash alone. The YAML and JSON file cases follow with `PRE-043`.
 - **Test ID:** `PRE_024_content_hash_excludes_diagram_and_matches_git`
 
 ### PRE-025 Graph diff lists nodes and edges added, removed and changed
@@ -270,8 +312,18 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Given:** `kyc-onboarding` v2 `ACTIVE` with layout revision 3; `carol` and `dave` hold `processes:author`.
 - **When:** `carol` saves a layout with `If-Match: "3"`; `dave` then saves with `If-Match: "3"`; `carol` saves a layout naming node `ghost-step`.
 - **Then:** `carol`'s first save returns `200` with revision 4, `createdBy: carol`; the definition status, hash and `lockVersion` are unchanged and no approval is requested. `dave` gets `409 VERSION_CONFLICT`. The `ghost-step` save gets `422 LAYOUT_INVALID`. Revisions 1 to 4 remain readable.
+- **Also:** Two saves over the same revision at once make exactly one new revision and one `409 VERSION_CONFLICT`. The table refuses `UPDATE`, `DELETE` and `TRUNCATE` of a revision (SQLSTATE `55000`). A save publishes `processes.definition.layout-saved.v1` and is allowed for a draft, an active and a retired version, and while `authoring.cockpit-drafts` is off, because a layout is not a draft. A version that has no layout answers `204` with `ETag: "0"`, so the first save sends `If-Match: "0"`.
 - **Example:** `save layout If-Match 3 -> revision 4, hash unchanged; concurrent If-Match 3 -> 409`.
-- **Test ID:** `PRE_026_layout_revision_append_only_without_approval`
+- **Test ID:** `PRE_026_layout_revision_append_only_without_approval`, `PRE_026_two_saves_over_the_same_revision_at_once_make_exactly_one_revision`, `PRE_026_the_table_refuses_to_change_or_delete_a_revision`, `PRE_026_a_layout_can_be_saved_for_a_draft`, `PRE_026_layout_bodies_and_problems_match_the_contract`
+
+### PRE-194 A layout is checked against its schema and the steps of its version, needs the right permission, and never crosses tenants
+- **Traces to:** `TR-DEF-02`, `TR-TEN-01`, #102
+- **Milestone:** M3
+- **Given:** `kyc-onboarding` v1 of `bank-a`; `carol` holds `processes:author`; `viewer` holds `processes:read` only; a caller of `bank-b` holds both.
+- **When:** `carol` saves a layout with `schemaVersion` 2, a box with a text `x` and an unknown member, a lane with a repeated step and a step the version lacks, a link to a step the version lacks, and an unknown top-level member; she repeats a valid save with the same `Idempotency-Key`, and reuses the key for another layout; `viewer` saves; a caller with neither permission reads; the `bank-b` caller reads, lists and saves `bank-a`'s layout.
+- **Then:** The invalid save is `422 LAYOUT_INVALID` listing each problem as a path and a reason in `paths`, at most 20, never a value, and writes nothing. The repeat returns the first revision and writes nothing; the reused key is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. `viewer`'s save is `403 PERMISSION_DENIED`, the read without permission as well. The `bank-b` calls are `404 DEFINITION_NOT_FOUND`, no row or event is written, and `bank-b` has its own layout history for its own version.
+- **Example:** `nodes.ghost-step -> 422, paths ["$.nodes.ghost-step names a step that is not in the definition"]; bank-b reads bank-a's layout -> 404`.
+- **Test ID:** `PRE_194_a_layout_is_validated_against_its_schema_and_the_steps_of_the_version`, `PRE_194_a_save_is_idempotent_and_a_key_is_not_reused_for_another_layout`, `PRE_194_saving_needs_the_author_permission_and_reading_the_read_permission`, `PRE_194_another_tenant_can_neither_read_nor_save_a_layout_and_nothing_is_written`
 
 ### PRE-037 Definition lifecycle events are published inside the state transaction
 - **Traces to:** `TR-OBS-04`, `TR-OBS-06`
