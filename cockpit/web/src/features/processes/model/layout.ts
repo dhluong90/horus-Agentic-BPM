@@ -130,13 +130,26 @@ function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
   return { x: centre.x + (dx / length) * radius, y: centre.y + (dy / length) * radius };
 }
 
+export interface LayoutOptions {
+  /**
+   * Leave room for status badges on the steps of an instance (CKP-017): a badge sits on a box's top edge and may be
+   * wider than the box, so ranks and rows are spaced to keep it clear of the next step.
+   */
+  badges?: boolean;
+}
+
+/** Spacing with badges: the widest badge (about 150 px) fits over a 116 px box and the gap to the next rank, and clears a caption that hangs below the symbol above it. */
+const BADGE_RANKSEP = 56;
+const BADGE_NODESEP = 64;
+
 /**
  * Lays the graph out. `typeLabel` gives each node's type in words in the user's language, so a box is sized to the
  * words it shows.
  */
-export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type): Layout {
+export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
   const g = new dagre.graphlib.Graph({ multigraph: true });
-  g.setGraph({ rankdir: 'LR', nodesep: 28, ranksep: 24, marginx: 4, marginy: 12 });
+  const badges = options.badges === true;
+  g.setGraph({ rankdir: 'LR', nodesep: badges ? BADGE_NODESEP : 28, ranksep: badges ? BADGE_RANKSEP : 24, marginx: 4, marginy: badges ? 36 : 12 });
   g.setDefaultEdgeLabel(() => ({}));
   const sizes = new Map(graph.nodes.map((node) => [node.id, sized(node, shapeOf(node.type), typeLabel(node.type))]));
   for (const node of graph.nodes) {
@@ -198,14 +211,18 @@ export function overlaps(a: Pick<PlacedNode, 'x' | 'y' | 'width' | 'height'>, b:
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-/** The smallest scale the diagram is drawn at: its smallest text is then the 12 px caption stop. */
+/** The scale "100 %" draws at, and the smallest Fit uses for a definition: its smallest text is then the 12 px caption stop. */
 export const MIN_SCALE = 1;
 
+/** The smallest scale of the "Whole case" overview; below it the drawing scrolls rather than become unreadable. */
+export const WHOLE_FIT_MIN_SCALE = 0.4;
+
 /**
- * The scale that fits a drawing into its canvas, up as well as down to MIN_SCALE. A drawing wider than that scrolls
- * inside its canvas rather than shrinking text below 12 px.
+ * The scale that fits a drawing into its canvas, up to `max` and down to `min`. Fit keeps `min` at 100 %, so a wider
+ * drawing pans rather than shrink text below 12 px (CKP-069, CKP-017); only the "Whole case" overview passes
+ * WHOLE_FIT_MIN_SCALE.
  */
-export function fitScale(drawing: { width: number; height: number }, canvas: { width: number; height: number }, max = 1.6): number {
+export function fitScale(drawing: { width: number; height: number }, canvas: { width: number; height: number }, max = 1.6, min = MIN_SCALE): number {
   if (drawing.width <= 0 || drawing.height <= 0 || canvas.width <= 0 || canvas.height <= 0) return MIN_SCALE;
-  return Math.max(MIN_SCALE, Math.min(max, canvas.width / drawing.width, canvas.height / drawing.height));
+  return Math.max(min, Math.min(max, canvas.width / drawing.width, canvas.height / drawing.height));
 }

@@ -127,6 +127,63 @@ public interface VersionService {
     VersionDiff diff(String ruleSet, int version, int base);
 
     /**
+     * Reads every row of a version in plain language (RLE-091): in each language of the message catalogue, a full
+     * sentence and a short form. A masked input is named as masked and its test is never written. Writes nothing.
+     * Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version to read
+     * @return one reading per row, in table order
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when the version does not exist
+     * @throws ReadingsTooLargeException when the version has more rows than one request reads
+     */
+    RuleReadings.RuleSetReadings readings(String ruleSet, int version);
+
+    /**
+     * Reads the rows a diff of two versions lists, each in both versions (RLE-092). Rows that did not change are not
+     * read. Writes nothing. Needs {@code rules:read}.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version compared
+     * @param base the version it is compared against; must differ from {@code version}
+     * @return the readings of the changed rows
+     * @throws InputInvalidException when {@code base} equals {@code version}
+     * @throws RuleSetNotFoundException when the tenant has no such rule set
+     * @throws VersionNotFoundException when either version does not exist
+     * @throws ReadingsTooLargeException when the diff lists more rows than one request reads
+     */
+    RuleReadings.ReadingsDiff readingsDiff(String ruleSet, int version, int base);
+
+    /**
+     * Reads the outcomes of a simulation result in plain language (RLE-093). The matched rows are read in the version
+     * that decided them; the sample inputs are not part of the reading. Writes nothing. Needs {@code rules:read}.
+     *
+     * @param result the result of {@link RuleEngine#simulate}
+     * @return one reading per sample, in the order of the result
+     * @throws VersionNotFoundException when a version the result names no longer exists
+     * @throws ReadingsTooLargeException when the result has more samples than one request reads
+     */
+    default RuleReadings.SimulationReadings readSimulation(SimulationResult result) {
+        return readSimulation(result, List.of());
+    }
+
+    /**
+     * As {@link #readSimulation(SimulationResult)}, naming each sample: the reading of sample {@code i} carries
+     * {@code labels.get(i)} as sent, so a reviewer can tell which sample produced which outcome. The label is the
+     * caller's own text and is never taken from the sample's inputs.
+     *
+     * @param result the result of {@link RuleEngine#simulate}
+     * @param labels one label per sample in the order of the result, null for a sample without one; a shorter list
+     *     leaves the rest unlabelled
+     * @return one reading per sample, in the order of the result
+     * @throws VersionNotFoundException when a version the result names no longer exists
+     * @throws ReadingsTooLargeException when the result has more samples than one request reads
+     * @throws IllegalArgumentException when a label is longer than {@link RuleReadings#LABEL_MAX} characters
+     */
+    RuleReadings.SimulationReadings readSimulation(SimulationResult result, List<String> labels);
+
+    /**
      * Moves a draft to {@code PENDING_APPROVAL} and records the caller as requester.
      *
      * @param ruleSet the rule set name

@@ -3,6 +3,9 @@ package io.github.dhluong90.bpm.rules.internal.service;
 import io.github.dhluong90.bpm.rules.api.AuthorUnknownException;
 import io.github.dhluong90.bpm.rules.api.DraftAuthoringDisabledException;
 import io.github.dhluong90.bpm.rules.api.DraftValidation;
+import io.github.dhluong90.bpm.rules.api.ReadingsTooLargeException;
+import io.github.dhluong90.bpm.rules.api.RuleReadings;
+import io.github.dhluong90.bpm.rules.api.SimulationResult;
 import io.github.dhluong90.bpm.rules.api.ImportRequest;
 import io.github.dhluong90.bpm.rules.api.PendingApproval;
 import io.github.dhluong90.bpm.rules.api.PermissionDeniedException;
@@ -92,6 +95,8 @@ public final class DefaultVersionService implements VersionService {
     private final Supersession supersession;
     /** Words problems and readings; the same catalogue as the explanations (PD-077). */
     private final CatalogueExplainer catalogue;
+    /** Reads rows in plain language; the same reader serves {@code :validate}, readings, diffs and simulations. */
+    private final ReadingBuilder reader;
 
     /**
      * Creates the service.
@@ -115,6 +120,7 @@ public final class DefaultVersionService implements VersionService {
         this.supersession = Objects.requireNonNull(supersession, "supersession must not be null");
         this.meters = Objects.requireNonNull(meters, "meters must not be null");
         this.catalogue = Objects.requireNonNull(catalogue, "catalogue must not be null");
+        this.reader = new ReadingBuilder(catalogue);
     }
 
     @Override
@@ -326,8 +332,18 @@ public final class DefaultVersionService implements VersionService {
             try {
                 ParsedRuleSet parsed = checkedDraftDocument(tenant, ruleSet, request.format(), source);
                 boolean maskByDefault = context.masking().maskByDefault(tenant);
-                return new DraftValidation(ruleSet, version, true, List.of(), false,
-                        catalogue.readings(parsed.model(), maskByDefault));
+                ReadingBuilder.Table table = reader.table(ruleSet, version, parsed.model(),
+                        EngineValues.read(parsed.canonicalJson()), maskByDefault);
+                if (!table.readable()) {
+                    // a legal draft of up to RULES_MAX rows is valid whatever its size: only its readings are left out
+                    return new DraftValidation(ruleSet, version, true, List.of(), false, List.of(), true,
+                            DraftValidation.TABLE_TOO_LARGE);
+                }
+                return new DraftValidation(ruleSet, version, true, List.of(), false, table.rows().stream()
+                        .map(row -> new DraftValidation.Reading(row.ruleId(), row.readings().entrySet().stream()
+                                .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey,
+                                        e -> e.getValue().full()))))
+                        .toList());
             } catch (ValidationFailedException refused) {
                 return new DraftValidation(ruleSet, version, false,
                         refused.violations().stream().map(catalogue::problem).toList(), refused.truncated(),
@@ -350,6 +366,86 @@ public final class DefaultVersionService implements VersionService {
             return VersionDiffs.diff(compared, against, context.masking().maskByDefault(tenant),
                     context.masking().personalDataNames(tenant));
         });
+    }
+
+    @Override
+    public RuleReadings.RuleSetReadings readings(String ruleSet, int version) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        requireRuleSetName(ruleSet);
+        return context.withoutDooming(() -> {
+            ReadingBuilder.Table table = table(tenant, ruleSet, version);
+            table.requireReadable();
+            return new RuleReadings.RuleSetReadings(ruleSet, version, reader.languages(), table.rows());
+        });
+    }
+
+    @Override
+    public RuleReadings.ReadingsDiff readingsDiff(String ruleSet, int version, int base) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        requireRuleSetName(ruleSet);
+        if (base == version) {
+            throw new InputInvalidException("base must name another version than " + version);
+        }
+        return context.withoutDooming(() -> {
+            StoredVersion compared = existing(tenant, ruleSet, version);
+            StoredVersion against = existing(tenant, ruleSet, base);
+            boolean maskByDefault = context.masking().maskByDefault(tenant);
+            VersionDiff diff = VersionDiffs.diff(compared, against, maskByDefault,
+                    context.masking().personalDataNames(tenant));
+            if (diff.rows().size() > EngineDefaults.READINGS_MAX) {
+                throw new ReadingsTooLargeException("rows", diff.rows().size(), EngineDefaults.READINGS_MAX);
+            }
+            ReadingBuilder.Table current = reader.table(ruleSet, version, compared.canonicalJson(), maskByDefault);
+            ReadingBuilder.Table previous = reader.table(ruleSet, base, against.canonicalJson(), maskByDefault);
+            List<RuleReadings.ChangedRow> rows = new java.util.ArrayList<>();
+            for (VersionDiff.RowChange change : diff.rows()) {
+                java.util.Map<String, RuleReadings.Reading> after = current.row(change.ruleId())
+                        .map(RuleReadings.Row::readings).orElse(java.util.Map.of());
+                java.util.Map<String, RuleReadings.Reading> before = previous.row(change.ruleId())
+                        .map(RuleReadings.Row::readings).orElse(java.util.Map.of());
+                rows.add(new RuleReadings.ChangedRow(change.ruleId(), change.change(), change.position(),
+                        change.basePosition(), !before.equals(after), before, after));
+            }
+            return new RuleReadings.ReadingsDiff(ruleSet, version, base, reader.languages(), rows,
+                    diff.unchangedCount());
+        });
+    }
+
+    @Override
+    public RuleReadings.SimulationReadings readSimulation(SimulationResult result, List<String> labels) {
+        Objects.requireNonNull(result, "result must not be null");
+        Objects.requireNonNull(labels, "labels must not be null");
+        labels.stream().filter(label -> label != null && label.length() > RuleReadings.LABEL_MAX).findAny()
+                .ifPresent(label -> {
+                    throw new IllegalArgumentException("A sample label is at most " + RuleReadings.LABEL_MAX
+                            + " characters");
+                });
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        if (result.samples().size() > EngineDefaults.READINGS_MAX) {
+            throw new ReadingsTooLargeException("samples", result.samples().size(), EngineDefaults.READINGS_MAX);
+        }
+        return context.withoutDooming(() -> {
+            ReadingBuilder.Table simulated = table(tenant, result.ruleSet(), result.version());
+            ReadingBuilder.Table baseline = result.baselineVersion() == null ? null
+                    : table(tenant, result.ruleSet(), result.baselineVersion());
+            List<RuleReadings.SampleReading> samples = result.samples().stream()
+                    .map(sample -> new RuleReadings.SampleReading(sample.index(), "S" + (sample.index() + 1),
+                            sample.index() < labels.size() ? labels.get(sample.index()) : null, sample.changed(),
+                            reader.outcome(sample.simulated(), simulated),
+                            sample.baseline() == null || baseline == null ? null
+                                    : reader.outcome(sample.baseline(), baseline)))
+                    .toList();
+            return new RuleReadings.SimulationReadings(result.ruleSet(), result.version(), result.baselineVersion(),
+                    reader.languages(), samples);
+        });
+    }
+
+    private ReadingBuilder.Table table(String tenant, String ruleSet, int version) {
+        StoredVersion stored = existing(tenant, ruleSet, version);
+        return reader.table(ruleSet, version, stored.canonicalJson(), context.masking().maskByDefault(tenant));
     }
 
     private StoredVersion existing(String tenant, String ruleSet, int version) {

@@ -178,6 +178,8 @@ final class TestEngine {
                         tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
                 new io.github.dhluong90.bpm.process.internal.service.NodeWindowStatsService(() -> id.tenant, id, b.clock,
                         tx, processStore, new JdbcNodeStatsStore(ds), Duration.ofDays(31)),
+                new io.github.dhluong90.bpm.process.internal.service.InstanceActivityService(() -> id.tenant, id, tx,
+                        processStore, processStore, 200),
                 processStore);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
         List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();

@@ -77,12 +77,14 @@ class ValidateDraftTest {
         // Then it is valid, with R1, R2 and R3 read in both languages
         assertThat(result.valid()).isTrue();
         assertThat(result.problems()).isEmpty();
+        assertThat(result.readingsTruncated()).isFalse();
+        assertThat(result.readingsReason()).isNull();
         assertThat(result.readings()).extracting(DraftValidation.Reading::ruleId).containsExactly("R1", "R2", "R3");
         assertThat(result.readings().get(0).text().get("en"))
-                .isEqualTo("Rule R1 applies when tier, which equals GOLD.");
+                .isEqualTo("Rule R1 applies when tier is Gold. Then fee is 0 VND.");
         assertThat(result.readings().get(1).text().get("vi"))
-                .isEqualTo("Quy tắc R2 áp dụng khi txCount, tức là ít nhất 3.");
-        assertThat(result.readings().get(2).text().get("en")).isEqualTo("Rule R3 always applies; it has no condition.");
+                .startsWith("Quy tắc R2 áp dụng khi tx count ít nhất là 3.");
+        assertThat(result.readings().get(2).text().get("en")).startsWith("Rule R3 always applies; it has no condition.");
         // and no version, history, event or idempotency row was written; the draft is as it was
         assertThat(stores.history).hasSize(history);
         assertThat(stores.outbox).hasSize(events);
@@ -91,6 +93,57 @@ class ValidateDraftTest {
         RuleSetVersion after = versions.find("card-fee", 2, true).orElseThrow();
         assertThat(after.lockVersion()).isEqualTo(draft.lockVersion());
         assertThat(after.canonicalHash()).isEqualTo(draft.canonicalHash());
+    }
+
+    static ImportRequest cardFeeOfRows(int rows) {
+        StringBuilder text = new StringBuilder("""
+                schemaVersion: 1
+                ruleSet: card-fee
+                hitPolicy: first
+                inputs:
+                  - { name: tier, type: string }
+                outputs:
+                  - { name: fee, type: money }
+                rules:
+                """);
+        for (int i = 1; i <= rows; i++) {
+            text.append("  - { id: R").append(i).append(", when: { tier: \"== 'T").append(i)
+                    .append("'\" }, then: { fee: \"10000 VND\" } }\n");
+        }
+        return yaml(text.toString());
+    }
+
+    @Test
+    void RLE_090_a_valid_table_of_500_rows_still_has_its_readings() {
+        lansDraftV2();
+        DraftValidation result = versions.validateDraft("card-fee", 2, cardFeeOfRows(EngineDefaults.READINGS_MAX));
+        assertThat(result.valid()).isTrue();
+        assertThat(result.readings()).hasSize(EngineDefaults.READINGS_MAX);
+        assertThat(result.readingsTruncated()).isFalse();
+        assertThat(result.readingsReason()).isNull();
+    }
+
+    @Test
+    void RLE_090_a_valid_draft_of_501_rows_is_valid_and_leaves_its_readings_out_with_a_reason() {
+        lansDraftV2();
+        int history = stores.history.size();
+        DraftValidation result = versions.validateDraft("card-fee", 2, cardFeeOfRows(EngineDefaults.READINGS_MAX + 1));
+        assertThat(result.valid()).isTrue();
+        assertThat(result.problems()).isEmpty();
+        assertThat(result.readings()).isEmpty();
+        assertThat(result.readingsTruncated()).isTrue();
+        assertThat(result.readingsReason()).isEqualTo("TABLE_TOO_LARGE");
+        assertThat(stores.history).hasSize(history);
+    }
+
+    @Test
+    void RLE_090_a_valid_draft_of_5000_rows_is_valid_and_leaves_its_readings_out_with_a_reason() {
+        lansDraftV2();
+        DraftValidation result = versions.validateDraft("card-fee", 2, cardFeeOfRows(EngineDefaults.RULES_MAX));
+        assertThat(result.valid()).isTrue();
+        assertThat(result.readings()).isEmpty();
+        assertThat(result.readingsTruncated()).isTrue();
+        assertThat(result.readingsReason()).isEqualTo("TABLE_TOO_LARGE");
     }
 
     @Test
@@ -192,8 +245,8 @@ class ValidateDraftTest {
         // Then the reading names the input as masked and the value is nowhere in the result
         assertThat(result.valid()).isTrue();
         assertThat(result.readings()).singleElement().satisfies(r -> {
-            assertThat(r.text().get("en")).isEqualTo("Rule R1 applies when nationalId is masked and its test is not shown.");
-            assertThat(r.text().get("vi")).contains("nationalId").doesNotContain("079123456789");
+            assertThat(r.text().get("en")).startsWith("Rule R1 applies when national id is masked; its test is not shown.");
+            assertThat(r.text().get("vi")).contains("national id").doesNotContain("079123456789");
         });
         assertThat(result.toString()).doesNotContain("079123456789");
     }

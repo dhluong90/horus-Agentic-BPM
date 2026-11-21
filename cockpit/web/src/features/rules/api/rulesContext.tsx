@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { BpmMeV1 } from '../../../api/generated/bpm-me.v1';
 import { createRulesClient, type RulesClient } from '../../../api/rules/rulesClient';
+import type { ReadingStyle } from '../../../preferences/storage';
 
 /** Who is calling which host: the client, and what /me says the user may do. */
 export interface RulesSession {
@@ -11,6 +12,8 @@ export interface RulesSession {
   can: (permission: string) => boolean;
   /** False when the host keeps rule changes in its release pipeline (/meta setting authoring.cockpit-drafts). */
   cockpitDrafts: boolean;
+  /** The host's reading style (/meta setting rules.readings.style), used until the viewer picks one (PD-077). */
+  readingStyle: ReadingStyle;
 }
 
 const RulesContext = createContext<RulesSession | undefined>(undefined);
@@ -20,6 +23,7 @@ export function RulesProvider({
   hostId,
   me,
   cockpitDrafts,
+  readingStyle = 'full',
   fetchImpl,
   children,
 }: {
@@ -27,6 +31,7 @@ export function RulesProvider({
   hostId: string;
   me: BpmMeV1;
   cockpitDrafts: boolean;
+  readingStyle?: ReadingStyle;
   fetchImpl?: typeof fetch | undefined;
   children: ReactNode;
 }) {
@@ -42,8 +47,9 @@ export function RulesProvider({
       userId,
       can: (permission) => granted.has(permission),
       cockpitDrafts,
+      readingStyle,
     };
-  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, fetchImpl]);
+  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, readingStyle, fetchImpl]);
   return <RulesContext.Provider value={value}>{children}</RulesContext.Provider>;
 }
 

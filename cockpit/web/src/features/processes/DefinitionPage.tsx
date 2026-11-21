@@ -3,13 +3,15 @@ import { setCrumbLabel } from '../../app/crumbs';
 import { suppliedName, usePersonName } from '../../app/people';
 import { formatRoute, type ProcessLens } from '../../app/route';
 import type { DefinitionVersion } from '../../api/processes/schemas';
-import { AreaError, LoadingRows, PageHead } from '../../components/PageParts';
+import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
 import { Tabs } from '../rules/components/Tabs';
+import { formatDateTime } from '../rules/model/dates';
 import { useProcessesSession } from './api/processesContext';
-import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useRejectDefinition } from './api/useProcesses';
+import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useInstances, useRejectDefinition } from './api/useProcesses';
 import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
 import { DOCK_RESERVE } from './approval/dock';
+import { InstanceStatusPill } from './InstanceStatusPill';
 import { approvalBlock, reviewedHash, type DiffState } from './model/graphDiff';
 import { flowOrder, type DiagramGraph } from './model/bpmnGraph';
 import { nodeTypeLabel } from './model/nodeLabels';
@@ -27,10 +29,11 @@ type Approve = ReturnType<typeof useApproveDefinition>;
 type Reject = ReturnType<typeof useRejectDefinition>;
 
 /**
- * One definition version as a diagram, laid out automatically (CKP-069), with its steps as a list beside it. A
- * version waiting for approval opens on its Changes (CKP-024) with the four-eyes decision docked below.
+ * One definition version as a diagram, laid out automatically (CKP-069), with its steps as a list beside it, and the
+ * cases of its key. A version waiting for approval opens on its Changes (CKP-024) with the four-eyes decision docked
+ * below. The view is kept in the URL, so coming back from a case returns to the list.
  */
-export function DefinitionPage({ definitionKey, version, lens }: { definitionKey: string; version: number; lens?: ProcessLens | undefined }) {
+export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { definitionKey: string; version: number; lens?: ProcessLens | undefined; pageLimit: number }) {
   const { t } = useI18n();
   const personName = usePersonName();
   const details = useDefinitionVersion(definitionKey, version);
@@ -55,35 +58,35 @@ export function DefinitionPage({ definitionKey, version, lens }: { definitionKey
     ? t('definition.subtitlePending', { version: String(version), who: personName(requester, suppliedName(details.data, 'requestedBy')) })
     : t('definition.subtitle', { version: String(version) });
   const docked = pending || decided !== undefined;
+  const steps = graph.data?.nodes.length;
   const items = [
     ...(reviewable ? [{ id: 'changes' as const, label: t('definition.lens.changes') }] : []),
     { id: 'diagram' as const, label: t('definition.lens.diagram') },
-    ...(graph.data ? [{ id: 'steps' as const, label: t('definition.lens.steps', { count: String(graph.data.nodes.length) }) }] : []),
+    { id: 'steps' as const, label: steps !== undefined ? t('definition.lens.steps', { count: String(steps) }) : t('definition.lens.stepsPlain') },
+    { id: 'cases' as const, label: t('definition.lens.cases') },
   ];
   return (
     <section className={docked ? 'workspace workspace--docked' : 'workspace'} aria-labelledby="definition-title">
       <PageHead id="definition-title" title={title} subtitle={subtitle}
         action={details.data ? <DefinitionStatusPill status={details.data.status} /> : undefined} />
       <article className="card card--diagram">
-        {graph.isPending ? <LoadingRows rows={6} /> : graph.isError ? (
-          <AreaError error={graph.error} onRetry={() => { void graph.refetch(); }} />
-        ) : (
-          <Tabs label={t('definition.lenses')} selected={shown} onSelect={select} items={items}>
-            {shown === 'changes' ? (
-              diff.isPending ? <LoadingRows rows={6} /> : diff.isError ? (
-                <AreaError error={diff.error} onRetry={() => { void diff.refetch(); }} />
-              ) : (
-                <Suspense fallback={<LoadingRows rows={6} />}>
-                  <ChangesView definitionKey={definitionKey} diff={diff.data} title={title} targetGraph={graph.data} />
-                </Suspense>
-              )
-            ) : shown === 'diagram' ? (
+        <Tabs label={t('definition.lenses')} selected={shown} onSelect={select} items={items}>
+          {shown === 'cases' ? <CaseList definitionKey={definitionKey} pageLimit={pageLimit} /> : graph.isPending ? <LoadingRows rows={6} /> : graph.isError ? (
+            <AreaError error={graph.error} onRetry={() => { void graph.refetch(); }} />
+          ) : shown === 'changes' ? (
+            diff.isPending ? <LoadingRows rows={6} /> : diff.isError ? (
+              <AreaError error={diff.error} onRetry={() => { void diff.refetch(); }} />
+            ) : (
               <Suspense fallback={<LoadingRows rows={6} />}>
-                <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: DOCK_RESERVE } : {})} />
+                <ChangesView definitionKey={definitionKey} diff={diff.data} title={title} targetGraph={graph.data} />
               </Suspense>
-            ) : <StepList graph={graph.data} />}
-          </Tabs>
-        )}
+            )
+          ) : shown === 'diagram' ? (
+            <Suspense fallback={<LoadingRows rows={6} />}>
+              <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: DOCK_RESERVE } : {})} />
+            </Suspense>
+          ) : <StepList graph={graph.data} />}
+        </Tabs>
       </article>
       {details.data !== undefined && docked ? (
         decided !== undefined ? <DecidedLine version={details.data} outcome={decided} /> : (
@@ -143,5 +146,54 @@ function StepList({ graph }: { graph: DiagramGraph }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+/** The cases of this process key, newest first, every status, a page at a time; each opens on its diagram. */
+function CaseList({ definitionKey, pageLimit }: { definitionKey: string; pageLimit: number }) {
+  const { t, locale } = useI18n();
+  const cases = useInstances(definitionKey, pageLimit);
+  const person = usePersonName();
+  if (cases.isPending) return <LoadingRows rows={4} />;
+  if (cases.isError) return <AreaError error={cases.error} onRetry={() => { void cases.refetch(); }} />;
+  const items = cases.data.pages.flatMap((page) => page.data);
+  if (items.length === 0) return <div className="card__pad"><EmptyState icon="processes" text={t('cases.empty')} /></div>;
+  return (
+    <div className="cases">
+      <table className="qtable qtable--links" aria-label={t('cases.label')}>
+        <thead>
+          <tr>
+            <th scope="col">{t('cases.col.case')}</th>
+            <th scope="col">{t('cases.col.status')}</th>
+            <th scope="col">{t('cases.col.version')}</th>
+            <th scope="col">{t('cases.col.started')}</th>
+            <th scope="col">{t('cases.col.startedBy')}</th>
+            <th scope="col"><span className="sr-only">{t('processes.col.open')}</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={item.id}>
+              <th scope="row">
+                <a className="qtable__link" href={formatRoute({ name: 'instance', instanceId: item.id })}>
+                  {item.businessKey ?? t('cases.noKey')}
+                </a>
+              </th>
+              <td><InstanceStatusPill status={item.status} /></td>
+              <td className="tnum">{t('rules.version', { version: String(item.definitionVersion) })}</td>
+              <td className="tnum muted">{formatDateTime(item.startedAt, locale)}</td>
+              <td>{item.startedBy ? person(item.startedBy) : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
+              <td className="qtable__chevron" aria-hidden="true">›</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {cases.hasNextPage ? (
+        <div className="cases__more">
+          <button type="button" className="btn btn--secondary" disabled={cases.isFetchingNextPage} aria-busy={cases.isFetchingNextPage}
+            onClick={() => { void cases.fetchNextPage(); }}>{t('cases.more')}</button>
+        </div>
+      ) : null}
+    </div>
   );
 }

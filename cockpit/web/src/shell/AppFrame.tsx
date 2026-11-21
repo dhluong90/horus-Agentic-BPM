@@ -11,6 +11,7 @@ import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
+import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
 import { RulesProvider } from '../features/rules/api/rulesContext';
@@ -20,6 +21,8 @@ import { PeopleProvider } from '../app/people';
 import { queueEngines, reviewCount, useApprovalQueue } from '../features/approvals/useApprovalQueue';
 import type { Engine } from '../features/approvals/queue';
 import { NavRail } from './NavRail';
+import { hostReadingStyle } from '../preferences/readingStyle';
+import type { ReadingStyle } from '../preferences/storage';
 import '../components/frame.css';
 
 /**
@@ -34,6 +37,11 @@ export function cockpitDraftsOn(meta: BpmMetaV1): boolean {
   return value === true || value === 'true';
 }
 
+/** The host's reading style for rule readings, from the rules module of /meta (PD-077). */
+export function readingStyleOf(meta: BpmMetaV1): ReadingStyle {
+  return hostReadingStyle(meta.modules.find((module) => module.module === 'rules')?.settings ?? {});
+}
+
 export interface FrameProps {
   host: RegistryHost;
   meta: BpmMetaV1;
@@ -44,7 +52,7 @@ export interface FrameProps {
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
 export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
   return (
-    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} fetchImpl={fetchImpl}>
+    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
           <Frame meta={meta} me={me} />
@@ -93,7 +101,9 @@ function AreaContent({ route, meta, me, areas, engines }: { route: Route; meta: 
     case 'processes':
       return <ProcessesPage pageLimit={pageLimit} />;
     case 'process':
-      return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} />;
+      return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} pageLimit={pageLimit} />;
+    case 'instance':
+      return <InstancePage instanceId={route.instanceId} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
   }

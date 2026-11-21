@@ -30,7 +30,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-014 | `CKP_014_meta_features_and_version_skew_gate_screens` | Testing Library, mocked hosts | M1 | `TR-UI-08` | Planned |
 | CKP-015 | `CKP_015_host_switch_shows_one_host_at_a_time` | Playwright | M1 | `TR-UI-01` | Planned |
 | CKP-016 | `CKP_016_definition_diagram_auto_layout_and_render_budget` | Playwright, render timing | M2 | `TR-UI-07`, `TR-DEF-02` | Planned |
-| CKP-017 | `CKP_017_instance_diagram_shows_tokens_and_activities` | Testing Library | M2 | `TR-UI-07`, `TR-UI-03` | Planned |
+| CKP-017 | `CKP_017_instance_diagram_shows_tokens_and_activities` | Testing Library; Playwright at 1440x900 and 1440x1200 | M2 | `TR-UI-07`, `TR-UI-03` | Done |
 | CKP-018 | `CKP_018_live_counts_overlay_on_definition_diagram` | Testing Library, fake timers | M2 (cut candidate) | `TR-PERF-09` | Planned |
 | CKP-019 | `CKP_019_merged_inbox_exact_order_partial_banner_and_304` | Playwright, stub hosts | M2 | `TR-UI-01`, `TR-PERF-07` | Planned |
 | CKP-020 | `CKP_020_merged_incident_list_routes_actions_to_host` | Playwright, stub hosts | M2 | `TR-OPS-03` | Planned |
@@ -58,6 +58,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-073 | `CKP_073_*` (`cockpit/web/src/features/rules/HistoryAndEvidence.test.tsx`, `cockpit/web/e2e/audit.spec.ts`) | Vitest, Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core | M3 | `TR-OBS-01`, `TR-UI-02`, `TR-UI-04` | Automated |
 | CKP-074 | `CKP_074_*` (`cockpit/web/src/features/rules/HistoryAndEvidence.test.tsx`, `cockpit/web/src/api/rules/rulesClient.test.ts`, `cockpit/web/e2e/audit.spec.ts`) | Vitest with network capture, Playwright with the download | M3 | `TR-SEC-05`, `TR-OBS-01`, `TR-IDEM-01` | Automated |
 | CKP-075 | `CKP_075_*` (`cockpit/web/src/features/rules/HistoryAndEvidence.test.tsx`, `cockpit/web/e2e/audit.spec.ts`) | Vitest, Playwright | M3 | `TR-SEC-05`, `TR-UI-02`, `TR-UI-04` | Automated |
+| CKP-076 | `CKP_076_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with the fake engine and network capture; Playwright at 1440x900 and 1440x1200, light and dark, English and Vietnamese, axe-core, and a reload | M2 | `TR-UI-02`, `TR-UI-04`, `RLE-091` | Automated |
+| CKP-077 | `CKP_077_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest, Playwright with the approval dock above the fold, axe-core | M2 | `TR-UI-02`, `TR-UI-04`, `RLE-092` | Automated |
+| CKP-078 | `CKP_078_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with request body capture, Playwright with the result above the fold, axe-core | M2 | `TR-UI-02`, `TR-UI-04`, `RLE-093` | Automated |
+| CKP-079 | `CKP_079_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with problem answers, Playwright for every state, axe-core | M2 | `TR-SEC-05`, `TR-UI-02`, `TR-UI-04` | Automated |
 
 ## Known gaps
 | Gap | Plan |

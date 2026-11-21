@@ -9,7 +9,7 @@ import type { BpmMetaV1 } from '../api/generated/bpm-meta.v1';
 export const registryEmbedded = {
   schemaVersion: 1,
   auth: { mode: 'host-session' },
-  hosts: [{ id: 'loans', label: { en: 'Loan origination', vi: 'Khởi tạo khoản vay' }, baseUrl: '', environment: 'demo' }],
+  hosts: [{ id: 'loans', label: { en: 'Retail banking', vi: 'Ngân hàng bán lẻ' }, baseUrl: '', environment: 'demo' }],
 } as const;
 
 export const metaRulesOnly: BpmMetaV1 = {
@@ -153,7 +153,7 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
     case 'rules-author':
       return { ...ok, me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }) };
     case 'rules-approver':
-      return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate'] }) };
+      return { ...ok, me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate', 'rules:simulate'] }) };
     case 'rules-author-drafts-default':
       // A host that does not report authoring.cockpit-drafts at all: off by default in 0.1.0 (PD-094).
       return {

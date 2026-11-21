@@ -30,6 +30,7 @@ class ValidateDraftWebMvcTest {
 
     Set<String> permissions;
     RuntimeException refusal;
+    DraftValidation answer;
     final List<String> calls = new ArrayList<>();
     final List<ImportRequest> requests = new ArrayList<>();
     MockMvc mvc;
@@ -38,6 +39,7 @@ class ValidateDraftWebMvcTest {
     void setUp() {
         permissions = Set.of("rules:read", "rules:author");
         refusal = null;
+        answer = null;
         CallerResolver callers = new CallerResolver() {
             @Override
             public String currentCallerId() {
@@ -58,6 +60,9 @@ class ValidateDraftWebMvcTest {
                     requests.add((ImportRequest) args[2]);
                     if (refusal != null) {
                         throw refusal;
+                    }
+                    if (answer != null) {
+                        return answer;
                     }
                     return new DraftValidation("card-fee", 3, false,
                             List.of(new DraftValidation.Problem("R2", "balance", "TYPE_MISMATCH", 8,
@@ -95,8 +100,31 @@ class ValidateDraftWebMvcTest {
         assertThat(problem.get("message").get("vi").asString()).isEqualTo("Ô này trộn các giá trị.");
         assertThat(body.get("problemsTruncated").asBoolean()).isFalse();
         assertThat(body.get("readings")).isEmpty();
+        assertThat(body.get("readingsTruncated").asBoolean()).isFalse();
+        assertThat(body.get("readingsReason").isNull()).isTrue();
         assertThat(calls).containsExactly("card-fee v3");
         assertThat(requests.getFirst().idempotencyKey()).isNull();
+    }
+
+    @Test
+    void RLE_090_a_valid_table_too_large_to_read_is_answered_200_with_readings_truncated_and_a_reason()
+            throws Exception {
+        // Given a valid draft of 501 rows, and again of 5,000, whose readings the engine leaves out
+        for (int rows : new int[] {501, 5_000}) {
+            answer = new DraftValidation("card-fee", 3, true, List.of(), false, List.of(), true,
+                    DraftValidation.TABLE_TOO_LARGE);
+            // When lan posts it
+            MockHttpServletResponse response = mvc.perform(post(URL).contentType("application/yaml")
+                    .content("ruleSet: card-fee\n# " + rows + " rows\n")).andReturn().getResponse();
+            // Then 200, valid, no readings, the flag and the reason; never 422 READINGS_TOO_LARGE
+            assertThat(response.getStatus()).isEqualTo(200);
+            JsonNode body = json(response);
+            assertThat(body.get("valid").asBoolean()).isTrue();
+            assertThat(body.get("problems")).isEmpty();
+            assertThat(body.get("readings")).isEmpty();
+            assertThat(body.get("readingsTruncated").asBoolean()).isTrue();
+            assertThat(body.get("readingsReason").asString()).isEqualTo("TABLE_TOO_LARGE");
+        }
     }
 
     @Test

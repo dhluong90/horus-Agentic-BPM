@@ -1,0 +1,25 @@
+{
+  "source": "rule-engine RuleReadingsTest (RLE_091 short form and wording), card-fee table CARD_FEE, engine 0.3.0 wording of PR #422",
+  "definition": {
+    "ruleSet": "card-fee",
+    "inputs": [
+      { "name": "tier", "type": "string", "description": "Hạng" },
+      { "name": "balance", "type": "money", "description": "Số dư" },
+      { "name": "txCount", "type": "integer", "description": "Số giao dịch" }
+    ],
+    "outputs": [
+      { "name": "fee", "type": "money", "description": "phí" },
+      { "name": "waived", "type": "boolean", "description": "miễn phí" }
+    ],
+    "rules": [
+      { "id": "R1", "when": { "tier": "== 'GOLD'" }, "then": { "fee": "0 VND", "waived": true } },
+      { "id": "R2", "when": { "tier": "== 'FIRST_TIME'", "txCount": "== 3" }, "then": { "fee": "10000 VND" } },
+      { "id": "R3", "when": {}, "then": { "fee": "30000 VND", "waived": false } }
+    ]
+  },
+  "expected": {
+    "R1": { "en": { "short": "Gold: phí 0 VND; miễn phí: Yes" }, "vi": { "short": "Hạng Gold: phí 0 VND; miễn phí: Có", "full": "Quy tắc R1 áp dụng khi Hạng là Gold. Khi đó phí là 0 VND; miễn phí là Có." } },
+    "R2": { "en": { "full": "Rule R2 applies when Hạng is First time and Số giao dịch is 3. Then phí is 10,000 VND." }, "vi": { "short": "Hạng First time, Số giao dịch 3: phí 10.000 VND" } },
+    "R3": { "en": { "short": "Any other case: phí 30,000 VND; miễn phí: No" }, "vi": { "short": "Mọi trường hợp khác: phí 30.000 VND; miễn phí: Không" } }
+  }
+}

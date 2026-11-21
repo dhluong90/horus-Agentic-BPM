@@ -512,7 +512,14 @@ paths:
         Each problem carries a stable `code` and a `message` in every language of the engine's message catalogue
         (`en` and `vi` ship). The message is written from the catalogue and the code alone; it never repeats text of
         the cell, so a masked value is never echoed. `readings` has one entry per rule when the document is valid and
-        is empty otherwise; a reading of a condition on a masked input says that the value is masked.
+        has at most 500 rows, and is empty otherwise; a reading of a condition on a masked input says that the value
+        is masked.
+
+        What the answer can be, exactly: `200` with `valid: true` and the readings; `200` with `valid: true`,
+        `readings: []`, `readingsTruncated: true` and `readingsReason: TABLE_TOO_LARGE` for a valid table of 501 to
+        5,000 rows; `200` with `valid: false`, the problems and `readings: []`. It is never `422 READINGS_TOO_LARGE`
+        (only the readings endpoints answer that). `readingsTruncated` is false and `readingsReason` null in the
+        other two cases.
 
         A `SYNTAX_ERROR` also carries `position`, `expected` (the token or form the parser expected there, by
         language) and `example` (a short correct expression), when the parser knows what it expected (#419). These come
@@ -563,6 +570,8 @@ paths:
                       vi: Ô này trộn các giá trị khác kiểu, hoặc không phải là điều kiện đúng hoặc sai.
                 problemsTruncated: false
                 readings: []
+                readingsTruncated: false
+                readingsReason: null
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -652,6 +661,112 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/readings:
+    get:
+      tags: [rule-sets]
+      operationId: readVersion
+      summary: Read every row of a version in plain language
+      description: |
+        Permission `rules:read`. Every row of the version as a plain sentence, written by the engine so
+        every host shows the same text (PD-027, `RLE-091`). Each row is read in every language of the
+        message catalogue (`en` and `vi` ship with the engine; a host may add more) and in two styles:
+        `full`, a sentence such as "Rule R1 applies when Balance is at least 50,000,000 VND and segment
+        is VIP. Then fee is 0 VND.", and `short`, such as "Balance >= 50,000,000 VND, segment = VIP -> fee = 0 VND".
+        Numbers and money are grouped for the language, an input is named by its declared label, else its
+        name in words. When the author wrote a sentence for the row and the language (PD-123) and every
+        placeholder in it can be filled from the table (`{ruleId}`, `{ruleSet}`, `{version}`, and
+        `{output.name}` of a literal output), `full` is that sentence and `source` is `TEMPLATE`;
+        otherwise `source` is `GENERATED`. A sentence that needs the value of an input is never used here,
+        because a table holds no input values.
+
+        A masked input, by its declaration or the tenant's `decision-log.mask-default`, is named as masked
+        and its test is never written. The request is bounded: a version of more than 500 rows is
+        `422 READINGS_TOO_LARGE`, never cut short. Writes nothing; the same version gives a byte-identical
+        body. A rule set of another tenant is `404 RULE_SET_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      responses:
+        '200':
+          description: One entry per row, in table order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleSetReadings'
+              example:
+                ruleSet: account-tier
+                version: 1
+                languages: [en, vi]
+                rows:
+                  - ruleId: R1
+                    position: 1
+                    readings:
+                      en:
+                        full: Rule R1 applies when Balance is at least 50,000,000 VND and segment is Vip. Then fee is 0 VND.
+                        short: 'Balance at least 50,000,000 VND, Vip: fee 0 VND'
+                        source: GENERATED
+                      vi:
+                        full: Quy tắc R1 áp dụng khi Balance ít nhất là 50.000.000 VND và segment là Vip. Khi đó fee là 0 VND.
+                        short: 'Balance ít nhất 50.000.000 VND, segment Vip: fee 0 VND'
+                        source: GENERATED
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/diff/readings:
+    get:
+      tags: [rule-sets]
+      operationId: readDiff
+      summary: Read the changed rows of a diff in both versions
+      description: |
+        Permission `rules:read`. The rows `GET .../diff` lists, each read in `{version}` (`current`) and in
+        `base` (`previous`), so a screen strikes the old sentence and adds the new one (`RLE-092`). An
+        `ADDED` row has no `previous`, a `REMOVED` row no `current`. `readingChanged` is false when the
+        row changed but its readings did not, for example a description. Rows that did not change are not
+        read; `unchangedCount` says how many. Each side is read as in `RLE-091`, so a masked input is named
+        as masked and its test is never written, whichever version it is in. More than 500 changed rows is
+        `422 READINGS_TOO_LARGE`. No `base`, or `base` equal to `{version}`, is `400 INPUT_INVALID`; a
+        `base` that does not exist is `404 VERSION_NOT_FOUND`. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - name: base
+          in: query
+          required: true
+          description: The version to compare against, usually the version in effect
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: The readings of the changed rows, in the order of the diff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingsDiff'
+              example:
+                ruleSet: account-tier
+                version: 2
+                base: 1
+                languages: [en, vi]
+                rows:
+                  - ruleId: R1
+                    change: CHANGED
+                    position: 1
+                    basePosition: 1
+                    readingChanged: true
+                    previous:
+                      en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND. Then fee is 0 VND.', short: 'Balance at least 50,000,000 VND: fee 0 VND', source: GENERATED }
+                    current:
+                      en: { full: 'Rule R1 applies when Balance is at least 60,000,000 VND. Then fee is 0 VND.', short: 'Balance at least 60,000,000 VND: fee 0 VND', source: GENERATED }
+                unchangedCount: 3
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}/export:
     get:
@@ -1231,6 +1346,68 @@ paths:
                     changed: true
                     simulated: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 30000 } } }
                     baseline: { outcome: MATCHED, matchedRuleIds: [R3], outputs: { fee: { currency: VND, amount: 50000 } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate-readings:
+    post:
+      tags: [rule-sets]
+      operationId: simulateReadings
+      summary: Run a simulation and read each outcome in plain language
+      description: |
+        Permissions `rules:simulate` and `rules:read`, both checked before the body is read. The body and the
+        simulation are those of `:simulate`; the answer reads each side of every sample in plain language
+        (`RLE-093`): the matched rows as in `RLE-091`, read in the version that decided them (the baseline's
+        rows in the baseline version), then the result, or the sentence of no match or of the failure. Each
+        outcome has a `full` sentence and a `short` form in every language of the catalogue. Each result
+        names its sample with `reference` (`S1`, `S2`, ...) and the `label` the caller sent with it, if any.
+        The sample inputs are not echoed, and a masked input is never written. More than 500 samples is
+        `422 READINGS_TOO_LARGE`. Writes nothing (no decision row, idempotency record or event), so it takes
+        no `Idempotency-Key`; the same version, samples and clock give the same body.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationRequest'
+            example:
+              samples:
+                - label: VIP customer, balance 55,000,000 VND
+                  inputs: { balance: { currency: VND, amount: 55000000 }, segment: VIP }
+      responses:
+        '200':
+          description: One reading per sample, in the order sent, each naming its sample
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationReadings'
+              example:
+                ruleSet: account-tier
+                version: 2
+                baselineVersion: 1
+                languages: [en, vi]
+                results:
+                  - index: 0
+                    reference: S1
+                    label: VIP customer, balance 55,000,000 VND
+                    changed: true
+                    simulated:
+                      kind: MATCHED
+                      ruleIds: [R5]
+                      readings:
+                        en: { full: 'Rule R5 always applies; it has no condition. Result: Tier is Basic; fee is 50,000 VND.', short: 'R5: Tier Basic; fee 50,000 VND', source: GENERATED }
+                    baseline:
+                      kind: MATCHED
+                      ruleIds: [R1]
+                      readings:
+                        en: { full: 'Rule R1 applies when Balance is at least 50,000,000 VND and segment is Vip. Result: Tier is Gold; fee is 0 VND.', short: 'R1: Tier Gold; fee 0 VND', source: GENERATED }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -2801,6 +2978,125 @@ components:
           description: On `CHANGED` only, in canonical member order
           items:
             $ref: '#/components/schemas/FieldChange'
+    ReadingText:
+      type: object
+      required: [full, short, source]
+      properties:
+        full:
+          type: string
+          description: A full sentence
+        short:
+          type: string
+          description: |
+            The short form, a compact phrase in plain words and never a symbol or an expression: the conditions,
+            then a colon and the result, such as `Gold: fee 0 VND` (en) and `Hạng Gold: phí 0 VND` (vi). A row with
+            no condition reads `Any other case: ...` and `Mọi trường hợp khác: ...`. Names are the column `label`
+            when there is one; a code such as `GOLD` is worded as the rule table shows it (`Gold`).
+        source:
+          type: string
+          enum: [TEMPLATE, GENERATED]
+          description: "`TEMPLATE` when `full` is the author's own sentence for the row (PD-123), else `GENERATED`"
+    ReadingsByLanguage:
+      type: object
+      description: The reading by language code, one entry for every language in `languages`
+      additionalProperties:
+        $ref: '#/components/schemas/ReadingText'
+    RuleSetReadings:
+      type: object
+      required: [ruleSet, version, languages, rows]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer }
+        languages:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [ruleId, position, readings]
+            properties:
+              ruleId: { type: string }
+              position: { type: integer, minimum: 1 }
+              readings: { $ref: '#/components/schemas/ReadingsByLanguage' }
+    ReadingsDiff:
+      type: object
+      required: [ruleSet, version, base, languages, rows, unchangedCount]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer }
+        base: { type: integer }
+        languages:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [ruleId, change, readingChanged, previous, current]
+            properties:
+              ruleId: { type: string }
+              change:
+                type: string
+                enum: [ADDED, REMOVED, CHANGED, MOVED]
+              position: { type: integer, minimum: 1, description: Absent when `REMOVED` }
+              basePosition: { type: integer, minimum: 1, description: Absent when `ADDED` }
+              readingChanged: { type: boolean }
+              previous:
+                $ref: '#/components/schemas/ReadingsByLanguage'
+              current:
+                $ref: '#/components/schemas/ReadingsByLanguage'
+        unchangedCount: { type: integer }
+    OutcomeReading:
+      type: object
+      required: [kind, ruleIds, readings]
+      properties:
+        kind:
+          type: string
+          enum: [MATCHED, NO_MATCH, FAILED]
+        ruleIds:
+          type: array
+          items: { type: string }
+        readings: { $ref: '#/components/schemas/ReadingsByLanguage' }
+    SimulationReadings:
+      type: object
+      required: [ruleSet, version, baselineVersion, languages, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer }
+        baselineVersion:
+          type: [integer, 'null']
+        languages:
+          type: array
+          items: { type: string }
+        results:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [index, reference, label, changed, simulated, baseline]
+            properties:
+              index: { type: integer, minimum: 0 }
+              reference:
+                type: string
+                description: |
+                  The sample's place in the request, one-based: `S1` for the first. Always present, so a screen can
+                  name a sample the caller did not label.
+                examples: [S1]
+              label:
+                type: [string, 'null']
+                description: |
+                  The `label` the caller sent with the sample, written back as sent, or null when it sent none. The
+                  engine never builds it from the inputs: it is the caller's own words, so keep a masked value out of it.
+                examples: [VIP customer, balance 55,000,000 VND]
+              changed: { type: boolean }
+              simulated: { $ref: '#/components/schemas/OutcomeReading' }
+              baseline:
+                oneOf:
+                  - $ref: '#/components/schemas/OutcomeReading'
+                  - type: 'null'
     VersionDiff:
       type: object
       required: [ruleSet, version, base, canonicalHash, baseCanonicalHash, sourceHashChanged, effectiveFrom,
@@ -2927,7 +3223,7 @@ components:
           examples: [8]
     DraftValidation:
       type: object
-      required: [ruleSet, version, valid, problems, problemsTruncated, readings]
+      required: [ruleSet, version, valid, problems, problemsTruncated, readings, readingsTruncated, readingsReason]
       properties:
         ruleSet: { type: string }
         version: { type: integer, minimum: 1 }
@@ -2944,9 +3240,20 @@ components:
           description: True when more problems were found than `problems` lists
         readings:
           type: array
-          description: One entry per rule, in document order, when `valid`; empty otherwise
+          description: |
+            One entry per rule, in document order, when `valid` and the table has at most 500 rows; empty
+            otherwise (when not `valid`, or when `readingsTruncated` is true)
           items:
             $ref: '#/components/schemas/RuleReading'
+        readingsTruncated:
+          type: boolean
+          description: |
+            True when the document is `valid` but has more than 500 rows, so `readings` is left out. The
+            validation itself is never refused for size: a draft may have up to 5,000 rows.
+        readingsReason:
+          type: [string, 'null']
+          enum: [TABLE_TOO_LARGE, null]
+          description: Why `readings` is left out; `TABLE_TOO_LARGE`, or null when `readingsTruncated` is false
     ValidationProblem:
       type: object
       required: [ruleId, column, code, position, message]
@@ -3048,6 +3355,15 @@ components:
             type: object
             required: [inputs]
             properties:
+              label:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: |
+                  Optional name for the sample, such as `VIP customer, balance 55,000,000 VND`. `:simulate-readings`
+                  writes it back on that sample's reading, so a reviewer can tell which sample gave which outcome;
+                  `:simulate` checks it and ignores it. Text of another kind, an empty text or one over 100 characters
+                  is `400 INPUT_INVALID`. Do not put a masked value in it: it is echoed as sent.
               inputs:
                 type: object
                 description: Input values by name; money as `Money`
@@ -3306,6 +3622,15 @@ components:
             type: object
             required: [inputs]
             properties:
+              label:
+                type: string
+                minLength: 1
+                maxLength: 100
+                description: |
+                  Optional name for the sample, such as `VIP customer, balance 55,000,000 VND`. `:simulate-readings`
+                  writes it back on that sample's reading, so a reviewer can tell which sample gave which outcome;
+                  `:simulate` checks it and ignores it. Text of another kind, an empty text or one over 100 characters
+                  is `400 INPUT_INVALID`. Do not put a masked value in it: it is echoed as sent.
               inputs:
                 type: object
                 description: Input values by name; money as `Money`
@@ -3616,7 +3941,7 @@ components:
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
-            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE]
+            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE, READINGS_TOO_LARGE]
         detail: { type: string }
         correlationId: { type: string }
         currentCanonicalHash:

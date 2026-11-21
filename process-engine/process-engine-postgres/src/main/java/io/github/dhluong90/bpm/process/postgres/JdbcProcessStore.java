@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.process.postgres;
 
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
+import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.internal.exec.HistoryEntry;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.internal.exec.TokenKind;
@@ -61,6 +62,22 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
             return null;
         });
         return entered;
+    }
+
+    @Override
+    public List<NodeActivityRow> nodeActivities(String tenant, String instanceId, Instant from, Instant to) {
+        return ProcessListQueries.NODE_ACTIVITIES.list(jdbc, List.of(tenant, instanceId, ts(from), ts(to)),
+                (rs, row) -> new NodeActivityRow(rs.getString("node_id"), instant(rs, "first_entered_at"),
+                        instant(rs, "last_entered_at"), instant(rs, "last_completed_at"), rs.getLong("entries"),
+                        rs.getLong("attempt_ids"), rs.getString("last_actor")));
+    }
+
+    @Override
+    public List<InstanceActivities.Entry> historyEntries(String tenant, String instanceId, Instant from, Instant to,
+            int limit) {
+        return ProcessListQueries.HISTORY_ENTRIES.list(jdbc, List.of(tenant, instanceId, ts(from), ts(to), limit),
+                (rs, row) -> new InstanceActivities.Entry(rs.getString("id"), rs.getString("event_type"),
+                        rs.getString("node_id"), rs.getString("actor_id"), instant(rs, "occurred_at")));
     }
 
     // ---- definitions --------------------------------------------------------------------------------------

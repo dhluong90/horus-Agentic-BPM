@@ -449,5 +449,12 @@ class ProcessRestErrorMatrixTest {
             maybeFail();
             return new NodeCounts(definitionKey, version, STARTED, Map.of());
         }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.InstanceActivities activities(String instanceId, int limit) {
+            maybeFail();
+            return new io.github.dhluong90.bpm.process.api.InstanceActivities(instanceId, STARTED, null, List.of(),
+                    List.of(), false);
+        }
     }
 }
