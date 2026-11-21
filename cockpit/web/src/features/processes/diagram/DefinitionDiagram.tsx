@@ -9,6 +9,7 @@ import {
   GATEWAY_HALF,
   layoutGraph,
   MIN_SCALE,
+  WHOLE_FIT_MIN_SCALE,
   SYMBOL_SIZE,
   symbolCentre,
   TASK_TEXT,
@@ -24,7 +25,8 @@ import { NodeIcon } from './NodeIcon';
  * The read-only definition diagram (CKP-069, CKP-070), in its own chunk with dagre so the first screen does not load
  * them (CKP-028). Drawn as SVG with the diagram tokens of the styleguide; agent steps carry the violet that means
  * "agent step" and nothing else. A node type this cockpit does not draw is a dashed box named in words. "Fit" scales
- * the drawing to the canvas, up or down, but never below 100 %, where the smallest text is 12 px.
+ * a definition to the canvas, up or down, but never below 100 %, where the smallest text is 12 px; a case (with an
+ * overlay) is fitted whole, so every step and end is on screen, and "100 %" shows it at full size.
  */
 
 type Zoom = 'fit' | 'actual';
@@ -44,26 +46,37 @@ export interface DiagramOverlay {
   badges: ReadonlyMap<string, StepBadge>;
   selected: string | undefined;
   onSelect: (nodeId: string) => void;
+  /** Height kept free under the canvas inside the viewport, for the step panel below the drawing. */
+  reserveBelow: number;
 }
 
 const BADGE_HEIGHT = 20;
 const BADGE_CHAR = 6.6;
-const DONE_RADIUS = 9;
+/** A done mark stays a disc of at least 23 px on screen at any scale Fit picks, drawn clear of the box's border. */
+const DONE_SCREEN_RADIUS = 11.5;
+const DONE_MIN_RADIUS = 12;
+const DONE_MAX_RADIUS = 16;
+const DONE_CLEARANCE = 4;
+
+function doneRadius(scale: number): number {
+  return Math.min(DONE_MAX_RADIUS, Math.max(DONE_MIN_RADIUS, DONE_SCREEN_RADIUS / scale));
+}
 
 function badgeWidth(badge: StepBadge): number {
   return Math.ceil(badge.text.length * BADGE_CHAR) + 32;
 }
 
 /** A badge across the top edge of a box, or over the symbol of an event or gateway. */
-function Badge({ node, badge }: { node: PlacedNode; badge: StepBadge }) {
+function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; scale: number }) {
   if (badge.tone === 'done') {
-    // On a box's top-right corner; above a symbol, clear of the flows that leave it on the right.
-    const cx = node.shape === 'task' ? node.x + node.width - 4 : symbolCentre(node).x;
-    const cy = node.shape === 'task' ? node.y + 4 : node.y - DONE_RADIUS - 6;
+    const radius = doneRadius(scale);
+    // Above a box's top-right corner and above a symbol, clear of the border and of the flows that leave on the right.
+    const cx = node.shape === 'task' ? node.x + node.width - radius - 2 : symbolCentre(node).x;
+    const cy = node.y - radius - DONE_CLEARANCE;
     return (
-      <g className="dg-badge dg-badge--done" aria-hidden="true">
-        <circle cx={cx} cy={cy} r={DONE_RADIUS} />
-        <text x={cx} y={cy + 4} textAnchor="middle">{badge.icon}</text>
+      <g className="dg-badge dg-badge--done" aria-hidden="true" transform={`translate(${cx.toFixed(1)} ${cy.toFixed(1)}) scale(${(radius / DONE_MIN_RADIUS).toFixed(3)})`}>
+        <circle cx={0} cy={0} r={DONE_MIN_RADIUS} />
+        <text x={0} y={5} textAnchor="middle">{badge.icon}</text>
       </g>
     );
   }
@@ -82,6 +95,7 @@ function Badge({ node, badge }: { node: PlacedNode; badge: StepBadge }) {
 
 /** Space kept under the canvas inside the viewport: the card's padding and the page's bottom margin (as in processes.css). */
 const BELOW_CANVAS = 52;
+const MIN_FIT_HEIGHT = 200;
 const MIN_CANVAS_HEIGHT = 240;
 const LABEL_CHAR = 6.8;
 
@@ -208,13 +222,15 @@ export default function DefinitionDiagram({ graph, label, overlay }: { graph: Di
   const [zoom, setZoom] = useState<Zoom>('fit');
   const frame = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<{ width: number; height: number } | undefined>(undefined);
+  const reserveBelow = overlay?.reserveBelow ?? 0;
 
   useEffect(() => {
     const element = frame.current;
     if (!element) return;
     const measure = () => {
       const top = element.getBoundingClientRect().top + window.scrollY;
-      setCanvas({ width: element.clientWidth, height: Math.max(MIN_CANVAS_HEIGHT, window.innerHeight - top - BELOW_CANVAS) });
+      const free = window.innerHeight - top - BELOW_CANVAS - reserveBelow;
+      setCanvas({ width: element.clientWidth, height: Math.max(reserveBelow > 0 ? MIN_FIT_HEIGHT : MIN_CANVAS_HEIGHT, free) });
     };
     measure();
     window.addEventListener('resize', measure);
@@ -224,9 +240,9 @@ export default function DefinitionDiagram({ graph, label, overlay }: { graph: Di
       window.removeEventListener('resize', measure);
       observer?.disconnect();
     };
-  }, []);
+  }, [reserveBelow]);
 
-  const scale = zoom === 'fit' && canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
+  const scale = zoom === 'fit' && canvas !== undefined ? fitScale(layout, canvas, undefined, withBadges ? WHOLE_FIT_MIN_SCALE : MIN_SCALE) : MIN_SCALE;
   const selected = overlay?.selected;
   useEffect(() => {
     // Keep the selected step in view when the drawing is wider than its canvas.
@@ -264,7 +280,7 @@ export default function DefinitionDiagram({ graph, label, overlay }: { graph: Di
           {overlay !== undefined ? (
             <g>{layout.nodes.map((node) => {
               const badge = overlay.badges.get(node.id);
-              return badge !== undefined ? <Badge key={node.id} node={node} badge={badge} /> : null;
+              return badge !== undefined ? <Badge key={node.id} node={node} badge={badge} scale={scale} /> : null;
             })}</g>
           ) : null}
         </svg>

@@ -42,6 +42,9 @@ import { nodeTypeLabel } from './model/nodeLabels';
 const DefinitionDiagram = lazy(() => import('./diagram/DefinitionDiagram'));
 
 type Lens = 'diagram' | 'timeline';
+
+/** Viewport height kept under the drawing for the step panel, so the panel and its action stay above the fold. */
+const STEP_PANEL_RESERVE = 210;
 type T = (key: MessageKey, params?: Record<string, string>) => string;
 
 export function InstancePage({ instanceId }: { instanceId: string }) {
@@ -160,7 +163,7 @@ function InstanceDiagram({ instance, graph, activities, load, label }: {
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const selected = picked ?? firstStep(marks, order);
   const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t)])), [marks, t]);
-  const overlay: DiagramOverlay = { badges, selected, onSelect: setPicked };
+  const overlay: DiagramOverlay = { badges, selected, onSelect: setPicked, reserveBelow: STEP_PANEL_RESERVE };
   const node = graph.nodes.find((item) => item.id === selected);
   return (
     <div className="instance-grid">
@@ -184,13 +187,13 @@ function durationText(ms: number, t: T): string {
   return durationParts(ms).map((part) => t(`instance.unit.${part.unit}`, { value: String(part.value) })).join(' ');
 }
 
+/** Who acted, in words: a person by name, the engine as "Process Engine"; an engine node's id stays under Details. */
 function useActorText(): (actor: string | null) => string {
   const { t } = useI18n();
   const person = usePersonName();
   return (actor) => {
     const who = actorReplica(actor);
-    if (!who.engine) return person(who.login);
-    return who.replica !== undefined ? t('review.byEngine', { replica: who.replica }) : t('instance.engine');
+    return who.engine ? t('instance.engine') : person(who.login);
   };
 }
 
@@ -214,32 +217,56 @@ function StepDetails({ instance, node, mark, activities, load }: {
     }
     return undefined;
   })();
+  const who = activity !== undefined ? actorReplica(activity.actor) : undefined;
+  const engineNode = who?.engine === true ? who.replica : undefined;
   return (
     <div className="inspector__body">
-      <div className="inspector__head">
-        <h2 className="card__title">{name}</h2>
-        <p className={node.type === 'serviceTask:agentTask' ? 'inspector__type inspector__type--agent' : 'inspector__type'}>{nodeTypeLabel(node.type, t)}</p>
+      <div className="inspector__col">
+        <div className="inspector__head">
+          <h2 className="card__title">{name}</h2>
+          <p className={node.type === 'serviceTask:agentTask' ? 'inspector__type inspector__type--agent' : 'inspector__type'}>{nodeTypeLabel(node.type, t)}</p>
+        </div>
+        <StateLine mark={mark} activity={activity !== undefined} />
+        {summary !== undefined ? <p className="inspector__summary">{summary}</p> : null}
       </div>
-      <StateLine mark={mark} activity={activity !== undefined} />
-      {summary !== undefined ? <p className="inspector__summary">{summary}</p> : null}
-      {load.pending ? <LoadingRows rows={3} /> : load.error !== undefined ? (
-        <ActivitiesError error={load.error} onRetry={load.retry} />
-      ) : activity === undefined && mark === undefined ? (
-        <p className="muted inspector__hint">{t('instance.notReached')}</p>
-      ) : (
-        <dl className="facts">
-          {activity?.enteredAt ? <Fact term={t('instance.fact.entered')}>{formatDateTime(activity.enteredAt, locale)}</Fact> : null}
-          {activity?.completedAt ? <Fact term={t('instance.fact.completed')}>{formatDateTime(activity.completedAt, locale)}</Fact> : null}
-          {activity?.durationMs !== null && activity?.durationMs !== undefined ? <Fact term={t('instance.fact.duration')}>{durationText(activity.durationMs, t)}</Fact> : null}
-          {attempts !== undefined ? <Fact term={t('instance.fact.attempts')}>{attempts}</Fact> : null}
-          {activity !== undefined ? <Fact term={t('instance.fact.actor')}>{actorText(activity.actor)}</Fact> : null}
-          {task !== undefined ? <Fact term={t('instance.fact.waitingFor')}>{assigneeWords(task.assignee)}</Fact> : null}
-          {task?.claimedBy ? <Fact term={t('instance.fact.takenBy')}>{actorText(task.claimedBy)}</Fact> : null}
-        </dl>
-      )}
-      {activity?.incident ? <IncidentBox code={activity.incident.code} openedAt={activity.incident.openedAt} /> : null}
-      {task !== undefined ? <TaskAction taskId={task.id} /> : null}
+      <div className="inspector__col">
+        {load.pending ? <LoadingRows rows={3} /> : load.error !== undefined ? (
+          <ActivitiesError error={load.error} onRetry={load.retry} />
+        ) : activity === undefined && mark === undefined ? (
+          <p className="muted inspector__hint">{t('instance.notReached')}</p>
+        ) : (
+          <dl className="facts">
+            {activity?.enteredAt ? <Fact term={t('instance.fact.entered')}>{formatDateTime(activity.enteredAt, locale)}</Fact> : null}
+            {activity?.completedAt ? <Fact term={t('instance.fact.completed')}>{formatDateTime(activity.completedAt, locale)}</Fact> : null}
+            {activity?.durationMs !== null && activity?.durationMs !== undefined ? <Fact term={t('instance.fact.duration')}>{durationText(activity.durationMs, t)}</Fact> : null}
+            {attempts !== undefined ? <Fact term={t('instance.fact.attempts')}>{attempts}</Fact> : null}
+            {activity !== undefined ? <Fact term={t('instance.fact.actor')}>{actorText(activity.actor)}</Fact> : null}
+            {task !== undefined ? <Fact term={t('instance.fact.waitingFor')}>{assigneeWords(task.assignee)}</Fact> : null}
+            {task?.claimedBy ? <Fact term={t('instance.fact.takenBy')}>{actorText(task.claimedBy)}</Fact> : null}
+          </dl>
+        )}
+      </div>
+      {activity?.incident || task !== undefined || engineNode !== undefined ? (
+        <div className="inspector__col inspector__col--end">
+          {activity?.incident ? <IncidentBox code={activity.incident.code} openedAt={activity.incident.openedAt} replica={engineNode} /> : null}
+          {task !== undefined ? <TaskAction taskId={task.id} noActivity={load.error !== undefined} /> : null}
+          {!activity?.incident && engineNode !== undefined ? <EngineNode replica={engineNode} /> : null}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** The engine node that last acted, one click away: an id for operators, not for the page body. */
+function EngineNode({ replica }: { replica: string }) {
+  const { t } = useI18n();
+  return (
+    <details className="alert__details inspector__details">
+      <summary>{t('area.error.details')}</summary>
+      <dl>
+        <div><dt>{t('instance.fact.engineNode')}</dt><dd className="mono">{replica} <CopyButton value={replica} /></dd></div>
+      </dl>
+    </details>
   );
 }
 
@@ -257,7 +284,7 @@ function StateLine({ mark, activity }: { mark: NodeMark | undefined; activity: b
 }
 
 /** An open incident in words, with its code and when it opened one click away (styleguide: alerts). */
-function IncidentBox({ code, openedAt }: { code: string; openedAt: string }) {
+function IncidentBox({ code, openedAt, replica }: { code: string; openedAt: string; replica: string | undefined }) {
   const { t, locale } = useI18n();
   return (
     <div className="alert alert--error inspector__incident" role="note">
@@ -269,6 +296,7 @@ function IncidentBox({ code, openedAt }: { code: string; openedAt: string }) {
           <dl>
             <div><dt>{t('error.code')}</dt><dd className="mono">{code} <CopyButton value={code} /></dd></div>
             <div><dt>{t('instance.fact.opened')}</dt><dd className="tnum">{formatDateTime(openedAt, locale)}</dd></div>
+            {replica !== undefined ? <div><dt>{t('instance.fact.engineNode')}</dt><dd className="mono">{replica} <CopyButton value={replica} /></dd></div> : null}
           </dl>
         </details>
       </div>
@@ -276,17 +304,21 @@ function IncidentBox({ code, openedAt }: { code: string; openedAt: string }) {
   );
 }
 
-/** Open the task waiting here; unavailable, with the reason beside it, without the task permission. */
-function TaskAction({ taskId }: { taskId: string }) {
+/**
+ * Open the task waiting here. Unavailable, with the reason beside it, without the task permission, or when the
+ * service gives no step activity, so the strongest action never sits under a line saying there is nothing to see.
+ */
+function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolean }) {
   const { t } = useI18n();
   const { can } = useProcessesSession();
-  if (can('processes:task:work')) {
+  const reason: MessageKey | undefined = !can('processes:task:work') ? 'instance.openTaskBlocked' : noActivity ? 'instance.openTaskNoActivity' : undefined;
+  if (reason === undefined) {
     return <a className="btn btn--primary inspector__action" href={formatRoute({ name: 'task', taskId })}>{t('instance.openTask')}</a>;
   }
   return (
     <div className="inspector__blocked">
       <button type="button" className="btn btn--primary inspector__action" aria-disabled="true" aria-describedby="instance-task-reason">{t('instance.openTask')}</button>
-      <p id="instance-task-reason" className="inspector__reason"><span aria-hidden="true">ⓘ</span> {t('instance.openTaskBlocked')}</p>
+      <p id="instance-task-reason" className="inspector__reason"><span aria-hidden="true">ⓘ</span> {t(reason)}</p>
     </div>
   );
 }

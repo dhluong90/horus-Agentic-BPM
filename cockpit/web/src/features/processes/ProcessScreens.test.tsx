@@ -115,8 +115,11 @@ describe('CKP-017 instance on its diagram', () => {
     const inspector = screen.getByRole('complementary', { name: 'Selected step' });
     expect(within(inspector).getByText('The agent did not answer in time.')).toBeInTheDocument();
     expect(within(inspector).getByText('3 attempts')).toBeInTheDocument();
+    expect(within(inspector).getByText('Process Engine')).toBeInTheDocument();
+    expect(inspector).not.toHaveTextContent('Process Engine (');
     await userEvent.click(within(inspector).getByText('Details'));
     expect(within(inspector).getByText('AGENT_TIMEOUT')).toBeVisible();
+    expect(within(inspector).getByText('loans-7f9c')).toBeVisible();
     expect(diagram).not.toHaveTextContent('AGENT_TIMEOUT');
   });
 
@@ -151,6 +154,12 @@ describe('CKP-017 instance on its diagram', () => {
     const diagram = await screen.findByRole('group', { name: 'Diagram of Case APP-1042' });
     expect(await within(diagram).findByRole('button', { name: 'Assess documents Agent task, Waiting for a person' })).toBeInTheDocument();
     expect(await screen.findByText('This service does not report step activity yet.')).toBeInTheDocument();
+    // With nothing to show, the task action is unavailable and says why, not a filled primary link.
+    const inspector = screen.getByRole('complementary', { name: 'Selected step' });
+    expect(within(inspector).queryByRole('link', { name: 'Open the task' })).not.toBeInTheDocument();
+    const action = within(inspector).getByRole('button', { name: 'Open the task' });
+    expect(action).toHaveAttribute('aria-disabled', 'true');
+    expect(action).toHaveAccessibleDescription('Opens once step activity is reported.');
   });
 
   it('CKP_017_a_case_reads_in_vietnamese', async () => {
@@ -205,7 +214,14 @@ describe('CKP-007 agent task inspector', () => {
     expect(within(why).getByText('A guardrail rule refused the answer.')).toBeInTheDocument();
     expect(within(why).getByText('Rule R2')).toBeInTheDocument();
     expect(within(why).getByText('Declared income is 38% above the income on the salary slips')).toBeInTheDocument();
-    expect(within(why).getByText('Process Engine (loans-7f9c)')).toBeInTheDocument();
+    // The engine reads as a word; its node id is one click away under Details.
+    expect(within(why).getByText('Process Engine')).toBeInTheDocument();
+    expect(within(why).getByText('loans-7f9c')).not.toBeVisible();
+    // The breadcrumb keeps the way back to the process and the case.
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(await within(crumbs).findByRole('link', { name: 'Loan origination' })).toHaveAttribute('href', '#/processes/loan-origination/3/cases');
+    expect(within(crumbs).getByRole('link', { name: 'Case APP-1042' })).toHaveAttribute('href', `#/instances/${INSTANCE_ID}`);
+    expect(within(crumbs).getByText('Agent review')).toHaveAttribute('aria-current', 'page');
     expect(within(why).getByText('…R2X7')).toHaveAttribute('title', '01JD4G2DEC1S10N0000000R2X7');
 
     // Take the review, then override with a reason.

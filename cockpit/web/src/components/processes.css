@@ -73,6 +73,7 @@
 .review-why__facts > div { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
 .review-why__facts dt { color: var(--muted); }
 .review-why__facts dd { margin: 0; color: var(--ink); }
+.review-why__details { margin: 0; }
 .review-why__ref { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
 .copy-btn { white-space: nowrap; }
 .copy-btn--icon { min-height: 28px; width: 28px; padding: 0; justify-content: center; }
@@ -121,20 +122,24 @@
 .dg-badge--incident rect { fill: var(--bad-soft); stroke: var(--bad-fill); stroke-width: 1; }
 .dg-badge--incident text { fill: var(--bad); }
 .dg-badge--done circle { fill: var(--ok-soft); stroke: var(--ok-fill); stroke-width: 1; }
-.dg-badge--done text { fill: var(--ok); font-size: 11px; }
+.dg-badge--done text { fill: var(--ok); font-size: 15px; font-weight: 700; }
 .dg-node--pick { cursor: pointer; }
 .dg-node--selected rect, .dg-node--selected circle, .dg-node--selected > path { stroke: var(--accent); stroke-width: 3; }
 
 .instance .page-head { margin-bottom: 12px; }
-.instance-grid { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--gap); align-items: start; margin-top: 8px; }
-@media (max-width: 1180px) { .instance-grid { grid-template-columns: minmax(0, 1fr); } }
+/* A case is wide and flows left to right: the drawing takes the full width so Fit shows the whole case, and the
+ * selected step's panel runs under it in three columns (what it is, what happened, what to do). */
+.instance-grid { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
 .instance-grid__canvas { min-width: 0; }
 .inspector {
-  display: flex; flex-direction: column; gap: 12px; padding: var(--card-pad);
+  padding: 16px var(--card-pad);
   border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface);
-  max-height: max(240px, calc(100vh - var(--topbar-h) - 236px)); overflow: auto;
 }
-.inspector__body { display: flex; flex-direction: column; gap: 12px; }
+.inspector__body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr); gap: 12px 32px; align-items: start; }
+.inspector__col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.inspector__col--end { align-items: flex-start; }
+@media (max-width: 1180px) { .inspector__body { grid-template-columns: minmax(0, 1fr); } }
+.inspector__details { margin: 0; }
 .inspector__head { display: flex; flex-direction: column; gap: 2px; }
 .inspector__head .card__title { margin: 0; }
 .inspector__type { margin: 0; color: var(--muted); font: var(--type-label); }

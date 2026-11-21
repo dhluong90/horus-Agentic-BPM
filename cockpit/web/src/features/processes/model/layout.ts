@@ -211,14 +211,18 @@ export function overlaps(a: Pick<PlacedNode, 'x' | 'y' | 'width' | 'height'>, b:
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 }
 
-/** The smallest scale the diagram is drawn at: its smallest text is then the 12 px caption stop. */
+/** The scale "100 %" draws at, and the smallest Fit uses for a definition: its smallest text is then the 12 px caption stop. */
 export const MIN_SCALE = 1;
 
+/** The smallest scale Fit uses for a whole case; below it the drawing scrolls rather than become unreadable. */
+export const WHOLE_FIT_MIN_SCALE = 0.4;
+
 /**
- * The scale that fits a drawing into its canvas, up as well as down to MIN_SCALE. A drawing wider than that scrolls
- * inside its canvas rather than shrinking text below 12 px.
+ * The scale that fits a drawing into its canvas, up to `max` and down to `min`. A definition keeps `min` at 100 %, so
+ * a wider drawing scrolls rather than shrink text below 12 px (CKP-069); a case passes WHOLE_FIT_MIN_SCALE so the
+ * operator sees every step and end of the case at once, and "100 %" shows it at full size (CKP-017).
  */
-export function fitScale(drawing: { width: number; height: number }, canvas: { width: number; height: number }, max = 1.6): number {
+export function fitScale(drawing: { width: number; height: number }, canvas: { width: number; height: number }, max = 1.6, min = MIN_SCALE): number {
   if (drawing.width <= 0 || drawing.height <= 0 || canvas.width <= 0 || canvas.height <= 0) return MIN_SCALE;
-  return Math.max(MIN_SCALE, Math.min(max, canvas.width / drawing.width, canvas.height / drawing.height));
+  return Math.max(min, Math.min(max, canvas.width / drawing.width, canvas.height / drawing.height));
 }

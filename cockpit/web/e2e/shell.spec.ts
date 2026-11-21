@@ -29,7 +29,7 @@ test.describe('embedded cockpit, case A', () => {
     await page.goto('./#/service');
 
     const header = page.getByTestId('session-header');
-    await expect(header.getByTestId('header-host')).toHaveText('Loan origination');
+    await expect(header.getByTestId('header-host')).toHaveText('Retail banking');
     await expect(header.getByTestId('header-tenant')).toHaveText('bank-a');
     await expect(header.getByTestId('header-user')).toHaveText('Nguyễn Thị Lan');
     expect(calls[0]).toBe('/cockpit-hosts.json');

@@ -18,7 +18,10 @@ export function Breadcrumb() {
   const [route] = useRoute();
   const override = useCrumbLabel();
   const pageTrail = useCrumbTrail();
-  const crumbs = route.name === 'instance' ? [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, ...(pageTrail ?? [])] : trail(route, t);
+  // A case and its task know their parents (process, case) only once loaded; the page sets that trail.
+  const crumbs = (route.name === 'instance' || route.name === 'task') && pageTrail !== undefined
+    ? [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, ...pageTrail]
+    : trail(route, t);
   const last = crumbs.at(-1);
   if (override !== undefined && route.name === 'rule-set' && last) crumbs[crumbs.length - 1] = { label: override };
   // A process is named by its display name, which only the page knows; until it loads, the crumb waits rather than show the key.
