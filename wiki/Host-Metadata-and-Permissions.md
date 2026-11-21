@@ -86,7 +86,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `engineVersion` | The version of the engine starter the host was built with |
 | `features` | Empty: a flag such as `rules.simulation` is added with the feature it announces, so a client never offers a screen whose endpoints are missing |
 | `settings` | Omitted when the engine has none. The Rule Engine always sends `authoring.cockpit-drafts`, and `decision-log.mask-default` and `decision-log.require-explicit-mask` as in force for the caller's tenant |
-| `tenancy.switching` | `false`: tenant switching arrives in M2 |
+| `tenancy.switching` | `horus.bpm.tenancy.switching.enabled`, `false` by default |
 | `limits.maxPageSize` | `horus.bpm.limits.max-page-size`, `200` by default, the largest page of any engine list. A host that lowers the engines' `query.max-page-size` lowers this to match |
 
 ## `GET /api/bpm/me`
@@ -109,7 +109,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `user.id` | The principal name; for a JWT, the `sub` claim unless the host's converter says otherwise |
 | `user.displayName` | The first claim of `horus.bpm.security.display-name-claims` the principal carries (default `name`, then `preferred_username`); omitted when none is present |
 | `tenant.current` | The tenant the request resolved to; see [Tenant](#tenant) |
-| `tenant.allowed` | The current tenant only, until tenant switching arrives in M2 |
+| `tenant.allowed` | The signed-in tenant, then, only while `horus.bpm.tenancy.switching.enabled` is `true`, the tenants of the token's `allowed_tenants` claim. The tenants a caller may send as `X-Tenant-Id` |
 | `permissions` | Engine permissions the caller holds, in each engine's order; see [Permissions](#permissions) |
 | `roles` | The caller's host roles that an engine role mapping names, sorted. Other host roles are left out, so the host's role model does not reach the browser |
 | `groups` | The claim of `horus.bpm.security.groups-claim` (default `groups`) when the principal has one, otherwise empty |
@@ -207,7 +207,9 @@ Whatever the resolver, these rules hold:
 |---|---|
 | No tenant for the principal | `401 UNAUTHENTICATED` with `WWW-Authenticate: Bearer error="invalid_token"` and a security log entry `tenant.unresolved`; nothing is read |
 | The principal carries the tenant attribute and a host resolver returns another tenant | `403 TENANT_NOT_ALLOWED` |
-| An `X-Tenant-Id` header, the tenant switch request, differs from the resolved tenant (switching is off until M2) | `403 TENANT_NOT_ALLOWED` |
+| An `X-Tenant-Id` header, the tenant switch request, differs from the resolved tenant and switching is off (the default) | `403 TENANT_NOT_ALLOWED` |
+| Switching is on and the header names a tenant outside the token's allowed-tenants claim, or is blank, malformed or repeated | `403 TENANT_NOT_ALLOWED` |
+| Switching is on and the header names the signed-in tenant or a tenant in the allowed-tenants claim | Served for that tenant; one `tenant.switch.accepted` entry |
 | The tenant is not 1 to 64 letters, digits, `.`, `_` or `-`, starting with a letter or digit | `403 TENANT_NOT_ALLOWED` |
 | A tenant in a query parameter, a body or any other header | Ignored |
 
@@ -217,7 +219,7 @@ Every refusal writes one entry on the logger `io.github.dhluong90.bpm.security`:
 tenant.switch.refused reason=switching-off user=lan%40bank-a.vn tokenTenant=bank-a requestedTenant=bank-b correlationId=01M7RT1NNKHDP8JWFNE563SNP6 clientCorrelationId=-
 ```
 
-`reason` is `switching-off`, `differs-from-token-tenant` or `invalid-tenant`. Values are percent-encoded outside letters, digits, `.`, `_` and `-`, and cut at 128 characters, so a value cannot forge another field and can still be read back.
+`reason` is `switching-off`, `differs-from-token-tenant`, `invalid-tenant`, `not-in-allowed-list` or `repeated-header`. An accepted switch writes `tenant.switch.accepted user=... fromTenant=... requestedTenant=... correlationId=...` on the same logger at `INFO`; keep that logger at `INFO` or finer. Values are percent-encoded outside letters, digits, `.`, `_` and `-`, and cut at 128 characters, so a value cannot forge another field and can still be read back.
 
 ## Headers and errors
 

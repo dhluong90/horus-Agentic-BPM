@@ -10,7 +10,10 @@ import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.host.spi.TenantResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,10 +39,13 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * the authorities and the engines' role mappings.
  *
  * <p>Two checks then apply to every resolver, the host's own included: when the principal carries the
- * tenant attribute, the resolved tenant must equal it; and while tenant switching is off, an
- * {@code X-Tenant-Id} header, the switch request of ADR-0014 decision 5, must equal the resolved tenant. A
- * mismatch, or a tenant outside the allowed format, is {@code 403 TENANT_NOT_ALLOWED} with a
- * {@code tenant.switch.refused} security log entry (ADR-0014). The current request is taken from Spring's
+ * tenant attribute, the resolved tenant must equal it; and an {@code X-Tenant-Id} header, the switch request
+ * of ADR-0014 decision 5, must equal the resolved tenant, unless tenant switching is on and the header names
+ * a tenant in the allowed-tenants attribute of the verified principal (the header alone never grants a tenant;
+ * the signed-in tenant is always allowed). A mismatch, an unlisted tenant, a repeated header, or a tenant
+ * outside the allowed format, is {@code 403 TENANT_NOT_ALLOWED} with a {@code tenant.switch.refused}
+ * security log entry (ADR-0014); an accepted switch writes {@code tenant.switch.accepted} with the user, both
+ * tenants and the correlation id. The current request is taken from Spring's
  * request context; outside a request (a host job running as a user) there is no header to check.
  *
  * <p>Before any of that, a caller whose id starts with {@value #RESERVED_PREFIX} is refused with
@@ -69,16 +75,21 @@ final class DefaultEngineAccess implements EngineAccess {
 
     private final TenantResolver resolver;
     private final String tenantClaim;
+    private final boolean switching;
+    private final String allowedTenantsClaim;
     private final Function<Authentication, Map<String, Object>> claims;
     private final String challenge;
     private final String groupsClaim;
     private final List<String> displayNameClaims;
     private final List<ModuleDescriptor> modules;
 
-    DefaultEngineAccess(TenantResolver resolver, String tenantClaim, Function<Authentication, Map<String, Object>> claims,
-            HostMetadataProperties.Security security, List<ModuleDescriptor> modules) {
+    DefaultEngineAccess(TenantResolver resolver, HostMetadataProperties.Tenancy tenancy,
+            Function<Authentication, Map<String, Object>> claims, HostMetadataProperties.Security security,
+            List<ModuleDescriptor> modules) {
         this.resolver = resolver;
-        this.tenantClaim = tenantClaim;
+        this.tenantClaim = tenancy.claim();
+        this.switching = tenancy.switching().enabled();
+        this.allowedTenantsClaim = tenancy.allowedTenantsClaim();
         this.claims = claims;
         this.challenge = security.challenge();
         this.groupsClaim = security.groupsClaim();
@@ -153,12 +164,50 @@ final class DefaultEngineAccess implements EngineAccess {
         if (tokenTenant != null && !tokenTenant.equals(tenant)) {
             throw refused(request, authentication, tokenTenant, tenant, "differs-from-token-tenant");
         }
+        List<String> allowed = switching ? allowedTenants(context, tenant) : List.of(tenant);
         String requested = request == null ? null : request.getHeader(TENANT_SWITCH_HEADER);
+        String effective = tenant;
         if (requested != null && !requested.equals(tenant)) {
-            throw refused(request, authentication, tokenTenant, requested, "switching-off");
+            if (!switching) {
+                throw refused(request, authentication, tokenTenant, requested, "switching-off");
+            }
+            if (Collections.list(request.getHeaders(TENANT_SWITCH_HEADER)).size() > 1) {
+                throw refused(request, authentication, tokenTenant, requested, "repeated-header");
+            }
+            if (!TENANT.matcher(requested).matches()) {
+                throw refused(request, authentication, tokenTenant, requested, "invalid-tenant");
+            }
+            if (!allowed.contains(requested)) {
+                throw refused(request, authentication, tokenTenant, requested, "not-in-allowed-list");
+            }
+            effective = requested;
+            SECURITY_LOG.info("tenant.switch.accepted user=" + CorrelationIds.loggable(authentication.getName())
+                    + " fromTenant=" + CorrelationIds.loggable(tenant)
+                    + " requestedTenant=" + CorrelationIds.loggable(requested)
+                    + " correlationId=" + correlationId(request)
+                    + " clientCorrelationId=" + clientCorrelationId(request));
         }
-        return new EngineCaller(authentication.getName(), displayName(context), tenant, authorities,
-                stringList(context.attributes().get(groupsClaim)));
+        return new EngineCaller(authentication.getName(), displayName(context), effective, authorities,
+                stringList(context.attributes().get(groupsClaim)), allowed);
+    }
+
+    /**
+     * The signed-in tenant first, then the well-formed tenants of the verified principal's allowed-tenants
+     * attribute: a JSON array, or one space-separated string as the OAuth scope claim is written. Nothing the
+     * request carries is read.
+     */
+    private List<String> allowedTenants(CallerContext context, String signedIn) {
+        Set<String> allowed = new LinkedHashSet<>();
+        allowed.add(signedIn);
+        Object claim = context.attributes().get(allowedTenantsClaim);
+        Collection<?> values = claim instanceof Collection<?> list ? list
+                : claim instanceof String text ? Arrays.asList(text.trim().split("\\s+")) : List.of();
+        for (Object value : values) {
+            if (value instanceof String tenant && TENANT.matcher(tenant).matches()) {
+                allowed.add(tenant);
+            }
+        }
+        return List.copyOf(allowed);
     }
 
     /**

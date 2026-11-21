@@ -51,6 +51,12 @@
       <artifactId>spring-security-oauth2-core</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- The audience validator of bearer tokens (TR-SEC-12). Optional: loaded only when the host has JWT support. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-oauth2-jose</artifactId>
+      <optional>true</optional>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

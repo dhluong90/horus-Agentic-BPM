@@ -138,8 +138,8 @@ Rules:
 | Storage | Access, ID and refresh tokens in memory only (`InMemoryWebStorage`), never `localStorage` or `sessionStorage`. A reload signs in again through the identity provider's session |
 | Per-host tokens | One refresh grant per host with that host's `scope`; the identity provider maps the scope to the host's audience. A token leaked from one host's traffic is not accepted by another host |
 | Lifetime | Access tokens of 5 to 10 minutes are recommended; the cockpit refreshes a host's token 60 s before expiry and only for hosts it is using |
-| Host side | Each host validates the audience (`spring.security.oauth2.resourceserver.jwt.audiences`) and rejects a token whose audience is another host with `401`. When `rest.cors.allowed-origins` is set, the starter refuses to start outside `dev` without an audience configured (`TR-SEC-12`) |
-| CORS | Off by default; the exact cockpit origin per host; bearer tokens, never cookies, so no credentials mode (`TR-SEC-09`) |
+| Host side | Each host validates the audience (`spring.security.oauth2.resourceserver.jwt.audiences`) and rejects a token whose audience is another host with `401`. The starter setting is `horus.bpm.security.audiences` (or Boot's own property above). When `horus.bpm.rest.cors.allowed-origins` is set, the starter refuses to start outside `dev` without an audience configured (`TR-SEC-12`). Built in `bpm-host-metadata` for both engines (#11) |
+| CORS | `horus.bpm.rest.cors.allowed-origins`, off by default; the exact cockpit origin per host, no wildcard; bearer tokens, never cookies, so no credentials mode (`TR-SEC-09`) |
 
 ![Sign-in and host probing](images/signin-sequence.svg)
 
@@ -338,7 +338,7 @@ A queue of escalated reviews needs a task query, which the Process Engine API do
 | Changed host registry | Same change control as the bundle; CSP `connect-src` limits origins | `CKP-012`; deployment guide |
 | Cross-site request forgery in embedded mode | Host session cookie with `SameSite=Lax`. Contract for `host-session`: the host keeps its CSRF token in the readable cookie `XSRF-TOKEN` (`CookieCsrfTokenRepository.withHttpOnlyFalse()` with a token handler that accepts the raw value in the header, as `SpaCsrfTokenRequestHandler` in `examples/rule-engine-only` does on Spring Security 6.5 and 7); the starter loads the token whenever a cockpit file is served, so the cookie exists; the cockpit's host client sends the cookie value in `X-XSRF-TOKEN` on every request that changes data | `CockpitCsrfContractTest`, `hostClient.test.ts`, `CockpitEmbeddedIT` |
 | Clickjacking | `frame-ancestors 'self'` and `X-Frame-Options: SAMEORIGIN` on every cockpit file. Framing inside the host's own admin UI on the same origin is supported; any other origin is refused. The starter holds `SAMEORIGIN` on cockpit paths in a filter ahead of the host's security, which otherwise writes `DENY` | `CockpitBehindHostSecurityTest`, `CockpitEmbeddedIT` |
-| Tenant crossing | `X-Tenant-Id` checked by the host against the allowed-tenants claim; one tenant per screen | `CKP-022`, `PRE-038`, `RLE-018` |
+| Tenant crossing | `X-Tenant-Id` checked by the host against the allowed-tenants claim, with `horus.bpm.tenancy.switching.enabled` (off by default); one tenant per screen | `CKP-022`, `PRE-038`, `RLE-018` |
 | Self-approval through the UI | Disabled button; API refuses | `CKP-003`, `CKP-024` |
 | Open redirect through a task form link | Links checked by the engine at import; the cockpit opens them with `rel="noopener noreferrer"` and only if relative or listed | `CKP-021`, `PRE-031` |
 | Masked data shown in clear | The cockpit never receives clear values of masked fields | `CKP-005` |
