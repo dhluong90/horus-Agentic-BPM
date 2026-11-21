@@ -6,6 +6,8 @@ Shadow means the agent runs on real cases and its answer is recorded, while a pe
 
 Before 1.0 the autonomy ceiling is rung 3. Rung 4, end to end with no sampling, is not offered.
 
+A built-in shadow mode is planned for 1.1 (PD-138): the case will not wait for the agent step, the agent's answer and the person's decision will be recorded side by side with an agreement result, and a configurable share of cases will be sampled. It will be additive and off by default. Until then, use the pattern in this guide.
+
 ## What you build
 
 ```mermaid

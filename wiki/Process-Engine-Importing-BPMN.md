@@ -75,7 +75,7 @@ The root element must declare the namespaces, and the process must be executable
 | `endEvent` with no event definition | | `name` | `<bpmn:endEvent id="end-approved"/>` |
 | `serviceTask` | `horus:handler`, the name of a `ServiceTaskHandler` bean in your host | `horus:resultVariable`, `horus:input` elements | `horus:handler="cardProfiles.load"` |
 | `businessRuleTask` | `horus:ruleSet`, the name of a published rule set | `horus:resultVariable`, `horus:input` elements | `horus:ruleSet="card-fee"` |
-| `userTask` | `horus:assignee` as `user:<id>`, `role:<role>` or `group:<group>`; `horus:resultVariable` | `horus:fourEyes="true"`: the starter and earlier completers may not complete it. `horus:sla`: working time until the task is due, an ISO 8601 duration such as `PT4H`, up to 366 days; `horus:calendar`: the tenant calendar it counts in (elapsed time without one; since 0.2.0) | `horus:assignee="role:CARD_OFFICER"` |
+| `userTask` | `horus:assignee` as `user:<id>`, `role:<role>` or `group:<group>`; `horus:resultVariable` | `horus:fourEyes="true"`: the starter and earlier completers may not complete it. `horus:sla`: working time until the task is due, an ISO 8601 duration such as `PT4H`, up to 366 days; `horus:calendar`: the tenant calendar it counts in (elapsed time without one; since 0.3.0) | `horus:assignee="role:CARD_OFFICER"` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 

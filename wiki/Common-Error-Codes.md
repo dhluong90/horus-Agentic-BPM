@@ -22,7 +22,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 |---|---|---|---|
 | 400 | [INPUT_INVALID](#input_invalid) | both | M1 |
 | 400 | [QUERY_INVALID](#query_invalid) | both | M1 |
-| 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | rules | 0.2.0 |
+| 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | rules | 0.3.0 |
 | 401 | [UNAUTHENTICATED](#unauthenticated) | both | M1 |
 | 403 | [PERMISSION_DENIED](#permission_denied) | both | M1 |
 | 403 | [TENANT_NOT_ALLOWED](#tenant_not_allowed) | both | M1 on `/api/bpm/meta` and `/api/bpm/me` (switching off); M2 everywhere |
@@ -39,7 +39,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
-| 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.2.0 |
+| 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
@@ -54,7 +54,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [EVALUATION_ERROR](#evaluation_error) | rules | M1 |
 | 422 | [REPLAY_NOT_POSSIBLE](#replay_not_possible) | rules | M1 (0.2.0) |
 | 422 | [BATCH_TOO_LARGE](#batch_too_large) | rules | M1 |
-| 422 | [HISTORY_TOO_LARGE](#history_too_large) | rules | M3 |
+| 422 | [HISTORY_TOO_LARGE](#history_too_large) | rules | 0.3.0 |
 | 422 | [EVIDENCE_TOO_LARGE](#evidence_too_large) | rules | M3 |
 | 422 | [DEFINITION_TOO_LARGE](#definition_too_large) | processes | M2 |
 | 422 | [GUARDRAIL_CONTRACT_INVALID](#guardrail_contract_invalid) | processes | M2 |
