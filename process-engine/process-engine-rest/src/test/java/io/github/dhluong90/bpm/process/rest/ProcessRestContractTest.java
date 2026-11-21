@@ -104,6 +104,34 @@ class ProcessRestContractTest {
     }
 
     @Test
+    void PRE_029_the_window_mode_of_the_node_stats_matches_the_contract() throws Exception {
+        MvcResult window = exchange(get(BASE + "/definitions/card-fee-review/versions/1/node-stats")
+                .param("mode", "window").param("from", "2026-11-20T10:00:00Z").param("to", "2026-11-20T11:00:00Z"));
+
+        assertThat(window.getResponse().getStatus()).isEqualTo(200);
+        tools.jackson.databind.JsonNode body = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON.readTree(window.getResponse().getContentAsString());
+        assertThat(body.get("mode").stringValue()).isEqualTo("window");
+        assertThat(body.get("asOf").stringValue()).isEqualTo("2026-11-20T10:50:00Z");
+        assertThat(body.get("lagSeconds").asInt()).isEqualTo(600);
+        assertThat(body.at("/nodes/review/completed").asInt()).isEqualTo(1200);
+        assertThat(body.at("/nodes/review/p95Ms").asLong()).isEqualTo(9_900_000L);
+        assertThat(body.at("/nodes/start/p95Ms").isNull()).isTrue();
+        assertThat(window.getResponse().getHeader("ETag")).isNull();
+    }
+
+    @Test
+    void PRE_029_the_window_mode_refuses_a_bad_mode_a_bad_time_and_live_with_a_range() throws Exception {
+        assertProblem(get(BASE + "/definitions/card-fee-review/versions/1/node-stats").param("mode", "history"), 400,
+                "INPUT_INVALID");
+        assertProblem(get(BASE + "/definitions/card-fee-review/versions/1/node-stats").param("mode", "window")
+                .param("from", "yesterday"), 400, "INPUT_INVALID");
+        assertProblem(get(BASE + "/definitions/card-fee-review/versions/1/node-stats").param("from",
+                "2026-11-20T10:00:00Z"), 400, "INPUT_INVALID");
+        assertProblem(get(BASE + "/definitions/no-such-process/versions/1/node-stats").param("mode", "window"), 404,
+                "DEFINITION_NOT_FOUND");
+    }
+
+    @Test
     void TR_SEC_08_completing_a_task_twice_is_a_problem_that_matches_the_contract() throws Exception {
         exchange(post(BASE + "/instances").contentType(MediaType.APPLICATION_JSON).header("Idempotency-Key", "s-1")
                 .content("{\"definitionKey\":\"card-fee-review\"}"));
@@ -330,6 +358,21 @@ class ProcessRestContractTest {
                 throw new DefinitionNotFoundException("No definition " + definitionKey + " version " + version);
             }
             return new NodeCounts(definitionKey, version, NOW, Map.of("review", Map.of("WAITING_USER", 3L)));
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.NodeWindowStats nodeWindowStats(String definitionKey, int version,
+                java.time.Instant from, java.time.Instant to) {
+            if (!"card-fee-review".equals(definitionKey)) {
+                throw new DefinitionNotFoundException("No definition " + definitionKey + " version " + version);
+            }
+            java.time.Instant end = to == null ? java.time.Instant.parse("2026-11-20T11:00:00Z") : to;
+            java.time.Instant start = from == null ? end.minus(java.time.Duration.ofHours(24)) : from;
+            return new io.github.dhluong90.bpm.process.api.NodeWindowStats(definitionKey, version, start, end,
+                    java.time.Instant.parse("2026-11-20T10:50:00Z"), java.time.Duration.ofMinutes(10),
+                    Map.of("review", new io.github.dhluong90.bpm.process.api.NodeWindowStats.NodeWindow(1200, 1200, 0, 0,
+                            0, 5_400_000L, 4_800_000L, 9_900_000L), "start", new io.github.dhluong90.bpm.process.api
+                            .NodeWindowStats.NodeWindow(3, 0, 0, 0, 0, null, null, null)));
         }
     }
 

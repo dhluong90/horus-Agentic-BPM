@@ -14,6 +14,17 @@ public interface TransactionRunner {
     <T> T inTransaction(Supplier<T> work);
 
     /**
+     * Runs {@code action} once the current transaction has committed, and never when it rolls back. A runner that
+     * cannot register a callback, or a call made outside a transaction, runs the action at once. Used for metrics,
+     * which count committed work only (PRE-084); the action must not throw and must not touch the database.
+     *
+     * @param action the action
+     */
+    default void afterCommit(Runnable action) {
+        action.run();
+    }
+
+    /**
      * Whether the current thread is inside a transaction of this runner's transaction manager that the engine did not
      * open itself, for example a host's {@code @Transactional} method. Transactions the engine opens through a
      * {@link #tracked} runner are seen whatever the runner, so the async executor's guard (ADR-0008, TR-ASY-01) never
@@ -63,6 +74,11 @@ public interface TransactionRunner {
                     }
                 }
             });
+        }
+
+        @Override
+        public void afterCommit(Runnable action) {
+            delegate.afterCommit(action);
         }
 
         @Override

@@ -562,14 +562,17 @@ public class ProcessController {
     }
 
     /**
-     * Live tokens per node of one definition version, from the live token index ({@code processes:read}, PRE-028).
-     * Only {@code mode=live} in this release; the window mode follows with the hourly rollup.
+     * Per node of one definition version: {@code mode=live} the live tokens from the live token index (PRE-028),
+     * {@code mode=window} the counts and typical durations of whole hours from the hourly rollup (PRE-029). Needs
+     * {@code processes:read}; both read the caller's tenant only.
      */
     @GetMapping("/definitions/{key}/versions/{version}/node-stats")
     public ResponseEntity<byte[]> nodeStats(@PathVariable("key") String key, @PathVariable("version") String version,
-            @RequestParam(value = "mode", defaultValue = "live") String mode) {
-        if (!"live".equals(mode)) {
-            throw new InputInvalidException("mode must be live in this release");
+            @RequestParam(value = "mode", defaultValue = "live") String mode,
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to) {
+        if (!"live".equals(mode) && !"window".equals(mode)) {
+            throw new InputInvalidException("mode must be live or window");
         }
         int number;
         try {
@@ -579,6 +582,12 @@ public class ProcessController {
         }
         if (number < 1) {
             throw new InputInvalidException("version must be a positive integer");
+        }
+        if ("window".equals(mode)) {
+            return windowStats(key, number, instant("from", from), instant("to", to));
+        }
+        if (from != null || to != null) {
+            throw new InputInvalidException("from and to apply to mode=window only");
         }
         NodeCounts counts = queries.liveNodeCounts(key, number);
         ObjectNode body = EngineJson.NODES.objectNode();
@@ -592,6 +601,56 @@ public class ProcessController {
             byStatus.forEach(statuses::put);
         });
         return json(HttpStatus.OK, body, counts.asOf().toEpochMilli(), null);
+    }
+
+    private ResponseEntity<byte[]> windowStats(String key, int version, java.time.Instant from, java.time.Instant to) {
+        io.github.dhluong90.bpm.process.api.NodeWindowStats stats = queries.nodeWindowStats(key, version, from, to);
+        ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("definitionKey", stats.definitionKey());
+        body.put("version", stats.version());
+        body.put("mode", "window");
+        body.put("from", stats.from().toString());
+        body.put("to", stats.to().toString());
+        if (stats.asOf() == null) {
+            body.putNull("asOf");
+            body.putNull("lagSeconds");
+        } else {
+            body.put("asOf", stats.asOf().toString());
+            body.put("lagSeconds", stats.lag().toSeconds());
+        }
+        ObjectNode nodes = body.putObject("nodes");
+        stats.nodes().forEach((node, figures) -> {
+            ObjectNode n = nodes.putObject(node);
+            n.put("entered", figures.entered());
+            n.put("completed", figures.completed());
+            n.put("failed", figures.failed());
+            n.put("incidents", figures.incidents());
+            n.put("slaBreaches", figures.slaBreaches());
+            putOrNull(n, "meanMs", figures.meanMs());
+            putOrNull(n, "p50Ms", figures.p50Ms());
+            putOrNull(n, "p95Ms", figures.p95Ms());
+        });
+        // The answer changes as the rollup advances, so it carries no ETag.
+        return json(HttpStatus.OK, body, null, null);
+    }
+
+    private static void putOrNull(ObjectNode node, String name, Long value) {
+        if (value == null) {
+            node.putNull(name);
+        } else {
+            node.put(name, value);
+        }
+    }
+
+    private static java.time.Instant instant(String name, String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return java.time.Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new InputInvalidException(name + " must be a UTC time such as 2026-11-20T10:00:00Z");
+        }
     }
 
     /**

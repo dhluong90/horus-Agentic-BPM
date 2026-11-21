@@ -113,6 +113,22 @@ class BoundedListQueriesTest {
     }
 
     @Test
+    void PRE_036_an_engine_sweep_must_carry_a_time_range_a_limit_or_a_single_count() {
+        assertThatThrownBy(() -> new ListQuery("history-of-everyone",
+                new Bound.EngineSweep("occurred_at", "one slice"),
+                "SELECT id FROM pre_history WHERE occurred_at >= ?"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("occurred_at < ?");
+        assertThatThrownBy(() -> new ListQuery("instances-of-everyone",
+                new Bound.EngineSweep(null, "claimed: a gauge"),
+                "SELECT status, count(*) FROM pre_instance WHERE status = 'RUNNING' GROUP BY status"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("single count");
+        assertThatThrownBy(() -> new Bound.EngineSweep("tenant_id", "a tenant is not a time column"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void PRE_036_the_registry_holds_every_list_query_with_a_unique_name() {
         List<String> names = ProcessListQueries.all().stream().map(ListQuery::name).toList();
 
@@ -122,7 +138,9 @@ class BoundedListQueriesTest {
                 "definition-keys", "definition-keys-after",
                 "claim-timers", "claim-async-steps", "claim-async-kind", "instance-history-actors", "calendar-holidays",
                 "tasks-mine-dated", "tasks-any-undated", "migration-live-nodes", "migration-instances-at-node",
-                "migration-movable-instances", "instances-1",
+                "migration-movable-instances", "instance-token-entered-at", "rollup-slice", "window-node-sums",
+                "window-node-histogram", "gauge-active-instances", "gauge-open-incidents", "gauge-oldest-due-job",
+                "instances-1",
                 "instances-3-key-range-after");
     }
 

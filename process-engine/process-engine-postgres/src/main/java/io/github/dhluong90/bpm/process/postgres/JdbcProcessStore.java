@@ -53,6 +53,16 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 (rs, row) -> new LiveCount(rs.getString("current_node_id"), rs.getString("status"), rs.getLong("live")));
     }
 
+    @Override
+    public java.util.Map<String, java.time.Instant> tokenEnteredAt(String tenant, String instanceId) {
+        java.util.Map<String, java.time.Instant> entered = new java.util.HashMap<>();
+        ProcessListQueries.TOKEN_ENTERED_AT.list(jdbc, List.of(tenant, instanceId), (rs, row) -> {
+            entered.put(rs.getString("id"), rs.getTimestamp("entered_at").toInstant());
+            return null;
+        });
+        return entered;
+    }
+
     // ---- definitions --------------------------------------------------------------------------------------
 
     private static final String DEFINITION_COLUMNS = ProcessListQueries.DEFINITION_COLUMNS;

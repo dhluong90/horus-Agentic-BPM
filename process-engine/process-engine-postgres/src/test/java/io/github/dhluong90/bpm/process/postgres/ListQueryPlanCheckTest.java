@@ -44,6 +44,8 @@ class ListQueryPlanCheckTest {
 
     static SingleConnectionDataSource connection;
     static JdbcClient jdbc;
+    /** The partial indexes of the engine schema; an engine sweep may count every row of one. */
+    static java.util.Set<String> partialIndexes = java.util.Set.of();
 
     @BeforeAll
     static void seed() {
@@ -141,6 +143,8 @@ class ListQueryPlanCheckTest {
                 POSTGRES.getPassword(), true);
         jdbc = JdbcClient.create(connection);
         jdbc.sql("SET enable_seqscan = off").update();
+        partialIndexes = java.util.Set.copyOf(jdbc.sql("SELECT c.relname FROM pg_index i JOIN pg_class c "
+                + "ON c.oid = i.indexrelid WHERE i.indpred IS NOT NULL").query(String.class).list());
     }
 
     @AfterAll
@@ -176,6 +180,15 @@ class ListQueryPlanCheckTest {
         samples.put("migration-live-nodes", List.of("bank-a", DEFINITION));
         samples.put("migration-instances-at-node", List.of("bank-a", DEFINITION, "credit-review", 100));
         samples.put("migration-movable-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-review"}, 100));
+        Timestamp sliceFrom = Timestamp.from(NOW.minusSeconds(3600));
+        Timestamp sliceTo = Timestamp.from(NOW.minusSeconds(3540));
+        samples.put("instance-token-entered-at", List.of("bank-a", INSTANCE));
+        samples.put("rollup-slice", List.of(sliceFrom, sliceTo));
+        samples.put("window-node-sums", List.of("bank-a", DEFINITION, from, T));
+        samples.put("window-node-histogram", List.of("bank-a", DEFINITION, from, T));
+        samples.put("gauge-active-instances", List.of());
+        samples.put("gauge-open-incidents", List.of());
+        samples.put("gauge-oldest-due-job", List.of("TIMER"));
         samples.put("calendar-holidays", List.of("bank-a", "ACAL1"));
         String[] both = {"CLAIMED", "OPEN"};
         Timestamp end = Timestamp.from(Instant.parse("9999-12-31T00:00:00Z"));
@@ -233,6 +246,23 @@ class ListQueryPlanCheckTest {
         });
     }
 
+    /**
+     * The rollup slice is bounded by its time range through an index, whichever index the planner picks. PostgreSQL
+     * 14 and 16 read it through {@code idx_pre_history_time_brin} on each partition (V27). PostgreSQL 18 adds B-tree
+     * skip scan, so with few tenants it may read the same range through the primary key
+     * {@code (tenant_id, occurred_at, id)}; both are an index condition on both ends of {@code occurred_at}. That
+     * the BRIN exists on every partition is checked by {@link RollupMigrationTest}.
+     */
+    @Test
+    void PRE_036_the_rollup_slice_reads_history_by_its_time_index() {
+        List<JsonNode> nodes = new ArrayList<>();
+        collect(plan(ProcessListQueries.ROLLUP_SLICE, samples().get("rollup-slice")), nodes);
+
+        assertThat(nodes).noneSatisfy(n -> assertThat(n.path("Node Type").asString("")).isEqualTo("Seq Scan"));
+        assertThat(nodes).as("an index condition on both ends of the slice").anySatisfy(n -> assertThat(
+                n.path("Index Cond").asString("")).contains("occurred_at >=").contains("occurred_at <"));
+    }
+
     @Test
     void PRE_036_a_group_by_over_pre_history_fails_the_plan_check() {
         // Given a report registered as if one event type bounded it: every history row of bank-a, grouped
@@ -278,7 +308,9 @@ class ListQueryPlanCheckTest {
             if (type.equals("Seq Scan")) {
                 found.add(query.name() + ": sequential scan of " + relation + " (" + query.bound() + ")");
             } else if (type.endsWith("Index Scan") || type.equals("Index Only Scan")) {
-                if (node.path("Index Cond").asString("").isEmpty()) {
+                boolean sweptPartial = query.bound() instanceof Bound.EngineSweep sweep && sweep.column() == null
+                        && partialIndexes.contains(node.path("Index Name").asString(""));
+                if (node.path("Index Cond").asString("").isEmpty() && !sweptPartial) {
                     // With sequential scans off, a whole-index walk is how the planner reads every row
                     found.add(query.name() + ": full scan of " + relation + " through " + node.path("Index Name").asString()
                             + " (" + query.bound() + ")");
@@ -301,6 +333,19 @@ class ListQueryPlanCheckTest {
                 boolean keyed = nodes.stream().anyMatch(n -> n.path("Index Cond").asString("").contains(parents.column()));
                 if (!keyed) {
                     found.add(query.name() + ": no index condition on " + parents.column() + " (" + parents.why() + ")");
+                }
+            }
+            case Bound.EngineSweep sweep -> {
+                if (sweep.column() != null) {
+                    boolean ranged = nodes.stream().map(n -> n.path("Index Cond").asString(""))
+                            .anyMatch(c -> c.contains(sweep.column() + " >=") && c.contains(sweep.column() + " <"));
+                    if (!ranged) {
+                        found.add(query.name() + ": no index condition on both ends of " + sweep.column() + " ("
+                                + sweep.why() + ")");
+                    }
+                } else if (nodes.stream().noneMatch(n -> n.path("Node Type").asString("").equals("Limit")
+                        || n.path("Node Type").asString("").equals("Aggregate"))) {
+                    found.add(query.name() + ": neither a Limit nor a single count in the plan (" + sweep.why() + ")");
                 }
             }
         }

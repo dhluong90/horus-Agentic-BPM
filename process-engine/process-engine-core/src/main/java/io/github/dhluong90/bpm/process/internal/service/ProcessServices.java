@@ -196,6 +196,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final BusinessCalendar calendar;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
+    /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
+            io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE;
+    /** The kind of the async job the current thread's result transaction handles, for the attempt metric. */
+    private static final ThreadLocal<String[]> ATTEMPT_KIND = new ThreadLocal<>();
 
     /**
      * @param memorySources the steps a later agent step reads as memory (#101); only their results are kept
@@ -1434,8 +1439,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         InstanceState state = new InstanceState(row.id(), row.tenantId(), row.definitionId(), row.businessKey(),
                 InstanceStatus.valueOf(row.status()), tokens, Values.readMap(row.variablesJson()),
                 participants(tenant, row), row.sequence());
-        run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()),
-                new RunAs.EngineWork(tenant, TIMER_ACTOR));
+        try (io.github.dhluong90.bpm.process.spi.EventScope ignored = jobScope(job.id())) {
+            run(definition, row, state, new Command.JobDue(job.id(), job.tokenId(), job.jobKind()),
+                    new RunAs.EngineWork(tenant, TIMER_ACTOR));
+        }
+        Duration lag = job.nextFireAt() == null ? Duration.ZERO : Duration.between(job.nextFireAt(), clock.instant());
+        Duration reported = lag.isNegative() ? Duration.ZERO : lag;
+        transactions.afterCommit(() -> metrics.timerLag(reported));
         return true;
     }
 
@@ -1497,6 +1507,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // The adapter scope never changes for a job, so it is checked before any lock is taken.
         JobRow peek = jobs.findJob(tenant, jobId).filter(j -> JobStore.isAsync(j.jobKind()))
                 .orElseThrow(() -> new AsyncStepNotFoundException("No async step " + jobId));
+        String[] kindOut = ATTEMPT_KIND.get();
+        if (kindOut != null) {
+            kindOut[0] = peek.jobKind();
+        }
         if (!async.mayComplete(target(peek), callers.currentRoles())) {
             throw new PermissionDeniedException("Not a completer of this step's adapter (adapters.completer-roles)");
         }
@@ -1548,6 +1562,31 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private StepCompletion.Outcome recordAttempt(String tenant, String jobId, String attemptId, Presented presented,
             StepResult result, String reportedBy) {
+        String[] kind = new String[1];
+        String[] outer = ATTEMPT_KIND.get() == null ? null : ATTEMPT_KIND.get();
+        ATTEMPT_KIND.set(kind);
+        StepCompletion.Outcome outcome;
+        try (io.github.dhluong90.bpm.process.spi.EventScope ignored = jobScope(jobId)) {
+            outcome = recordAttemptCore(tenant, jobId, attemptId, presented, result, reportedBy);
+        } finally {
+            if (outer == null) {
+                ATTEMPT_KIND.remove();
+            } else {
+                ATTEMPT_KIND.set(outer);
+            }
+        }
+        if (kind[0] != null) {
+            // A failed or business-error result that the retry policy accepted is counted as FAILED (PRE-084).
+            String label = outcome == StepCompletion.Outcome.ACCEPTED && !(result instanceof StepResult.Completed)
+                    ? "FAILED" : outcome.name();
+            String jobKind = kind[0];
+            transactions.afterCommit(() -> metrics.asyncAttempt(jobKind, label));
+        }
+        return outcome;
+    }
+
+    private StepCompletion.Outcome recordAttemptCore(String tenant, String jobId, String attemptId,
+            Presented presented, StepResult result, String reportedBy) {
         Objects.requireNonNull(tenant, "tenant must not be null");
         try {
             return transactions.inTransaction(() -> recordInTransaction(tenant, jobId, attemptId, presented, result,
@@ -2290,6 +2329,39 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Installs the sink of the engine's measurements. Called once while the engine is wired, before the first request;
+     * the engine never calls the sink inside a transaction that can still roll back, except for a failed step.
+     *
+     * @param sink the sink, or null for none
+     */
+    public void useMetrics(io.github.dhluong90.bpm.process.spi.ProcessMetrics sink) {
+        this.metrics = sink == null ? io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE : sink;
+    }
+
+    /** Counts instance and incident events once their transaction has committed (PRE-084). */
+    private void countCommitted(ProcessEventPublisher.Event event) {
+        io.github.dhluong90.bpm.process.spi.ProcessMetrics sink = metrics;
+        if (sink == io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE) {
+            return;
+        }
+        Object key = event.payload().get("definitionKey");
+        String definitionKey = key == null ? null : key.toString();
+        Runnable count = switch (event.type()) {
+            case "processes.instance.started.v1" -> () -> sink.instanceStarted(definitionKey);
+            case "processes.instance.completed.v1" -> () -> sink.instanceCompleted(definitionKey);
+            case "processes.instance.failed.v1" -> () -> sink.instanceFailed(definitionKey);
+            case "processes.incident.raised.v1" -> {
+                Object code = event.payload().get("errorCode");
+                yield () -> sink.incidentRaised(code == null ? null : code.toString());
+            }
+            default -> null;
+        };
+        if (count != null) {
+            transactions.afterCommit(count);
+        }
+    }
+
+    /**
      * Hands an event to the publisher inside the transaction. A slow listener holds the instance lock and a
      * connection, so the call is timed and logged above {@code handlers.slow-call-warning} with the event type,
      * instance and duration only, never the payload. A listener exception rolls the transaction back and is reported
@@ -2298,7 +2370,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void publish(ProcessEventPublisher.Event event, String instanceId) {
         long started = System.nanoTime();
         try {
-            publisher.publish(event);
+            publisher.publish(event.withContext(io.github.dhluong90.bpm.process.spi.EventScope.correlationId(),
+                    io.github.dhluong90.bpm.process.spi.EventScope.causationId()));
+            countCommitted(event);
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "process.event.listener.failed type={0} instance={1} exception={2}",
                     event.type(), instanceId, e.getClass().getName());
@@ -2445,6 +2519,69 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     // ---- shell --------------------------------------------------------------------------------------------
 
+    /**
+     * The event scope of work a job starts: the job is the cause, and the correlation is the caller's when the job was
+     * handed to the engine inside a request, otherwise the job id, so every event of one job shares one chain.
+     */
+    private static io.github.dhluong90.bpm.process.spi.EventScope jobScope(String jobId) {
+        String correlation = io.github.dhluong90.bpm.process.spi.EventScope.correlationId();
+        return io.github.dhluong90.bpm.process.spi.EventScope.open(correlation == null ? jobId : correlation, jobId);
+    }
+
+    /** The engine command kinds, which are the {@code stepKind} of the step duration metric (a fixed set). */
+    private static String stepKind(Command command) {
+        return switch (command) {
+            case Command.Start s -> "START";
+            case Command.CompleteTask c -> "COMPLETE_TASK";
+            case Command.JobDue j -> "JOB_DUE";
+            case Command.AsyncResult a -> "ASYNC_RESULT";
+            case Command.Cancel c -> "CANCEL";
+            default -> "OTHER";
+        };
+    }
+
+    /**
+     * One {@code processes.step.completed.v1} per node completed by a transition, inside the transaction of the step
+     * (PRE-085). {@code durationMs} runs from the token's entry at the node to now: from the entry recorded in the same
+     * transition, or from the token row when the step waited in an earlier transaction. The payload holds ids and the
+     * duration, never a variable or a step output (PRE-086).
+     */
+    private void publishStepsCompleted(InstanceRow row, InstanceState state, List<HistoryEntry> entries) {
+        Map<String, Instant> entered = null;
+        for (HistoryEntry e : entries) {
+            if (!"NODE_COMPLETED".equals(e.type()) || e.nodeId() == null || e.tokenId() == null) {
+                continue;
+            }
+            Instant since = null;
+            for (HistoryEntry earlier : entries) {
+                if ("NODE_ENTERED".equals(earlier.type()) && e.tokenId().equals(earlier.tokenId())
+                        && e.nodeId().equals(earlier.nodeId())) {
+                    since = earlier.occurredAt();
+                }
+            }
+            if (since == null) {
+                if (entered == null) {
+                    entered = store.tokenEnteredAt(state.tenantId(), state.instanceId());
+                }
+                since = entered.get(e.tokenId());
+            }
+            long durationMs = since == null ? 0 : Math.max(0, Duration.between(since, e.occurredAt()).toMillis());
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("instanceId", state.instanceId());
+            payload.put("nodeId", e.nodeId());
+            payload.put("attemptId", e.attemptId());
+            payload.put("durationMs", durationMs);
+            payload.put("definitionKey", row.definitionKey());
+            payload.put("version", row.definitionVersion());
+            if (row.businessKey() != null) {
+                payload.put("businessKey", row.businessKey());
+            }
+            publish(new ProcessEventPublisher.Event(Ids.child(e.tokenId() + "/" + e.nodeId() + "/" + e.attemptId(),
+                    e.occurredAt().toEpochMilli()), "processes.step.completed.v1", state.tenantId(), e.occurredAt(),
+                    payload), state.instanceId());
+        }
+    }
+
     private void run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first, RunAs as) {
         Compiled compiled = compiled(definition);
         InstanceState state = initial;
@@ -2466,7 +2603,18 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     throw new ExecutionException("STEP_LIMIT", null, "More than " + EngineDefaults.MAX_COMMANDS_PER_CALL
                             + " steps in one call; the process loops without a wait state");
                 }
-                Transition t = compiled.kernel().apply(state, queue.poll(), clock);
+                Command command = queue.poll();
+                long appliedAt = System.nanoTime();
+                Transition t;
+                try {
+                    t = compiled.kernel().apply(state, command, clock);
+                } catch (RuntimeException e) {
+                    metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
+                    throw e;
+                }
+                Duration kernelTime = Duration.ofNanos(System.nanoTime() - appliedAt);
+                String commandKind = stepKind(command);
+                transactions.afterCommit(() -> metrics.stepApplied(commandKind, "OK", kernelTime));
                 state = t.state();
                 history.addAll(t.history());
                 for (Effect effect : t.effects()) {
@@ -2647,6 +2795,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 effect.getClass().getSimpleName() + " is not supported in this release");
                     }
                 }
+                // After the transition's own events (started, task created), so a consumer reads them in order.
+                publishStepsCompleted(row, state, t.history());
             }
         } catch (ExecutionException e) {
             if ("SELF_APPROVAL_FORBIDDEN".equals(e.code())) {

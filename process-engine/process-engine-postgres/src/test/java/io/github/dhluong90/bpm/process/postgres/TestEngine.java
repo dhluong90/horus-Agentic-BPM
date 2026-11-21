@@ -176,6 +176,8 @@ final class TestEngine {
         this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
                 new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
                         tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
+                new io.github.dhluong90.bpm.process.internal.service.NodeWindowStatsService(() -> id.tenant, id, b.clock,
+                        tx, processStore, new JdbcNodeStatsStore(ds), Duration.ofDays(31)),
                 processStore);
         this.jobs = new JobExecutor(jobStore, tx, b.clock, jobSettings, services.jobHandlers());
         List<io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner> runners = new java.util.ArrayList<>();
@@ -473,7 +475,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_migration_history, pre_migration, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
+                + "TRUNCATE pre_node_stats_hourly, pre_engine_watermark, pre_migration_history, pre_migration, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
                 + "pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();

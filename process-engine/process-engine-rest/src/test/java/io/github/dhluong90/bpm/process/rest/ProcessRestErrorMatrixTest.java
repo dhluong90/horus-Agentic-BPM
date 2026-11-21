@@ -280,6 +280,13 @@ class ProcessRestErrorMatrixTest {
         }
 
         @Override
+        public io.github.dhluong90.bpm.process.api.NodeWindowStats nodeWindowStats(String definitionKey, int version,
+                java.time.Instant from, java.time.Instant to) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public DefinitionVersion importDefinition(ImportRequest request) {
             maybeFail();
             throw new UnsupportedOperationException();

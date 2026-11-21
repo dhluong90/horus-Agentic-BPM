@@ -20,6 +20,7 @@ public final class ProcessQueries implements ProcessQueryService {
 
     private final ProcessServices lists;
     private final LiveNodeCountService liveCounts;
+    private final NodeWindowStatsService windowStats;
     private final TaskQueries tasks;
 
     /**
@@ -27,21 +28,26 @@ public final class ProcessQueries implements ProcessQueryService {
      *
      * @param lists definition and instance lists
      * @param liveCounts live counts per node
+     * @param windowStats hourly rollup per node
      */
-    public ProcessQueries(ProcessServices lists, LiveNodeCountService liveCounts) {
+    public ProcessQueries(ProcessServices lists, LiveNodeCountService liveCounts, NodeWindowStatsService windowStats) {
         this.lists = Objects.requireNonNull(lists);
         this.liveCounts = Objects.requireNonNull(liveCounts);
+        this.windowStats = Objects.requireNonNull(windowStats);
         this.tasks = null;
     }
 
     /**
      * @param lists definition and instance lists
      * @param liveCounts live counts per node
+     * @param windowStats hourly rollup per node
      * @param taskStore the read store of the task list (PRE-030)
      */
-    public ProcessQueries(ProcessServices lists, LiveNodeCountService liveCounts, ProcessQueryStore taskStore) {
+    public ProcessQueries(ProcessServices lists, LiveNodeCountService liveCounts, NodeWindowStatsService windowStats,
+            ProcessQueryStore taskStore) {
         this.lists = Objects.requireNonNull(lists);
         this.liveCounts = Objects.requireNonNull(liveCounts);
+        this.windowStats = Objects.requireNonNull(windowStats);
         this.tasks = lists.taskQueries(Objects.requireNonNull(taskStore));
     }
 
@@ -66,5 +72,11 @@ public final class ProcessQueries implements ProcessQueryService {
     @Override
     public NodeCounts liveNodeCounts(String definitionKey, int version) {
         return liveCounts.liveNodeCounts(definitionKey, version);
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.NodeWindowStats nodeWindowStats(String definitionKey, int version,
+            java.time.Instant from, java.time.Instant to) {
+        return windowStats.nodeWindowStats(definitionKey, version, from, to);
     }
 }

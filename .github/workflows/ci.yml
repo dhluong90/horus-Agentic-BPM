@@ -207,6 +207,72 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  throughput-report:
+    # PRE-087 (TR-PERF-04): the step throughput of one replica on PostgreSQL with history on, against the target of
+    # 1,000 transitions per second. Reported and never a gate (PD-026): a result below the target, or more than 20 %
+    # below the previous report, is a warning in the job summary, and the job passes. Runs on main only.
+    name: Throughput report
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: PostgreSQL image, pinned by digest
+        run: |
+          docker pull "$POSTGRES_18_IMAGE"
+          echo "POSTGRES_IMAGE=$POSTGRES_18_IMAGE" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-throughput-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-boot-4.x-
+            maven-${{ runner.os }}-
+
+      # The report of the previous run on main, for the comparison. A miss is fine: there is nothing to compare with.
+      - name: Restore the previous report
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: throughput-previous
+          key: throughput-previous-${{ github.run_id }}
+          restore-keys: |
+            throughput-previous-
+
+      - name: Run the load test (1 minute warm-up, 5 minutes measured)
+        run: |
+          previous=""
+          if [ -f throughput-previous/throughput-report.json ]; then previous="$PWD/throughput-previous/throughput-report.json"; fi
+          tools/mvn-retry.sh -B -ntp verify -pl process-engine/process-engine-postgres -am \
+            -Dbpm.test.postgres.image="$POSTGRES_IMAGE" \
+            -Dit.test=ThroughputReportIT -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dfailsafe.failIfNoSpecifiedTests=false \
+            -Dhorus.throughput.warmup=PT1M -Dhorus.throughput.measure=PT5M -Dhorus.throughput.previous="$previous"
+
+      - name: Job summary
+        if: always()
+        run: |
+          report=process-engine/process-engine-postgres/target/throughput-report
+          if [ -f "$report/throughput-report.md" ]; then cat "$report/throughput-report.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          mkdir -p throughput-previous
+          if [ -f "$report/throughput-report.json" ]; then cp "$report/throughput-report.json" throughput-previous/; fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: throughput-report
+          path: process-engine/process-engine-postgres/target/throughput-report/
+          if-no-files-found: warn
+          retention-days: 90
+
   feel-differential-nightly:
     # RLE-021 (TR-STD-02): the differential property test against the reference FEEL implementation at
     # 100,000 tries per property. Every pull request runs the same test at 1,000 tries in the verify job.

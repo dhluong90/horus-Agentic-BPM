@@ -99,7 +99,11 @@ class LiveNodeCountsIT {
         assertThat(body.get("nodes").propertyNames()).containsExactly("officer-review");
         assertThat(response.headers().firstValue("ETag")).isPresent();
 
-        assertThat(send("GET", "an", NODE_STATS + "?mode=window", null).statusCode()).isEqualTo(400);
+        assertThat(send("GET", "an", NODE_STATS + "?mode=history", null).statusCode()).isEqualTo(400);
+        // The window mode reads the hourly rollup (PRE-029), not the live index, in the caller's tenant
+        HttpResponse<String> window = send("GET", "an", NODE_STATS + "?mode=window", null);
+        assertThat(window.statusCode()).as(window.body()).isEqualTo(200);
+        assertThat(JSON.readTree(window.body()).get("mode").stringValue()).isEqualTo("window");
         HttpResponse<String> unknown = send("GET", "an",
                 "/api/bpm/processes/v1/definitions/card-fee-review/versions/9/node-stats", null);
         assertThat(unknown.statusCode()).isEqualTo(404);

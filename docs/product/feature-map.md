@@ -114,8 +114,8 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-29 | A migration plan is validated as a dry run that changes nothing | S2 | M2 | PE 7.2 Logic | PRE-014 | TR-MIG-01 | specified | PE-F-01 | PD-017 |
 | PE-F-30 | A migration executes in batches; one instance's failure affects only that instance | S2 | M2 (cut candidate) | PE 7.2 Logic | PRE-015 | TR-MIG-02 | specified | PE-F-29 | PD-017, PD-031 |
 | PE-F-31 | A migration maps renamed steps explicitly and cancels removed steps | S2 | M3 | PE 7.4, 8 | | TR-MIG-03 | spec gap | PE-F-30 | |
-| PE-F-32 | Hosts get metrics for active instances, incidents and timer lag, and events for start, completion and incident | S1, S2 | M2 | PE 7.2 Observability | | TR-OBS-02, TR-OBS-04, TR-OBS-06 | spec gap | X-F-07 | |
-| PE-F-33 | Throughput of 1 000 step transitions per second per replica is measured and reported | S1 | M2 | PE 7.4 | | TR-PERF-04 | spec gap | | PD-026 |
+| PE-F-32 | Hosts get metrics for active instances, incidents and timer lag, and events for start, completion and incident | S1, S2 | M2 | PE 7.2 Observability | PRE-084, PRE-085, PRE-086 | TR-OBS-02, TR-OBS-04, TR-OBS-06 | specified | X-F-07 | |
+| PE-F-33 | Throughput of 1 000 step transitions per second per replica is measured and reported | S1 | M2 | PE 7.4 | PRE-087 | TR-PERF-04 | specified | | PD-026 |
 | PE-F-34 | An MCP tool adapter is available as an example outside the engine artifacts | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
 | PE-F-35 | Reference adapters for common model APIs are available in `examples/` | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |
 | PE-F-36 | An agent receives bounded context from earlier steps as memory | S3 | M3 | PE 7.4, 8 | PRE-100, PRE-101, PRE-102 | TR-AGT-01, TR-AGT-02, TR-SEC-05 | specified | PE-F-22 | |
@@ -131,7 +131,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-46 | The engine API returns the graph diff between two definition versions: nodes and edges added, removed or changed | S2 | M2 | PE | | | spec gap | PE-F-45 | PD-033 |
 | PE-F-47 | An instance's activity history (nodes run, when, how long, attempts, who acted) is read bounded by the instance start | S2 | M2 | PE 7.2 Data | | TR-OBS-01 | spec gap | PE-F-15 | PD-032 |
 | PE-F-48 | Live counts of active tokens per node of a definition version, from an index, never from history | S2 | M2 | PE | | | spec gap | PE-F-01 | PD-038 |
-| PE-F-49 | Hourly rollup of counts, incidents and p50 and p95 durations per node, filled by the scheduler with a watermark, a few minutes behind | S2 | M3 | PE | | | spec gap | PE-F-15, PE-F-48 | PD-038 |
+| PE-F-49 | Hourly rollup of counts, incidents and p50 and p95 durations per node, filled by the scheduler with a watermark, a few minutes behind | S2 | M3 | PE | PRE-029 | TR-PERF-10 | specified | PE-F-15, PE-F-48 | PD-038 |
 | PE-F-50 | Tasks are queried by assignee, role, group, due date and SLA breach; the caller resolver supplies roles and groups | S2 | M2 | PE 7.4 | PRE-030 | TR-TEN-01 | specified | PE-F-07 | PD-035 |
 | PE-F-51 | A `userTask` declares a form (JSON Schema with display hints) or a link to the host's own screen | S1, S2 | M2 | PE 7.4 | | | spec gap | PE-F-07 | PD-032 |
 | PE-F-52 | The host publishes a step catalogue: registered service and agent adapters with input schemas, rule sets that meet the guardrail contract, calendars and roles | S1, S3 | M3 | PE | | TR-SEC-01 | spec gap | PE-F-08, PE-F-24, PE-F-19 | PD-032 |

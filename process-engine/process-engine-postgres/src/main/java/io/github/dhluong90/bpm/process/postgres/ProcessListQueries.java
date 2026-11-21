@@ -130,6 +130,64 @@ final class ProcessListQueries {
                     + "AND t.instance_id = i.id AND t.status IN " + LIVE_STATUSES + " "
                     + "AND t.current_node_id = ANY (?::text[])) ORDER BY i.id LIMIT ?");
 
+    /** The entry time of each token of one instance (#110), for the duration of a completed step. */
+    static final ListQuery TOKEN_ENTERED_AT = new ListQuery("instance-token-entered-at",
+            new Bound.ParentKey("instance_id", "the tokens of one instance, at most a few per node of its definition"),
+            "SELECT id, entered_at FROM pre_token WHERE tenant_id = ? AND instance_id = ?");
+
+    /**
+     * One slice of the hourly step statistics rollup (#110), for every tenant: the events of the slice, each completed
+     * step with the entry time of its token through {@code idx_pre_history_instance}. The range is at most
+     * {@code stats.rollup-max-slice}; it is read through {@code idx_pre_history_time_brin} on every partition (V27)
+     * or, on PostgreSQL 18, a skip scan of the primary key. Parameters: from, to.
+     */
+    static final ListQuery ROLLUP_SLICE = new ListQuery("rollup-slice",
+            new Bound.EngineSweep("occurred_at", "one slice of at most stats.rollup-max-slice, by occurred_at"),
+            "SELECT h.tenant_id, h.definition_id, h.node_id, h.event_type, "
+                    + "h.occurred_at, CASE WHEN h.event_type = 'NODE_COMPLETED' THEN (SELECT max(e.occurred_at) "
+                    + "FROM pre_history e WHERE e.tenant_id = h.tenant_id AND e.instance_id = h.instance_id "
+                    + "AND e.occurred_at <= h.occurred_at AND e.event_type = 'NODE_ENTERED' AND e.token_id = h.token_id "
+                    + "AND e.node_id = h.node_id) END AS entered_at "
+                    + "FROM pre_history h WHERE h.occurred_at >= ? AND h.occurred_at < ? AND h.node_id IS NOT NULL "
+                    + "AND h.event_type IN ('NODE_ENTERED','NODE_COMPLETED','NODE_FAILED','INCIDENT_RAISED','SLA_BREACHED')");
+
+    /**
+     * The step sums of one definition version in a window (#110), on the primary key
+     * {@code (tenant_id, definition_id, bucket_start, node_id)} of {@code pre_node_stats_hourly}; the window is at
+     * most {@code query.max-range}. Parameters: tenant, definition, from, to.
+     */
+    static final ListQuery WINDOW_NODE_SUMS = new ListQuery("window-node-sums",
+            new Bound.ParentKey("definition_id", "one row per step of one definition version, a window of at most "
+                    + "query.max-range"),
+            "SELECT node_id, sum(entered_count) AS entered, sum(completed_count) AS "
+                    + "completed, sum(failed_count) AS failed, sum(incident_count) AS incidents, sum(sla_breach_count) AS "
+                    + "sla_breaches, sum(duration_sum_ms) AS duration_sum FROM pre_node_stats_hourly "
+                    + "WHERE tenant_id = ? AND definition_id = ? AND bucket_start >= ? AND bucket_start < ? GROUP BY node_id");
+
+    /** The duration histogram per step of one definition version in a window, on the same primary key. */
+    static final ListQuery WINDOW_NODE_HISTOGRAM = new ListQuery("window-node-histogram",
+            new Bound.ParentKey("definition_id", "one row per step and histogram bucket of one definition version, a "
+                    + "window of at most query.max-range"),
+            "SELECT s.node_id, u.k, sum(u.h)::bigint AS n "
+                    + "FROM pre_node_stats_hourly s CROSS JOIN LATERAL unnest(s.duration_hist) WITH ORDINALITY AS u(h, k) "
+                    + "WHERE s.tenant_id = ? AND s.definition_id = ? AND s.bucket_start >= ? AND s.bucket_start < ? "
+                    + "GROUP BY s.node_id, u.k");
+
+    /** The running instances of every tenant, for a gauge (#86): an index-only count of V25's partial index. */
+    static final ListQuery GAUGE_ACTIVE_INSTANCES = new ListQuery("gauge-active-instances",
+            new Bound.EngineSweep(null, "one count over idx_pre_instance_running_definition (V25), running rows only"),
+            "SELECT count(*) FROM pre_instance WHERE status = 'RUNNING'");
+
+    /** The open incidents of every tenant, for a gauge (#86): an index-only count of {@code idx_pre_incident_open}. */
+    static final ListQuery GAUGE_OPEN_INCIDENTS = new ListQuery("gauge-open-incidents",
+            new Bound.EngineSweep(null, "one count over idx_pre_incident_open, open rows only"),
+            "SELECT count(*) FROM pre_incident WHERE status = 'OPEN'");
+
+    /** The oldest due job of one kind, for a gauge (#86), on {@code idx_pre_timer_poll_kind}. Parameter: the kind. */
+    static final ListQuery GAUGE_OLDEST_DUE_JOB = new ListQuery("gauge-oldest-due-job",
+            new Bound.EngineSweep(null, "the first entry of idx_pre_timer_poll_kind for one kind, LIMIT 1"),
+            "SELECT next_fire_at FROM pre_timer WHERE job_kind = ? AND status = 'DUE' ORDER BY next_fire_at, id LIMIT 1");
+
     /** The first page of definition keys. */
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
@@ -245,6 +303,8 @@ final class ProcessListQueries {
                 OPEN_INCIDENTS, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS, RECORDED_ANSWERS_AFTER, REPLAY_CASES,
                 DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
+                TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
+                GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true)));
         all.addAll(DATED.values());

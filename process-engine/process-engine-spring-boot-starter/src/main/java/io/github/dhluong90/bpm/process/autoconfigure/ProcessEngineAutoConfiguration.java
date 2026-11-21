@@ -36,6 +36,10 @@ import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
 import io.github.dhluong90.bpm.process.internal.service.LocalServiceInvoker;
 import io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService;
 import io.github.dhluong90.bpm.process.internal.service.Migrations;
+import io.github.dhluong90.bpm.process.postgres.JdbcGaugeStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcNodeStatsStore;
+import io.github.dhluong90.bpm.process.internal.service.NodeWindowStatsService;
+import io.github.dhluong90.bpm.process.internal.service.NodeStatsRollup;
 import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
@@ -531,8 +535,83 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
     ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts,
-            JdbcProcessStore store) {
-        return new ProcessQueries(services, liveCounts, store);
+            NodeWindowStatsService windowStats, JdbcProcessStore store) {
+        return new ProcessQueries(services, liveCounts, windowStats, store);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcNodeStatsStore processEngineNodeStatsStore(DataSource dataSource) {
+        return new JdbcNodeStatsStore(dataSource);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    NodeWindowStatsService processEngineNodeWindowStats(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, JdbcNodeStatsStore stats, ProcessEngineProperties properties) {
+        return new NodeWindowStatsService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, stats, properties.query().maxRange());
+    }
+
+    /** The hourly rollup, one writer per slice across replicas (PRE-029). */
+    @Bean
+    @ConditionalOnMissingBean
+    NodeStatsRollup processEngineNodeStatsRollup(ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcNodeStatsStore stats, JobExecutor executor, ProcessEngineProperties properties) {
+        return new NodeStatsRollup(clock.getIfUnique(Clock::systemUTC), transactions, stats,
+                properties.stats().toRollup(), executor.replicaId());
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcGaugeStore processEngineGaugeStore(DataSource dataSource) {
+        return new JdbcGaugeStore(dataSource);
+    }
+
+    /**
+     * The meters of PRE-084, bound to the host's registry when Micrometer is present. The engine hands its
+     * measurements to this bean after commit.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.core.instrument.binder.MeterBinder")
+    @ConditionalOnProperty(prefix = "horus.bpm.processes.metrics", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    static class ProcessEngineMetricsConfiguration {
+
+        @Bean
+        @ConditionalOnMissingBean(ProcessEngineMetrics.class)
+        ProcessEngineMetrics processEngineMetrics(JdbcGaugeStore gauges, ObjectProvider<Clock> clock,
+                ProcessServices services, ProcessEngineProperties properties) {
+            ProcessEngineMetrics metrics = new ProcessEngineMetrics(gauges, clock.getIfUnique(Clock::systemUTC),
+                    properties.metrics().definitionKeyTag());
+            services.useMetrics(metrics);
+            return metrics;
+        }
+
+        /** The gauges are read on {@code metrics.gauge-refresh}, once per replica, never per scrape. */
+        @Bean
+        ProcessMaintenanceScheduler.Task processEngineGaugeRefresh(ProcessEngineMetrics metrics,
+                ProcessEngineProperties properties) {
+            return new ProcessMaintenanceScheduler.Task("gauge-refresh", properties.metrics().gaugeRefresh(),
+                    metrics::refreshGauges);
+        }
+    }
+
+    /**
+     * Periodic background work: the rollup on {@code stats.rollup-interval}, and any task another bean adds, such as
+     * the gauge refresh of the metrics. This method names no Micrometer type, so a host without Micrometer loads it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    ProcessMaintenanceScheduler processEngineMaintenance(ObjectProvider<Clock> clock, NodeStatsRollup rollup,
+            ObjectProvider<ProcessMaintenanceScheduler.Task> tasks, ProcessEngineProperties properties) {
+        ProcessMaintenanceScheduler scheduler = new ProcessMaintenanceScheduler(clock.getIfUnique(Clock::systemUTC));
+        if (properties.stats().rollupEnabled()) {
+            scheduler.add("node-stats-rollup", properties.stats().rollupInterval(), rollup::run);
+        }
+        tasks.orderedStream().forEach(scheduler::add);
+        return scheduler;
     }
 
     @Bean
@@ -594,6 +673,12 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         MigrationController processEngineMigrationController(MigrationService migrations) {
             return new MigrationController(migrations);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.EventScopeFilter processEngineEventScopeFilter() {
+            return new io.github.dhluong90.bpm.process.rest.EventScopeFilter();
         }
 
         @Bean
