@@ -1,12 +1,18 @@
 package io.github.dhluong90.bpm.expr.internal;
 
 import io.github.dhluong90.bpm.expr.api.Money;
+import io.github.dhluong90.bpm.expr.spi.ExpressionFunction;
+import io.github.dhluong90.bpm.expr.spi.ValueType;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * Evaluates an {@link Expr} over input slots with FEEL semantics (rule-engine/docs/DESIGN.md section
@@ -174,6 +180,7 @@ public final class Evaluator {
             }
             case Expr.IsNull isNull -> (evaluate(isNull.target(), slots) == null) != isNull.negated();
             case Expr.Call call -> call(call, slots);
+            case Expr.HostCall call -> hostCall(call, slots);
             case Expr.Matches matches -> {
                 // FEEL: a null or non-string text gives null, which never matches.
                 Object text = evaluate(matches.target(), slots);
@@ -213,6 +220,52 @@ public final class Evaluator {
             }
         }
         return false;
+    }
+
+    /**
+     * Calls a host function with argument values only (RLE-055). A null argument gives null and the function is not
+     * called (FEEL). The declared step cost is charged before the call, so a function that costs more than the budget
+     * leaves never runs. An exception, or a result of a type other than the declared one, is {@code FUNCTION_FAILED}:
+     * the failure names the function, never the exception's message, class or stack, which could carry an input value.
+     */
+    private Object hostCall(Expr.HostCall call, Object[] slots) {
+        ExpressionFunction function = call.function();
+        List<Object> values = new ArrayList<>(call.args().size());
+        boolean anyNull = false;
+        for (Expr arg : call.args()) {
+            Object value = evaluate(arg, slots);
+            anyNull |= value == null;
+            values.add(value);
+        }
+        if (anyNull) {
+            return null;
+        }
+        if (steps != null && function.stepCost() > 1) {
+            steps.charge(function.stepCost() - 1);
+        }
+        Object result;
+        try {
+            result = function.implementation().apply(Collections.unmodifiableList(values));
+        } catch (RuntimeException e) {
+            throw new EvaluationException(EvaluationLimits.FUNCTION_FAILED, "function " + function.name() + " failed", e);
+        }
+        if (result != null && !hasType(result, function.resultType())) {
+            throw new EvaluationException(EvaluationLimits.FUNCTION_FAILED, "function " + function.name()
+                    + " returned a value that is not a " + function.resultType().name().toLowerCase(Locale.ROOT));
+        }
+        return result;
+    }
+
+    private static boolean hasType(Object value, ValueType type) {
+        return switch (type) {
+            case STRING -> value instanceof String;
+            case BOOLEAN -> value instanceof Boolean;
+            case NUMBER -> value instanceof BigDecimal;
+            case DATE -> value instanceof LocalDate;
+            case DATETIME -> value instanceof Instant;
+            case MONEY -> value instanceof Money;
+            case LIST, ANY -> false;
+        };
     }
 
     private Object call(Expr.Call call, Object[] slots) {

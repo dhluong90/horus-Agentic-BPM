@@ -1,0 +1,15 @@
+flowchart TD
+  A["Import, draft replacement, request-publish or approval: cell calls segmentOf(balance, tenureMonths)"] --> B{"Registered by the host, with the argument count and types it declares?"}
+  B -- no --> C["422 VALIDATION_FAILED, rule, column and position: FORBIDDEN_CONSTRUCT for an unknown name, TYPE_MISMATCH otherwise; nothing stored"]
+  B -- yes --> D{"Worst case, with each declared step cost, within evaluation.step-budget?"}
+  D -- no --> E["422 VALIDATION_FAILED, EVALUATION_BUDGET_EXCEEDED"]
+  D -- yes --> F["Approval records name and version label of each function in rle_version_function"]
+  F --> G["Evaluate: arguments are values only; no tenant, caller, clock or connection"]
+  G --> H{"Any argument null?"}
+  H -- yes --> I["null, the function is not called"]
+  H -- no --> J{"function-version-change is refuse and the label differs from the approved one?"}
+  J -- yes --> K["EVALUATION_ERROR, error_code FUNCTION_CHANGED"]
+  J -- no --> L["Charge the declared step cost, call the function"]
+  L --> M{"Threw, or result not of the declared type?"}
+  M -- yes --> N["EVALUATION_ERROR, error_code FUNCTION_FAILED; the exception stays in the server log"]
+  M -- no --> O["Decision row records segmentOf@version in function_versions"]

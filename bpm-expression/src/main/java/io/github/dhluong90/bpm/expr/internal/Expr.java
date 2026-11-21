@@ -88,6 +88,19 @@ public sealed interface Expr {
         }
     }
 
+    /**
+     * A call of a function the host registered (RLE-055). It gets argument values only; a {@code null} argument gives
+     * {@code null} without a call, as in FEEL. It has no FEEL translation: a rule set that calls one has no DMN export.
+     *
+     * @param function the registered function
+     * @param args the arguments, as many as the function has parameters
+     */
+    record HostCall(io.github.dhluong90.bpm.expr.spi.ExpressionFunction function, List<Expr> args) implements Expr {
+        public HostCall {
+            args = List.copyOf(args);
+        }
+    }
+
     /** The pure functions of {@code horus-expr-v1}, with their FEEL translation. */
     enum Function {
         /** {@code round(x, scale)}, half-even; FEEL {@code decimal(x, scale)}, the same as {@code round half even}. */

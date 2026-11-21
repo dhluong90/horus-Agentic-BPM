@@ -1,0 +1,18 @@
+# A rule set that fails import: R2 reads an input the rule set does not declare.
+schemaVersion: 1
+ruleSet: card-fee
+hitPolicy: first
+
+inputs:
+  - { name: tier, type: string }
+
+outputs:
+  - { name: fee, type: money }
+
+rules:
+  - id: R1
+    when: { tier: "== 'GOLD'" }
+    then: { fee: "0 VND" }
+  - id: R2
+    when: { tier: "creditScoreX > 600" }
+    then: { fee: "10000 VND" }

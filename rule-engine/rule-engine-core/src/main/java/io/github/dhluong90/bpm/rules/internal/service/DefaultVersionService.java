@@ -382,9 +382,13 @@ public final class DefaultVersionService implements VersionService {
             // A version requested before strict mode was turned on is checked again, so it never reaches the
             // append-only decision log with an undeclared input (security review of #308).
             requireMaskDeclarations(tenant, current.canonicalJson());
+            // RLE-056: a call to a function the host removed since the import is refused here too, as at request.
+            recheck(current);
             Acknowledgement acknowledgement = requireAcknowledgement(current, acknowledged);
             Instant now = context.clock().instant();
             StoredVersion updated = current.approved(actor, now, opts.comment());
+            // RLE-058: the function versions the version is approved with are the baseline of a later change.
+            context.functions().approvals().record(tenant, ruleSet, version, compiledFunctions(current), now);
             store.updateVersion(updated, current.lockVersion());
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.APPROVED,
                     current.status(), updated.status(), actor, opts.comment(), updated.lockVersion(), now, null, null,
@@ -821,10 +825,18 @@ public final class DefaultVersionService implements VersionService {
      * Compiles a model with the host's configured limits, the ones evaluation will apply, and refuses a table whose
      * worst-case step count is over the step budget (TR-SEC-01), so it fails here and not on every evaluation.
      */
+    /** The host functions a stored version calls, each with the version label registered now. */
+    private java.util.Map<String, String> compiledFunctions(StoredVersion stored) {
+        EngineSettings settings = context.settings();
+        return CompiledRuleSet.compile(RuleSetReader.readCanonical(stored.canonicalJson()), settings.maxOutputBytes(),
+                settings.maxStringLength(), settings.regexLimits(), settings.evaluationLimits(),
+                context.functions().library()).hostFunctions();
+    }
+
     private void compileForPublication(io.github.dhluong90.bpm.rules.internal.model.Definitions model) {
         EngineSettings settings = context.settings();
         CompiledRuleSet.compile(model, settings.maxOutputBytes(), settings.maxStringLength(), settings.regexLimits(),
-                settings.evaluationLimits()).requireWithinStepBudget();
+                settings.evaluationLimits(), context.functions().library()).requireWithinStepBudget();
     }
 
     @Override

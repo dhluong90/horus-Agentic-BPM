@@ -9,7 +9,10 @@ import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionWarning;
 import io.github.dhluong90.bpm.rules.embedded.EmbeddedEngineGrant;
 import io.github.dhluong90.bpm.rules.internal.service.EmbeddedEngineGrants;
+import io.github.dhluong90.bpm.expr.spi.ExpressionFunction;
 import io.github.dhluong90.bpm.rules.internal.service.EngineSettings;
+import io.github.dhluong90.bpm.rules.internal.service.HostFunctions;
+import io.github.dhluong90.bpm.rules.spi.RuleFunctionRegistry;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.api.RuleSetHistoryService;
 import io.github.dhluong90.bpm.rules.rest.RuleSetHistoryController;
@@ -86,14 +89,45 @@ class RuleEngineServicesConfiguration {
     @ConditionalOnMissingBean
     RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
-            MaskingPolicy masking, Environment environment, DecisionExplainer explainer) {
+            MaskingPolicy masking, Environment environment, DecisionExplainer explainer,
+            RuleFunctionRegistry functions) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         requireDevProfileForUnboundApprovals(settings, environment);
         warnIfApprovalsAreNotBoundToContent(settings);
-        return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
-                RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
-                properties.toQuerySettings(), explainer));
+        try {
+            return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
+                    RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
+                    properties.toQuerySettings(), explainer, functions.functions(),
+                    HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange())));
+        } catch (IllegalArgumentException e) {
+            // A function registered twice, with a built-in name or an invalid name (RLE-058): nothing is served.
+            throw new IllegalStateException("The Rule Engine does not start: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The host's functions for rule cells (RLE-055): every {@link ExpressionFunction} bean. A host bean of this type
+     * replaces it. Functions are registered per host, never per tenant, and must be pure calculations (PD-119).
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    RuleFunctionRegistry ruleEngineFunctionRegistry(ObjectProvider<ExpressionFunction> functions) {
+        return () -> functions.orderedStream().toList();
+    }
+
+    /** Checks the host functions against the versions published rule sets were approved with (RLE-058). */
+    @Bean
+    @ConditionalOnMissingBean
+    RuleEngineFunctionCheck ruleEngineFunctionCheck(RuleEngineInternals internals) {
+        return RuleEngineFunctionCheck.of(internals.engines().functionCheck());
+    }
+
+    /** The function version setting and the functions whose version changed, in the rules settings of {@code /meta}. */
+    @Bean
+    @ConditionalOnMissingBean(name = "ruleEngineFunctionSettings")
+    ModuleTenantSettings ruleEngineFunctionSettings(RuleEngineFunctionCheck check, RuleEngineProperties properties) {
+        return check.tenantSettings(HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange()));
     }
 
     /**

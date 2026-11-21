@@ -24,6 +24,9 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
     /** Reason of a decision that ran past its step budget or its time backstop. */
     public static final String EVALUATION_BUDGET_EXCEEDED = "EVALUATION_BUDGET_EXCEEDED";
 
+    /** Reason of a decision whose host function threw, or returned a value of another type than it declared (RLE-057). */
+    public static final String FUNCTION_FAILED = "FUNCTION_FAILED";
+
     /** Which bound an {@value #EVALUATION_BUDGET_EXCEEDED} decision reached: a stable field, not only text. */
     public enum Limit {
         /** The step budget: deterministic, the same input fails the same way on every machine. */
@@ -100,6 +103,14 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
                 }
                 yield sum;
             }
+            // The call node costs the function's declared step cost (RLE-055), its arguments cost what they cost.
+            case Expr.HostCall call -> {
+                long sum = call.function().stepCost();
+                for (Expr arg : call.args()) {
+                    sum += worstCase(arg);
+                }
+                yield sum;
+            }
         };
     }
 
@@ -129,12 +140,24 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
 
         /** Charges one step; throws once the budget or the backstop is spent. */
         void charge() {
-            if (++used > limits.stepBudget()) {
+            charge(1);
+        }
+
+        /**
+         * Charges several steps at once, for a host function's declared step cost (RLE-055); throws once the budget
+         * or the backstop is spent.
+         *
+         * @param count the steps, at least 1
+         */
+        void charge(int count) {
+            int before = used;
+            used += count;
+            if (used < 0 || used > limits.stepBudget()) {
                 throw new EvaluationException(EVALUATION_BUDGET_EXCEEDED, Limit.STEPS.name(),
                         "the decision took more than "
                         + limits.stepBudget() + " evaluation steps");
             }
-            if (used % CHECK_EVERY == 0 && System.nanoTime() - deadline > 0) {
+            if (used / CHECK_EVERY != before / CHECK_EVERY && System.nanoTime() - deadline > 0) {
                 throw new EvaluationException(EVALUATION_BUDGET_EXCEEDED, Limit.TIME.name(),
                         "the decision ran longer than "
                         + limits.timeoutMillis() + " ms");

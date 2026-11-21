@@ -15,7 +15,7 @@ Documents: `docs/DESIGN.md`, `docs/SPEC.md`, `docs/TEST-PLAN.md`, `docs/adr/`. P
 | `rule-engine-rest` | Controllers under `/api/bpm/rules/v1` (import, read, request publication, approve, evaluate), RFC 9457 errors, the engine's own JSON. Contract: [`api/openapi.yaml`](api/openapi.yaml) | core; Spring MVC from the host |
 | `rule-engine-spring-boot-starter` | `RuleEngineAutoConfiguration` (single host `DataSource`, checked against the transaction manager), `RuleEngine` and `VersionService` beans, the caller from Spring Security, the controllers in servlet hosts, `RuleEngineInactiveAutoConfiguration`, `horus.bpm.rules.enabled` and `migrate-on-start`, `ruleEngine` health contributor | core, postgres, rest, Spring Boot auto-configuration |
 
-`rule-engine-test` is added with the first feature that needs it.
+`rule-engine-test` (test scope) lets a developer test a rule set file in JUnit 5 with `@RuleSetTest` and writes a row coverage report: see the wiki page "How to simulate a draft and test rule sets" and `docs/DESIGN.md` section 4.10. It is never a dependency of the starter. A host registers its own pure functions for rule cells as `ExpressionFunction` beans: see section 3.2.1 of the design.
 
 ### What works today
 

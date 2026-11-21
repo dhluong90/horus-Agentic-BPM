@@ -14,11 +14,11 @@
   <packaging>pom</packaging>
   <name>HORUS Rule Engine</name>
 
-  <!-- rule-engine-test joins here with the feature that needs it. -->
   <modules>
     <module>rule-engine-core</module>
     <module>rule-engine-postgres</module>
     <module>rule-engine-rest</module>
     <module>rule-engine-spring-boot-starter</module>
+    <module>rule-engine-test</module>
   </modules>
 </project>
