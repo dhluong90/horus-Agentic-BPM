@@ -148,6 +148,78 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `Forward [A, B, C(fail)] -> Compensate [comp(B), comp(A)] in LIFO order`.
 - **Test ID:** `PRE_013_failure_executes_reverse_saga_compensation`
 
+A `saga` block is a BPMN `transaction`: its steps run under the block's own scope token (ADR-0020). A completed `serviceTask` or `agentTask` with `horus:compensate` pushes one entry onto `pre_compensation_stack` (V31) under its scope token. A step that fails for good with `horus:onFailure="compensate"`, or a `throwCompensation` (an `intermediateThrowEvent` with a `compensateEventDefinition`, inside a `saga`), walks the stack of that scope token newest first, one undo at a time. Each undo is a `COMPENSATION` job keyed by its own job id. A remote or agent step's undo is a `ServiceAdapter` called with no transaction open. A local step's undo is a `ServiceTaskHandler` that runs in the job's result transaction. The instance is `COMPENSATING` during the walk and ends `FAILED`.
+
+### PRE-073 A failed transfer undoes its completed steps newest first, and each undo gets the forward step's keys
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04`, `TR-ASY-01`, #67
+- **Milestone:** M2
+- **Given:**
+  - Definition `fund-transfer` has a `saga` block `transfer` with three steps:
+    - `hold-funds`: local, compensated by the local `release-hold`;
+    - `debit-source`: remote, adapter `core-banking`, compensated by the remote `credit-back`;
+    - `credit-target`: remote, `onFailure: compensate`.
+  - An instance moves `25,000,000 VND` from account `0011-223344` to `0099-887766`.
+  - `debit-source` was accepted on job `J1`, attempt 1.
+- **When:** `credit-target` fails with `BUSINESS_ERROR` `ACCOUNT_CLOSED`.
+- **Then:**
+  - Because the step declares `onFailure: compensate`, the failure starts compensation instead of the incident of `PRE-040`. The same happens when a step's job reaches `FAILED` for any other reason: not retryable, or the last attempt used.
+  - The instance is `COMPENSATING` and `processes.compensation.started.v1` carries the `transfer` scope token and stack depth 2.
+  - `credit-back` runs first, as a `COMPENSATION` job `C1` with the `runners.compensation` retry policy. The adapter call carries:
+    - `idempotencyKey = C1`, kept on every retry;
+    - `forwardJobId = J1`, the key the original debit was posted under, so the core can find and reverse it;
+    - `forwardAttemptId`, the accepted forward attempt;
+    - the entry's input snapshot: the forward inputs and, under `forwardResult`, the forward result.
+  - `release-hold` runs only after `C1` is `DONE`, in its own transaction, and receives `forwardAttemptId`.
+  - Both entries end `DONE`, the `transfer` scope token ends `COMPENSATED`, live flow tokens are `CANCELLED`, and the instance ends `FAILED` with `processes.instance.failed.v1`.
+  - `credit-target` was never completed, so it is never compensated.
+  - A `compensate` name that no host bean registers is refused at `:request-approval` and `:approve` with `422 VALIDATION_FAILED`, as in `PRE-072`: `HANDLER_NOT_REGISTERED` for a local step's undo, `ADAPTER_NOT_REGISTERED` for a remote or agent step's undo. An unknown `onFailure` value or an undo name that is not a name is refused at import (`ON_FAILURE_INVALID`, `COMPENSATE_INVALID`).
+- **Example:** `[hold-funds, debit-source, credit-target(fail)] -> credit-back(forwardJobId J1) -> release-hold -> FAILED, scope COMPENSATED`.
+- **Test ID:** `PRE_073_*` in `SagaCompensationTest` (`process-engine-postgres`) and `SagaBlockTest` (`process-engine-bpmn`)
+
+### PRE-074 An undo that fails raises an incident, stops the walk and keeps what was undone
+- **Traces to:** `TR-COMP-02`, `TR-OPS-03`, `TR-IDEM-04`, PD-126, #67
+- **Milestone:** M2
+- **Given:** The instance of `PRE-073`, where `credit-back` answers `BUSINESS_ERROR` `ACCOUNT_FROZEN`. Separately, `credit-back` times out on all 3 attempts.
+- **When:** Each failure is recorded.
+- **Then:**
+  - The stack entry of `debit-source` is `FAILED`.
+  - An incident `COMPENSATION_FAILED` opens on node `debit-source`. It names the stack entry, `forwardJobId J1` and the cause code (`ACCOUNT_FROZEN` or `ADAPTER_TIMEOUT`), and `processes.incident.raised.v1` is published with the cause as `businessCode`. The adapter's message is never stored.
+  - The walk pauses: `release-hold` stays `PENDING` and the instance stays `COMPENSATING`.
+  - A retry of the incident (`PRE-077`) runs `credit-back` again under the same job id `C1` with a new attempt id, so the core never credits twice. Its success resolves the incident `RETRY_SUCCEEDED`.
+  - A resolution (`PRE-078`) marks the undo done by hand: one operator proposes it with a reason, a second approves it, and the incident is `RESOLVED` with `COMPLETED_MANUALLY`.
+  - Once the entry is `DONE`, by a retry or by a resolution, the walk continues with `release-hold`.
+- **Example:** `credit-back ACCOUNT_FROZEN -> COMPENSATION_FAILED, release-hold PENDING, instance COMPENSATING`.
+- **Test ID:** `PRE_074_*` in `SagaCompensationTest`
+
+### PRE-075 A manual undo opens an incident with the step's context instead of being skipped
+- **Traces to:** `TR-COMP-03`, `TR-SEC-05`, PD-126, #67
+- **Milestone:** M2
+- **Given:** `debit-source` declares `compensate: manual`.
+- **When:** The walk reaches its entry.
+- **Then:**
+  - The entry is `MANUAL` and an incident `COMPENSATION_MANUAL_REQUIRED` opens. The incident names the step, the forward job id and the forward attempt id. History records `COMPENSATION_STEP_MANUAL` with those ids and the input snapshot, masked inputs as keyed hashes only.
+  - The walk pauses until the incident is resolved. A retry is `409 INVALID_STATE`, because a manual undo has nothing to run, and the incident offers `resolve` only.
+  - Nothing is skipped silently (`TR-COMP-03`).
+- **Example:** `compensate: manual on debit-source -> COMPENSATION_MANUAL_REQUIRED, walk paused`.
+- **Test ID:** `PRE_075_*` in `SagaCompensationTest`
+
+### PRE-076 A compensation walks only its own scope, and a compensating instance cannot be cancelled
+- **Traces to:** `TR-STD-29`, `TR-COMP-01`, `TR-TEN-01`, #67
+- **Milestone:** M2
+- **Given:** One instance of `fx-booking` whose root scope holds the completed step `open-account`, and two `saga` entries `fx-leg-1` and `fx-leg-2`, each with two compensable steps.
+- **When:**
+  - (a) `fx-leg-2`'s confirmation fails with `onFailure: compensate`.
+  - (b) `throwCompensation` runs inside `fx-leg-1`.
+  - (c) `POST /instances/{id}:cancel` is sent while the instance is `COMPENSATING`.
+- **Then:**
+  - (a) Only the two entries of `fx-leg-2` are undone. `fx-leg-1` and `open-account` are untouched (`PRE-044`, `TR-STD-29`).
+  - (b) Only `fx-leg-1`'s entries are walked.
+  - (c) The cancel is `409 INVALID_STATE`, and its detail says a compensation is running. An undo is never abandoned half way. An operator resolves the incidents first.
+  - A step without a `compensate` handler pushes no entry. A `throwCompensation` outside a `saga` is refused at import (`THROW_COMPENSATION_OUTSIDE_SAGA`), and a sequence flow that crosses a block's boundary when the definition is compiled (`FLOW_CROSSES_SAGA`).
+  - An undo is engine work in the tenant of the locked `pre_instance` row, with no caller. Another tenant's instance or incident answers `404`, and nothing is written.
+- **Example:** `fx-leg-2 fails -> 2 undos in fx-leg-2 only; cancel while COMPENSATING -> 409 INVALID_STATE`.
+- **Test ID:** `PRE_076_*` in `SagaCompensationTest` and `SagaBlockTest`
+
 ### PRE-014 Migration validate dry-run detects unmapped steps without mutating instances
 - **Traces to:** `TR-MIG-01`
 - **Milestone:** M2
@@ -506,7 +578,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** An instance starts and runs until `notify-partner` fails.
 - **Then:** At start `pre_token` holds one root `SCOPE` token (`scope_token_id` null, `current_node_id = loan-booking`, `WAITING_SCOPE`) and one `FLOW` token under it; entering `disburse` creates a second `SCOPE` token whose `scope_token_id` is the root; the join counts only the two `FLOW` tokens of the `disburse` scope token and creates exactly one outgoing token; `pre_compensation_stack` holds `cancelLoan` under the root scope token and `releaseFunds` and `closeAccount` under the `disburse` scope token; after the failure the engine runs the two `disburse` handlers newest first, never `cancelLoan`, and the `disburse` scope token ends `COMPENSATED` while the root `cancelLoan` entry stays `PENDING`; a second instance started at the same time shares no token or stack row with the first.
 - **Example:** `notify-partner fails in saga disburse -> the two disburse handlers run newest first; cancelLoan is not run`.
-- **Test ID:** `PRE_044_joins_and_compensation_keyed_by_scope_token`
+- **Test ID:** `PRE_044_*`: the join half in `ParallelGatewayTest` and `ParallelJoinPostgresIT` (#251), the compensation half in `SagaCompensationTest` and `SagaBlockTest` (#67)
 
 ### PRE-045 Engine REST bodies ignore the host's JSON settings
 - **Traces to:** `TR-EMB-07`, `TR-API-06`
@@ -1186,3 +1258,32 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 - **Then:** It publishes `throughput-report.json` and `.md` with the sustained transitions per second, the p50, p95 and p99 time of one engine call, the most pool connections in use, the runner's vCPU count and memory, and the PostgreSQL version. A result below 1,000 per second, or more than 20 % below the previous `main` report, is a warning in the report and the job summary. It never fails the build (PD-026).
 - **Example:** `1,180 transitions/s, p95 7 ms, 4 vCPU runner -> report published, no gate`.
 - **Test ID:** `PRE_087_throughput_report_is_written_and_never_gates`
+
+---
+
+## Guarded Agent Example (#66)
+
+The example host `examples/guarded-agent-process` runs the guarded agent journey on the engine APIs alone, with seed data and a scripted demo. It has no cockpit dependency; the cockpit's instance view (#57) reads the same APIs.
+
+### PRE-185 An agent answer the guardrail allows moves the loan on, and a refused one goes to a second person
+- **Traces to:** `TR-AGT-01`, `TR-SEC-11`, #66
+- **Milestone:** M2
+- **Given:** The example host on the `dev` profile. Its seeder publishes `loan-document-guardrails` through maker-checker (R2: a risk score of 70 or more is refused, `HIGH_RISK_SCORE`) and deploys `loan-document-review`: the agent step `assess-documents` with `onViolation: route-to-human` and reviewer `role:COMPLIANCE_REVIEWER`, then `underwrite`. Tenant `bank-a` has three seeded applications: `LN-2026-0101` (250,000,000 VND, 3 documents), `LN-2026-0102` (1,500,000,000 VND, 3 documents) and `LN-2026-0103` (600,000,000 VND, 2 documents). The stub assessor approves every complete file, scoring 85 from 1,000,000,000 VND and 20 below, and refers an incomplete one with 55.
+- **When:** Tellers send the three applications to review with `POST /loan-applications/{id}:review`, and the agent step runs for each.
+- **Then:**
+  - `LN-2026-0101`: risk 20, `APPROVE` passes the guardrail; the loan waits on `underwrite`.
+  - `LN-2026-0102`: risk 85, `APPROVE` is refused (`R2`, `HIGH_RISK_SCORE`). Nothing of the answer is accepted, and a four-eyes review task for `role:COMPLIANCE_REVIEWER` shows the answer with `summary` masked. The teller who sent it, who also holds the reviewer role, is refused (`403 SELF_APPROVAL_FORBIDDEN`). Reviewer `thu` refers it with a reason; the step completes with `REFER`, history records `HUMAN_OVERRIDE`, and the loan waits on `underwrite`.
+  - `LN-2026-0103`: the assessor refers it with risk 55, which the guardrail allows.
+  - Sending an application again returns the instance it already has (the application id is the business key, `PRE-002`).
+- **Example:** `LN-2026-0102 risk 85 APPROVE -> GUARDRAIL_VIOLATION -> thu refers -> underwrite`.
+- **Test ID:** `PRE_185_*` in `GuardedAgentJourneyIT` (`examples/guarded-agent-process`)
+
+### PRE-186 A case is drawn on its diagram from the engine APIs alone
+- **Traces to:** `TR-AGT-01`, #66
+- **Milestone:** M2
+- **Given:** `LN-2026-0102` after its review, waiting on `underwrite`.
+- **When:** The reviewer reads `GET /definitions/loan-document-review/versions/1/export?format=bpmn` and `GET /instances/{id}`.
+- **Then:** The export is BPMN 2.0 XML with a shape for every step (`start`, `assess-documents`, `underwrite`, `end`); the instance names its definition and the step its live token waits on; and history holds the case's path in order: `INSTANCE_STARTED`, `ASYNC_STEP_SCHEDULED`, `ASYNC_RESULT_REFUSED`, `STEP_ROUTED_TO_REVIEW`. No cockpit code is needed to read them.
+- **Example:** `export -> 4 shapes; instance -> underwrite WAITING_USER`.
+- **Test ID:** `PRE_186_*` in `GuardedAgentJourneyIT`
+

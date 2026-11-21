@@ -176,6 +176,40 @@ public interface ProcessStore {
         }
     }
 
+    /**
+     * One undo on the compensation stack of a scope token (#67, V31).
+     *
+     * @param seq push order within the scope token, from 1; the walk takes the highest {@code PENDING} entry
+     * @param forwardJobId the forward step's job, or null for a local step
+     * @param forwardAttemptId the accepted forward attempt
+     * @param handler the handler or adapter that undoes the step, or {@code manual}
+     * @param mode {@code local}, {@code remote} or {@code manual}
+     * @param inputSnapshotJson the forward inputs and result, plain: only the undo reads them
+     * @param status {@code PENDING}, {@code RUNNING}, {@code DONE}, {@code FAILED} or {@code MANUAL}
+     * @param jobId the undo's own job, the idempotency key of a remote undo; null until it is scheduled
+     */
+    record CompensationEntry(String tenantId, String id, String instanceId, String scopeTokenId, int seq, String stepId,
+            String forwardJobId, String forwardAttemptId, String handler, String mode, String inputSnapshotJson,
+            String status, String jobId, Instant pushedAt, Instant completedAt) {
+
+        /** Status of an entry not yet undone. */
+        public static final String PENDING = "PENDING";
+        /** Status of an entry whose undo job is due or running. */
+        public static final String RUNNING = "RUNNING";
+        /** Status of an entry undone, by its job or by an approved resolution. */
+        public static final String DONE = "DONE";
+        /** Status of an entry whose undo failed for good; an incident is open. */
+        public static final String FAILED = "FAILED";
+        /** Status of an entry that waits for an operator; an incident is open. */
+        public static final String MANUAL = "MANUAL";
+
+        /** @return a copy with this status, job and completion time */
+        public CompensationEntry with(String newStatus, String newJobId, Instant newCompletedAt) {
+            return new CompensationEntry(tenantId, id, instanceId, scopeTokenId, seq, stepId, forwardJobId,
+                    forwardAttemptId, handler, mode, inputSnapshotJson, newStatus, newJobId, pushedAt, newCompletedAt);
+        }
+    }
+
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
             String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
@@ -352,6 +386,34 @@ public interface ProcessStore {
      *     instance's or another tenant's
      */
     Map<String, String> stepResults(String tenant, String instanceId, java.util.Collection<String> nodeIds);
+
+    /**
+     * Pushes an undo onto the stack of its scope token, with the next {@code seq} of that scope (#67). The caller holds
+     * the instance row lock, so pushes of one instance never race.
+     *
+     * @param entry the entry; its {@code seq} is ignored and assigned here
+     */
+    default void pushCompensation(CompensationEntry entry) {
+        throw new UnsupportedOperationException("compensation is not supported by this store");
+    }
+
+    /**
+     * @param tenant tenant
+     * @param instanceId instance
+     * @return every stack entry of the instance, by scope token and then newest first; bounded by the instance's
+     *     completed steps with an undo
+     */
+    default List<CompensationEntry> compensationEntries(String tenant, String instanceId) {
+        throw new UnsupportedOperationException("compensation is not supported by this store");
+    }
+
+    /**
+     * @param entry the entry with its new status, job id and completion time
+     * @return the rows changed: 1, or 0 when the tenant has no such entry
+     */
+    default int updateCompensation(CompensationEntry entry) {
+        throw new UnsupportedOperationException("compensation is not supported by this store");
+    }
 
     /** @param incident a new {@code OPEN} incident (#58) */
     void insertIncident(IncidentRow incident);

@@ -72,7 +72,7 @@ final class AgentMemory {
     /** @return the ids of the steps any step of the process reads as memory */
     static Set<String> sources(Process process) {
         Set<String> sources = new HashSet<>();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof FlowNode node) {
                 node.extensions().all(MemoryEntry.class).forEach(m -> sources.add(m.from()));
             }
@@ -92,7 +92,7 @@ final class AgentMemory {
     static List<DefinitionProblem> check(Process process, AgentMemoryLimits limits) {
         Map<String, FlowNode> nodes = new HashMap<>();
         Map<String, List<String>> incoming = new HashMap<>();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof FlowNode node) {
                 nodes.put(node.id(), node);
             } else if (element instanceof SequenceFlow flow && flow.sourceRef() != null && flow.targetRef() != null) {

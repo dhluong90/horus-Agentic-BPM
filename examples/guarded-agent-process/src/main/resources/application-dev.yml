@@ -1,0 +1,10 @@
+# Local development only. The demo users carry no tenant attribute, so the engines serve them for this fixed tenant;
+# the engines refuse it outside the dev profile.
+horus:
+  bpm:
+    tenancy:
+      dev-tenant: bank-a
+    processes:
+      definitions:
+        # The seeder's import activates the process without a second person (dev profile only).
+        auto-approve: true

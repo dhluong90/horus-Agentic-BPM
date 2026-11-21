@@ -1,7 +1,12 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
@@ -48,10 +53,18 @@ public final class CanonicalProcessWriter {
         if (process.name() != null) {
             doc.put("name", process.name());
         }
-        ArrayNode steps = doc.putArray("steps");
-        List<SequenceFlow> flows = process.flowElements().stream().filter(SequenceFlow.class::isInstance)
+        writeSteps(doc.putArray("steps"), process.flowElements());
+        return doc;
+    }
+
+    /**
+     * The steps of one container. A {@code saga} block ({@code transaction}, #67) is a step of type {@code saga}
+     * whose own steps are nested under {@code steps}, so a definition without one keeps the hash it had.
+     */
+    private static void writeSteps(ArrayNode steps, List<FlowElement> elements) {
+        List<SequenceFlow> flows = elements.stream().filter(SequenceFlow.class::isInstance)
                 .map(SequenceFlow.class::cast).toList();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : elements) {
             if (!(element instanceof FlowNode node)) {
                 continue;
             }
@@ -183,19 +196,28 @@ public final class CanonicalProcessWriter {
                         out.forEach(f -> next.add(f.targetRef()));
                     }
                 }
+                case Transaction saga -> {
+                    step.put("type", "saga");
+                    writeSteps(step.putArray("steps"), saga.flowElements());
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof CompensateEventDefinition ->
+                        step.put("type", "throwCompensation");
                 default -> step.put("type", node.getClass().getSimpleName());
             }
+            // #67: only when declared, so the hash of a step without them is unchanged.
+            node.extensions().first(CompensateHandlerRef.class).ifPresent(c -> step.put("compensate", c.handler()));
+            node.extensions().first(OnFailure.class).ifPresent(f -> step.put("onFailure", f.action()));
             List<InputMapping> inputs = node.extensions().all(InputMapping.class);
             if (!inputs.isEmpty()) {
                 ObjectNode in = step.putObject("inputs");
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
-            if (!(node instanceof ExclusiveGateway) && out.size() == 1) {
+            if (!(node instanceof ExclusiveGateway) && !(node instanceof IntermediateThrowEvent) && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
-        return doc;
     }
 
     /**

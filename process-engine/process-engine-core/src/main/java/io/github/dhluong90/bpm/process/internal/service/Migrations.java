@@ -240,7 +240,7 @@ public final class Migrations implements MigrationService {
 
     static Map<String, Step> steps(Process process) {
         Map<String, String> names = new HashMap<>();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof FlowNode node) {
                 names.put(node.id(), node.name());
             }

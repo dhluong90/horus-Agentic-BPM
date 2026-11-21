@@ -15,7 +15,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
@@ -152,6 +154,11 @@ public final class SubsetBpmnWriter {
         }
         node.extensions().first(ResultVariable.class).ifPresent(r -> attributes.append(optional("horus:resultVariable",
                 r.name())));
+        // #67: the undo and the failure action are part of the step, so the export reads back to the same hash.
+        node.extensions().first(CompensateHandlerRef.class).ifPresent(c -> attributes.append(optional(
+                "horus:compensate", c.handler())));
+        node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
+                f.action())));
         if (inputs.isEmpty() && agent == null && node.incoming().isEmpty() && node.outgoing().isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;

@@ -10,6 +10,8 @@ import io.github.dhluong90.bpm.process.internal.exec.StepResult;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import java.util.Map;
 
 /** Shared enter and trigger of steps that invoke something and wait for its result. */
@@ -18,7 +20,15 @@ final class InvocationSupport {
     /** Incident code of a business error that no path of the process handles (PRE-040, PRE-111). */
     static final String UNHANDLED_BUSINESS_ERROR = "UNHANDLED_BUSINESS_ERROR";
 
+    /** The key under which an undo's input snapshot carries the forward step's result (#67). */
+    static final String FORWARD_RESULT = "forwardResult";
+
     private InvocationSupport() {
+    }
+
+    /** @return whether the step declares {@code horus:onFailure="compensate"} */
+    static boolean compensates(FlowNode node) {
+        return node.extensions().first(OnFailure.class).map(OnFailure::compensates).orElse(false);
     }
 
     static void invoke(FlowNode node, Token token, ExecutionContext ctx, ServiceKind kind, String target,
@@ -57,6 +67,10 @@ final class InvocationSupport {
     private static void result(FlowNode node, Token token, Command.AsyncResult result, ExecutionContext ctx) {
         switch (result.result()) {
             case StepResult.Completed completed -> {
+                // #67: a step with an undo pushes it onto its scope's stack before anything moves on, so the stack
+                // holds the steps in the order they completed. The entry keeps what the undo needs: the step's
+                // inputs and its result.
+                pushUndo(node, token, result.attemptId(), completed.output(), ctx);
                 StepSupport.storeResult(node, completed.output(), ctx);
                 ctx.effect(new Effect.RecordResult(token.id(), node.id(), result.attemptId(), completed.output(),
                         false));
@@ -70,10 +84,30 @@ final class InvocationSupport {
                 // stays on the step and the shell opens an incident in this transaction; nothing is retried, because
                 // a business error is not technical. Error events (S1) will catch it before this point. The
                 // handler's message never leaves the engine log: it may carry personal data.
+                if (compensates(node)) {
+                    // PRE-073: the step declares onFailure compensate, so its scope is undone instead.
+                    ctx.compensate(token, error.code());
+                    return;
+                }
                 ctx.effect(new Effect.RaiseIncident(token.id(), node.id(), UNHANDLED_BUSINESS_ERROR, error.code()));
             }
             case StepResult.Failed failed -> throw new ExecutionException(failed.errorCode(), node.id(), failed.detail());
         }
+    }
+
+    /**
+     * #67: a completed step with an undo pushes it onto its scope's stack before anything moves on, so the stack holds
+     * the steps in the order they completed. The entry keeps what the undo needs: the step's inputs, and its result
+     * under {@link #FORWARD_RESULT}.
+     */
+    private static void pushUndo(FlowNode node, Token token, String forwardAttempt, Map<String, Object> output,
+            ExecutionContext ctx) {
+        node.extensions().first(CompensateHandlerRef.class).ifPresent(undo -> {
+            Map<String, Object> snapshot = new java.util.LinkedHashMap<>(StepSupport.inputs(node, token, ctx));
+            snapshot.put(FORWARD_RESULT, output);
+            ctx.effect(new Effect.PushCompensation(token.scopeTokenId(), node.id(), forwardAttempt, undo.handler(),
+                    snapshot));
+        });
     }
 
     /** The token waits on the same step for a person; the review task is its activity instance. */
@@ -96,6 +130,7 @@ final class InvocationSupport {
             throw new ExecutionException("TASK_MISMATCH", node.id(), "Task " + complete.taskId()
                     + " is not the open review task of this token");
         }
+        pushUndo(node, token, token.activityInstanceId(), complete.result(), ctx);
         StepSupport.storeResult(node, complete.result(), ctx);
         ctx.effect(new Effect.RecordResult(token.id(), node.id(), complete.taskId(), complete.result(), true));
         Token active = token.withStatus(TokenStatus.ACTIVE);

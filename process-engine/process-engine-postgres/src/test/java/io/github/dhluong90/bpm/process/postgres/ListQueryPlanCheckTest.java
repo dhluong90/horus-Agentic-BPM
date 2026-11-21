@@ -176,6 +176,7 @@ class ListQueryPlanCheckTest {
         samples.put("instance-open-incidents", List.of("bank-a", INSTANCE));
         samples.put("pending-approvals", List.of("bank-a", 51));
         samples.put("pending-approvals-after", List.of("bank-a", T, "A" + "DEF" + "%022d".formatted(5), 51));
+        samples.put("instance-compensation-stack", List.of("bank-a", INSTANCE));
         samples.put("incidents", List.of("bank-a", "OPEN", 50));
         samples.put("incidents-after", List.of("bank-a", "OPEN", T, "AIC" + "%023d".formatted(500), 50));
         samples.put("instance-step-results", List.of("bank-a", INSTANCE, new String[] {"credit-review", "kyc-agent"}));

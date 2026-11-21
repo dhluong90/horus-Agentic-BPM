@@ -29,6 +29,7 @@
     <module>rule-and-process</module>
     <module>mcp-tool-adapter</module>
     <module>model-adapters</module>
+    <module>guarded-agent-process</module>
     <module>rule-engine-benchmarks</module>
   </modules>
 </project>
