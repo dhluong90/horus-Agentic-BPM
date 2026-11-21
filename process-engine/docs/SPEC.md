@@ -1073,6 +1073,37 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 
 ---
 
+## Delegate and Reassign Tasks (#263, PD-110)
+
+### PRE-178 A supervisor reassigns an open task or delegates a claimed one, with a reason, and the move is recorded with both people
+- **Traces to:** `TR-IDEM-03`, `TR-SEC-04`, `TR-AUD-01`, #263
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; loan application `LN-2027-0042` started by `alice`, submitted by `bob`; its `check-documents` task `T1` is assigned to `role:LOAN_OFFICER`, `OPEN` at `lockVersion = 0`; officers `carol` and `dan` hold `LOAN_OFFICER` in the host directory; supervisor `hoa` holds `processes:task:manage` and `processes:task:work`; `carol` is on leave.
+- **When:** (a) `hoa` reads `GET /tasks/T1`. (b) `hoa` posts `POST /tasks/T1:reassign` with `If-Match: "0"`, `Idempotency-Key: re-1` and `{ "assignee": "carol", "reason": "Loan queue is backed up" }`, then replays it. (c) `carol` falls ill; `hoa` posts `POST /tasks/T1:delegate` with `If-Match: "1"`, `Idempotency-Key: de-1` and `{ "assignee": "dan", "reason": "Carol is on sick leave" }`, then replays it. (d) `hoa` posts `:reassign` to the now claimed task, and `:delegate` to an open one.
+- **Then:** (a) `allowedActions` is `["reassign"]`. (b) `200` with `status: CLAIMED`, `claimedBy: carol`, `lockVersion: 1`, `ETag: "1"` and `allowedActions: ["delegate"]`; the replay returns the same body; one `TASK_REASSIGNED` history entry with actor `hoa`, claimant `carol` and the reason, and one `processes.task.reassigned.v1` carrying `reassignedBy: hoa`, `claimedBy: carol` and the reason, in the usual envelope. (c) `200` with `claimedBy: dan`, `lockVersion: 2`; one `TASK_DELEGATED` entry and one `processes.task.delegated.v1` with `delegatedBy: hoa`, `previousClaimant: carol`, `claimedBy: dan` and the reason; the replay changes nothing. The task keeps `assignee: role:LOAN_OFFICER`. (d) `409 INVALID_STATE` each time; nothing is written. A task that is `COMPLETED` or `CANCELLED` is refused the same way.
+- **Example:** `reassign(T1, "carol", "Loan queue is backed up", If-Match "0") -> 200 CLAIMED by carol; delegate(T1, "dan", ..., If-Match "1") -> 200 CLAIMED by dan`.
+- **Test ID:** `PRE_178_reassign_and_delegate_move_a_task_and_record_both_people_and_the_reason`, `PRE_178_a_completed_or_cancelled_task_is_never_moved`, `PRE_178_a_replay_returns_the_first_answer_and_writes_nothing`
+
+### PRE-179 A target who may not work the task is refused with ASSIGNEE_NOT_ALLOWED and nothing is written
+- **Traces to:** `TR-SEC-04`, `TR-IDEM-03`, #263
+- **Milestone:** M2
+- **Given:** The loan application of `PRE-178` with its four-eyes `approve-credit` task `T2` for `role:LOAN_OFFICER`, claimed by `carol`, `lockVersion = 3`; `alice` started the instance and `bob` completed its `submit-application` task; `lan` holds `CUSTOMER_SERVICE` only; the host directory knows `alice`, `bob`, `carol` and `dan` as `LOAN_OFFICER`. A second open task `T3`, assigned to `user:carol`.
+- **When:** `hoa` delegates `T2` to `alice`, then to `bob`, then to `lan`, then to `carol`, then to `system:timer`, then to `dan`; and reassigns `T3` to `lan`.
+- **Then:** The first five are `409 ASSIGNEE_NOT_ALLOWED` (started the instance, completed an earlier task, lacks the role, already holds the task, reserved identity); the history, the events, the idempotency records and `T2`'s `lockVersion` are unchanged after each. `dan` succeeds. A task assigned to one user can go to `lan`. With no directory bean, a role or group task cannot be given to a named user: `409 ASSIGNEE_NOT_ALLOWED`.
+- **Example:** `delegate(T2, "alice") -> 409 ASSIGNEE_NOT_ALLOWED (started this instance); delegate(T2, "dan") -> 200`.
+- **Test ID:** `PRE_179_the_starter_and_an_earlier_completer_cannot_be_given_a_four_eyes_task`, `PRE_179_a_user_without_the_role_or_group_is_refused_and_a_user_task_goes_to_anyone`, `PRE_179_without_a_directory_a_role_task_cannot_be_given_to_a_named_user`
+
+### PRE-180 Moving a task needs the manage permission, a reason, If-Match and an Idempotency-Key, and never crosses tenants
+- **Traces to:** `TR-SEC-04`, `TR-TEN-01`, `TR-IDEM-03`, #263
+- **Milestone:** M2
+- **Given:** `T1` of `PRE-178` at `lockVersion = 0`; `carol` holds `processes:task:work` only; `hoa` holds `processes:task:manage`; supervisor `thu` of tenant `bank-b` holds the same permission; the REST adapter over the engine.
+- **When:** (a) `carol` posts `:reassign`. (b) `hoa` posts with `If-Match: "7"`. (c) `hoa` posts without `If-Match`, without `Idempotency-Key`, with no `reason`, a blank one, a 501-character one, and a body without `assignee`. (d) `hoa` sends `re-1` again with another assignee. (e) `thu` posts `:reassign` for `T1`. (f) `GET /tasks/T1` by `carol`.
+- **Then:** (a) `403 PERMISSION_DENIED`. (b) `409 VERSION_CONFLICT`. (c) `428 PRECONDITION_REQUIRED` twice, then `400 INPUT_INVALID` for each bad body. (d) `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. (e) `404 TASK_NOT_FOUND`; no row of `bank-b` is written. (f) `allowedActions` has no `reassign`. Nothing is written by any refusal, and `T1` stays at `lockVersion 0`. A 500-character reason is accepted.
+- **Example:** `POST /tasks/T1:reassign {"assignee":"carol","reason":""} -> 400 INPUT_INVALID`.
+- **Test ID:** `PRE_180_moving_a_task_needs_the_manage_permission_and_the_task_stays_unchanged_when_refused`, `PRE_180_another_tenant_cannot_see_or_move_the_task`, `PRE_180_the_rest_adapter_enforces_headers_reason_and_error_codes`
+
+---
+
 ## Metrics, Events and Throughput (#86)
 
 ### PRE-084 Metrics count only committed work, carry bounded tags and never a tenant or a business value

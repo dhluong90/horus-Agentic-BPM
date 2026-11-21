@@ -32,6 +32,7 @@ import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
+import io.github.dhluong90.bpm.process.api.AssigneeNotAllowedException;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.InvalidStateException;
@@ -131,6 +132,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_CANCEL = "processes:cancel";
     static final String PERMISSION_READ = "processes:read";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
+    static final String PERMISSION_TASK_MANAGE = "processes:task:manage";
     static final String PERMISSION_AUTHOR = "processes:author";
     static final String PERMISSION_APPROVE = "processes:approve";
     static final String PERMISSION_STEP_COMPLETE = "processes:step:complete";
@@ -175,6 +177,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     /** Incident code of a business error no path of the process catches (DN-09). */
     static final String UNHANDLED_BUSINESS_ERROR = "UNHANDLED_BUSINESS_ERROR";
     static final List<String> INSTANCE_STATUSES = List.of("RUNNING", "COMPLETED", "CANCELLED", "COMPENSATING", "FAILED");
+    private static final int MAX_USER_ID_LENGTH = 200;
+    /** The longest reason of a reassign or delegate (PD-110, fixed). */
+    static final int HAND_OVER_REASON_MAX = 500;
     private static final java.util.regex.Pattern KEY = java.util.regex.Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final int MAX_KEY_LENGTH = 200;
     /** A definition hash as the engine shows it: lower-case hexadecimal SHA-256 (TR-DEF-04). */
@@ -215,6 +220,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    private volatile io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory =
+            io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
             io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE;
     /** The kind of the async job the current thread's result transaction handles, for the attempt metric. */
@@ -2844,6 +2851,108 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public TaskView reassign(String taskId, String assignee, String reason, long expectedLockVersion,
+            String idempotencyKey) {
+        return handOver("reassign", "OPEN", taskId, assignee, reason, expectedLockVersion, idempotencyKey);
+    }
+
+    @Override
+    public TaskView delegate(String taskId, String assignee, String reason, long expectedLockVersion,
+            String idempotencyKey) {
+        return handOver("delegate", "CLAIMED", taskId, assignee, reason, expectedLockVersion, idempotencyKey);
+    }
+
+    /**
+     * Reassigns an open task or delegates a claimed one (PD-110), under the instance row lock. Guards in order: the
+     * lock version, the status (a completed or cancelled task is never moved), then the target: not the current
+     * claimant, not a four-eyes participant, and holding the task's role or group in the host's directory. A refused
+     * request writes nothing.
+     */
+    private TaskView handOver(String action, String fromStatus, String taskId, String assignee, String reason,
+            long expectedLockVersion, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_TASK_MANAGE);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("A " + action + " needs an Idempotency-Key");
+        }
+        if (assignee == null || assignee.isBlank() || assignee.length() > MAX_USER_ID_LENGTH) {
+            throw new InputInvalidException("assignee is required, 1 to " + MAX_USER_ID_LENGTH + " characters");
+        }
+        String why = boundedComment(reason, true);
+        if (why.length() > HAND_OVER_REASON_MAX) {
+            // PD-110: the length is part of the contract, not a setting.
+            throw new InputInvalidException("reason must be at most " + HAND_OVER_REASON_MAX + " characters, was "
+                    + why.length());
+        }
+        String requestHash = Hashes.sha256Parts(action, caller, taskId, assignee, why,
+                String.valueOf(expectedLockVersion));
+        TaskView moved = transactions.inTransaction(() -> idempotent(tenant, action, idempotencyKey, requestHash, () -> {
+            Locked locked = lockTask(tenant, taskId, expectedLockVersion);
+            TaskRow task = locked.task();
+            if (!fromStatus.equals(task.status())) {
+                throw new InvalidStateException("Task " + taskId + " is " + task.status() + "; only a "
+                        + fromStatus + " task can be " + (fromStatus.equals("OPEN") ? "reassigned" : "delegated"));
+            }
+            requireAssigneeAllowed(tenant, locked, assignee);
+            Instant now = clock.instant();
+            if (store.handOverTask(tenant, taskId, task.lockVersion(), fromStatus, task.claimedBy(), assignee,
+                    now) != 1) {
+                throw new VersionConflictException("Task " + taskId + " changed concurrently");
+            }
+            Map<String, Object> extra = new LinkedHashMap<>();
+            extra.put(fromStatus.equals("OPEN") ? "reassignedBy" : "delegatedBy", caller);
+            if (task.claimedBy() != null) {
+                extra.put("previousClaimant", task.claimedBy());
+            }
+            extra.put("claimedBy", assignee);
+            extra.put("reason", why);
+            recordTaskChange(locked, fromStatus.equals("OPEN") ? "TASK_REASSIGNED" : "TASK_DELEGATED",
+                    fromStatus.equals("OPEN") ? "processes.task.reassigned.v1" : "processes.task.delegated.v1", caller,
+                    now, extra);
+            return taskView(store.findTask(tenant, taskId).orElseThrow(), locked.instance());
+        }, Views::taskToJson, Views::taskFromJson));
+        return withActions(moved, caller, transactions.inTransaction(() -> participants(tenant,
+                store.findInstance(tenant, moved.instanceId()).orElseThrow())));
+    }
+
+    /** The target rules of PD-110; each refusal is {@code ASSIGNEE_NOT_ALLOWED} and writes nothing. */
+    private void requireAssigneeAllowed(String tenant, Locked locked, String assignee) {
+        TaskRow task = locked.task();
+        if (assignee.startsWith(SYSTEM_PREFIX)) {
+            throw new AssigneeNotAllowedException("Identities starting with " + SYSTEM_PREFIX + " are reserved for the"
+                    + " engine");
+        }
+        if (assignee.equals(task.claimedBy())) {
+            throw new AssigneeNotAllowedException(assignee + " already holds task " + task.id());
+        }
+        if (task.fourEyes() && participants(tenant, locked.instance()).contains(assignee)) {
+            throw new AssigneeNotAllowedException(assignee + " started this instance or completed an earlier task of"
+                    + " it, so cannot work its four-eyes task");
+        }
+        int colon = task.assignee().indexOf(':');
+        String kind = task.assignee().substring(0, colon);
+        String value = task.assignee().substring(colon + 1);
+        boolean holds = switch (kind) {
+            case "role" -> directory.holdsRole(tenant, assignee, value);
+            case "group" -> directory.inGroup(tenant, assignee, value);
+            default -> true;
+        };
+        if (!holds) {
+            throw new AssigneeNotAllowedException(assignee + " does not hold the " + kind + " the task is assigned to");
+        }
+    }
+
+    /**
+     * Installs the host's directory of roles and groups, which {@code reassign} and {@code delegate} ask about the
+     * target. Called once while the engine is wired; without it no role or group task can be handed to a named user.
+     *
+     * @param directory the directory, or null for none
+     */
+    public void useAssigneeDirectory(io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory) {
+        this.directory = directory == null ? io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE : directory;
+    }
+
+    @Override
     public ProcessInstance complete(String taskId, Map<String, Object> result, long expectedLockVersion,
             String idempotencyKey) {
         return complete(taskId, result, null, expectedLockVersion, idempotencyKey);
@@ -2963,6 +3072,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             actions.add("unclaim");
             if (assigned(task.assignee(), caller) && !refusedByFourEyes) {
                 actions.add("complete");
+            }
+        }
+        if (callers.currentPermissions().contains(PERMISSION_TASK_MANAGE)) {
+            if ("OPEN".equals(task.status())) {
+                actions.add("reassign");
+            } else if ("CLAIMED".equals(task.status())) {
+                actions.add("delegate");
             }
         }
         return task.withAllowedActions(actions);

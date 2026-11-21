@@ -16,6 +16,7 @@ import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InstanceQuery;
 import io.github.dhluong90.bpm.process.api.InstanceSummary;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
+import io.github.dhluong90.bpm.process.api.AssigneeNotAllowedException;
 import io.github.dhluong90.bpm.process.api.InvalidStateException;
 import io.github.dhluong90.bpm.process.api.NoEffectiveVersionException;
 import io.github.dhluong90.bpm.process.api.NodeCounts;
@@ -38,6 +39,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -233,6 +235,32 @@ class ProcessRestContractTest {
         // 500: anything unexpected, with a correlation id only.
         assertProblem(post(BASE + "/instances").contentType(MediaType.APPLICATION_JSON).header("Idempotency-Key", "s-5")
                 .content("{\"definitionKey\":\"engine-bug\"}"), 500, "INTERNAL");
+    }
+
+    @Test
+    void PRE_180_the_rest_adapter_enforces_headers_reason_and_error_codes() throws Exception {
+        String url = BASE + "/tasks/" + FakeEngine.TASK;
+        String body = "{\"assignee\":\"dan\",\"reason\":\"Carol is on sick leave\"}";
+
+        MvcResult moved = exchange(post(url + ":delegate").contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "\"0\"").header("Idempotency-Key", "d-1").content(body));
+        assertThat(moved.getResponse().getStatus()).isEqualTo(200);
+        assertThat(moved.getResponse().getHeader("ETag")).isEqualTo("\"1\"");
+        assertThat(moved.getResponse().getContentAsString()).contains("\"claimedBy\":\"dan\"")
+                .contains("\"allowedActions\":[\"delegate\"]");
+        assertThat(exchange(post(url + ":reassign").contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "\"0\"").header("Idempotency-Key", "r-1").content(body)).getResponse().getStatus())
+                .isEqualTo(200);
+
+        assertProblem(post(url + ":reassign").contentType(MediaType.APPLICATION_JSON).header("Idempotency-Key", "r-2")
+                .content(body), 428, "PRECONDITION_REQUIRED");
+        assertProblem(post(url + ":delegate").contentType(MediaType.APPLICATION_JSON).header("If-Match", "\"0\"")
+                .content(body), 428, "PRECONDITION_REQUIRED");
+        assertProblem(post(url + ":delegate").contentType(MediaType.APPLICATION_JSON).header("If-Match", "\"3\"")
+                .header("Idempotency-Key", "d-4").content(body), 409, "VERSION_CONFLICT");
+        assertProblem(post(url + ":delegate").contentType(MediaType.APPLICATION_JSON).header("If-Match", "\"0\"")
+                .header("Idempotency-Key", "d-5")
+                .content("{\"assignee\":\"alice\",\"reason\":\"Cover the queue\"}"), 409, "ASSIGNEE_NOT_ALLOWED");
     }
 
     private MvcResult assertProblem(RequestBuilder request, int status, String code) throws Exception {
@@ -473,6 +501,31 @@ class ProcessRestContractTest {
         @Override
         public TaskView unclaim(String taskId, long expectedLockVersion, String idempotencyKey) {
             throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
+        public TaskView reassign(String taskId, String assignee, String reason, long expectedLockVersion,
+                String idempotencyKey) {
+            return handOver(assignee, reason, expectedLockVersion, Set.of("delegate"));
+        }
+
+        @Override
+        public TaskView delegate(String taskId, String assignee, String reason, long expectedLockVersion,
+                String idempotencyKey) {
+            return handOver(assignee, reason, expectedLockVersion, Set.of("delegate"));
+        }
+
+        /** The engine's refusals are PRE-179 and PRE-180; here only the mapping to the contract is exercised. */
+        private static TaskView handOver(String assignee, String reason, long expectedLockVersion,
+                Set<String> actions) {
+            if ("alice".equals(assignee)) {
+                throw new AssigneeNotAllowedException("alice started this instance, so cannot work its four-eyes task");
+            }
+            if (expectedLockVersion != 0) {
+                throw new VersionConflictException("Task " + TASK + " is at lock version 0");
+            }
+            return new TaskView(TASK, INSTANCE, "card-fee-review", 1, null, "review", "Review the fee",
+                    "role:FEE_REVIEWER", false, "CLAIMED", 1, assignee, NOW, NOW, null, null, actions, null);
         }
     }
 }
