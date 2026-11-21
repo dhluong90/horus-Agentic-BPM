@@ -63,8 +63,9 @@ public final class ProcessListQueries {
                     "tenant and definition equality on idx_pre_token_live, live statuses only",
                     () -> List.of("bank-a", SAMPLE_DEFINITION)),
             new Registered("rollup-slice", ROLLUP_SLICE_SQL,
-                    "one slice of at most stats.rollup-max-slice by occurred_at (idx_pre_history_time_brin); entry time "
-                            + "through idx_pre_history_instance",
+                    "one slice of at most stats.rollup-max-slice: an index condition on both ends of occurred_at, "
+                            + "through idx_pre_history_time_brin on every partition (V27) or, on PostgreSQL 18, a "
+                            + "skip scan of the primary key; entry time through idx_pre_history_instance",
                     () -> List.of(SAMPLE_FROM, SAMPLE_TO)),
             new Registered("window-node-sums", WINDOW_SUMS_SQL,
                     "primary key range (tenant, definition, bucket_start) of at most query.max-range",
@@ -73,7 +74,8 @@ public final class ProcessListQueries {
                     "primary key range (tenant, definition, bucket_start) of at most query.max-range",
                     () -> List.of("bank-a", SAMPLE_DEFINITION, SAMPLE_FROM, SAMPLE_TO)),
             new Registered("gauge-active-instances", ACTIVE_INSTANCES_SQL,
-                    "index-only scan of the partial index idx_pre_instance_running", List::of),
+                    "index-only scan of the partial index idx_pre_instance_running_definition (V25, #401, arrives at "
+                            + "integration); until then idx_pre_instance_status", List::of),
             new Registered("gauge-open-incidents", OPEN_INCIDENTS_SQL,
                     "index-only scan of the partial index idx_pre_incident_open", List::of),
             new Registered("gauge-oldest-due-job", OLDEST_DUE_SQL,

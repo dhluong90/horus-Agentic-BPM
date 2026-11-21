@@ -67,12 +67,24 @@ class ProcessListQueriesPlanIT {
         }
     }
 
+    /**
+     * The slice is bounded by its time range through an index, whichever index the planner picks. PostgreSQL 14 and
+     * 16 read it through {@code idx_pre_history_time_brin}. PostgreSQL 18 adds B-tree skip scan, so with few tenants
+     * it reads the same range through the primary key {@code (tenant_id, occurred_at, id)}, skipping over the
+     * tenants; both are an index condition on both ends of {@code occurred_at}. The BRIN itself is checked on every
+     * partition by {@link RollupMigrationTest}.
+     */
     @Test
     void PRE_036_the_rollup_slice_reads_history_by_its_time_index() {
         ProcessListQueries.Registered slice = ProcessListQueries.all().stream()
                 .filter(q -> q.name().equals("rollup-slice")).findFirst().orElseThrow();
 
-        assertThat(plan(slice)).contains("idx_pre_history_time_brin");
+        String outer = plan(slice).split("SubPlan")[0];
+
+        assertThat(outer).as("outer scan of the slice").doesNotContain("Seq Scan").contains(" on pre_history");
+        assertThat(outer.lines().filter(l -> l.contains("Index Cond:")))
+                .as("index condition on both ends of the slice: %s", outer)
+                .anySatisfy(l -> assertThat(l).contains("occurred_at >=").contains("occurred_at <"));
     }
 
     @Test

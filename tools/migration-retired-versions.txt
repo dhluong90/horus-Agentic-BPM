@@ -6,3 +6,4 @@ rule-engine V8 reserved for the duplicate guard (#25) and withdrawn unused after
 rule-engine V9 reserved for decision input masking (#24) and withdrawn unused after V10 and V11 were taken
 rule-engine V13 reserved for the approval seal (#237 steps 2 and 3) and withdrawn unbuilt when V14 (#283) was taken; arriving after V14 it would be out of order
 process-engine V5 reserved for the parallel join (#62) and withdrawn unused: pull request #251 needs no migration, and V6 and V7 are taken by #249 and #264
+process-engine V28 held a running-instance index (#86) and withdrawn as a duplicate of V25 (#401); a database may have run it from the branch

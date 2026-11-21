@@ -583,7 +583,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 
 `processes.step.completed.v1` is published once per node a transition completes, inside the step's transaction, with `durationMs` from the token's entry at the node (the entry in the same transition, or `pre_token.entered_at` for a step that waited). `processes.incident.resolved.v1`, `processes.instance.failed.v1` and `processes.compensation.started.v1` have schemas and are emitted when the engine has a resolve operation, a path to `FAILED` and compensation.
 
-**Metrics (#86, `PRE-084`).** The starter binds `horus.pre.*` meters to the host's `MeterRegistry` when Micrometer is present. The core calls the `ProcessMetrics` SPI only after the transaction commits (`TransactionRunner.afterCommit`), so a rolled-back start or step is never counted; a failed step is the one exception, reported at once. Tag values are checked against fixed sets (`stepKind`: `START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL`; `outcome`; job `kind`; the engine error codes) and anything else is `OTHER`. Gauges (`instances.active`, `incidents.open`, `jobs.due.oldest.age{kind}`) are read by one bounded query set per `metrics.gauge-refresh` on each replica, never per scrape: the counts are index-only scans of the partial indexes `idx_pre_instance_running` (V28) and `idx_pre_incident_open`, and the oldest due job is the first entry of `idx_pre_timer_poll_kind` per kind. They count every tenant together, so a shared registry leaks no tenant's volume.
+**Metrics (#86, `PRE-084`).** The starter binds `horus.pre.*` meters to the host's `MeterRegistry` when Micrometer is present. The core calls the `ProcessMetrics` SPI only after the transaction commits (`TransactionRunner.afterCommit`), so a rolled-back start or step is never counted; a failed step is the one exception, reported at once. Tag values are checked against fixed sets (`stepKind`: `START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL`; `outcome`; job `kind`; the engine error codes) and anything else is `OTHER`. Gauges (`instances.active`, `incidents.open`, `jobs.due.oldest.age{kind}`) are read by one bounded query set per `metrics.gauge-refresh` on each replica, never per scrape: the counts are index-only scans of the partial indexes `idx_pre_instance_running_definition` (V25, #401) and `idx_pre_incident_open`, and the oldest due job is the first entry of `idx_pre_timer_poll_kind` per kind. They count every tenant together, so a shared registry leaks no tenant's volume.
 
 `processes.definition.deployed.v1` from the earlier baseline is removed: deploy now creates a draft, and no release has shipped.
 
@@ -920,7 +920,7 @@ CREATE TABLE pre_history_default PARTITION OF pre_history DEFAULT;
 CREATE TABLE pre_history_2027_01 PARTITION OF pre_history
   FOR VALUES FROM ('2027-01-01 00:00:00+00') TO ('2027-02-01 00:00:00+00');   -- created by the scheduler 7 days ahead
 CREATE INDEX idx_pre_history_instance ON pre_history (tenant_id, instance_id, occurred_at, id);
-CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices (#110, V27: built CONCURRENTLY per partition, parent ON ONLY)
+CREATE INDEX idx_pre_history_time_brin ON pre_history USING brin (occurred_at);   -- rollup slices (#110, V27: parent ON ONLY, built CONCURRENTLY and attached on every existing partition; new partitions inherit it)
 
 CREATE TABLE pre_node_stats_hourly (                                              -- #110, V26
   tenant_id         TEXT        NOT NULL,
