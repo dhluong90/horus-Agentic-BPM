@@ -133,6 +133,22 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_AUTHOR = "processes:author";
     static final String PERMISSION_APPROVE = "processes:approve";
     static final String PERMISSION_STEP_COMPLETE = "processes:step:complete";
+    static final String PERMISSION_INCIDENT_MANAGE = "processes:incident:manage";
+    /** History types of the incident commands (#68). */
+    static final String INCIDENT_RETRIED = "INCIDENT_RETRIED";
+    static final String INCIDENT_RESOLUTION_PROPOSED = "INCIDENT_RESOLUTION_PROPOSED";
+    static final String INCIDENT_RESOLUTION_REJECTED = "INCIDENT_RESOLUTION_REJECTED";
+    static final String INCIDENT_RESOLVED = "INCIDENT_RESOLVED";
+    /** Resolutions of an incident (#68). */
+    static final String RETRY_SUCCEEDED = "RETRY_SUCCEEDED";
+    static final String COMPLETED_MANUALLY = "COMPLETED_MANUALLY";
+    static final String INSTANCE_CANCELLED = "INSTANCE_CANCELLED";
+    /** Who resolved an incident whose retry was accepted: the engine, never a person (PRE-077). */
+    static final String RESOLVED_BY_ENGINE = "system:process-engine";
+    static final List<String> INCIDENT_STATUSES = List.of("OPEN", "RESOLUTION_PENDING", "RESOLVED");
+    /** An agent step whose memory failed before any call cannot run again: the facts it needs are missing (#101). */
+    static final java.util.Set<String> NOT_RETRYABLE = java.util.Set.of("AGENT_MEMORY_TOO_LARGE", "AGENT_MEMORY_MISSING",
+            "AGENT_MEMORY_INVALID", "AGENT_MEMORY_MASKED_FIELD");
     /** Actor of the result transaction of an async step. */
     static final String ASYNC_ACTOR = "system:async-step";
     static final String DEV_APPROVER = "system:dev-auto-approve";
@@ -160,6 +176,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final List<String> INSTANCE_STATUSES = List.of("RUNNING", "COMPLETED", "CANCELLED", "COMPENSATING", "FAILED");
     private static final java.util.regex.Pattern KEY = java.util.regex.Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final int MAX_KEY_LENGTH = 200;
+    /** A definition hash as the engine shows it: lower-case hexadecimal SHA-256 (TR-DEF-04). */
+    private static final java.util.regex.Pattern CONTENT_HASH = java.util.regex.Pattern.compile("^[0-9a-f]{64}$");
     private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
     static final String TIMER_ACTOR = "system:timer";
     private static final System.Logger LOG = System.getLogger(ProcessServices.class.getName());
@@ -621,12 +639,25 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
-    public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment, String idempotencyKey) {
+    public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
+            String comment, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
+        // PRE-177 (PD-139): an approval names the content it reviewed, refused before anything is read when missing.
+        if (expectedDefinitionHash == null && settings.requireContentHash()) {
+            throw new io.github.dhluong90.bpm.process.api.ContentHashRequiredException();
+        }
+        if (expectedDefinitionHash != null && !CONTENT_HASH.matcher(expectedDefinitionHash).matches()) {
+            throw new InputInvalidException("expectedDefinitionHash must be 64 lower-case hexadecimal characters, the"
+                    + " definitionHash of the version reviewed");
+        }
         String note = boundedComment(comment, false);
-        String requestHash = Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
-                Long.toString(expectedLockVersion), note);
+        // The hash joins the request hash only when named, so a request stored before the field existed still replays.
+        String requestHash = expectedDefinitionHash == null
+                ? Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                        Long.toString(expectedLockVersion), note)
+                : Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                        Long.toString(expectedLockVersion), note, expectedDefinitionHash);
         return transactions.inTransaction(() -> idempotent(tenant, "approve", idempotencyKey, requestHash, () -> {
             LockedKey locked = lockVersion(tenant, ref);
             StoredDefinition current = locked.version();
@@ -643,6 +674,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 + "(horus.bpm.lifecycle.approver-must-differ-from: makers)");
             }
             requireLock(current, expectedLockVersion);
+            // PRE-177: the content reviewed, after the lock version: a refreshed lock version can still carry a
+            // decision made on older content, and a refusal names what is stored now.
+            if (expectedDefinitionHash != null && !expectedDefinitionHash.equals(current.definitionHash())) {
+                throw new io.github.dhluong90.bpm.process.api.ContentChangedException("The content of " + ref.key()
+                        + " v" + ref.version() + " is not the content reviewed: expected definition hash "
+                        + expectedDefinitionHash + " but it is " + current.definitionHash() + ", at lock version "
+                        + current.lockVersion(), current.definitionHash(), current.lockVersion());
+            }
             // PRE-016: and again at approval, against the rule set version in effect now.
             checkGuardrailContracts(tenant, storedProcess(current));
             // An older version never overtakes a newer active one (PRE-021).
@@ -660,10 +699,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             String approver = self ? DEV_APPROVER : caller;
             StoredDefinition updated = current.approved(approver, now, effective, note);
             write(updated);
-            lifecycleHistory(updated, "APPROVED", current.status(), caller, note,
-                    Map.of("sourceHash", updated.sourceHash(), "readerVersion", READER_VERSION,
-                            "effectiveFrom", effective.toString(),
-                            "approverMustDifferFrom", settings.approverRule().value()), now);
+            Map<String, Object> approvedDetails = new LinkedHashMap<>();
+            approvedDetails.put("sourceHash", updated.sourceHash());
+            approvedDetails.put("readerVersion", READER_VERSION);
+            approvedDetails.put("effectiveFrom", effective.toString());
+            approvedDetails.put("approverMustDifferFrom", settings.approverRule().value());
+            if (expectedDefinitionHash != null) {
+                approvedDetails.put("reviewedDefinitionHash", expectedDefinitionHash);
+            }
+            lifecycleHistory(updated, "APPROVED", current.status(), caller, note, approvedDetails, now);
             Map<String, Object> payload = definitionPayload(updated);
             payload.put("requestedBy", updated.requestedBy());
             payload.put("effectiveFrom", effective.toString());
@@ -672,6 +716,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             payload.put("approvedAt", now.toString());
             payload.put("sourceHash", updated.sourceHash());
             payload.put("readerVersion", READER_VERSION);
+            if (expectedDefinitionHash != null) {
+                payload.put("reviewedDefinitionHash", expectedDefinitionHash);
+            }
             publishDefinition(updated, "processes.definition.approved.v1", payload, now);
             if (!effective.isAfter(now)) {
                 retireSuperseded(locked.all(), updated, now);
@@ -1636,6 +1683,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 if (!jobs.markDone(tenant, job.id(), job.lockedBy(), job.attempt(), clock.instant())) {
                     throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
                 }
+                closeRetried(tenant, row.id(), job.tokenId(), clock.instant());
             }
             case StepResult.BusinessError error -> giveBack(job, attemptId, error.code(), false, true, reportedBy);
             case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), false,
@@ -1714,6 +1762,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             if (!jobs.markDone(tenant, job.id(), job.lockedBy(), job.attempt(), now)) {
                 throw new IllegalStateException("Job " + job.id() + " lost its claim inside its result transaction");
             }
+            closeRetried(tenant, row.id(), job.tokenId(), now);
             return;
         }
         if (!jobs.release(tenant, job.id(), job.lockedBy(), job.attempt(), job.nextFireAt(), true, now)) {
@@ -1798,11 +1847,32 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         String code = site.errorCode() == null || site.errorCode().isBlank() ? "STEP_FAILED" : site.errorCode();
         String cause = site.summary().length() > 500 ? site.summary().substring(0, 500) : site.summary();
-        String id = Ulid.next(now);
-        store.insertIncident(new ProcessStore.IncidentRow(site.tenantId(), id, site.instanceId(), site.definitionId(),
-                site.tokenId(), site.nodeId(), code, cause, site.retries(), "OPEN", 0, now, null));
+        // PRE-077: a retried step that fails again keeps its incident open with the new cause, never a second one.
+        ProcessStore.IncidentRow again = site.tokenId() == null ? null : store.openIncidents(site.tenantId(),
+                site.instanceId()).stream().filter(i -> site.tokenId().equals(i.tokenId())
+                        && io.github.dhluong90.bpm.process.api.Incident.OPEN.equals(i.status())).findFirst()
+                .orElse(null);
+        String id;
+        long eventSequence;
+        int retries;
+        if (again == null) {
+            id = Ulid.next(now);
+            retries = site.retries();
+            eventSequence = 1;
+            store.insertIncident(new ProcessStore.IncidentRow(site.tenantId(), id, site.instanceId(),
+                    site.definitionId(), site.tokenId(), site.nodeId(), code, cause, retries, "OPEN", 0, now, null));
+        } else {
+            ProcessStore.IncidentRow failed = again.failedAgain(code, cause);
+            writeIncident(failed);
+            id = failed.id();
+            retries = failed.retryCount();
+            eventSequence = failed.lockVersion() + 1;
+        }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("incidentId", id);
+        if (again != null) {
+            details.put("failedAgain", true);
+        }
         if (site.jobId() != null) {
             details.put("jobId", site.jobId());
         }
@@ -1810,7 +1880,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (site.businessCode() != null) {
             details.put("businessCode", site.businessCode());
         }
-        details.put("retryCount", site.retries());
+        details.put("retryCount", retries);
         store.appendHistory(site.tenantId(), site.instanceId(), site.definitionId(), List.of(new HistoryEntry(
                 INCIDENT_RAISED, site.nodeId(), site.tokenId(), site.attemptId(),
                 site.jobId() == null ? DecisionCaller.ENGINE_IDENTITY : ASYNC_ACTOR, now, details)));
@@ -1822,16 +1892,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (site.businessCode() != null) {
             payload.put("businessCode", site.businessCode());
         }
-        payload.put("retryCount", site.retries());
+        payload.put("retryCount", retries);
         payload.put("definitionKey", row.definitionKey());
         payload.put("version", row.definitionVersion());
         if (row.businessKey() != null) {
             payload.put("businessKey", row.businessKey());
         }
-        publish(new ProcessEventPublisher.Event(Ids.child(id, 1),
+        publish(new ProcessEventPublisher.Event(Ids.child(id, eventSequence),
                 "processes.incident.raised.v1", site.tenantId(), now, payload), row.id());
         LOG.log(System.Logger.Level.WARNING, "process.incident.raised tenant={0} instance={1} node={2} code={3}"
-                + " retryCount={4}", site.tenantId(), site.instanceId(), site.nodeId(), code, site.retries());
+                + " retryCount={4}", site.tenantId(), site.instanceId(), site.nodeId(), code, retries);
     }
 
     @Override
@@ -1841,10 +1911,517 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return transactions.inTransaction(() -> {
             store.findInstance(tenant, instanceId).orElseThrow(() -> new InstanceNotFoundException("No instance "
                     + instanceId));
-            return store.openIncidents(tenant, instanceId).stream().map(i -> new io.github.dhluong90.bpm.process.api
-                    .Incident(i.id(), i.instanceId(), i.nodeId(), i.tokenId(), i.errorCode(), i.causeSummary(),
-                    i.retryCount(), i.status(), i.lockVersion(), i.createdAt(), i.resolvedAt())).toList();
+            String caller = callers.currentCallerId();
+            java.util.Set<String> held = callers.currentPermissions();
+            return store.openIncidents(tenant, instanceId).stream().map(i -> incidentView(i, null, caller, held))
+                    .toList();
         });
+    }
+
+    // ---- IncidentService: retry and resolve (#68, PD-126, DESIGN section 3.6) -------------------------------
+
+    @Override
+    public Page<io.github.dhluong90.bpm.process.api.Incident> incidents(
+            io.github.dhluong90.bpm.process.api.IncidentQuery query) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_READ);
+        io.github.dhluong90.bpm.process.api.IncidentQuery q = query == null
+                ? io.github.dhluong90.bpm.process.api.IncidentQuery.open() : query;
+        if (!INCIDENT_STATUSES.contains(q.status())) {
+            throw new QueryInvalidException("status must be one of " + String.join(", ", INCIDENT_STATUSES));
+        }
+        int limit = limit(q.page());
+        // The cursor is bound to the tenant and the status it was issued for.
+        String after = cursors().verify(tenant, q.status(), "incidents", q.page().cursor());
+        Instant afterCreatedAt = null;
+        String afterId = null;
+        if (after != null) {
+            int bar = after.lastIndexOf('|');
+            try {
+                afterCreatedAt = Instant.parse(after.substring(0, bar));
+                afterId = after.substring(bar + 1);
+            } catch (RuntimeException e) {
+                throw Cursors.invalid();
+            }
+        }
+        Instant at = afterCreatedAt;
+        String id = afterId;
+        List<ProcessStore.IncidentRow> rows = transactions.inTransaction(() -> store.incidents(tenant, q.status(), at,
+                id, limit + 1));
+        java.util.Set<String> held = callers.currentPermissions();
+        List<io.github.dhluong90.bpm.process.api.Incident> items = rows.stream().limit(limit)
+                .map(r -> incidentView(r, null, caller, held)).toList();
+        if (rows.size() <= limit) {
+            return new Page<>(items, null);
+        }
+        io.github.dhluong90.bpm.process.api.Incident last = items.get(limit - 1);
+        return new Page<>(items, cursors().sign(tenant, q.status(), "incidents", last.createdAt() + "|" + last.id()));
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.Incident incident(String incidentId) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_READ);
+        requireIncidentId(incidentId);
+        return transactions.inTransaction(() -> {
+            ProcessStore.IncidentRow row = store.findIncident(tenant, incidentId)
+                    .orElseThrow(() -> incidentNotFound(incidentId));
+            return incidentView(row, jobOf(tenant, row).orElse(null), caller, callers.currentPermissions());
+        });
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.Incident retry(String incidentId, long expectedLockVersion,
+            String reason, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_INCIDENT_MANAGE);
+        requireIncidentId(incidentId);
+        requireKey(idempotencyKey, "Retrying an incident");
+        String why = requiredReason(reason);
+        String requestHash = Hashes.sha256Parts("incident-retry", caller, incidentId,
+                Long.toString(expectedLockVersion), why);
+        io.github.dhluong90.bpm.process.api.Incident done = transactions.inTransaction(() -> idempotent(tenant,
+                "incident-retry", idempotencyKey, requestHash, () -> {
+                    LockedIncident locked = lockIncident(tenant, incidentId, expectedLockVersion, "retry");
+                    ProcessStore.IncidentRow incident = locked.incident();
+                    if (NOT_RETRYABLE.contains(incident.errorCode())) {
+                        throw new InvalidStateException("Incident " + incidentId + " (" + incident.errorCode()
+                                + ") failed before any call because the step's memory could not be built; running it"
+                                + " again cannot help. Resolve it with an output instead");
+                    }
+                    io.github.dhluong90.bpm.process.internal.exec.Token token = waitingToken(tenant, locked);
+                    Instant now = clock.instant();
+                    java.util.Optional<JobRow> job = jobs.lockJob(tenant, token.activityInstanceId());
+                    if (job.isPresent() && !"FAILED".equals(job.get().status())) {
+                        throw new InvalidStateException("The job of incident " + incidentId + " is "
+                                + job.get().status() + "; an attempt is due or running");
+                    }
+                    ProcessStore.IncidentRow retried = incident.next(incident.status(), incident.retryCount() + 1,
+                            job.isPresent());
+                    writeIncident(retried);
+                    Map<String, Object> details = incidentDetails(retried);
+                    details.put("reason", why);
+                    job.ifPresent(j -> details.put("jobId", j.id()));
+                    store.appendHistory(tenant, retried.instanceId(), retried.definitionId(), List.of(new HistoryEntry(
+                            INCIDENT_RETRIED, retried.nodeId(), retried.tokenId(), token.activityInstanceId(), caller,
+                            now, details)));
+                    Map<String, Object> payload = incidentPayload(retried, locked.instance());
+                    payload.put("retriedBy", caller);
+                    payload.put("reason", why);
+                    publishIncident(retried, "processes.incident.retried.v1", payload, locked.instance(), now);
+                    LOG.log(System.Logger.Level.INFO, "process.incident.retried tenant={0} incident={1} retryCount={2}",
+                            tenant, incidentId, retried.retryCount());
+                    if (job.isPresent()) {
+                        // PRE-077: the same job id, so the remote side deduplicates; the next claim is a new attempt.
+                        if (!jobs.retryFailed(tenant, job.get().id(), now)) {
+                            throw new IllegalStateException("Job " + job.get().id() + " left FAILED under its lock");
+                        }
+                        return incidentView(retried, null, caller, java.util.Set.of());
+                    }
+                    // A local step: its handler runs again in this transaction, under a new attempt id.
+                    List<IncidentSite> raised = run(locked.definition(), locked.instance(),
+                            stateOf(tenant, locked.instance()), new Command.RetryStep(token.id(),
+                                    token.activityInstanceId(), caller), RunAs.REQUEST);
+                    ProcessStore.IncidentRow after = store.lockIncident(tenant, incidentId).orElseThrow();
+                    if (raised.stream().noneMatch(site -> java.util.Objects.equals(site.tokenId(), after.tokenId()))) {
+                        ProcessStore.IncidentRow resolved = after.resolved(RETRY_SUCCEEDED, RESOLVED_BY_ENGINE, now);
+                        writeIncident(resolved);
+                        recordResolved(resolved, caller, null, Map.of(), now);
+                        return incidentView(resolved, null, caller, java.util.Set.of());
+                    }
+                    return incidentView(after, null, caller, java.util.Set.of());
+                }, Views::incidentToJson, Views::incidentFromJson));
+        return withIncidentActions(done, caller);
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.Incident resolve(String incidentId, long expectedLockVersion,
+            Map<String, Object> output, String reason, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_INCIDENT_MANAGE);
+        requireIncidentId(incidentId);
+        requireKey(idempotencyKey, "Resolving an incident");
+        String why = requiredReason(reason);
+        if (output == null) {
+            throw new InputInvalidException("output is required: the result the waiting step completes with");
+        }
+        String outputJson = boundedJson(output, "The output");
+        String requestHash = Hashes.sha256Parts("incident-resolve", caller, incidentId,
+                Long.toString(expectedLockVersion), why, outputJson);
+        io.github.dhluong90.bpm.process.api.Incident done = transactions.inTransaction(() -> idempotent(tenant,
+                "incident-resolve", idempotencyKey, requestHash, () -> {
+                    LockedIncident locked = lockIncident(tenant, incidentId, expectedLockVersion, "resolve");
+                    io.github.dhluong90.bpm.process.internal.exec.Token token = waitingToken(tenant, locked);
+                    JobRow job = jobs.findJob(tenant, token.activityInstanceId()).orElse(null);
+                    // PRE-078: the step's output schema, as for any result; the guardrail is not run on a person's
+                    // answer. A violation names the path and what is wrong there, never the value.
+                    Map<String, Object> schema = job == null ? null
+                            : AgentResultGuard.outputSchema(Values.readMap(job.payloadJson()));
+                    if (schema != null) {
+                        List<String> violations = outputSchemas.validate(schema, output);
+                        if (violations == null || !violations.isEmpty()) {
+                            throw new io.github.dhluong90.bpm.process.api.OutputInvalidException("The output breaks"
+                                    + " the step's output schema", violations == null
+                                            ? List.of("$: the schema check gave no answer") : violations);
+                        }
+                    }
+                    Instant now = clock.instant();
+                    String mode = settings.resolveApproval().value();
+                    ProcessStore.IncidentRow proposed = locked.incident().proposed(caller, now, why, outputJson, mode);
+                    writeIncident(proposed);
+                    Map<String, Object> details = incidentDetails(proposed);
+                    details.put("reason", why);
+                    details.put("output", auditedOutput(job, output));
+                    details.put("approvalMode", mode);
+                    store.appendHistory(tenant, proposed.instanceId(), proposed.definitionId(), List.of(
+                            new HistoryEntry(INCIDENT_RESOLUTION_PROPOSED, proposed.nodeId(), proposed.tokenId(),
+                                    token.activityInstanceId(), caller, now, details)));
+                    Map<String, Object> payload = incidentPayload(proposed, locked.instance());
+                    payload.put("proposedBy", caller);
+                    payload.put("approvalMode", mode);
+                    publishIncident(proposed, "processes.incident.resolution-proposed.v1", payload, locked.instance(),
+                            now);
+                    if (settings.resolveApproval() == EngineSettings.ResolveApproval.SINGLE) {
+                        // dev profile only: the proposer's resolution applies at once, recorded as single.
+                        return incidentView(applyResolution(locked, proposed, token, job, caller, null, now), job,
+                                caller, java.util.Set.of());
+                    }
+                    return incidentView(proposed, job, caller, java.util.Set.of());
+                }, Views::incidentToJson, Views::incidentFromJson));
+        return withIncidentActions(done, caller);
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.Incident approveResolution(String incidentId, long expectedLockVersion,
+            String comment, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_INCIDENT_MANAGE);
+        requireIncidentId(incidentId);
+        requireKey(idempotencyKey, "Approving a resolution");
+        String note = boundedComment(comment, false);
+        String requestHash = Hashes.sha256Parts("incident-approve", caller, incidentId,
+                Long.toString(expectedLockVersion), note);
+        io.github.dhluong90.bpm.process.api.Incident done = transactions.inTransaction(() -> idempotent(tenant,
+                "incident-approve", idempotencyKey, requestHash, () -> {
+                    LockedIncident locked = lockPending(tenant, incidentId, expectedLockVersion, caller, "approve");
+                    io.github.dhluong90.bpm.process.internal.exec.Token token = waitingToken(tenant, locked);
+                    JobRow job = jobs.findJob(tenant, token.activityInstanceId()).orElse(null);
+                    ProcessStore.IncidentRow resolved = applyResolution(locked, locked.incident(), token, job, caller,
+                            note, clock.instant());
+                    return incidentView(resolved, job, caller, java.util.Set.of());
+                }, Views::incidentToJson, Views::incidentFromJson));
+        return withIncidentActions(done, caller);
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.Incident rejectResolution(String incidentId, long expectedLockVersion,
+            String reason, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_INCIDENT_MANAGE);
+        requireIncidentId(incidentId);
+        requireKey(idempotencyKey, "Rejecting a resolution");
+        String why = requiredReason(reason);
+        String requestHash = Hashes.sha256Parts("incident-reject", caller, incidentId,
+                Long.toString(expectedLockVersion), why);
+        io.github.dhluong90.bpm.process.api.Incident done = transactions.inTransaction(() -> idempotent(tenant,
+                "incident-reject", idempotencyKey, requestHash, () -> {
+                    LockedIncident locked = lockPending(tenant, incidentId, expectedLockVersion, caller, "reject");
+                    ProcessStore.IncidentRow pending = locked.incident();
+                    ProcessStore.IncidentRow open = pending.proposalRejected();
+                    writeIncident(open);
+                    Instant now = clock.instant();
+                    Map<String, Object> details = incidentDetails(open);
+                    details.put("reason", why);
+                    details.put("proposedBy", pending.proposedBy());
+                    store.appendHistory(tenant, open.instanceId(), open.definitionId(), List.of(new HistoryEntry(
+                            INCIDENT_RESOLUTION_REJECTED, open.nodeId(), open.tokenId(), null, caller, now, details)));
+                    Map<String, Object> payload = incidentPayload(open, locked.instance());
+                    payload.put("rejectedBy", caller);
+                    payload.put("proposedBy", pending.proposedBy());
+                    publishIncident(open, "processes.incident.resolution-rejected.v1", payload, locked.instance(), now);
+                    return incidentView(open, null, caller, java.util.Set.of());
+                }, Views::incidentToJson, Views::incidentFromJson));
+        return withIncidentActions(done, caller);
+    }
+
+    /** An incident locked under its instance's row lock, with the instance and the version it runs. */
+    private record LockedIncident(ProcessStore.IncidentRow incident, InstanceRow instance,
+            StoredDefinition definition) {
+    }
+
+    /**
+     * Locks the instance row, then the incident, in the order every instance transition takes, and checks, in this
+     * order, that it is {@code OPEN}, that the lock version is current, that no retry is in flight and that the
+     * instance runs (PRE-079). A refusal writes nothing.
+     */
+    private LockedIncident lockIncident(String tenant, String incidentId, long expectedLockVersion, String action) {
+        LockedIncident locked = lockAny(tenant, incidentId);
+        ProcessStore.IncidentRow incident = locked.incident();
+        if (!io.github.dhluong90.bpm.process.api.Incident.OPEN.equals(incident.status())) {
+            throw new InvalidStateException("Incident " + incidentId + " is " + incident.status() + "; only an OPEN"
+                    + " incident can " + action);
+        }
+        requireIncidentLock(incident, expectedLockVersion);
+        if (incident.retrying()) {
+            throw new InvalidStateException("Incident " + incidentId + " is being retried; wait for the attempt to"
+                    + " finish");
+        }
+        return locked;
+    }
+
+    /** As {@link #lockIncident}, for a pending resolution decided by a second person, never its proposer. */
+    private LockedIncident lockPending(String tenant, String incidentId, long expectedLockVersion, String caller,
+            String action) {
+        LockedIncident locked = lockAny(tenant, incidentId);
+        ProcessStore.IncidentRow incident = locked.incident();
+        if (!io.github.dhluong90.bpm.process.api.Incident.RESOLUTION_PENDING.equals(incident.status())) {
+            throw new InvalidStateException("Incident " + incidentId + " is " + incident.status() + "; no resolution"
+                    + " waits for a decision");
+        }
+        // PD-126: four eyes, checked here so that the Java API and REST refuse alike, before anything is written.
+        if (caller.equals(incident.proposedBy())) {
+            throw new SelfApprovalForbiddenException("The proposer of the resolution of incident " + incidentId
+                    + " cannot " + action + " it; a second holder of " + PERMISSION_INCIDENT_MANAGE + " decides");
+        }
+        requireIncidentLock(incident, expectedLockVersion);
+        return locked;
+    }
+
+    private LockedIncident lockAny(String tenant, String incidentId) {
+        ProcessStore.IncidentRow seen = store.findIncident(tenant, incidentId)
+                .orElseThrow(() -> incidentNotFound(incidentId));
+        InstanceRow instance = store.lockInstance(tenant, seen.instanceId())
+                .orElseThrow(() -> incidentNotFound(incidentId));
+        ProcessStore.IncidentRow incident = store.lockIncident(tenant, incidentId)
+                .orElseThrow(() -> incidentNotFound(incidentId));
+        if (!"RUNNING".equals(instance.status()) && !io.github.dhluong90.bpm.process.api.Incident.RESOLVED.equals(
+                incident.status())) {
+            throw new InvalidStateException("Instance " + instance.id() + " is " + instance.status());
+        }
+        StoredDefinition definition = store.definition(tenant, instance.definitionId()).orElseThrow();
+        return new LockedIncident(incident, instance, definition);
+    }
+
+    private static void requireIncidentLock(ProcessStore.IncidentRow incident, long expected) {
+        if (incident.lockVersion() != expected) {
+            throw new VersionConflictException("Incident " + incident.id() + " is at lock version "
+                    + incident.lockVersion() + ", not " + expected);
+        }
+    }
+
+    /** The token the incident holds on its step, which must still wait there. */
+    private io.github.dhluong90.bpm.process.internal.exec.Token waitingToken(String tenant, LockedIncident locked) {
+        ProcessStore.IncidentRow incident = locked.incident();
+        return store.tokens(tenant, incident.instanceId()).stream()
+                .filter(t -> t.id().equals(incident.tokenId()) && t.status() == TokenStatus.WAITING_ASYNC
+                        && t.nodeId().equals(incident.nodeId()))
+                .findFirst()
+                .orElseThrow(() -> new InvalidStateException("The token of incident " + incident.id()
+                        + " no longer waits on " + incident.nodeId()));
+    }
+
+    /**
+     * Completes the waiting step with the proposed output and resolves the incident {@code COMPLETED_MANUALLY}
+     * (PRE-078), in the caller's transaction: history records the proposer, the approver, the reason and the output
+     * as history may keep it, and {@code processes.incident.resolved.v1} carries both identities.
+     */
+    private ProcessStore.IncidentRow applyResolution(LockedIncident locked, ProcessStore.IncidentRow pending,
+            io.github.dhluong90.bpm.process.internal.exec.Token token, JobRow job, String approver, String comment,
+            Instant now) {
+        Map<String, Object> output = Values.readMap(pending.proposalOutputJson());
+        run(locked.definition(), locked.instance(), stateOf(locked.instance().tenantId(), locked.instance()),
+                new Command.AsyncResult(token.id(), token.activityInstanceId(), new StepResult.Completed(output)),
+                RunAs.REQUEST);
+        ProcessStore.IncidentRow current = store.lockIncident(pending.tenantId(), pending.id()).orElseThrow();
+        ProcessStore.IncidentRow resolved = current.resolved(COMPLETED_MANUALLY, approver, now);
+        writeIncident(resolved);
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("proposedBy", pending.proposedBy());
+        extra.put("reason", pending.proposalReason());
+        extra.put("output", auditedOutput(job, output));
+        extra.put("approvalMode", pending.approvalMode());
+        if (comment != null) {
+            extra.put("comment", comment);
+        }
+        recordResolved(resolved, approver, token.activityInstanceId(), extra, now);
+        return resolved;
+    }
+
+    /**
+     * Closes the incident a retry left on a token once the step is accepted or routed to its reviewer (PRE-077):
+     * {@code RESOLVED} with {@code RETRY_SUCCEEDED}, in the result transaction. Nothing happens without one.
+     */
+    private void closeRetried(String tenant, String instanceId, String tokenId, Instant now) {
+        for (ProcessStore.IncidentRow open : store.openIncidents(tenant, instanceId)) {
+            if (open.retrying() && java.util.Objects.equals(open.tokenId(), tokenId)) {
+                ProcessStore.IncidentRow resolved = open.resolved(RETRY_SUCCEEDED, RESOLVED_BY_ENGINE, now);
+                writeIncident(resolved);
+                recordResolved(resolved, RESOLVED_BY_ENGINE, null, Map.of(), now);
+            }
+        }
+    }
+
+    /** PRE-079: a cancel resolves every unresolved incident of the instance in the cancel transaction. */
+    private void closeOnCancel(String tenant, String instanceId, String caller, Instant now) {
+        for (ProcessStore.IncidentRow open : store.openIncidents(tenant, instanceId)) {
+            ProcessStore.IncidentRow resolved = open.resolved(INSTANCE_CANCELLED, caller, now);
+            writeIncident(resolved);
+            recordResolved(resolved, caller, null, Map.of(), now);
+        }
+    }
+
+    private void recordResolved(ProcessStore.IncidentRow resolved, String actor, String attemptId,
+            Map<String, Object> extra, Instant now) {
+        InstanceRow instance = store.findInstance(resolved.tenantId(), resolved.instanceId()).orElseThrow();
+        Map<String, Object> details = incidentDetails(resolved);
+        details.put("resolution", resolved.resolution());
+        details.put("resolvedBy", resolved.resolvedBy());
+        details.putAll(extra);
+        store.appendHistory(resolved.tenantId(), resolved.instanceId(), resolved.definitionId(), List.of(
+                new HistoryEntry(INCIDENT_RESOLVED, resolved.nodeId(), resolved.tokenId(), attemptId, actor, now,
+                        details)));
+        Map<String, Object> payload = incidentPayload(resolved, instance);
+        payload.put("resolution", resolved.resolution());
+        payload.put("resolvedBy", resolved.resolvedBy());
+        if (resolved.proposedBy() != null && COMPLETED_MANUALLY.equals(resolved.resolution())) {
+            payload.put("proposedBy", resolved.proposedBy());
+            payload.put("approvalMode", resolved.approvalMode());
+        }
+        publishIncident(resolved, "processes.incident.resolved.v1", payload, instance, now);
+        LOG.log(System.Logger.Level.INFO, "process.incident.resolved tenant={0} incident={1} resolution={2}",
+                resolved.tenantId(), resolved.id(), resolved.resolution());
+    }
+
+    private void writeIncident(ProcessStore.IncidentRow updated) {
+        if (store.updateIncident(updated) != 1) {
+            throw new VersionConflictException("Incident " + updated.id() + " changed meanwhile");
+        }
+    }
+
+    private static Map<String, Object> incidentDetails(ProcessStore.IncidentRow incident) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("incidentId", incident.id());
+        details.put("errorCode", incident.errorCode());
+        details.put("retryCount", incident.retryCount());
+        details.put("status", incident.status());
+        return details;
+    }
+
+    private static Map<String, Object> incidentPayload(ProcessStore.IncidentRow incident, InstanceRow instance) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("incidentId", incident.id());
+        payload.put("instanceId", incident.instanceId());
+        payload.put("nodeId", incident.nodeId());
+        payload.put("errorCode", incident.errorCode());
+        payload.put("retryCount", incident.retryCount());
+        payload.put("status", incident.status());
+        payload.put("definitionKey", instance.definitionKey());
+        payload.put("version", instance.definitionVersion());
+        if (instance.businessKey() != null) {
+            payload.put("businessKey", instance.businessKey());
+        }
+        return payload;
+    }
+
+    /** The event id derives from the incident id and the lock version the change reaches, so a replay repeats it. */
+    private void publishIncident(ProcessStore.IncidentRow incident, String type, Map<String, Object> payload,
+            InstanceRow instance, Instant now) {
+        publish(new ProcessEventPublisher.Event(Ids.child(incident.id(), incident.lockVersion() + 1), type,
+                incident.tenantId(), now, payload), instance.id());
+    }
+
+    /**
+     * The output as history and the incident view keep it: an agent step's output masked by its output schema's
+     * policy, as its answers are (#52); another step's output as given, since it has no masking policy.
+     */
+    private Map<String, Object> auditedOutput(JobRow job, Map<String, Object> output) {
+        if (job == null) {
+            return output;
+        }
+        ResultGuard guard = guards.get(job.jobKind());
+        return guard == null ? output : guard.auditOutput(Values.readMap(job.payloadJson()), output);
+    }
+
+    private java.util.Optional<JobRow> jobOf(String tenant, ProcessStore.IncidentRow incident) {
+        if (incident.tokenId() == null) {
+            return java.util.Optional.empty();
+        }
+        return store.tokens(tenant, incident.instanceId()).stream().filter(t -> t.id().equals(incident.tokenId()))
+                .findFirst().flatMap(t -> t.activityInstanceId() == null ? java.util.Optional.empty()
+                        : jobs.findJob(tenant, t.activityInstanceId()));
+    }
+
+    private io.github.dhluong90.bpm.process.api.Incident incidentView(ProcessStore.IncidentRow row, JobRow job,
+            String caller, java.util.Set<String> held) {
+        io.github.dhluong90.bpm.process.api.PendingResolution pending = row.proposedBy() == null ? null
+                : new io.github.dhluong90.bpm.process.api.PendingResolution(row.proposedBy(), row.proposedAt(),
+                        row.proposalReason(), auditedOutput(job, row.proposalOutputJson() == null ? Map.of()
+                                : Values.readMap(row.proposalOutputJson())), row.approvalMode());
+        return new io.github.dhluong90.bpm.process.api.Incident(row.id(), row.instanceId(), row.nodeId(), row.tokenId(),
+                row.errorCode(), row.causeSummary(), row.retryCount(), row.status(), row.lockVersion(), row.createdAt(),
+                row.resolvedAt(), row.resolution(), row.resolvedBy(), pending, row.retrying(),
+                incidentActions(row.status(), row.retrying(), row.errorCode(), row.proposedBy(), caller, held));
+    }
+
+    private io.github.dhluong90.bpm.process.api.Incident withIncidentActions(
+            io.github.dhluong90.bpm.process.api.Incident i, String caller) {
+        return new io.github.dhluong90.bpm.process.api.Incident(i.id(), i.instanceId(), i.nodeId(), i.tokenId(),
+                i.errorCode(), i.causeSummary(), i.retryCount(), i.status(), i.lockVersion(), i.createdAt(),
+                i.resolvedAt(), i.resolution(), i.resolvedBy(), i.pendingResolution(), i.retrying(),
+                incidentActions(i.status(), i.retrying(), i.errorCode(), i.pendingResolution() == null ? null
+                        : i.pendingResolution().proposedBy(), caller, callers.currentPermissions()));
+    }
+
+    /** What the caller may do now (PRE-080): computed from the row, the caller and its permissions. */
+    private static List<String> incidentActions(String status, boolean retrying, String errorCode, String proposedBy,
+            String caller, java.util.Set<String> held) {
+        if (!held.contains(PERMISSION_INCIDENT_MANAGE)) {
+            return List.of();
+        }
+        List<String> actions = new ArrayList<>();
+        if (io.github.dhluong90.bpm.process.api.Incident.OPEN.equals(status) && !retrying) {
+            if (!NOT_RETRYABLE.contains(errorCode)) {
+                actions.add("retry");
+            }
+            actions.add("resolve");
+        }
+        if (io.github.dhluong90.bpm.process.api.Incident.RESOLUTION_PENDING.equals(status)
+                && !caller.equals(proposedBy)) {
+            actions.add("approve-resolution");
+            actions.add("reject-resolution");
+        }
+        return actions;
+    }
+
+    private InstanceState stateOf(String tenant, InstanceRow row) {
+        return new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
+                InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
+                participants(tenant, row), row.sequence());
+    }
+
+    private String requiredReason(String reason) {
+        if (reason == null || reason.isBlank() || reason.length() > settings.reasonMaxLength()) {
+            throw new InputInvalidException("reason is required, 1 to " + settings.reasonMaxLength()
+                    + " characters (lifecycle.reason-max-length)");
+        }
+        return reason;
+    }
+
+    private static void requireKey(String idempotencyKey, String what) {
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException(what + " needs an Idempotency-Key");
+        }
+    }
+
+    private static void requireIncidentId(String incidentId) {
+        if (incidentId == null || incidentId.isBlank() || incidentId.length() > 26) {
+            throw incidentNotFound(String.valueOf(incidentId));
+        }
+    }
+
+    private static io.github.dhluong90.bpm.process.api.IncidentNotFoundException incidentNotFound(String id) {
+        return new io.github.dhluong90.bpm.process.api.IncidentNotFoundException("No incident " + id
+                + " in this tenant");
     }
 
     /**
@@ -1993,6 +2570,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
                     participants(tenant, row), row.sequence());
             run(definition, row, state, new Command.Cancel(reason, caller), RunAs.REQUEST);
+            closeOnCancel(tenant, row.id(), caller, clock.instant());
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
     }
@@ -2353,7 +2931,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     // ---- shell --------------------------------------------------------------------------------------------
 
-    private void run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first, RunAs as) {
+    private List<IncidentSite> run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first,
+            RunAs as) {
         Compiled compiled = compiled(definition);
         InstanceState state = initial;
         List<HistoryEntry> history = new ArrayList<>();
@@ -2582,6 +3161,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         recorded.values().forEach(store::recordStepResult);
         store.appendHistory(tenant, state.instanceId(), definition.id(), history);
         newIncidents.forEach(site -> raiseIncident(site, now));
+        return newIncidents;
     }
 
     /**

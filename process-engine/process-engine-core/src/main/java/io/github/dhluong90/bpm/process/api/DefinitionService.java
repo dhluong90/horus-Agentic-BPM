@@ -71,7 +71,39 @@ public interface DefinitionService {
      * @throws VersionSupersededException when a newer version of the key is already active (PRE-021)
      * @throws InvalidStateException when the version is not pending approval
      */
-    DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment, String idempotencyKey);
+    default DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment,
+            String idempotencyKey) {
+        return approve(ref, expectedLockVersion, null, comment, idempotencyKey);
+    }
+
+    /**
+     * Approves a pending version as a second person, bound to the content the approver reviewed (PRE-177, PD-139):
+     * {@code expectedDefinitionHash} is the {@code definitionHash} the approver saw, and the version is approved only
+     * when it is still the stored one. The check runs under the key lock after the status, four-eyes and lock-version
+     * checks, so a refusal writes, publishes and records nothing. With
+     * {@code horus.bpm.processes.approval.require-content-hash} on (the default; {@code false} is accepted on the
+     * {@code dev} profile only) an approval without a hash is refused before anything is read.
+     *
+     * <p>Where the hash comes from: the approver's screen shows the version and, when the change list against the
+     * effective version is complete, its hash. A change list cut off at its limit carries no hash that may be
+     * approved, so the client has nothing to send until every page has been read.
+     *
+     * @param ref the version
+     * @param expectedLockVersion its lock version
+     * @param expectedDefinitionHash the {@code definitionHash} the approver reviewed, 64 lower-case hexadecimal
+     *     characters; null only when the setting is off
+     * @param comment an optional comment, stored in the history
+     * @param idempotencyKey idempotency key, or null
+     * @return the version
+     * @throws ContentHashRequiredException when no hash is named and the setting is on
+     * @throws ContentChangedException when the stored content is not the content reviewed; nothing is written
+     * @throws SelfApprovalForbiddenException when the caller requested the approval (PRE-019); nothing is written
+     * @throws VersionSupersededException when a newer version of the key is already active (PRE-021)
+     * @throws InvalidStateException when the version is not pending approval
+     * @throws InputInvalidException when the hash is not 64 lower-case hexadecimal characters
+     */
+    DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
+            String comment, String idempotencyKey);
 
     /**
      * Sends a pending version back to {@code DRAFT} with a reason (PRE-021).

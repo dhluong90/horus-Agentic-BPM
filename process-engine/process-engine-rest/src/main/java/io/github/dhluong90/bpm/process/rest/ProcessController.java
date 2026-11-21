@@ -134,14 +134,19 @@ public class ProcessController {
         return version(definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom, idempotencyKey));
     }
 
-    /** Approves a pending version as a second person ({@code processes:approve}). Body, optional: {@code comment}. */
+    /**
+     * Approves a pending version as a second person ({@code processes:approve}). Body: {@code expectedDefinitionHash},
+     * the hash of the content reviewed (required while {@code approval.require-content-hash} is on, PRE-177), and an
+     * optional {@code comment}.
+     */
     @PostMapping("/definitions/{key}/versions/{version}:approve")
     public ResponseEntity<byte[]> approve(@PathVariable("key") String key, @PathVariable("version") int version,
             HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         long lock = requiredLockVersion(ifMatch);
-        return version(definitions.approve(DefinitionRef.of(key, version), lock, text(optionalBody(http), "comment"),
-                idempotencyKey));
+        JsonNode body = optionalBody(http);
+        return version(definitions.approve(DefinitionRef.of(key, version), lock, text(body, "expectedDefinitionHash"),
+                text(body, "comment"), idempotencyKey));
     }
 
     /** Sends a pending version back to draft ({@code processes:approve}). Body: {@code reason}, required. */

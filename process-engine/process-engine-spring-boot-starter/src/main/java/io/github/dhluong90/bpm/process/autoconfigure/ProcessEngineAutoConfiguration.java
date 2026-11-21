@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.host.autoconfigure.RetireLastVersion;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.process.api.DefinitionService;
+import io.github.dhluong90.bpm.process.api.IncidentService;
 import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
@@ -41,6 +42,7 @@ import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineSchemaMigrator;
 import io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions;
 import io.github.dhluong90.bpm.process.rest.AgentReplayController;
+import io.github.dhluong90.bpm.process.rest.IncidentController;
 import io.github.dhluong90.bpm.process.rest.ProcessController;
 import io.github.dhluong90.bpm.process.rest.ProcessProblemDetails;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
@@ -96,7 +98,7 @@ public class ProcessEngineAutoConfiguration {
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
-            "processes:step:complete", "processes:agent:replay");
+            "processes:step:complete", "processes:agent:replay", "processes:incident:manage");
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
     static final String REMOVED_AUTO_APPROVE = "horus.bpm.processes.definitions-auto-approve";
     private static final Log LOG = LogFactory.getLog(ProcessEngineAutoConfiguration.class);
@@ -358,6 +360,18 @@ public class ProcessEngineAutoConfiguration {
             LOG.warn(ApproverMustDifferFrom.PROPERTY + "=requester relaxes four eyes for process definitions: the "
                     + "importer of a version may approve it (PD-096). Every approval records this.");
         }
+        if (!properties.approval().requireContentHash()) {
+            // PD-139: an approval that names no reviewed content is a relaxation of maker-checker.
+            requireDevProfileOnly(environment, "horus.bpm.processes.approval.require-content-hash=false");
+            LOG.warn("Process definition approvals need not name the reviewed content (horus.bpm.processes.approval"
+                    + ".require-content-hash=false, dev profile).");
+        }
+        if (properties.incidents().toSetting() == EngineSettings.ResolveApproval.SINGLE) {
+            // PD-126: one person resolving an incident with an output of their choosing is a maker-checker gap.
+            requireDevProfileOnly(environment, "horus.bpm.processes.incidents.resolve-approval=single");
+            LOG.warn("Incidents are resolved by one person (horus.bpm.processes.incidents.resolve-approval=single, "
+                    + "dev profile).");
+        }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");
             LOG.warn("Maker-checker for process definitions is off (horus.bpm.processes.maker-checker.enabled, dev "
@@ -445,6 +459,12 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(IncidentService.class)
+    IncidentService processIncidentService(ProcessServices services) {
+        return services;
+    }
+
+    @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
     ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts) {
         return new ProcessQueries(services, liveCounts);
@@ -463,7 +483,9 @@ public class ProcessEngineAutoConfiguration {
         return ModuleDescriptor.builder("processes", ProcessEngineModule.engineVersion(), "v1")
                 .settings(Map.of(ApproverMustDifferFrom.META_SETTING, ApproverMustDifferFrom.from(environment).value(),
                         RetireApproval.META_SETTING, RetireApproval.from(environment).value(),
-                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value()))
+                        RetireLastVersion.META_SETTING, RetireLastVersion.from(environment).value(),
+                        "approval.require-content-hash", properties.approval().requireContentHash(),
+                        "incidents.resolve-approval", properties.incidents().resolveApproval()))
                 .permissions(PERMISSIONS)
                 .rolePermissions(properties.security().rolePermissions())
                 .build();
@@ -502,6 +524,12 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         AgentReplayController processEngineAgentReplayController(AgentReplays replays) {
             return new AgentReplayController(replays);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        IncidentController processEngineIncidentController(IncidentService incidents) {
+            return new IncidentController(incidents);
         }
 
         @Bean

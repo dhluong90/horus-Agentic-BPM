@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * Inputs of the kernel. Each is applied under the instance row lock by the shell.
  */
-public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted {
+public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.RetryStep {
 
     /**
      * Starts the instance at its none start event.
@@ -159,6 +159,22 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
     record ChildCompleted(String childInstanceId, String tokenId, Map<String, Object> output) implements Command {
         public ChildCompleted {
             output = output == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(output));
+        }
+    }
+
+    /**
+     * An operator retries a step that waits on an incident and has no job (#68, PRE-077): a local step whose handler
+     * returned a business error. The token, waiting on the step under {@code attemptId}, enters the step again, so the
+     * handler runs again in this transaction under a new attempt id.
+     *
+     * @param tokenId the token waiting on the step
+     * @param attemptId the token's current attempt id, the one the incident was raised under
+     * @param actor the operator
+     */
+    record RetryStep(String tokenId, String attemptId, String actor) implements Command {
+        public RetryStep {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
+            Objects.requireNonNull(attemptId, "attemptId must not be null");
         }
     }
 }

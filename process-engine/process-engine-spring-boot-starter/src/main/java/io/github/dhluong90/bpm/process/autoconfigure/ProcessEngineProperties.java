@@ -31,6 +31,8 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     and {@code jobs.*}
  * @param agents agent step settings (#59)
  * @param replay offline replay of agent answers (#98)
+ * @param approval what a definition approval must name (PD-139)
+ * @param incidents how incidents are resolved (PD-126)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -48,7 +50,9 @@ public record ProcessEngineProperties(
         @DefaultValue Adapters adapters,
         @DefaultValue Runners runners,
         @DefaultValue Agents agents,
-        @DefaultValue Replay replay) {
+        @DefaultValue Replay replay,
+        @DefaultValue Approval approval,
+        @DefaultValue Incidents incidents) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -418,6 +422,35 @@ public record ProcessEngineProperties(
     }
 
     /**
+     * @param requireContentHash an approval of a definition version must name {@code expectedDefinitionHash}, the
+     *     hash of the content the approver reviewed (PD-139, PRE-177); {@code false} is accepted on the {@code dev}
+     *     profile only
+     */
+    public record Approval(@DefaultValue("true") boolean requireContentHash) {
+    }
+
+    /**
+     * @param resolveApproval {@code four-eyes} (the default): resolving an incident with an operator's output is a
+     *     proposal that a second holder of {@code processes:incident:manage}, never the proposer, approves or
+     *     rejects (PD-126, PRE-078); {@code single} applies the proposer's resolution at once and is accepted on the
+     *     {@code dev} profile only
+     */
+    public record Incidents(@DefaultValue("four-eyes") String resolveApproval) {
+
+        public Incidents {
+            if (!"four-eyes".equals(resolveApproval) && !"single".equals(resolveApproval)) {
+                throw new IllegalArgumentException("horus.bpm.processes.incidents.resolve-approval must be four-eyes "
+                        + "or single, was " + resolveApproval);
+            }
+        }
+
+        EngineSettings.ResolveApproval toSetting() {
+            return "single".equals(resolveApproval) ? EngineSettings.ResolveApproval.SINGLE
+                    : EngineSettings.ResolveApproval.FOUR_EYES;
+        }
+    }
+
+    /**
      * @param rolePermissions host authority (for example {@code ROLE_CARD_OFFICER}) to engine permissions
      */
     public record Security(@DefaultValue Map<String, List<String>> rolePermissions) {
@@ -427,6 +460,7 @@ public record ProcessEngineProperties(
             EngineSettings.RetireLastVersionRule retireLastVersion) {
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
                 idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
-                lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion);
+                lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion,
+                approval.requireContentHash(), incidents.toSetting());
     }
 }

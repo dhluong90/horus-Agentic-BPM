@@ -233,6 +233,55 @@ public final class Views {
                 n.has("review") && n.get("review").isObject() ? Values.readMap(n.get("review").toString()) : null);
     }
 
+    /** @param i incident @return JSON tree, with {@code allowedActions} (#68) */
+    public static ObjectNode incident(io.github.dhluong90.bpm.process.api.Incident i) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("id", i.id()).put("instanceId", i.instanceId()).put("nodeId", i.nodeId());
+        putNullable(o, "tokenId", i.tokenId());
+        o.put("errorCode", i.errorCode()).put("causeSummary", i.causeSummary()).put("retryCount", i.retryCount())
+                .put("status", i.status()).put("lockVersion", i.lockVersion()).put("retrying", i.retrying())
+                .put("createdAt", i.createdAt().toString());
+        putNullable(o, "resolvedAt", i.resolvedAt() == null ? null : i.resolvedAt().toString());
+        putNullable(o, "resolution", i.resolution());
+        putNullable(o, "resolvedBy", i.resolvedBy());
+        io.github.dhluong90.bpm.process.api.PendingResolution p = i.pendingResolution();
+        if (p == null) {
+            o.putNull("pendingResolution");
+        } else {
+            ObjectNode proposal = o.putObject("pendingResolution");
+            proposal.put("proposedBy", p.proposedBy()).put("proposedAt", p.proposedAt().toString());
+            putNullable(proposal, "reason", p.reason());
+            proposal.set("output", Values.toJson(p.output()));
+            putNullable(proposal, "approvalMode", p.approvalMode());
+        }
+        ArrayNode actions = o.putArray("allowedActions");
+        i.allowedActions().forEach(actions::add);
+        return o;
+    }
+
+    /** The stored answer of an incident command: the incident without the caller's actions. */
+    static String incidentToJson(io.github.dhluong90.bpm.process.api.Incident i) {
+        ObjectNode o = incident(i);
+        o.remove("allowedActions");
+        return EngineJson.JSON.writeValueAsString(o);
+    }
+
+    static io.github.dhluong90.bpm.process.api.Incident incidentFromJson(String json) {
+        JsonNode n = EngineJson.JSON.readTree(json);
+        JsonNode p = n.get("pendingResolution");
+        io.github.dhluong90.bpm.process.api.PendingResolution pending = p == null || p.isNull() ? null
+                : new io.github.dhluong90.bpm.process.api.PendingResolution(p.get("proposedBy").stringValue(),
+                        Instant.parse(p.get("proposedAt").stringValue()), text(p, "reason"),
+                        p.has("output") && p.get("output").isObject() ? Values.readMap(p.get("output").toString())
+                                : Map.of(), text(p, "approvalMode"));
+        return new io.github.dhluong90.bpm.process.api.Incident(n.get("id").stringValue(),
+                n.get("instanceId").stringValue(), n.get("nodeId").stringValue(), text(n, "tokenId"),
+                n.get("errorCode").stringValue(), n.get("causeSummary").stringValue(), n.get("retryCount").intValue(),
+                n.get("status").stringValue(), n.get("lockVersion").longValue(),
+                Instant.parse(n.get("createdAt").stringValue()), instant(n, "resolvedAt"), text(n, "resolution"),
+                text(n, "resolvedBy"), pending, n.get("retrying").booleanValue(), List.of());
+    }
+
     /** @param d summary @return JSON tree */
     public static ObjectNode definitionSummary(DefinitionSummary d) {
         ObjectNode o = EngineJson.NODES.objectNode().put("key", d.key());

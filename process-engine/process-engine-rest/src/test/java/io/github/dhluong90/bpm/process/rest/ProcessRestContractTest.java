@@ -214,8 +214,8 @@ class ProcessRestContractTest {
         }
 
         @Override
-        public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String comment,
-                String idempotencyKey) {
+        public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
+                String comment, String idempotencyKey) {
             throw new UnsupportedOperationException();
         }
 
