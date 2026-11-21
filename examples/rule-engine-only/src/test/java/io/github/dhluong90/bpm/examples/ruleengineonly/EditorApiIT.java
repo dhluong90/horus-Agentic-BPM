@@ -189,7 +189,7 @@ class EditorApiIT {
                 .query(Long.class).single()).isEqualTo(1L);
         // and lan sees request-publish again
         assertThat(send(t, "lan", "GET", "/rule-sets/card-fee/versions/2", null, null, null, null).json()
-                .path("allowedActions").toString()).isEqualTo("[\"request-publish\"]");
+                .path("allowedActions").toString()).isEqualTo("[\"request-publish\",\"discard\"]");
     }
 
     /** PD-089 over HTTP: the requester who also holds rules:approve cannot reject their own request and is pointed to :withdraw. */
@@ -298,7 +298,7 @@ class EditorApiIT {
         assertThat(actions(t, "lan", 2)).isEqualTo("[\"withdraw\"]");
         assertThat(actions(t, "minh", 2)).isEqualTo("[\"approve\",\"reject\"]");
         assertThat(actions(t, "dan", 2)).isEqualTo("[]");
-        assertThat(actions(t, "lan", 3)).isEqualTo("[\"request-publish\"]");
+        assertThat(actions(t, "lan", 3)).isEqualTo("[\"request-publish\",\"discard\"]");
         assertThat(actions(t, "minh", 3)).isEqualTo("[]");
         // v1 published: the approvers may retire it (#28), the reader nothing
         assertThat(actions(t, "lan", 1)).isEqualTo("[\"retire\"]");
@@ -351,7 +351,7 @@ class EditorApiIT {
         assertThat(withdrawn.status()).as(withdrawn.body()).isEqualTo(200);
         assertThat(withdrawn.json().path("status").asString()).isEqualTo("DRAFT");
         assertThat(withdrawn.json().path("requestedBy").isNull()).isTrue();
-        assertThat(withdrawn.json().path("allowedActions").toString()).isEqualTo("[\"request-publish\"]");
+        assertThat(withdrawn.json().path("allowedActions").toString()).isEqualTo("[\"request-publish\",\"discard\"]");
         assertThat(withdrawn.etag()).isNotEqualTo(pending.etag());
         assertThat(replay.status()).isEqualTo(200);
         assertThat(replay.body()).isEqualTo(withdrawn.body());
