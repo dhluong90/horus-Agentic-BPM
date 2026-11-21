@@ -1720,8 +1720,11 @@ paths:
         contract: `RULE_MATCHED`, `NO_RULE_MATCHED`, `UNIQUE_HIT_VIOLATION`, `EVALUATION_ERROR`, `VALUE_MISSING` and
         `VALUE_MASKED`, each with named `params`. `text` is rendered from `reasons` through a message catalogue:
         `lang`, then `Accept-Language`, choose among the catalogues the host has (English and Vietnamese ship),
-        else `explain.default-language`; `language` says which was used. Numbers in `text` have no grouping and
-        money is in major units with its currency code (`10000 VND`); JSON values keep money in minor units. A
+        else `explain.default-language`; `language` says which was used. `text` is the author's sentence of the matched
+        row (or of no match) in that language when the rule set has one, else the generated sentence; `textSource`
+        says which. Names are the declared `label` of an input or output, else the name in words. Numbers and money are
+        grouped for the language and money keeps its currency code (`10,000 VND`, `10.000 VND`); booleans read Yes or
+        No; JSON values keep money in minor units. A
         masked input shows its stored `hmac:<keyId>:<hex>` with `masked: true` (RLE-031); the plain value is never
         available. The same decision always gives the same body. A decision of another tenant is
         `404 DECISION_NOT_FOUND`. Writes nothing.
@@ -2687,7 +2690,10 @@ components:
             a function the host did not register),
             `INVALID_LITERAL`, `INVALID_PATTERN`, `EXPRESSION_TOO_LONG`, `EXPRESSION_TOO_DEEP` (more than
             64 levels, a chain such as `a + a + ...` included). Other cell problems: `UNKNOWN_OUTPUT`,
-            `MASKED_INPUT_IN_OUTPUT`. A table whose worst case is over the step budget:
+            `MASKED_INPUT_IN_OUTPUT`. Explanation templates (`explain`, `explanations.noMatch`), with `column` set to
+            `explain`: `UNKNOWN_PLACEHOLDER`, `MASKED_INPUT_IN_TEMPLATE` (a placeholder of an input declared
+            `mask: true`), `TEMPLATE_TOO_LONG` (over 500 characters) and `INPUT_INVALID` (a language tag that is not
+            BCP 47, or more than 10 languages). A table whose worst case is over the step budget:
             `EVALUATION_BUDGET_EXCEEDED`, on the first rule from which it is over, with a null `column`.
             Null for a problem of the document as a whole. New codes may be added.
           examples: [TYPE_MISMATCH]
@@ -3068,7 +3074,7 @@ components:
     DecisionExplanation:
       type: object
       description: A logged decision explained from its row and its stored version (RLE-030, RLE-031, DESIGN section 4.7)
-      required: [decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched, outputs, reasons, language, text]
+      required: [decisionId, ruleSet, version, hitPolicy, outcome, errorCode, clock, matched, outputs, reasons, language, text, textSource]
       properties:
         decisionId: { type: string }
         ruleSet: { type: string }
@@ -3098,7 +3104,11 @@ components:
           description: The language `text` is written in
         text:
           type: string
-          description: The plain-language explanation rendered from `reasons`; a client never parses it
+          description: The plain-language explanation rendered from `reasons`, or the author's template; a client never parses it
+        textSource:
+          type: string
+          enum: [TEMPLATE, GENERATED]
+          description: '`TEMPLATE` when `text` is the author''s sentence for the requested language; `GENERATED` for the catalogue sentence. Failures are always `GENERATED`'
     ExplainedRow:
       type: object
       required: [ruleId, position, conditions, outputs]

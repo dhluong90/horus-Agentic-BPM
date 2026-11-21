@@ -36,4 +36,36 @@ public interface DecisionExplainer {
      * @return the text, one or more sentences
      */
     String text(DecisionExplanation explanation, String language);
+
+    /**
+     * Returns the languages this renderer can write for one explanation: {@link #languages()} and, for a renderer
+     * that uses the author's sentences, the languages those are written in.
+     *
+     * @param explanation the explanation, without text
+     * @return language codes, lower case
+     */
+    default Set<String> languagesFor(DecisionExplanation explanation) {
+        return languages();
+    }
+
+    /**
+     * Writes the explanation in one language and says where the sentence came from. The default writes
+     * {@link #text} and reports it as generated.
+     *
+     * @param explanation the explanation, without text
+     * @param language a member of {@link #languagesFor(DecisionExplanation)}
+     * @return the text and its source
+     */
+    default Rendered render(DecisionExplanation explanation, String language) {
+        return new Rendered(text(explanation, language), DecisionExplanation.GENERATED);
+    }
+
+    /**
+     * A sentence and its source.
+     *
+     * @param text the sentence
+     * @param source {@link DecisionExplanation#TEMPLATE} or {@link DecisionExplanation#GENERATED}
+     */
+    record Rendered(String text, String source) {
+    }
 }
