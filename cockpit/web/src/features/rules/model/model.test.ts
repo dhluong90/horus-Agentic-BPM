@@ -5,7 +5,8 @@ import { draftReducer, initialDraft } from './draft';
 import { placeError } from './engineErrors';
 import { nonAsciiCharacters } from './nonAscii';
 import { formatDecimalText, formatMoney, groupWhileTyping, toMinorUnits } from './money';
-import { columnLabel, readCondition, readOutput, readResult } from './reading';
+import { clauseLabel, columnLabel, readCondition, readOutput, readResult } from './reading';
+import { emptyAmountHint } from './cellMessages';
 import { valueLabel } from './cells';
 import { nextRowId, sameRows, toDocument, toRows } from './table';
 
@@ -152,5 +153,27 @@ describe('Try it currencies', () => {
     expect(currencyOfInput(mixed, 'tier')).toEqual({ kind: 'unknown' });
     const disagree: RuleSetDefinition = { ...mixed, rules: [...mixed.rules, { id: 'R3', when: { balance: '< 5000000 VND' }, then: {} }] };
     expect(currencyOfInput(disagree, 'balance')).toEqual({ kind: 'mixed' });
+  });
+});
+
+describe('column labels and cell hints', () => {
+  it('CKP_006_a_column_reads_with_the_rule_sets_own_label_in_the_screen_language', () => {
+    // The display label arrives with the labels slice (#392): one text, or texts by language code.
+    expect(clauseLabel({ name: 'balance', label: { en: 'Balance', vi: 'Số dư' } }, 'vi')).toBe('Số dư');
+    expect(clauseLabel({ name: 'balance', label: { en: 'Balance' } }, 'vi')).toBe('Balance');
+    expect(clauseLabel({ name: 'txCount', label: 'Số giao dịch' }, 'en')).toBe('Số giao dịch');
+    // Without a label, the existing reading of the description or the name.
+    expect(clauseLabel({ name: 'txCount' }, 'vi')).toBe(columnLabel('txCount', undefined));
+    expect(clauseLabel({ name: 'tier', description: 'customer tier' }, 'vi')).toBe('Customer tier');
+  });
+
+  it('CKP_006_an_empty_amount_says_what_to_type', () => {
+    const compare = { kind: 'compare', op: '≥', amount: '', currency: 'VND' };
+    expect(emptyAmountHint(compare, '50,000,000 VND', 'VND')).toEqual({ key: 'cellHint.amountExample', params: { example: '50,000,000 VND' } });
+    expect(emptyAmountHint(compare, undefined, 'VND')).toEqual({ key: 'cellHint.amountIn', params: { currency: 'VND' } });
+    expect(emptyAmountHint({ kind: 'compare', amount: '', currency: undefined }, undefined, undefined)).toEqual({ key: 'cellHint.number', params: {} });
+    // A filled amount, or any other cell, shows the engine's sentence alone.
+    expect(emptyAmountHint({ ...compare, amount: '5' }, '50,000,000 VND', 'VND')).toBeUndefined();
+    expect(emptyAmountHint({ kind: 'choice' }, undefined, undefined)).toBeUndefined();
   });
 });

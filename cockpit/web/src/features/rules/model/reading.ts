@@ -107,3 +107,22 @@ export function columnLabel(name: string, description: string | undefined): stri
   const words = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replaceAll('_', ' ').toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
+
+/** The part of an input or output clause a column header needs. `label` arrives with the display labels slice (#392). */
+export interface LabelledClause { name: string; description?: string | undefined; [key: string]: unknown }
+
+/**
+ * A column's name in the reader's language: the rule set's own `label` when it has one, either one text or texts by
+ * language code; otherwise the readable form of its description or name ({@link columnLabel}). The cockpit never
+ * translates a rule set's names itself: the author's label is the only source of a localised column name.
+ */
+export function clauseLabel(clause: LabelledClause, locale: Locale): string {
+  const label = clause['label'];
+  if (typeof label === 'string' && label.trim() !== '') return label;
+  if (label !== null && typeof label === 'object') {
+    const byLocale = label as Readonly<Record<string, unknown>>;
+    const text = byLocale[locale] ?? byLocale['en'];
+    if (typeof text === 'string' && text.trim() !== '') return text;
+  }
+  return columnLabel(clause.name, clause.description);
+}

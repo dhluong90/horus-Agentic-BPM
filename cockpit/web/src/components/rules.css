@@ -103,6 +103,8 @@
 .cell-input::placeholder { color: var(--muted); font-style: italic; opacity: .8; }
 .cell-edit--bad .cell-input, .cell-input[aria-invalid="true"] { border-color: var(--bad-fill); box-shadow: 0 0 0 1px var(--bad-fill); background: var(--bad-soft); }
 .cell-error { color: var(--bad); font-size: 12px; line-height: 1.4; max-width: 260px; }
+/* The engine's own sentence under the cockpit's hint: quieter, on its own line. */
+.cell-error__detail { display: block; color: var(--muted); font-weight: 400; }
 .dt__row--bad > * { background: var(--bad-soft); }
 .dt__actions { white-space: nowrap; }
 .row-actions { display: inline-flex; gap: 2px; }
@@ -302,6 +304,15 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
   border: 1px dashed var(--line-strong); background: transparent; color: var(--muted); cursor: pointer; font: inherit;
 }
 .cell-any-edit:hover { border-color: var(--control); color: var(--ink-2); }
+/* What the dash means for this column ("Balance: any value"), on hover and keyboard focus only (styleguide 9: wildcard). */
+.cell-any-edit__hint { display: none; margin-left: 8px; color: var(--muted); font: var(--type-caption, 500 12px/1.4 var(--font-ui)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell-any-edit:hover .cell-any-edit__hint, .cell-any-edit:focus-visible .cell-any-edit__hint { display: inline; }
+/* An icon-only button names itself on hover and keyboard focus (styleguide elevation 4: tooltips). */
+.has-tip { position: relative; }
+.has-tip:hover::after, .has-tip:focus-visible::after {
+  content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; padding: 4px 8px; border-radius: var(--radius-s, 6px);
+  background: var(--surface); color: var(--ink); box-shadow: var(--sh-pop); font: var(--type-caption, 500 12px/1.4 var(--font-ui)); white-space: nowrap; pointer-events: none;
+}
 .picker { position: relative; display: block; }
 .picker__trigger {
   display: flex; align-items: center; gap: 4px; width: 100%; min-height: 36px; padding: 2px 8px; border-radius: var(--radius-s);
@@ -330,13 +341,30 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .editor-foot { border-top: 0; }
 
 /* Sticky save dock */
+/*
+ * The save dock (styleguide elevation 3). The editing page fills the window, so the dock sits at the bottom of the
+ * window whether the table is short or long, and it spans the content width like the cards above it. It eats the
+ * page's 40 px bottom padding, so the page never scrolls just to show it.
+ */
+.rs:has(> .edit-dock) { display: flex; flex-direction: column; min-height: calc(100dvh - var(--topbar-h, 64px) - 68px); }
 .edit-dock {
-  position: sticky; bottom: 0; z-index: 20; margin: 16px -24px -48px; padding: 14px 24px; display: flex; align-items: center; gap: 12px;
-  background: var(--surface); border-top: 1px solid var(--line);
+  position: sticky; bottom: 0; z-index: 20; margin: auto 0 -40px; padding: 12px var(--card-pad, 20px);
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface); border: 1px solid var(--line); border-bottom: 0; border-radius: var(--radius-l, 12px) var(--radius-l, 12px) 0 0;
   box-shadow: var(--sh-dock, 0 -8px 24px -12px rgba(15, 23, 42, .18));
 }
-.edit-dock__status { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; color: var(--ink-2); }
-.edit-dock__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn-fill); }
+.rs > .workbench--editing { margin-bottom: 16px; }
+.edit-dock__row { display: flex; align-items: center; gap: 12px; }
+.edit-dock__status { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink-2); min-height: 20px; }
+/* A save conflict: one warning line with its action, above the save row, so the grid above never moves. */
+.edit-dock__conflict {
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; border-radius: var(--radius-m, 8px);
+  background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-fill);
+}
+.edit-dock__conflict-text { flex: 1 1 auto; margin: 0; color: var(--ink); font: var(--type-label, 500 13px/1.45 var(--font-ui)); }
+.edit-dock__warn { color: var(--warn); }
+.edit-dock__conflict .btn { flex: none; }
+.edit-dock__dot { display: inline-block; vertical-align: middle; width: 8px; height: 8px; border-radius: 50%; background: var(--warn-fill); }
 /* Grid editor (CKP-006): the reason beside a disabled action, the count to fix, the keyboard hint, the conflict notice */
 .reason-line { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font: var(--type-label, 500 13px/1.45 var(--font-ui)); }
 .rs-head__action { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }

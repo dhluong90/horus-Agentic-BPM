@@ -35,19 +35,70 @@ interface State {
   scenario: Scenario;
   seed: () => StoredVersion[];
   hash: string;
-  primary: keyof typeof en;
+  /** The screen's primary action, checked above the fold; none on a screen without one (the Rules list, History). */
+  primary?: keyof typeof en;
   prepare?: (page: Page, locale: Locale, engine: Engine) => Promise<void>;
   ready: (page: Page, locale: Locale) => Promise<void>;
 }
 
+/** WCAG contrast ratio of two CSS colours `rgb(r, g, b)`. */
+function contrast(a: string, b: string): number {
+  const lum = (css: string) => {
+    const [r = 0, g = 0, bl = 0] = (css.match(/\d+(\.\d+)?/g) ?? []).map(Number).map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05);
+}
+
+/** Where the grid starts on screen: a conflict must not move it. */
+const gridTop = async (page: Page) => (await page.locator('table.dt--edit').boundingBox())?.y ?? -1;
+
 const STATES: readonly State[] = [
+  // The journey into the editor: the Rules list, the published version with New draft, the stored draft.
+  {
+    name: 'journey-1-rules-list',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules',
+    ready: async (page) => { await expect(page.getByRole('link', { name: /card-fee/ }).first()).toBeVisible(); },
+  },
+  {
+    name: 'journey-2-published-version',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/1',
+    primary: 'editor.newDraft',
+    ready: async (page, locale) => { await expect(page.getByRole('button', { name: WORDS[locale]['editor.newDraft'] })).toBeVisible(); },
+  },
+  {
+    name: 'journey-3-draft-version',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/2',
+    primary: 'dock.requestPublish',
+    ready: async (page, locale) => { await expect(page.getByRole('button', { name: WORDS[locale]['editor.edit'] })).toBeEnabled(); },
+  },
   {
     name: 'empty',
     scenario: 'rules-author',
     seed: draftSeed,
     hash: '#/rules/card-fee/2/edit',
     primary: 'editor.save',
-    ready: async (page, locale) => { await expect(page.getByText(WORDS[locale]['editor.block.nothing'])).toBeVisible(); },
+    ready: async (page, locale) => {
+      // Said once, beside Save; the dock sits at the bottom of the window, aligned to the cards.
+      await expect(page.getByText(WORDS[locale]['editor.block.nothing'])).toHaveCount(1);
+      const dock = await page.locator('.edit-dock').boundingBox();
+      const card = await page.locator('.workbench__main').boundingBox();
+      const viewport = page.viewportSize();
+      expect(Math.round((dock?.y ?? 0) + (dock?.height ?? 0))).toBe(viewport?.height);
+      expect(Math.round(dock?.x ?? 0)).toBe(Math.round(card?.x ?? -1));
+      expect(Math.round(dock?.width ?? 0)).toBe(Math.round(card?.width ?? -1));
+      // Disabled Save: muted text on the grey fill keeps at least 4.5:1 in both themes.
+      const save = page.getByRole('button', { name: WORDS[locale]['editor.save'], exact: true });
+      const [color, fill] = await save.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).backgroundColor]);
+      expect(contrast(color, fill)).toBeGreaterThanOrEqual(4.5);
+    },
   },
   {
     name: 'editing',
@@ -59,6 +110,10 @@ const STATES: readonly State[] = [
       await editFee(page, locale);
       await page.getByRole('button', { name: WORDS[locale]['editor.rowActions'].replace('{id}', 'R2') }).click();
       await page.getByRole('menuitem', { name: WORDS[locale]['editor.copy'].replace('{id}', 'R2') }).click();
+      // A wildcard says what its dash means for the column on hover and on focus.
+      const wildcard = page.getByRole('button', { name: WORDS[locale]['editor.anyCell'].replace('{cell}', cell(locale, 'R1', 'Balance')) });
+      await wildcard.hover();
+      await expect(wildcard.locator('.cell-any-edit__hint')).toHaveText(WORDS[locale]['editor.anyOf'].replace('{column}', 'Balance'));
     },
     ready: async (page) => { await expect(page.locator('.draft-changes__line')).toHaveCount(2); },
   },
@@ -73,8 +128,11 @@ const STATES: readonly State[] = [
       await page.keyboard.press('Enter');
     },
     ready: async (page, locale) => {
-      await expect(page.locator('.cell-edit--bad .cell-error')).toBeVisible();
+      const example = locale === 'en' ? '50,000,000 VND' : '50.000.000 VND';
+      await expect(page.locator('.cell-edit--bad .cell-error')).toContainText(WORDS[locale]['cellHint.amountExample'].replace('{example}', example));
       await expect(page.getByText(WORDS[locale]['editor.block.fix'])).toBeVisible();
+      // A refused cell never shows in the Changes card.
+      await expect(page.locator('#draft-changes')).not.toContainText('→');
     },
   },
   {
@@ -85,12 +143,20 @@ const STATES: readonly State[] = [
     primary: 'editor.save',
     prepare: async (page, locale, engine) => {
       await editFee(page, locale);
+      const before = await gridTop(page);
+      // Someone else saves the same draft first, with R5's fee changed.
       const stored = engine.store.find((v) => v.ruleSet === 'card-fee' && v.version === 2);
-      if (stored) stored.lockVersion = 1;
+      if (stored) {
+        stored.lockVersion = 1;
+        stored.definition = { ...stored.definition, rules: stored.definition.rules.map((r) => (r.id === 'R5' ? { ...r, then: { ...r.then, fee: '45000 VND' } } : r)) };
+      }
       await page.getByRole('button', { name: WORDS[locale]['editor.save'], exact: true }).click();
+      await expect(page.getByText(WORDS[locale]['editor.conflict.title'])).toBeVisible();
+      // The warning is in the dock: the grid stays where it was.
+      expect(await gridTop(page)).toBe(before);
     },
     ready: async (page, locale) => {
-      await expect(page.getByText(WORDS[locale]['editor.conflict.title'])).toBeVisible();
+      await expect(page.locator('.edit-dock__conflict')).toContainText(WORDS[locale]['editor.conflict.cells'].replace('{cells}', 'R5 Fee'));
       await expect(page.getByRole('button', { name: WORDS[locale]['editor.conflict.load'] })).toBeEnabled();
     },
   },
@@ -112,7 +178,18 @@ const STATES: readonly State[] = [
     seed: demoSeed,
     hash: '#/rules/card-fee/2/edit',
     primary: 'dock.approve',
-    ready: async (page, locale) => { await expect(page.getByText(WORDS[locale]['editor.block.pending'])).toBeVisible(); },
+    ready: async (page, locale) => {
+      const edit = page.getByRole('button', { name: WORDS[locale]['editor.edit'] });
+      await expect(edit).toBeDisabled();
+      await expect(page.getByText(WORDS[locale]['editor.block.pending'])).toHaveCount(1);
+    },
+  },
+  {
+    name: 'history',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/2/history',
+    ready: async (page, locale) => { await expect(page.getByText(WORDS[locale]['details.hash']).first()).toBeVisible(); },
   },
 ];
 
@@ -133,9 +210,11 @@ for (const state of STATES) {
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await state.prepare?.(page, locale, engine);
           await state.ready(page, locale);
-          const primary = await page.getByRole('button', { name: WORDS[locale][state.primary], exact: true }).first().boundingBox();
-          expect(primary, 'primary action is rendered').not.toBeNull();
-          expect((primary?.y ?? 0) + (primary?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+          if (state.primary !== undefined) {
+            const primary = await page.getByRole('button', { name: WORDS[locale][state.primary], exact: true }).first().boundingBox();
+            expect(primary, 'primary action is rendered').not.toBeNull();
+            expect((primary?.y ?? 0) + (primary?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+          }
           // One language, no ids, no codes, no raw JSON or YAML on the screen.
           const main = page.locator('main');
           await expect(main).not.toContainText(/CK-F-|CKP-0|PD-0|SYNTAX_ERROR|VERSION_CONFLICT|schemaVersion|"rules"/);

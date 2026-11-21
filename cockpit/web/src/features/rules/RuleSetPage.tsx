@@ -5,7 +5,7 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { useRulesSession } from './api/rulesContext';
 import { useApprove, useCopyVersion, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { saveFile } from '../../app/saveFile';
-import { DecisionCard, DetailsPanel, DraftsOffNote, editBlock, HeaderActions, type Review } from './components/ActionDock';
+import { DecisionCard, DetailsPanel, DraftsOffNote, editBlock, HeaderActions, showsEdit, type Review } from './components/ActionDock';
 import { ChangesView } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
 import { DraftWorkspace } from './components/DraftWorkspace';
@@ -106,7 +106,8 @@ interface WorkbenchProps {
   versions: readonly VersionSummary[];
   lens: Lens;
   navigate: Navigate;
-  say: (text: string) => void;
+  /** A success message; `sticky` keeps it until dismissed and moves the focus to the title, for a saved draft. */
+  say: (text: string, sticky?: boolean) => void;
   importVersion: { start: (document: RuleDocument, fileName: string) => void; isPending: boolean; error: unknown; fileName: string | undefined };
   /** The file each version was imported from on this page, by version number. */
   importedFrom: Readonly<Record<number, string>>;
@@ -120,10 +121,15 @@ interface WorkbenchProps {
 
 function Workbench({ version, versions, lens, navigate, say, importVersion, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain }: WorkbenchProps) {
   useEffect(() => {
-    if (focusTitle !== version.version) return;
-    window.document.getElementById('rule-set-title')?.focus();
-    onTitleFocused();
-  }, [focusTitle, onTitleFocused, version.version]);
+    // The editor closes on save before the table opens: the title of the table takes the focus, not the editor's.
+    if (focusTitle !== version.version || lens === 'edit') return;
+    // After the frame has moved the focus to the main region for the new route, so the title keeps it.
+    const timer = window.setTimeout(() => {
+      window.document.getElementById('rule-set-title')?.focus();
+      onTitleFocused();
+    }, 0);
+    return () => { window.clearTimeout(timer); };
+  }, [focusTitle, onTitleFocused, version.version, lens]);
   const { t } = useI18n();
   const session = useRulesSession();
   const { can } = session;
@@ -204,7 +210,8 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
           ) : null}
         </div>
         <DraftsOffNote />
-        {lens === 'edit' && block !== undefined && block !== 'dock.draftsOff' ? (
+        {/* The reason sits beside Edit draft when the header shows it; otherwise it is the one line under the title. */}
+        {lens === 'edit' && block !== undefined && block !== 'dock.draftsOff' && !showsEdit(version, session) ? (
           <p className="reason-line rs-head__note"><span aria-hidden="true">⊘</span> {t(block, { who: version.createdBy ?? '' })}</p>
         ) : null}
         {newDraft.error ? <ProblemNotice error={newDraft.error} /> : null}
@@ -238,7 +245,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
       {editing ? (
         <DraftWorkspace latest={version}
           onSaved={(saved) => {
-            say(t('editor.replaced', { version: String(saved.version) }));
+            say(t('editor.replaced', { version: String(saved.version) }), true);
             navigate({ name: 'rule-set', ruleSet: saved.ruleSet, version: saved.version, lens: 'table' });
           }}
           onDiscard={() => { go({ lens: 'table' }); }} />
@@ -272,7 +279,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
 export function RuleSetPage({ name, versionNumber, lens }: { name: string; versionNumber: number | undefined; lens: Lens | undefined }) {
   const { t } = useI18n();
   const versions = useVersions(name);
-  const [toast, setToast] = useState<string | undefined>(undefined);
+  const [toast, setToast] = useState<{ text: string; sticky: boolean } | undefined>(undefined);
   // The content hash of each version as the user first saw it on this page (four eyes: approve what you reviewed).
   const [opened, setOpened] = useState<Readonly<Record<number, string>>>({});
   const closeToast = useCallback(() => { setToast(undefined); }, []);
@@ -286,7 +293,7 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
   const importVersion = useSaveDraft(name, (created) => {
     const file = picked.current;
     if (file !== undefined) setImportedFrom((known) => ({ ...known, [created.version]: file }));
-    setToast(t('ruleSet.imported', { version: String(created.version) }));
+    setToast({ text: t('ruleSet.imported', { version: String(created.version) }), sticky: false });
     setFocusTitle(created.version);
     navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'table' });
   });
@@ -331,13 +338,17 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
         onReviewAgain={() => { setOpened({ ...opened, [current.version]: current.canonicalHash }); }}
         lens={activeLens}
         navigate={navigate}
-        say={(text) => { setToast(text); }}
+        say={(text, sticky = false) => {
+          setToast({ text, sticky });
+          // After a save the page returns to the table: the focus goes to the title, beside the saved status.
+          if (sticky) setFocusTitle(current.version);
+        }}
         importedFrom={importedFrom}
         focusTitle={focusTitle}
         onTitleFocused={titleFocused}
         importVersion={{ start: (document, fileName) => { setToast(undefined); picked.current = fileName; setPickedFile(fileName); importVersion.start(document); }, isPending: importVersion.isPending, error: importVersion.error, fileName: pickedFile }}
       />
-      <Toast text={toast} onClose={closeToast} />
+      <Toast text={toast?.text} sticky={toast?.sticky ?? false} onClose={closeToast} />
     </section>
   );
 }

@@ -1,10 +1,11 @@
 import { useRef, type Dispatch, type FocusEvent, type KeyboardEvent } from 'react';
 import type { InputClause, OutputClause, RuleSetDefinition } from '../../../api/rules/schemas';
-import { useI18n } from '../../../i18n/I18nProvider';
-import { columnCurrency, inputKind, outputKind, readConditionCell, readOutputCell } from '../model/cells';
+import { useI18n, type Translate } from '../../../i18n/I18nProvider';
+import { emptyAmountHint } from '../model/cellMessages';
+import { columnCurrency, inputKind, outputKind, readConditionCell, readOutputCell, type CellModel } from '../model/cells';
 import type { DraftAction, DraftState } from '../model/draft';
 import type { ErrorPlace } from '../model/engineErrors';
-import { columnLabel } from '../model/reading';
+import { clauseLabel, readCondition, readOutput, type CellReading } from '../model/reading';
 import type { EditableRow } from '../model/table';
 import { BoolToggle, ChoiceEditor, CompareEditor, MoneyEditor, TextEditor } from './CellEditors';
 import { TableHead } from './DecisionTable';
@@ -21,30 +22,52 @@ function messagesFor(errors: readonly ErrorPlace[], row: EditableRow, column: st
 /** The first problem of a cell or row; the count of the rest is in the save dock. */
 const first = (messages: string[]): string | undefined => messages[0];
 
-function ConditionCell({ row, input, definition, error, dispatch }: { row: EditableRow; input: InputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
-  const { t } = useI18n();
-  const label = t('editor.cellLabel', { row: row.id, column: columnLabel(input.name, input.description) });
+/** The amount of a saved cell as an example ("50,000,000 VND"), when the cell had one. */
+function exampleOf(reading: CellReading): string | undefined {
+  const value = reading.kind === 'compare' || reading.kind === 'value' ? reading.value : undefined;
+  return value?.kind === 'text' && /\d/.test(value.text) ? value.text : undefined;
+}
+
+/**
+ * What a refused cell says: what to type when its amount field is empty, with the engine's sentence as the detail;
+ * otherwise the engine's sentence alone. The engine's SYNTAX_ERROR sentence is generic, so the hint says what to do.
+ */
+function cellProblem(engine: string | undefined, model: CellModel, example: string | undefined, currency: string | undefined, t: Translate): { error: string | undefined; detail: string | undefined } {
+  if (engine === undefined) return { error: undefined, detail: undefined };
+  const hint = emptyAmountHint(model, example, currency);
+  return hint === undefined ? { error: engine, detail: undefined } : { error: t(hint.key, hint.params), detail: engine };
+}
+
+function ConditionCell({ row, input, definition, error: engine, dispatch }: { row: EditableRow; input: InputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
+  const { t, locale } = useI18n();
+  const column = clauseLabel(input, locale);
+  const label = t('editor.cellLabel', { row: row.id, column });
   const errorId = `err-${row.key}-${input.name}`;
   const kind = inputKind(input);
   const text = row.when[input.name] ?? '';
   const model = readConditionCell(text, kind);
+  const currency = kind === 'money' ? columnCurrency(definition, 'when', input.name) : undefined;
+  const { error, detail } = cellProblem(engine, model, exampleOf(readCondition(row.original?.when[input.name], locale)), currency, t);
   const onText = (next: string) => { dispatch({ type: 'edit-cell', key: row.key, part: 'when', column: input.name, text: next }); };
-  const common = { label, error, errorId };
+  const common = { label, error, detail, errorId, column };
   if (model.kind === 'raw' || kind === 'raw' || kind === 'text') return <TextEditor {...common} text={text} mono onText={onText} />;
   if (kind === 'choice') return <ChoiceEditor {...common} model={model} options={(input.allowed ?? []).map(String)} onText={onText} />;
   if (kind === 'bool') return <BoolToggle {...common} value={model.kind === 'bool' ? model.value : undefined} condition onText={onText} />;
-  return <CompareEditor {...common} model={model} currency={kind === 'money' ? columnCurrency(definition, 'when', input.name) : undefined} onText={onText} />;
+  return <CompareEditor {...common} model={model} currency={currency} onText={onText} />;
 }
 
-function OutputCell({ row, output, definition, error, dispatch }: { row: EditableRow; output: OutputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
-  const { t } = useI18n();
-  const label = t('editor.cellLabel', { row: row.id, column: columnLabel(output.name, output.description) });
+function OutputCell({ row, output, definition, error: engine, dispatch }: { row: EditableRow; output: OutputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
+  const { t, locale } = useI18n();
+  const column = clauseLabel(output, locale);
+  const label = t('editor.cellLabel', { row: row.id, column });
   const errorId = `err-${row.key}-${output.name}`;
   const kind = outputKind(output);
   const text = row.then[output.name] ?? '';
-  const model = readOutputCell(text, kind, kind === 'money' ? columnCurrency(definition, 'then', output.name) : undefined);
+  const currency = kind === 'money' ? columnCurrency(definition, 'then', output.name) : undefined;
+  const model = readOutputCell(text, kind, currency);
+  const { error, detail } = cellProblem(engine, model, exampleOf(readOutput(row.original?.then[output.name], locale)), currency, t);
   const onText = (next: string) => { dispatch({ type: 'edit-cell', key: row.key, part: 'then', column: output.name, text: next }); };
-  const common = { label, error, errorId };
+  const common = { label, error, detail, errorId, column };
   if (model.kind === 'money') return <MoneyEditor {...common} model={model} onText={onText} />;
   if (kind === 'bool' && (model.kind === 'bool' || model.kind === 'any')) return <BoolToggle {...common} value={model.kind === 'bool' ? model.value : undefined} condition={false} onText={onText} />;
   if (model.kind === 'text') return <TextEditor {...common} text={model.text} mono={false} onText={(value) => { onText(value === '' ? '' : `'${value.replaceAll("'", "\\'")}'`); }} />;
@@ -56,6 +79,7 @@ function RowMenu({ row, index, count, dispatch }: { row: EditableRow; index: num
   return (
     <MenuButton
       label={t('editor.rowActions', { id: row.id })}
+      tooltip={t('editor.rowActions', { id: row.id })}
       className="iconbtn iconbtn--small hit"
       trigger={<span aria-hidden="true">⋯</span>}
       items={[

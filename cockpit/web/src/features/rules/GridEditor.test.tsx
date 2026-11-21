@@ -1,12 +1,14 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import type { Scenario } from '../../mocks/fixtures';
 import { resetRuleEngine } from '../../mocks/handlers';
 import { mockHost, setScenario } from '../../mocks/node';
 import { draftSeed } from '../../mocks/ruleEngine';
 import { placeProblems } from './model/engineErrors';
+import { Toast } from './components/Toast';
+import { I18nProvider } from '../../i18n/I18nProvider';
 
 /** Rule Engine calls the screens made: method, path, and the two headers a write is bound by. */
 let calls: { method: string; path: string; key: string | null; ifMatch: string | null }[] = [];
@@ -47,8 +49,12 @@ describe('grid editor', () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2/edit');
     const cell = await breakR2Balance(user);
-    // The engine's catalogue sentence, on row R2's Balance cell; no code or expression on screen.
-    expect(cell).toHaveAccessibleDescription(/The cell is not a valid expression\./);
+    // What to type, with the cell's saved amount as the example; the engine's catalogue sentence stays as the detail.
+    expect(cell).toHaveAccessibleDescription('Enter an amount, for example 50,000,000 VND. The cell is not a valid expression.');
+    // The Changes card shows committed, valid cells only: never the half-edited "≥ 50,000,000 VND → ≥".
+    const changes = screen.getByRole('region', { name: 'Changes in this draft' });
+    expect(changes).not.toHaveTextContent('→');
+    expect(changes).toHaveTextContent('Changed cells show here once you leave them.');
     expect(screen.queryByText(/SYNTAX_ERROR/)).not.toBeInTheDocument();
     expect(screen.getByText('1 to fix')).toBeInTheDocument();
     // Saving is blocked until the cell is fixed, and the button says why in one line.
@@ -65,6 +71,30 @@ describe('grid editor', () => {
     await waitFor(() => { expect(cell).toHaveAttribute('aria-invalid', 'false'); });
     expect(screen.queryByText('1 to fix')).not.toBeInTheDocument();
     await waitFor(() => { expect(save).toBeEnabled(); });
+    expect(changes).toHaveTextContent('Balance: ≥ 50,000,000 VND → ≥ 40,000,000 VND');
+  });
+
+  it('CKP_006_a_cell_being_typed_stays_out_of_the_changes_card', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/2/edit');
+    const fee = await screen.findByLabelText('Row R3, Fee');
+    await user.clear(fee);
+    await user.type(fee, '400');
+    const changes = screen.getByRole('region', { name: 'Changes in this draft' });
+    // Not committed yet: the dock counts the change, the card waits for Enter or leaving the cell.
+    expect(screen.getByText('1 unsaved change')).toBeInTheDocument();
+    expect(changes).not.toHaveTextContent('Fee');
+    await user.type(fee, '00{Enter}');
+    await waitFor(() => { expect(changes).toHaveTextContent('Fee: 35,000 VND → 40,000 VND'); });
+  });
+
+  it('CKP_006_the_dock_says_once_that_there_is_nothing_to_save', async () => {
+    open('#/rules/card-fee/2/edit');
+    const save = await screen.findByRole('button', { name: 'Save draft' });
+    // The row's ⋯ menu is named, and shows its name as a tooltip on hover and keyboard focus.
+    expect(screen.getByRole('button', { name: 'Actions for row R1' })).toHaveAttribute('data-tip', 'Actions for row R1');
+    expect(save).toHaveAccessibleDescription('Nothing to save yet.');
+    expect(screen.getAllByText(/Nothing to save yet|No changes yet/)).toHaveLength(1);
   });
 
   it('CKP_006_problems_read_in_the_language_of_the_screen', async () => {
@@ -73,7 +103,7 @@ describe('grid editor', () => {
     const cell = await screen.findByLabelText('Dòng R2, Balance', { exact: true });
     await user.clear(cell);
     await user.keyboard('{Enter}');
-    await waitFor(() => { expect(cell).toHaveAccessibleDescription(/Ô này không phải là biểu thức hợp lệ\./); });
+    await waitFor(() => { expect(cell).toHaveAccessibleDescription('Nhập số tiền, ví dụ 50.000.000 VND. Ô này không phải là biểu thức hợp lệ.'); });
     expect(screen.queryByText(/The cell is not a valid expression/)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Lưu bản nháp' })).toHaveAccessibleDescription('Sửa các ô được đánh dấu để lưu.');
   });
@@ -94,6 +124,33 @@ describe('grid editor', () => {
     expect(screen.getByRole('button', { name: 'Request publish' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
     expect(engine.store.find((v) => v.ruleSet === 'card-fee' && v.version === 2)?.history?.at(-1)?.action).toBe('DRAFT_UPDATED');
+    // A keyboard user lands on the title beside the saved status; the message stays until it is closed.
+    await waitFor(() => { expect(document.getElementById('rule-set-title')).toHaveFocus(); });
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('Draft version 2 saved')).not.toBeInTheDocument();
+  });
+
+  it('CKP_006_a_saved_message_stays_until_it_is_closed', () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<I18nProvider><Toast text="Draft version 2 saved" sticky onClose={() => { throw new Error('closed on its own'); }} /></I18nProvider>);
+      act(() => { vi.advanceTimersByTime(60_000); });
+      expect(screen.getByText('Draft version 2 saved')).toBeInTheDocument();
+      let closed = false;
+      rerender(<I18nProvider><Toast text="Imported as version 3" onClose={() => { closed = true; }} /></I18nProvider>);
+      act(() => { vi.advanceTimersByTime(6_000); });
+      expect(closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('CKP_006_the_content_hash_is_in_history_not_in_details', async () => {
+    open('#/rules/card-fee/2');
+    expect(await screen.findByText('Hit policy')).toBeInTheDocument();
+    expect(screen.queryByText('Content hash')).not.toBeInTheDocument();
+    window.location.hash = '#/rules/card-fee/2/history';
+    expect((await screen.findAllByText('Content hash')).length).toBeGreaterThan(0);
   });
 
   it('CKP_006_a_save_conflict_keeps_the_edits_until_the_latest_is_loaded', async () => {
@@ -112,7 +169,10 @@ describe('grid editor', () => {
     expect(await screen.findByText('Someone else saved this draft after you opened it.')).toBeInTheDocument();
     expect(screen.getByLabelText('Row R3, Fee')).toHaveValue('40,000');
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveAccessibleDescription('Load the latest version before saving.');
+    // The warning sits in the save dock, so the grid does not move, and names the cells the other save changed.
+    expect(screen.getByRole('button', { name: 'Save draft' })).toHaveAccessibleDescription(
+      'Someone else saved this draft after you opened it. They changed R5 Fee. Loading the latest version replaces your edits.');
+    expect(screen.getByRole('alert')).toBe(document.querySelector('.edit-dock__conflict'));
     // Never retried with the newer lock version on its own.
     expect(saves().map((c) => c.ifMatch)).toEqual(['"0"']);
 
@@ -156,7 +216,9 @@ describe('grid editor', () => {
     expect(edit).toBeDisabled();
     expect(edit).toHaveAccessibleDescription('Only hoa can change this draft.');
     window.location.hash = '#/rules/kyc-risk/2/edit';
-    expect(await screen.findByText('Only hoa can change this draft.', { selector: '.rs-head__note' })).toBeInTheDocument();
+    // The reason is said once, beside the disabled Edit draft.
+    await waitFor(() => { expect(screen.getAllByText('Only hoa can change this draft.')).toHaveLength(1); });
+    expect(screen.getByRole('button', { name: /Edit draft/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
     expect(saves()).toEqual([]);
   });
@@ -172,7 +234,11 @@ describe('grid editor', () => {
   it('CKP_006_the_reviewer_reads_a_pending_version_without_any_editor', async () => {
     resetRuleEngine();
     open('#/rules/card-fee/2/edit', 'rules-approver');
-    expect(await screen.findByText('Waiting for approval, so it cannot change.')).toBeInTheDocument();
+    // Edit draft is shown disabled, with the reason beside it, so the reviewer reads whose turn it is.
+    const edit = await screen.findByRole('button', { name: /Edit draft/ });
+    expect(edit).toBeDisabled();
+    expect(edit).toHaveAccessibleDescription('Waiting for approval, so it cannot change.');
+    expect(screen.getAllByText('Waiting for approval, so it cannot change.')).toHaveLength(1);
     const main = document.body.querySelector('.workbench__main');
     if (!(main instanceof HTMLElement)) throw new Error('table missing');
     expect(within(main).queryByRole('textbox')).not.toBeInTheDocument();

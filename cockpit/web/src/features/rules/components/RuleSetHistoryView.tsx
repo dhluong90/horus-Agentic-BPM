@@ -115,6 +115,10 @@ function Summary({ line, people }: { line: VersionHistoryLine; people: { label: 
             <dd>{name(person.who ?? '')}{person.at !== null && person.at !== undefined ? <span className="muted tnum"> · {when(person.at)}</span> : null}</dd>
           </div>
         ))}
+        <div className="rsh__person rsh__hash">
+          <dt>{t('details.hash')}</dt>
+          <dd><span className="mono" title={line.canonicalHash}>{line.canonicalHash.slice(0, 12)}</span></dd>
+        </div>
       </dl>
       {line.approvalComment || line.rejectionReason ? (
         <dl className="rsh__comments">
