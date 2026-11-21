@@ -161,6 +161,12 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
 | [PD-138](#pd-138-a-built-in-shadow-mode-for-agent-steps-is-planned-for-11-the-documented-pattern-covers-10) | A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0 | Decided (product manager, delegated, PD-073); revisits PD-015 |
 | [PD-139](#pd-139-approvals-require-the-reviewed-content-hash-for-rules-and-process-definitions) | Approvals require the reviewed content hash, for rules and process definitions | Decided (product manager, delegated, PD-073) |
+| [PD-140](#pd-140-what-the-10-api-freeze-promises-the-frozen-surface-compatibility-and-deprecation) | What the 1.0 API freeze promises: the frozen surface, compatibility and deprecation | Decided (product manager, delegated, PD-073) |
+| [PD-141](#pd-141-both-engines-list-unsupported-standard-elements-as-unsupportedelements-with-one-item-shape) | Both engines list unsupported standard elements as `unsupportedElements`, with one item shape | Decided (product manager, delegated, PD-073) |
+| [PD-142](#pd-142-the-spreadsheet-round-trip-stays-a-csv-format-of-the-engine-for-10) | The spreadsheet round-trip stays a CSV format of the engine for 1.0 | Decided (product manager, delegated, PD-073); confirms PD-107 |
+| [PD-143](#pd-143-imported-dmn-tables-keep-the-strict-error-mode-through-10) | Imported DMN tables keep the strict error mode through 1.0 | Decided (product manager, delegated, PD-073); confirms PD-125 |
+| [PD-144](#pd-144-seven-items-move-to-11-calling-a-child-process-stays-in-10) | Seven items move to 1.1; calling a child process stays in 1.0 | Decided (product manager, delegated, PD-073) |
+| [PD-145](#pd-145-recommendation-strict-masking-by-default-outside-dev-before-the-freeze) | Recommendation: strict masking by default outside `dev`, before the freeze | Pending product owner |
 
 ---
 
@@ -3900,3 +3906,159 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 - Configurable: only the `dev` relaxation.
 
 **Follow-ups.** Product manager: the issue "Process Engine: Approve Only the Reviewed Definition". Architect: the SPEC and OpenAPI change for both. Cockpit: send the hash on every approval (#246 follow-up). If the process side misses 1.0, definition approval does not ship without the hash.
+
+### PD-140 What the 1.0 API freeze promises: the frozen surface, compatibility and deprecation
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #115 cannot close while X-F-18 has no specification statement. What does "frozen" cover, what does each release type promise, and how is an element deprecated? |
+| Raised by | Plan to 1.0; issue #115 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 2 |
+
+**Options considered**
+
+1. Freeze the Java `api` and `spi` packages only, as ADR-0016 already describes. Consequence: the smallest promise, but a bank that calls REST, consumes events or sets configuration has no promise at all, and most cockpit and integration users are in that group.
+2. Freeze every surface a host builds on: Java, REST, error codes, events, definition formats and hashes, configuration and metrics, with the same patch, minor and major rules and one deprecation policy for all of them (chosen). Consequence: one promise a bank can read on one page; more checks in CI; database tables, texts, screens and preview elements stay outside it.
+3. Freeze everything, including database tables and the cockpit screens. Consequence: hosts could read tables directly, so every storage change would need a major release; the cockpit could never improve its screens.
+
+**Recommendation and decision.** Option 2. A bank adopts the engines through REST and events as often as through Java, and a broken event or a changed default stops a payment as surely as a removed method. The deprecation length stays as PD-054 decided.
+
+**Consequences.**
+- New cross-cutting specification [`docs/architecture/SPEC.md`](../architecture/SPEC.md), statements `XCS-001` to `XCS-008`: the frozen surface, what is not frozen, the patch, minor and major rules, the tolerant-reader rules for clients, deprecation on every surface, no change between the freeze and 1.0.0, the CI checks, and the security exception.
+- A changed default that makes an unchanged deployment behave differently is a breaking change. Defaults that should change must change before the freeze (see PD-145).
+- A breaking REST change goes under `/v2` beside `/v1`.
+- Preview elements are marked `x-horus-preview: true` in OpenAPI and are outside the promise until a minor release removes the mark.
+- The freeze date stays 5 February 2027 (PD-135). This entry does not change it.
+- Configurable: no. It is a promise to adopters.
+
+**Follow-ups.** Architect: the OpenAPI, schema and catalogue compatibility checks of `XCS-007`, and the API review report at the freeze. Documentation: the wiki compatibility page with the tolerant-reader rules (#119). Maintainers (engineering): #115 acceptance criteria point to `XCS-001` to `XCS-008`.
+
+### PD-141 Both engines list unsupported standard elements as `unsupportedElements`, with one item shape
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #380: the Rule Engine lists refused DMN elements under `elements` (items `element`, `id`, `line`, `stage`); the Process Engine lists refused BPMN elements under `problems` (items `code`, `message`, `element`, `elementId`, `line`, `stage`). Which name and item shape do both use from 1.0? |
+| Raised by | Review of the BPMN import; issue #380 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 3 |
+
+**Options considered**
+
+1. `problems` in both engines. Consequence: no change in the Process Engine, but `problems` already means validation problems of a draft in the Rule Engine with another item shape, so one name would carry two shapes there.
+2. `elements` in both engines. Consequence: no change in the Rule Engine, but the name says nothing on its own, and the Process Engine would split its `problems` list.
+3. A new name in both, `unsupportedElements`, with one item shape (chosen). Consequence: both engines change one field before the freeze; the name says what the list holds and collides with nothing.
+
+**Recommendation and decision.** Option 3. Both engines break once now, while 0.x allows it, instead of carrying two names for ever after the freeze. A client that reads both engines has one parser.
+
+**Consequences.**
+- The Problem body of `DMN_UNSUPPORTED_ELEMENT`, `EXPRESSION_LANGUAGE_UNSUPPORTED` and `BPMN_UNSUPPORTED_ELEMENT` carries `unsupportedElements`, in document order, at most 100 entries. `violationsTruncated`, already used by both engines for this list, keeps its name.
+- Item shape in both engines: `element` (the element name), `elementId` (string or null, at most 200 characters, control characters removed), `line` (from 1), `stage` (`S0`, `S1`, `S2`, `S3` or `not planned`) and `message` (plain English, which may change; the element and stage are the contract).
+- The Process Engine keeps `problems` for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`, which are not refusals of a standard.
+- A successful import that ignored vendor extensions returns them in `warnings`, with the same item fields as a refusal's warnings, so a successful import also says what was kept but not read.
+- The stage of an intermediate throw event comes from its event definition.
+- This is a breaking change and must merge before the freeze; the 0.x release notes name it. Configurable: no.
+
+**Follow-ups.** Architect: both OpenAPI files and the wiki page `Common-Error-Codes`. Maintainers (engineering): #380, before the freeze.
+
+### PD-142 The spreadsheet round-trip stays a CSV format of the engine for 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #39 is still open. To reach 1.0 sooner, should the cockpit convert the spreadsheet in the browser instead of the engine reading and writing CSV (PD-107)? |
+| Raised by | Plan to 1.0; issue #39 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 1 |
+
+**Options considered**
+
+1. Keep PD-107: the engine reads and writes CSV through the shorthand reader the cell editor already uses (chosen). Consequence: one grammar and one message catalogue for the file, the editor and the Java API; a host without the cockpit gets the round-trip; errors name the spreadsheet row and column.
+2. Convert in the browser. Consequence: no engine endpoint, but a second shorthand reader that can drift from the engine's, errors that cannot name the Excel row reliably, and a format that only cockpit users get. Moving to the engine later would add a format after the freeze.
+3. A new `.xlsx` format. Consequence: a spreadsheet library in the release, which needs a licence check and adds weight, for no gain over CSV that Excel opens and saves.
+
+**Recommendation and decision.** Option 1. It is also the faster path now: the shorthand reader and its messages exist for the cell editor, so the engine work is a file layout around them, while option 2 writes a new reader. Reuse is the reason PD-107 chose it, and that has not changed.
+
+**Consequences.** PD-107 stands unchanged. `.xlsx` stays a later candidate. #39 stays in 1.0. Configurable: no.
+
+**Follow-ups.** Maintainers (engineering): #39 as specified.
+
+### PD-143 Imported DMN tables keep the strict error mode through 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #121 asks which error mode an imported DMN table gets: `spec`, as PD-066 decided, or `strict`, which keeps one hash for the same behaviour (`RLE-045`). |
+| Raised by | Plan to 1.0; issue #121 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21, option 1 |
+
+**Options considered**
+
+1. Keep PD-125: `strict` until stage S1 brings a construct whose result depends on the mode, then `spec` for newly imported models (chosen). Consequence: no hash changes for the same behaviour; PD-066 applies when it starts to matter.
+2. `spec` now. Consequence: the same table gets one hash from YAML and another from DMN, breaking `RLE-045` for no difference in results.
+
+**Recommendation and decision.** Option 1, which PD-125 already decided; nothing new is needed. With #121 moved to 1.1 (PD-144) and stage S1 arriving in 1.1, every DMN table imported in 1.0 is `strict`. Stored versions keep their recorded mode and hash.
+
+**Consequences.** PD-066 and PD-125 stand. Configurable: no.
+
+**Follow-ups.** None beyond #121 in 1.1.
+
+### PD-144 Seven items move to 1.1; calling a child process stays in 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | To reach 1.0 sooner, which open lower-priority items can move to 1.1: #45, #91, #92, #121, #123, #124, #125, and does #114 stay in 1.0? |
+| Raised by | Plan to 1.0 |
+| Decision | Decided by the product manager under delegated authority (PD-073), 2026-11-21 |
+
+**Test applied.** An item stays in 1.0 if a bank pilot needs it on day one, or if a four-eyes, audit or masking control depends on it, or if adding it after the freeze would be a breaking change. Effort alone is not a reason.
+
+**Options considered**
+
+1. Move all eight. Consequence: the shortest path, but a BPMN call activity is in the stage S0 coverage that imports already promise, so 1.0 would refuse a common bank pattern it advertises.
+2. Move seven and keep #92 (chosen). Consequence: the release keeps every control and the advertised BPMN coverage; the security audit has less new code to review.
+3. Move none. Consequence: about seven more items, two of them large, in the stretch before the audit.
+
+**Decision per item**
+
+| Issue | Decision | Reason |
+|---|---|---|
+| #45 Asynchronous decision log mode | 1.1 | A tuning option for high volume, off by default; the in-transaction log is the stronger audit record, and adding a write mode later is additive |
+| #91 Live counts on the process diagram | 1.1 | A supervisor convenience; incidents and task queues already show the work; no control depends on it |
+| #92 Call a child process and wait | 1.0 | Bank processes reuse sub-processes such as KYC; call activity is in the stage S0 import coverage, so dropping it narrows what 1.0 accepts |
+| #114 OpenTelemetry traces | 1.1 | Metrics, events and correlation ids already give operations a view; traces are additive behind an optional tracer; `TR-OBS-03` is reported, not a gate, at 1.0; designing spans with masked inputs in mind is safer outside the audit rush |
+| #121 Import a DMN table from modelling tools | 1.1 | 0.1.0 already imports a single DMN table; the modeller corpus widens what is accepted, which is additive; `TR-STD-25` is reported at 1.0 |
+| #123 Historical heatmap per step | 1.1 | Analysis for process owners, not needed to run a pilot |
+| #124 Process modeller canvas (Preview) | 1.1 | Already a preview and the first cut candidate; processes are imported and approved without it |
+| #125 Business calendar editor | 1.1 | The calendar and its four-eyes change rule live in the engine (PD-131); hosts set calendars through configuration until the editor ships, so no control is lost |
+
+**Consequences.**
+- The seven issues move to `track:1.1`, each with a one-line reason.
+- The 1.0 exit criteria report `TR-STD-25` and `TR-OBS-03` instead of gating on them.
+- Pull an item back into 1.0 only if a named pilot bank needs it before the freeze review and the change is additive.
+
+**Follow-ups.** Product manager: the roadmap and feature map show these items in 1.1. Maintainers (engineering): #92 stays in the plan before the audit.
+
+### PD-145 Recommendation: strict masking by default outside `dev`, before the freeze
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-21 |
+| Question | Issue #311: should `decision-log.require-explicit-mask` default to `true` outside the `dev` profile? PD-132 kept it `false` until a pilot bank finds unmasked personal data. |
+| Raised by | Product manager, on the compatibility rule of PD-140 |
+| Decision | Pending product owner. This entry is a recommendation; PD-132 stands until the product owner decides |
+
+**Options considered**
+
+1. Keep PD-132: off by default; guidance and the publish-time warning as mitigation. Consequence: no change for authors. But under PD-140 a changed default is a breaking change after the freeze, so the kill criterion of PD-099 could only fire in 2.0.
+2. On by default outside `dev`; `dev` stays off for quick starts (recommended). Consequence: every input in a production rule set says `mask: true` or `mask: false`, so no personal data reaches the append-only decision log by omission. Authors write `mask: false` on inputs such as amounts and tiers. A draft made before the upgrade cannot be sent for approval until its inputs are declared, and the release notes say so. Published versions keep evaluating.
+3. On everywhere. Consequence: the same protection, and every quick start in `dev` must declare masks too.
+
+**Recommendation (product manager).** Option 2, decided before the freeze. Three reasons.
+- The decision log is append-only. Personal data logged by mistake can never be erased, which conflicts with erasure duties under GDPR and Vietnam's Decree 13. The security review already said a kill criterion that waits for a pilot acts too late.
+- After 5 February 2027 the default can no longer change in 1.x. 0.x is the last time this costs nothing in compatibility, the same reasoning PD-139 applied to approval hashes.
+- The cost is one word per input for authors, and the configuration page already tells banks to turn strict mode on for production.
+
+**Consequences if accepted.** The default changes outside `dev`, with `false` still allowed as an explicit setting per host or tenant; the rule engine DESIGN 4.4, the wiki configuration page and the release notes change; PD-132 is superseded. If not accepted, PD-132 stands and the default stays `false` through 1.x.
+
+**Follow-ups.** Product owner: decide before the freeze. Architect: the default change, if accepted.
