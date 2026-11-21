@@ -39,4 +39,18 @@ public interface ProcessQueryService {
      * @throws DefinitionNotFoundException when the version does not exist in the caller's tenant
      */
     NodeCounts liveNodeCounts(String definitionKey, int version);
+
+    /**
+     * Reads what happened at each step of one instance of the caller's tenant (PRE-027): per step when it was
+     * entered and left, how long it took, how many attempts, who acted last and any open incident, and the history
+     * entries in time order. History is read only between the instance's start and its end, so PostgreSQL scans only
+     * the partitions the instance lived in. No variable or input value is returned. Needs {@code processes:read}.
+     *
+     * @param instanceId the instance id
+     * @param limit the most history entries to return, 1 to {@code query.max-page-size}
+     * @return the activities
+     * @throws InstanceNotFoundException when no such instance exists in the tenant, also when another tenant has it
+     * @throws QueryInvalidException when the limit is out of range
+     */
+    InstanceActivities activities(String instanceId, int limit);
 }

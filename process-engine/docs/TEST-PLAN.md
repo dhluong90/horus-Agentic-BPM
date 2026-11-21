@@ -42,7 +42,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-024 | `PRE_024_content_hash_excludes_diagram_and_matches_git` | Unit, RFC 8785 vectors, CI hash script | M2 | `TR-DEF-04`, `TR-DEF-02` | Planned |
 | PRE-025 | `PRE_025_graph_diff_reports_nodes_and_edges` | Unit | M2 | `TR-DEF-03` | Planned |
 | PRE-026 | `PRE_026_layout_revision_append_only_without_approval` | Concurrency, WebMvc | M3 | `TR-DEF-02` | Planned |
-| PRE-027 | `PRE_027_activities_bounded_by_instance_lifetime` | Testcontainers, plan capture | M2 | `TR-PERF-08`, `TR-OBS-01` | Planned |
+| PRE-027 | `PRE_027_activities_bounded_by_instance_lifetime` | Testcontainers, plan capture | M2 | `TR-PERF-08`, `TR-OBS-01` | Done |
 | PRE-028 | `PRE_028_live_node_counts_from_token_index` | Testcontainers, SQL capture | M2 | `TR-PERF-09` | Planned |
 | PRE-029 | `PRE_029_rollup_bounded_lag_and_no_step_tx_writes` | Two-replica Testcontainers, SQL capture | M3 | `TR-PERF-10` | Planned |
 | PRE-030 | `PRE_030_task_query_filters_bounded_by_index` | Testcontainers, plan capture | M2 | `TR-PERF-07`, `TR-TEN-01` | Planned |

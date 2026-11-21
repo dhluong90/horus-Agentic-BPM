@@ -173,6 +173,8 @@ class ListQueryPlanCheckTest {
         samples.put("claim-async-steps", List.of(T, T, 20, "replica-1", T));
         samples.put("claim-async-kind", List.of(T, T, "ASYNC_SERVICE", 20, "replica-1", T));
         samples.put("instance-history-actors", List.of("bank-a", INSTANCE, "NODE_ENTERED"));
+        samples.put("instance-node-activities", List.of("bank-a", INSTANCE, from, T));
+        samples.put("instance-history-entries", List.of("bank-a", INSTANCE, from, T, 201));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));

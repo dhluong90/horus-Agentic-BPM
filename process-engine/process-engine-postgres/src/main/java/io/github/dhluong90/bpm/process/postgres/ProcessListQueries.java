@@ -111,6 +111,33 @@ final class ProcessListQueries {
             "SELECT DISTINCT actor_id FROM pre_history WHERE tenant_id = ? AND instance_id = ? AND event_type = ? "
                     + "AND actor_id IS NOT NULL");
 
+    /**
+     * The history of one instance aggregated per step (PRE-027), on {@code idx_pre_history_instance}, between the
+     * instance's start and end so the planner prunes every partition outside its lifetime. Parameters: tenant,
+     * instance, from, to.
+     */
+    static final ListQuery NODE_ACTIVITIES = new ListQuery("instance-node-activities",
+            new Bound.ParentKey("instance_id", "one row per step of one instance, within its lifetime"),
+            "SELECT node_id, "
+                    + "min(occurred_at) FILTER (WHERE event_type = 'NODE_ENTERED') AS first_entered_at, "
+                    + "max(occurred_at) FILTER (WHERE event_type = 'NODE_ENTERED') AS last_entered_at, "
+                    + "max(occurred_at) FILTER (WHERE event_type = 'NODE_COMPLETED') AS last_completed_at, "
+                    + "count(*) FILTER (WHERE event_type = 'NODE_ENTERED') AS entries, "
+                    + "count(DISTINCT attempt_id) AS attempt_ids, "
+                    + "(array_agg(actor_id ORDER BY occurred_at DESC, id DESC) FILTER (WHERE actor_id IS NOT NULL))[1] "
+                    + "AS last_actor FROM pre_history WHERE tenant_id = ? AND instance_id = ? "
+                    + "AND occurred_at >= ? AND occurred_at <= ? AND node_id IS NOT NULL GROUP BY node_id");
+
+    /**
+     * The history entries of one instance oldest first (PRE-027), on {@code idx_pre_history_instance}, within its
+     * lifetime. Parameters: tenant, instance, from, to, limit.
+     */
+    static final ListQuery HISTORY_ENTRIES = new ListQuery("instance-history-entries",
+            new Bound.Page("oldest first on idx_pre_history_instance (tenant_id, instance_id, occurred_at, id)"),
+            "SELECT id, event_type, node_id, actor_id, occurred_at FROM pre_history "
+                    + "WHERE tenant_id = ? AND instance_id = ? AND occurred_at >= ? AND occurred_at <= ? "
+                    + "ORDER BY occurred_at, id LIMIT ?");
+
     /** Due timers, for every tenant: the poll of each replica. */
     static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
@@ -125,7 +152,7 @@ final class ProcessListQueries {
     static List<ListQuery> all() {
         return List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS, OPEN_INCIDENTS, STEP_RESULTS,
                 OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS, RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS,
-                DEFINITION_KEYS_AFTER, HISTORY_ACTORS, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
+                DEFINITION_KEYS_AFTER, HISTORY_ACTORS, NODE_ACTIVITIES, HISTORY_ENTRIES, CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true));
     }

@@ -501,6 +501,54 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /instances/{id}/activities:
+    get:
+      tags: [instances]
+      operationId: getInstanceActivities
+      summary: Read what happened at each step of one instance
+      description: |
+        Per step the instance entered: when it was first entered and last left, the duration between them (null until
+        it completes), the attempts (its entries, or its distinct attempts when a remote step retried), the last
+        identity that acted on it (null for engine steps) and its open incident; then the history entries in time
+        order, at most `limit`, with `hasMore`. History is read only between the instance's `startedAt` and `endedAt`
+        (no upper bound while it runs), so PostgreSQL scans only the monthly partitions the instance lived in
+        (PRE-027, ADR-0015). No variable or input value is returned, so a masked input never appears. The `ETag`
+        is a hash of the body; a matching `If-None-Match` gets `304` with no body. Another tenant's instance is
+        `404 INSTANCE_NOT_FOUND`. Permission `processes:read`. Writes nothing.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 26, maxLength: 26 }
+        - name: limit
+          in: query
+          required: false
+          description: Most history entries to return, 1 to `query.max-page-size`; 200 when absent
+          schema: { type: integer, minimum: 1, maximum: 200 }
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: The activities
+          headers:
+            ETag:
+              description: A hash of the body, quoted; send it as `If-None-Match`
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InstanceActivities' }
+        '304':
+          description: Unchanged since the `ETag` sent in `If-None-Match`; no body
+          headers:
+            ETag:
+              schema: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /instances/{id}:cancel:
     post:
       tags: [instances]
@@ -1239,6 +1287,52 @@ components:
         startedBy: { type: [string, 'null'] }
         startedAt: { type: string, format: date-time }
         endedAt: { type: [string, 'null'], format: date-time }
+    InstanceActivities:
+      type: object
+      required: [instanceId, startedAt, endedAt, nodes, entries, hasMore]
+      properties:
+        instanceId: { type: string }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+        nodes:
+          type: array
+          description: One item per step the instance entered, in the order it first entered them
+          items:
+            type: object
+            required: [nodeId, state, enteredAt, completedAt, durationMs, attempts, actor, incident]
+            properties:
+              nodeId: { type: string }
+              state:
+                type: string
+                enum: [ACTIVE, COMPLETED, INCIDENT]
+                description: '`ACTIVE`: entered and not left since; `COMPLETED`: left after its last entry; `INCIDENT`: holds an open incident'
+              enteredAt: { type: [string, 'null'], format: date-time, description: First entry }
+              completedAt: { type: [string, 'null'], format: date-time, description: Last completion }
+              durationMs:
+                type: [integer, 'null']
+                minimum: 0
+                description: From the first entry to the last completion, computed by the engine; null until it completes
+              attempts: { type: integer, minimum: 0 }
+              actor: { type: [string, 'null'], description: 'The last identity that acted on the step; null for engine steps' }
+              incident:
+                type: [object, 'null']
+                required: [code, openedAt]
+                properties:
+                  code: { type: string, description: 'The error code, for example AGENT_TIMEOUT' }
+                  openedAt: { type: string, format: date-time }
+        entries:
+          type: array
+          description: History entries in time order, at most `limit`
+          items:
+            type: object
+            required: [id, type, nodeId, actor, occurredAt]
+            properties:
+              id: { type: string }
+              type: { type: string, description: 'For example INSTANCE_STARTED, NODE_ENTERED, NODE_COMPLETED, TASK_COMPLETED, INCIDENT_RAISED, INSTANCE_ENDED' }
+              nodeId: { type: [string, 'null'] }
+              actor: { type: [string, 'null'] }
+              occurredAt: { type: string, format: date-time }
+        hasMore: { type: boolean, description: The instance has more entries than `entries` holds }
     NodeCounts:
       type: object
       required: [definitionKey, version, mode, asOf, nodes]
