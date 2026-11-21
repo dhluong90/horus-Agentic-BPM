@@ -1593,8 +1593,8 @@ paths:
         clock, so the decision replays (`POST /decisions/{decisionId}:replay`). A failed evaluation
         (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a `unique` table matches several rules; no
         match is outcome `NO_MATCH`) is logged and answered `422` with the `decisionId` and
-        `matchedRuleIds`, never with partial outputs. Members other than `inputs` and `clock` are
-        ignored, including `tenantId`. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+        `matchedRuleIds`, never with partial outputs. Members other than `inputs`, `clock` and
+        `decision` are ignored, including `tenantId`. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - name: ruleSet
           in: path
@@ -3011,6 +3011,16 @@ components:
             The instant the decision reasons about, ISO 8601 with `Z` or an offset, for example
             `2026-11-20T10:00:00Z`. Selects the version in force and feeds `today()` and `now()`.
             Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
+        decision:
+          type: string
+          maxLength: 100
+          description: |
+            Optional id of the decision to evaluate. A rule set is a DMN model with one decision named
+            after the rule set, so the only accepted value is the rule set's name, which gives the same
+            result and the same idempotency hash as leaving it out. Any other value is
+            `400 INPUT_INVALID` naming `decision`, and no decision is logged. Reserved for rule sets with
+            several decisions (stage S1).
+          examples: [card-fee]
     EvaluationLimit:
       type: string
       enum: [STEPS, TIME]
@@ -3209,7 +3219,9 @@ components:
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]
-          description: A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds
+          description: |
+            A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds.
+            Warnings of a later error mode will be a new member, not a new outcome.
         matched:
           type: boolean
           description: False for a no-match, where every output is null and matchedRuleIds is empty
@@ -3227,7 +3239,10 @@ components:
         decisionId: { type: string }
         ruleSet: { type: string }
         version: { type: integer }
-        hitPolicy: { type: string, enum: [FIRST, UNIQUE, COLLECT] }
+        hitPolicy:
+          type: string
+          enum: [FIRST, UNIQUE, COLLECT]
+          description: New values may be added (ANY, PRIORITY, RULE_ORDER, OUTPUT_ORDER from stage S1)
         outcome:
           type: string
           enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]

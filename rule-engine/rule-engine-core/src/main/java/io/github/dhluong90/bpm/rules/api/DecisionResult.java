@@ -133,7 +133,11 @@ public record DecisionResult(String decisionId, String ruleSet, int version, Ins
         return outcome instanceof Failed;
     }
 
-    /** Outcome of an evaluation. */
+    /**
+     * Outcome of an evaluation. The three cases are fixed from 1.0, so an exhaustive {@code switch} keeps compiling:
+     * later hit policies return the same cases, and warnings of a later error mode come as a new member of
+     * {@link DecisionResult}, not as a new case.
+     */
     public sealed interface Outcome permits Matched, NoMatch, Failed {
     }
 

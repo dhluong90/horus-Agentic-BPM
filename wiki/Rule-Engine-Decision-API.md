@@ -85,6 +85,8 @@ r.outcome();            // Matched (sealed: Matched, NoMatch, Failed)
 | Pin and replay | `DecisionRequest.withVersion(v)` evaluates one published version instead of selecting; it needs `rules:pin`, which no role holds by default. A decision at a chosen clock has `clockChosen()` true, and so does its log row (`eval_clock` differs from `created_at`). `RuleEngine.replay(decisionId)` evaluates a logged decision again with its version, inputs and clock, writes nothing and needs `rules:log:read` (`TR-DET-05`) |
 | Errors | `UNIQUE_HIT_VIOLATION` and `EVALUATION_ERROR` come back as a `Failed` outcome with `code()`, because they are logged decisions; `evaluateAs` throws `DecisionFailedException` with the same code. Other failures throw an unchecked `HorusBpmException` subtype whose `code()` equals the REST error code (ADR-0016) |
 | Idempotency | `DecisionRequest.idempotencyKey` returns the stored decision instead of logging a second one (ADR-0006) |
+| Decision | `DecisionRequest.withDecision(id)` and the evaluate body member `decision` name the decision to evaluate. A rule set holds one decision, named after the rule set, so only that name is accepted, and it gives the same result and idempotency hash as leaving it out. Any other id is `400 INPUT_INVALID` and nothing is logged. The id is reserved for rule sets with several decisions (stage S1) |
+| Compatibility | The `DecisionResult` outcome has three cases (`Matched`, `NoMatch`, `Failed`), fixed from 1.0, so an exhaustive `switch` keeps compiling. Hit policy and log outcome strings, `DecisionLogEntry.Outcome` and `SourceFormat` may gain values, so do not switch on them exhaustively |
 
 ## REST conventions
 
