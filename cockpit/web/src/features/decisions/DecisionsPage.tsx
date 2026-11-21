@@ -36,7 +36,8 @@ export function DecisionLogLocked({ titleId, message = 'dlog.locked' }: { titleI
       <PageHead id={titleId} title={t('decisions.title')} subtitle={t('decisions.subtitle')} preview />
       <article className="card locked-state" role="note">
         <span className="locked-state__icon"><LockIcon /></span>
-        <p>{t(message)}</p>
+        <p className="locked-state__text">{t(message)}</p>
+        <a className="btn btn--quiet locked-state__action" href={formatRoute({ name: 'home' })}>{t('dlog.locked.goHome')}</a>
       </article>
     </section>
   );

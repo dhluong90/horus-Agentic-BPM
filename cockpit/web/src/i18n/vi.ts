@@ -268,6 +268,8 @@ export const vi: Record<MessageKey, string> = {
   'action.copyReference': 'Sao chép mã tham chiếu',
   'action.cancel': 'Huỷ',
   'action.referenceCopied': 'Đã sao chép mã tham chiếu',
+  'action.copyCode': 'Sao chép mã lỗi',
+  'action.codeCopied': 'Đã sao chép mã lỗi',
 
   'host.choose': 'Chọn dịch vụ',
   'host.switch': 'đổi dịch vụ',
@@ -553,8 +555,8 @@ export const vi: Record<MessageKey, string> = {
   'history.DRAFT_UPDATED': 'Cập nhật bản nháp',
   'history.other': 'Thay đổi',
 
-  'dlog.crumb': 'Quyết định {id}',
   'dlog.locked': 'Cần quyền đọc nhật ký quyết định để xem các quyết định.',
+  'dlog.locked.goHome': 'Về Trang chủ',
   'dlog.searchLabel': 'Tìm quyết định',
   'dlog.findBy': 'Tìm theo',
   'dlog.byRuleSet': 'Bộ quy tắc',
@@ -596,7 +598,7 @@ export const vi: Record<MessageKey, string> = {
   'dlog.error.cannotExplain': 'Dịch vụ không giải thích được quyết định này.',
   'dlog.error.table': 'Không hiển thị được bảng quy tắc của phiên bản này.',
   'dlog.back': 'Quay lại danh sách quyết định',
-  'dlog.detailTitle': 'Quyết định {id}',
+  'dlog.detailTitle': 'Quyết định',
   'dlog.detailSubtitle': 'Một quyết định đã ghi và lý do.',
   'dlog.ruleSetDecision': 'Quyết định theo {ruleSet}',
   'dlog.decidedAt': 'Quyết định lúc {when}',

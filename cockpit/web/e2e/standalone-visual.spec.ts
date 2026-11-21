@@ -19,6 +19,8 @@ interface State {
   kyc?: HostAnswer;
   /** Breaks sign-in at the identity provider. */
   refuseSignIn?: boolean;
+  /** Comes back from the identity provider with a stale state, as an expired or reused sign-in does. */
+  expireSignIn?: boolean;
   /** Holds the provider's discovery answer, so the signing-in state stays on screen. */
   holdSignIn?: boolean;
   ready: (page: Page) => Promise<void>;
@@ -28,6 +30,7 @@ interface State {
 const STATES: readonly State[] = [
   { name: 'signing-in', hash: '#/rules', holdSignIn: true, ready: async (page) => { await expect(page.locator('[aria-busy="true"]')).toBeVisible(); } },
   { name: 'sign-in-failed', hash: '#/rules', refuseSignIn: true, ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); } },
+  { name: 'sign-in-expired', hash: '#/rules', expireSignIn: true, ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); } },
   { name: 'loans-rules', hash: '#/hosts/loans/rules', ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); } },
   {
     name: 'host-picker-open', hash: '#/hosts/loans/rules',
@@ -44,7 +47,14 @@ const STATES: readonly State[] = [
   {
     name: 'host-error', hash: '#/hosts/kyc/rules',
     kyc: { meProblem: { status: 403, code: 'PERMISSION_DENIED', correlationId: '01JD3A7Q2M5N8P1R4S6T9V0W2X' } },
-    ready: async (page) => { await expect(page.getByTestId('error-code')).toBeVisible(); },
+    ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); },
+  },
+  {
+    // The same error with Details open: the code, the reference and the status, each with Copy where it helps.
+    name: 'host-error-details', hash: '#/hosts/kyc/rules',
+    kyc: { meProblem: { status: 403, code: 'PERMISSION_DENIED', correlationId: '01JD3A7Q2M5N8P1R4S6T9V0W2X' } },
+    ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); },
+    after: async (page) => { await page.locator('.panel__details summary').click(); await expect(page.getByTestId('error-code')).toBeVisible(); },
   },
   { name: 'decision-choose-host', hash: `#/decisions/${DECISION}`, ready: async (page) => { await expect(page.locator('.host-choice')).toBeVisible(); } },
   { name: 'decision-from-link', hash: `#/decisions/${DECISION}?host=loans`, loans: { me: meHa }, ready: async (page) => { await expect(page.locator('.dlog-detail')).toBeVisible(); } },
@@ -64,6 +74,15 @@ for (const state of STATES) {
           if (state.holdSignIn) {
             // The provider's discovery never answers, so the cockpit keeps showing that it is signing in.
             await page.route(`${ISSUER}/.well-known/openid-configuration`, () => undefined);
+          }
+          if (state.expireSignIn) {
+            await page.route(`${ISSUER}/protocol/openid-connect/auth**`, async (route) => {
+              const url = new URL(route.request().url());
+              const back = new URL(url.searchParams.get('redirect_uri') ?? '');
+              back.searchParams.set('code', 'stale-code');
+              back.searchParams.set('state', 'stale-state');
+              await route.fulfill({ status: 200, contentType: 'text/html', body: `<!doctype html><meta http-equiv="refresh" content="0;url=${back.toString().replaceAll('&', '&amp;')}"><title>Sign in</title>` });
+            });
           }
           if (state.refuseSignIn) {
             await page.route(`${ISSUER}/protocol/openid-connect/auth**`, async (route) => {

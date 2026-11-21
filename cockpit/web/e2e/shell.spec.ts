@@ -256,13 +256,16 @@ test.describe('targets and fold (ux-design section 8)', () => {
       await mockHost(page, scenario);
       await page.goto('./#/service');
       await expect(scenario === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
+      // Measure the Copy buttons too: open every Details disclosure first.
+      await page.locator('details').evaluateAll((all) => { for (const details of all) (details as HTMLDetailsElement).open = true; });
 
       const tooSmall = await page.evaluate(() => {
         const half = 21; // probe inside a 44 x 44 px box centred on the control
         const failures: string[] = [];
         for (const control of document.querySelectorAll<HTMLElement>('button, a[href]')) {
           const rect = control.getBoundingClientRect();
-          if (rect.width === 0 || rect.bottom < 0 || rect.top > window.innerHeight) continue;
+          // A control inside a closed Details is not visible, so it has no target to measure yet.
+          if (rect.width === 0 || rect.bottom < 0 || rect.top > window.innerHeight || !control.checkVisibility()) continue;
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
           const probes: Array<[number, number]> = [[cx, cy - half], [cx, cy + half], [cx - half, cy], [cx + half, cy]];

@@ -266,6 +266,8 @@ export const en = {
   'action.copyReference': 'Copy reference',
   'action.cancel': 'Cancel',
   'action.referenceCopied': 'Reference copied',
+  'action.copyCode': 'Copy error code',
+  'action.codeCopied': 'Error code copied',
 
   'host.choose': 'Choose a service',
   'host.switch': 'switch service',
@@ -551,8 +553,8 @@ export const en = {
   'history.DRAFT_UPDATED': 'Draft updated',
   'history.other': 'Changed',
 
-  'dlog.crumb': 'Decision {id}',
   'dlog.locked': 'Reading decisions needs permission to read the decision log.',
+  'dlog.locked.goHome': 'Go to Home',
   'dlog.searchLabel': 'Find decisions',
   'dlog.findBy': 'Find by',
   'dlog.byRuleSet': 'Rule set',
@@ -594,7 +596,7 @@ export const en = {
   'dlog.error.cannotExplain': 'The service cannot explain this decision.',
   'dlog.error.table': 'The rule table of this version cannot be shown.',
   'dlog.back': 'Back to decisions',
-  'dlog.detailTitle': 'Decision {id}',
+  'dlog.detailTitle': 'Decision',
   'dlog.detailSubtitle': 'One logged decision and why.',
   'dlog.ruleSetDecision': '{ruleSet} decision',
   'dlog.decidedAt': 'Decided {when}',

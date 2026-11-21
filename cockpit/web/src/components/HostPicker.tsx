@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { hostLabel, type RegistryHost } from '../app/config/registry';
 import { areaOf, areaRoute, formatRoute, parseRoute, splitHost, withHost } from '../app/route';
 import { useI18n } from '../i18n/I18nProvider';
+import { EnvironmentTag, environmentLabel } from './EnvironmentTag';
 import { CheckIcon } from './icons';
 
 export interface HostPickerProps {
@@ -33,7 +34,7 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
   const name = [
     `${t('header.service')}: ${label}`,
     ...(tenant !== undefined ? [`${t('header.tenant')}: ${tenant}`] : []),
-    ...(current?.environment !== undefined ? [`${t('header.environment')}: ${current.environment}`] : []),
+    ...(current?.environment !== undefined ? [`${t('header.environment')}: ${environmentLabel(current.environment, locale)}`] : []),
   ].join(', ');
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
       <span className={ready ? 'service-pill__dot' : 'service-pill__dot service-pill__dot--idle'} aria-hidden="true" />
       <span className="service-pill__name" data-testid="header-host" aria-hidden="true">{label}</span>
       {tenant !== undefined ? <span className="service-pill__tenant" data-testid="header-tenant" aria-hidden="true">{tenant}</span> : null}
-      {current?.environment !== undefined ? <span className="tag tag--env" aria-hidden="true">{current.environment}</span> : null}
+      {current?.environment !== undefined ? <EnvironmentTag environment={current.environment} /> : null}
     </>
   );
 
@@ -107,7 +108,7 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
                   }}
                 >
                   <span className="host-picker__label">{hostLabel(host.label, locale) || host.id}</span>
-                  {host.environment !== undefined ? <span className="host-picker__env">{host.environment}</span> : null}
+                  {host.environment !== undefined ? <span className="host-picker__env">{environmentLabel(host.environment, locale)}</span> : null}
                   {selected ? <span className="host-picker__check" aria-hidden="true"><CheckIcon /></span> : null}
                 </a>
               </li>

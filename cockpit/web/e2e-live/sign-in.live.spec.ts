@@ -30,8 +30,39 @@ for (const locale of ['en', 'vi'] as const) {
         }
         await page.screenshot({ path: `${SHOTS}/sign-in-1440x${String(height)}-${theme}-${locale}.png` });
       });
+
+      test(`TR_UI_03_signed_out_line_passes_every_axe_rule_${locale}_${theme}_1440x${String(height)}`, async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height });
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await page.goto(`/login?lang=${locale}&logout`);
+        await expect(page.getByRole('status')).toHaveText(locale === 'en' ? /You have signed out\./ : /Bạn đã đăng xuất/);
+        const axe = await new AxeBuilder({ page }).analyze();
+        expect(axe.violations.map((violation) => `${violation.id}: ${violation.nodes.map((node) => node.target.join(' ')).join(' | ')}`)).toEqual([]);
+        await page.screenshot({ path: `${SHOTS}/sign-in-signed-out-1440x${String(height)}-${theme}-${locale}.png` });
+      });
     }
   }
+}
+
+for (const [locale, theme] of [['en', 'light'], ['vi', 'dark']] as const) {
+  test(`TR_UI_03_a_demo_row_shows_hover_and_focus_and_fills_the_username_${locale}_${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+    await page.goto(`/login?lang=${locale}`);
+    const rows = page.locator('.demo__user');
+    // Keyboard focus on the first row, the pointer over the second: both states read as actions.
+    await rows.first().focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await rows.nth(1).hover();
+    const focusRing = await rows.first().evaluate((row) => getComputedStyle(row).outlineStyle);
+    expect(focusRing).toBe('solid');
+    const resting = await rows.nth(2).evaluate((row) => getComputedStyle(row).backgroundColor);
+    await expect.poll(() => rows.nth(1).evaluate((row) => getComputedStyle(row).backgroundColor)).not.toBe(resting);
+    await page.screenshot({ path: `${SHOTS}/sign-in-demo-rows-1440x900-${theme}-${locale}.png` });
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#username')).toHaveValue(await rows.first().getAttribute('data-username') ?? '');
+  });
 }
 
 test('CKP_041_a_decision_link_survives_the_host_sign_in_of_the_embedded_cockpit', async ({ page }) => {
@@ -49,7 +80,11 @@ test('CKP_041_a_decision_link_survives_the_host_sign_in_of_the_embedded_cockpit'
   // Lan holds no rules:log:read on the example host: the link is refused in words and nothing is requested
   await expect(page.getByText('You do not have permission to open decisions.')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/journey-3-decision-link-1440x900-light-en.png` });
-  await page.getByRole('link', { name: 'Home' }).first().click();
-  await expect(page.getByTestId('header-user')).toBeAttached();
+  // The refusal offers the next step; the journey ends on a useful Home, not on the refusal
+  await page.getByRole('link', { name: 'Go to Home' }).click();
+  await expect(page).toHaveURL(/#\/home$/);
+  await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), / })).toBeVisible();
+  await expect(page.locator('.home')).toBeVisible();
+  await page.mouse.move(0, 0);
   await page.screenshot({ path: `${SHOTS}/journey-4-home-1440x900-light-en.png` });
 });

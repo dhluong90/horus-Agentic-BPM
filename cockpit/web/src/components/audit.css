@@ -19,6 +19,8 @@
 .card.locked-state { flex-direction: row; align-items: center; gap: 12px; color: var(--ink-2); }
 .locked-state__icon { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--muted); }
 .locked-state__icon .lock-icon { width: 18px; height: 18px; }
+.locked-state__text { flex: 1 1 auto; min-width: 0; }
+.locked-state__action { flex: none; }
 .field__input--bad { border-color: var(--bad-fill); }
 
 /* Disabled is not a colour (styleguide section 3): a flat fill, muted text, and the reason in words beside it. */

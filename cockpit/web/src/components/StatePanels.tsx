@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { HostError } from '../api/hostError';
 import type { SignInProblem } from '../app/auth/oidc';
 import type { ConfigProblem } from '../app/session/useHostSession';
@@ -32,45 +33,66 @@ function errorText(error: HostError): { title: MessageKey; body: MessageKey } {
   return ERROR_TEXT.problem;
 }
 
-/** A host that answers with an error shows its code and correlation id, never a blank page. */
+/** One fact behind Details: a machine value in monospace, with Copy when support needs to paste it. */
+interface Fact { label: MessageKey; value: string | undefined; testId?: string; copy?: { label: MessageKey; copied: MessageKey } }
+
+const COPY_CODE = { label: 'action.copyCode', copied: 'action.codeCopied' } as const;
+const COPY_REFERENCE = { label: 'action.copyReference', copied: 'action.referenceCopied' } as const;
+
+/**
+ * The code, the reference and the HTTP status of a failed call, one click away behind Details (styleguide section
+ * 9, alerts): support needs them, the person reading the panel does not.
+ */
+function ProblemFacts({ facts }: { facts: readonly Fact[] }) {
+  const { t } = useI18n();
+  if (facts.length === 0) return null;
+  return (
+    <details className="alert__details panel__details">
+      <summary className="hit">{t('area.error.details')}</summary>
+      <dl>
+        {facts.map((fact) => (
+          <div key={fact.label}>
+            <dt>{t(fact.label)}</dt>
+            <dd className="facts__with-action">
+              <span data-testid={fact.testId}><FactValue value={fact.value} /></span>
+              {fact.copy !== undefined && fact.value !== undefined ? <CopyButton value={fact.value} label={t(fact.copy.label)} copiedLabel={t(fact.copy.copied)} /> : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+/** The calm alert shape: soft fill, a 3 px edge, an icon and a title, then one plain sentence. */
+function AlertPanel({ tone, titleId, title, children }: { tone: 'bad' | 'warn'; titleId: string; title: string; children: ReactNode }) {
+  return (
+    <section className={`panel panel--${tone === 'bad' ? 'error' : 'warn'}`} role="alert" aria-labelledby={titleId}>
+      <h1 id={titleId} className="panel__title">
+        <span className={`status-icon status-icon--${tone}`} aria-hidden="true">{tone === 'bad' ? '✕' : '!'}</span>
+        {title}
+      </h1>
+      {children}
+    </section>
+  );
+}
+
+/** A host that answers with an error says so in one sentence; its code and reference wait behind Details. */
 export function HostErrorPanel({ error, onRetry }: { error: HostError; onRetry: () => void }) {
   const { t } = useI18n();
   const text = errorText(error);
-  const code = error.kind === 'problem' ? error.code : undefined;
-  const correlationId = error.kind === 'problem' || error.kind === 'unexpected-response' ? error.correlationId : undefined;
-  const status = error.kind === 'problem' || error.kind === 'unexpected-response' ? error.status : undefined;
+  const answered = error.kind === 'problem' || error.kind === 'unexpected-response';
+  const facts: Fact[] = answered
+    ? [
+        { label: 'error.code', value: error.kind === 'problem' ? error.code : undefined, testId: 'error-code', copy: COPY_CODE },
+        { label: 'error.correlationId', value: error.correlationId, testId: 'error-correlation-id', copy: COPY_REFERENCE },
+        { label: 'error.status', value: String(error.status) },
+      ]
+    : [];
   return (
-    <section className="panel panel--error" role="alert" aria-labelledby="host-error-title">
-      <h1 id="host-error-title" className="panel__title">
-        <span className="status-icon status-icon--bad" aria-hidden="true">!</span>
-        {t(text.title)}
-      </h1>
+    <AlertPanel tone="bad" titleId="host-error-title" title={t(text.title)}>
       <p className="panel__body">{t(text.body)}</p>
-      {error.kind === 'problem' || error.kind === 'unexpected-response' ? (
-        <dl className="facts">
-          <div>
-            <dt>{t('error.code')}</dt>
-            <dd data-testid="error-code">
-              <FactValue value={code} />
-            </dd>
-          </div>
-          <div>
-            <dt>{t('error.correlationId')}</dt>
-            <dd className="facts__with-action">
-              <span data-testid="error-correlation-id">
-                <FactValue value={correlationId} />
-              </span>
-              {correlationId !== undefined ? <CopyButton value={correlationId} /> : null}
-            </dd>
-          </div>
-          {status !== undefined ? (
-            <div>
-              <dt>{t('error.status')}</dt>
-              <dd className="mono">{status}</dd>
-            </div>
-          ) : null}
-        </dl>
-      ) : null}
+      <ProblemFacts facts={facts} />
       <div className="panel__actions">
         {error.kind === 'signed-out' ? (
           <button type="button" className="btn btn--primary" onClick={() => {
@@ -84,7 +106,7 @@ export function HostErrorPanel({ error, onRetry }: { error: HostError; onRetry: 
           </button>
         )}
       </div>
-    </section>
+    </AlertPanel>
   );
 }
 
@@ -119,11 +141,7 @@ export function ConfigErrorPanel({ problem }: { problem: ConfigProblem }) {
   const message = configMessage(problem);
   const pointer = 'pointer' in problem ? problem.pointer : undefined;
   return (
-    <section className="panel panel--error" role="alert" aria-labelledby="config-error-title">
-      <h1 id="config-error-title" className="panel__title">
-        <span className="status-icon status-icon--bad" aria-hidden="true">!</span>
-        {t('config.title')}
-      </h1>
+    <AlertPanel tone="bad" titleId="config-error-title" title={t('config.title')}>
       <p className="panel__body">{t(message.key, message.params)}</p>
       <p className="panel__hint">{t('config.body')}</p>
       {pointer !== undefined && pointer !== '' ? (
@@ -134,7 +152,7 @@ export function ConfigErrorPanel({ problem }: { problem: ConfigProblem }) {
           </div>
         </dl>
       ) : null}
-    </section>
+    </AlertPanel>
   );
 }
 
@@ -166,26 +184,15 @@ export function SignInFailedPanel({ problem, onRetry }: { problem: SignInProblem
   const { t } = useI18n();
   const code = problem.reason === 'provider-refused' ? problem.error : problem.reason === 'token-refused' ? problem.error : undefined;
   return (
-    <section className="panel panel--error" role="alert" aria-labelledby="sign-in-error-title">
-      <h1 id="sign-in-error-title" className="panel__title">
-        <span className="status-icon status-icon--bad" aria-hidden="true">!</span>
-        {t('signIn.failed.title')}
-      </h1>
+    <AlertPanel tone="bad" titleId="sign-in-error-title" title={t('signIn.failed.title')}>
       <p className="panel__body">{t(SIGN_IN_TEXT[problem.reason])}</p>
-      {code !== undefined ? (
-        <dl className="facts">
-          <div>
-            <dt>{t('error.code')}</dt>
-            <dd className="mono" data-testid="error-code">{code}</dd>
-          </div>
-        </dl>
-      ) : null}
+      <ProblemFacts facts={code !== undefined ? [{ label: 'error.code', value: code, testId: 'error-code', copy: COPY_CODE }] : []} />
       <div className="panel__actions">
         <button type="button" className="btn btn--primary" onClick={onRetry}>
           {t('action.signIn')}
         </button>
       </div>
-    </section>
+    </AlertPanel>
   );
 }
 
@@ -193,20 +200,11 @@ export function SignInFailedPanel({ problem, onRetry }: { problem: SignInProblem
 export function UnsupportedVersionPanel({ hostName, engineVersion, lines }: { hostName: string; engineVersion: string; lines: readonly string[] }) {
   const { t } = useI18n();
   return (
-    <section className="panel panel--warn" role="alert" aria-labelledby="version-title">
-      <h1 id="version-title" className="panel__title">
-        <span className="status-icon status-icon--warn" aria-hidden="true">!</span>
-        {t('version.title')}
-      </h1>
+    <AlertPanel tone="warn" titleId="version-title" title={t('version.title')}>
       <p className="panel__body" data-testid="version-text">{t('version.body', { service: hostName, version: engineVersion, supported: lines.join(t('version.and')) })}</p>
       <p className="panel__hint">{t('version.hint')}</p>
-      <dl className="facts">
-        <div>
-          <dt>{t('error.code')}</dt>
-          <dd className="mono" data-testid="error-code">UNSUPPORTED_VERSION</dd>
-        </div>
-      </dl>
-    </section>
+      <ProblemFacts facts={[{ label: 'error.code', value: 'UNSUPPORTED_VERSION', testId: 'error-code', copy: COPY_CODE }]} />
+    </AlertPanel>
   );
 }
 

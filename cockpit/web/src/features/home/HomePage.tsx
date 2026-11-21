@@ -167,7 +167,7 @@ function PendingBody({ view, items, onRetry }: { view: 'review' | 'mine'; items:
   if (items.status === 'loading') return <LoadingRows rows={2} />;
   if (items.status === 'error') return <AreaError error={items.error} onRetry={onRetry} />;
   if (items.data.length === 0) {
-    return <EmptyState text={view === 'review' ? t('home.noOtherReviews') : t('home.noOwnWork')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />;
+    return <EmptyState icon="approvals" text={view === 'review' ? t('home.noOtherReviews') : t('home.noOwnWork')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />;
   }
   return <PendingList items={items.data.slice(0, RECENT_ROWS)} compact />;
 }

@@ -12,6 +12,8 @@ const LOCALES = ['en', 'vi'] as const;
 const STATES: ReadonlyArray<{ name: string; scenario: Scenario }> = [
   { name: 'ready', scenario: 'ready' },
   { name: 'me-error', scenario: 'me-forbidden' },
+  // The host session ended: one calm line and Sign in again.
+  { name: 'session-ended', scenario: 'signed-out' },
 ];
 
 for (const { name, scenario } of STATES) {

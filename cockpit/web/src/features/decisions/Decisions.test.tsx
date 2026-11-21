@@ -108,8 +108,8 @@ describe('one decision', () => {
   it('CKP_005_decision_log_masks_pii_and_highlights_matched_row', async () => {
     const user = userEvent.setup();
     open(`#/decisions/${NAMED}`);
-    // The engine's sentence, unchanged.
-    expect(await screen.findByText(/^Rule R2 of card-fee version 1 matched because tier is GOLD/)).toBeInTheDocument();
+    // The engine's sentence, unchanged: here the rule set author's sentence for R2, with the value grouped.
+    expect(await screen.findByText('The card fee is waived because a Gold customer keeps a balance of 60,000,000 VND, at least 50,000,000 VND.')).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Inputs' }));
     const inputs = screen.getByRole('table', { name: 'Inputs' });
     const nationalId = within(inputs).getByRole('row', { name: /National id/ });
@@ -126,6 +126,10 @@ describe('one decision', () => {
   it('CKP_072_decision_shows_engine_sentence_conditions_and_masked_inputs', async () => {
     open(`#/decisions/${NAMED}`);
     expect(await screen.findByRole('heading', { level: 1, name: 'card-fee decision' })).toBeInTheDocument();
+    // No raw id in the breadcrumb: it leads back to Decisions only.
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(crumbs).getByRole('link', { name: 'Decisions' })).toBeInTheDocument();
+    expect(crumbs).not.toHaveTextContent(/01KF/);
     expect(screen.getByText('Rule R2 matched', { selector: '.why .badge' })).toBeInTheDocument();
     const explain = calls.find((call) => call.path.endsWith('/explain'));
     expect(explain?.path).toBe(`/decisions/${NAMED}/explain`);
@@ -155,9 +159,19 @@ describe('one decision', () => {
 
   it('CKP_072_the_sentence_follows_the_screen_language', async () => {
     open(`#/decisions/${NAMED}`, 'rules-auditor', 'vi');
-    expect(await screen.findByText(/^Quy tắc R2 của card-fee phiên bản 1 khớp vì/)).toBeInTheDocument();
+    // The rule set's Vietnamese sentence for R2, the amount grouped for the language; the cockpit shows it unchanged.
+    expect(await screen.findByText('Phí thẻ được miễn vì khách hàng hạng Vàng duy trì số dư 60.000.000 VND, từ 50.000.000 VND trở lên.')).toBeInTheDocument();
+    expect(document.querySelector('.why__text')).toHaveAttribute('lang', 'vi');
     expect(calls.find((call) => call.path.endsWith('/explain'))?.query.get('lang')).toBe('vi');
     expect(screen.getByRole('tab', { name: 'Điều kiện' })).toBeInTheDocument();
+  });
+
+  it('CKP_072_a_row_without_its_own_sentence_reads_in_the_generated_sentence_grouped_for_the_language', async () => {
+    open('#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7TA', 'rules-auditor', 'vi');
+    expect(await screen.findByText(/^Quy tắc R4 của card-fee phiên bản 1 khớp vì tx count là 25, tức là ít nhất 20\./)).toBeInTheDocument();
+    const sentence = document.querySelector('.why__text');
+    expect(sentence).toHaveTextContent('Kết quả: fee 15.000 VND; waived Không.');
+    expect(sentence).not.toHaveTextContent(/true|false|\d{4,} VND/);
   });
 
   it('CKP_072_a_failed_decision_reads_in_words_with_the_error_edge_and_the_code_behind_details', async () => {
@@ -196,6 +210,8 @@ describe('one decision', () => {
   it('CKP_042_a_user_without_the_decision_log_is_told_so_and_no_decision_is_requested', async () => {
     open(`#/decisions/${NAMED}`, 'rules-auditor-no-log');
     expect(await screen.findByText('You do not have permission to open decisions.')).toBeInTheDocument();
+    // Not a dead end: the refusal offers Home.
+    expect(screen.getByRole('link', { name: 'Go to Home' })).toHaveAttribute('href', '#/home');
     expect(decisionCalls()).toEqual([]);
   });
 

@@ -3,6 +3,7 @@ import { signOutOfHost } from '../api/hostClient';
 import type { MessageKey } from '../i18n/en';
 import { useI18n } from '../i18n/I18nProvider';
 import { BrandMark } from './BrandMark';
+import { EnvironmentTag, environmentLabel } from './EnvironmentTag';
 import { PreferenceControls } from './PreferenceControls';
 
 /** What the header shows about the session. Absent until /meta and /me have both answered. */
@@ -75,11 +76,11 @@ export function SessionHeader({ session, banner, breadcrumb, service }: {
 }
 
 function ServicePill({ session }: { session: SessionSummary }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const name = [
     `${t('header.service')}: ${session.hostLabel}`,
     `${t('header.tenant')}: ${session.tenant}`,
-    ...(session.environment !== undefined ? [`${t('header.environment')}: ${session.environment}`] : []),
+    ...(session.environment !== undefined ? [`${t('header.environment')}: ${environmentLabel(session.environment, locale)}`] : []),
   ].join(', ');
   return (
     <p className="service-pill" title={name}>
@@ -87,7 +88,7 @@ function ServicePill({ session }: { session: SessionSummary }) {
       <span className="service-pill__dot" aria-hidden="true" />
       <span className="service-pill__name" data-testid="header-host" title={session.hostLabel} aria-hidden="true">{session.hostLabel}</span>
       <span className="service-pill__tenant" data-testid="header-tenant" aria-hidden="true">{session.tenant}</span>
-      {session.environment !== undefined ? <span className="tag tag--env" aria-hidden="true">{session.environment}</span> : null}
+      {session.environment !== undefined ? <EnvironmentTag environment={session.environment} /> : null}
     </p>
   );
 }

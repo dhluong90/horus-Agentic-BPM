@@ -59,6 +59,11 @@ describe('embedded shell, failure paths', () => {
 
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByRole('heading', { name: /refused the request/ })).toBeInTheDocument();
+    // One plain sentence; the code, the reference and the HTTP status wait behind a closed Details.
+    const details = alert.querySelector('details');
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(within(alert).getByText('Details')).toBeInTheDocument();
     expect(screen.getByTestId('error-code')).toHaveTextContent('PERMISSION_DENIED');
     expect(screen.getByTestId('error-correlation-id')).toHaveTextContent('01JD3A7Q2M5N8P1R4S6T9V0W2X');
     const top = await header();
