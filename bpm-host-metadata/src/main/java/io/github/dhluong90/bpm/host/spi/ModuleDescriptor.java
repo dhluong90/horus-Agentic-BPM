@@ -18,6 +18,22 @@ import java.util.regex.Pattern;
  * {@code bpm-meta.v1.schema.json} and the permission names of ADR-0010, so a wrong entry stops the host
  * at start-up instead of reaching a client. Immutable and safe for concurrent use.
  *
+ * <p>Engine starters build it with {@link #builder(String, String, String)}, so optional fields added in a later
+ * release leave their code unchanged; the canonical constructor stays for existing callers.
+ *
+ * <p><b>Closed set.</b> The modules are exactly {@code rules} and {@code processes}, and every permission matches
+ * {@code (rules|processes)(:[a-z]+){1,2}}. Both are closed on purpose: they are the {@code module} enum of the
+ * published schema {@code bpm-meta.v1.schema.json} and the permission names of ADR-0010. A third engine therefore
+ * needs a release of this module and a new schema version; widening a v1 enum ships behind a feature flag, so a
+ * client on the old schema never meets a value it cannot read.
+ *
+ * <pre>{@code
+ * ModuleDescriptor.builder("rules", "0.2.0", "v1")
+ *         .permissions(List.of("rules:read", "rules:publish:approve"))
+ *         .rolePermissions(Map.of("ROLE_PRICING_APPROVER", List.of("rules:read", "rules:publish:approve")))
+ *         .build();
+ * }</pre>
+ *
  * @param module the REST path segment and permission prefix: {@code rules} or {@code processes}
  * @param engineVersion the engine release, semantic version with an optional pre-release suffix
  * @param apiVersion the REST API major version, for example {@code v1}
@@ -70,6 +86,82 @@ public record ModuleDescriptor(
             }
         }
         rolePermissions = copyRolePermissions(rolePermissions, permissions, module);
+    }
+
+    /**
+     * Starts a descriptor with its required fields; features, settings, permissions and role mappings are empty
+     * until set.
+     *
+     * @param module {@code rules} or {@code processes}
+     * @param engineVersion the engine release, for example {@code 0.2.0}
+     * @param apiVersion the REST API major version, for example {@code v1}
+     * @return a new builder; not safe for concurrent use
+     */
+    public static Builder builder(String module, String engineVersion, String apiVersion) {
+        return new Builder(module, engineVersion, apiVersion);
+    }
+
+    /** Collects the fields of a {@link ModuleDescriptor}; {@link #build()} validates them as the constructor does. */
+    public static final class Builder {
+
+        private final String module;
+        private final String engineVersion;
+        private final String apiVersion;
+        private List<String> features = List.of();
+        private Map<String, Object> settings = Map.of();
+        private List<String> permissions = List.of();
+        private Map<String, List<String>> rolePermissions = Map.of();
+
+        private Builder(String module, String engineVersion, String apiVersion) {
+            this.module = module;
+            this.engineVersion = engineVersion;
+            this.apiVersion = apiVersion;
+        }
+
+        /**
+         * @param features feature flags, each starting with {@code <module>.}
+         * @return this builder
+         */
+        public Builder features(List<String> features) {
+            this.features = Objects.requireNonNull(features, "features");
+            return this;
+        }
+
+        /**
+         * @param settings settings clients must respect; booleans, integers or strings
+         * @return this builder
+         */
+        public Builder settings(Map<String, Object> settings) {
+            this.settings = Objects.requireNonNull(settings, "settings");
+            return this;
+        }
+
+        /**
+         * @param permissions every permission the engine checks, in display order
+         * @return this builder
+         */
+        public Builder permissions(List<String> permissions) {
+            this.permissions = Objects.requireNonNull(permissions, "permissions");
+            return this;
+        }
+
+        /**
+         * @param rolePermissions host authority to the permissions it grants
+         * @return this builder
+         */
+        public Builder rolePermissions(Map<String, List<String>> rolePermissions) {
+            this.rolePermissions = Objects.requireNonNull(rolePermissions, "rolePermissions");
+            return this;
+        }
+
+        /**
+         * @return the validated descriptor
+         * @throws IllegalArgumentException when a value breaks the published schema or the permission names
+         */
+        public ModuleDescriptor build() {
+            return new ModuleDescriptor(module, engineVersion, apiVersion, features, settings, permissions,
+                    rolePermissions);
+        }
     }
 
     private static void requireMatch(Pattern pattern, String value, String field) {

@@ -2,10 +2,8 @@
 # The spec-to-test gate (tools/spec-coverage.py, TR-QA-01) skips these ids and warns when one gains a test.
 # Remove the line in the pull request that adds the test. Format: <ID> <milestone>, the milestone as in SPEC.md.
 
-RLE-015 M3
 RLE-018 M2
 # RLE-032: the JSON and DMN round trips keep the hash (#233); YAML export and format=xlsx are not tested yet.
 RLE-032 M1
 RLE-033 M1
-RLE-038 M3
 RLE-053 M1

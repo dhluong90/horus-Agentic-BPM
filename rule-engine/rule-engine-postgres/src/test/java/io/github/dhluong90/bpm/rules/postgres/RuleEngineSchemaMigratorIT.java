@@ -36,7 +36,7 @@ class RuleEngineSchemaMigratorIT {
 
         assertThat(result.initialVersion()).isNull();
         assertThat(result.currentVersion()).isEqualTo("24");
-        assertThat(result.migrationsExecuted()).isEqualTo(16);
+        assertThat(result.migrationsExecuted()).isEqualTo(18);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -47,6 +47,7 @@ class RuleEngineSchemaMigratorIT {
                 "rle_setting_seen",
                 "rle_rule",
                 "rle_decision",
+                "rle_decision_log_drop",
                 "rle_decision_outbox",
                 "rle_idempotency");
     }
@@ -124,9 +125,9 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.currentVersion()).isEqualTo("24");
-        assertThat(result.migrationsExecuted()).isEqualTo(16);
+        assertThat(result.migrationsExecuted()).isEqualTo(18);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "20", "21", "24");
+                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "18", "19", "20", "21", "24");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -144,7 +145,7 @@ class RuleEngineSchemaMigratorIT {
         assertThat(second.migrationsExecuted()).isZero();
         assertThat(migrator.currentVersion()).contains("24");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(16L);
+                .isEqualTo(18L);
     }
 
     @Test
@@ -189,6 +190,69 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
+    void RLE_038_V18_holds_four_eyes_on_retirement_and_its_rollback_step_runs() throws java.io.IOException {
+        // Given a migrated database with tet-fee-waiver v1 PUBLISHED and v2 DRAFT
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        JdbcClient jdbc = JdbcClient.create(db);
+        jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES ('bank-a', 'RS1', 'tet-fee-waiver',"
+                + " now())").update();
+        String insert = "INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy,"
+                + " canonical_json, canonical_hash, source_format, source_document, source_hash, created_at)"
+                + " VALUES ('bank-a', :id, 'RS1', :num, :status, 'FIRST', '{}', repeat('a', 64), 'YAML', '',"
+                + " repeat('b', 64), now())";
+        jdbc.sql(insert).param("id", "V1").param("num", 1).param("status", "PUBLISHED").update();
+        jdbc.sql(insert).param("id", "V2").param("num", 2).param("status", "DRAFT").update();
+        String request = "UPDATE rle_version SET retire_requested_by = :by, retire_requested_at = now(),"
+                + " retire_reason = :reason, retire_confirm_no_version = true WHERE tenant_id = 'bank-a' AND id = :id";
+
+        // Then a complete request is accepted on the published version only, and a partial one never
+        assertThat(jdbc.sql(request).param("by", "bob").param("reason", "Tet promotion ended").param("id", "V1").update())
+                .isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(request).param("by", "bob")
+                .param("reason", "Tet promotion ended").param("id", "V2").update())
+                .hasMessageContaining("rle_version_retire_request_published");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET retire_reason = NULL"
+                + " WHERE tenant_id = 'bank-a' AND id = 'V1'").update())
+                .hasMessageContaining("rle_version_retire_request_complete");
+        // and a retirement that leaves the request on the row is refused
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET status = 'RETIRED',"
+                + " retired_at = now() WHERE tenant_id = 'bank-a' AND id = 'V1'").update())
+                .hasMessageContaining("rle_version_retire_request_published");
+        // and a RETIRED history row confirmed by its own requester, or naming a requester outside four-eyes, is refused
+        String history = "INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status,"
+                + " actor, reason, approval_mode, lock_version, occurred_at, retire_requested_by) VALUES ('bank-a', :id,"
+                + " 'V1', 'RETIRED', 'PUBLISHED', 'RETIRED', :actor, 'Tet promotion ended', :mode, 3, now(), 'bob')";
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(history).param("id", "H1")
+                .param("actor", "bob").param("mode", "four-eyes").update())
+                .hasMessageContaining("rle_version_history_retire_four_eyes");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(history).param("id", "H2")
+                .param("actor", "carol").param("mode", "single").update())
+                .hasMessageContaining("rle_version_history_retire_four_eyes");
+        assertThat(jdbc.sql(history).param("id", "H3").param("actor", "carol").param("mode", "four-eyes").update())
+                .isEqualTo(1);
+
+        // When the documented rollback step of V18 runs, Then the columns are gone and the rows stay
+        jdbc.sql(rollbackStatements("V18__rle_version_retire_request.sql")).update();
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'retire_requested_by'")
+                .query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_version").query(Long.class).single()).isEqualTo(2L);
+    }
+
+    /** The statements between {@code rollback-begin} and {@code rollback-end} of a migration, without the comment marks. */
+    private static String rollbackStatements(String migration) throws java.io.IOException {
+        String path = "io/github/dhluong90/bpm/rules/postgres/migration/" + migration;
+        try (java.io.InputStream in = RuleEngineSchemaMigratorIT.class.getClassLoader().getResourceAsStream(path)) {
+            assertThat(in).as(path).isNotNull();
+            String script = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            String block = script.substring(script.indexOf("-- rollback-begin\n") + "-- rollback-begin\n".length(),
+                    script.indexOf("-- rollback-end"));
+            return block.lines().map(line -> line.replaceFirst("^--\\s{0,3}", ""))
+                    .collect(java.util.stream.Collectors.joining("\n"));
+        }
+    }
+
+    @Test
     void RLE_008_V10_adds_the_pinned_mark_to_every_partition_and_its_rollback_step_runs() {
         DataSource db = freshDatabase();
         new RuleEngineSchemaMigrator(db).migrate();
@@ -213,7 +277,7 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 16));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 18));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();

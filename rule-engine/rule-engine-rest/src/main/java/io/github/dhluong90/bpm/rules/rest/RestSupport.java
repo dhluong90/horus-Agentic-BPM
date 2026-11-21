@@ -61,15 +61,21 @@ final class RestSupport {
             builder.header(HttpHeaders.LOCATION, BASE + "/rule-sets/" + version.ruleSet() + "/versions/" + version.version());
         }
         ObjectNode body = EngineValues.version(version);
-        body.set("allowedActions", actions(version.status(), version.createdBy(), version.requestedBy(), callers));
+        body.set("allowedActions", actions(version.status(), version.createdBy(), version.requestedBy(),
+                version.retirementRequest() == null ? null : version.retirementRequest().requestedBy(), callers));
         return builder.contentType(MediaType.APPLICATION_JSON)
                 .body(EngineValues.write(body).getBytes(StandardCharsets.UTF_8));
     }
 
     static ArrayNode actions(VersionStatus status, String createdBy, String requestedBy, CallerResolver callers) {
+        return actions(status, createdBy, requestedBy, null, callers);
+    }
+
+    static ArrayNode actions(VersionStatus status, String createdBy, String requestedBy, String retireRequestedBy,
+            CallerResolver callers) {
         ArrayNode actions = EngineJson.NODES.arrayNode();
-        VersionActions.allowed(status, createdBy, requestedBy, callers.currentCallerId(), callers.currentPermissions())
-                .forEach(actions::add);
+        VersionActions.allowed(status, createdBy, requestedBy, retireRequestedBy, callers.currentCallerId(),
+                callers.currentPermissions()).forEach(actions::add);
         return actions;
     }
 
@@ -98,7 +104,8 @@ final class RestSupport {
         node.set("requestedAt", EngineValues.value(v.requestedAt()));
         node.set("approvedBy", EngineValues.value(v.approvedBy()));
         node.set("approvedAt", EngineValues.value(v.approvedAt()));
-        node.set("allowedActions", actions(v.status(), v.createdBy(), v.requestedBy(), callers));
+        node.set("retireRequestedBy", EngineValues.value(v.retireRequestedBy()));
+        node.set("allowedActions", actions(v.status(), v.createdBy(), v.requestedBy(), v.retireRequestedBy(), callers));
         return node;
     }
 

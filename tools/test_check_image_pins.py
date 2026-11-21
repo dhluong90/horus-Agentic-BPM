@@ -139,6 +139,20 @@ class ImagePinsTest(unittest.TestCase):
             "cockpit/web/node_modules/x/src/test/A.java": 'new PostgreSQLContainer("postgres:16")\n',
         }))
 
+    def test_list_prints_each_pinned_test_image_once_without_its_tag(self) -> None:
+        # The weekly rescan of the test images (#293) reads this list.
+        other = "sha256:" + "fedcba9876543210" * 4
+        root = self.tree({
+            "pom.xml": f"<bpm.test.postgres.image>postgres@{DIGEST}</bpm.test.postgres.image>\n",
+            ".github/workflows/ci.yml": f"  POSTGRES_16_IMAGE: postgres@{DIGEST} # 16-alpine\n"
+                                        f"      image: mcr.microsoft.com/playwright:v1.65.1-noble@{other}\n"
+                                        "      IMAGE: horus/host:local # pin-exempt: built in this job\n",
+            "examples/host/src/test/resources/testcontainers.properties": f"ryuk.container.image=testcontainers/ryuk@{other}\n",
+            "docker-compose.yml": f"    image: postgres:16-alpine@{other}\n",
+        })
+        self.assertEqual([f"mcr.microsoft.com/playwright@{other}", f"postgres@{DIGEST}",
+                          f"testcontainers/ryuk@{other}"], pins.pinned(root))
+
 
 if __name__ == "__main__":
     unittest.main()

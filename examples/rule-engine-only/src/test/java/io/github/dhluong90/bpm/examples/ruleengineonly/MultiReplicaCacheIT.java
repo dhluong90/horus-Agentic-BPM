@@ -74,6 +74,7 @@ class MultiReplicaCacheIT {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("pooler")
     void TR_ASY_04_copies_behind_a_transaction_pooler_refresh_within_the_epoch_interval() throws Exception {
         // Given the schema migrated on a direct connection, then two copies through PgBouncer in transaction mode
         String database = freshDatabase();

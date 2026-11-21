@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.rules.internal.store;
 
+import io.github.dhluong90.bpm.rules.api.RetirementRequest;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
@@ -31,16 +32,100 @@ import java.time.Instant;
  * @param createdAt creation time
  * @param retiredAt when it was retired, or null while it is not; selection reads it (ADR-0025 decision 3)
  * @param copiedFrom the earlier version this one restored as a draft (RLE-062), or null when it was imported
+ * @param retirementRequest the pending four-eyes retirement (columns {@code retire_*}, V18), or null; only a
+ *     {@code PUBLISHED} version has one, and selection never reads it
  */
 public record StoredVersion(
         String tenantId, String id, String ruleSetId, String ruleSet, int version, VersionStatus status,
         String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
         SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion,
         String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment,
-        String createdBy, Instant createdAt, Instant retiredAt, Integer copiedFrom) {
+        String createdBy, Instant createdAt, Instant retiredAt, Integer copiedFrom,
+        RetirementRequest retirementRequest) {
+
+    public StoredVersion {
+        if (retirementRequest != null && status != VersionStatus.PUBLISHED) {
+            throw new IllegalArgumentException("only a published version has a pending retirement, " + ruleSet + " v"
+                    + version + " is " + status);
+        }
+    }
+
+    /**
+     * Creates a row of a restore, which has no pending retirement.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param ruleSetId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param canonicalJson see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceDocument see the record
+     * @param sourceHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param approvalComment see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     * @param retiredAt see the record
+     * @param copiedFrom see the record
+     */
+    public StoredVersion(String tenantId, String id, String ruleSetId, String ruleSet, int version,
+            VersionStatus status, String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
+            SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion, String requestedBy,
+            Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment, String createdBy,
+            Instant createdAt, Instant retiredAt, Integer copiedFrom) {
+        this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
+                sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
+                approvalComment, createdBy, createdAt, retiredAt, copiedFrom, null);
+    }
 
     /**
      * Creates a row that is not a restore.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param ruleSetId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param status see the record
+     * @param hitPolicy see the record
+     * @param effectiveFrom see the record
+     * @param canonicalJson see the record
+     * @param canonicalHash see the record
+     * @param sourceFormat see the record
+     * @param sourceDocument see the record
+     * @param sourceHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param approvedBy see the record
+     * @param approvedAt see the record
+     * @param approvalComment see the record
+     * @param createdBy see the record
+     * @param createdAt see the record
+     * @param retiredAt see the record
+     * @param retirementRequest see the record
+     */
+    public StoredVersion(String tenantId, String id, String ruleSetId, String ruleSet, int version,
+            VersionStatus status, String hitPolicy, Instant effectiveFrom, String canonicalJson, String canonicalHash,
+            SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion, String requestedBy,
+            Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment, String createdBy,
+            Instant createdAt, Instant retiredAt, RetirementRequest retirementRequest) {
+        this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
+                sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
+                approvalComment, createdBy, createdAt, retiredAt, null, retirementRequest);
+    }
+
+    /**
+     * Creates a row that is not a restore and has no pending retirement.
      *
      * @param tenantId see the record
      * @param id see the record
@@ -72,7 +157,7 @@ public record StoredVersion(
             Instant createdAt, Instant retiredAt) {
         this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
                 sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
-                approvalComment, createdBy, createdAt, retiredAt, null);
+                approvalComment, createdBy, createdAt, retiredAt, null, null);
     }
 
     /**
@@ -107,7 +192,7 @@ public record StoredVersion(
             Instant createdAt) {
         this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
                 sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
-                approvalComment, createdBy, createdAt, null, null);
+                approvalComment, createdBy, createdAt, null, null, null);
     }
 
     /**
@@ -119,7 +204,8 @@ public record StoredVersion(
     public RuleSetVersion toView(boolean includeSource) {
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalJson,
                 canonicalHash, sourceFormat, sourceHash, includeSource ? sourceDocument : null, requestedBy,
-                requestedAt, approvedBy, approvedAt, createdBy, createdAt, retiredAt, copiedFrom, java.util.List.of());
+                requestedAt, approvedBy, approvedAt, createdBy, createdAt, retiredAt, copiedFrom, java.util.List.of(),
+                retirementRequest);
     }
 
     /**
@@ -163,7 +249,33 @@ public record StoredVersion(
     }
 
     /**
-     * Returns a copy moved to {@code RETIRED} from an instant on: selection stops choosing it for any later clock.
+     * Returns a copy that keeps serving with a pending four-eyes retirement (RLE-038).
+     *
+     * @param request the request
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion retireRequested(RetirementRequest request) {
+        java.util.Objects.requireNonNull(request, "request must not be null");
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
+                canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1, requestedBy,
+                requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom,
+                request);
+    }
+
+    /**
+     * Returns a copy whose pending retirement is withdrawn; the version is unchanged otherwise and keeps serving.
+     *
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion retireCancelled() {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
+                canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1, requestedBy,
+                requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom, null);
+    }
+
+    /**
+     * Returns a copy moved to {@code RETIRED} from an instant on: selection stops choosing it for any later clock. A
+     * pending retirement request ends with it.
      *
      * @param at the transaction's clock; a retirement is never back-dated
      * @return the new state with the lock version incremented
@@ -212,6 +324,7 @@ public record StoredVersion(
      */
     public io.github.dhluong90.bpm.rules.api.VersionSummary toSummary() {
         return new io.github.dhluong90.bpm.rules.api.VersionSummary(ruleSet, version, status, hitPolicy, effectiveFrom,
-                lockVersion, canonicalHash, createdBy, createdAt, requestedBy, requestedAt, approvedBy, approvedAt);
+                lockVersion, canonicalHash, createdBy, createdAt, requestedBy, requestedAt, approvedBy, approvedAt,
+                retirementRequest == null ? null : retirementRequest.requestedBy());
     }
 }

@@ -2,7 +2,7 @@
 
 Check what a draft would decide before anyone approves it, and keep rule sets covered by unit tests in CI.
 
-Simulation against sample inputs over REST and the Java API is built (0.2.0). The cockpit Simulation screen and the test library describe the 0.1 target; replay against decision history is a Cockpit 0.2 target, and attaching simulation reports to publication requests is a 1.0 target. Milestone scope is owned by the [[Roadmap]].
+Simulation against sample inputs over REST and the Java API is built (0.2.0), and so is replaying logged decisions through a draft. The cockpit Simulation screen and the test library describe the 0.1 target; the cockpit replay screen is a Cockpit 0.2 target, and attaching simulation reports to publication requests is a 1.0 target. Milestone scope is owned by the [[Roadmap]].
 
 ## Before you start
 
@@ -49,9 +49,31 @@ Approving v2 with an `effectiveFrom` at or before now puts it in force and retir
 
 `:simulate` takes no `clock`: the baseline is the version in force at the host clock. To see what a version scheduled for a later date decides on that date, add `"clock": "2027-01-01T00:00:00Z"` to an `:evaluate` request. `today()` and `now()` in the expressions use that instant, and the version lookup uses it too. `clock` needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED` without it), and that decision is logged.
 
-## Replay history through a draft (Cockpit 0.2 target)
+## Replay history through a draft
 
-In the cockpit Simulation screen choose "Replay last N decisions". The engine evaluates the last N decisions of the effective version through the draft and reports how many outcomes change, grouped by output value, for example `18 of 100 changed: fee 30000 VND to 0 VND`. This is the pre-publication check for a fee or eligibility change.
+Sample customers miss edge cases. Replay last month's real decisions through the draft and see whose outcome would change. You need `rules:simulate` and `rules:log:read`, because the answer is built from logged inputs.
+
+```bash
+curl -s -X POST http://localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/2:simulate-history \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","limit":100}'
+```
+
+```json
+{"ruleSet":"card-fee","version":2,"status":"DRAFT","decisionCount":100,"replayedCount":100,"changedCount":18,
+ "notReplayableCount":0,"truncated":false,"results":[{"decisionId":"01KB2R6Q3C0000000000000001","loggedVersion":1,
+ "evalClock":"2026-11-29T22:00:00Z","changed":true,"maskedInputs":[],
+ "simulated":{"outcome":"MATCHED","matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":30000}}},
+ "logged":{"outcome":"MATCHED","matchedRuleIds":["R3"],"outputs":{"fee":{"currency":"VND","amount":50000}}}}]}
+```
+
+- **Both sides at the decision's own clock.** Each decision is evaluated with the version it was made with and with the draft, both at its logged clock, so `today()` is the day of the decision. The logged side is what was decided.
+- **Nothing is written.** No decision row, idempotency record or event; the decision log count is the same afterwards. The response holds no logged input.
+- **Masked inputs.** A decision whose masked input had a value cannot be evaluated again. It is listed with `maskedInputs` naming the inputs, never their values, and counted in `notReplayableCount`; the run goes on.
+- **Bounds.** The period is at most `query.max-range` (31 days) and the run at most `simulation.max-inputs` (1,000) decisions, newest first. `truncated` says the period held more. All the decisions of one run share one regular expression budget (`evaluation.regex-max-reads-per-request`).
+- **Tenancy.** The tenant is the signed-in one. Another tenant's version is `404 VERSION_NOT_FOUND`, and its decisions are never read.
+
+The Java API is `ruleEngine.simulateHistory("card-fee", 2, HistorySimulation.between(from, to).withLimit(100))`.
 
 ## Unit-test a rule set
 
@@ -95,4 +117,6 @@ Given the same version, inputs and clock, outputs and matched rule ids are ident
 | `403 CLOCK_NOT_ALLOWED` when sending `clock` | `clock` requires `rules:simulate`, on `:evaluate` and on `/versions/{v}:evaluate` alike | Grant the permission to the simulation role, or leave `clock` out to use the host clock |
 | Simulation rows appear in the Decisions screen | The call went to an `:evaluate` endpoint, which logs every decision | Use `:simulate` for drafts and what-if runs; it writes no decision row |
 | `rules:coverage` reports a row you believe is tested | The test matches a different row first under `first` | Check `matchedRuleIds` in the test; reorder rows or adjust inputs |
-| Replay shows 0 changed outcomes for a changed row | The history window contains no decisions that reach that row | Increase N or add sample inputs that hit the row |
+| Replay shows 0 changed outcomes for a changed row | The period contains no decisions that reach that row | Choose a longer period (up to 31 days) or add sample inputs that hit the row |
+| `403 PERMISSION_DENIED` on `:simulate-history` | Replay needs both `rules:simulate` and `rules:log:read` | Grant `rules:log:read` to the role that replays, or replay with sample inputs instead |
+| `notReplayableCount` above 0 | Those decisions had a masked input with a value; the log holds only its fingerprint | Expected for masked inputs; cover those cases with sample inputs |

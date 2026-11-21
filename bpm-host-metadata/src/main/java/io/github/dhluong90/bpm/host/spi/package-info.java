@@ -12,5 +12,10 @@
  *   <li>{@link io.github.dhluong90.bpm.host.spi.TenantResolver} and {@link io.github.dhluong90.bpm.host.spi.CallerContext}: a
  *       host implements the resolver when its principal carries no tenant attribute.
  * </ul>
+ *
+ * <p>The set of engine modules and the permission pattern are closed (see {@link
+ * io.github.dhluong90.bpm.host.spi.ModuleDescriptor}): a third engine needs a release of this module and a schema
+ * change. JSpecify {@code @NullMarked} goes on this package once null checking runs across the repository; until
+ * then, nullable values carry {@code @Nullable} and everything else is non-null.
  */
 package io.github.dhluong90.bpm.host.spi;
