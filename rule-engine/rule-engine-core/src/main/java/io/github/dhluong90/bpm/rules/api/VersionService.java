@@ -302,6 +302,19 @@ public interface VersionService {
     Page<VersionSummary> listVersions(String ruleSet, PageRequest page);
 
     /**
+     * Lists the versions of the caller's tenant that wait for a second person, oldest request first, whatever their
+     * number: a pending version that is not the latest of its rule set is included (#31, RLE-190). Each item carries
+     * the {@code canonicalHash} a reviewer sends back with the decision and the actions the caller may take now.
+     * Needs {@code rules:read}. Read only.
+     *
+     * @param page the page to read
+     * @return the page; its cursor is signed and bound to the tenant and this list
+     * @throws QueryInvalidException when the limit is out of range or the cursor was not issued by this list
+     * @throws PermissionDeniedException without {@code rules:read}
+     */
+    Page<PendingApproval> pendingApprovals(PageRequest page);
+
+    /**
      * Reads the lifecycle history of a version, oldest first.
      *
      * @param ruleSet the rule set name

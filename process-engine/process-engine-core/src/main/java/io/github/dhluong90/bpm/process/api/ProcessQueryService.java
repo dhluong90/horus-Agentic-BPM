@@ -17,6 +17,21 @@ public interface ProcessQueryService {
     Page<DefinitionSummary> definitions(PageRequest page);
 
     /**
+     * Lists the definition versions of the caller's tenant that wait for a second person, oldest request first,
+     * whatever their number: a pending version that is not the latest of its key is included (#31, PRE-190). Each
+     * item carries the {@code definitionHash} a reviewer sends back with the decision and the actions the caller may
+     * take now. Needs {@code processes:read}. Read only.
+     *
+     * @param page which page
+     * @return one page; its cursor is signed and bound to the tenant and this list
+     * @throws QueryInvalidException when the limit or the cursor is not valid
+     * @throws PermissionDeniedException without {@code processes:read}
+     */
+    default Page<PendingApproval> pendingApprovals(PageRequest page) {
+        throw new UnsupportedOperationException("This query service does not list pending approvals");
+    }
+
+    /**
      * Lists instances, newest first ({@code startedAt}, then {@code id}, both descending). Needs
      * {@code processes:read}.
      *

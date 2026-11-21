@@ -213,6 +213,18 @@ public class ProcessController {
         return json(HttpStatus.OK, Views.page(page, Views::definitionSummary), null, null);
     }
 
+    /**
+     * Lists the definition versions waiting for a second person, oldest request first ({@code processes:read}, #31,
+     * PRE-190). Each item has the {@code definitionHash} a reviewer sends back with the approval and the caller's
+     * {@code allowedActions}; never the definition.
+     */
+    @GetMapping("/approvals")
+    public ResponseEntity<byte[]> approvals(@RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor) {
+        return json(HttpStatus.OK, Views.page(queries.pendingApprovals(new PageRequest(limitOf(limit), cursor)),
+                Views::pendingApproval), null, null);
+    }
+
     /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash. */
     @GetMapping("/definitions/{key}/versions/{version}")
     public ResponseEntity<byte[]> definitionVersion(@PathVariable("key") String key,

@@ -110,6 +110,20 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public List<PendingApprovalRow> pendingApprovals(String tenant, Instant afterRequestedAt, String afterId,
+            int limit) {
+        org.springframework.jdbc.core.RowMapper<PendingApprovalRow> mapper = (rs, row) -> new PendingApprovalRow(
+                rs.getString("id"), rs.getString("key_name"), rs.getString("name"), rs.getInt("version_num"),
+                rs.getString("definition_hash"), rs.getLong("lock_version"), rs.getString("created_by"),
+                rs.getString("requested_by"), instant(rs, "requested_at"));
+        if (afterRequestedAt == null) {
+            return ProcessListQueries.PENDING_APPROVALS.list(jdbc, List.of(tenant, limit), mapper);
+        }
+        return ProcessListQueries.PENDING_APPROVALS_AFTER.list(jdbc, List.of(tenant, ts(afterRequestedAt), afterId,
+                limit), mapper);
+    }
+
+    @Override
     public void insertDefinition(StoredDefinition d) {
         jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
                         + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "

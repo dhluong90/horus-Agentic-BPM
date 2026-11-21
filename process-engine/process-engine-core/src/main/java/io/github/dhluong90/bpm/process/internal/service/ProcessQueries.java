@@ -65,6 +65,11 @@ public final class ProcessQueries implements ProcessQueryService {
     }
 
     @Override
+    public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page) {
+        return lists.pendingApprovals(page);
+    }
+
+    @Override
     public Page<InstanceSummary> instances(InstanceQuery query) {
         return lists.instances(query);
     }

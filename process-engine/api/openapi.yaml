@@ -16,7 +16,8 @@ info:
     content is not the content reviewed it is `409 CONTENT_CHANGED` with the current hash. It also covers the graph
     diff between two stored versions, and migration plans with their dry run; executing a plan follows in a later
     release. It also covers incidents: an operator lists them, retries a failed step, or proposes a resolution that a
-    second person approves (PD-126). The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
+    second person approves (PD-126). The pending approvals queue lists the versions that wait for a second person, with the
+    hash a reviewer sends back. The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
     features that implement them.
 
     Every body is read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings
@@ -53,6 +54,54 @@ tags:
   - name: incidents
     description: List incidents, retry a failed step, and resolve one with a second person's approval
 paths:
+  /approvals:
+    get:
+      tags: [lifecycle]
+      operationId: listPendingApprovals
+      summary: List the definition versions waiting for a second person, oldest request first
+      description: |
+        The pending approvals queue of the caller's tenant (#31, `PRE-190`): every definition version in
+        `PENDING_APPROVAL` across all keys, including one that is not the latest version of its key. Permission
+        `processes:read`; the answer shows what the caller may do, it does not need `processes:approve`. Ordered by
+        `(requestedAt, id)`, keyset-paged with a signed cursor bound to the tenant and this list; at most
+        `query.max-page-size` (200) per page, 50 by default. A cursor from another list, another tenant or an edited
+        one is `400 QUERY_INVALID`.
+
+        Each item has what a reviewer needs to open the version and to approve exactly the content that was reviewed
+        (`PRE-177`, PD-139): the `definitionHash` to send back as `expectedDefinitionHash` and the `lockVersion` to
+        send as `If-Match`. Items never carry the definition, the source or a variable.
+
+        `allowedActions` is what the caller may send now, in the order `approve`, `reject`. `deniedActions` gives, for
+        `approve` and `reject` only, why the caller may not send one, as a code: `PERMISSION_REQUIRED` (no
+        `processes:approve`) or `SELF_APPROVAL_FORBIDDEN` (the caller requested the version, or made it under
+        `lifecycle.approver-must-differ-from: makers`; a maker may still reject). An action in `allowedActions` has no
+        entry. The commands check again and stay the authority. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of pending versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingApprovalPage' }
+              example:
+                data:
+                  - key: kyc-onboarding
+                    name: KYC onboarding
+                    version: 2
+                    definitionHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b
+                    lockVersion: 1
+                    requestedBy: alice
+                    requestedAt: '2027-04-05T03:30:00Z'
+                    allowedActions: []
+                    deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /definitions:
     post:
       tags: [definitions]
@@ -1747,6 +1796,42 @@ components:
           type: [integer, 'null']
           description: The version a start uses now, or null when the key has no active version
         lastChangedAt: { type: string, format: date-time }
+    PendingApproval:
+      type: object
+      required: [key, version, definitionHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions]
+      properties:
+        key: { type: string }
+        name: { type: [string, 'null'] }
+        version: { type: integer, minimum: 1 }
+        definitionHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The value the reviewer sends back as `expectedDefinitionHash` (`PRE-177`, PD-139)
+        lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        allowedActions:
+          type: array
+          items: { type: string, enum: [approve, reject] }
+        deniedActions:
+          type: object
+          description: For `approve` and `reject` the caller may not send, the reason as a code
+          properties:
+            approve: { $ref: '#/components/schemas/PendingDenial' }
+            reject: { $ref: '#/components/schemas/PendingDenial' }
+          additionalProperties: false
+    PendingDenial:
+      type: string
+      enum: [PERMISSION_REQUIRED, SELF_APPROVAL_FORBIDDEN]
+    PendingApprovalPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PendingApproval' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     DefinitionSummaryPage:
       type: object
       required: [data, nextCursor, hasNext]
