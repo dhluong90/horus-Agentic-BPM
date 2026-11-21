@@ -13,7 +13,7 @@ function idToken(claims: Record<string, unknown>): string {
 }
 
 /** A test identity provider: discovery, the token endpoint for both grants, and a record of every form sent. */
-function provider(options: { refuseScope?: string; nonce?: () => string } = {}) {
+function provider(options: { refuseScope?: string; nonce?: () => string; refreshFailures?: number[] } = {}) {
   const forms: URLSearchParams[] = [];
   const pending = new Map<string, string>();
   const navigated: string[] = [];
@@ -27,6 +27,8 @@ function provider(options: { refuseScope?: string; nonce?: () => string } = {}) 
     const form = new URLSearchParams(typeof init?.body === 'string' ? init.body : '');
     forms.push(form);
     if (form.get('scope') === options.refuseScope) return Response.json({ error: 'invalid_scope' }, { status: 400 });
+    const failure = form.get('grant_type') === 'refresh_token' ? options.refreshFailures?.shift() : undefined;
+    if (failure !== undefined) return Response.json({ error: 'temporarily_unavailable' }, { status: failure });
     issued += 1;
     const scope = form.get('scope') ?? 'sign-in';
     return Response.json({
@@ -155,6 +157,21 @@ describe('standalone sign-in (CKP-013, TR-SEC-12)', () => {
     await expect(session.accessToken('kyc-bpm')).rejects.toMatchObject({ problem: { reason: 'no-access' } });
     await expect(session.accessToken('loans-bpm')).resolves.toMatch(/^token-loans-bpm-/);
   });
+
+  for (const status of [503, 429] as const) {
+    it(`CKP_013_a_refresh_answered_${String(status)}_keeps_the_session_and_succeeds_on_the_next_try`, async () => {
+      const { session, forms } = await signedIn(provider({ refreshFailures: [status] }));
+
+      await expect(session.accessToken('loans-bpm')).rejects.toMatchObject({ problem: { reason: 'provider-unreachable' } });
+      // The host call reads as unreachable, never as signed out.
+      const fetchOnce = authorizedFetch(() => Promise.resolve(new Response()), () => Promise.reject(new TokenError({ reason: 'provider-unreachable' })));
+      await expect(fetchOnce('https://loans.api.bank.example/api/bpm/me')).rejects.toMatchObject({ hostError: { kind: 'unreachable' } });
+
+      await expect(session.accessToken('loans-bpm')).resolves.toMatch(/^token-loans-bpm-/);
+      // The same refresh token is used again: the failure did not drop it.
+      expect(forms.slice(1).map((form) => form.get('refresh_token'))).toEqual(['refresh-1', 'refresh-1']);
+    });
+  }
 
   it('TR_SEC_12_each_host_request_carries_only_its_token_and_no_cookie', async () => {
     const seen: RequestInit[] = [];

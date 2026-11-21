@@ -313,6 +313,8 @@ export function createTokenSession(config: Discovery, settings: OidcSettings, de
     } catch {
       throw new TokenError({ reason: 'provider-unreachable' });
     }
+    // A provider that is down or busy (5xx, 429) has not ended the session: keep the refresh token and try later.
+    if (response.status >= 500 || response.status === 429) throw new TokenError({ reason: 'provider-unreachable' });
     if (!response.ok) {
       const error = await errorCode(response);
       if (error === 'invalid_scope' || error === 'access_denied' || error === 'unauthorized_client') throw new TokenError({ reason: 'no-access', error });
