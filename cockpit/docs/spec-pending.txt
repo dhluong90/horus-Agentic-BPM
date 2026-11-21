@@ -18,7 +18,6 @@ CKP-014 M1
 CKP-015 M1
 # CKP-016: automatic layout ships as CKP-069; stays listed until stored layouts (slice 8.8) and the instance view.
 CKP-016 M2
-CKP-017 M2
 CKP-018 M2
 CKP-019 M2
 CKP-020 M2

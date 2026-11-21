@@ -1,7 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { meHoa, metaWithProcesses } from '../src/mocks/fixtures';
-import { MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
+import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from '../src/mocks/caseDemo';
+import { INSTANCE_ID, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
 import { createFakeProcessEngine, type ProcessSeed } from '../src/mocks/processEngine';
 import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
 import { mockHost, rememberLocale } from './mockHost';
@@ -47,6 +48,8 @@ interface Screen {
   title: Record<Locale, string | RegExp>;
   /** The fake engine's seed beyond the language: who started the case, who reported the answer. */
   seed?: Omit<ProcessSeed, 'locale'>;
+  /** The signed-in user, when not Hoa. */
+  user?: typeof meHoa;
   /** Steps after the page opens, for example taking the review and starting an override. */
   prepare?: (page: Page, locale: Locale) => Promise<void>;
   /** The element that must be visible without scrolling at 1440x900: the primary action, or the diagram. */
@@ -65,7 +68,25 @@ const T = {
   reported: { en: 'You reported this answer, so someone else decides.', vi: 'Bạn đã gửi câu trả lời này, nên người khác quyết định.' },
   secondPerson: { en: 'A second person decides this answer, not you.', vi: 'Người thứ hai quyết định câu trả lời này, không phải bạn.' },
   masked: { en: 'Part of the answer is masked, so only an override is possible.', vi: 'Một phần câu trả lời đã được che, nên chỉ có thể sửa.' },
+  cases: { en: 'Cases', vi: 'Hồ sơ' },
+  timeline: { en: 'Timeline', vi: 'Dòng thời gian' },
+  openTask: { en: 'Open the task', vi: 'Mở công việc' },
+  kyc: { en: 'Customer onboarding (KYC)', vi: 'Mở khách hàng mới (KYC)' },
+  dispute: { en: 'Card dispute', vi: 'Khiếu nại thẻ' },
+  noCases: { en: 'No case of this process has started yet.', vi: 'Chưa có hồ sơ nào của quy trình này.' },
+  incident: { en: 'The agent did not answer in time.', vi: 'Tác tử AI không trả lời kịp thời hạn.' },
+  capture: { en: 'Capture application', vi: 'Nhập hồ sơ vay' },
+  verify: { en: 'Verify identity documents', vi: 'Xác minh giấy tờ tuỳ thân' },
+  noActivities: { en: 'This service does not report step activity yet.', vi: 'Dịch vụ này chưa cung cấp hoạt động theo từng bước.' },
+  notFound: { en: 'This service has no case with this reference.', vi: 'Dịch vụ này không có hồ sơ với mã tham chiếu này.' },
+  blocked: { en: 'Your permissions do not include working on tasks.', vi: 'Quyền của bạn không bao gồm xử lý công việc.' },
+  pick: { en: 'Select a step to see what happened there.', vi: 'Chọn một bước để xem điều gì đã diễn ra.' },
 } as const;
+
+const caseTitle = (key: string) => ({ en: `Case ${key}`, vi: `Hồ sơ ${key}` });
+const selectStep = (nodeId: string) => async (page: Page) => {
+  await page.locator(`[data-node="${nodeId}"]`).click();
+};
 
 const SCREENS: readonly Screen[] = [
   {
@@ -118,13 +139,91 @@ const SCREENS: readonly Screen[] = [
     title: T.review,
     focal: (page, locale) => page.getByRole('button', { name: T.record[locale] }),
   },
+  {
+    name: 'definition-cases',
+    hash: '#/processes/loan-origination/3/cases',
+    title: T.loan,
+    focal: (page) => page.getByRole('link', { name: 'APP-1038' }),
+  },
+  {
+    name: 'definition-cases-empty',
+    hash: '#/processes/card-dispute/1/cases',
+    title: T.dispute,
+    focal: (page, locale) => page.getByText(T.noCases[locale]),
+  },
+  {
+    name: 'instance-waiting',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    focal: (page, locale) => page.getByRole('link', { name: T.openTask[locale] }),
+  },
+  {
+    name: 'instance-step-completed',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    prepare: selectStep('capture'),
+    focal: (page) => page.locator('.inspector__summary'),
+  },
+  {
+    name: 'instance-timeline',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
+    focal: (page) => page.locator('.timeline tbody tr').first(),
+  },
+  {
+    name: 'instance-incident',
+    hash: `#/instances/${INCIDENT_INSTANCE_ID}`,
+    title: caseTitle('APP-1045'),
+    focal: (page, locale) => page.locator('.inspector__incident').getByText(T.incident[locale]),
+  },
+  {
+    name: 'instance-kyc-step',
+    hash: `#/instances/${KYC_INSTANCE_ID}`,
+    title: caseTitle('KYC-2207'),
+    prepare: selectStep('verify-docs'),
+    focal: (page) => page.locator('.inspector__summary'),
+  },
+  {
+    name: 'instance-completed',
+    hash: `#/instances/${BOOKED_INSTANCE_ID}`,
+    title: caseTitle('APP-1038'),
+    focal: (page, locale) => page.getByText(T.pick[locale]),
+  },
+  {
+    name: 'instance-task-not-allowed',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    user: { ...meHoa, permissions: ['rules:read', 'processes:read'] },
+    focal: (page, locale) => page.getByText(T.blocked[locale]),
+  },
+  {
+    name: 'instance-no-activities',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    seed: { activities: 'missing' },
+    focal: (page, locale) => page.getByText(T.noActivities[locale]),
+  },
+  {
+    name: 'instance-activities-error',
+    hash: `#/instances/${INSTANCE_ID}`,
+    title: caseTitle('APP-1042'),
+    seed: { activities: 'failing' },
+    focal: (page) => page.locator('.inspector .alert--error'),
+  },
+  {
+    name: 'instance-not-found',
+    hash: '#/instances/01JD4I0N0SUCH0000000000000',
+    title: { en: /^Case$/, vi: /^Hồ sơ$/ },
+    focal: (page, locale) => page.getByText(T.notFound[locale]),
+  },
 ];
 
 async function openScreen(page: Page, screen: Screen, viewport: { width: number; height: number }, theme: 'light' | 'dark', locale: Locale) {
   await page.setViewportSize(viewport);
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await rememberLocale(page, locale);
-  await mockEngines(page, { ...screen.seed, locale });
+  await mockEngines(page, { ...screen.seed, locale }, screen.user);
   await page.goto(`./${screen.hash}`);
   await expect(page.getByRole('heading', { level: 1, name: screen.title[locale] })).toBeVisible();
   await expect(page.locator('.skeleton')).toHaveCount(0);

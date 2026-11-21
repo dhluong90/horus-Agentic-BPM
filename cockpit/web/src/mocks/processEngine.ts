@@ -2,6 +2,7 @@ import {
   DEMO_DEFINITIONS, FORM_TASK_ID, FORM_TASK_NAME, INSTANCE_ID, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_CONTEXT, REVIEW_TASK_ID, REVIEW_TASK_NAME,
   VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
 } from './processDemo';
+import { demoCases } from './caseDemo';
 
 /*
  * An in-memory Process Engine for the dev server, Vitest and Playwright, in the response shapes of
@@ -57,6 +58,10 @@ export interface ProcessSeed {
   reportedBy?: string;
   /** The tenant's language of the demo data: names, reasons and answer words. */
   locale?: 'en' | 'vi';
+  /** No case at all, for the empty states. */
+  noCases?: boolean;
+  /** How the activities read answers: as the engine does, as an older engine without it (404), or failing (500). */
+  activities?: 'ok' | 'missing' | 'failing';
 }
 
 export function createFakeProcessEngine(seed: ProcessSeed = {}) {
@@ -81,7 +86,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     body: JSON.stringify({ type: `${ERROR_TYPE}${code.toLowerCase()}`, title: code, status, code, correlationId: '01JD4C0RRE1AT10N0000000PE1', ...extra }),
   });
 
-  const instance = () => ({
+  const cases = seed.noCases === true ? [] : demoCases(startedBy, { review: REVIEW_TASK_NAME[locale], approve: locale === 'vi' ? 'Duyệt khách hàng rủi ro cao' : 'Approve high-risk customer' });
+  const instance = () => cases.find((item) => item.instance.id === INSTANCE_ID)?.instance ?? ({
     id: INSTANCE_ID, definitionKey: 'loan-origination', definitionVersion: 3, businessKey: 'APP-1042', status: 'RUNNING',
     variables: {}, tokens: [], tasks: [], lockVersion: 4, startedBy, startedAt: '2026-11-20T02:58:00Z', endedAt: null,
   });
@@ -142,9 +148,25 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         source: 'IMPORT', lockVersion: 2, effectiveFrom: found.status === 'ACTIVE' ? '2026-11-01T00:00:00Z' : null,
       });
     }
-    if (request.method === 'GET' && path === `${BASE}/instances/${INSTANCE_ID}`) {
+    if (request.method === 'GET' && path === `${BASE}/instances`) {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
-      return json(200, instance(), { ETag: '"4"' });
+      const key = url.searchParams.get('definitionKey');
+      const statuses = (url.searchParams.get('status') ?? 'RUNNING').split(',');
+      const data = cases.map((item) => item.instance).filter((item) => (key === null || item.definitionKey === key) && statuses.includes(item.status))
+        .map((item) => ({ id: item.id, definitionKey: item.definitionKey, definitionVersion: item['definitionVersion'], businessKey: item['businessKey'], status: item.status, lockVersion: item['lockVersion'], startedBy: item['startedBy'], startedAt: item.startedAt, endedAt: item['endedAt'] }));
+      return json(200, { data, nextCursor: null, hasNext: false });
+    }
+    const instanceMatch = /^\/api\/bpm\/processes\/v1\/instances\/([^/:]+)(\/activities)?$/.exec(path);
+    if (request.method === 'GET' && instanceMatch) {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      const id = instanceMatch[1] ?? '';
+      const found = id === INSTANCE_ID ? { instance: instance(), activities: cases.find((item) => item.instance.id === id)?.activities } : cases.find((item) => item.instance.id === id);
+      if (!found) return problem(404, 'INSTANCE_NOT_FOUND');
+      if (instanceMatch[2] === undefined) return json(200, found.instance, { ETag: `"${String(found.instance['lockVersion'])}"` });
+      if (seed.activities === 'missing') return problem(404, 'INPUT_INVALID');
+      if (seed.activities === 'failing') return problem(500, 'INTERNAL');
+      if (!found.activities) return problem(404, 'INSTANCE_NOT_FOUND');
+      return json(200, found.activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
     }
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete))?$/.exec(path);
     if (taskMatch) {

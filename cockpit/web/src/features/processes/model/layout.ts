@@ -130,13 +130,26 @@ function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
   return { x: centre.x + (dx / length) * radius, y: centre.y + (dy / length) * radius };
 }
 
+export interface LayoutOptions {
+  /**
+   * Leave room for status badges on the steps of an instance (CKP-017): a badge sits on a box's top edge and may be
+   * wider than the box, so ranks and rows are spaced to keep it clear of the next step.
+   */
+  badges?: boolean;
+}
+
+/** Spacing with badges: the widest badge (about 150 px) fits over a 116 px box and the gap to the next rank, and clears a caption that hangs below the symbol above it. */
+const BADGE_RANKSEP = 56;
+const BADGE_NODESEP = 64;
+
 /**
  * Lays the graph out. `typeLabel` gives each node's type in words in the user's language, so a box is sized to the
  * words it shows.
  */
-export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type): Layout {
+export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
   const g = new dagre.graphlib.Graph({ multigraph: true });
-  g.setGraph({ rankdir: 'LR', nodesep: 28, ranksep: 24, marginx: 4, marginy: 12 });
+  const badges = options.badges === true;
+  g.setGraph({ rankdir: 'LR', nodesep: badges ? BADGE_NODESEP : 28, ranksep: badges ? BADGE_RANKSEP : 24, marginx: 4, marginy: badges ? 36 : 12 });
   g.setDefaultEdgeLabel(() => ({}));
   const sizes = new Map(graph.nodes.map((node) => [node.id, sized(node, shapeOf(node.type), typeLabel(node.type))]));
   for (const node of graph.nodes) {
