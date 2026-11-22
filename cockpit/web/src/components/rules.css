@@ -494,7 +494,13 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .diff-row--added td.sbs__absent { color: var(--ok); font-weight: 600; }
 .diff-td--old { background: var(--diff-mod); color: var(--ink-2); }
 .diff-td--old .cell-values, .diff-td--old .cell-output { text-decoration: line-through; }
-.changes__notes { margin: 0; padding: 0 20px 14px 38px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.changes__notes { margin: 0; padding: 0 20px 14px; list-style: none; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+/* A long diff scrolls inside its own region, so the docked decision stays in view and the version row stays on top. */
+.dt-scroll--sbs { overflow: auto; max-height: max(300px, calc(100vh - 480px)); }
+.dt--sbs .sbs__versions th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); }
+.dt--sbs thead td.dt__rowhead { background: var(--surface-2); border-bottom: 0; padding: 0; }
+.since-mark { display: block; margin-top: 2px; color: var(--ink-2); font-size: 12px; font-weight: 500; }
+.since-mark::before { content: '↺ ' / ''; }
 
 /* The four-eyes decision, docked: title, comment and actions on one band at the bottom of the viewport. */
 .decision__body, .decision__actions { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

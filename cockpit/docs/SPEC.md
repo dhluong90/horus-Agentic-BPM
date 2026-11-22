@@ -26,6 +26,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** User opens Approval detail or Diff view comparing `v1` vs `v2`.
 - **Then:** UI highlights `R2` (`changed`) and `R6` (`added`) before the approval action. Showing a simulation report attached to the request is M3 and is not part of this statement.
 - **Example:** `Diff v1..v2 -> R2 marked modified (30000 -> 0 VND), R6 marked added`.
+- **Polish (#280):** the summary line leaves out zero counts; the version row stays in view while a long diff scrolls; a cell whose value differs from what the approver had on screen says what it was, once; a look-alike character is named by its script before its code point; after `409 VERSION_CONFLICT` on Approve or Reject the version is read again, reads as changed while open, and the decision is never sent again on its own.
 - **Test ID:** `CKP_002_version_diff_highlights_row_changes`
 
 ### CKP-003 Maker-checker disables Approve button for requester and surfaces API 403 if forced

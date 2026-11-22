@@ -133,9 +133,9 @@ describe('version diff', () => {
 
 describe('non-ASCII literals', () => {
   it('ADR_0026_look_alike_characters_are_named_by_code_point', () => {
-    expect(nonAsciiCharacters("== 'GОLD'")).toEqual(['О U+041E']);
+    expect(nonAsciiCharacters("== 'GОLD'")).toEqual(['Cyrillic О (U+041E)']);
     expect(nonAsciiCharacters("== 'GOLD'")).toEqual([]);
-    expect(nonAsciiCharacters("'Phí thường niên'")).toEqual(['í U+00ED', 'ư U+01B0', 'ờ U+1EDD', 'ê U+00EA']);
+    expect(nonAsciiCharacters("'Phí thường niên'")).toEqual(['Latin í (U+00ED)', 'Latin ư (U+01B0)', 'Latin ờ (U+1EDD)', 'Latin ê (U+00EA)']);
   });
 });
 

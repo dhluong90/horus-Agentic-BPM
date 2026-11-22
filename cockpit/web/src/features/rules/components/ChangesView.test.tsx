@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RuleSetDefinition, RuleSetVersion, VersionDiff } from '../../../api/rules/schemas';
 import { I18nProvider, type Locale } from '../../../i18n/I18nProvider';
 import { formatDateTime } from '../model/dates';
-import { ChangesView } from './ChangesView';
+import { ChangesView, type SeenVersion } from './ChangesView';
 
 const definition: RuleSetDefinition = {
   schemaVersion: 1, ruleSet: 'card-fee', hitPolicy: 'first',
@@ -42,10 +42,10 @@ const diff: VersionDiff = {
   unchangedCount: 1,
 };
 
-function show(d: VersionDiff = diff, next: RuleSetDefinition = proposed, locale: Locale = 'en', nextEffective: string | null = null) {
+function show(d: VersionDiff = diff, next: RuleSetDefinition = proposed, locale: Locale = 'en', nextEffective: string | null = null, seen?: SeenVersion, now?: number) {
   render(
     <I18nProvider initialLocale={locale}>
-      <ChangesView diff={d} base={version(1, 'PUBLISHED', definition, d.effectiveFrom.from)} next={version(2, 'PENDING_APPROVAL', next, nextEffective)} />
+      <ChangesView diff={d} base={version(1, 'PUBLISHED', definition, d.effectiveFrom.from)} next={version(2, 'PENDING_APPROVAL', next, nextEffective)} seen={seen} {...(now === undefined ? {} : { now })} />
     </I18nProvider>,
   );
 }
@@ -122,7 +122,7 @@ describe('side-by-side version diff', () => {
     // R1's GOLD now carries a Cyrillic capital O (U+041E): it reads like GOLD and never matches it.
     const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike);
-    expect(within(row('R1')).getByText('Look-alike character: О U+041E')).toBeInTheDocument();
+    expect(within(row('R1')).getByText('Look-alike character: Cyrillic О (U+041E)')).toBeInTheDocument();
     expect(screen.getAllByText(/Look-alike character:/)).toHaveLength(1);
     expect(screen.getByText('1 changed cell contains a look-alike character')).toBeInTheDocument();
   });
@@ -130,7 +130,7 @@ describe('side-by-side version diff', () => {
   it('ADR_0026_vietnamese_names_look_alike_and_hidden_characters_in_plain_words', () => {
     const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike, 'vi');
-    expect(within(row('R1')).getByText('Ký tự dễ nhầm: О U+041E')).toBeInTheDocument();
+    expect(within(row('R1')).getByText('Ký tự dễ nhầm: Chữ Kirin О (U+041E)')).toBeInTheDocument();
     expect(screen.getByText('1 ô đã sửa có ký tự dễ nhầm')).toBeInTheDocument();
     expect(screen.queryByText(/ASCII/)).not.toBeInTheDocument();
   });
@@ -138,5 +138,48 @@ describe('side-by-side version diff', () => {
   it('ADR_0026_a_flagged_value_without_a_visible_character_is_still_marked', () => {
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GOLD\\u200B'", nonAscii: true }] }, ...diff.rows] });
     expect(within(row('R1')).getByText('Hidden character')).toBeInTheDocument();
+  });
+
+  it('CKP_002_the_summary_line_leaves_out_zero_counts', () => {
+    const added: VersionDiff = { ...diff, rows: [{ ruleId: 'R6', change: 'ADDED', position: 2 }, { ...diff.rows[1] } as VersionDiff['rows'][number]], unchangedCount: 0 };
+    show(added);
+    expect(screen.getByText('1 added, 1 changed')).toBeInTheDocument();
+    expect(screen.queryByText(/(^|, )0 (added|changed|removed|moved|unchanged)/)).not.toBeInTheDocument();
+  });
+
+  it('CKP_002_the_summary_line_in_vietnamese_leaves_out_zero_counts', () => {
+    show({ ...diff, rows: [{ ruleId: 'R6', change: 'ADDED', position: 2 }], unchangedCount: 0 }, proposed, 'vi');
+    expect(screen.getByText('1 thêm')).toBeInTheDocument();
+  });
+
+  it('CKP_002_no_row_change_says_so_instead_of_counting_zeros', () => {
+    show({ ...diff, rows: [], unchangedCount: 0 });
+    expect(screen.getByText('No row changes.')).toBeInTheDocument();
+  });
+
+  it('CKP_002_a_look_alike_is_named_by_its_script_before_its_code_point', () => {
+    const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
+    show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike);
+    expect(within(row('R1')).getByText(/Cyrillic О \(U\+041E\)/)).toBeInTheDocument();
+  });
+
+  it('CKP_002_cells_that_changed_since_the_approver_opened_the_page_say_what_they_were', () => {
+    // The approver opened v2 when R3 cost 32,000 VND and R1 was as it is now; R3 now reads 35,000 VND.
+    const opened: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R3' ? { ...r, then: { fee: '32000 VND' } } : r)) };
+    const at = Date.parse('2026-11-18T09:00:00Z');
+    show(diff, proposed, 'en', null, { definition: opened, at }, at + 60_000);
+    expect(within(row('R3')).getByText('was 32,000 VND 1 minute ago')).toBeInTheDocument();
+    expect(screen.getAllByText(/^was /)).toHaveLength(1);
+  });
+
+  it('CKP_002_nothing_is_marked_when_the_page_is_as_the_approver_opened_it', () => {
+    show(diff, proposed, 'en', null, { definition: proposed, at: Date.now() });
+    expect(screen.queryByText(/^was /)).not.toBeInTheDocument();
+  });
+
+  it('CKP_002_a_change_in_the_last_seconds_reads_a_moment_ago', () => {
+    const opened: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R3' ? { ...r, then: { fee: '32000 VND' } } : r)) };
+    show(diff, proposed, 'vi', null, { definition: opened, at: 1000 }, 5000);
+    expect(screen.getByText('trước là 32.000 VND vừa xong')).toBeInTheDocument();
   });
 });

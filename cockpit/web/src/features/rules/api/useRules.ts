@@ -265,7 +265,17 @@ export function useDiscardDraft(onDone: (version: DiscardedVersion) => void) {
   );
 }
 
-export function useApprove(onDone: (version: RuleSetVersion) => void) {
+/** A 409 VERSION_CONFLICT: the version moved on. It is read again and the decision is never sent again on its own. */
+function conflictHandler(refresh: () => Promise<void>, onConflict: (() => void) | undefined) {
+  return async (error: unknown) => {
+    const hostError = error instanceof HostCallError ? error.hostError : undefined;
+    if (hostError?.kind !== 'problem' || hostError.code !== 'VERSION_CONFLICT') return;
+    onConflict?.();
+    await refresh();
+  };
+}
+
+export function useApprove(onDone: (version: RuleSetVersion) => void, onConflict?: () => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
@@ -277,10 +287,11 @@ export function useApprove(onDone: (version: RuleSetVersion) => void) {
       await refresh();
       onDone(version);
     },
+    conflictHandler(refresh, onConflict),
   );
 }
 
-export function useReject(onDone: (version: RuleSetVersion) => void) {
+export function useReject(onDone: (version: RuleSetVersion) => void, onConflict?: () => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
@@ -289,6 +300,7 @@ export function useReject(onDone: (version: RuleSetVersion) => void) {
       await refresh();
       onDone(version);
     },
+    conflictHandler(refresh, onConflict),
   );
 }
 

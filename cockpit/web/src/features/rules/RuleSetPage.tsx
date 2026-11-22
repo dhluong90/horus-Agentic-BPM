@@ -8,7 +8,7 @@ import { useRulesSession } from './api/rulesContext';
 import { useApprove, useCopyVersion, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { saveFile } from '../../app/saveFile';
 import { DecisionCard, DetailsPanel, DraftsOffNote, editBlock, HeaderActions, showsEdit, type Review } from './components/ActionDock';
-import { ChangesView } from './components/ChangesView';
+import { ChangesView, type SeenVersion } from './components/ChangesView';
 import { DecisionTable } from './components/DecisionTable';
 import { DraftWorkspace } from './components/DraftWorkspace';
 import { EvidenceExport } from './components/EvidenceExport';
@@ -89,7 +89,7 @@ function Inspector({ version, importedFrom, onMatched }: { version: RuleSetVersi
  * The approver's comparison. The engine computes the diff (RLE-028); both versions are read in full so every
  * row shows beside its counterpart. Nothing is fetched until the Changes view is open.
  */
-function ChangesLens({ version, base }: { version: RuleSetVersion; base: VersionSummary | undefined }) {
+function ChangesLens({ version, base, seen }: { version: RuleSetVersion; base: VersionSummary | undefined; seen: SeenVersion | undefined }) {
   const { t } = useI18n();
   const [view, setView] = useState<'table' | 'readings'>('table');
   const baseVersion = useVersion(version.ruleSet, base?.version);
@@ -120,11 +120,11 @@ function ChangesLens({ version, base }: { version: RuleSetVersion; base: Version
   else if (view === 'table' && diff.isError) body = <ProblemNotice error={diff.error} />;
   else if (baseVersion.isPending || (view === 'table' && diff.isPending)) body = <p className="empty" role="status">{t('ruleSets.loading')}</p>;
   else if (view === 'readings') body = <div className="changes readings"><ReadingsDiffView base={baseVersion.data} next={version} onCompareTable={() => { setView('table'); }} /></div>;
-  else if (diff.data !== undefined) body = <ChangesView diff={diff.data} base={baseVersion.data} next={version} />;
+  else if (diff.data !== undefined) body = <ChangesView diff={diff.data} base={baseVersion.data} next={version} seen={seen} />;
   return <>{switcher}{body}</>;
 }
 
-function LensContent({ lens, version, base, matched, onOpenTable, onEdit }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string>; onOpenTable: () => void; onEdit: () => void }) {
+function LensContent({ lens, version, base, matched, onOpenTable, onEdit, seen }: { lens: Lens; version: RuleSetVersion; base: VersionSummary | undefined; matched: ReadonlySet<string>; onOpenTable: () => void; onEdit: () => void; seen: SeenVersion | undefined }) {
   switch (lens) {
     case 'table':
     case 'edit':
@@ -132,7 +132,7 @@ function LensContent({ lens, version, base, matched, onOpenTable, onEdit }: { le
     case 'readings':
       return <ReadingsView version={version} matched={matched} onOpenTable={onOpenTable} />;
     case 'changes':
-      return <ChangesLens version={version} base={base} />;
+      return <ChangesLens version={version} base={base} seen={seen} />;
     case 'history':
       return <RuleSetHistoryView ruleSet={version.ruleSet} openVersion={version.version} />;
     case 'source':
@@ -160,11 +160,16 @@ interface WorkbenchProps {
   /** The content hash of this version when the user opened it; a different current hash means it changed under them. */
   openedHash: string;
   onReviewAgain: () => void;
+  /** The version as the approver first had it on screen, to mark what changed since. */
+  seen: SeenVersion | undefined;
+  /** The engine refused the last decision with 409 VERSION_CONFLICT and the version was read again. */
+  conflicted: boolean;
+  onConflict: () => void;
   /** Read the version and its list again after the engine said the content moved on; the new content is then the one reviewed. */
   onReloadChanges: () => Promise<void>;
 }
 
-function Workbench({ version, versions, lens, navigate, say, importVersion, onSheet, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain, onReloadChanges }: WorkbenchProps) {
+function Workbench({ version, versions, lens, navigate, say, importVersion, onSheet, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain, onReloadChanges, seen, conflicted, onConflict }: WorkbenchProps) {
   useEffect(() => {
     // The editor closes on save before the table opens: the title of the table takes the focus, not the editor's.
     if (focusTitle !== version.version || lens === 'edit') return;
@@ -187,9 +192,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
     navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'edit' });
   });
   const requestPublish = useRequestPublish((updated) => { say(t('dock.requested', { version: String(updated.version) })); });
-  const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); });
+  const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); }, onConflict);
 
-  const reject = useReject((updated) => { say(t('dock.rejected', { version: String(updated.version) })); });
+  const reject = useReject((updated) => { say(t('dock.rejected', { version: String(updated.version) })); }, onConflict);
   // Export hands the engine's bytes to the browser unchanged, so the file imports back with the same hash (RLE-032).
   const exportFile = useExportVersion((exported) => {
     saveFile(exported.file, exported.fileName);
@@ -219,7 +224,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
   // the user opened. The same query as the Changes view, so nothing is fetched twice.
   const diff = useVersionDiff(version, comparing && version.status === 'PENDING_APPROVAL' ? base?.version : undefined);
   let review: Review = 'ok';
-  if (openedHash !== version.canonicalHash || (diff.data !== undefined && diff.data.canonicalHash !== version.canonicalHash)) review = 'changed';
+  if (conflicted || openedHash !== version.canonicalHash || (diff.data !== undefined && diff.data.canonicalHash !== version.canonicalHash)) review = 'changed';
   else if (diff.isFetching) review = 'checking';
   const decision = (docked: boolean) => (
     <DecisionCard version={version} docked={docked} review={review} onReload={() => { approve.reset(); reject.reset(); void onReloadChanges(); }}
@@ -236,7 +241,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
 
   const main: ReactNode = (
     <div className="card workbench__main">
-      <LensContent lens={lens} version={version} base={base} matched={matched} onOpenTable={() => { go({ lens: 'table' }); }} onEdit={() => { go({ lens: 'edit' }); }} />
+      <LensContent lens={lens} version={version} base={base} matched={matched} onOpenTable={() => { go({ lens: 'table' }); }} onEdit={() => { go({ lens: 'edit' }); }} seen={seen} />
     </div>
   );
 
@@ -340,12 +345,23 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
   );
 }
 
+/** Notes the content of a version when it first reaches the screen, so a later change under the approver can be marked. */
+function SeenRecorder({ version, onSeen }: { version: RuleSetVersion; onSeen: (seen: SeenVersion) => void }) {
+  const { definition, version: number } = version;
+  useEffect(() => { onSeen({ definition, at: Date.now() }); }, [number]); // eslint-disable-line react-hooks/exhaustive-deps -- once per version
+  return null;
+}
+
 export function RuleSetPage({ name, versionNumber, lens }: { name: string; versionNumber: number | undefined; lens: Lens | undefined }) {
   const { t } = useI18n();
   const versions = useVersions(name);
   const [toast, setToast] = useState<{ text: string; sticky: boolean } | undefined>(undefined);
   // The content hash of each version as the user first saw it on this page (four eyes: approve what you reviewed).
   const [opened, setOpened] = useState<Readonly<Record<number, string>>>({});
+  // The content of each version as the user first had it on screen: what changed since is marked once in the diff.
+  const [seen, setSeen] = useState<Readonly<Record<number, SeenVersion>>>({});
+  // Versions where the engine refused a decision with 409 VERSION_CONFLICT; the approver checks the new content first.
+  const [conflicted, setConflicted] = useState<ReadonlySet<number>>(new Set());
   const closeToast = useCallback(() => { setToast(undefined); }, []);
   // Import of the next version from a file (CKP-030); it stays available when cockpit drafts are off (PD-075).
   const [pickedFile, setPickedFile] = useState<string | undefined>(undefined);
@@ -394,6 +410,7 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
 
   return (
     <section className="workspace rs" aria-labelledby="rule-set-title">
+      <SeenRecorder version={current} onSeen={(first) => { setSeen((known) => (known[current.version] === undefined ? { ...known, [current.version]: first } : known)); }} />
       <Workbench
         // While the grid is open a newer lock version must not remount it: the edits stay, and the editor offers the
         // newer version (DraftWorkspace). Elsewhere a new lock version is a fresh view.
@@ -401,11 +418,18 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
         version={current}
         versions={versions.data}
         openedHash={openedHash ?? current.canonicalHash}
-        onReviewAgain={() => { setOpened({ ...opened, [current.version]: current.canonicalHash }); }}
+        seen={seen[current.version]}
+        conflicted={conflicted.has(current.version)}
+        onConflict={() => { setConflicted((known) => new Set(known).add(current.version)); }}
+        onReviewAgain={() => {
+          setOpened({ ...opened, [current.version]: current.canonicalHash });
+          setConflicted((known) => { const next = new Set(known); next.delete(current.version); return next; });
+        }}
         onReloadChanges={async () => {
           const [fresh] = await Promise.all([version.refetch(), versions.refetch()]);
           const hash = fresh.data?.canonicalHash;
           if (hash !== undefined) setOpened((known) => ({ ...known, [current.version]: hash }));
+          setConflicted((known) => { const next = new Set(known); next.delete(current.version); return next; });
         }}
         lens={activeLens}
         navigate={navigate}

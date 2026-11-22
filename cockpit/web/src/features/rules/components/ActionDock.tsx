@@ -118,6 +118,12 @@ function TakesEffect({ effectiveFrom }: { effectiveFrom: string | null | undefin
  * engine's answer, shown with its code behind Details. Docked, it sits at the bottom of the screen under the
  * side-by-side diff, so Approve stays in view while the approver reads what changed.
  */
+function isVersionConflict(error: unknown): boolean {
+  if (error === undefined || error === null) return false;
+  const hostError = toHostError(error);
+  return hostError.kind === 'problem' && hostError.code === 'VERSION_CONFLICT';
+}
+
 /** What Approve sends: the comment, and the exact { code, input } pairs the approver accepted (PD-104, RLE-053). */
 export interface ApproveArgs { comment: string; acknowledgedWarnings: AcknowledgedWarning[] }
 
@@ -162,12 +168,15 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   const needsAcceptance = mayApprove && toAccept.length > 0 && !accepted;
   const error: unknown = approve.error ?? reject.error;
   // After the engine said the content moved on, the same approval is never sent again: the reviewer reloads first.
-  const stale = asksForReview(error);
-  const canApprove = mayApprove && review === 'ok' && !needsAcceptance && !stale;
+  const conflict = isVersionConflict(error);
+  const stale = !conflict && asksForReview(error);
+  // A 409 VERSION_CONFLICT reads as "changed while you had it open": the version is read again and the approver checks it.
+  const reviewNow: Review = conflict ? 'changed' : review;
+  const canApprove = mayApprove && reviewNow === 'ok' && !needsAcceptance && !stale;
   // PD-089: a requester never rejects their own request; withdrawing is its own action (:withdraw).
   const canReject = allowed.has('reject') && self === undefined;
   // A disabled Approve says why; while the current diff loads it is only busy for a moment.
-  const unavailable = canApprove || needsAcceptance || stale || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
+  const unavailable = canApprove || needsAcceptance || stale || (mayApprove && reviewNow === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
   return (
     <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
@@ -214,7 +223,7 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
           </div>
         </>
       )}
-      {error !== undefined && error !== null && !(refused && error === approve.error) ? <ProblemNotice error={error} onReload={onReload} /> : null}
+      {error !== undefined && error !== null && !conflict && !(refused && error === approve.error) ? <ProblemNotice error={error} onReload={onReload} /> : null}
     </section>
   );
 }

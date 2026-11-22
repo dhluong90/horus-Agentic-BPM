@@ -374,16 +374,28 @@ describe('four eyes', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Waiting for approval');
   });
 
-  it('TR_UI_02_a_version_conflict_offers_reload', async () => {
+  // After 409 VERSION_CONFLICT the cockpit reads the version again, says it changed, and never sends the decision again on its own.
+  it.each([['approve', 'Approve and publish'], ['reject', 'Reject']])('CKP_002_a_version_conflict_on_%s_reloads_the_version_and_never_resubmits', async (action, button) => {
     const user = userEvent.setup();
-    mockHost.use(http.post('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2\\:approve', () => HttpResponse.json(
-      { type: 'x', title: 'Conflict', status: 409, code: 'VERSION_CONFLICT', detail: 'Expected lock version 1 but card-fee v2 is at 2', correlationId: '01JCONFLICT00000000000000000' },
-      { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
-    )));
+    let sent = 0;
+    mockHost.use(http.post(`*/api/bpm/rules/v1/rule-sets/card-fee/versions/2\\:${action}`, () => {
+      sent += 1;
+      return HttpResponse.json(
+        { type: 'x', title: 'Conflict', status: 409, code: 'VERSION_CONFLICT', detail: 'Expected lock version 1 but card-fee v2 is at 2', correlationId: '01JCONFLICT00000000000000000' },
+        { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+      );
+    }));
     open('#/rules/card-fee/2', 'rules-approver');
-    await user.click(await screen.findByRole('button', { name: 'Approve and publish' }));
-    expect(await screen.findByText('Someone changed this version. Reload it and try again.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    await waitFor(() => { expect(screen.getByRole('button', { name: 'Approve and publish' })).toBeEnabled(); });
+    if (action === 'reject') await user.type(screen.getByLabelText('Comment'), 'Needs another look');
+    const versionReads = () => calls.filter((c) => c.method === 'GET' && c.path === '/rule-sets/card-fee/versions/2').length;
+    const before = versionReads();
+    await user.click(screen.getByRole('button', { name: button }));
+    expect(await screen.findByText('Version 2 changed while you had it open. Check the table again.')).toBeInTheDocument();
+    await waitFor(() => { expect(versionReads()).toBeGreaterThan(before); });
+    expect(screen.getByRole('button', { name: 'Approve and publish' })).toBeDisabled();
+    expect(sent).toBe(1);
+    expect(screen.queryByText('Someone changed this version. Reload it and try again.')).not.toBeInTheDocument();
   });
 });
 

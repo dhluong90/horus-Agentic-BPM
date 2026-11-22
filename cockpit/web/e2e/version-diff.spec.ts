@@ -134,6 +134,9 @@ test(`CKP_002_approve_waits_when_the_version_changes_under_the_reader_${theme}_$
   await expect(approve).toBeDisabled();
   await expect(approve).toHaveAccessibleDescription(c.notice);
   expect(approvals).toEqual([]);
+  // CKP-002 item 1: the cell that changed since the page was opened says what it was, once.
+  await expect(page.locator('.since-mark')).toHaveCount(1);
+  await expect(rowOf(page, 'R3').locator('.since-mark')).toContainText(locale === 'en' ? 'was 35,000 VND a moment ago' : 'trước là 35.000 VND vừa xong');
   await settle(page);
   await page.screenshot({ path: `e2e/screenshots/version-diff-changed-1440x900-${theme}-${locale}.png`, fullPage: false });
   await check(page);
@@ -171,8 +174,8 @@ async function check(page: Page) {
 // The two review screens of the design sign-off: light English and dark Vietnamese at 1440x900.
 const REVIEW_SHOTS = [{ theme: 'light', locale: 'en' }, { theme: 'dark', locale: 'vi' }] as const;
 const REVIEW_TEXT = {
-  en: { long: 'Version 1 and version 2 of domestic-transfer-fee, side by side', structure: 'Version 1 and version 2 of card-cashback, side by side', policy: 'Hit policy: first matching row wins → exactly one row matches', column: 'Result column added: Cap', lookalike: 'Look-alike character: О U+041E', count: '1 changed cell contains a look-alike character', scheduled: 'Takes effect 01 Jan 2027 00:00 once approved.' },
-  vi: { long: 'Phiên bản 1 và phiên bản 2 của domestic-transfer-fee, đặt cạnh nhau', structure: 'Phiên bản 1 và phiên bản 2 của card-cashback, đặt cạnh nhau', policy: 'Cách chọn dòng: dòng khớp đầu tiên được áp dụng → chỉ đúng một dòng khớp', column: 'Thêm cột kết quả: Cap', lookalike: 'Ký tự dễ nhầm: О U+041E', count: '1 ô đã sửa có ký tự dễ nhầm', scheduled: 'Có hiệu lực 01/01/2027 00:00 sau khi được phê duyệt.' },
+  en: { long: 'Version 1 and version 2 of domestic-transfer-fee, side by side', structure: 'Version 1 and version 2 of card-cashback, side by side', policy: 'Hit policy: first matching row wins → exactly one row matches', column: 'Result column added: Cap', lookalike: 'Look-alike character: Cyrillic О (U+041E)', count: '1 changed cell contains a look-alike character', scheduled: 'Takes effect 01 Jan 2027 00:00 once approved.' },
+  vi: { long: 'Phiên bản 1 và phiên bản 2 của domestic-transfer-fee, đặt cạnh nhau', structure: 'Phiên bản 1 và phiên bản 2 của card-cashback, đặt cạnh nhau', policy: 'Cách chọn dòng: dòng khớp đầu tiên được áp dụng → chỉ đúng một dòng khớp', column: 'Thêm cột kết quả: Cap', lookalike: 'Ký tự dễ nhầm: Chữ Kirin О (U+041E)', count: '1 ô đã sửa có ký tự dễ nhầm', scheduled: 'Có hiệu lực 01/01/2027 00:00 sau khi được phê duyệt.' },
 } as const;
 
 for (const { theme, locale } of REVIEW_SHOTS) {
@@ -185,20 +188,20 @@ for (const { theme, locale } of REVIEW_SHOTS) {
     await expect(table.locator('tbody tr')).toHaveCount(21);
     const dock = page.locator('.decision--dock');
     const approve = page.getByRole('button', { name: TEXT[locale].approve, exact: true });
-    // At the top the diff runs on under the dock: the dock is pinned to the viewport, Approve in view.
-    const top = await dock.boundingBox();
-    const tableBox = await table.boundingBox();
-    expect((top?.y ?? 0) + (top?.height ?? 0)).toBeLessThanOrEqual(900);
-    expect((tableBox?.y ?? 0) + (tableBox?.height ?? 0)).toBeGreaterThan(top?.y ?? 0);
+    const region = page.getByRole('region', { name: REVIEW_TEXT[locale].long });
+    // The long diff scrolls in its own region: the decision is in view without scrolling the page.
     await expect(approve).toBeInViewport();
-    // Scrolled to where the table ends: the dock is still pinned and the last row sits fully above it.
-    await page.evaluate(() => { window.scrollTo(0, document.documentElement.scrollHeight); });
-    const end = await page.evaluate(() => window.scrollY);
-    await page.evaluate((y) => { window.scrollTo(0, y - 28); }, end);
+    const docked = await dock.boundingBox();
+    expect((docked?.y ?? 0) + (docked?.height ?? 0)).toBeLessThanOrEqual(900);
+    // CKP-002 item 2: scrolled to the last row, the version row is still at the top of the region.
+    await region.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    const regionBox = await region.boundingBox();
+    const versions = await page.locator('.sbs__versions .sbs__side--next').boundingBox();
+    expect(Math.abs((versions?.y ?? -99) - (regionBox?.y ?? 0))).toBeLessThanOrEqual(2);
+    await expect(page.locator('.sbs__versions .sbs__side--next')).toBeInViewport();
     const last = await rowOf(page, 'R20').boundingBox();
-    const pinned = await dock.boundingBox();
-    expect(Math.round((pinned?.y ?? 0) + (pinned?.height ?? 0))).toBe(900 - 12);
-    expect((last?.y ?? 0) + (last?.height ?? 0)).toBeLessThanOrEqual(pinned?.y ?? 0);
+    expect((last?.y ?? 0) + (last?.height ?? 0)).toBeLessThanOrEqual((regionBox?.y ?? 0) + (regionBox?.height ?? 0) + 1);
+    await expect(approve).toBeInViewport();
     await expect(rowOf(page, 'R20').locator('.diff-td--mod')).toContainText(locale === 'en' ? '12,000 VND' : '12.000 VND');
     await settle(page);
     await page.screenshot({ path: `e2e/screenshots/version-diff-long-1440x900-${theme}-${locale}.png`, fullPage: false });
