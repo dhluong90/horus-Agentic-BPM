@@ -1,23 +1,34 @@
+import { useState } from 'react';
 import type { InputMasking, Rule, RuleSetDefinition, RuleSetVersion, VersionDiff } from '../../../api/rules/schemas';
 import { useI18n, type Locale } from '../../../i18n/I18nProvider';
-import { formatDateTime } from '../model/dates';
+import { agoText, formatDateTime } from '../model/dates';
 import { cellText, nonAsciiCharacters } from '../model/nonAscii';
-import { clauseLabel, columnLabel, readCondition, readOutput } from '../model/reading';
+import { clauseLabel, columnLabel, readCondition, readOutput, type CellReading } from '../model/reading';
 import { changeNotes, flagged, maskRemoved, type ChangeNote } from '../model/masking';
 import { countChanges, pairRows, structureNotes, type PairChange, type RowPair } from '../model/versionDiff';
 import { CellValue } from './CellValue';
+import { readingText } from './DraftChanges';
 
 const GLYPH: Record<PairChange, string> = { ADDED: '＋', CHANGED: '✎', MOVED: '⇅', REMOVED: '−', UNCHANGED: '' };
 
 type Side = 'base' | 'next';
 
+/** The content of the version as it was on screen when the approver opened the page, and when that was. */
+export interface SeenVersion { definition: RuleSetDefinition; at: number }
+
 /** The characters the engine flagged, named by code point; an escape or a hidden character has no visible glyph. */
 function NonAsciiMark({ raw }: { raw: string }) {
-  const { t } = useI18n();
-  const characters = nonAsciiCharacters(raw);
+  const { t, locale } = useI18n();
+  const characters = nonAsciiCharacters(raw, locale);
   return (
     <span className="nonascii-mark">
-      <span aria-hidden="true">▲</span> {characters.length > 0 ? t('changes.nonAscii', { chars: characters.join(', ') }) : t('changes.hiddenCharacter')}
+      <span aria-hidden="true">▲</span> {characters.length > 0 ? t('changes.nonAscii') : t('changes.hiddenCharacter')}
+      {characters.length > 0 ? (
+        <details className="nonascii-mark__details">
+          <summary>{t('inspector.details')}</summary>
+          <span>{characters.join(', ')}</span>
+        </details>
+      ) : null}
     </span>
   );
 }
@@ -34,10 +45,7 @@ function SideHead({ version, effectiveFrom, hash, span, side }: { version: RuleS
     <th scope="colgroup" colSpan={span} className={`sbs__side sbs__side--${side} sbs__start--${side}`}>
       <span className="sbs__title">{t('changes.sideTitle', { version: String(version.version) })}</span>
       <span className="sbs__meta">{meta}</span>
-      <details className="sbs__details">
-        <summary>{t('inspector.details')}</summary>
-        <span className="sbs__hash">{t('details.hash')} <span className="mono" title={hash}>{hash.slice(0, 12)}</span></span>
-      </details>
+      <span className="sbs__hash sr-only">{t('details.hash')} <span className="mono">{hash.slice(0, 12)}</span></span>
     </th>
   );
 }
@@ -82,7 +90,7 @@ function ColumnNames({ definition, side, flags }: { definition: RuleSetDefinitio
 }
 
 /** One side of a row: its cells, or one quiet cell saying the row is not on this side. */
-function SideCells({ definition, rule, pair, side, absent }: { definition: RuleSetDefinition; rule: Rule | undefined; pair: RowPair; side: Side; absent: string }) {
+function SideCells({ definition, rule, pair, side, absent, seen, now }: { definition: RuleSetDefinition; rule: Rule | undefined; pair: RowPair; side: Side; absent: string; seen?: SeenVersion | undefined; now: number }) {
   const { t, locale } = useI18n();
   const span = definition.inputs.length + definition.outputs.length;
   if (rule === undefined) return <td colSpan={span} className={`sbs__absent sbs__start--${side}`}>{absent}</td>;
@@ -90,11 +98,16 @@ function SideCells({ definition, rule, pair, side, absent }: { definition: RuleS
     const key = `${part}.${name}`;
     const changed = pair.changed.has(key);
     const value = part === 'when' ? rule.when[name] : rule.then[name];
+    const before = side === 'next' ? seen?.definition.rules.find((r) => r.id === rule.id) : undefined;
+    const wasValue = before === undefined ? undefined : part === 'when' ? before.when[name] : before.then[name];
+    const wasReading = before === undefined ? undefined : part === 'when' ? readCondition(before.when[name], locale) : readOutput(before.then[name], locale);
+    const moved = before !== undefined && JSON.stringify(wasValue ?? null) !== JSON.stringify(value ?? null);
     const classes = [first, changed ? (side === 'next' ? 'diff-td--mod' : 'diff-td--old') : undefined].filter(Boolean).join(' ');
     return (
       <td key={`${side}-${key}`} className={classes === '' ? undefined : classes}>
         {changed ? <span className="sr-only">{side === 'next' ? t('change.CHANGED') : t('changes.was')} </span> : null}
         <CellValue reading={part === 'when' ? readCondition(rule.when[name], locale) : readOutput(rule.then[name], locale)} />
+        {moved && wasReading !== undefined && seen !== undefined ? <SinceMark was={wasReading} elapsed={now - seen.at} /> : null}
         {side === 'next' && pair.nonAscii.has(key) ? <NonAsciiMark raw={cellText(value)} /> : null}
       </td>
     );
@@ -105,6 +118,13 @@ function SideCells({ definition, rule, pair, side, absent }: { definition: RuleS
       {definition.outputs.map((output, index) => cell('then', output.name, index === 0 ? 'dt__first-then' : undefined))}
     </>
   );
+}
+
+/** A cell that differs from what the approver had on screen: the earlier value, once, in the cell. */
+function SinceMark({ was, elapsed }: { was: CellReading; elapsed: number }) {
+  const { t, locale } = useI18n();
+  const ago = agoText(elapsed, locale) ?? t('changes.since.moment');
+  return <span className="since-mark">{t('changes.since', { was: readingText(was, t), ago })}</span>;
 }
 
 function RowMarks({ pair }: { pair: RowPair }) {
@@ -133,7 +153,7 @@ type Translate = ReturnType<typeof useI18n>['t'];
 function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next: RuleSetDefinition, locale: Locale): string {
   const policy = (value: string) => {
     const upper = value.toUpperCase();
-    return t(upper === 'UNIQUE' ? 'policy.UNIQUE' : upper === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST');
+    return t(upper === 'UNIQUE' ? 'changes.policy.UNIQUE' : upper === 'COLLECT' ? 'changes.policy.COLLECT' : 'changes.policy.FIRST');
   };
   switch (note.kind) {
     case 'hitPolicy':
@@ -162,8 +182,11 @@ function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next:
  * side in one table, so each rule id sits on one line. What changed comes from the engine's diff (RLE-028);
  * the cells use the editor's labels and formats. Effective dates and hashes are version metadata in the header.
  */
-export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: RuleSetVersion; next: RuleSetVersion }) {
+export function ChangesView({ diff, base, next, seen, now }: { diff: VersionDiff; base: RuleSetVersion; next: RuleSetVersion; seen?: SeenVersion | undefined; now?: number }) {
   const { t, locale } = useI18n();
+  // Read once when the view opens, so the "minutes ago" does not drift while the approver reads.
+  const [opened] = useState(() => Date.now());
+  const clock = now ?? opened;
   const pairs = pairRows(diff, base.definition.rules, next.definition.rules);
   const counts = countChanges(diff);
   const notes = changeNotes(diff, structureNotes(diff));
@@ -174,14 +197,16 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
     return name !== undefined && flagged(item) ? [[name, noteText(t, note, base.definition, next.definition, locale)]] : [];
   }));
   const removedMasks = diff.masking.filter(maskRemoved).length;
-  const values = { added: String(counts.added), changed: String(counts.changed), moved: String(counts.moved), removed: String(counts.removed), unchanged: String(counts.unchanged) };
+  // Only the counts that are not zero: "1 added, 1 changed", never "0 removed".
+  const summary = (['added', 'changed', 'moved', 'removed', 'unchanged'] as const)
+    .filter((kind) => counts[kind] > 0).map((kind) => t(`changes.count.${kind}`, { count: String(counts[kind]) })).join(', ');
   const baseSpan = base.definition.inputs.length + base.definition.outputs.length;
   const nextSpan = next.definition.inputs.length + next.definition.outputs.length;
   const caption = t('changes.caption', { base: String(base.version), version: String(next.version), name: next.ruleSet });
   return (
     <div className="changes">
       <p className="changes__summary">
-        <strong className="tnum">{t(counts.moved > 0 ? 'changes.summaryMoved' : 'changes.summaryLine', values)}</strong>
+        <strong className="tnum">{summary === '' ? t('changes.none') : summary}</strong>
         {counts.nonAscii > 0 ? (
           <span className="nonascii-mark"><span aria-hidden="true">▲</span> {counts.nonAscii === 1 ? t('changes.nonAsciiCountOne') : t('changes.nonAsciiCount', { count: String(counts.nonAscii) })}</span>
         ) : null}
@@ -194,20 +219,22 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
           {notes.map((note, index) => <li key={index}>{noteText(t, note, base.definition, next.definition, locale)}</li>)}
         </ul>
       ) : null}
-      <div className="dt-scroll" role="region" tabIndex={0} aria-label={caption}>
+      <div className="dt-scroll dt-scroll--sbs" role="region" tabIndex={0} aria-label={caption}>
         <table className="dt dt--diff dt--sbs">
           <caption className="sr-only">{caption}</caption>
           <thead>
             <tr className="sbs__versions">
-              <th scope="col" rowSpan={3} className="dt__rowhead">{t('table.row')}</th>
+              <th scope="col" className="dt__rowhead">{t('table.row')}</th>
               <SideHead version={base} effectiveFrom={diff.effectiveFrom.from} hash={diff.baseCanonicalHash} span={baseSpan} side="base" />
               <SideHead version={next} effectiveFrom={diff.effectiveFrom.to} hash={diff.canonicalHash} span={nextSpan} side="next" />
             </tr>
             <tr className="dt__groups">
+              <td className="dt__rowhead" aria-hidden="true" />
               <ColumnGroups definition={base.definition} side="base" />
               <ColumnGroups definition={next.definition} side="next" />
             </tr>
             <tr>
+              <td className="dt__rowhead" aria-hidden="true" />
               <ColumnNames definition={base.definition} side="base" />
               <ColumnNames definition={next.definition} side="next" flags={flags} />
             </tr>
@@ -219,8 +246,8 @@ export function ChangesView({ diff, base, next }: { diff: VersionDiff; base: Rul
                   <span className="row-id mono">{pair.ruleId}</span>{' '}
                   <RowMarks pair={pair} />
                 </th>
-                <SideCells definition={base.definition} rule={pair.base} pair={pair} side="base" absent={t('changes.notInBase', { version: String(base.version) })} />
-                <SideCells definition={next.definition} rule={pair.next} pair={pair} side="next" absent={t('changes.removedIn', { version: String(next.version) })} />
+                <SideCells definition={base.definition} rule={pair.base} pair={pair} side="base" now={clock} absent={t('changes.notInBase', { version: String(base.version) })} />
+                <SideCells definition={next.definition} rule={pair.next} pair={pair} side="next" now={clock} seen={seen} absent={t('changes.removedIn', { version: String(next.version) })} />
               </tr>
             ))}
           </tbody>
