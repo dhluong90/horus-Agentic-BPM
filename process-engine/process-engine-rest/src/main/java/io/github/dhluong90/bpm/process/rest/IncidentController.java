@@ -50,10 +50,11 @@ public class IncidentController {
     @GetMapping("/incidents")
     public ResponseEntity<byte[]> list(@RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "limit", required = false) String limit,
-            @RequestParam(value = "cursor", required = false) String cursor) {
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         IncidentQuery query = new IncidentQuery(status == null ? null : status.strip(),
                 new PageRequest(limitOf(limit), cursor));
-        return json(HttpStatus.OK, Views.page(incidents.incidents(query), Views::incident), null);
+        return ProcessController.conditional(Views.page(incidents.incidents(query), Views::incident), ifNoneMatch);
     }
 
     /** Reads one incident ({@code processes:read}); the {@code ETag} is its lock version. */

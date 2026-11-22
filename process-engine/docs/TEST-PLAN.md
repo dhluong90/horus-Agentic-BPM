@@ -150,6 +150,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-215 | `PRE_215_*` in `ImportedLayoutPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a file with a diagram, two imports, a version stored without a layout | M3 | `TR-DEF-02`, `PRE-024` | Done (#445) |
 | PRE-216 | `PRE_216_*` in `TaskQueryPostgresIT` and `StepCatalogueRestContractTest` | Testcontainers with 100 and 101 role queues; problem body against the contract | M3 | `TR-PERF-07`, `TR-SEC-01` | Done (#408) |
 | PRE-217 | `PRE_217_*` in `AgentTaskIT` | Testcontainers, the real Rule Engine; import of a malformed set | M3 | `TR-UI-04` | Done (#386) |
+| PRE-218 | `PRE_218_*` in `ProcessRestErrorMatrixTest` and `IncidentRestContractTest` | WebMvc against the OpenAPI contract: tag, 304, changed content, page and view, refused caller | M3 | `TR-PERF-07`, `TR-TEN-01` | Done |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 
