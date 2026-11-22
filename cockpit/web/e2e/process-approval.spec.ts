@@ -195,7 +195,8 @@ for (const locale of LOCALES) {
     await expect(requester.locator('[data-node="approve"][data-mark="changed"]')).toBeVisible();
     const list = requester.getByRole('region', { name: locale === 'en' ? 'What changed' : 'Những gì thay đổi' });
     await expect(list).toContainText(locale === 'en' ? 'Assignee › Role' : 'Người được giao › Vai trò');
-    await expect(list).toContainText(/CREDIT_OFFICER → .*SENIOR_CREDIT_OFFICER/);
+    await expect(list).toContainText(locale === 'en' ? /Credit officer → .*Senior credit officer/ : /Cán bộ tín dụng → .*Cán bộ tín dụng cao cấp/);
+    await expect(list).not.toContainText('CREDIT_OFFICER');
     // Money in a changed value reads with the language's separators and its currency.
     await expect(list).toContainText(locale === 'en' ? '500,000,000' : '500.000.000');
     const line = dock(requester, locale).getByText(T[locale].self);

@@ -38,7 +38,7 @@ describe('CKP-024 process approval with the graph diff', () => {
     expect(within(diagram).getByRole('img', { name: 'Approve high-risk customer, Person task, Changed' })).toBeInTheDocument();
 
     await waitFor(() => { expect(approve()).toBeEnabled(); });
-    expect(dock()).toHaveTextContent(`Approves content ${KYC_V3_HASH.slice(0, 12)}`);
+    expect(dock()).not.toHaveTextContent(KYC_V3_HASH.slice(0, 12));
     await userEvent.type(within(dock()).getByRole('textbox', { name: 'Comment' }), 'Reviewed with the KYC committee');
     await userEvent.click(approve());
 

@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 're
 import type { ActivityEntry, CompensationScope, InstanceActivities, ProcessInstance } from '../../api/processes/schemas';
 import { toHostError } from '../../api/hostError';
 import { setCrumbTrail } from '../../app/crumbs';
-import { usePersonName } from '../../app/people';
+import { useNames, useWantNames, wantedOf } from './api/displayNames';
 import { formatRoute } from '../../app/route';
 import { CopyButton } from '../../components/CopyButton';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
@@ -18,7 +18,6 @@ import { flowOrder, type DiagramGraph, type DiagramNode } from './model/bpmnGrap
 import {
   activityOf,
   actorReplica,
-  assigneeWords,
   durationParts,
   entryKey,
   firstStep,
@@ -195,12 +194,19 @@ function durationText(ms: number, t: T): string {
 /** Who acted, in words: a person by name, the engine as "Process Engine"; an engine node's id stays under Details. */
 function useActorText(): (actor: string | null) => string {
   const { t } = useI18n();
-  const person = usePersonName();
+  const { user } = useNames();
   return (actor) => {
     const who = actorReplica(actor);
-    return who.engine ? t('instance.engine') : person(who.login);
+    return who.engine ? t('instance.engine') : user(who.login);
   };
 }
+
+/** The logins among these actors, for the display name lookup; an engine replica is not a person. */
+const peopleOf = (actors: readonly (string | null | undefined)[]): string[] => [...new Set(actors.flatMap((actor) => {
+  if (actor === null || actor === undefined) return [];
+  const who = actorReplica(actor);
+  return who.engine ? [] : [who.login];
+}))];
 
 function StepDetails({ instance, node, mark, activities, load }: {
   instance: ProcessInstance;
@@ -211,8 +217,10 @@ function StepDetails({ instance, node, mark, activities, load }: {
 }) {
   const { t, locale } = useI18n();
   const actorText = useActorText();
+  const { assigneeName } = useNames();
   const activity = activityOf(activities, node.id);
   const task = openTaskAt(instance, node.id);
+  useWantNames(wantedOf(task !== undefined ? [task.assignee] : [], peopleOf([activity?.actor, task?.claimedBy])));
   const name = node.name ?? node.id;
   const attempts = activity !== undefined ? t(activity.attempts === 1 ? 'instance.attempts.one' : 'instance.attempts.many', { count: String(activity.attempts) }) : undefined;
   const summary = (() => {
@@ -246,7 +254,7 @@ function StepDetails({ instance, node, mark, activities, load }: {
             {activity?.durationMs !== null && activity?.durationMs !== undefined ? <Fact term={t('instance.fact.duration')}>{durationText(activity.durationMs, t)}</Fact> : null}
             {attempts !== undefined ? <Fact term={t('instance.fact.attempts')}>{attempts}</Fact> : null}
             {activity !== undefined ? <Fact term={t('instance.fact.actor')}>{actorText(activity.actor)}</Fact> : null}
-            {task !== undefined ? <Fact term={t('instance.fact.waitingFor')}>{assigneeWords(task.assignee)}</Fact> : null}
+            {task !== undefined ? <Fact term={t('instance.fact.waitingFor')}>{assigneeName(task.assignee)}</Fact> : null}
             {task?.claimedBy ? <Fact term={t('instance.fact.takenBy')}>{actorText(task.claimedBy)}</Fact> : null}
           </dl>
         )}
@@ -333,6 +341,7 @@ function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolea
 function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
   const actorText = useActorText();
+  useWantNames({ users: peopleOf(activities.entries.map((entry) => entry.actor)) });
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
   const stepName = (id: string) => names.get(id) ?? wordsOf(id);
   const scopes = activities.compensations ?? [];

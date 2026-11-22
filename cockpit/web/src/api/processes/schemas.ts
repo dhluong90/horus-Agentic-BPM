@@ -24,6 +24,20 @@ export const definitionSummary = z
 export type DefinitionSummary = z.infer<typeof definitionSummary>;
 export const definitionSummaryPage = page(definitionSummary);
 
+/** One agent step input or output that declares neither mask true nor mask false (PD-146, PRE-205). */
+export interface UnclassifiedField { step: string; field: string; direction: 'INPUT' | 'OUTPUT' }
+
+const unclassifiedEntry = z.object({ code: z.literal('UNCLASSIFIED_FIELD'), step: z.string(), field: z.string(), direction: z.enum(['INPUT', 'OUTPUT']) }).loose();
+
+/** Read entry by entry: a warning this cockpit cannot read is dropped, never fatal; an engine without them sends none. */
+const unclassifiedWarnings = z
+  .array(z.unknown())
+  .optional()
+  .transform((items) => (items ?? []).flatMap((item): UnclassifiedField[] => {
+    const parsed = unclassifiedEntry.safeParse(item);
+    return parsed.success ? [{ step: parsed.data.step, field: parsed.data.field, direction: parsed.data.direction }] : [];
+  }));
+
 export const definitionVersion = z
   .object({
     id: z.string(),
@@ -43,6 +57,8 @@ export const definitionVersion = z
     approvedBy: nullableString,
     approvedAt: nullableString,
     decisionComment: nullableString,
+    /** Reminders that never block (PD-146): agent step fields with no classification. Names only, never a value. */
+    warnings: unclassifiedWarnings.optional(),
   })
   .loose();
 export type DefinitionVersion = z.infer<typeof definitionVersion>;
@@ -207,6 +223,8 @@ export const pendingDefinitionApproval = z
     definitionHash: z.string().regex(/^[0-9a-f]{64}$/),
     lockVersion: z.number().int(),
     requestedBy: z.string(),
+    /** The requester as a screen shows them, in the caller's language; the id when the host knows no name (#442). */
+    requestedByName: z.string().min(1).optional(),
     requestedAt: z.string(),
     allowedActions: z.array(z.string()),
     deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),

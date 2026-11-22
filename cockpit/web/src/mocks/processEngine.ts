@@ -1,3 +1,4 @@
+import { DEMO_NAMES } from './displayNames';
 import {
   DEMO_DEFINITIONS, FORM_TASK_ID, FORM_TASK_NAME, INSTANCE_ID, kycDiff, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_CONTEXT, REVIEW_TASK_ID, REVIEW_TASK_NAME,
   VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
@@ -104,6 +105,8 @@ export interface ProcessSeed {
   incidents?: boolean;
   /** The host's `incidents.resolve-approval` (PD-126): `four-eyes` by default, `single` on the dev profile only. */
   resolveApproval?: 'four-eyes' | 'single';
+  /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
+  unclassified?: boolean;
 }
 
 /** A command on an incident, as the engine received it. */
@@ -115,6 +118,12 @@ export interface RecordedIncidentCommand {
   ifMatch: string | undefined;
   idempotencyKey: string | undefined;
 }
+
+/** What the engine lists for the pending onboarding version when fields are left unclassified: names only (PRE-205). */
+const UNCLASSIFIED_DEMO = [
+  { code: 'UNCLASSIFIED_FIELD', step: 'verify-docs', field: 'documentType', direction: 'INPUT', message: 'Input documentType of step verify-docs is not classified: it declares neither mask true nor mask false. This does not block approval.' },
+  { code: 'UNCLASSIFIED_FIELD', step: 'verify-docs', field: 'summary', direction: 'OUTPUT', message: 'Output summary of step verify-docs is not classified: it declares neither mask true nor mask false. This does not block approval.' },
+];
 
 export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const locale = seed.locale ?? 'en';
@@ -238,9 +247,11 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (assignee.length < 1 || assignee.length > 200 || reason.length < 1 || reason.length > 500) return problem(400, 'INPUT_INVALID');
     if (task.status !== (command === 'reassign' ? 'OPEN' : 'CLAIMED')) return problem(409, 'INVALID_STATE');
     const directUser = task.assignee.startsWith('user:');
-    if (fourEyesRefuses(task, assignee) || task.claimedBy === assignee || (!directUser && !mayWork(task, assignee))) {
-      return problem(409, 'ASSIGNEE_NOT_ALLOWED', { detail: 'The named user may not work this task' });
-    }
+    // The refusals say which rule applied (PRE-206): reason, and for a missing role or group, what the target lacks.
+    const refuse = (reason: string, required?: string) => problem(409, 'ASSIGNEE_NOT_ALLOWED', { detail: 'The named user may not work this task', reason, ...(required !== undefined ? { required } : {}) });
+    if (task.claimedBy === assignee) return refuse('ALREADY_ASSIGNED');
+    if (fourEyesRefuses(task, assignee)) return refuse('FOUR_EYES_PARTICIPANT');
+    if (!directUser && !mayWork(task, assignee)) return refuse(task.assignee.startsWith('group:') ? 'MISSING_GROUP' : 'MISSING_ROLE', task.assignee);
     handOvers.push({ taskId: task.id, command, actor: request.user, from: task.claimedBy, to: assignee, reason });
     Object.assign(task, { status: 'CLAIMED', claimedBy: assignee, claimedAt: QUEUE_NOW, lockVersion: task.lockVersion + 1 });
     return json(200, taskBody(task, request), { ETag: `"${String(task.lockVersion)}"` });
@@ -271,6 +282,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       createdBy: found.createdBy ?? 'lan', createdAt: found.lastChangedAt, source: 'IMPORT', lockVersion: found.lockVersion,
       effectiveFrom: found.effectiveFrom ?? (found.status === 'ACTIVE' ? '2026-11-01T00:00:00Z' : null),
       requestedBy: found.requestedBy ?? null, requestedAt: found.requestedAt ?? null, decisionComment: found.decisionComment,
+      warnings: seed.unclassified === true && found.key === 'kyc-onboarding' && found.version === 3 ? UNCLASSIFIED_DEMO : [],
     };
   }
 
@@ -347,7 +359,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : undefined;
         return {
           key: d.key, name: d.name, version: d.version, definitionHash: d.definitionHash ?? DEFAULT_HASH, lockVersion: d.lockVersion,
-          requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
+          requestedBy, requestedByName: DEMO_NAMES[locale].users[requestedBy] ?? requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
           allowedActions: denial === undefined ? ['approve', 'reject'] : [],
           deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
         };

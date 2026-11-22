@@ -482,6 +482,9 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .sbs__side--next { box-shadow: inset 0 3px 0 var(--accent-fill); }
 .sbs__title { display: block; color: var(--ink); font: 600 14px/1.4 var(--font-ui); }
 .sbs__meta { display: block; color: var(--ink-2); font: 500 13px/1.45 var(--font-ui); }
+.sbs__details { margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.sbs__details > summary, .rsh__details > summary { cursor: pointer; width: fit-content; min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
+.rsh__details { margin-top: 4px; font-size: 12px; color: var(--muted); }
 .sbs__hash { display: block; color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.45; }
 .dt--sbs .sbs__start--base { border-left: 1px solid var(--line); }
 .dt--sbs .sbs__start--next { border-left: 2px solid var(--line-strong); }
@@ -614,3 +617,12 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .dialog--wide .notice__located { max-height: 36vh; overflow-y: auto; }
 .dialog__file { color: var(--ink-2); }
 .dialog__file-label { margin-inline-end: 4px; }
+
+/* Fields not classified (PD-146): neutral and quiet, one short band on the card ground; amber is kept for what needs
+ * attention. The sentence and the field names share a line where the width allows, and wrap under the title where not. */
+.unclassified { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--radius-m); background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); font-size: 13px; line-height: 1.45; --note-indent: 1.35em; }
+.unclassified__head { margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; }
+.unclassified__title { font-weight: 650; color: var(--ink); }
+.unclassified__icon { display: inline-block; width: calc(var(--note-indent) - 0.3em); color: var(--muted); }
+.unclassified__list { margin: 0; padding: 0 0 0 var(--note-indent); list-style: none; display: flex; flex-wrap: wrap; column-gap: 14px; color: var(--muted); }
+.workspace > .unclassified { margin-bottom: 12px; }

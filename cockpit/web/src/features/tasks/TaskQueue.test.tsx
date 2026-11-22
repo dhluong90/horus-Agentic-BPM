@@ -58,7 +58,7 @@ describe('CKP-046 claim from Available to me', () => {
     currentProcessEngine().claimAs(QUEUE_TASKS.creditReviewOverdue, 'hoa');
     await userEvent.click(claim);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('hoa claimed this task first.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Hoa Tran claimed this task first.');
     await waitFor(() => { expect(screen.getByRole('tab', { name: 'Available to me (2)' })).toBeInTheDocument(); });
     expect(screen.queryByText('Case LN-2026-0142')).not.toBeInTheDocument();
     // No code, no raw body on the surface.
@@ -69,7 +69,7 @@ describe('CKP-046 claim from Available to me', () => {
     setScenario('tasks-supervisor');
     open(`#/tasks?view=all&task=${QUEUE_TASKS.collateral}`);
     const selected = await screen.findByRole('complementary', { name: 'Collateral valuation' });
-    await within(selected).findByText('Claimed by hoa', { selector: '.badge' });
+    await within(selected).findByText('Claimed by Hoa Tran', { selector: '.badge' });
     // Sau may hand it on, so Reassign is offered; there is no Claim for a task someone else holds.
     expect(within(selected).getByRole('button', { name: 'Reassign' })).toBeEnabled();
     expect(within(selected).queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('CKP-048 reassign with a reason', () => {
     expect(submit).not.toHaveAttribute('aria-disabled');
     await userEvent.click(submit);
 
-    expect(await screen.findByText('Credit review is now with hoa.')).toBeInTheDocument();
+    expect(await screen.findByText('Credit review is now with Hoa Tran.')).toBeInTheDocument();
     const reassign = currentProcessEngine().requests.find((request) => request.path.endsWith(':reassign'));
     expect(reassign?.path).toBe(`/api/bpm/processes/v1/tasks/${QUEUE_TASKS.creditReview}:reassign`);
     expect(JSON.parse(reassign?.body ?? '{}')).toEqual({ assignee: 'hoa', reason: 'Covering leave' });
@@ -121,7 +121,7 @@ describe('CKP-048 reassign with a reason', () => {
 
     // A claimed task is delegated.
     window.location.hash = `#/tasks?view=all&task=${QUEUE_TASKS.myCreditReview}`;
-    await waitFor(() => { expect(within(screen.getByRole('complementary', { name: 'Credit review' })).getByText(/Claimed by an/, { selector: '.badge' })).toBeInTheDocument(); });
+    await waitFor(() => { expect(within(screen.getByRole('complementary', { name: 'Credit review' })).getByText(/Claimed by An Nguyen/, { selector: '.badge' })).toBeInTheDocument(); });
     const claimed = screen.getByRole('complementary', { name: 'Credit review' });
     await userEvent.click(within(claimed).getByRole('button', { name: 'Reassign' }));
     dialog = await screen.findByRole('dialog', { name: 'Reassign Credit review' });
@@ -146,7 +146,7 @@ describe('CKP-048 reassign with a reason', () => {
     await userEvent.type(within(dialog).getByLabelText('Reason'), 'Covering leave');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Reassign' }));
 
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('hoa cannot take this task. They may lack its role, or have worked on this case.');
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Hoa Tran worked on this case, so someone else must take this task.');
     // The code stays one click away behind Details (styleguide section 9), never in the sentence.
     expect(within(dialog).getByText(/ASSIGNEE_NOT_ALLOWED/)).not.toBeVisible();
     expect(within(dialog).getByRole('alert').querySelector('p')).not.toHaveTextContent(/ASSIGNEE_NOT_ALLOWED|409/);

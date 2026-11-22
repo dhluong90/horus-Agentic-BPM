@@ -133,6 +133,8 @@ export const pendingRuleApproval = z
     canonicalHash: z.string().regex(/^[0-9a-f]{64}$/),
     lockVersion: z.number().int(),
     requestedBy: z.string(),
+    /** The requester as a screen shows them, in the caller's language; the id when the host knows no name (#442). */
+    requestedByName: z.string().min(1).optional(),
     requestedAt: z.string(),
     allowedActions: z.array(z.string()),
     deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
@@ -156,7 +158,7 @@ export type HistoryEntry = z.infer<typeof historyEntry>;
 export const versionHistory = z.object({ data: z.array(historyEntry) }).loose();
 
 /** Warning codes this cockpit shows. A warning with another code, from a newer engine, is dropped. */
-export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA'] as const;
+export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA', 'UNCLASSIFIED_INPUT'] as const;
 export type WarningCode = (typeof WARNING_CODES)[number];
 
 const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string(), requiresAcknowledgement: z.boolean().optional() }).loose();
@@ -169,6 +171,10 @@ export interface VersionWarning { code: WarningCode; input: string; matchedName:
 /** One warning the approver accepts, as the exact pair shown on screen (PD-104, RLE-053). */
 export interface AcknowledgedWarning { code: WarningCode; input: string }
 
+/** The reminder that an input is not classified (PD-146): never blocks, never needs an acceptance. */
+export const UNCLASSIFIED = 'UNCLASSIFIED_INPUT';
+export const isUnclassified = (warning: { code: WarningCode }): boolean => warning.code === UNCLASSIFIED;
+
 const pendingWarning = z.object({ code: z.string(), input: z.string() }).loose();
 
 /**
@@ -179,7 +185,8 @@ export function readPendingWarnings(value: unknown): AcknowledgedWarning[] | und
   if (!Array.isArray(value)) return undefined;
   return value.flatMap((item): AcknowledgedWarning[] => {
     const parsed = pendingWarning.safeParse(item);
-    return parsed.success && (WARNING_CODES as readonly string[]).includes(parsed.data.code) ? [{ code: parsed.data.code as WarningCode, input: parsed.data.input }] : [];
+    // A reminder (UNCLASSIFIED_INPUT) is never part of what an approver accepts.
+    return parsed.success && parsed.data.code !== UNCLASSIFIED && (WARNING_CODES as readonly string[]).includes(parsed.data.code) ? [{ code: parsed.data.code as WarningCode, input: parsed.data.input }] : [];
   });
 }
 

@@ -81,3 +81,5 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | Keyboard node list and canvas exemption notice are pending PD-048 | Statements follow the decision |
 | Federation envelope (`TR-UI-05`) is pending PD-046 | Stub-host load test designed with the process engine load harness |
 | Identity providers without refresh tokens for browser clients (DESIGN open question 15.2) | A second sign-in test profile once the fallback is decided |
+| The process engine sends no label for a definition's inputs and outputs, so the process review names a changed input (`highRiskAmount`) and an unclassified field (`documentType`) by its identifier spelled out in words, in the engine's language, also on a Vietnamese screen (#415, #438) | Show the engine's label when the definition carries one; no text is invented in the cockpit |
+| Tenant names are slugs when the host sends no display name | The host supplies tenant names |
