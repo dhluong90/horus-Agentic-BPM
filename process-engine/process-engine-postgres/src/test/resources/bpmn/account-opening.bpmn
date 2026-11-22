@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRE-013: three steps in the root scope. The funds are reserved and the account opened in the host's own tables;
+     when the partner notification exhausts its retries, the account is closed first and the funds released second. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_account-opening"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="account-opening" name="Account opening" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"
+                      horus:resultVariable="reservation"/>
+    <bpmn:serviceTask id="open-account" horus:handler="open-account" horus:compensate="close-account"
+                      horus:resultVariable="account"/>
+    <bpmn:serviceTask id="notify-partner" horus:handler="partner-hub" horus:mode="remote"
+                      horus:onFailure="compensate" horus:resultVariable="notice"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="reserve-funds"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="reserve-funds" targetRef="open-account"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="open-account" targetRef="notify-partner"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="notify-partner" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -131,7 +131,7 @@ public class MigrationController {
         return node;
     }
 
-    private static void approval(ObjectNode node, MigrationPlan.Approval approval) {
+    static void approval(ObjectNode node, MigrationPlan.Approval approval) {
         node.put("mode", approval.value());
         node.put("secondPersonRequired", approval.needsSecondPerson());
     }

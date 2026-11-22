@@ -25,7 +25,8 @@ import tools.jackson.databind.node.ObjectNode;
  * {@code detail} and {@code correlationId} (ADR-0010). Applies to the engine controllers only.
  */
 @RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class,
-    DecisionLogController.class, SimulationController.class, RuleSetHistoryController.class})
+    DecisionLogController.class, SimulationController.class, RuleSetHistoryController.class,
+    ApprovalController.class})
 public class ProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());

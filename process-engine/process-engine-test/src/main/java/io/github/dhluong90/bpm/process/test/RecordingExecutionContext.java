@@ -224,6 +224,20 @@ public final class RecordingExecutionContext implements ExecutionContext {
         update(scope.withStatus(TokenStatus.CANCELLED));
     }
 
+    /** Records the scope entry: a {@code SCOPE} token for the block, and the arriving token ends. */
+    @Override
+    public void enterScope(Token token, io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode block) {
+        createToken(io.github.dhluong90.bpm.process.internal.exec.TokenKind.SCOPE, block.id(), token.scopeTokenId());
+        update(token.withStatus(TokenStatus.COMPLETED));
+    }
+
+    /** Records the start of a compensation of the token's scope as its effect. */
+    @Override
+    public void compensate(Token failing, String cause) {
+        effects.add(new Effect.StartCompensation(failing.scopeTokenId() == null ? failing.id() : failing.scopeTokenId(),
+                failing.nodeId(), cause));
+    }
+
     @Override
     public void effect(Effect effect) {
         effects.add(effect);

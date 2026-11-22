@@ -514,6 +514,38 @@ public class RuleSetController {
     }
 
     /**
+     * {@code POST /rule-sets/{name}/versions/{v}:discard}, optional body {@code {"reason": "..."}}: the author throws
+     * away a draft that is no longer wanted (RLE-098, #418). Nothing is deleted; the version becomes {@code DISCARDED}
+     * and one history row records it. {@code Idempotency-Key} and {@code If-Match} are required.
+     */
+    @PostMapping("/{name}/versions/{version:\\d+}:discard")
+    public ResponseEntity<byte[]> discard(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
+        RestSupport.require(callers, "rules:author");
+        String key = RestSupport.requiredIdempotencyKey(idempotencyKey, ":discard");
+        long lock = RestSupport.requiredIfMatch(ifMatch, ":discard");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        String reason = null;
+        if (body.length > 0) {
+            JsonNode value = EngineValues.readRequest(body).get("reason");
+            if (value != null && !value.isNull()) {
+                if (!value.isString()) {
+                    throw new InputInvalidException("reason must be a string");
+                }
+                reason = value.stringValue();
+            }
+        }
+        WriteOptions options = new WriteOptions(key, lock, reason, ProblemDetails.correlationId(correlationId));
+        return RestSupport.version(HttpStatus.OK, versions.discard(name, version, options), callers);
+    }
+
+    /**
      * {@code GET /rule-sets/{name}/versions/{v}/export?format=json|dmn}: the version as a file that imports back with
      * the same canonical hash. Writes nothing.
      */

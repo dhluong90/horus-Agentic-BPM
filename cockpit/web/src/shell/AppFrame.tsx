@@ -14,11 +14,13 @@ import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
+import { TasksPage } from '../features/tasks/TasksPage';
 import { RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
 import { PeopleProvider } from '../app/people';
-import { usePendingRequests, useEveryRuleSet } from '../features/overview/useRuleOverview';
+import { queueEngines, reviewCount, useApprovalQueue } from '../features/approvals/useApprovalQueue';
+import type { Engine } from '../features/approvals/queue';
 import { NavRail } from './NavRail';
 import { hostReadingStyle } from '../preferences/readingStyle';
 import type { ReadingStyle } from '../preferences/storage';
@@ -46,27 +48,31 @@ export interface FrameProps {
   meta: BpmMetaV1;
   me: BpmMeV1;
   fetchImpl?: typeof fetch | undefined;
+  /** The registry's `refresh.inboxSeconds`: how often the task queue is read again (30 by default). */
+  inboxSeconds?: number | undefined;
 }
 
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
-export function AppFrame({ host, meta, me, fetchImpl }: FrameProps) {
+export function AppFrame({ host, meta, me, fetchImpl, inboxSeconds = 30 }: FrameProps) {
   return (
     <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
-          <Frame meta={meta} me={me} />
+          <Frame meta={meta} me={me} inboxSeconds={inboxSeconds} />
         </PeopleProvider>
       </ProcessesProvider>
     </RulesProvider>
   );
 }
 
-function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
+function Frame({ meta, me, inboxSeconds }: { meta: BpmMetaV1; me: BpmMeV1; inboxSeconds: number }) {
   const areas = availableAreas(meta, me);
   const [route] = useRoute(areaRoute(landingArea(meta, areas)));
   const area = areaOf(route);
-  const main = useFocusOnNavigation(formatRoute(route));
-  const reviewCount = useReviewCount(meta.limits.maxPageSize, areas.includes('approvals'));
+  // Choosing a task in the queue keeps the focus on the list; moving to another screen or tab sends it to main.
+  const main = useFocusOnNavigation(formatRoute(route.name === 'tasks' ? { ...route, taskId: undefined } : route));
+  const engines = areas.includes('approvals') ? queueEngines(meta, me) : NO_ENGINES;
+  const review = useReviewCount(engines, meta.limits.maxPageSize);
   const note = landingNote(meta);
   useEffect(() => {
     // A start-up log line for the host's operators; the user simply lands on Home.
@@ -74,24 +80,24 @@ function Frame({ meta, me }: { meta: BpmMetaV1; me: BpmMeV1 }) {
   }, [note]);
   return (
     <div className="frame">
-      <NavRail areas={areas} current={area} reviewCount={reviewCount} />
+      <NavRail areas={areas} current={area} reviewCount={review.count} reviewMore={review.more} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} inboxSeconds={inboxSeconds} /> : <NotAvailable />}
       </main>
     </div>
   );
 }
 
-function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[] }) {
+function AreaContent({ route, meta, me, areas, engines, inboxSeconds }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[]; inboxSeconds: number }) {
   const pageLimit = meta.limits.maxPageSize;
   switch (route.name) {
     case 'home':
-      return <HomePage pageLimit={pageLimit} me={me} areas={areas} />;
+      return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} />;
     case 'rule-sets':
     case 'rule-set':
       return <RulesArea route={route} pageLimit={pageLimit} />;
     case 'approvals':
-      return <ApprovalsPage pageLimit={pageLimit} />;
+      return <ApprovalsPage engines={engines} pageLimit={pageLimit} />;
     case 'decisions':
       return <DecisionsPage query={route.query ?? {}} pageLimit={pageLimit} />;
     case 'decision':
@@ -102,6 +108,8 @@ function AreaContent({ route, meta, me, areas }: { route: Route; meta: BpmMetaV1
       return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} pageLimit={pageLimit} />;
     case 'instance':
       return <InstancePage instanceId={route.instanceId} />;
+    case 'tasks':
+      return <TasksPage view={route.view} taskId={route.taskId} refreshSeconds={inboxSeconds} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
   }
@@ -132,8 +140,9 @@ function useFocusOnNavigation(location: string) {
   return main;
 }
 
-/** How many requests this user may review now: the count on the Approvals menu item. */
-function useReviewCount(pageLimit: number, enabled: boolean): number {
-  const pending = usePendingRequests(useEveryRuleSet(pageLimit, enabled));
-  return pending.status === 'ready' ? pending.data.filter((request) => request.canApprove).length : 0;
+const NO_ENGINES: readonly Engine[] = [];
+
+/** How many requests this user may approve now, across both engines: the count on the Approvals menu item. */
+function useReviewCount(engines: readonly Engine[], pageLimit: number): { count: number; more: boolean } {
+  return reviewCount(useApprovalQueue(engines, pageLimit).state);
 }

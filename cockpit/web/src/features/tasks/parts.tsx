@@ -1,0 +1,87 @@
+import type { SlaState, Task, TaskSummary } from '../../api/processes/schemas';
+import { usePersonName } from '../../app/people';
+import type { Translate } from '../../i18n/I18nProvider';
+import { useI18n } from '../../i18n/I18nProvider';
+import { useProcessesSession } from '../processes/api/processesContext';
+import { formatDateTime } from '../rules/model/dates';
+import { overdueParts, parseAssignee, readableName } from './model/queue';
+
+/** The task's step name; a task without one reads "Untitled task", never its node id. */
+export function taskTitle(task: Pick<TaskSummary, 'name'>, t: Translate): string {
+  return task.name !== null && task.name !== undefined && task.name.trim() !== '' ? task.name : t('tasks.unnamed');
+}
+
+/** Who a task is for, in words: "Role: Credit officer", "Group: Loans operations", or a person's name. */
+export function useAssigneeLabel(): (assignee: string) => string {
+  const { t } = useI18n();
+  const personName = usePersonName();
+  return (value: string) => {
+    const assignee = parseAssignee(value);
+    switch (assignee.kind) {
+      case 'role':
+        return t('tasks.assignee.role', { name: readableName(assignee.name) });
+      case 'group':
+        return t('tasks.assignee.group', { name: readableName(assignee.name) });
+      case 'user':
+        return personName(assignee.id);
+    }
+  };
+}
+
+export function AssigneeText({ assignee }: { assignee: string }) {
+  const label = useAssigneeLabel();
+  return <span className="tasks__assignee">{label(assignee)}</span>;
+}
+
+export function DueText({ dueAt }: { dueAt: string | null | undefined }) {
+  const { t, locale } = useI18n();
+  const when = formatDateTime(dueAt, locale);
+  return when === undefined ? <span className="muted">{t('tasks.sla.none')}</span> : <span className="tnum">{when}</span>;
+}
+
+/** "2 h 30 min" from the engine's overdueBy, in the user's language; undefined when the engine sent none. */
+export function useOverdueText(): (overdueBy: string | null | undefined) => string | undefined {
+  const { t } = useI18n();
+  return (overdueBy) => {
+    const parts = overdueParts(overdueBy);
+    if (parts === undefined) return undefined;
+    const words = [
+      ...(parts.days > 0 ? [t('tasks.duration.days', { count: String(parts.days) })] : []),
+      ...(parts.hours > 0 ? [t('tasks.duration.hours', { count: String(parts.hours) })] : []),
+      ...(parts.minutes > 0 ? [t('tasks.duration.minutes', { count: String(parts.minutes) })] : []),
+    ];
+    return words.length > 0 ? words.join(' ') : undefined;
+  };
+}
+
+/**
+ * The deadline state, calm: overdue is an amber pill with a word and an icon; due soon is a word with a clock in the
+ * text colour; on time and no deadline add nothing beside the due time.
+ */
+export function SlaMark({ sla, overdueBy }: { sla: SlaState; overdueBy: string | null | undefined }) {
+  const { t } = useI18n();
+  const overdueText = useOverdueText();
+  if (sla === 'BREACHED') {
+    const time = overdueText(overdueBy);
+    return <span className="badge badge--warn tasks__sla"><span aria-hidden="true">▲</span> {time !== undefined ? t('tasks.sla.overdueBy', { time }) : t('tasks.sla.overdue')}</span>;
+  }
+  if (sla === 'DUE_SOON') return <span className="tasks__soon"><span aria-hidden="true">◷</span> {t('tasks.sla.dueSoon')}</span>;
+  return null;
+}
+
+export function StatusMark({ status, claimedBy }: { status: Task['status']; claimedBy: string | null | undefined }) {
+  const { t } = useI18n();
+  const personName = usePersonName();
+  const { userId } = useProcessesSession();
+  if (status === 'CLAIMED') {
+    const mine = claimedBy === userId;
+    return (
+      <span className={mine ? 'badge badge--accent' : 'badge badge--neutral'}>
+        <span aria-hidden="true">●</span> {mine ? t('tasks.status.claimedByYou') : t('tasks.status.claimedBy', { who: personName(claimedBy ?? '') })}
+      </span>
+    );
+  }
+  if (status === 'COMPLETED') return <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('tasks.status.completed')}</span>;
+  if (status === 'CANCELLED') return <span className="badge badge--neutral"><span aria-hidden="true">■</span> {t('tasks.status.cancelled')}</span>;
+  return <span className="badge badge--neutral"><span aria-hidden="true">○</span> {t('tasks.status.open')}</span>;
+}

@@ -246,8 +246,20 @@ public class DecisionController {
                 .withIdempotencyKey(idempotencyKey)
                 .withCorrelationId(correlation)
                 .withClock(clock(request.get("clock")))
-                .withVersion(version);
+                .withVersion(version)
+                .withDecision(decisionId(request.get("decision")));
         return answer(engine.evaluate(decision), correlation);
+    }
+
+    /** The decision the request names, or null when the member is absent or null (DN-08, RLE-097). */
+    private static String decisionId(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isString()) {
+            throw new InputInvalidException("decision must be a string, the rule set's name");
+        }
+        return value.stringValue();
     }
 
     /** An ISO 8601 instant with {@code Z} or an offset, or null when the member is absent or null. */

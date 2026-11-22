@@ -23,6 +23,7 @@ import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import io.github.dhluong90.bpm.rules.rest.DecisionController;
 import io.github.dhluong90.bpm.rules.rest.DecisionLogController;
 import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
+import io.github.dhluong90.bpm.rules.rest.ApprovalController;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
 import io.github.dhluong90.bpm.rules.rest.SimulationController;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
@@ -377,6 +378,12 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean
         RuleSetController ruleEngineRuleSetController(VersionService versions, CallerResolver callers) {
             return new RuleSetController(versions, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        ApprovalController ruleEngineApprovalController(VersionService versions, CallerResolver callers) {
+            return new ApprovalController(versions, callers);
         }
 
         @Bean

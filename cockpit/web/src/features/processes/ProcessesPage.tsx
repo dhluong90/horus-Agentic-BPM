@@ -27,7 +27,8 @@ export function DefinitionStatusPill({ status }: { status: DefinitionStatus }) {
 
 /**
  * Processes: the definition keys of the tenant (listDefinitions), each row opening the diagram of the version a start
- * uses now, or of the latest version when none is in effect.
+ * uses now, or of the latest version when none is in effect. A key whose latest version waits for approval offers
+ * Review change, which opens that version's Changes (CKP-024).
  */
 export function ProcessesPage({ pageLimit }: { pageLimit: number }) {
   const { t } = useI18n();
@@ -75,7 +76,14 @@ function DefinitionTable({ pageLimit }: { pageLimit: number }) {
             <td className="tnum">{version(item.latestVersion)}</td>
             <td className="tnum">{item.effectiveVersion !== null && item.effectiveVersion !== undefined ? version(item.effectiveVersion) : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
             <td className="tnum muted">{formatDateTime(item.lastChangedAt, locale)}</td>
-            <td className="qtable__chevron" aria-hidden="true">›</td>
+            {item.latestStatus === 'PENDING_APPROVAL' ? (
+              <td className="qtable__action">
+                <a className="btn btn--small hit" href={formatRoute({ name: 'process', key: item.key, version: item.latestVersion, lens: 'changes' })}
+                  aria-label={`${t('processes.reviewChange')}: ${item.name ?? item.key}, ${version(item.latestVersion)}`}>
+                  {t('processes.reviewChange')}
+                </a>
+              </td>
+            ) : <td className="qtable__chevron" aria-hidden="true">›</td>}
           </tr>
         ))}
       </tbody>

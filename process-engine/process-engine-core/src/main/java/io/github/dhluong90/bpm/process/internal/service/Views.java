@@ -208,7 +208,7 @@ public final class Views {
             o.set("review", Values.toJson(t.review()));
         }
         ArrayNode actions = o.putArray("allowedActions");
-        for (String action : List.of("claim", "unclaim", "complete")) {
+        for (String action : List.of("claim", "unclaim", "complete", "reassign", "delegate")) {
             if (t.allowedActions().contains(action)) {
                 actions.add(action);
             }
@@ -295,6 +295,19 @@ public final class Views {
             o.put("effectiveVersion", d.effectiveVersion());
         }
         o.put("lastChangedAt", d.lastChangedAt().toString());
+        return o;
+    }
+
+    /** @param a pending approval @return JSON tree: hashes and identities, never the definition (#31) */
+    public static ObjectNode pendingApproval(io.github.dhluong90.bpm.process.api.PendingApproval a) {
+        ObjectNode o = EngineJson.NODES.objectNode().put("key", a.key());
+        putNullable(o, "name", a.name());
+        o.put("version", a.version()).put("definitionHash", a.definitionHash()).put("lockVersion", a.lockVersion())
+                .put("requestedBy", a.requestedBy()).put("requestedAt", a.requestedAt().toString());
+        ArrayNode actions = o.putArray("allowedActions");
+        a.allowedActions().forEach(actions::add);
+        ObjectNode denied = o.putObject("deniedActions");
+        a.deniedActions().forEach(denied::put);
         return o;
     }
 

@@ -12,13 +12,14 @@ const TITLE: Record<Area, MessageKey> = {
   approvals: 'menu.approvals',
   decisions: 'menu.decisions',
   processes: 'menu.processes',
+  tasks: 'menu.tasks',
 };
 
 /**
  * The left menu (styleguide section 8): icon and label per area, the review count on Approvals, and the
  * preview areas under one "Preview" heading. Collapsed, it shows icons with a tooltip; the count becomes a dot.
  */
-export function NavRail({ areas, current, reviewCount }: { areas: readonly Area[]; current: Area; reviewCount: number }) {
+export function NavRail({ areas, current, reviewCount, reviewMore = false }: { areas: readonly Area[]; current: Area; reviewCount: number; reviewMore?: boolean }) {
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(readMenuCollapsed);
   const toggleLabel = collapsed ? t('menu.expand') : t('menu.collapse');
@@ -28,9 +29,10 @@ export function NavRail({ areas, current, reviewCount }: { areas: readonly Area[
   const item = (area: Area) => {
     const title = t(TITLE[area]);
     const isPreview = PREVIEW_AREAS.has(area);
-    const count = area === 'approvals' && reviewCount > 0 ? reviewCount : undefined;
+    // A host with more requests than one page shows "200+" (cockpit DESIGN section 3).
+    const count = area === 'approvals' && reviewCount > 0 ? `${String(reviewCount)}${reviewMore ? '+' : ''}` : undefined;
     const label = isPreview ? t('menu.withPreview', { title }) : title;
-    const name = count !== undefined ? `${label}, ${t('menu.toReview', { count: String(count) })}` : label;
+    const name = count !== undefined ? `${label}, ${t('menu.toReview', { count })}` : label;
     return (
       <li key={area}>
         <a
@@ -44,7 +46,7 @@ export function NavRail({ areas, current, reviewCount }: { areas: readonly Area[
           <AreaIcon area={area} />
           <span className="navrail__title">{title}</span>
           {count !== undefined ? <span className="navrail__count tnum" aria-hidden="true">{count}</span> : null}
-          {count !== undefined && !collapsed ? <span className="sr-only">, {t('menu.toReview', { count: String(count) })}</span> : null}
+          {count !== undefined && !collapsed ? <span className="sr-only">, {t('menu.toReview', { count })}</span> : null}
         </a>
       </li>
     );

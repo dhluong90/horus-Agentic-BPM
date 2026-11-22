@@ -38,7 +38,8 @@ describe('menu areas (PD-093)', () => {
   it('TR_UI_08_processes_shows_only_where_a_process_engine_is_registered', () => {
     expect(availableAreas(metaRulesOnly, meLan)).not.toContain('processes');
     expect(availableAreas(metaBoth, meMinh)).toEqual(['home', 'rules', 'approvals', 'decisions', 'processes']);
-    expect(availableAreas(metaBoth, withPermissions(['processes:read']))).toEqual(['home', 'processes']);
+    // Approvals holds the process queue too (#31): a process user who reads definitions follows requests there.
+    expect(availableAreas(metaBoth, withPermissions(['processes:read']))).toEqual(['home', 'approvals', 'processes']);
   });
 
   it('TR_UI_08_rule_permissions_without_the_rules_module_show_nothing', () => {

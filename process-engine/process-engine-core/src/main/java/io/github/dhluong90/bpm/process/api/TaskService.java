@@ -9,7 +9,7 @@ import java.util.Map;
  * row lock, checks the task's lock version, changes the task with a conditional update, and writes its history entry
  * and event in the same transaction; a completion then runs the following synchronous steps in it too.
  *
- * <p>Deliberate gaps of this release: forms are not validated, and delegate and reassign come later.
+ * <p>Deliberate gap of this release: forms are not validated.
  */
 public interface TaskService {
 
@@ -53,6 +53,45 @@ public interface TaskService {
      * @throws TaskNotAssignedException when the caller is not the claimant
      */
     TaskView unclaim(String taskId, long expectedLockVersion, String idempotencyKey);
+
+    /**
+     * Assigns an open task to a named user ({@code OPEN} to {@code CLAIMED}; PD-110). Needs
+     * {@code processes:task:manage}. The target must hold the task's role or group (asked of the
+     * {@link io.github.dhluong90.bpm.process.spi.AssigneeDirectory}), and on a four-eyes task must not be the identity
+     * that started the instance or completed an earlier task of it.
+     *
+     * @param taskId the task id
+     * @param assignee the user id the task is handed to
+     * @param reason why, 1 to {@code reason-max-length} characters, recorded in the history and the event
+     * @param expectedLockVersion the task's lock version, sent as {@code If-Match}
+     * @param idempotencyKey required; a replay with the same key and request returns the original result
+     * @return the claimed task
+     * @throws TaskNotFoundException when no such task exists in the tenant
+     * @throws VersionConflictException when {@code expectedLockVersion} is stale
+     * @throws InvalidStateException when the task is not open (a completed task is never reassigned)
+     * @throws AssigneeNotAllowedException when the target may not work the task; nothing is written
+     * @throws InputInvalidException when the assignee or the reason is missing or the reason too long
+     */
+    TaskView reassign(String taskId, String assignee, String reason, long expectedLockVersion, String idempotencyKey);
+
+    /**
+     * Hands a claimed task to another user ({@code CLAIMED} stays {@code CLAIMED}, new claimant; PD-110). Needs
+     * {@code processes:task:manage}. Same rules for the target as {@link #reassign}; the current claimant is not a
+     * valid target.
+     *
+     * @param taskId the task id
+     * @param assignee the user id the task is handed to
+     * @param reason why, 1 to {@code reason-max-length} characters, recorded in the history and the event
+     * @param expectedLockVersion the task's lock version, sent as {@code If-Match}
+     * @param idempotencyKey required; a replay with the same key and request returns the original result
+     * @return the task, claimed by the new user
+     * @throws TaskNotFoundException when no such task exists in the tenant
+     * @throws VersionConflictException when {@code expectedLockVersion} is stale
+     * @throws InvalidStateException when the task is not claimed (a completed task is never delegated)
+     * @throws AssigneeNotAllowedException when the target may not work the task; nothing is written
+     * @throws InputInvalidException when the assignee or the reason is missing or the reason too long
+     */
+    TaskView delegate(String taskId, String assignee, String reason, long expectedLockVersion, String idempotencyKey);
 
     /**
      * Completes a task the caller has claimed. Needs {@code processes:task:work}; the caller must be the claimant and

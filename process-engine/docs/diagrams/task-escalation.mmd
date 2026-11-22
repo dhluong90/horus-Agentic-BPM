@@ -1,0 +1,25 @@
+sequenceDiagram
+  autonumber
+  participant Eng as Step transaction (task creation)
+  participant Poll as Job poller (every replica)
+  participant Q as escalations-due (EngineSweep, idx_pre_task_escalation_due)
+  participant DB as pre_instance, pre_task, pre_history, pre_incident
+  participant Host as Host event publisher
+  Eng->>DB: insert pre_task with due_at
+  Eng->>DB: store levels with their fire times and next_escalation_at (level 1)
+  Note over Eng,DB: Level times come from the calendar of the SLA, once, with the engine clock
+  Poll->>Q: due tasks of every tenant, at most jobs.batch-size, oldest first
+  Q-->>Poll: tenant, task, instance
+  loop each task, own transaction, as system:timer
+    Poll->>DB: lock pre_instance row
+    Poll->>DB: reread task and its escalation
+    alt instance not RUNNING, task not OPEN or CLAIMED, or level already applied
+      Poll-->>Poll: nothing written
+    else target user is a four-eyes participant
+      Poll->>DB: count the level, ESCALATION_REFUSED in history, incident ESCALATION_TARGET_FORBIDDEN
+    else level applies
+      Poll->>DB: new assignment, release the claim unless onClaimed is keep, count the level, next_escalation_at
+      Poll->>DB: TASK_ESCALATED in history
+      Poll->>Host: processes.task.escalated.v1 in the same transaction
+    end
+  end

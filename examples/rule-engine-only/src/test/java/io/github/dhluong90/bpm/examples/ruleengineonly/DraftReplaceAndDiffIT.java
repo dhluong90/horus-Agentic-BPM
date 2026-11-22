@@ -117,7 +117,7 @@ class DraftReplaceAndDiffIT {
         assertThat(replaced.json().path("createdBy").asString()).isEqualTo("lan");
         assertThat(replaced.etag()).isEqualTo("\"1\"");
         assertThat(replaced.json().path("canonicalHash").asString()).isNotEqualTo(draft.json().path("canonicalHash").asString());
-        assertThat(replaced.json().path("allowedActions").toString()).isEqualTo("[\"request-publish\"]");
+        assertThat(replaced.json().path("allowedActions").toString()).isEqualTo("[\"request-publish\",\"discard\"]");
         assertThat(replay.body()).isEqualTo(replaced.body());
         assertThat(send(t, "dan", "GET", path + "?include=source", null, null, null, null).json().path("sourceDocument")
                 .asString()).isEqualTo(new String(cardFee("0 VND"), StandardCharsets.UTF_8));

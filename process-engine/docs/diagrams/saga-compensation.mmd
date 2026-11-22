@@ -1,0 +1,40 @@
+sequenceDiagram
+  autonumber
+  box rgb(224,242,241) Process Engine in one replica
+    participant K as Kernel and walk
+    participant W as Adapter executor
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_compensation_stack, pre_timer, pre_incident
+  end
+  box rgb(243,229,245) Core banking
+    participant X as core-banking, credit-back
+  end
+  rect rgb(255,248,225)
+    Note over K,DB: TX2 of credit-target, under the pre_instance row lock
+    K->>DB: credit-target FAILED (ACCOUNT_CLOSED), onFailure compensate
+    K->>DB: instance COMPENSATING, live flow tokens CANCELLED
+    K->>DB: processes.compensation.started.v1, scope transfer, depth 2
+    K->>DB: newest PENDING entry debit-source RUNNING, COMPENSATION job C1
+  end
+  rect rgb(243,229,245)
+    Note over W,X: No transaction, no connection, no row lock
+    W->>X: credit-back, idempotencyKey C1, forwardJobId J1, forwardAttemptId
+    X-->>W: Completed, or a failure
+  end
+  alt the undo completed
+    rect rgb(255,248,225)
+      Note over K,DB: TX2 of C1
+      K->>DB: entry DONE, job C1 DONE, COMPENSATION_STEP_COMPLETED
+      K->>DB: next entry hold-funds RUNNING, COMPENSATION job C2 (local)
+    end
+    rect rgb(255,248,225)
+      Note over K,DB: TX2 of C2: release-hold runs in this transaction
+      K->>DB: entry DONE, stack empty: scope COMPENSATED, instance FAILED
+    end
+  else retries used, or not retryable
+    rect rgb(255,248,225)
+      K->>DB: entry FAILED, incident COMPENSATION_FAILED, walk paused
+    end
+    Note over K,DB: retry: C1 DUE again, same job id. Approved resolution: entry DONE by hand. Then the walk goes on
+  end

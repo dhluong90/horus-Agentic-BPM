@@ -297,7 +297,9 @@ describe('four eyes', () => {
     await waitFor(() => { expect(screen.getByRole('button', { name: 'Approve and publish' })).toBeEnabled(); });
     await user.click(screen.getByRole('button', { name: 'Approve and publish' }));
     expect(await screen.findByText('The rules changed after you opened this version. Review it again before you decide.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeInTheDocument();
+    // Approve waits for the reviewer to show the current changes; nothing can be sent with the stale hash.
+    expect(screen.getByRole('button', { name: 'Approve and publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Show the current changes' })).toBeInTheDocument();
   });
 
   it('RLE_025_approver_rejects_with_a_reason_and_the_history_shows_it', async () => {

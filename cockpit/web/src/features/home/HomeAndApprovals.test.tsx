@@ -14,7 +14,14 @@ const pendingForRequester = {
   canonicalHash: 'h', requestedBy: 'lan', requestedAt: '2026-11-18T08:30:00Z', approvedBy: null, approvedAt: null,
   createdBy: 'lan', createdAt: '2026-11-18T08:00:00Z', allowedActions: ['withdraw'],
 };
-const cardFeeSummary = (status: string) => ({ ruleSet: 'card-fee', latestVersion: 2, latestStatus: status, publishedVersion: 1, lastChangedAt: '2026-11-18T08:30:00Z' });
+
+const HASH = 'a'.repeat(64);
+
+/** An item of the Rule Engine's GET /approvals (RLE-190) as the engine sends it to this caller. */
+const ruleItem = (ruleSet: string, requestedAt: string, extra: Record<string, unknown> = {}) => ({
+  ruleSet, version: 2, canonicalHash: HASH, lockVersion: 1, requestedBy: 'hoa', requestedAt, allowedActions: ['approve', 'reject'], deniedActions: {}, ...extra,
+});
+const page = (data: unknown[], more = false) => ({ data, nextCursor: more ? 'next' : null, hasNext: more });
 
 function open(hash: string) {
   window.location.hash = hash;
@@ -47,12 +54,7 @@ describe('Home (PD-092: content by role)', () => {
 
   it('TR_UI_02_the_focal_request_is_the_oldest_and_the_others_are_rows_that_open_on_click', async () => {
     setScenario('ready-approver');
-    const version = (ruleSet: string, requestedAt: string) => ({ ...pendingForRequester, ruleSet, requestedAt, requestedBy: 'hoa', createdBy: 'hoa', allowedActions: ['approve', 'reject'] });
-    mockHost.use(
-      http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json({ data: [{ ...cardFeeSummary('PENDING_APPROVAL') }, { ...cardFeeSummary('PENDING_APPROVAL'), ruleSet: 'fx-margin' }], nextCursor: null, hasNext: false })),
-      http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions', () => HttpResponse.json({ data: [version('card-fee', '2026-11-18T08:30:00Z')], nextCursor: null, hasNext: false })),
-      http.get('*/api/bpm/rules/v1/rule-sets/fx-margin/versions', () => HttpResponse.json({ data: [version('fx-margin', '2026-11-19T01:40:00Z')], nextCursor: null, hasNext: false })),
-    );
+    mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z'), ruleItem('fx-margin', '2026-11-19T01:40:00Z')]))));
     open('');
 
     expect(await card(/card-fee · Version 2/)).toHaveTextContent('Waiting for your review');
@@ -64,11 +66,7 @@ describe('Home (PD-092: content by role)', () => {
 
   it('TR_UI_08_people_show_by_display_name_when_the_engine_sends_one_and_by_login_otherwise', async () => {
     setScenario('ready-approver');
-    mockHost.use(
-      http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions', () =>
-        HttpResponse.json({ data: [{ ...pendingForRequester, allowedActions: ['approve', 'reject'], requestedByName: 'Nguyễn Thị Lan' }], nextCursor: null, hasNext: false }),
-      ),
-    );
+    mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z', { requestedBy: 'lan', requestedByName: 'Nguyễn Thị Lan' })]))));
     open('');
 
     const focus = await card(/card-fee · Version 2/);
@@ -142,34 +140,56 @@ describe('Home (PD-092: content by role)', () => {
 });
 
 describe('Approvals', () => {
-  it('TR_UI_02_an_author_follows_their_request_and_gets_no_withdraw_until_the_engine_offers_it', async () => {
+  it('CKP_003_maker_checker_ui_blocks_requester_self_approval', async () => {
+    mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([
+      ruleItem('card-fee', '2026-11-18T08:30:00Z', { requestedBy: 'lan', allowedActions: [], deniedActions: { approve: 'SELF_APPROVAL_FORBIDDEN', reject: 'SELF_APPROVAL_FORBIDDEN' } }),
+    ]))));
     open('#/approvals');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Approvals' })).toBeInTheDocument();
     const preview = await card(/card-fee · Version 2/);
-    expect(within(preview).getByText('Waits for another approver.')).toBeInTheDocument();
+    const approve = within(preview).getByRole('button', { name: /Approve/ });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription('You made this change, so someone else approves it.');
+    expect(within(preview).getByRole('link', { name: /Open changes/ })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
+    // No withdraw until the engine offers it, and no Review next for a requester.
     expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Review next' })).not.toBeInTheDocument();
   });
 
-  it('TR_UI_02_an_approver_gets_review_next_and_the_full_review_link', async () => {
+  it('CKP_003_every_reason_code_reads_as_one_line_beside_the_disabled_approve', async () => {
+    setScenario('ready-approver');
+    mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([
+      ruleItem('card-fee', '2026-11-18T08:30:00Z', { allowedActions: [], deniedActions: { approve: 'AUTHOR_UNKNOWN', reject: 'AUTHOR_UNKNOWN' } }),
+      ruleItem('fx-margin', '2026-11-19T08:30:00Z', { allowedActions: [], deniedActions: { approve: 'SOMETHING_NEW' } }),
+    ]))));
+    open('#/approvals');
+
+    const first = await card(/card-fee · Version 2/);
+    expect(within(first).getByRole('button', { name: /Approve/ })).toHaveAccessibleDescription('No author is recorded, so no one can approve it.');
+    await userEvent.click(screen.getByRole('button', { name: /fx-margin · Version 2/ }));
+    const second = await card(/fx-margin · Version 2/);
+    expect(within(second).getByRole('button', { name: /Approve/ })).toHaveAccessibleDescription('You cannot approve this change.');
+    expect(screen.getByRole('main')).not.toHaveTextContent(/SOMETHING_NEW|AUTHOR_UNKNOWN/);
+  });
+
+  it('CKP_003_an_approver_gets_review_next_and_the_full_review_with_the_diff', async () => {
     setScenario('ready-approver');
     open('#/approvals');
 
     expect(await screen.findByRole('link', { name: 'Review next' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
     const preview = await card(/card-fee · Version 2/);
-    expect(within(preview).getByRole('link', { name: /Open full review/ })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
-    expect(within(preview).getByText('replaces Version 1')).toBeInTheDocument();
+    expect(within(preview).getByRole('link', { name: /Review and approve/ })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
+    expect(within(preview).queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument();
   });
 
   it('TR_UI_02_the_requester_withdraws_with_an_optional_reason_and_the_request_goes_after_the_engine_confirms', async () => {
     let pending = true;
     const sent: { ifMatch: string | null; key: string | null; body: unknown }[] = [];
     mockHost.use(
-      http.get('*/api/bpm/rules/v1/rule-sets/card-fee/versions', () =>
-        HttpResponse.json({ data: pending ? [pendingForRequester] : [{ ...pendingForRequester, status: 'DRAFT', requestedBy: null, allowedActions: ['request-publish'] }], nextCursor: null, hasNext: false }),
+      http.get('*/api/bpm/rules/v1/approvals', () =>
+        HttpResponse.json(page(pending ? [ruleItem('card-fee', '2026-11-18T08:30:00Z', { requestedBy: 'lan', allowedActions: ['withdraw'], deniedActions: { approve: 'SELF_APPROVAL_FORBIDDEN', reject: 'SELF_APPROVAL_FORBIDDEN' } })] : [])),
       ),
-      http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json({ data: [cardFeeSummary(pending ? 'PENDING_APPROVAL' : 'DRAFT')], nextCursor: null, hasNext: false })),
       http.post('*/api/bpm/rules/v1/rule-sets/card-fee/versions/2:withdraw', async ({ request }) => {
         sent.push({ ifMatch: request.headers.get('If-Match'), key: request.headers.get('Idempotency-Key'), body: await request.json() });
         pending = false;
@@ -279,9 +299,9 @@ describe('security (review lows)', () => {
     open('#/decisions');
 
     expect(await screen.findByText('Choose a rule set or a case reference, and a month.')).toBeInTheDocument();
-    // Nothing is searched before the user asks. Only the shell's own calls: registry, /meta, /me and the rule lists behind the Approvals count.
+    // Nothing is searched before the user asks. Only the shell's own calls: registry, /meta, /me and the approvals list behind the menu count.
     expect(calls.filter((path) => /decision/i.test(path))).toEqual([]);
-    expect(calls.every((path) => path.endsWith('/cockpit-hosts.json') || path === '/api/bpm/meta' || path === '/api/bpm/me' || path.startsWith('/api/bpm/rules/v1/rule-sets'))).toBe(true);
+    expect(calls.every((path) => path.endsWith('/cockpit-hosts.json') || path === '/api/bpm/meta' || path === '/api/bpm/me' || path.startsWith('/api/bpm/rules/v1/rule-sets') || path === '/api/bpm/rules/v1/approvals')).toBe(true);
     mockHost.events.removeListener('request:start', record);
   });
 });

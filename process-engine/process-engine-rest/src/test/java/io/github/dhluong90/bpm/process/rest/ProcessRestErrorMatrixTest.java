@@ -421,6 +421,22 @@ class ProcessRestErrorMatrixTest {
         }
 
         @Override
+        public TaskView reassign(String taskId, String assignee, String reason, long expectedLockVersion,
+                String idempotencyKey) {
+            maybeFail();
+            calls.add("reassign " + taskId + " " + assignee + " " + expectedLockVersion + " " + idempotencyKey);
+            return task(taskId);
+        }
+
+        @Override
+        public TaskView delegate(String taskId, String assignee, String reason, long expectedLockVersion,
+                String idempotencyKey) {
+            maybeFail();
+            calls.add("delegate " + taskId + " " + assignee + " " + expectedLockVersion + " " + idempotencyKey);
+            return task(taskId);
+        }
+
+        @Override
         public ProcessInstance complete(String taskId, Map<String, Object> result, long expectedLockVersion,
                 String idempotencyKey) {
             maybeFail();

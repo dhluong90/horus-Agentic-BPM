@@ -10,7 +10,7 @@ info:
     chosen clock, or pinned to a version), batch evaluation of up to 1,000 items, replay of a logged decision,
     decision-log reads (one decision, one rule set's decisions in a period, the decisions of one case reference, and
     the searches by a plain or a masked input's value), the plain-language explanation of a decision, a rule set's
-    history across its versions, and the evidence export of versions and decisions.
+    history across its versions, the pending approvals queue, and the evidence export of versions and decisions.
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -30,6 +30,54 @@ tags:
   - name: decisions
     description: Evaluation and the decision log
 paths:
+  /approvals:
+    get:
+      tags: [rule-sets]
+      operationId: listPendingApprovals
+      summary: List the versions waiting for a second person, oldest request first
+      description: |
+        The pending approvals queue of the caller's tenant (#31, `RLE-190`): every version in `PENDING_APPROVAL`
+        across all rule sets, including one that is not the latest version of its rule set. Permission `rules:read`;
+        the answer shows what the caller may do, it does not need `rules:approve`. Ordered by `(requestedAt, id)`,
+        keyset-paged with a signed cursor bound to the tenant and this list; at most `query.max-page-size` (200) per
+        page, 50 by default. A cursor from another list, another tenant or an edited one is `400 QUERY_INVALID`.
+
+        Each item has what a reviewer needs to open the version and to decide on exactly the content that was
+        reviewed (`RLE-084`, PD-139): the `canonicalHash` to send back as `expectedCanonicalHash` and the
+        `lockVersion` to send as `If-Match`. Items never carry the definition, the source or an input value.
+
+        `allowedActions` is what the caller may send now, in the order `approve`, `reject`, `withdraw`.
+        `deniedActions` gives, for `approve` and `reject` only, why the caller may not send one, as a code:
+        `PERMISSION_REQUIRED` (no `rules:approve`), `SELF_APPROVAL_FORBIDDEN` (the caller requested or authored the
+        version) or `AUTHOR_UNKNOWN` (no recorded author, so nobody can approve it, PD-105). An action in
+        `allowedActions` has no entry. The commands check again and stay the authority. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of pending versions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingApprovalPage'
+              example:
+                data:
+                  - ruleSet: card-fee
+                    version: 2
+                    canonicalHash: 3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
+                    lockVersion: 1
+                    requestedBy: lan
+                    requestedAt: '2026-12-15T01:30:00Z'
+                    allowedActions: []
+                    deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /rule-sets:
     get:
       tags: [rule-sets]
@@ -472,6 +520,10 @@ paths:
         5,000 rows; `200` with `valid: false`, the problems and `readings: []`. It is never `422 READINGS_TOO_LARGE`
         (only the readings endpoints answer that). `readingsTruncated` is false and `readingsReason` null in the
         other two cases.
+
+        A `SYNTAX_ERROR` also carries `position`, `expected` (the token or form the parser expected there, by
+        language) and `example` (a short correct expression), when the parser knows what it expected (#419). These come
+        from the catalogue by the kind of error, never from the cell, so a masked value is not echoed.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -1650,6 +1702,59 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:discard:
+    post:
+      tags: [rule-sets]
+      operationId: discardDraft
+      summary: Discard a draft version that is no longer wanted
+      description: |
+        Permission `rules:author`, checked before the body is read. Only the draft's author (`createdBy`) may
+        discard it; anyone else, an approver included, gets `403 PERMISSION_DENIED`. Only a `DRAFT` can be discarded;
+        any other status, a discarded version included, is `409 INVALID_STATE`, so an approved version can never be
+        removed this way (RLE-098, #418). It is not refused when
+        `horus.bpm.rules.authoring.cockpit-drafts` is `false`: it brings in no content.
+
+        Nothing is deleted. The version becomes `DISCARDED` with `lockVersion` incremented; its number is never used
+        again, its document and hashes stay for the audit trail, and it is left out of `GET .../versions` and of the
+        rule set's `latestVersion`. One history entry `DISCARDED` (actor, optional reason, `fromStatus` `DRAFT`) is
+        appended, shown by `GET .../versions/{version}/history` and `GET .../rule-sets/{name}/history`, and one
+        `rules.version.discarded.v1` event is written
+        (`rule-engine/api/schema/rules.version.discarded.v1.schema.json`), in the same transaction.
+
+        `allowedActions` of a draft contains `discard` for its author with `rules:author`, so a screen shows the
+        action only when the engine allows it.
+
+        `Idempotency-Key` and `If-Match` are required: without `If-Match` the answer is
+        `428 PRECONDITION_REQUIRED`, without `Idempotency-Key` `400 INPUT_INVALID`; a stale `If-Match` is
+        `409 VERSION_CONFLICT`. The reason is optional; one longer than `lifecycle.reason-max-length` (default 2,000
+        characters) is `400 INPUT_INVALID`. A body over 16,384 bytes is `413 PAYLOAD_TOO_LARGE`. A repeat with the
+        same key returns the original answer.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKeyRequired'
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IfMatchRequired'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawRequest'
+            example:
+              reason: Started from the wrong version
+      responses:
+        '200':
+          $ref: '#/components/responses/Version'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate:
     post:
       tags: [decisions]
@@ -1665,8 +1770,8 @@ paths:
         clock, so the decision replays (`POST /decisions/{decisionId}:replay`). A failed evaluation
         (`EVALUATION_ERROR`, or `UNIQUE_HIT_VIOLATION` when a `unique` table matches several rules; no
         match is outcome `NO_MATCH`) is logged and answered `422` with the `decisionId` and
-        `matchedRuleIds`, never with partial outputs. Members other than `inputs` and `clock` are
-        ignored, including `tenantId`. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
+        `matchedRuleIds`, never with partial outputs. Members other than `inputs`, `clock` and
+        `decision` are ignored, including `tenantId`. A body over 1,048,576 bytes is `413 PAYLOAD_TOO_LARGE`.
       parameters:
         - name: ruleSet
           in: path
@@ -2291,7 +2396,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         hitPolicy:
           type: string
           enum: [FIRST, UNIQUE, COLLECT]
@@ -2387,12 +2492,13 @@ components:
         `rules:approve` when the caller is not the requester; `withdraw` on a `PENDING_APPROVAL`
         with `rules:author` for its requester only (PD-089), who never gets `approve` or `reject`;
         `retire` on a `PUBLISHED` version with `rules:approve` and no pending retirement; while a
+        `discard` on a `DRAFT` with `rules:author` for its author only (RLE-098); while a
         retirement is pending, `confirm-retire` for a `rules:approve` holder who is not its requester
         and `cancel-retire` for any `rules:approve` holder (`RLE-038`).
         A hint for screens only: the engine checks again on every command.
       items:
         type: string
-        enum: [request-publish, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
+        enum: [request-publish, discard, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
     RuleSetSummary:
       type: object
       required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
@@ -2506,7 +2612,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         hitPolicy:
           type: string
           enum: [FIRST, UNIQUE, COLLECT]
@@ -2536,19 +2642,57 @@ components:
           type: [string, 'null']
         hasNext:
           type: boolean
+    PendingApproval:
+      type: object
+      required: [ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        canonicalHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The value the reviewer sends back as `expectedCanonicalHash` (`RLE-084`, PD-139)
+        lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        allowedActions:
+          type: array
+          items: { type: string, enum: [approve, reject, withdraw] }
+        deniedActions:
+          type: object
+          description: For `approve` and `reject` the caller may not send, the reason as a code
+          properties:
+            approve: { $ref: '#/components/schemas/PendingDenial' }
+            reject: { $ref: '#/components/schemas/PendingDenial' }
+          additionalProperties: false
+    PendingDenial:
+      type: string
+      enum: [PERMISSION_REQUIRED, SELF_APPROVAL_FORBIDDEN, AUTHOR_UNKNOWN]
+    PendingApprovalPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PendingApproval'
+        nextCursor:
+          type: [string, 'null']
+        hasNext:
+          type: boolean
     HistoryEntry:
       type: object
       required: [action, toStatus, actor, lockVersion, occurredAt]
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED, DISCARDED]
         fromStatus:
           type: [string, 'null']
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, null]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED, null]
         toStatus:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         actor: { type: string }
         reason:
           type: [string, 'null']
@@ -2769,7 +2913,7 @@ components:
         reason:
           type: [string, 'null']
           maxLength: 2000
-          description: Optional; why the requester takes the request back. Stored in the history and the event
+          description: Optional; why the requester takes the request back (`:withdraw`) or the author discards the draft (`:discard`). Stored in the history and the event
     FieldChange:
       type: object
       required: [path, from, to, nonAscii]
@@ -3136,6 +3280,20 @@ components:
           additionalProperties: { type: string }
           examples:
             - { en: The cell is not a valid expression., vi: Ô này không phải là biểu thức hợp lệ. }
+        expected:
+          type: object
+          description: |
+            Present on a `SYNTAX_ERROR` whose kind the parser knows: the token or form it expected at `position`, by
+            language code, from the message catalogue. Chosen by the kind of error alone, so it never repeats text of
+            the cell and a masked value is never echoed. A host language without an entry is omitted. New kinds may be
+            added; a client must not depend on the wording.
+          additionalProperties: { type: string }
+          examples:
+            - { en: A closing parenthesis ) to match the opening one., vi: Dấu đóng ngoặc ) khớp với dấu mở ngoặc. }
+        example:
+          type: string
+          description: "Present with `expected`, a short correct expression from the catalogue, the same in every language"
+          examples: ["(balance + 100) > 0"]
     RuleReading:
       type: object
       required: [ruleId, text]
@@ -3160,6 +3318,16 @@ components:
             The instant the decision reasons about, ISO 8601 with `Z` or an offset, for example
             `2026-11-20T10:00:00Z`. Selects the version in force and feeds `today()` and `now()`.
             Needs `rules:simulate` (`403 CLOCK_NOT_ALLOWED`); default the host clock.
+        decision:
+          type: string
+          maxLength: 100
+          description: |
+            Optional id of the decision to evaluate. A rule set is a DMN model with one decision named
+            after the rule set, so the only accepted value is the rule set's name, which gives the same
+            result and the same idempotency hash as leaving it out. Any other value is
+            `400 INPUT_INVALID` naming `decision`, and no decision is logged. Reserved for rule sets with
+            several decisions (stage S1).
+          examples: [card-fee]
     EvaluationLimit:
       type: string
       enum: [STEPS, TIME]
@@ -3208,7 +3376,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         baselineVersion:
           type: [integer, 'null']
           description: The version effective at `evaluatedAt`, or null when nothing is effective
@@ -3263,7 +3431,7 @@ components:
         version: { type: integer, minimum: 1 }
         status:
           type: string
-          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED]
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
         from: { type: string, format: date-time }
         to: { type: string, format: date-time }
         decisionCount:
@@ -3367,7 +3535,9 @@ components:
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH]
-          description: A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds
+          description: |
+            A failed evaluation is answered with a Problem instead, carrying decisionId and matchedRuleIds.
+            Warnings of a later error mode will be a new member, not a new outcome.
         matched:
           type: boolean
           description: False for a no-match, where every output is null and matchedRuleIds is empty
@@ -3385,7 +3555,10 @@ components:
         decisionId: { type: string }
         ruleSet: { type: string }
         version: { type: integer }
-        hitPolicy: { type: string, enum: [FIRST, UNIQUE, COLLECT] }
+        hitPolicy:
+          type: string
+          enum: [FIRST, UNIQUE, COLLECT]
+          description: New values may be added (ANY, PRIORITY, RULE_ORDER, OUTPUT_ORDER from stage S1)
         outcome:
           type: string
           enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
@@ -3649,7 +3822,7 @@ components:
         eventsTruncated]
       properties:
         version: { type: integer }
-        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED] }
+        status: { type: string, enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED] }
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo:
           type: [string, 'null']

@@ -151,9 +151,11 @@ interface WorkbenchProps {
   /** The content hash of this version when the user opened it; a different current hash means it changed under them. */
   openedHash: string;
   onReviewAgain: () => void;
+  /** Read the version and its list again after the engine said the content moved on; the new content is then the one reviewed. */
+  onReloadChanges: () => Promise<void>;
 }
 
-function Workbench({ version, versions, lens, navigate, say, importVersion, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain }: WorkbenchProps) {
+function Workbench({ version, versions, lens, navigate, say, importVersion, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain, onReloadChanges }: WorkbenchProps) {
   useEffect(() => {
     // The editor closes on save before the table opens: the title of the table takes the focus, not the editor's.
     if (focusTitle !== version.version || lens === 'edit') return;
@@ -208,7 +210,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
   if (openedHash !== version.canonicalHash || (diff.data !== undefined && diff.data.canonicalHash !== version.canonicalHash)) review = 'changed';
   else if (diff.isFetching) review = 'checking';
   const decision = (docked: boolean) => (
-    <DecisionCard version={version} docked={docked} review={review} onReload={() => { window.location.reload(); }}
+    <DecisionCard version={version} docked={docked} review={review} onReload={() => { approve.reset(); reject.reset(); void onReloadChanges(); }}
       onReviewAgain={() => { onReviewAgain(); go({ lens: 'changes' }); }}
       approve={{ start: ({ comment, acknowledgedWarnings }) => { approve.start({ version, reviewedHash: openedHash, comment, acknowledgedWarnings }); }, isPending: approve.isPending, error: approve.error }}
       reject={{ start: (reason) => { reject.start({ version, reviewedHash: openedHash, reason }); }, isPending: reject.isPending, error: reject.error }} />
@@ -379,6 +381,11 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
         versions={versions.data}
         openedHash={openedHash ?? current.canonicalHash}
         onReviewAgain={() => { setOpened({ ...opened, [current.version]: current.canonicalHash }); }}
+        onReloadChanges={async () => {
+          const [fresh] = await Promise.all([version.refetch(), versions.refetch()]);
+          const hash = fresh.data?.canonicalHash;
+          if (hash !== undefined) setOpened((known) => ({ ...known, [current.version]: hash }));
+        }}
         lens={activeLens}
         navigate={navigate}
         say={(text, sticky = false) => {

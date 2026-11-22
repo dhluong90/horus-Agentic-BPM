@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.examples.ruleandprocess;
 
 import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
 import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
+import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.ArrayList;
@@ -157,6 +158,16 @@ class HostSecurityConfiguration {
             users.add(User.withUsername("hoa").password(encoded).roles("TELLER", "CARD_OFFICER", "BRANCH_SUPERVISOR").build());
         }
         return new InMemoryUserDetailsManager(users);
+    }
+
+    /**
+     * Who may be given a role task by reassign or delegate (PD-110): the roles of this host's user store, in the
+     * {@code dev} tenant. Without this bean the engine refuses every such move with {@code 409 ASSIGNEE_NOT_ALLOWED}.
+     */
+    @Bean
+    AssigneeDirectory hostAssigneeDirectory(InMemoryUserDetailsManager hostUsers,
+            @Value("${horus.bpm.tenancy.dev-tenant:}") String devTenant) {
+        return new UserStoreAssigneeDirectory(hostUsers, devTenant);
     }
 
     /**

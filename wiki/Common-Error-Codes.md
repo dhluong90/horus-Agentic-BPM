@@ -38,14 +38,19 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
+| 404 | [LAYOUT_NOT_FOUND](#layout_not_found) | processes | 0.3.0 |
 | 404 | [INCIDENT_NOT_FOUND](#incident_not_found) | processes | 0.3.0 |
+| 404 | [CALENDAR_NOT_FOUND](#calendar_not_found) | processes | 0.3.0 |
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
 | 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
 | 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
 | 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
+| 422 | [LAYOUT_INVALID](#layout_invalid) | processes | 0.3.0 |
+| 409 | [DRY_RUN_REQUIRED](#dry_run_required) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
 | 409 | [INVALID_STATE](#invalid_state) | both | M1 |
+| 409 | [ASSIGNEE_NOT_ALLOWED](#assignee_not_allowed) | processes | 0.3.0 |
 | 409 | [IDEMPOTENCY_IN_FLIGHT](#idempotency_in_flight) | both | M1 |
 | 409 | [RULE_SET_EXISTS](#rule_set_exists) | rules | M1 |
 | 409 | [VERSION_SUPERSEDED](#version_superseded) | processes | M2 |
@@ -100,6 +105,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ### IDEMPOTENCY_KEY_REUSE_MISMATCH
 `422`. The `Idempotency-Key` was used before with a different request body. This is a client defect, so retrying the same request never helps. Use a new key for a new request.
 
+### CALENDAR_NOT_FOUND
+`404`. Unknown calendar key or calendar change id, or one of another tenant. Nothing is written by a command that answers it. A task whose `horus:calendar` the tenant does not have fails its step instead (`422 STEP_FAILED`, reason `CALENDAR_NOT_FOUND`).
+
 ### CONTENT_HASH_REQUIRED
 `400`. `:approve` or `:reject` did not send `expectedCanonicalHash`, the `canonicalHash` of the content the reviewer saw, and `horus.bpm.rules.approval.require-content-hash` is on (the default, `RLE-084`, PD-139). Send the hash the reviewer's screen showed when they opened the version. Nothing is written. A host on the `dev` profile can turn the requirement off; any other profile refuses to start with it off.
 
@@ -111,6 +119,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### INVALID_STATE
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
+
+### ASSIGNEE_NOT_ALLOWED
+`409`. `:reassign` or `:delegate` named a user who may not work the task: they lack the task's role or group, they started the instance or completed an earlier task of it and the task is four-eyes, they already hold the task, or the name is reserved for the engine. Nothing is written. Pick another colleague. If every role or group task is refused, the host has not supplied an `AssigneeDirectory`.
 
 ### RATE_LIMITED
 `429` with `Retry-After`. The Rule Engine returns it for the masked-input search past `masking.search.max-per-minute` searches per caller per minute (default 30); the refusal is audited. Otherwise it is returned only when the host configures a rate limiter. Wait the given seconds and retry.
@@ -253,7 +264,16 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `404`. Unknown agent replay run, a run of another tenant, or a case the run does not have. Runs are deleted `replay.retention` (30 days) after they were created.
 
 ### MIGRATION_NOT_FOUND
-`404`. Unknown migration plan id, or a plan of another tenant (`GET /migrations/{id}`, `POST /migrations/{id}:validate`). Nothing is written.
+`404`. Unknown migration plan id, or a plan of another tenant (`GET /migrations/{id}`, `POST /migrations/{id}:validate`, `:execute`, `:approve`, `:reject`, `/execution`, `/instances`). Nothing is written.
+
+### DRY_RUN_REQUIRED
+`409`. A migration is proposed or approved without a passing dry run. The engine runs the dry run itself: the plan has conflicts (the detail gives their number), or the dry run of the proposal is older than `migration.dry-run-validity` when the second person approves. Nothing is written. Resolve the conflicts, or propose the execution again, then approve.
+
+### LAYOUT_NOT_FOUND
+`404`. The version has no such layout revision (`GET .../layout?revision=n`). A version with no layout at all answers `204`, not an error.
+
+### LAYOUT_INVALID
+`422`. A layout document breaks the layout schema, or names a step the definition version does not have. `paths` lists each problem as a path and a reason, for example `$.nodes.ghost-step names a step that is not in the definition`, never a value. Nothing is written. Correct the document and save again over the same `If-Match`.
 
 ### REPLAY_TOO_LARGE
 `422`. The period of an agent replay holds more recorded answers than `horus.bpm.processes.replay.max-cases` (50,000). The body carries `cases` and `limit`. Nothing is written. Choose a shorter period.

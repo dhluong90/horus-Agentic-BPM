@@ -34,6 +34,8 @@ To reject instead of approve: `POST .../versions/3:reject` with `{ "reason": "..
 
 To take back your own request: `POST .../versions/3:withdraw` with `Idempotency-Key`, `If-Match` set to the version's `ETag`, and optionally `{ "reason": "Wrong fee for GOLD" }`. Only the person who requested publication can withdraw, and they need `rules:author`; anyone else, an approver included, gets `403 PERMISSION_DENIED`. The version returns to draft, nothing is published, the version in effect does not change, and the history shows `WITHDRAWN` with who and why. Edit the draft and request publication again to start a new approval. In the cockpit the requester sees Withdraw on their own pending version and never Approve or Reject.
 
+Find what waits for you. `GET /approvals` lists every version of your tenant that is waiting for a second person, oldest request first, including an older version of a rule set that has a newer one (0.3.0, #31). Each item gives the `canonicalHash` and `lockVersion` to send back with your decision, and what you may do: the person who requested a version gets neither `approve` nor `reject` (`SELF_APPROVAL_FORBIDDEN`; they can withdraw), the author gets `reject` but not `approve`, a caller without `rules:approve` gets `PERMISSION_REQUIRED`, and a version with no recorded author cannot be approved by anyone (`AUTHOR_UNKNOWN`). The list needs only `rules:read`, so a reviewer sees why a button is missing; the commands still decide.
+
 ## Roll a change back
 
 History is never rewritten: to undo a fee change, restore an earlier version as the next draft and publish it the normal way.

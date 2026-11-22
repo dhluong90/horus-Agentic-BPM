@@ -4,17 +4,23 @@ import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
   definitionVersion,
+  pendingDefinitionApprovalPage,
+  type PendingDefinitionApproval,
+  graphDiff,
   instanceActivities,
   instanceSummaryPage,
   INSTANCE_STATUSES,
   processInstance,
   task,
+  taskSummaryPage,
   type DefinitionSummary,
   type DefinitionVersion,
+  type GraphDiff,
   type InstanceActivities,
   type InstanceSummary,
   type ProcessInstance,
   type Task,
+  type TaskSummary,
 } from './schemas';
 
 type Fetch = typeof fetch;
@@ -27,6 +33,32 @@ export interface TaskAnswer {
   reason: string;
 }
 
+/** What listTasks filters by; each member maps one to one to a query parameter of `GET /tasks`. */
+export interface TaskQuery {
+  /** `mine`, `candidate` and `any` (the last needs processes:task:manage), comma separated by the client. */
+  assignment: readonly ('mine' | 'candidate' | 'any')[];
+  status?: readonly ('OPEN' | 'CLAIMED')[] | undefined;
+  slaBreached?: boolean | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+  signal?: AbortSignal | undefined;
+}
+
+/** Who takes a task over and why (PD-110): a user id, and a reason of 1 to 500 characters. */
+export interface TaskHandOver {
+  assignee: string;
+  reason: string;
+}
+
+/**
+ * What Approve sends (approveDefinition): the definitionHash of the content the approver reviewed, never one read
+ * again at decision time (PD-139), and an optional comment.
+ */
+export interface DefinitionApproval {
+  expectedDefinitionHash: string;
+  comment: string;
+}
+
 /**
  * Typed client of the Process Engine REST API (process-engine/api/openapi.yaml). One method per operation; the
  * operation id is named on each. Task commands carry the caller's Idempotency-Key and the task's lockVersion as
@@ -35,8 +67,16 @@ export interface TaskAnswer {
 export interface ProcessesClient {
   /** listDefinitions: one page of keys, ordered by key */
   listDefinitions(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<DefinitionSummary>>;
+  /** listPendingApprovals: one page of definition versions waiting for a second person, oldest request first (PRE-190) */
+  listPendingApprovals(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<PendingDefinitionApproval>>;
   /** getDefinitionVersion */
   getVersion(key: string, version: number, signal?: AbortSignal): Promise<DefinitionVersion>;
+  /** getDefinitionDiff: steps and links changed from `base` (the version in effect when absent) to this version */
+  getDiff(key: string, version: number, base?: number, signal?: AbortSignal): Promise<GraphDiff>;
+  /** approveDefinition: as a second person, bound to the reviewed content hash */
+  approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
+  /** rejectDefinition: back to draft with a reason */
+  rejectDefinition(key: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<DefinitionVersion>;
   /** exportDefinition (format=bpmn): the version's graph as BPMN 2.0 XML; writes nothing */
   exportBpmn(key: string, version: number, signal?: AbortSignal): Promise<string>;
   /** getTask: the task with the actions this caller may take, and the review context of a refused agent answer */
@@ -47,8 +87,16 @@ export interface ProcessesClient {
   listInstances(request: { definitionKey: string; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<InstanceSummary>>;
   /** getInstanceActivities: per step what happened, and the history entries in time order */
   getInstanceActivities(id: string, signal?: AbortSignal): Promise<InstanceActivities>;
+  /** listTasks: one page in due-time order, tasks without a due time last */
+  listTasks(query: TaskQuery): Promise<Page<TaskSummary>>;
   /** claimTask */
   claimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
+  /** unclaimTask: hand a claimed task back to its candidates */
+  unclaimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
+  /** reassignTask: an open task to a named user, with a reason (processes:task:manage) */
+  reassignTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
+  /** delegateTask: a claimed task to another user, with a reason (processes:task:manage) */
+  delegateTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
   /** completeTask: the reviewer's answer and reason; the engine records HUMAN_OVERRIDE */
   completeTask(id: string, lockVersion: number, answer: TaskAnswer, idempotencyKey: string): Promise<ProcessInstance>;
 }
@@ -70,8 +118,29 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/definitions${text === '' ? '' : `?${text}`}`, ...withSignal(request.signal) }, definitionSummaryPage);
       return answer.data;
     },
+    async listPendingApprovals(request = {}) {
+      const query = new URLSearchParams();
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      const text = query.toString();
+      const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/approvals${text === '' ? '' : `?${text}`}`, ...withSignal(request.signal) }, pendingDefinitionApprovalPage);
+      return answer.data;
+    },
     async getVersion(key, version, signal) {
       return (await call({ method: 'GET', path: versionPath(key, version), ...withSignal(signal) }, definitionVersion)).data;
+    },
+    async getDiff(key, version, base, signal) {
+      const query = base !== undefined ? `?base=${String(base)}` : '';
+      return (await call({ method: 'GET', path: `${versionPath(key, version)}/diff${query}`, ...withSignal(signal) }, graphDiff)).data;
+    },
+    async approveDefinition(key, version, lockVersion, approval, idempotencyKey) {
+      const comment = approval.comment.trim();
+      const body = { contentType: 'application/json', text: JSON.stringify({ expectedDefinitionHash: approval.expectedDefinitionHash, comment: comment === '' ? null : comment }) };
+      return (await call({ method: 'POST', path: `${versionPath(key, version)}:approve`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
+    },
+    async rejectDefinition(key, version, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
+      return (await call({ method: 'POST', path: `${versionPath(key, version)}:reject`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
     },
     async exportBpmn(key, version, signal) {
       const answer = await downloadFromHost(fetchImpl, baseUrl, { method: 'GET', path: `${versionPath(key, version)}/export?format=bpmn`, ...withSignal(signal) }, 'application/bpmn+xml');
@@ -92,8 +161,29 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async getInstanceActivities(id, signal) {
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/instances/${segment(id)}/activities`, ...withSignal(signal) }, instanceActivities)).data;
     },
+    async listTasks(request) {
+      const query = new URLSearchParams();
+      query.set('assignment', request.assignment.join(','));
+      if (request.status !== undefined && request.status.length > 0) query.set('status', request.status.join(','));
+      if (request.slaBreached !== undefined) query.set('slaBreached', String(request.slaBreached));
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/tasks?${query.toString()}`, ...withSignal(request.signal) }, taskSummaryPage);
+      return answer.data;
+    },
     async claimTask(id, lockVersion, idempotencyKey) {
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:claim`, headers: command(lockVersion, idempotencyKey) }, task)).data;
+    },
+    async unclaimTask(id, lockVersion, idempotencyKey) {
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:unclaim`, headers: command(lockVersion, idempotencyKey) }, task)).data;
+    },
+    async reassignTask(id, lockVersion, handOver, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ assignee: handOver.assignee, reason: handOver.reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:reassign`, headers: command(lockVersion, idempotencyKey), body }, task)).data;
+    },
+    async delegateTask(id, lockVersion, handOver, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ assignee: handOver.assignee, reason: handOver.reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:delegate`, headers: command(lockVersion, idempotencyKey), body }, task)).data;
     },
     async completeTask(id, lockVersion, answer, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ result: answer.result, reason: answer.reason }) };

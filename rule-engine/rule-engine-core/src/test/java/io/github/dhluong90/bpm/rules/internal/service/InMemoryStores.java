@@ -344,7 +344,8 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
 
     private RuleSetSummary summary(RuleSetRow row, Instant now) {
         List<StoredVersion> own = versions.stream()
-                .filter(v -> v.tenantId().equals(row.tenantId()) && v.ruleSetId().equals(row.id())).toList();
+                .filter(v -> v.tenantId().equals(row.tenantId()) && v.ruleSetId().equals(row.id())
+                        && v.status() != VersionStatus.DISCARDED).toList();
         StoredVersion latest = own.stream().max(Comparator.comparingInt(StoredVersion::version)).orElseThrow();
         Integer published = findEffective(row.tenantId(), row.name(), now).map(StoredVersion::version).orElse(null);
         Set<String> ids = new HashSet<>();
@@ -361,10 +362,25 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
 
     @Override
     public List<VersionSummary> listVersions(String tenantId, String ruleSetId, Integer beforeVersion, int limit) {
-        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId))
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId) && v.ruleSetId().equals(ruleSetId)
+                        && v.status() != VersionStatus.DISCARDED)
                 .filter(v -> beforeVersion == null || v.version() < beforeVersion)
                 .sorted(Comparator.comparingInt(StoredVersion::version).reversed()).limit(limit)
                 .map(StoredVersion::toSummary).toList();
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.rules.internal.store.PendingVersion> listPendingApprovals(String tenantId,
+            DecisionLog.Position after, int limit) {
+        return versions.stream().filter(v -> v.tenantId().equals(tenantId)
+                        && v.status() == io.github.dhluong90.bpm.rules.api.VersionStatus.PENDING_APPROVAL)
+                .sorted(Comparator.comparing(StoredVersion::requestedAt).thenComparing(StoredVersion::id))
+                .filter(v -> after == null || v.requestedAt().isAfter(after.createdAt())
+                        || (v.requestedAt().equals(after.createdAt()) && v.id().compareTo(after.id()) > 0))
+                .limit(limit)
+                .map(v -> new io.github.dhluong90.bpm.rules.internal.store.PendingVersion(v.id(), v.ruleSet(),
+                        v.version(), v.canonicalHash(), v.lockVersion(), v.createdBy(), v.requestedBy(),
+                        v.requestedAt())).toList();
     }
 
     @Override

@@ -19,7 +19,7 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
 interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
-export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
+export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
 export interface StoredVersion {
   ruleSet: string;
@@ -90,6 +90,23 @@ function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   // PD-089: neither the requester nor the author may approve or reject; withdrawing is its own action.
   const self = v.requestedBy === request.user || v.createdBy === request.user;
   return self ? [] : ['approve', 'reject'];
+}
+
+/**
+ * GET /approvals for this caller (RLE-190): what they may send, in the engine's order, and why approve and reject are
+ * not offered. An empty `createdBy` stands for a version with no recorded author (PD-105).
+ */
+function pendingItem(v: StoredVersion, request: FakeRequest) {
+  const approver = request.permissions.includes('rules:approve');
+  const self = v.requestedBy === request.user || v.createdBy === request.user;
+  const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : v.createdBy === '' ? 'AUTHOR_UNKNOWN' : undefined;
+  const withdraw = v.requestedBy === request.user && request.permissions.includes('rules:author');
+  return {
+    ruleSet: v.ruleSet, version: v.version, canonicalHash: hash(JSON.stringify(v.definition)), lockVersion: v.lockVersion,
+    requestedBy: v.requestedBy ?? '', requestedAt: v.requestedAt ?? v.createdAt,
+    allowedActions: [...(denial === undefined ? ['approve', 'reject'] : []), ...(withdraw ? ['withdraw'] : [])],
+    deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
+  };
 }
 
 function lifecycle(v: StoredVersion, request: FakeRequest) {
@@ -632,6 +649,31 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     return json({ data: items.map((v) => lifecycle(v, request)), nextCursor: hasNext && last ? cursorOf(`versions:${name}`, String(last.version)) : null, hasNext });
   }
 
+  /** listPendingApprovals (RLE-190): every pending version, oldest request first, with a cursor bound to the list. */
+  function listPendingApprovals(url: URL, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:read')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:read');
+    const query = pageQuery(url, 'approvals');
+    if (!query.ok) return query.response;
+    const order = (v: StoredVersion) => `${v.requestedAt ?? v.createdAt}\u0000${v.ruleSet}\u0000${String(v.version).padStart(6, '0')}`;
+    const all = store.filter((v) => v.status === 'PENDING_APPROVAL').sort((a, b) => order(a).localeCompare(order(b))).filter((v) => query.after === undefined || order(v) > query.after);
+    const items = all.slice(0, query.limit);
+    const hasNext = all.length > query.limit;
+    const last = items.at(-1);
+    return json({ data: items.map((v) => pendingItem(v, request)), nextCursor: hasNext && last ? cursorOf('approvals', order(last)) : null, hasNext });
+  }
+
+  /** withdraw (RLE-046, PD-089): only the requester, back to DRAFT, with an optional reason. */
+  function withdraw(v: StoredVersion, request: FakeRequest): FakeResponse {
+    if (v.status !== 'PENDING_APPROVAL') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
+    if (v.requestedBy !== request.user) return problem(403, 'PERMISSION_DENIED', `Only the requester of ${v.ruleSet} v${String(v.version)} may withdraw it`);
+    const ifMatch = request.headers['if-match'];
+    if (ifMatch !== undefined && ifMatch !== `"${String(v.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT', `${v.ruleSet} v${String(v.version)} is at ${String(v.lockVersion)}`);
+    const body = request.body === '' ? {} : (JSON.parse(request.body) as { reason?: string });
+    Object.assign(v, { status: 'DRAFT', requestedBy: null, requestedAt: null, lockVersion: v.lockVersion + 1 });
+    record(v, 'WITHDRAWN', 'PENDING_APPROVAL', request.user, body.reason ?? null);
+    return view(v, request, marks);
+  }
+
   function evaluate(name: string, request: FakeRequest): FakeResponse {
     if (request.body.length > EVALUATE_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(EVALUATE_LIMIT)} bytes`);
     const effective = [...versionsOf(name)].reverse().find((v) => v.status === 'PUBLISHED');
@@ -710,6 +752,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     const url = new URL(request.path, 'http://host');
     const path = decodeURIComponent(url.pathname).replace(/^.*\/api\/bpm\/rules\/v1/, '');
     let m: RegExpExecArray | null;
+    if (path === '/approvals' && request.method === 'GET') return listPendingApprovals(url, request);
     if (path === '/rule-sets') return request.method === 'GET' ? listRuleSets(url) : importVersion(undefined, request);
     if (request.method === 'GET' && (m = /^\/rule-sets\/([^/]+)$/.exec(path))) {
       const name = m[1] ?? '';
@@ -717,7 +760,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/readings|\/diff\/readings|:simulate-readings)$/.exec(path))) return readings(m[1] ?? '', Number(m[2]), m[3] ?? '', url, request);
-    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate)?$/.exec(path))) {
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw)?$/.exec(path))) {
       const name = m[1] ?? '';
       if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
       const v = find(name, Number(m[2]));
@@ -736,6 +779,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       if (request.method === 'GET' && tail === '/export') return exportOf(v, url.searchParams.get('format'));
       if (request.method === 'PUT' && tail === undefined) return replaceDraft(v, request);
       if (request.method === 'POST' && tail === ':validate') return validateDraft(v, request);
+      if (request.method === 'POST' && tail === ':withdraw') return withdraw(v, request);
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
     }
     if (request.method === 'POST' && (m = /^\/decisions\/([^/:]+):evaluate$/.exec(path))) return evaluate(m[1] ?? '', request);

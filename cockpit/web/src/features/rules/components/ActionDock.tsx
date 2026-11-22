@@ -5,6 +5,7 @@ import type { MessageKey } from '../../../i18n/en';
 import { useRulesSession } from '../api/rulesContext';
 import { formatDateTime } from '../model/dates';
 import { toHostError } from '../../../api/hostError';
+import { asksForReview } from '../../processes/approval/ApprovalDock';
 import { PersonalDataWarnings } from './PersonalDataWarnings';
 import { ProblemNotice } from './ProblemNotice';
 
@@ -156,12 +157,14 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   const self = version.requestedBy === userId ? 'dock.selfRequested' : version.createdBy === userId ? 'dock.selfAuthored' : undefined;
   const mayApprove = allowed.has('approve') && self === undefined;
   const needsAcceptance = mayApprove && toAccept.length > 0 && !accepted;
-  const canApprove = mayApprove && review === 'ok' && !needsAcceptance;
+  const error: unknown = approve.error ?? reject.error;
+  // After the engine said the content moved on, the same approval is never sent again: the reviewer reloads first.
+  const stale = asksForReview(error);
+  const canApprove = mayApprove && review === 'ok' && !needsAcceptance && !stale;
   // PD-089: a requester never rejects their own request; withdrawing is its own action (:withdraw).
   const canReject = allowed.has('reject') && self === undefined;
-  const error: unknown = approve.error ?? reject.error;
   // A disabled Approve says why; while the current diff loads it is only busy for a moment.
-  const unavailable = canApprove || needsAcceptance || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
+  const unavailable = canApprove || needsAcceptance || stale || (mayApprove && review === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
   return (
     <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">

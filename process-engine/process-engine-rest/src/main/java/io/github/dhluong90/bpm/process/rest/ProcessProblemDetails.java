@@ -23,7 +23,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
 @RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class,
-        MigrationController.class, IncidentController.class})
+        MigrationController.class, MigrationExecutionController.class, LayoutController.class,
+        IncidentController.class, CalendarController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
@@ -38,6 +39,7 @@ public class ProcessProblemDetails {
             Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
             Map.entry("CHANGE_SET_TRUNCATED", HttpStatus.CONFLICT),
             Map.entry("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("CALENDAR_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("OUTPUT_INVALID", UNPROCESSABLE),
             Map.entry("UNAUTHENTICATED", HttpStatus.UNAUTHORIZED),
             Map.entry("PERMISSION_DENIED", HttpStatus.FORBIDDEN),
@@ -55,11 +57,15 @@ public class ProcessProblemDetails {
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("MIGRATION_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("LAYOUT_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("DRY_RUN_REQUIRED", HttpStatus.CONFLICT),
+            Map.entry("LAYOUT_INVALID", UNPROCESSABLE),
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_TOO_LARGE", UNPROCESSABLE),
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("INVALID_STATE", HttpStatus.CONFLICT),
+            Map.entry("ASSIGNEE_NOT_ALLOWED", HttpStatus.CONFLICT),
             Map.entry("VERSION_CONFLICT", HttpStatus.CONFLICT),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("GUARDRAIL_CONTRACT_INVALID", UNPROCESSABLE),
@@ -108,6 +114,10 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.OutputInvalidException o -> {
                 tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
                 o.paths().forEach(paths::add);
+            }
+            case io.github.dhluong90.bpm.process.api.LayoutInvalidException l -> {
+                tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
+                l.problems().forEach(paths::add);
             }
             case io.github.dhluong90.bpm.process.api.ReplayTooLargeException r ->
                     body.put("cases", r.cases()).put("limit", r.limit());

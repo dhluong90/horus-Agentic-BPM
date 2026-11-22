@@ -30,6 +30,7 @@ import io.github.dhluong90.bpm.process.internal.service.AsyncStepRunner;
 import io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidator;
 import io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner;
 import io.github.dhluong90.bpm.process.spi.AgentAdapter;
+import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
@@ -46,6 +47,7 @@ import io.github.dhluong90.bpm.process.internal.service.ProcessQueries;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcLayoutStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcMigrationStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcCalendarStore;
@@ -207,7 +209,8 @@ public class ProcessEngineAutoConfiguration {
 
     /**
      * Runs async steps outside any transaction, one runner per job kind with its own slots (#363): remote service
-     * steps through the host's {@code ServiceAdapter}s and agent steps through its {@code AgentAdapter}s (#52). The pool has as many daemon threads as all runners have
+     * steps through the host's {@code ServiceAdapter}s, agent steps through its {@code AgentAdapter}s (#52), and the
+     * undos of a compensation walk through the same {@code ServiceAdapter}s on their own lane (#67). The pool has as many daemon threads as all runners have
      * slots, so no claimed call waits for a thread; one daemon thread abandons calls at their timeout. Closed with the
      * context.
      */
@@ -217,8 +220,11 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<Clock> clock, JobSettings settings, AsyncSettings async,
             ObjectProvider<ServiceAdapter> adapters, ObjectProvider<AgentAdapter> agents, ProcessServices services) {
         java.util.concurrent.atomic.AtomicInteger n = new java.util.concurrent.atomic.AtomicInteger();
+        // #67: the undos of a compensation walk have their own lane, on the same ServiceAdapters.
         List<AsyncStepRunner> runners = List.of(new ServiceStepRunner(adaptersByName(adapters)),
-                new AgentStepRunner(agentsByName(agents)));
+                new AgentStepRunner(agentsByName(agents)),
+                new ServiceStepRunner(adaptersByName(adapters), io.github.dhluong90.bpm.process.internal.store.JobStore
+                        .COMPENSATION));
         int threads = AsyncStepExecutor.threadsNeeded(async, settings,
                 runners.stream().map(AsyncStepRunner::jobKind).toList());
         return new AsyncStepExecutor(jobs, transactions, clock.getIfUnique(Clock::systemUTC), settings, async,
@@ -259,13 +265,19 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnProperty(prefix = "horus.bpm.processes.jobs", name = "enabled", havingValue = "true",
             matchIfMissing = true)
     ProcessJobPoller processEngineJobPoller(JobExecutor executor, AsyncStepExecutor async, AgentReplays replays,
-            ProcessEngineProperties properties) {
-        // One poll runs the timers, starts the async attempts there are free adapter slots for, and replays one page
-        // of an offline agent replay (#98).
-        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce(),
+            io.github.dhluong90.bpm.process.internal.service.MigrationRunner migrationRunner,
+            ProcessServices services, ProcessEngineProperties properties) {
+        // One poll runs the timers, starts the async attempts there are free adapter slots for, replays one page of an
+        // offline agent replay (#98), runs up to ten batches of one approved migration (#90) and applies the task
+        // escalation levels that have come due (#73).
+        return new ProcessJobPoller(() -> executor.pollOnce() + async.pollOnce() + replays.pollOnce()
+                + migrationRunner.runDue(MIGRATION_BATCHES_PER_POLL) + services.escalateOverdue(),
                 executor.replicaId(),
                 properties.jobs().pollInterval(), Clock.systemUTC());
     }
+
+    /** Batches of one migration a poll runs before it gives the plan back, so several plans take turns. */
+    static final int MIGRATION_BATCHES_PER_POLL = 10;
 
     /** Bean name of the job poller health contributor on both Spring Boot lines ({@code processEngineJobs}). */
     static final String JOBS_HEALTH_BEAN = "processEngineJobsHealthIndicator";
@@ -320,7 +332,8 @@ public class ProcessEngineAutoConfiguration {
             JdbcJobStore jobs, JobSettings jobSettings, AsyncSettings async, ObjectProvider<ServiceAdapter> adapters,
             ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
-            OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar) {
+            OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
+            ObjectProvider<AssigneeDirectory> directory) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -335,7 +348,7 @@ public class ProcessEngineAutoConfiguration {
         SubsetBpmnReader reader = new SubsetBpmnReader(new Limits(properties.definitions().maxBytes(),
                 Limits.DEFAULTS.maxDepth(), Limits.DEFAULTS.maxElements(), Limits.DEFAULTS.maxForeignFragmentBytes(),
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
-        return new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
+        ProcessServices services = new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
                 Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(byName, decisions(beans), properties.handlers().slowCallWarning()), publisher,
@@ -345,6 +358,9 @@ public class ProcessEngineAutoConfiguration {
                 new V1ExpressionEvaluator(EngineDefaults.CONDITION_CACHE_ENTRIES), jobs, jobSettings, async,
                 adaptersByName(adapters).keySet(), agentsByName(agents).keySet(), outputSchemas, inputMasker,
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
+        // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
+        services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        return services;
     }
 
     @Bean
@@ -369,7 +385,8 @@ public class ProcessEngineAutoConfiguration {
         }
         return new Calendars(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
                 clock.getIfUnique(Clock::systemUTC), transactions, store, publisher,
-                Calendars.Approval.valueOf(properties.calendar().approval().name()));
+                Calendars.Approval.valueOf(properties.calendar().approval().name()), properties.idempotencyRetention(),
+                properties.query().maxPageSize());
     }
 
     @Bean
@@ -523,13 +540,65 @@ public class ProcessEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(MigrationService.class)
-    MigrationService processEngineMigrations(ObjectProvider<TenantResolver> tenants,
+    Migrations processEngineMigrations(ObjectProvider<TenantResolver> tenants,
             ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
             JdbcProcessStore store, JdbcMigrationStore migrations, ProcessServices services,
             ProcessEventPublisher publisher, ProcessEngineProperties properties) {
         return new Migrations(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
                 clock.getIfUnique(Clock::systemUTC), transactions, store, migrations, services::storedModel, publisher,
                 properties.migration().toSettings(), properties.idempotencyRetention());
+    }
+
+    /**
+     * Executing a migration plan (#90): propose with a reason, approve as a second person. The proposal and the
+     * approval repeat the dry run on the server.
+     */
+    @Bean
+    @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.MigrationExecutionService.class)
+    io.github.dhluong90.bpm.process.api.MigrationExecutionService processEngineMigrationExecutions(
+            ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
+            ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
+            JdbcMigrationStore migrationStore, Migrations migrations, ProcessEventPublisher publisher,
+            ProcessEngineProperties properties) {
+        return new io.github.dhluong90.bpm.process.internal.service.MigrationExecutions(
+                tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
+                transactions, store, migrationStore, migrations, publisher, properties.migration().toSettings(),
+                properties.idempotencyRetention());
+    }
+
+    /**
+     * The runner that moves the instances of an approved migration in batches (#90). It claims a plan under a lease, so
+     * one replica works on a plan at a time, and a crashed replica's plan is taken over after the lease. It runs inside
+     * the job poller, so {@code jobs.enabled=false} also stops it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    io.github.dhluong90.bpm.process.internal.service.MigrationRunner processEngineMigrationRunner(
+            ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
+            JdbcMigrationStore migrationStore, ProcessServices services, ProcessEventPublisher publisher,
+            JobExecutor executor, ProcessEngineProperties properties) {
+        return new io.github.dhluong90.bpm.process.internal.service.MigrationRunner(executor.replicaId(),
+                clock.getIfUnique(Clock::systemUTC), transactions, store, migrationStore, services::storedModel,
+                services, publisher, properties.migration().toSettings(),
+                io.github.dhluong90.bpm.process.internal.service.MigrationRunner.Checkpoint.NONE);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcLayoutStore processEngineLayoutStore(DataSource dataSource) {
+        return new JdbcLayoutStore(dataSource);
+    }
+
+    /** Diagram layout revisions, stored apart from the definition and its hash (#102). */
+    @Bean
+    @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.LayoutService.class)
+    io.github.dhluong90.bpm.process.api.LayoutService processEngineLayouts(ObjectProvider<TenantResolver> tenants,
+            ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
+            JdbcProcessStore store, JdbcLayoutStore layouts, ProcessServices services,
+            ProcessEventPublisher publisher, ProcessEngineProperties properties) {
+        return new io.github.dhluong90.bpm.process.internal.service.Layouts(tenants.getIfUnique(() -> () -> null),
+                callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC), transactions, store, layouts,
+                services::storedModel, publisher, properties.idempotencyRetention());
     }
 
     @Bean
@@ -709,6 +778,20 @@ public class ProcessEngineAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.MigrationExecutionController processEngineMigrationExecutionController(
+                io.github.dhluong90.bpm.process.api.MigrationExecutionService executions) {
+            return new io.github.dhluong90.bpm.process.rest.MigrationExecutionController(executions);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.LayoutController processEngineLayoutController(
+                io.github.dhluong90.bpm.process.api.LayoutService layouts) {
+            return new io.github.dhluong90.bpm.process.rest.LayoutController(layouts);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
         io.github.dhluong90.bpm.process.rest.EventScopeFilter processEngineEventScopeFilter() {
             return new io.github.dhluong90.bpm.process.rest.EventScopeFilter();
         }
@@ -717,6 +800,13 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         IncidentController processEngineIncidentController(IncidentService incidents) {
             return new IncidentController(incidents);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.CalendarController processEngineCalendarController(
+                CalendarService calendars) {
+            return new io.github.dhluong90.bpm.process.rest.CalendarController(calendars);
         }
 
         @Bean

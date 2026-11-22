@@ -331,6 +331,24 @@ public interface VersionService {
     RuleSetVersion withdraw(String ruleSet, int version, WriteOptions options);
 
     /**
+     * Discards a draft that is no longer wanted (RLE-098, #418). Only a {@code DRAFT} can be discarded, and only by its
+     * author. Nothing is deleted: the version becomes {@code DISCARDED}, keeps its number and content, is left out of
+     * {@link #listVersions} and stays in the rule set history, which gets one {@code DISCARDED} row. Writes one
+     * {@code rules.version.discarded.v1} event. Needs {@code rules:author}; it is not refused when draft editing is
+     * off, because it brings in no content.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number
+     * @param options idempotency key, optimistic lock and the optional reason in {@link WriteOptions#comment()}
+     * @return the version, now discarded
+     * @throws InputInvalidException when the reason is longer than {@code lifecycle.reason-max-length}
+     * @throws InvalidStateException when the version is not a draft
+     * @throws PermissionDeniedException when the caller lacks {@code rules:author} or is not the draft's author
+     * @throws VersionConflictException when the lock version is stale
+     */
+    RuleSetVersion discard(String ruleSet, int version, WriteOptions options);
+
+    /**
      * Lists the rule sets of the caller's tenant by name, a page at a time.
      *
      * @param page the page to read
@@ -357,6 +375,19 @@ public interface VersionService {
      * @throws QueryInvalidException when the limit is out of range or the cursor was not issued by this list
      */
     Page<VersionSummary> listVersions(String ruleSet, PageRequest page);
+
+    /**
+     * Lists the versions of the caller's tenant that wait for a second person, oldest request first, whatever their
+     * number: a pending version that is not the latest of its rule set is included (#31, RLE-190). Each item carries
+     * the {@code canonicalHash} a reviewer sends back with the decision and the actions the caller may take now.
+     * Needs {@code rules:read}. Read only.
+     *
+     * @param page the page to read
+     * @return the page; its cursor is signed and bound to the tenant and this list
+     * @throws QueryInvalidException when the limit is out of range or the cursor was not issued by this list
+     * @throws PermissionDeniedException without {@code rules:read}
+     */
+    Page<PendingApproval> pendingApprovals(PageRequest page);
 
     /**
      * Reads the lifecycle history of a version, oldest first.

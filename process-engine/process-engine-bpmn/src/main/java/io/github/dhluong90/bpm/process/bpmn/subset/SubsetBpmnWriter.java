@@ -15,7 +15,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
+import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
@@ -23,6 +25,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.InputMapping;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
+import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.nio.charset.StandardCharsets;
@@ -142,6 +145,10 @@ public final class SubsetBpmnWriter {
                 t.extensions().first(SlaSpec.class).ifPresent(sla -> attributes
                         .append(optional("horus:sla", sla.duration().toString()))
                         .append(optional("horus:calendar", sla.calendar())));
+                t.extensions().first(EscalationSpec.class).ifPresent(e -> attributes
+                        .append(optional("horus:escalation", e.levels().stream().map(l -> l.after().isZero() ? l.to()
+                                : l.to() + "|" + l.after()).collect(java.util.stream.Collectors.joining(";"))))
+                        .append(e.releaseClaim() ? "" : " horus:onClaimed=\"keep\""));
             }
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";
@@ -152,6 +159,11 @@ public final class SubsetBpmnWriter {
         }
         node.extensions().first(ResultVariable.class).ifPresent(r -> attributes.append(optional("horus:resultVariable",
                 r.name())));
+        // #67: the undo and the failure action are part of the step, so the export reads back to the same hash.
+        node.extensions().first(CompensateHandlerRef.class).ifPresent(c -> attributes.append(optional(
+                "horus:compensate", c.handler())));
+        node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
+                f.action())));
         if (inputs.isEmpty() && agent == null && node.incoming().isEmpty() && node.outgoing().isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;

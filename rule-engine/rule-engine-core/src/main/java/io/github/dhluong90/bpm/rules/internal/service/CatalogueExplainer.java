@@ -153,14 +153,24 @@ public final class CatalogueExplainer implements DecisionExplainer {
                 : violation.ruleId() != null ? "RULE_INVALID" : violation.column() != null ? "COLUMN_INVALID"
                 : "DOCUMENT_INVALID";
         Map<String, String> message = new LinkedHashMap<>();
+        Map<String, String> expected = new LinkedHashMap<>();
+        String example = null;
+        String syntax = "SYNTAX_ERROR".equals(code) ? violation.syntax() : null;
         for (String language : new TreeSet<>(catalogues.keySet())) {
             Words words = words(language, DecisionExplanation.Wording.NONE);
+            if (syntax != null && words.has("syntax." + syntax + ".expected")) {
+                expected.put(language, words.get("syntax." + syntax + ".expected"));
+            }
+            if (syntax != null && example == null && words.has("syntax." + syntax + ".example")) {
+                example = words.get("syntax." + syntax + ".example");
+            }
             String key = "problem." + code;
             message.put(language, words.has(key) ? words.get(key)
                     : words.get("problem." + (violation.ruleId() != null ? "RULE_INVALID"
                             : violation.column() != null ? "COLUMN_INVALID" : "DOCUMENT_INVALID")));
         }
-        return new DraftValidation.Problem(violation.ruleId(), violation.column(), code, violation.position(), message);
+        return new DraftValidation.Problem(violation.ruleId(), violation.column(), code, violation.position(), message,
+                expected, example);
     }
 
     /** The catalogue entries of one language, with the wording of the rule set being read. */

@@ -749,7 +749,8 @@ public final class CompiledRuleSet {
         try {
             located = Parser.parseLocated(source, name -> slots.getOrDefault(name, -1), input, problems.functions);
         } catch (ExpressionException e) {
-            problems.add(located(ruleId, input, e.error(), e.problem(), e.position() - shift));
+            problems.add(located(ruleId, input, e.error(), e.problem(), e.position() - shift,
+                    e.hint() == null ? null : e.hint().name()));
             return new Expr.Literal(Boolean.FALSE);
         }
         Expr expr = located.expr();
@@ -850,8 +851,13 @@ public final class CompiledRuleSet {
      * it; a position that falls before the cell (the input name of a shorthand) is reported as the cell's start.
      */
     private static Violation located(String ruleId, String column, ExpressionError error, String problem, int position) {
+        return located(ruleId, column, error, problem, position, null);
+    }
+
+    private static Violation located(String ruleId, String column, ExpressionError error, String problem, int position,
+            String syntax) {
         int at = Math.max(0, position);
-        return new Violation(ruleId, column, problem + " at position " + at, error.name(), at);
+        return new Violation(ruleId, column, problem + " at position " + at, error.name(), at, syntax);
     }
 
     private static int leadingSpaces(String text) {
@@ -885,7 +891,8 @@ public final class CompiledRuleSet {
                     }
                     yield located.expr();
                 } catch (ExpressionException e) {
-                    problems.add(located(ruleId, output.name(), e.error(), e.problem(), e.position()));
+                    problems.add(located(ruleId, output.name(), e.error(), e.problem(), e.position(),
+                            e.hint() == null ? null : e.hint().name()));
                     yield new Expr.Literal(null);
                 }
             }

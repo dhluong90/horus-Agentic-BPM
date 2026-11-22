@@ -352,10 +352,15 @@ public final class AsyncStepExecutor implements AutoCloseable {
         @SuppressWarnings("unchecked")
         Map<String, Object> inputs = payload.get("inputs") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
         Instant claimedAt = job.lockedUntil().minus(job.leaseDuration());
+        // An undo (#67) carries the forward step's keys, read from the payload the walk wrote; a forward call none.
+        boolean undo = JobStore.COMPENSATION.equals(job.jobKind());
         AdapterCall call = new AdapterCall(job.tenantId(), job.instanceId(), job.nodeId(),
                 payload.get("businessKey") == null ? null : String.valueOf(payload.get("businessKey")), job.id(),
                 ProcessServices.attemptId(job.id(), job.attempt()), claim.completionToken(), job.attempt(),
-                claimedAt.plus(timeoutOf(job)), inputs);
+                claimedAt.plus(timeoutOf(job)), inputs,
+                undo && payload.get(ProcessServices.FORWARD_JOB_ID) != null
+                        ? String.valueOf(payload.get(ProcessServices.FORWARD_JOB_ID)) : null,
+                undo ? String.valueOf(payload.get(ProcessServices.FORWARD_ATTEMPT_ID)) : null);
         try {
             AdapterResult result = lane.runner().run(target, call, java.util.Collections.unmodifiableMap(payload));
             return result == null ? new AdapterResult.Failed("ADAPTER_NULL_RESULT", "The adapter returned null", true)

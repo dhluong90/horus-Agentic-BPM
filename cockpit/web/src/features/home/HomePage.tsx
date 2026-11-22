@@ -1,14 +1,17 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { VersionSummary } from '../../api/rules/schemas';
-import { suppliedName, usePersonName } from '../../app/people';
+import { usePersonName } from '../../app/people';
 import { formatRoute, type Area } from '../../app/route';
-import { AreaError, EmptyState, LoadingRows } from '../../components/PageParts';
+import { AreaError, EmptyState, LoadingRows, type NextAction } from '../../components/PageParts';
 import type { MessageKey } from '../../i18n/en';
 import { useI18n } from '../../i18n/I18nProvider';
 import { PendingList } from '../approvals/PendingList';
+import { QueueRows } from '../approvals/QueueRows';
+import { itemKey, reviewRoute, type ApprovalItem, type Engine } from '../approvals/queue';
+import { useApprovalQueue, type QueueState } from '../approvals/useApprovalQueue';
 import { useRetryRules } from '../overview/useRetryRules';
-import { mapLoadable, ownWork, relevantRequests, useEveryRuleSet, useOpenVersions, type Loadable, type OwnWork, type PendingRequest } from '../overview/useRuleOverview';
+import { mapLoadable, ownWork, useEveryRuleSet, useOpenVersions, type Loadable, type OwnWork } from '../overview/useRuleOverview';
 import { RuleSetTable } from '../rules/RuleSetTable';
 import { formatDateTime } from '../rules/model/dates';
 import { useRulesSession } from '../rules/api/rulesContext';
@@ -18,20 +21,21 @@ const RECENT_ROWS = 5;
 
 /**
  * Home, the landing page for every role (PD-092). Its content follows what /me allows: an approver sees the
- * requests waiting for them, an author their own drafts and requests, anyone who reads rules the recent
- * rule sets, and a user with no rule permission one line saying so. Every number comes from the engine.
+ * requests waiting for them across both engines, an author their own drafts and requests, anyone who reads rules
+ * the recent rule sets, and a user with nothing to do here one line saying so. Every number comes from the engines.
  */
-export function HomePage({ pageLimit, me, areas }: { pageLimit: number; me: BpmMeV1; areas: readonly Area[] }) {
+export function HomePage({ pageLimit, me, areas, engines }: { pageLimit: number; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[] }) {
   const { t } = useI18n();
   const rules = areas.includes('rules');
+  const approver = mayApprove(me.permissions, engines);
   const name = me.user.displayName ?? me.user.id;
   return (
     <section className="workspace" aria-labelledby="home-title">
       <div className="page-head">
         <h1 id="home-title">{t(greeting(new Date().getHours()), { name })}</h1>
-        <p className="page-head__sub">{t(subtitle(me.permissions, rules))}</p>
+        <p className="page-head__sub">{t(subtitle(me.permissions, rules, approver))}</p>
       </div>
-      {rules ? <RoleContent pageLimit={pageLimit} me={me} /> : (
+      {rules || approver ? <RoleContent pageLimit={pageLimit} me={me} engines={engines} rules={rules} approver={approver} /> : (
         <article className="card">
           <EmptyState icon="home" text={t('home.nothingForRole')} />
         </article>
@@ -40,35 +44,53 @@ export function HomePage({ pageLimit, me, areas }: { pageLimit: number; me: BpmM
   );
 }
 
+/** The approve permission of an engine whose queue this user reads. */
+function mayApprove(permissions: readonly string[], engines: readonly Engine[]): boolean {
+  return (engines.includes('rules') && permissions.includes('rules:approve')) || (engines.includes('processes') && permissions.includes('processes:approve'));
+}
+
 function greeting(hour: number): MessageKey {
   if (hour < 12) return 'home.greeting.morning';
   if (hour < 18) return 'home.greeting.afternoon';
   return 'home.greeting.evening';
 }
 
-function subtitle(permissions: readonly string[], rules: boolean): MessageKey {
-  if (!rules) return 'home.subtitle.none';
-  const author = permissions.includes('rules:author');
-  const approver = permissions.includes('rules:approve');
+function subtitle(permissions: readonly string[], rules: boolean, approver: boolean): MessageKey {
+  const author = rules && permissions.includes('rules:author');
   if (author && approver) return 'home.subtitle.both';
   if (author) return 'home.subtitle.author';
   if (approver) return 'home.subtitle.approver';
-  return 'home.subtitle.reader';
+  return rules ? 'home.subtitle.reader' : 'home.subtitle.none';
 }
 
-function RoleContent({ pageLimit, me }: { pageLimit: number; me: BpmMeV1 }) {
+/** The queue's requests this user may approve now, as one async value. A queue they may not read holds none. */
+function approvable(state: QueueState): Loadable<ApprovalItem[]> {
+  switch (state.status) {
+    case 'loading':
+      return { status: 'loading' };
+    case 'error':
+      return { status: 'error', error: state.error };
+    case 'forbidden':
+      return { status: 'ready', data: [] };
+    case 'ready':
+      return { status: 'ready', data: state.items.filter((item) => item.canApprove) };
+  }
+}
+
+function RoleContent({ pageLimit, me, engines, rules, approver }: { pageLimit: number; me: BpmMeV1; engines: readonly Engine[]; rules: boolean; approver: boolean }) {
   const { t } = useI18n();
   const { userId } = useRulesSession();
-  const ruleSets = useEveryRuleSet(pageLimit);
+  const queue = useApprovalQueue(engines, pageLimit);
+  const retryRules = useRetryRules();
+  const ruleSets = useEveryRuleSet(pageLimit, rules);
   const versions = useOpenVersions(ruleSets);
-  const author = me.permissions.includes('rules:author');
-  const approver = me.permissions.includes('rules:approve');
-  const toReview = mapLoadable(versions, (data) => relevantRequests(data, userId).filter((request) => request.canApprove));
+  const author = rules && me.permissions.includes('rules:author');
+  const toReview = approvable(queue.state);
   const mine = mapLoadable(versions, (data) => ownWork(data, userId));
-  const focus = focalItem(toReview, mine);
+  const focus = focalItem(toReview, author ? mine : undefined);
   // The focal request is not repeated in the list, and the list shows requests only, never drafts.
-  const focusKey = focus?.kind === 'review' ? `${focus.request.version.ruleSet}/${String(focus.request.version.version)}` : undefined;
-  const otherReviews = mapLoadable(toReview, (data) => data.filter((request) => `${request.version.ruleSet}/${String(request.version.version)}` !== focusKey));
+  const focusKey = focus?.kind === 'review' ? itemKey(focus.item) : undefined;
+  const otherReviews = mapLoadable(toReview, (data) => data.filter((item) => itemKey(item) !== focusKey));
   const focusDraft = focus?.kind === 'draft' ? `${focus.version.ruleSet}/${String(focus.version.version)}` : undefined;
   // Approvers see "Pending approvals", which holds requests only. Authors who cannot approve see their drafts
   // and requests together, under a title that says so (the focal draft is not repeated).
@@ -79,23 +101,25 @@ function RoleContent({ pageLimit, me }: { pageLimit: number; me: BpmMeV1 }) {
       {(author || approver) ? (
         <div className={focus === undefined ? 'home__top home__top--single' : 'home__top'}>
           {focus !== undefined ? <FocusCard focus={focus} /> : null}
-          {approver ? <PendingCard toReview={otherReviews} mine={author ? myRequests : undefined} /> : <PendingCard toReview={undefined} mine={myWork} title={t('home.yourDraftsAndRequests')} />}
+          {approver
+            ? <PendingCard toReview={otherReviews} mine={author ? myRequests : undefined} onRetryReview={queue.retry} onRetryMine={retryRules} />
+            : <PendingCard toReview={undefined} mine={myWork} title={t('home.yourDraftsAndRequests')} onRetryReview={queue.retry} onRetryMine={retryRules} />}
         </div>
       ) : null}
-      <RecentCard ruleSets={ruleSets} />
+      {rules ? <RecentCard ruleSets={ruleSets} /> : null}
     </div>
   );
 }
 
-type Focus = { kind: 'review'; request: PendingRequest; waiting: number } | { kind: 'draft'; version: VersionSummary };
+type Focus = { kind: 'review'; item: ApprovalItem; waiting: number } | { kind: 'draft'; version: VersionSummary };
 
 /** The one next step: the request that has waited longest (as Approvals' Review next), else the author's latest draft. */
-function focalItem(toReview: Loadable<PendingRequest[]>, mine: Loadable<OwnWork[]>): Focus | undefined {
+function focalItem(toReview: Loadable<ApprovalItem[]>, mine: Loadable<OwnWork[]> | undefined): Focus | undefined {
   if (toReview.status === 'ready' && toReview.data.length > 0) {
     const next = toReview.data[0];
-    if (next !== undefined) return { kind: 'review', request: next, waiting: toReview.data.length };
+    if (next !== undefined) return { kind: 'review', item: next, waiting: toReview.data.length };
   }
-  if (mine.status === 'ready') {
+  if (mine?.status === 'ready') {
     const draft = mine.data.find((item) => item.kind === 'draft');
     if (draft !== undefined) return { kind: 'draft', version: draft.version };
   }
@@ -107,15 +131,14 @@ function FocusCard({ focus }: { focus: Focus }) {
   const { t, locale } = useI18n();
   const personName = usePersonName();
   if (focus.kind === 'review') {
-    const { version } = focus.request;
-    const requester = personName(version.requestedBy ?? '', suppliedName(version, 'requestedBy'));
+    const { item } = focus;
     return (
       <article className="focus-card" aria-labelledby="focus-title">
         <p className="focus-card__eyebrow">{t('home.focus.review')}</p>
-        <h2 id="focus-title" className="focus-card__title">{t('rules.nameVersion', { name: version.ruleSet, version: String(version.version) })}</h2>
-        <p className="focus-card__meta tnum">{t('home.sentBy', { date: formatDateTime(version.requestedAt ?? version.createdAt, locale) ?? '', name: requester })}</p>
+        <h2 id="focus-title" className="focus-card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</h2>
+        <p className="focus-card__meta tnum">{t('home.sentBy', { date: formatDateTime(item.requestedAt, locale) ?? '', name: personName(item.requestedBy, item.requesterName) })}</p>
         <div className="focus-card__actions">
-          <a className="btn btn--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'changes' })}>{t('approvals.review')}</a>
+          <a className="btn btn--contrast" href={formatRoute(reviewRoute(item))}>{t('approvals.review')}</a>
           <a className="link-action link-action--contrast" href={formatRoute({ name: 'approvals' })}>{t('home.focus.allWaiting', { count: String(focus.waiting) })} <span aria-hidden="true">→</span></a>
         </div>
       </article>
@@ -136,12 +159,12 @@ function FocusCard({ focus }: { focus: Focus }) {
 }
 
 /** Pending approvals: the user's own requests and drafts, and the requests they may review, one view at a time. */
-function PendingCard({ toReview, mine, title }: { toReview: Loadable<PendingRequest[]> | undefined; mine: Loadable<OwnWork[]> | undefined; title?: string }) {
+function PendingCard({ toReview, mine, title, onRetryReview, onRetryMine }: {
+  toReview: Loadable<ApprovalItem[]> | undefined; mine: Loadable<OwnWork[]> | undefined; title?: string; onRetryReview: () => void; onRetryMine: () => void;
+}) {
   const { t } = useI18n();
-  const retry = useRetryRules();
   const [view, setView] = useState<'review' | 'mine'>(toReview !== undefined ? 'review' : 'mine');
   const count = (value: Loadable<unknown[]> | undefined) => (value?.status === 'ready' ? value.data.length : undefined);
-  const shown = view === 'review' ? toReview : mine;
   return (
     <article className="card card--list" aria-labelledby="home-pending">
       <div className="card__head">
@@ -157,19 +180,22 @@ function PendingCard({ toReview, mine, title }: { toReview: Loadable<PendingRequ
           </div>
         ) : null}
       </div>
-      {shown === undefined ? null : <PendingBody view={view} items={shown} onRetry={retry} />}
+      {view === 'review' && toReview !== undefined ? (
+        <PendingBody items={toReview} empty={t('home.noOtherReviews')} action={{ label: t('menu.approvals'), href: formatRoute({ name: 'approvals' }) }} onRetry={onRetryReview} render={(items) => <QueueRows items={items} />} />
+      ) : mine !== undefined ? (
+        <PendingBody items={mine} empty={t('home.noOwnWork')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} onRetry={onRetryMine} render={(items) => <PendingList items={items} />} />
+      ) : null}
     </article>
   );
 }
 
-function PendingBody({ view, items, onRetry }: { view: 'review' | 'mine'; items: Loadable<PendingRequest[]> | Loadable<OwnWork[]>; onRetry: () => void }) {
-  const { t } = useI18n();
+function PendingBody<T>({ items, empty, action, onRetry, render }: { items: Loadable<T[]>; empty: string; action: NextAction; onRetry: () => void; render: (items: T[]) => ReactNode }) {
   if (items.status === 'loading') return <LoadingRows rows={2} />;
   if (items.status === 'error') return <AreaError error={items.error} onRetry={onRetry} />;
   if (items.data.length === 0) {
-    return <EmptyState text={view === 'review' ? t('home.noOtherReviews') : t('home.noOwnWork')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} />;
+    return <EmptyState text={empty} action={action} />;
   }
-  return <PendingList items={items.data.slice(0, RECENT_ROWS)} compact />;
+  return <>{render(items.data.slice(0, RECENT_ROWS))}</>;
 }
 
 function RecentCard({ ruleSets }: { ruleSets: ReturnType<typeof useEveryRuleSet> }) {
