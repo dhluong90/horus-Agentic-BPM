@@ -65,4 +65,59 @@ public interface CalendarService {
      * @throws CalendarNotFoundException when the tenant has no such change
      */
     CalendarChange change(String changeId);
+
+    /**
+     * Proposes as {@link #propose(String, WorkingCalendar, long, String)} does, once per idempotency key: a repeat
+     * with the same key and the same request returns the first answer and writes nothing (PRE-182).
+     *
+     * @param key the calendar key
+     * @param calendar the whole calendar after the change
+     * @param expectedVersion the version the change is made against: 0 for a new calendar
+     * @param reason why, at most 500 characters
+     * @param idempotencyKey 1 to 200 characters, or null for no replay protection
+     * @return the change as the first call returned it
+     * @throws IdempotencyKeyReuseException when the key was used with a different request
+     * @throws IdempotencyInFlightException when a request with the key is still running
+     */
+    CalendarChange propose(String key, WorkingCalendar calendar, long expectedVersion, String reason,
+            String idempotencyKey);
+
+    /**
+     * Approves as {@link #approve(String, String)} does, once per idempotency key (PRE-182).
+     *
+     * @param changeId the change
+     * @param comment an optional comment, at most 500 characters
+     * @param idempotencyKey 1 to 200 characters, or null for no replay protection
+     * @return the change as the first call returned it
+     */
+    CalendarChange approve(String changeId, String comment, String idempotencyKey);
+
+    /**
+     * Rejects as {@link #reject(String, String)} does, once per idempotency key (PRE-182).
+     *
+     * @param changeId the change
+     * @param comment why, at most 500 characters
+     * @param idempotencyKey 1 to 200 characters, or null for no replay protection
+     * @return the change as the first call returned it
+     */
+    CalendarChange reject(String changeId, String comment, String idempotencyKey);
+
+    /**
+     * Lists the tenant's calendars by key (PRE-181). Needs {@code processes:read}.
+     *
+     * @param page which page
+     * @return the summaries, without working hours or holidays
+     * @throws QueryInvalidException when the limit or the cursor is not valid
+     */
+    Page<CalendarSummary> calendars(PageRequest page);
+
+    /**
+     * Lists the tenant's calendar changes of one status, newest first (PRE-181). Needs {@code processes:read}.
+     *
+     * @param status {@code PENDING}, {@code APPROVED} or {@code REJECTED}
+     * @param page which page
+     * @return the changes
+     * @throws QueryInvalidException when the status, the limit or the cursor is not valid
+     */
+    Page<CalendarChange> changes(String status, PageRequest page);
 }

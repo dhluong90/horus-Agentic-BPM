@@ -199,6 +199,13 @@ final class RestSupport {
             }
             ObjectNode message = item.putObject("message");
             new java.util.TreeMap<>(p.message()).forEach(message::put);
+            if (!p.expected().isEmpty()) {
+                ObjectNode expected = item.putObject("expected");
+                new java.util.TreeMap<>(p.expected()).forEach(expected::put);
+                if (p.example() != null) {
+                    item.put("example", p.example());
+                }
+            }
         }
         node.put("problemsTruncated", result.problemsTruncated());
         ArrayNode readings = node.putArray("readings");

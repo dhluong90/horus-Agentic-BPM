@@ -17,9 +17,12 @@ import java.util.Objects;
  *     {@code rules:simulate} ({@code CLOCK_NOT_ALLOWED} otherwise)
  * @param version optional version number to evaluate instead of selecting one; it must have been approved
  *     ({@code PUBLISHED} or {@code RETIRED}). Null means the version in force at the clock
+ * @param decision optional id of the decision to evaluate within the rule set. A rule set is a DMN model with one
+ *     decision named after the rule set, so the only accepted value is {@code ruleSet}; null means that decision.
+ *     Reserved so that rule sets with several decisions (stage S1) need no new request type
  */
 public record DecisionRequest(String ruleSet, DecisionInput input, String idempotencyKey, String correlationId,
-        Instant clock, Integer version) {
+        Instant clock, Integer version, String decision) {
 
     public DecisionRequest {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -27,6 +30,21 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
         if (version != null && version < 1) {
             throw new IllegalArgumentException("version must be at least 1, was " + version);
         }
+    }
+
+    /**
+     * Creates a request for the rule set's own decision.
+     *
+     * @param ruleSet the rule set name
+     * @param input the inputs
+     * @param idempotencyKey optional key
+     * @param correlationId optional correlation id
+     * @param clock optional instant the decision reasons about
+     * @param version optional approved version number
+     */
+    public DecisionRequest(String ruleSet, DecisionInput input, String idempotencyKey, String correlationId,
+            Instant clock, Integer version) {
+        this(ruleSet, input, idempotencyKey, correlationId, clock, version, null);
     }
 
     /**
@@ -38,7 +56,7 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
      * @param correlationId optional correlation id
      */
     public DecisionRequest(String ruleSet, DecisionInput input, String idempotencyKey, String correlationId) {
-        this(ruleSet, input, idempotencyKey, correlationId, null, null);
+        this(ruleSet, input, idempotencyKey, correlationId, null, null, null);
     }
 
     /**
@@ -49,7 +67,7 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
      * @return the request
      */
     public static DecisionRequest of(String ruleSet, DecisionInput input) {
-        return new DecisionRequest(ruleSet, input, null, null, null, null);
+        return new DecisionRequest(ruleSet, input, null, null, null, null, null);
     }
 
     /**
@@ -59,7 +77,7 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
      * @return the new request
      */
     public DecisionRequest withIdempotencyKey(String key) {
-        return new DecisionRequest(ruleSet, input, key, correlationId, clock, version);
+        return new DecisionRequest(ruleSet, input, key, correlationId, clock, version, decision);
     }
 
     /**
@@ -69,7 +87,7 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
      * @return the new request
      */
     public DecisionRequest withCorrelationId(String id) {
-        return new DecisionRequest(ruleSet, input, idempotencyKey, id, clock, version);
+        return new DecisionRequest(ruleSet, input, idempotencyKey, id, clock, version, decision);
     }
 
     /**
@@ -79,7 +97,7 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
      * @return the new request
      */
     public DecisionRequest withClock(Instant at) {
-        return new DecisionRequest(ruleSet, input, idempotencyKey, correlationId, at, version);
+        return new DecisionRequest(ruleSet, input, idempotencyKey, correlationId, at, version, decision);
     }
 
     /**
@@ -89,6 +107,17 @@ public record DecisionRequest(String ruleSet, DecisionInput input, String idempo
      * @return the new request
      */
     public DecisionRequest withVersion(Integer number) {
-        return new DecisionRequest(ruleSet, input, idempotencyKey, correlationId, clock, number);
+        return new DecisionRequest(ruleSet, input, idempotencyKey, correlationId, clock, number, decision);
+    }
+
+    /**
+     * Returns a copy that names the decision to evaluate, for example {@code card-fee} in rule set {@code card-fee}.
+     * Until rule sets hold several decisions, any other id is refused with {@code INPUT_INVALID}.
+     *
+     * @param id the decision id, or null for the rule set's own decision
+     * @return the new request
+     */
+    public DecisionRequest withDecision(String id) {
+        return new DecisionRequest(ruleSet, input, idempotencyKey, correlationId, clock, version, id);
     }
 }

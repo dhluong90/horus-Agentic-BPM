@@ -248,7 +248,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
 - **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
 - **Example:** `retention P12M at 2028-02-03 -> drop rle_decision_2027_01 only; 0 DELETE statements`.
-- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`. The retention run ships with #104 (RE-F-31, PD-050): each drop is recorded in the append-only `rle_decision_log_drop` (V19), and retention is off unless the host sets `decision-log.retention` to whole months of at least `decision-log.retention-floor` (`P12M`); unset, nothing is dropped, start-up is unaffected on every profile and a WARN is logged at every start-up (PD-130). `keep-forever` is the explicit keep-everything value. PD-050 stays the 1.0 rule.
+- **Delivery:** creation ahead and the overflow case are tested by `RLE_017_*` in `DecisionLogPartitionMaintenanceIT` and `DecisionLogSearchIT`. The retention run ships with #104 (RE-F-31, PD-050): each drop is recorded in the append-only `rle_decision_log_drop` (V19), and retention is off unless the host sets `decision-log.retention` to whole months of at least `decision-log.retention-floor` (`P12M`); unset, nothing is dropped, start-up is unaffected on every profile and a WARN is logged at every start-up (PD-130). `keep-forever` is the explicit keep-everything value. PD-050 is the 1.0 rule: from 1.0 an unset value refuses start-up outside `dev` (`RLE-100`, #373).
 - **Test ID:** `RLE_017_decision_log_monthly_partitions_and_retention_by_drop`
 
 ### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
@@ -317,6 +317,48 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document (it is already in normal form) and its SHA-256 equals that hash and the stored `canonical_hash`.
 - **Example:** `card-fee.yaml -> Definitions(card-fee) / Decision(card-fee) / DecisionTable(FIRST, 2 inputs, 1 output, 3 rules) -> same hash`.
 - **Test ID:** `RLE_024_v1_rule_set_round_trips_through_dmn_model`
+
+### RLE-095 A schema version 1 document that uses a name reserved for full DMN is refused by name with its stage
+- **Traces to:** `TR-STD-04`, `TR-STD-03`, `TR-STD-26`, #38
+- **Milestone:** M1
+- **Given:** `card-fee.yaml` (schema version 1, `hitPolicy: first`) and five copies, each changed in one place: `hitPolicy: priority` (also `any`, `ruleOrder` and `outputOrder`); `expressionLanguage: feel` (also `FEEL` and the OMG FEEL namespace URIs of DMN 1.2 to 1.5, such as `https://www.omg.org/spec/DMN/20230324/FEEL/`); `schemaVersion: 2`; `errorMode: spec`. Control cases: `hitPolicy: cheapest`, `expressionLanguage: javascript`, and `schemaVersion` values of `0`, `-1`, `"2"`, `1.5` and `99999999999`.
+- **When:** Each document is read, and the `priority` copy of a rule set named `dmn-ready-priority` is posted to `POST /api/bpm/rules/v1/rule-sets` as `application/yaml`.
+- **Then:**
+  - Each reserved name is refused with `422 VALIDATION_FAILED`, and the detail names the member, the value and the stage that adds it. A hit policy gives "hitPolicy priority is added in stage S1; this release reads first, unique and collect". FEEL gives "expressionLanguage FEEL is added in stage S1 with a later schema version". `schemaVersion: 2` gives "schemaVersion 2 is written for a later engine release; this release reads schema version 1". `errorMode: spec` gives "errorMode spec is added in stage S1" (PD-125). A later schema version is never read as version 1.
+  - The control cases keep their plain refusal ("hitPolicy must be first, unique or collect", "expressionLanguage must be urn:horus-bpm:expr:v1", "schemaVersion must be 1"). These details name no stage and do not echo an unknown hit policy.
+  - Over HTTP the refusal is `422 VALIDATION_FAILED`, and `GET /rule-sets/dmn-ready-priority` is `404` afterwards, so nothing is stored.
+- **Example:** `card-fee.yaml with hitPolicy: priority -> 422 VALIDATION_FAILED "hitPolicy priority is added in stage S1", 0 rows`.
+- **Test ID:** `RLE_095_a_reserved_hit_policy_is_refused_by_name_with_stage_s1`, `RLE_095_an_unknown_hit_policy_keeps_the_plain_refusal`, `RLE_095_feel_as_expression_language_is_refused_by_name_with_stage_s1`, `RLE_095_another_expression_language_keeps_the_plain_refusal`, `RLE_095_a_later_schema_version_is_refused_by_name_and_never_read_as_version_1`, `RLE_095_a_schema_version_that_is_not_a_later_version_keeps_the_plain_refusal`, `RLE_095_error_mode_spec_is_refused_by_name_with_stage_s1`, `RLE_095_a_reserved_name_is_refused_over_http_with_its_stage_and_nothing_is_stored`
+
+### RLE-096 `errorMode: strict` is a member of schema version 1 that changes no hash
+- **Traces to:** `TR-STD-23`, `TR-STD-03`, PD-066, PD-125, #38
+- **Milestone:** M1
+- **Given:** `card-fee.yaml` without `errorMode`, and the same document with `errorMode: strict`. Control cases: `errorMode: lenient`, `errorMode: STRICT`, `errorMode: ""` and `errorMode: true`.
+- **When:** Both documents are read. The `strict` one is also exported to DMN 1.5 and the export is read again.
+- **Then:**
+  - Both documents give the same model, the same canonical JSON and the same `canonical_hash`. The canonical JSON has no `errorMode` member, because `strict` is the mode of every schema version 1 rule set, written or not. Only another mode, from stage S1, will be printed and hashed.
+  - The DMN round trip gives the same hash: an imported DMN table evaluates in `strict` mode until stage S1 (PD-125, `RLE-045`).
+  - `lenient`, `STRICT` and `""` are `422 VALIDATION_FAILED` with "errorMode must be strict or spec". `true` is refused because `errorMode` must be a string.
+- **Example:** `card-fee.yaml + errorMode: strict -> same canonical JSON and hash as card-fee.yaml`.
+- **Test ID:** `RLE_096_error_mode_strict_is_accepted_and_keeps_the_canonical_json_and_hash`, `RLE_096_error_mode_strict_survives_a_dmn_round_trip_with_the_same_hash`, `RLE_096_another_error_mode_is_refused_naming_both_modes`, `RLE_096_error_mode_must_be_a_string`
+
+### RLE-097 An evaluation can name its decision, and only the rule set's own decision is accepted
+- **Traces to:** `TR-STD-28`, `TR-IDEM-01`, `TR-TEN-01`, DN-08, #38
+- **Milestone:** M1
+- **Given:** Tenant `bank-a` has `card-fee` v1 `PUBLISHED`. A teller holds `rules:evaluate`. Tenant `bank-b` has no `card-fee`.
+- **When:**
+  - The teller evaluates `{ tier: GOLD, txCount: 5 }` three times: without a decision id, with `DecisionRequest.withDecision("card-fee")`, and with `withDecision("risk-adj")`.
+  - The same inputs are sent with `Idempotency-Key: k-097`, first without a decision id and then with `card-fee`.
+  - Over HTTP, `POST /api/bpm/rules/v1/decisions/dmn-ready-fee:evaluate` is sent with the body member `"decision": "dmn-ready-fee"`, then `"risk-adj"`, then `7`.
+  - A `bank-b` teller evaluates `card-fee` with `withDecision("card-fee")`.
+- **Then:**
+  - Leaving the decision out and naming `card-fee` give the same result: `R1` matches and `fee` is `{ "currency": "VND", "amount": 0 }`. Each call is logged once.
+  - The decision id is not part of the request hash, so the second `k-097` call replays the first decision and writes no second row.
+  - `risk-adj` is `400 INPUT_INVALID`, with a detail that starts "decision must be the rule set's name or left out", names stage S1 and does not echo the id. A non-string `decision` is `400 INPUT_INVALID` as well. No decision row is written.
+  - The `bank-b` call is `404 RULE_SET_NOT_FOUND`, and nothing is written.
+  - The four-argument and six-argument `DecisionRequest` constructors still compile and leave `decision` null.
+- **Example:** `evaluate card-fee with decision risk-adj -> 400 INPUT_INVALID, 0 decision rows`.
+- **Test ID:** `RLE_097_naming_the_rule_sets_own_decision_gives_the_same_result_as_leaving_it_out`, `RLE_097_the_decision_id_is_outside_the_idempotency_hash`, `RLE_097_another_decision_id_is_input_invalid_naming_decision_and_logs_nothing`, `RLE_097_another_tenants_rule_set_is_not_found_whatever_the_decision_id_and_nothing_is_written`, `RLE_097_the_older_constructors_leave_the_decision_out`, `RLE_097_the_evaluate_body_names_its_decision_and_only_the_rule_sets_own_is_accepted_over_http`
 
 ---
 
@@ -611,6 +653,47 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `sample S1 "VIP customer, balance 55,000,000 VND" -> baseline R1 (Tier Gold, fee 0 VND), simulated R5 (Tier Basic, fee 50,000 VND), changed true`
 - **Test IDs:** `RLE_093_a_simulation_result_reads_each_side_in_the_version_that_decided_it_and_never_shows_the_inputs`, `RLE_093_each_simulated_sample_carries_the_label_it_was_sent_with_and_a_reference`, `RLE_093_the_label_of_a_sample_is_passed_on_and_written_back_with_its_reference`, `RLE_093_a_label_that_is_not_text_of_1_to_100_characters_is_400_and_nothing_runs`
 
+### RLE-098 An author discards a draft that is no longer wanted; it stays in the history
+- **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, `TR-TEN-01`, #418
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`. `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` (`rules:author`), `lockVersion 0`, canonical hash `H2`. `minh` holds `rules:author`; `bob` holds `rules:approve`; a caller of `bank-b` holds `rules:author`; `dan` holds `rules:read`. The host sets `authoring.cockpit-drafts` to `false` in one case.
+- **When:** `lan` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:discard` with `Idempotency-Key: k-910`, `If-Match: "0"` and the reason "Started from the wrong version", then repeats it. Failure cases: `minh`; `bob`; `dan`; the `bank-b` caller; `lan` on v1 (published); `lan` on v2 again with a new key; a stale `If-Match`; no `If-Match`; no key; a reason of 2,001 characters. Then `lan` imports a new version and lists the versions.
+- **Then:**
+  - `200`; v2 is `DISCARDED` with `lockVersion 1` and `ETag: "1"`, keeps its number, author, document and hash `H2`, and no row of the version or its rules is deleted. The repeat with `k-910` returns the same body and changes nothing.
+  - One history row `DISCARDED` is appended: actor `lan`, reason, `fromStatus DRAFT`, `toStatus DISCARDED`, `lockVersion 1`; it is shown by the history of v2 and the history of the rule set, and the database refuses to change or delete it. One `rules.version.discarded.v1` event carries rule set, version, tenant, `discardedBy: lan`, `canonicalHash: H2` and the reason.
+  - `GET .../versions` lists v1 only and the rule set's `latestVersion` stays 1; the next import is v3: a discarded number is never used again. `allowedActions` of a draft holds `discard` for its author with `rules:author` and for nobody else.
+  - `minh`, `bob` and `dan` get `403 PERMISSION_DENIED` (only the author discards), `dan` before the body is read; the `bank-b` caller gets `404 RULE_SET_NOT_FOUND`; v1 and an already discarded v2 are `409 INVALID_STATE`, so a published or retired version can never be removed this way; a stale `If-Match` is `409 VERSION_CONFLICT`; no `If-Match` is `428 PRECONDITION_REQUIRED`; no key is `400 INPUT_INVALID`; the long reason is `400 INPUT_INVALID`. A failure writes no history row, event or idempotency record and leaves v2 as it was.
+  - With `authoring.cockpit-drafts: false`, `lan` can still discard: it brings in no content.
+- **Example:** `lan POSTs :discard on card-fee v2 with If-Match "0" -> 200, v2 DISCARDED, lockVersion 1, 1 DISCARDED history row, 1 discarded event; GET versions -> v1 only; minh -> 403; v1 -> 409`.
+- **Test ID:** `RLE_098_the_author_discards_a_draft_which_stays_in_the_history_and_leaves_the_list`
+
+### RLE-099 A syntax error names the expected token, the position and an example, in English and Vietnamese
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-02`, #419
+- **Milestone:** M2
+- **Given:** As `RLE-090`: `lan` validates draft v2 of `card-fee`. Tenant `bank-a` also declares `kyc-routing` v1 `DRAFT` whose input `nationalId` has `mask: true`.
+- **When:** `lan` sends `:validate` with (a) `R2` testing `txCount: ">= (3 + 1"`; (b) `R1` testing `tier: "= 'GOLD'"`; (c) `R2` testing `txCount: ">= tierX"`; (d) `kyc-routing` with `R1` testing `nationalId: "== '079123456789"`.
+- **Then:**
+  - (a) is `200`, `valid: false`, one problem on `R2` / `txCount` with `code: SYNTAX_ERROR`, `position: 9`, `expected.en` "A closing parenthesis ) to match the opening one.", `expected.vi` "Dấu đóng ngoặc ) khớp với dấu mở ngoặc." and `example` "(balance + 100) > 0". (b) has `position: 0`, `expected.en` "Two equals signs == to compare for equality." and `example` "tier == 'GOLD'".
+  - `expected` and `example` are chosen by the kind of syntax error the parser found (`OPERAND`, `OPERATOR_OR_END`, `OPEN_PAREN`, `CLOSE_PAREN`, `OPEN_BRACKET`, `CLOSE_BRACKET`, `KEYWORD_NULL`, `KEYWORD_AND`, `UNTERMINATED_STRING`, `SINGLE_QUOTES`, `EQUALITY`, `LOGIC_WORDS`, `NUMBER_START`, `NUMBER_DIGITS`, `STRING_ESCAPE`, `LITERAL_ARGUMENT`, `CHARACTER`) from the message catalogue, in every language it has; each kind has both in `en` and `vi`. A host language without an entry for a kind has no `expected` for it. They never repeat text of the cell.
+  - (c) is `UNKNOWN_INPUT` with no `expected` and no `example`: only a syntax error has them.
+  - (d) is a `SYNTAX_ERROR` that expects a closing single quote; the value `079123456789` appears nowhere in the answer. The save of the same body is `422 VALIDATION_FAILED` as before; its `message` is unchanged.
+  - No call writes a version, history row, event or idempotency record.
+- **Example:** `lan validates R2 with txCount ">= (3 + 1" -> SYNTAX_ERROR, position 9, expected "A closing parenthesis )...", example "(balance + 100) > 0"; a masked cell with an unterminated text -> expects a closing quote, the number appears nowhere`.
+- **Test ID:** `RLE_099_a_syntax_error_names_the_expected_token_the_position_and_an_example_in_both_languages`
+
+### RLE-100 From 1.0 an unset decision log retention refuses start-up outside dev
+- **Traces to:** `TR-OPS-01`, `TR-SEC-04`, PD-050, PD-130, #373
+- **Milestone:** M3
+- **Given:** A host on Rule Engine `1.0.0` or later with `horus.bpm.rules.decision-log.retention` unset. The same host on `0.3.0` is the case before 1.0.
+- **When:** The host starts on the profile `prod`, on no profile, on `dev, prod`, and on `dev` (optionally with `test`); then with `keep-forever` and with `P12M`; then the same unset host on `0.3.0-SNAPSHOT`.
+- **Then:**
+  - On `prod`, on no profile and on `dev, prod`, start-up fails with a message naming `horus.bpm.rules.decision-log.retention`, saying it is required from 1.0, offering `keep-forever` or whole months of at least 12 such as `P12M`, and pointing to the upgrade note in the wiki page Rule Engine Decision Log and Audit.
+  - On `dev` alone (optionally with `test`) the host starts, keeps every decision and logs the WARN of PD-130.
+  - With `keep-forever` or `P12M` the host starts on any profile; no partition is dropped for `keep-forever`.
+  - Before 1.0, unset starts on every profile and logs the WARN, which now says that 1.0 will refuse to start without the setting. The engine reads its version from the `Implementation-Version` of the starter jar; a build with no version (a class directory) behaves as before 1.0.
+- **Example:** `1.0.0, profile prod, retention unset -> start-up fails naming horus.bpm.rules.decision-log.retention; keep-forever -> starts; 0.3.0 -> WARN and starts`.
+- **Test ID:** `RLE_100_from_1_0_an_unset_retention_refuses_start_up_outside_dev_and_until_then_it_warns`
+
 ### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
 - **Milestone:** M1
@@ -767,6 +850,20 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - The order of checks is: permission, `If-Match` present, status, four eyes (then a recorded author), lock version, reviewed content, strict mode, acknowledgement. A stale lock version is still `409 VERSION_CONFLICT` first, and now names the current content too; a missing hash is refused before all of these, with the body. The cockpit sends the hash of the content the reviewer opened, never one read again at approval time. The hash is part of the idempotency request hash only when it is named, so a request stored before this field existed still replays.
 - **Example:** `approve v1 with If-Match 4 and hash of the 10000 VND content, content now 12000 VND at lock 4 -> 409 CONTENT_CHANGED, currentCanonicalHash = hash of 12000 VND`; `approve v1 with If-Match 4 and no hash -> 400 CONTENT_HASH_REQUIRED`.
 - **Test ID:** `RLE_084_an_approval_with_the_hash_of_the_current_content_publishes_as_before`, `RLE_084_a_decision_without_a_hash_is_refused_by_default_and_writes_nothing`, `RLE_084_a_decision_without_a_hash_is_allowed_when_the_requirement_is_off`, `RLE_084_turning_the_requirement_off_is_refused_outside_the_dev_profile`, `RLE_084_a_hash_that_no_longer_matches_is_CONTENT_CHANGED_with_the_current_hash_and_nothing_is_approved` and `RLE_084_approve_and_reject_send_the_hash_of_the_content_the_reviewer_opened_without_reading_it_again` (cockpit), `RLE_084_a_version_withdrawn_replaced_and_requested_again_is_refused_with_the_old_hash_even_with_the_new_lock`, `RLE_084_a_rejection_of_other_content_than_reviewed_is_refused_and_writes_nothing`, `RLE_084_a_stale_lock_version_is_still_refused_first_and_names_the_current_state`, `RLE_084_a_hash_that_is_not_64_lower_case_hexadecimal_characters_is_400_input_invalid`, `RLE_084_the_same_key_with_another_hash_is_not_a_replay`, `RLE_084_an_approval_or_rejection_of_other_content_than_reviewed_is_409_and_writes_nothing` (over HTTP), `RLE_084_an_approval_that_names_no_hash_is_400_content_hash_required` (over HTTP)
+
+### RLE-190 The pending approvals list shows every version waiting for a second person, with the hash to review against
+- **Traces to:** `TR-SEC-04`, `TR-SEC-11`, `TR-TEN-01`, `TR-PERF-07`, PD-139, #31
+- **Milestone:** M2
+- **Given:** At `bank-a` `lan` authors and requests `card-fee` v1 (10 January) and v2 (12 January) and `ana` requests `fx-margin` v1 (11 January); v1 of `card-fee` stays pending when v2 is requested. `bob` holds `rules:read` and `rules:approve`, `dan` holds `rules:read` only, an auditor of `bank-b` holds `rules:read`. The V30 index `idx_rle_version_pending` on `(tenant_id, requested_at, id)` over `PENDING_APPROVAL` versions exists.
+- **When:** Each of them calls `GET /approvals`, and `bob` pages it one version at a time with `limit=1` and the `nextCursor` of each page.
+- **Then:**
+  - `bob` gets the three versions oldest request first: `card-fee` v1, `fx-margin` v1, `card-fee` v2. A pending version that is not the latest of its rule set is included. Each item has `ruleSet`, `version`, `canonicalHash` (the value to send back as `expectedCanonicalHash`, `RLE-084`), `lockVersion` (the `If-Match`), `requestedBy`, `requestedAt`, `allowedActions` and `deniedActions`. It never carries the definition, the source or an input value. The status is `200`, the permission is `rules:read`, and nothing is written.
+  - `allowedActions` follows `VersionActions`: `bob` gets `approve` and `reject` and an empty `deniedActions`; `lan`, the requester, gets `withdraw` only, and `deniedActions` is `{approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN}`; the author of a version that another person requested gets `reject` and `approve: SELF_APPROVAL_FORBIDDEN`; `dan` gets none, with `PERMISSION_REQUIRED` for both; a version with no recorded author has `approve: AUTHOR_UNKNOWN` for everyone (`RLE-054`). A version the caller may decide has no entry in `deniedActions`.
+  - The pages hold one item each; the first two carry a `nextCursor` signed for the tenant and this list, the last has none and `hasNext` false. Versions requested at one instant page by id without a gap or a repeat. A version that is approved, rejected or withdrawn leaves the list.
+  - The `bank-b` auditor gets none of `bank-a`'s versions, and `bank-a`'s cursor is `400 QUERY_INVALID` for them, as are an unsigned payload, an edited signature, the cursor of the rule set list, `limit=0` and `limit=500`. A caller without `rules:read` is `403 PERMISSION_DENIED`.
+  - The statement is the registered list query `pending-approvals` (and `pending-approvals-after`) of `RLE-085`: its plan reads `idx_rle_version_pending` in `(requested_at, id)` order with a `Limit` and no sort, and V30 builds that index CONCURRENTLY, repairs an interrupted build and may run twice.
+- **Example:** `GET /approvals?limit=1 as bob -> card-fee v1, requestedBy lan, canonicalHash H1, allowedActions [approve, reject]`; `as lan -> allowedActions [withdraw], deniedActions {approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN}`.
+- **Test ID:** `RLE_190_lists_every_pending_version_oldest_request_first_including_one_that_is_not_the_latest`, `RLE_190_the_proposer_gets_no_approve_and_no_reject_and_the_reason_as_a_code`, `RLE_190_a_reader_without_approve_sees_the_queue_with_permission_required`, `RLE_190_an_author_who_is_not_the_requester_may_reject_but_not_approve`, `RLE_190_a_pending_version_with_no_recorded_author_cannot_be_approved_by_anyone_and_says_so`, `RLE_190_pages_by_signed_cursor_and_a_decided_version_leaves_the_queue`, `RLE_190_another_tenant_sees_none_and_its_cursor_is_not_ours`, `RLE_190_a_forged_or_cross_list_cursor_a_bad_limit_and_a_missing_permission_are_refused`, `RLE_190_answers_the_page_with_the_hash_the_reviewer_sends_back_and_the_callers_actions`, `RLE_190_a_caller_without_read_is_refused_and_a_bad_limit_or_cursor_is_query_invalid`, `RLE_190_lists_the_callers_tenant_oldest_first_across_pages_with_its_hashes`, `RLE_190_requests_made_in_the_same_instant_page_by_id_without_gap_or_repeat`, `RLE_190_the_pending_approvals_pages_read_the_partial_index_in_order_without_a_sort`, `TR_OPS_02_V30_builds_a_valid_partial_index_and_a_rerun_after_an_interrupted_build_replaces_it`
 
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 

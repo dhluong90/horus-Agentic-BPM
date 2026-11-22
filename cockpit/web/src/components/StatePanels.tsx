@@ -64,12 +64,16 @@ function ProblemFacts({ facts }: { facts: readonly Fact[] }) {
   );
 }
 
-/** The calm alert shape: soft fill, a 3 px edge, an icon and a title, then one plain sentence. */
-function AlertPanel({ tone, titleId, title, children }: { tone: 'bad' | 'warn'; titleId: string; title: string; children: ReactNode }) {
+/**
+ * The calm alert shape: soft fill, a 3 px edge, an icon and a title, then one plain sentence. `calm` is for a state
+ * that is nobody's fault (signed out): a plain panel announced as a status, with no alarm colour or icon.
+ */
+function AlertPanel({ tone, titleId, title, children }: { tone: 'bad' | 'warn' | 'calm'; titleId: string; title: string; children: ReactNode }) {
+  const calm = tone === 'calm';
   return (
-    <section className={`panel panel--${tone === 'bad' ? 'error' : 'warn'}`} role="alert" aria-labelledby={titleId}>
+    <section className={`panel panel--${tone === 'bad' ? 'error' : tone}`} role={calm ? 'status' : 'alert'} data-testid={calm ? 'signed-out' : undefined} aria-labelledby={titleId}>
       <h1 id={titleId} className="panel__title">
-        <span className={`status-icon status-icon--${tone}`} aria-hidden="true">{tone === 'bad' ? '✕' : '!'}</span>
+        {calm ? null : <span className={`status-icon status-icon--${tone}`} aria-hidden="true">{tone === 'bad' ? '✕' : '!'}</span>}
         {title}
       </h1>
       {children}
@@ -89,8 +93,10 @@ export function HostErrorPanel({ error, onRetry }: { error: HostError; onRetry: 
         { label: 'error.status', value: String(error.status) },
       ]
     : [];
+  // A signed-out user has done nothing wrong: one calm line and the way back in, no alarm colour or icon.
+  const calm = error.kind === 'signed-out';
   return (
-    <AlertPanel tone="bad" titleId="host-error-title" title={t(text.title)}>
+    <AlertPanel tone={calm ? 'calm' : 'bad'} titleId="host-error-title" title={t(text.title)}>
       <p className="panel__body">{t(text.body)}</p>
       <ProblemFacts facts={facts} />
       <div className="panel__actions">

@@ -138,7 +138,7 @@ for (const screen of SCREENS) {
           await mockRuleEngine(page, screen.scenario, screen.seed ?? demoSeed(), screen.audit ?? {});
           await screen.override?.(page);
           await page.goto(`./${screen.hash}`);
-          await expect(screen.signedOut === true ? page.getByRole('alert') : page.getByTestId('header-user')).toBeVisible();
+          await expect(screen.signedOut === true ? page.getByTestId('signed-out') : page.getByTestId('header-user')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await screen.prepare?.(page, locale);
           const focus = screen.focus(page, locale);

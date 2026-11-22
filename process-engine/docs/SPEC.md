@@ -148,6 +148,78 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `Forward [A, B, C(fail)] -> Compensate [comp(B), comp(A)] in LIFO order`.
 - **Test ID:** `PRE_013_failure_executes_reverse_saga_compensation`
 
+A `saga` block is a BPMN `transaction`: its steps run under the block's own scope token (ADR-0020). A completed `serviceTask` or `agentTask` with `horus:compensate` pushes one entry onto `pre_compensation_stack` (V31) under its scope token. A step that fails for good with `horus:onFailure="compensate"`, or a `throwCompensation` (an `intermediateThrowEvent` with a `compensateEventDefinition`, inside a `saga`), walks the stack of that scope token newest first, one undo at a time. Each undo is a `COMPENSATION` job keyed by its own job id. A remote or agent step's undo is a `ServiceAdapter` called with no transaction open. A local step's undo is a `ServiceTaskHandler` that runs in the job's result transaction. The instance is `COMPENSATING` during the walk and ends `FAILED`.
+
+### PRE-073 A failed transfer undoes its completed steps newest first, and each undo gets the forward step's keys
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04`, `TR-ASY-01`, #67
+- **Milestone:** M2
+- **Given:**
+  - Definition `fund-transfer` has a `saga` block `transfer` with three steps:
+    - `hold-funds`: local, compensated by the local `release-hold`;
+    - `debit-source`: remote, adapter `core-banking`, compensated by the remote `credit-back`;
+    - `credit-target`: remote, `onFailure: compensate`.
+  - An instance moves `25,000,000 VND` from account `0011-223344` to `0099-887766`.
+  - `debit-source` was accepted on job `J1`, attempt 1.
+- **When:** `credit-target` fails with `BUSINESS_ERROR` `ACCOUNT_CLOSED`.
+- **Then:**
+  - Because the step declares `onFailure: compensate`, the failure starts compensation instead of the incident of `PRE-040`. The same happens when a step's job reaches `FAILED` for any other reason: not retryable, or the last attempt used.
+  - The instance is `COMPENSATING` and `processes.compensation.started.v1` carries the `transfer` scope token and stack depth 2.
+  - `credit-back` runs first, as a `COMPENSATION` job `C1` with the `runners.compensation` retry policy. The adapter call carries:
+    - `idempotencyKey = C1`, kept on every retry;
+    - `forwardJobId = J1`, the key the original debit was posted under, so the core can find and reverse it;
+    - `forwardAttemptId`, the accepted forward attempt;
+    - the entry's input snapshot: the forward inputs and, under `forwardResult`, the forward result.
+  - `release-hold` runs only after `C1` is `DONE`, in its own transaction, and receives `forwardAttemptId`.
+  - Both entries end `DONE`, the `transfer` scope token ends `COMPENSATED`, live flow tokens are `CANCELLED`, and the instance ends `FAILED` with `processes.instance.failed.v1`.
+  - `credit-target` was never completed, so it is never compensated.
+  - A `compensate` name that no host bean registers is refused at `:request-approval` and `:approve` with `422 VALIDATION_FAILED`, as in `PRE-072`: `HANDLER_NOT_REGISTERED` for a local step's undo, `ADAPTER_NOT_REGISTERED` for a remote or agent step's undo. An unknown `onFailure` value or an undo name that is not a name is refused at import (`ON_FAILURE_INVALID`, `COMPENSATE_INVALID`).
+- **Example:** `[hold-funds, debit-source, credit-target(fail)] -> credit-back(forwardJobId J1) -> release-hold -> FAILED, scope COMPENSATED`.
+- **Test ID:** `PRE_073_*` in `SagaCompensationTest` (`process-engine-postgres`) and `SagaBlockTest` (`process-engine-bpmn`)
+
+### PRE-074 An undo that fails raises an incident, stops the walk and keeps what was undone
+- **Traces to:** `TR-COMP-02`, `TR-OPS-03`, `TR-IDEM-04`, PD-126, #67
+- **Milestone:** M2
+- **Given:** The instance of `PRE-073`, where `credit-back` answers `BUSINESS_ERROR` `ACCOUNT_FROZEN`. Separately, `credit-back` times out on all 3 attempts.
+- **When:** Each failure is recorded.
+- **Then:**
+  - The stack entry of `debit-source` is `FAILED`.
+  - An incident `COMPENSATION_FAILED` opens on node `debit-source`. It names the stack entry, `forwardJobId J1` and the cause code (`ACCOUNT_FROZEN` or `ADAPTER_TIMEOUT`), and `processes.incident.raised.v1` is published with the cause as `businessCode`. The adapter's message is never stored.
+  - The walk pauses: `release-hold` stays `PENDING` and the instance stays `COMPENSATING`.
+  - A retry of the incident (`PRE-077`) runs `credit-back` again under the same job id `C1` with a new attempt id, so the core never credits twice. Its success resolves the incident `RETRY_SUCCEEDED`.
+  - A resolution (`PRE-078`) marks the undo done by hand: one operator proposes it with a reason, a second approves it, and the incident is `RESOLVED` with `COMPLETED_MANUALLY`.
+  - Once the entry is `DONE`, by a retry or by a resolution, the walk continues with `release-hold`.
+- **Example:** `credit-back ACCOUNT_FROZEN -> COMPENSATION_FAILED, release-hold PENDING, instance COMPENSATING`.
+- **Test ID:** `PRE_074_*` in `SagaCompensationTest`
+
+### PRE-075 A manual undo opens an incident with the step's context instead of being skipped
+- **Traces to:** `TR-COMP-03`, `TR-SEC-05`, PD-126, #67
+- **Milestone:** M2
+- **Given:** `debit-source` declares `compensate: manual`.
+- **When:** The walk reaches its entry.
+- **Then:**
+  - The entry is `MANUAL` and an incident `COMPENSATION_MANUAL_REQUIRED` opens. The incident names the step, the forward job id and the forward attempt id. History records `COMPENSATION_STEP_MANUAL` with those ids and the input snapshot, masked inputs as keyed hashes only.
+  - The walk pauses until the incident is resolved. A retry is `409 INVALID_STATE`, because a manual undo has nothing to run, and the incident offers `resolve` only.
+  - Nothing is skipped silently (`TR-COMP-03`).
+- **Example:** `compensate: manual on debit-source -> COMPENSATION_MANUAL_REQUIRED, walk paused`.
+- **Test ID:** `PRE_075_*` in `SagaCompensationTest`
+
+### PRE-076 A compensation walks only its own scope, and a compensating instance cannot be cancelled
+- **Traces to:** `TR-STD-29`, `TR-COMP-01`, `TR-TEN-01`, #67
+- **Milestone:** M2
+- **Given:** One instance of `fx-booking` whose root scope holds the completed step `open-account`, and two `saga` entries `fx-leg-1` and `fx-leg-2`, each with two compensable steps.
+- **When:**
+  - (a) `fx-leg-2`'s confirmation fails with `onFailure: compensate`.
+  - (b) `throwCompensation` runs inside `fx-leg-1`.
+  - (c) `POST /instances/{id}:cancel` is sent while the instance is `COMPENSATING`.
+- **Then:**
+  - (a) Only the two entries of `fx-leg-2` are undone. `fx-leg-1` and `open-account` are untouched (`PRE-044`, `TR-STD-29`).
+  - (b) Only `fx-leg-1`'s entries are walked.
+  - (c) The cancel is `409 INVALID_STATE`, and its detail says a compensation is running. An undo is never abandoned half way. An operator resolves the incidents first.
+  - A step without a `compensate` handler pushes no entry. A `throwCompensation` outside a `saga` is refused at import (`THROW_COMPENSATION_OUTSIDE_SAGA`), and a sequence flow that crosses a block's boundary when the definition is compiled (`FLOW_CROSSES_SAGA`).
+  - An undo is engine work in the tenant of the locked `pre_instance` row, with no caller. Another tenant's instance or incident answers `404`, and nothing is written.
+- **Example:** `fx-leg-2 fails -> 2 undos in fx-leg-2 only; cancel while COMPENSATING -> 409 INVALID_STATE`.
+- **Test ID:** `PRE_076_*` in `SagaCompensationTest` and `SagaBlockTest`
+
 ### PRE-014 Migration validate dry-run detects unmapped steps without mutating instances
 - **Traces to:** `TR-MIG-01`
 - **Milestone:** M2
@@ -158,13 +230,54 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `PRE_014_migration_validate_reports_unmapped_steps_without_mutation`, `PRE_014_a_step_kept_under_its_id_as_another_step_type_is_a_conflict`, `PRE_014_a_plan_whose_steps_all_map_is_valid_and_lists_every_instance_that_would_move`, `PRE_014_every_registered_dry_run_query_is_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_counts_are_answered_by_an_index_on_a_seeded_database`, `PRE_014_the_dry_run_reads_return_the_seeded_rows_of_one_tenant_and_version`, `PRE_014_the_dry_run_report_matches_the_contract`
 
 ### PRE-015 Batched migration isolates per-instance failures without stalling healthy instances
-- **Traces to:** `TR-MIG-02`
+- **Traces to:** `TR-MIG-02`, #90
 - **Milestone:** M2
-- **Given:** Validated migration plan `v1 -> v2` across 250 running instances where instance `#120` hits a transient lock conflict or mapping invariant error.
-- **When:** Execute `POST /api/bpm/processes/v1/migrations/{id}:execute`.
-- **Then:** 249 healthy instances pin to `v2` with `MIGRATED` `pre_history` rows; instance `#120` gets an incident without rolling back the other 249 instances.
-- **Example:** `250 instances (1 corrupt) -> 249 migrated to v2, 1 incident raised`.
-- **Test ID:** `PRE_015_migration_execute_isolates_instance_failure`
+- **Given:** Approved migration plan `v1 -> v2` (`PRE-195`) across 250 running instances, `migration.batch-size` 100. Since the dry run, instance `#120`'s token has reached a step the target does not keep (a mapping invariant error). In a second case another transaction holds the row lock of one instance (a transient lock conflict). In a third, one instance ends after the batch was read.
+- **When:** The runner executes the plan, in batches, one instance lock at a time.
+- **Then:** 249 healthy instances pin to `v2`: `pre_instance`, every token, open task, due job and recorded result point at the `v2` row, and each has one `MIGRATED` `pre_history` row naming the approver, the proposer, the reason and both versions. Instance `#120` stays on `v1`, with one `OPEN` incident `MIGRATION_FAILED` on its step and an outcome `FAILED` with the code `STEP_NOT_IN_TARGET`, without rolling back the other 249 instances. The lock conflict is `FAILED` with `LOCK_CONFLICT` and an incident, the other instances move; the instance that ended is `SKIPPED` with `NOT_RUNNING` and has no incident. The plan ends `COMPLETED_WITH_FAILURES` (`COMPLETED` when nothing failed) with exact counts of migrated, failed and skipped, and publishes `processes.migration.completed.v1`. A moved instance goes on to a step that only `v2` has. A second run moves and writes nothing.
+- **Example:** `250 instances (1 corrupt) -> 249 migrated to v2, 1 incident raised, plan COMPLETED_WITH_FAILURES 249/1/0`.
+- **Test ID:** `PRE_015_migration_execute_isolates_instance_failure`, `PRE_015_a_moved_loan_continues_on_the_new_version`, `PRE_015_a_loan_another_transaction_holds_is_a_failure_with_an_incident_and_the_others_move`, `PRE_015_a_loan_that_ended_before_the_runner_reached_it_is_skipped_not_failed`
+
+### PRE-195 An execution is proposed with a reason and runs only after a second holder approves it
+- **Traces to:** `TR-MIG-01`, `TR-SEC-04`, `TR-SEC-11`, PD-114, PD-131, #90
+- **Milestone:** M2
+- **Given:** `loan-review` v1 retired with 5 running loans, v2 active; a plan v1 to v2 created by `thu`; `thu` and `lan` hold `processes:migration:manage`; `migration.dry-run-validity` is one hour.
+- **When:** `thu` proposes the execution with the reason `Add the audit sample after officer review, change CHG-2041` and then tries to approve and to reject it; the runner polls; `lan` approves with a stale and then with the right `If-Match`; in other cases the reason is blank, the caller lacks the permission, a loan has since reached a step `v2` lacks, `lan` approves 61 minutes after the proposal, and `lan` rejects instead.
+- **Then:**
+  - The engine runs the dry run itself at the proposal and at the approval; a plan with a conflict is `409 DRY_RUN_REQUIRED` naming the number of conflicts, as is an approval whose proposal's dry run is older than the validity, and nothing is written. A proposal whose dry run has expired may be proposed again.
+  - The proposal is `PROPOSED` with proposer, reason and time, `lockVersion` 1, and `processes.migration.proposed.v1`; it moves nothing and the runner finds nothing to run. `thu`'s own approval or rejection is `403 SELF_APPROVAL_FORBIDDEN` and changes nothing; a stale `If-Match` is `409 VERSION_CONFLICT`; a blank reason is `400 INPUT_INVALID`; a caller without the permission is `403 PERMISSION_DENIED`.
+  - `lan`'s approval makes the plan `APPROVED` with both people, in one transaction with its history row and `processes.migration.approved.v1`; only now does the runner move instances. A rejection with a reason makes it `REJECTED`, moves nothing, and the plan may be proposed again.
+  - With `migration.approval=single`, accepted on the `dev` profile only, the proposal is approved by the proposer at once and the history row records `single`. A repeat of a command with the same `Idempotency-Key` returns the first answer and writes nothing; the same key with another reason is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - The table refuses a `RUNNING` or `APPROVED` plan without an approver and a four-eyes plan whose approver is its proposer, whoever writes the row.
+- **Example:** `thu proposes, thu approves -> 403; lan approves -> APPROVED, runner moves 5; plan with 1 blocked loan -> 409 DRY_RUN_REQUIRED`.
+- **Test ID:** `PRE_195_a_second_holder_approves_and_only_the_approval_lets_the_runner_move_instances`, `PRE_195_a_rejected_proposal_moves_nothing_and_may_be_proposed_again`, `PRE_195_a_proposal_needs_a_reason_a_passing_dry_run_and_the_permission`, `PRE_195_the_dry_run_must_still_be_fresh_and_still_pass_when_the_second_person_approves`, `PRE_195_single_person_execution_is_approved_at_once_and_recorded_as_single`, `PRE_195_a_proposal_is_idempotent_and_a_key_is_not_reused_for_another_reason`, `PRE_195_the_table_refuses_a_running_plan_nobody_approved_and_a_four_eyes_approval_by_the_proposer`, `PRE_195_execution_bodies_and_problems_match_the_contract`
+
+### PRE-196 Another tenant can neither propose, approve nor read an execution, and nothing is written
+- **Traces to:** `TR-TEN-01`, `TR-MIG-01`, #90
+- **Milestone:** M2
+- **Given:** `bank-a`'s plan with a proposal over 3 running loans; `bank-b` has 4 running loans of its own and its own approved plan.
+- **When:** A manager of `bank-b` proposes, approves, rejects, reads and lists the outcomes of `bank-a`'s plan; the runner then polls twice.
+- **Then:** Each is `404 MIGRATION_NOT_FOUND`; every engine table holds the same rows and no event is published. A runner pass takes the plan of one tenant and moves only that tenant's loans: `bank-a` ends with 3 outcome rows and `bank-b` with 4, and neither tenant's progress counts the other's. The tenant of a plan is read from its row, never from a request.
+- **Example:** `bank-b approves bank-a's proposal -> 404, 0 rows; bank-a 3 moved, bank-b 4 moved`.
+- **Test ID:** `PRE_196_another_tenant_can_neither_propose_approve_nor_read_a_migration_and_nothing_is_written`
+
+### PRE-197 A crashed runner's plan is taken over after its lease and continues after the last committed instance
+- **Traces to:** `TR-MIG-02`, `TR-OPS-01`, #90
+- **Milestone:** M2
+- **Given:** An approved plan over 60 loans, `migration.batch-size` 25, `migration.lease` two minutes; the runner on `pod-a` stops after its 40th loan as a crash would.
+- **When:** `pod-b` polls at once, and again after the lease has ended.
+- **Then:** After the crash 40 loans are moved, the plan is `RUNNING` and `pod-a` holds the lease, so `pod-b` takes nothing. After the lease `pod-b` moves the 20 loans after the last committed one. Every loan has exactly one `MIGRATED` history row and one outcome row, the counts are 60/0/0, the plan is `COMPLETED`. The cursor, the counts and the lease are written in the transaction of each loan, so no state exists in which a loan is moved and not counted.
+- **Example:** `crash after 40 of 60 -> pod-b at +2 min moves 20, 60 MIGRATED rows, none twice`.
+- **Test ID:** `PRE_197_a_crashed_runner_is_taken_over_after_its_lease_and_continues_after_the_last_committed_instance`
+
+### PRE-198 One runner writes a plan at a time, and a runner that lost its lease writes nothing more
+- **Traces to:** `TR-MIG-02`, `TR-TEN-01`, #90
+- **Milestone:** M2
+- **Given:** An approved plan over 30 loans. Case 1: `pod-a` is slow; after its 5th loan its lease ends, `pod-b` takes the plan and finishes it, and `pod-a` then goes on with its batch. Case 2: `pod-b` polls while `pod-a` holds the lease.
+- **When:** `pod-a` reaches its 6th loan, which `pod-b` has already moved; `pod-b` polls during `pod-a`'s run.
+- **Then:** `pod-a` stops: its transaction is rolled back because it no longer holds the lease, and it counts nothing. `pod-b` did the other 25 loans. 30 `MIGRATED` rows, 30 outcome rows, counts 30/0/0, no loan moved or counted twice. In case 2 `pod-b` finds nothing to run while the lease is held. The claim is `FOR UPDATE SKIP LOCKED` on the plan row.
+- **Example:** `pod-a loses its lease after 5 -> pod-b moves 25, pod-a writes nothing more; 30 rows in all`.
+- **Test ID:** `PRE_198_one_writer_per_plan_a_runner_that_lost_its_lease_writes_nothing_more`, `PRE_198_two_runners_never_take_the_same_plan`
 
 ---
 
@@ -253,6 +366,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Both are imported as drafts, and the published hashing reference (RFC 8785 then SHA-256, `diagram` removed) is run on the file in CI.
 - **Then:** Both drafts carry the same `definitionHash`, equal to the hash computed in CI; the graph diff between them is empty.
 - **Example:** `hash(yaml with diagram) == hash(json reordered, no diagram) == ci_hash(file)`.
+- **Scope today:** The engine reads BPMN XML only; the `process-definition.v1` JSON and YAML reader is `PRE-043`. Until it ships the case runs on a BPMN file with a `BPMNDI` diagram, the same file with its attributes in another order and every box moved, and the file without any diagram, imported by two tenants. The stored definition holds no diagram, all three carry the hash that an independent run of the published reference (diagram removed, RFC 8785, SHA-256) gives for the stored document, a moved diagram is no new version, and a layout saved afterwards leaves the hash alone. The YAML and JSON file cases follow with `PRE-043`.
 - **Test ID:** `PRE_024_content_hash_excludes_diagram_and_matches_git`
 
 ### PRE-025 Graph diff lists nodes and edges added, removed and changed
@@ -270,8 +384,18 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Given:** `kyc-onboarding` v2 `ACTIVE` with layout revision 3; `carol` and `dave` hold `processes:author`.
 - **When:** `carol` saves a layout with `If-Match: "3"`; `dave` then saves with `If-Match: "3"`; `carol` saves a layout naming node `ghost-step`.
 - **Then:** `carol`'s first save returns `200` with revision 4, `createdBy: carol`; the definition status, hash and `lockVersion` are unchanged and no approval is requested. `dave` gets `409 VERSION_CONFLICT`. The `ghost-step` save gets `422 LAYOUT_INVALID`. Revisions 1 to 4 remain readable.
+- **Also:** Two saves over the same revision at once make exactly one new revision and one `409 VERSION_CONFLICT`. The table refuses `UPDATE`, `DELETE` and `TRUNCATE` of a revision (SQLSTATE `55000`). A save publishes `processes.definition.layout-saved.v1` and is allowed for a draft, an active and a retired version, and while `authoring.cockpit-drafts` is off, because a layout is not a draft. A version that has no layout answers `204` with `ETag: "0"`, so the first save sends `If-Match: "0"`.
 - **Example:** `save layout If-Match 3 -> revision 4, hash unchanged; concurrent If-Match 3 -> 409`.
-- **Test ID:** `PRE_026_layout_revision_append_only_without_approval`
+- **Test ID:** `PRE_026_layout_revision_append_only_without_approval`, `PRE_026_two_saves_over_the_same_revision_at_once_make_exactly_one_revision`, `PRE_026_the_table_refuses_to_change_or_delete_a_revision`, `PRE_026_a_layout_can_be_saved_for_a_draft`, `PRE_026_layout_bodies_and_problems_match_the_contract`
+
+### PRE-199 A layout is checked against its schema and the steps of its version, needs the right permission, and never crosses tenants
+- **Traces to:** `TR-DEF-02`, `TR-TEN-01`, #102
+- **Milestone:** M3
+- **Given:** `kyc-onboarding` v1 of `bank-a`; `carol` holds `processes:author`; `viewer` holds `processes:read` only; a caller of `bank-b` holds both.
+- **When:** `carol` saves a layout with `schemaVersion` 2, a box with a text `x` and an unknown member, a lane with a repeated step and a step the version lacks, a link to a step the version lacks, and an unknown top-level member; she repeats a valid save with the same `Idempotency-Key`, and reuses the key for another layout; `viewer` saves; a caller with neither permission reads; the `bank-b` caller reads, lists and saves `bank-a`'s layout.
+- **Then:** The invalid save is `422 LAYOUT_INVALID` listing each problem as a path and a reason in `paths`, at most 20, never a value, and writes nothing. The repeat returns the first revision and writes nothing; the reused key is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. `viewer`'s save is `403 PERMISSION_DENIED`, the read without permission as well. The `bank-b` calls are `404 DEFINITION_NOT_FOUND`, no row or event is written, and `bank-b` has its own layout history for its own version.
+- **Example:** `nodes.ghost-step -> 422, paths ["$.nodes.ghost-step names a step that is not in the definition"]; bank-b reads bank-a's layout -> 404`.
+- **Test ID:** `PRE_199_a_layout_is_validated_against_its_schema_and_the_steps_of_the_version`, `PRE_199_a_save_is_idempotent_and_a_key_is_not_reused_for_another_layout`, `PRE_199_saving_needs_the_author_permission_and_reading_the_read_permission`, `PRE_199_another_tenant_can_neither_read_nor_save_a_layout_and_nothing_is_written`
 
 ### PRE-037 Definition lifecycle events are published inside the state transaction
 - **Traces to:** `TR-OBS-04`, `TR-OBS-06`
@@ -454,7 +578,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** An instance starts and runs until `notify-partner` fails.
 - **Then:** At start `pre_token` holds one root `SCOPE` token (`scope_token_id` null, `current_node_id = loan-booking`, `WAITING_SCOPE`) and one `FLOW` token under it; entering `disburse` creates a second `SCOPE` token whose `scope_token_id` is the root; the join counts only the two `FLOW` tokens of the `disburse` scope token and creates exactly one outgoing token; `pre_compensation_stack` holds `cancelLoan` under the root scope token and `releaseFunds` and `closeAccount` under the `disburse` scope token; after the failure the engine runs the two `disburse` handlers newest first, never `cancelLoan`, and the `disburse` scope token ends `COMPENSATED` while the root `cancelLoan` entry stays `PENDING`; a second instance started at the same time shares no token or stack row with the first.
 - **Example:** `notify-partner fails in saga disburse -> the two disburse handlers run newest first; cancelLoan is not run`.
-- **Test ID:** `PRE_044_joins_and_compensation_keyed_by_scope_token`
+- **Test ID:** `PRE_044_*`: the join half in `ParallelGatewayTest` and `ParallelJoinPostgresIT` (#251), the compensation half in `SagaCompensationTest` and `SagaBlockTest` (#67)
 
 ### PRE-045 Engine REST bodies ignore the host's JSON settings
 - **Traces to:** `TR-EMB-07`, `TR-API-06`
@@ -975,6 +1099,20 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 - **Example:** `bob approves with H after the content became H2 -> 409 CONTENT_CHANGED (current H2), 0 rows`.
 - **Test ID:** `PRE_177_an_approval_with_the_reviewed_hash_publishes_the_version_and_records_the_hash`, `PRE_177_an_approval_of_content_changed_after_review_is_refused_naming_the_current_hash_and_writes_nothing`, `PRE_177_an_approval_without_a_hash_is_refused_while_the_setting_is_on`, `PRE_177_with_the_dev_relaxation_an_approval_without_a_hash_is_accepted`, `PRE_177_another_tenants_version_is_refused_and_nothing_is_written`, `PRE_177_a_replay_with_another_hash_under_the_same_key_is_a_key_reuse`, `PRE_177_a_truncated_diff_exposes_no_approvable_hash_and_an_approval_against_it_is_refused`, `PRE_177_the_two_approval_refusals_match_the_contract_and_name_the_current_content`, `PRE_177_an_approval_without_the_reviewed_hash_is_accepted_only_on_the_dev_profile`
 
+### PRE-190 The pending approvals list shows every definition version waiting for a second person, with the hash to review against
+- **Traces to:** `TR-SEC-04`, `TR-SEC-11`, `TR-TEN-01`, `TR-PERF-07`, PD-139, #31
+- **Milestone:** M2
+- **Given:** At `bank-a` the pipeline imports `kyc-onboarding` v1 and v2 and `loan-origination` v1; `alice` requests approval of `kyc-onboarding` v1 (5 April), `loan-origination` v1 (6 April) and `kyc-onboarding` v2 (7 April); v1 of `kyc-onboarding` stays pending when v2 is requested. `bob` holds `processes:read` and `processes:approve`, `dan` holds `processes:read` only, an auditor of `bank-b` holds `processes:read`. The V35 index `idx_pre_definition_pending_page` on `(tenant_id, requested_at, id)` over `PENDING_APPROVAL` versions exists, and `horus.bpm.lifecycle.approver-must-differ-from` is `makers` (the default).
+- **When:** Each of them calls `GET /approvals`, and `bob` pages it one version at a time with `limit=1` and the `nextCursor` of each page.
+- **Then:**
+  - `bob` gets the three versions oldest request first: `kyc-onboarding` v1, `loan-origination` v1, `kyc-onboarding` v2. A pending version that is not the latest of its key is included. Each item has `key`, `name`, `version`, `definitionHash` (the value to send back as `expectedDefinitionHash`, `PRE-177`), `lockVersion` (the `If-Match`), `requestedBy`, `requestedAt`, `allowedActions` and `deniedActions`. It never carries the definition, the source or a variable. The status is `200`, the permission is `processes:read`, and nothing is written.
+  - `allowedActions` follows the commands: `bob` gets `approve` and `reject` and an empty `deniedActions`; `alice`, the requester, gets none, with `{approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN}`; the pipeline, the importer, holding `processes:approve`, gets `reject` and `approve: SELF_APPROVAL_FORBIDDEN` (`PRE-019`, PD-096, PD-097); `dan` gets none, with `PERMISSION_REQUIRED` for both. With `maker-checker.enabled` false (dev profile only) a requester may approve, as the command allows.
+  - The pages hold one item each; the first two carry a `nextCursor` signed for the tenant and this list, the last has none and `hasNext` false. A version that is approved or rejected leaves the list.
+  - The `bank-b` auditor gets none of `bank-a`'s versions, and `bank-a`'s cursor is `400 QUERY_INVALID` for them, as are an unsigned payload, an edited signature, the cursor of the definition list, a cursor that is not a cursor, and `limit=500`. A caller without `processes:read` is `403 PERMISSION_DENIED`.
+  - The statement is the registered list query `pending-approvals` (and `pending-approvals-after`) of `PRE-036`: its plan reads `idx_pre_definition_pending_page` in `(requested_at, id)` order with a `Limit` and no sort, and V35 builds that index CONCURRENTLY on a table that holds definitions, and a re-run after a failed build drops the invalid index and builds it again.
+- **Example:** `GET /approvals?limit=1 as bob -> kyc-onboarding v1, requestedBy alice, definitionHash H1, allowedActions [approve, reject]`; `as alice -> allowedActions [], deniedActions {approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN}`.
+- **Test ID:** `PRE_190_lists_every_pending_version_oldest_request_first_including_one_that_is_not_the_latest`, `PRE_190_the_requester_gets_neither_approve_nor_reject_and_the_reason_as_a_code`, `PRE_190_the_maker_may_reject_but_not_approve_under_the_default_makers_rule`, `PRE_190_a_reader_without_approve_sees_the_queue_with_permission_required`, `PRE_190_pages_by_signed_cursor_and_a_decided_version_leaves_the_queue`, `PRE_190_another_tenant_sees_none_and_its_cursor_is_not_ours`, `PRE_190_a_forged_or_cross_list_cursor_a_bad_limit_and_a_missing_permission_are_refused`, `PRE_190_the_page_matches_the_contract_and_carries_the_hash_and_the_actions_but_no_definition`, `PRE_190_a_bad_limit_a_forged_cursor_and_a_missing_permission_are_problems_of_the_contract`, `PRE_190_the_pending_approvals_pages_read_the_partial_index_in_order_without_a_sort`, `TR_OPS_01_V35_builds_a_valid_partial_index_on_existing_definitions_concurrently`, `TR_OPS_01_a_rerun_of_V35_after_a_failed_build_drops_the_invalid_index_and_builds_it_again`
+
 ---
 
 ## Agent Memory (#101)
@@ -1073,6 +1211,37 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 
 ---
 
+## Delegate and Reassign Tasks (#263, PD-110)
+
+### PRE-183 A supervisor reassigns an open task or delegates a claimed one, with a reason, and the move is recorded with both people
+- **Traces to:** `TR-IDEM-03`, `TR-SEC-04`, `TR-AUD-01`, #263
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`; loan application `LN-2027-0042` started by `alice`, submitted by `bob`; its `check-documents` task `T1` is assigned to `role:LOAN_OFFICER`, `OPEN` at `lockVersion = 0`; officers `carol` and `dan` hold `LOAN_OFFICER` in the host directory; supervisor `hoa` holds `processes:task:manage` and `processes:task:work`; `carol` is on leave.
+- **When:** (a) `hoa` reads `GET /tasks/T1`. (b) `hoa` posts `POST /tasks/T1:reassign` with `If-Match: "0"`, `Idempotency-Key: re-1` and `{ "assignee": "carol", "reason": "Loan queue is backed up" }`, then replays it. (c) `carol` falls ill; `hoa` posts `POST /tasks/T1:delegate` with `If-Match: "1"`, `Idempotency-Key: de-1` and `{ "assignee": "dan", "reason": "Carol is on sick leave" }`, then replays it. (d) `hoa` posts `:reassign` to the now claimed task, and `:delegate` to an open one.
+- **Then:** (a) `allowedActions` is `["reassign"]`. (b) `200` with `status: CLAIMED`, `claimedBy: carol`, `lockVersion: 1`, `ETag: "1"` and `allowedActions: ["delegate"]`; the replay returns the same body; one `TASK_REASSIGNED` history entry with actor `hoa`, claimant `carol` and the reason, and one `processes.task.reassigned.v1` carrying `reassignedBy: hoa`, `claimedBy: carol` and the reason, in the usual envelope. (c) `200` with `claimedBy: dan`, `lockVersion: 2`; one `TASK_DELEGATED` entry and one `processes.task.delegated.v1` with `delegatedBy: hoa`, `previousClaimant: carol`, `claimedBy: dan` and the reason; the replay changes nothing. The task keeps `assignee: role:LOAN_OFFICER`. (d) `409 INVALID_STATE` each time; nothing is written. A task that is `COMPLETED` or `CANCELLED` is refused the same way.
+- **Example:** `reassign(T1, "carol", "Loan queue is backed up", If-Match "0") -> 200 CLAIMED by carol; delegate(T1, "dan", ..., If-Match "1") -> 200 CLAIMED by dan`.
+- **Test ID:** `PRE_183_reassign_and_delegate_move_a_task_and_record_both_people_and_the_reason`, `PRE_183_a_completed_or_cancelled_task_is_never_moved`, `PRE_183_a_replay_returns_the_first_answer_and_writes_nothing`
+
+### PRE-184 A target who may not work the task is refused with ASSIGNEE_NOT_ALLOWED and nothing is written
+- **Traces to:** `TR-SEC-04`, `TR-IDEM-03`, #263
+- **Milestone:** M2
+- **Given:** The loan application of `PRE-183` with its four-eyes `approve-credit` task `T2` for `role:LOAN_OFFICER`, claimed by `carol`, `lockVersion = 3`; `alice` started the instance and `bob` completed its `submit-application` task; `lan` holds `CUSTOMER_SERVICE` only; the host directory knows `alice`, `bob`, `carol` and `dan` as `LOAN_OFFICER`. A second open task `T3`, assigned to `user:carol`.
+- **When:** `hoa` delegates `T2` to `alice`, then to `bob`, then to `lan`, then to `carol`, then to `system:timer`, then to `dan`; and reassigns `T3` to `lan`.
+- **Then:** The first five are `409 ASSIGNEE_NOT_ALLOWED` (started the instance, completed an earlier task, lacks the role, already holds the task, reserved identity); the history, the events, the idempotency records and `T2`'s `lockVersion` are unchanged after each. `dan` succeeds. A task assigned to one user can go to `lan`. With no directory bean, a role or group task cannot be given to a named user: `409 ASSIGNEE_NOT_ALLOWED`.
+- **Example:** `delegate(T2, "alice") -> 409 ASSIGNEE_NOT_ALLOWED (started this instance); delegate(T2, "dan") -> 200`.
+- **Test ID:** `PRE_184_the_starter_and_an_earlier_completer_cannot_be_given_a_four_eyes_task`, `PRE_184_a_user_without_the_role_or_group_is_refused_and_a_user_task_goes_to_anyone`, `PRE_184_without_a_directory_a_role_task_cannot_be_given_to_a_named_user`
+
+### PRE-187 Moving a task needs the manage permission, a reason, If-Match and an Idempotency-Key, and never crosses tenants
+- **Traces to:** `TR-SEC-04`, `TR-TEN-01`, `TR-IDEM-03`, #263
+- **Milestone:** M2
+- **Given:** `T1` of `PRE-183` at `lockVersion = 0`; `carol` holds `processes:task:work` only; `hoa` holds `processes:task:manage`; supervisor `thu` of tenant `bank-b` holds the same permission; the REST adapter over the engine.
+- **When:** (a) `carol` posts `:reassign`. (b) `hoa` posts with `If-Match: "7"`. (c) `hoa` posts without `If-Match`, without `Idempotency-Key`, with no `reason`, a blank one, a 501-character one, and a body without `assignee`. (d) `hoa` sends `re-1` again with another assignee. (e) `thu` posts `:reassign` for `T1`. (f) `GET /tasks/T1` by `carol`.
+- **Then:** (a) `403 PERMISSION_DENIED`. (b) `409 VERSION_CONFLICT`. (c) `428 PRECONDITION_REQUIRED` twice, then `400 INPUT_INVALID` for each bad body. (d) `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. (e) `404 TASK_NOT_FOUND`; no row of `bank-b` is written. (f) `allowedActions` has no `reassign`. Nothing is written by any refusal, and `T1` stays at `lockVersion 0`. A 500-character reason is accepted.
+- **Example:** `POST /tasks/T1:reassign {"assignee":"carol","reason":""} -> 400 INPUT_INVALID`.
+- **Test ID:** `PRE_187_moving_a_task_needs_the_manage_permission_and_the_task_stays_unchanged_when_refused`, `PRE_187_another_tenant_cannot_see_or_move_the_task`, `PRE_187_the_rest_adapter_enforces_headers_reason_and_error_codes`
+
+---
+
 ## Metrics, Events and Throughput (#86)
 
 ### PRE-084 Metrics count only committed work, carry bounded tags and never a tenant or a business value
@@ -1120,3 +1289,102 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 - **Then:** It publishes `throughput-report.json` and `.md` with the sustained transitions per second, the p50, p95 and p99 time of one engine call, the most pool connections in use, the runner's vCPU count and memory, and the PostgreSQL version. A result below 1,000 per second, or more than 20 % below the previous `main` report, is a warning in the report and the job summary. It never fails the build (PD-026).
 - **Example:** `1,180 transitions/s, p95 7 ms, 4 vCPU runner -> report published, no gate`.
 - **Test ID:** `PRE_087_throughput_report_is_written_and_never_gates`
+
+---
+
+## Guarded Agent Example (#66)
+
+The example host `examples/guarded-agent-process` runs the guarded agent journey on the engine APIs alone, with seed data and a scripted demo. It has no cockpit dependency; the cockpit's instance view (#57) reads the same APIs.
+
+### PRE-185 An agent answer the guardrail allows moves the loan on, and a refused one goes to a second person
+- **Traces to:** `TR-AGT-01`, `TR-SEC-11`, #66
+- **Milestone:** M2
+- **Given:** The example host on the `dev` profile. Its seeder publishes `loan-document-guardrails` through maker-checker (R2: a risk score of 70 or more is refused, `HIGH_RISK_SCORE`) and deploys `loan-document-review`: the agent step `assess-documents` with `onViolation: route-to-human` and reviewer `role:COMPLIANCE_REVIEWER`, then `underwrite`. Tenant `bank-a` has three seeded applications: `LN-2026-0101` (250,000,000 VND, 3 documents), `LN-2026-0102` (1,500,000,000 VND, 3 documents) and `LN-2026-0103` (600,000,000 VND, 2 documents). The stub assessor approves every complete file, scoring 85 from 1,000,000,000 VND and 20 below, and refers an incomplete one with 55.
+- **When:** Tellers send the three applications to review with `POST /loan-applications/{id}:review`, and the agent step runs for each.
+- **Then:**
+  - `LN-2026-0101`: risk 20, `APPROVE` passes the guardrail; the loan waits on `underwrite`.
+  - `LN-2026-0102`: risk 85, `APPROVE` is refused (`R2`, `HIGH_RISK_SCORE`). Nothing of the answer is accepted, and a four-eyes review task for `role:COMPLIANCE_REVIEWER` shows the answer with `summary` masked. The teller who sent it, who also holds the reviewer role, is refused (`403 SELF_APPROVAL_FORBIDDEN`). Reviewer `thu` refers it with a reason; the step completes with `REFER`, history records `HUMAN_OVERRIDE`, and the loan waits on `underwrite`.
+  - `LN-2026-0103`: the assessor refers it with risk 55, which the guardrail allows.
+  - Sending an application again returns the instance it already has (the application id is the business key, `PRE-002`).
+- **Example:** `LN-2026-0102 risk 85 APPROVE -> GUARDRAIL_VIOLATION -> thu refers -> underwrite`.
+- **Test ID:** `PRE_185_*` in `GuardedAgentJourneyIT` (`examples/guarded-agent-process`)
+
+### PRE-186 A case is drawn on its diagram from the engine APIs alone
+- **Traces to:** `TR-AGT-01`, #66
+- **Milestone:** M2
+- **Given:** `LN-2026-0102` after its review, waiting on `underwrite`.
+- **When:** The reviewer reads `GET /definitions/loan-document-review/versions/1/export?format=bpmn` and `GET /instances/{id}`.
+- **Then:** The export is BPMN 2.0 XML with a shape for every step (`start`, `assess-documents`, `underwrite`, `end`); the instance names its definition and the step its live token waits on; and history holds the case's path in order: `INSTANCE_STARTED`, `ASYNC_STEP_SCHEDULED`, `ASYNC_RESULT_REFUSED`, `STEP_ROUTED_TO_REVIEW`. No cockpit code is needed to read them.
+- **Example:** `export -> 4 shapes; instance -> underwrite WAITING_USER`.
+- **Test ID:** `PRE_186_*` in `GuardedAgentJourneyIT`
+
+## Task Escalation and the Calendar API (#73, #409)
+
+### PRE-178 An overdue task moves to the escalation role at its deadline, keeping four eyes
+- **Traces to:** `TR-CAL-01`, `TR-SEC-04`
+- **Milestone:** M2
+- **Given:**
+  - Task `review-application` is for `role:credit-officer`, four-eyes, `horus:sla="PT8H"` on the tenant calendar `vn-banking-hours`: Monday to Friday 08:00 to 17:00, `Asia/Ho_Chi_Minh`.
+  - It is created Thu 3 Dec 2026 15:00 ICT, so it is due Fri 4 Dec 2026 14:00 ICT: 2 hours on Thursday and 6 on Friday.
+  - `horus:escalation="role:branch-supervisor"`: one level, to `role:branch-supervisor`, waiting `PT0S`.
+  - `minh` started the instance, so `minh` is a four-eyes participant.
+- **When:** The injected engine clock reaches Fri 4 Dec 14:00 ICT and the engine sweeps (`ProcessServices.escalateOverdue`, run by the job poller of every replica); the clock is one second earlier on the first sweep.
+- **Then:**
+  - At 13:59:59 nothing changes. At 14:00:00, under the `pre_instance` lock, the task's assignment becomes `role:branch-supervisor`, the task stays `OPEN` and counts level 1.
+  - History records `TASK_ESCALATED` by `system:timer` with the level, the assignment before and after and the due time. `processes.task.escalated.v1` is published in the same transaction with `taskId`, `instanceId`, `nodeId`, `level`, `from` and `to`.
+  - `minh`, even holding `branch-supervisor`, still cannot claim the task (`403 SELF_APPROVAL_FORBIDDEN`): escalation never removes a participant, so four eyes holds after any number of levels (`TR-SEC-04`). Another supervisor claims it.
+  - A task completed at 13:59:59 is never escalated. A second sweep, or a second replica sweeping at the same moment, applies nothing more: one history entry and one event per level, across replicas.
+  - The sweep reads at most `jobs.batch-size` due tasks across tenants through the registered bounded query `escalations-due` (`EngineSweep`, partial index `idx_pre_task_escalation_due`, V32), then locks each task's own instance and rereads the task before it changes anything; each change is made in the tenant of the locked row, and one task's failure holds back no other.
+- **Example:** `created Thu 15:00, PT8H business -> due Fri 14:00 -> role credit-officer -> branch-supervisor`.
+- **Test ID:** `PRE_178_an_overdue_task_moves_to_the_escalation_role_at_its_deadline_keeping_four_eyes` (`TaskEscalationPostgresIT`), `PRE_178_a_task_completed_before_its_deadline_is_never_escalated`, `PRE_178_the_sweep_is_tenant_scoped_idempotent_and_applies_a_level_once_across_replicas`, `PRE_178_the_first_level_with_no_wait_fires_at_the_due_time` (`EscalationPlanTest`), `PRE_178_V32_keeps_existing_tasks_and_builds_its_indexes_concurrently` (`TaskEscalationMigrationTest`)
+
+### PRE-179 A second level fires on business time, and a claimed task follows its declared rule
+- **Traces to:** `TR-CAL-01`, `TR-CAL-02`
+- **Milestone:** M2
+- **Given:**
+  - The task of `PRE-178` declares `horus:escalation="role:branch-supervisor;role:regional-manager|PT4H"`: up to 3 levels separated by `;`, each a target and an optional wait after `|`.
+  - Officer `tt.binh` claimed the task at 10:00 on Friday.
+  - Variant A declares nothing, or `horus:onClaimed="release"`, the default. Variant B declares `horus:onClaimed="keep"`.
+- **When:** Level 1 fires at Fri 14:00. Level 2 is 4 business hours later: 3 hours on Friday and 1 on Monday, so Mon 7 Dec 2026 09:00 ICT.
+- **Then:**
+  - Variant A at level 1: the claim is released, the task is `OPEN` for `branch-supervisor`, and the event names `tt.binh` as `releasedClaimant`.
+  - Variant B at level 1: `tt.binh` keeps the claim, the assignment changes, and `tt.binh` still completes the task; nobody else can claim it.
+  - Every level time is computed once, when the task is created, from the calendar of its SLA and stored with the task. Level 2 is Mon 09:00, not Sat 02:00, and a calendar change approved after the task was created, such as 7 Dec as a holiday, does not move it (`TR-CAL-02`).
+  - At import, a fourth level, a target equal to the assignment it replaces, a later level that waits nothing, a wait that is not an ISO 8601 duration of zero or more up to 366 days, an escalation without `horus:sla`, an unknown claim rule or `horus:onClaimed` without an escalation is `422 VALIDATION_FAILED` with the problem code `ESCALATION_INVALID`. A task without `horus:escalation` keeps its canonical form and hash.
+- **Example:** `level 2 PT4H after Fri 14:00 -> Mon 09:00 ICT -> regional-manager`.
+- **Test ID:** `PRE_179_a_second_level_fires_on_business_time_and_a_claimed_task_is_released` (`TaskEscalationPostgresIT`), `PRE_179_a_claimant_who_keeps_the_claim_still_completes_the_task`, `PRE_179_a_later_level_counts_its_wait_in_business_time_across_the_weekend` (`EscalationPlanTest`), `PRE_179_*` in `SubsetBpmnReaderEscalationTest`
+
+### PRE-180 An escalation that cannot apply is recorded, never silent, and never crosses tenants
+- **Traces to:** `TR-SEC-04`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:**
+  - Variant A: a level targets `user:minh`, who started the instance of a four-eyes task.
+  - Variant B: the instance is cancelled before the deadline, while a task of another tenant with the same schedule is overdue.
+  - Variant C: two replicas sweep the same overdue task at the same moment.
+- **When:** The deadline passes and the sweep runs.
+- **Then:**
+  - A: the assignment is unchanged, the level is counted so the sweep does not try it again, history records `ESCALATION_REFUSED` with `ESCALATION_TARGET_FORBIDDEN`, and an incident with that code opens.
+  - B: the cancelled instance's task is not escalated; only the other tenant's task moves, and its event carries that tenant. A task is only ever changed under the lock of its own instance row, in the tenant stored on it.
+  - C: one replica applies the level and the other, after the first commits, finds it applied and writes nothing.
+  - Not in this release: a target role the host `RoleCatalogue` does not list is not checked at approval (the SPI follows with its slice).
+- **Example:** `target user minh is the maker -> no change, incident ESCALATION_TARGET_FORBIDDEN`.
+- **Test ID:** `PRE_180_a_level_that_targets_the_maker_is_recorded_with_an_incident_and_changes_nothing`, `PRE_180_a_cancelled_instance_is_not_escalated_and_another_tenants_task_is_never_touched` (`TaskEscalationPostgresIT`)
+
+### PRE-181 The calendars in force and the calendar changes are read over REST, in the caller's tenant
+- **Traces to:** `TR-CAL-01`, `TR-TEN-01`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a` with calendars `branch-hours`, `card-centre` and `vn-banking-hours`, a pending change of `vn-banking-hours` and two approved ones; tenant `bank-b` with `bank-b-hours`; the caller holds `processes:read`.
+- **When:** The caller reads `GET /calendars` with `limit=1` and then with the returned cursor, `GET /calendars/vn-banking-hours`, `GET /calendar-changes?status=PENDING` and `status=APPROVED` page by page, and `GET /calendar-changes/{id}`; a manager of `bank-b` uses a cursor of `bank-a`.
+- **Then:** Calendars come in key order as summaries without hours or holidays, each page read through the registered bounded queries `calendars` and `calendars-after` (the `(tenant_id, calendar_key)` unique index); one calendar has its hours and holidays and an `ETag` of its version; changes come newest first through `idx_pre_calendar_change_status` (V32) with the old and the new value; `bank-b` never sees `bank-a` rows; a cursor of another tenant, an unknown status or a limit above `query.max-page-size` is `400 QUERY_INVALID`; another tenant's calendar or change is `404 CALENDAR_NOT_FOUND`. Every body validates against `process-engine/api/openapi.yaml`.
+- **Example:** `GET /calendars?limit=1 -> branch-hours + nextCursor; the cursor with bank-b -> 400 QUERY_INVALID`.
+- **Test ID:** `PRE_181_calendars_and_changes_are_listed_in_pages_for_the_callers_tenant_only` (`CalendarChangeIdempotencyPostgresIT`), `PRE_181_the_calendar_list_one_calendar_and_the_changes_match_the_contract` (`CalendarRestContractTest`)
+
+### PRE-182 A calendar change is proposed, approved and rejected once per idempotency key, under four eyes
+- **Traces to:** `TR-IDEM-01`, `TR-CAL-01`, `TR-SEC-04`
+- **Milestone:** M2
+- **Given:** Tenant `bank-a`, `vn-banking-hours` at version 3, `kim` and `lan` holding `processes:calendar:manage`, `horus.bpm.processes.calendar.approval` at its default `four-eyes` (PD-118 as amended by PD-131); `kim` proposes with `If-Match: "3"` and `Idempotency-Key: k-1`.
+- **When:** `POST /calendars/vn-banking-hours/changes` is sent twice with the same key and body, once with the same key and another reason, once without `If-Match` and once without the key; `lan` approves with `a-1` and repeats it; two replicas receive the same proposal together; `bank-b` proposes with the same key `k-1`.
+- **Then:** The first call is `201` with the change `PENDING` and a `Location`; the repeat returns the same status and body and writes no second change, no second decision and no second `processes.calendar.changed.v1` (the answer is stored whole in `pre_idempotency` in the transaction of the work, so a repeat after the approval still answers `PENDING`); the same key with another request is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`; a missing `If-Match` or key is `428 PRECONDITION_REQUIRED`; a stale `If-Match` is `409 VERSION_CONFLICT`; the concurrent proposals create one change; a key belongs to its tenant; a caller without `processes:calendar:manage` is refused before any key is claimed. `kim` approving is `403 SELF_APPROVAL_FORBIDDEN`. An approval or rejection needs no `If-Match`: the calendar version a change was proposed against is checked under the calendar's row lock, and a change that is no longer pending is `409 INVALID_STATE`. A body with a tenant or any other field is `400 INPUT_INVALID`.
+- **Example:** `propose(k-1) twice -> one change; approve(a-1) twice -> version 4 once, one event`.
+- **Test ID:** `PRE_182_a_proposal_repeated_with_the_same_key_returns_the_first_answer_and_writes_nothing_more`, `PRE_182_an_approval_repeated_with_the_same_key_applies_once_and_emits_one_event`, `PRE_182_two_concurrent_proposals_with_one_key_create_one_change_and_a_key_is_per_tenant`, `PRE_182_a_proposal_without_the_permission_is_refused_before_any_key_is_claimed` (`CalendarChangeIdempotencyPostgresIT`), `PRE_182_*` in `CalendarRestContractTest`
+

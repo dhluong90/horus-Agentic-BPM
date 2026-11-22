@@ -36,12 +36,12 @@ final class ParallelJoinCompileStep implements CompileStep {
     @Override
     public void compile(Process process, CompiledProcess.Builder builder) {
         Map<String, Integer> gateways = new HashMap<>();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof ParallelGateway gateway) {
                 gateways.put(gateway.id(), 0);
             }
         }
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof SequenceFlow flow && gateways.containsKey(flow.targetRef())) {
                 gateways.merge(flow.targetRef(), 1, Integer::sum);
             }

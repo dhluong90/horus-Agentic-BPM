@@ -53,8 +53,9 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
         { label: route.key },
         { label: t('rules.version', { version: String(route.version) }) },
       ];
-    // Until the page sets its trail, a task or a case leads back to Processes only (its title names it).
+    // Until the page sets its trail, a task leads back to Tasks and a case to Processes (the title names it).
     case 'task':
+      return [{ label: t('menu.tasks'), href: formatRoute({ name: 'tasks' }) }];
     case 'instance':
       return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }];
     case 'decision':

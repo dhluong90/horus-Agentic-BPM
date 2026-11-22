@@ -27,10 +27,40 @@ import java.util.Objects;
  *     never log it; {@link #toString()} masks it
  * @param attempt the attempt number, from 1
  * @param deadline when the engine abandons this attempt (claim time plus the step timeout)
- * @param inputs the resolved {@code horus:input} values
+ * @param inputs the resolved {@code horus:input} values; for an undo (#67), the forward step's inputs and its result
+ *     under {@code forwardResult}
+ * @param forwardJobId for an undo of a compensation walk (#67): the job the forward step ran under, the key the
+ *     remote side posted the original call under, so it can find and reverse it; null for a forward call
+ * @param forwardAttemptId for an undo: the accepted forward attempt; null for a forward call
  */
 public record AdapterCall(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
-        String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs) {
+        String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs,
+        String forwardJobId, String forwardAttemptId) {
+
+    /**
+     * A forward call, which undoes nothing.
+     *
+     * @param tenantId the instance's tenant
+     * @param instanceId the instance id
+     * @param nodeId the step id
+     * @param businessKey the business key, or null
+     * @param jobId the job id, the idempotency key
+     * @param attemptId the attempt id
+     * @param completionToken the completion token of the attempt
+     * @param attempt the attempt number
+     * @param deadline when the engine abandons the attempt
+     * @param inputs the resolved inputs
+     */
+    public AdapterCall(String tenantId, String instanceId, String nodeId, String businessKey, String jobId,
+            String attemptId, String completionToken, int attempt, Instant deadline, Map<String, Object> inputs) {
+        this(tenantId, instanceId, nodeId, businessKey, jobId, attemptId, completionToken, attempt, deadline, inputs,
+                null, null);
+    }
+
+    /** @return whether this call undoes a forward step of a compensation walk (#67) */
+    public boolean isUndo() {
+        return forwardAttemptId != null;
+    }
 
     public AdapterCall {
         Objects.requireNonNull(tenantId, "tenantId must not be null");
@@ -57,6 +87,8 @@ public record AdapterCall(String tenantId, String instanceId, String nodeId, Str
     public String toString() {
         return "AdapterCall[tenantId=" + tenantId + ", instanceId=" + instanceId + ", nodeId=" + nodeId + ", jobId="
                 + jobId + ", attemptId=" + attemptId + ", completionToken=***, attempt=" + attempt + ", deadline="
-                + deadline + ", inputs=" + inputs.keySet() + "]";
+                + deadline + ", inputs=" + inputs.keySet()
+                + (forwardAttemptId == null ? "" : ", forwardJobId=" + forwardJobId + ", forwardAttemptId="
+                        + forwardAttemptId) + "]";
     }
 }

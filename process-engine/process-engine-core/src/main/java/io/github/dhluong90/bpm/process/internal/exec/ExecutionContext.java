@@ -66,6 +66,26 @@ public interface ExecutionContext {
      */
     void cancelSubtree(Token scope);
 
+    /**
+     * Enters a {@code saga} block (#67, ADR-0020): a {@code SCOPE} token for the block under the arriving token's
+     * scope, the arriving token ends, and a first {@code FLOW} token under the new scope enters the block's start
+     * event. When the last live flow token of the block ends, a new flow token leaves the block in the enclosing scope.
+     *
+     * @param token the arriving token, on the block
+     * @param block the block
+     */
+    void enterScope(Token token, FlowNode block);
+
+    /**
+     * Starts the compensation of the token's scope (#67, PRE-013, PRE-044): every live flow token of the instance is
+     * cancelled with its task or job, the instance is {@code COMPENSATING}, and the shell walks the scope's stack
+     * newest first. The instance can only end {@code FAILED} from here.
+     *
+     * @param failing the token whose step failed, or that reached {@code throwCompensation}
+     * @param cause the code that started it, for example a business error code
+     */
+    void compensate(Token failing, String cause);
+
     /** @param effect an effect for the shell */
     void effect(Effect effect);
 

@@ -176,6 +176,40 @@ public interface ProcessStore {
         }
     }
 
+    /**
+     * One undo on the compensation stack of a scope token (#67, V31).
+     *
+     * @param seq push order within the scope token, from 1; the walk takes the highest {@code PENDING} entry
+     * @param forwardJobId the forward step's job, or null for a local step
+     * @param forwardAttemptId the accepted forward attempt
+     * @param handler the handler or adapter that undoes the step, or {@code manual}
+     * @param mode {@code local}, {@code remote} or {@code manual}
+     * @param inputSnapshotJson the forward inputs and result, plain: only the undo reads them
+     * @param status {@code PENDING}, {@code RUNNING}, {@code DONE}, {@code FAILED} or {@code MANUAL}
+     * @param jobId the undo's own job, the idempotency key of a remote undo; null until it is scheduled
+     */
+    record CompensationEntry(String tenantId, String id, String instanceId, String scopeTokenId, int seq, String stepId,
+            String forwardJobId, String forwardAttemptId, String handler, String mode, String inputSnapshotJson,
+            String status, String jobId, Instant pushedAt, Instant completedAt) {
+
+        /** Status of an entry not yet undone. */
+        public static final String PENDING = "PENDING";
+        /** Status of an entry whose undo job is due or running. */
+        public static final String RUNNING = "RUNNING";
+        /** Status of an entry undone, by its job or by an approved resolution. */
+        public static final String DONE = "DONE";
+        /** Status of an entry whose undo failed for good; an incident is open. */
+        public static final String FAILED = "FAILED";
+        /** Status of an entry that waits for an operator; an incident is open. */
+        public static final String MANUAL = "MANUAL";
+
+        /** @return a copy with this status, job and completion time */
+        public CompensationEntry with(String newStatus, String newJobId, Instant newCompletedAt) {
+            return new CompensationEntry(tenantId, id, instanceId, scopeTokenId, seq, stepId, forwardJobId,
+                    forwardAttemptId, handler, mode, inputSnapshotJson, newStatus, newJobId, pushedAt, newCompletedAt);
+        }
+    }
+
     /** User task row; {@code claimedBy} is set while it is {@code CLAIMED} and kept once completed or cancelled. */
     record TaskRow(String tenantId, String id, String instanceId, String tokenId, String definitionId, String nodeId,
             String name, String assignee, boolean fourEyes, String status, long lockVersion, String claimedBy,
@@ -200,6 +234,20 @@ public interface ProcessStore {
         }
     }
 
+    /**
+     * The escalation of one user task (PRE-178): the levels resolved at creation, how many were applied, and when the
+     * next one is due.
+     *
+     * @param tenantId tenant
+     * @param taskId task
+     * @param instanceId the task's instance
+     * @param level levels already applied, 0 when none
+     * @param nextAt when the next level is due, or null when none is left
+     * @param json the resolved levels and the claim rule
+     */
+    record EscalationRow(String tenantId, String taskId, String instanceId, int level, Instant nextAt, String json) {
+    }
+
     /** Recorded answer to an idempotent write; {@code responseJson} is null while the claim is pending. */
     record IdempotencyRecord(String tenantId, String operation, String key, String requestHash, String responseJson,
             Instant expiresAt) {
@@ -219,6 +267,38 @@ public interface ProcessStore {
      * @param now the time that decides the effective version
      */
     List<DefinitionSummary> definitionKeys(String tenant, String afterKey, int limit, Instant now);
+
+    /**
+     * A definition version waiting for approval, without its definition or source (#31, PRE-190).
+     *
+     * @param id the version id, the tie-break of the keyset
+     * @param key the definition key
+     * @param name the process name, or null
+     * @param version the version number
+     * @param definitionHash the definition hash
+     * @param lockVersion the optimistic lock
+     * @param createdBy the importer or creator
+     * @param requestedBy the requester
+     * @param requestedAt when approval was requested
+     */
+    record PendingApprovalRow(String id, String key, String name, int version, String definitionHash,
+            long lockVersion, String createdBy, String requestedBy, Instant requestedAt) {
+    }
+
+    /**
+     * A page of the tenant's definition versions in {@code PENDING_APPROVAL}, oldest request first on
+     * {@code (requested_at, id)} (PRE-190).
+     *
+     * @param tenant tenant
+     * @param afterRequestedAt keyset: the {@code requestedAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id, or null
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<PendingApprovalRow> pendingApprovals(String tenant, Instant afterRequestedAt, String afterId,
+            int limit) {
+        throw new UnsupportedOperationException("pending approvals are not supported by this store");
+    }
 
     void insertDefinition(StoredDefinition definition);
 
@@ -298,7 +378,62 @@ public interface ProcessStore {
     /** @return rows updated: 1, or 0 when the lock version is stale or the task is not claimed by {@code claimant} */
     int unclaimTask(String tenant, String id, long expectedLockVersion, String claimant);
 
+    /**
+     * Gives a task to a new claimant, the lock version moving by one.
+     *
+     * @param expectedStatus {@code OPEN} for a reassignment, {@code CLAIMED} for a delegation
+     * @param previousClaimant the claimant a delegation must still find, or null for a reassignment
+     * @return rows updated: 1, or 0 when the lock version is stale or the task is no longer in that state
+     */
+    int handOverTask(String tenant, String id, long expectedLockVersion, String expectedStatus,
+            String previousClaimant, String newClaimant, Instant at);
+
     void cancelTask(String tenant, String id);
+
+    /**
+     * Keeps the resolved escalation of a task just inserted (PRE-178).
+     *
+     * @param tenant tenant
+     * @param taskId the task
+     * @param json the resolved levels and the claim rule
+     * @param firstAt when the first level fires
+     */
+    default void scheduleEscalation(String tenant, String taskId, String json, Instant firstAt) {
+        throw new UnsupportedOperationException("escalation is not supported by this store");
+    }
+
+    /**
+     * The sweep's read (PRE-178): open or claimed tasks of every tenant whose next level has come due, oldest first.
+     *
+     * @param now the engine clock
+     * @param limit the most rows; the sweep's batch size
+     * @return task keys only: the sweep locks the instance and rereads each task before it changes anything
+     */
+    default List<EscalationRow> dueEscalations(Instant now, int limit) {
+        return List.of();
+    }
+
+    /**
+     * @param tenant tenant
+     * @param taskId the task
+     * @return the task's escalation, or empty when it declared none
+     */
+    default Optional<EscalationRow> escalation(String tenant, String taskId) {
+        return Optional.empty();
+    }
+
+    /**
+     * Applies one level: moves the task to {@code assignee}, releases the claim when asked, counts the level, sets the
+     * time of the next one and moves the lock version. Only while the task is open or claimed, at the version read.
+     *
+     * @param assignee {@code user:}, {@code role:} or {@code group:}; null leaves the assignment as it is (a refused
+     *     level, which is only counted)
+     * @return rows updated: 1, or 0 when the task is no longer open or claimed or its lock version moved
+     */
+    default int escalateTask(String tenant, String id, long expectedLockVersion, String assignee, boolean releaseClaim,
+            int level, Instant nextAt) {
+        throw new UnsupportedOperationException("escalation is not supported by this store");
+    }
 
     List<TaskRow> tasks(String tenant, String instanceId);
 
@@ -320,6 +455,34 @@ public interface ProcessStore {
      *     instance's or another tenant's
      */
     Map<String, String> stepResults(String tenant, String instanceId, java.util.Collection<String> nodeIds);
+
+    /**
+     * Pushes an undo onto the stack of its scope token, with the next {@code seq} of that scope (#67). The caller holds
+     * the instance row lock, so pushes of one instance never race.
+     *
+     * @param entry the entry; its {@code seq} is ignored and assigned here
+     */
+    default void pushCompensation(CompensationEntry entry) {
+        throw new UnsupportedOperationException("compensation is not supported by this store");
+    }
+
+    /**
+     * @param tenant tenant
+     * @param instanceId instance
+     * @return every stack entry of the instance, by scope token and then newest first; bounded by the instance's
+     *     completed steps with an undo
+     */
+    default List<CompensationEntry> compensationEntries(String tenant, String instanceId) {
+        throw new UnsupportedOperationException("compensation is not supported by this store");
+    }
+
+    /**
+     * @param entry the entry with its new status, job id and completion time
+     * @return the rows changed: 1, or 0 when the tenant has no such entry
+     */
+    default int updateCompensation(CompensationEntry entry) {
+        throw new UnsupportedOperationException("compensation is not supported by this store");
+    }
 
     /** @param incident a new {@code OPEN} incident (#58) */
     void insertIncident(IncidentRow incident);

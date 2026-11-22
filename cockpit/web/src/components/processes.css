@@ -126,6 +126,96 @@
 .review-changes__to { color: var(--ink); font-weight: 600; background: var(--indigo-soft); padding: 0 4px; border-radius: var(--radius-xs); }
 .review-changes__none { margin: 0; font: var(--type-label); }
 
+/* ---------- Process approval with the graph diff (CKP-024) ----------
+ * The change on the diagram: green for added, indigo for a changed value, red for removed (styleguide 2), each
+ * with its glyph and its word in the list beside it. One diagram at a time; the decision docks at the bottom. */
+.qtable__action { width: 1%; white-space: nowrap; text-align: right; }
+.qtable__action .btn { position: relative; z-index: 1; }
+
+.dg__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dg__bar--end { justify-content: flex-end; }
+
+.pdiff { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--gap); align-items: stretch; }
+.dg__frame--fill { max-height: none; display: flex; }
+.dg__frame--fill .dg__svg { margin: auto; flex: none; }
+.pdiff--first { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 1180px) { .pdiff { grid-template-columns: minmax(0, 1fr); } }
+.pdiff__main { min-width: 0; }
+.pdiff__bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pdiff__legend { display: flex; align-items: center; gap: 12px; margin: 0; padding: 0; list-style: none; font: var(--type-caption); color: var(--ink-2); }
+.pdiff__key { display: inline-flex; align-items: center; gap: 4px; }
+.pdiff__swatch { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: var(--radius-pill); font: 700 11px/1 var(--font-ui); color: var(--surface); }
+.pdiff__key--added .pdiff__swatch { background: var(--ok); }
+.pdiff__key--changed .pdiff__swatch { background: var(--indigo); }
+.pdiff__key--removed .pdiff__swatch { background: var(--bad); }
+
+.pdiff__list {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; margin-top: 40px; padding: 12px 16px;
+  border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface);
+  overflow: auto; contain: size;
+}
+@media (max-width: 1180px) { .pdiff__list { contain: none; max-height: none; } }
+.pdiff__title { margin: 0; font: var(--type-h2); color: var(--ink); }
+.pdiff__group { margin: 8px 0 0; font: var(--type-label); color: var(--muted); }
+.pdiff__note { margin: 0; color: var(--ink-2); font: var(--type-label); }
+.pdiff__truncated { gap: 4px; }
+.notice--info { border-color: var(--accent-fill); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent-fill); }
+.notice--info .notice__icon { color: var(--accent); }
+.pdiff__entries { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.pdiff__entry { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.pdiff__entry:last-child { border-bottom: 0; }
+.pdiff__link { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; font: var(--type-label); color: var(--ink); }
+.pdiff__pick {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; width: 100%; min-height: 36px; padding: 4px 8px; margin: 0 -8px;
+  border: 0; border-radius: var(--radius-m); background: none; color: var(--ink); font: var(--type-label); text-align: left; cursor: pointer;
+  box-sizing: content-box;
+}
+.pdiff__pick:hover { background: var(--surface-2); }
+.pdiff__pick.is-selected { background: var(--select); box-shadow: inset 3px 0 0 var(--accent); }
+.pdiff__pick:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.pdiff__name { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.pdiff__type, .pdiff__kind { color: var(--muted); font-weight: 500; }
+.pdiff__values { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0 0 0 4px; font: var(--type-label); }
+.pdiff__values > div { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.pdiff__values dt { color: var(--muted); }
+.pdiff__values dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.pdiff__from { color: var(--ink-2); text-decoration: line-through; }
+.pdiff__to { font-weight: 600; background: var(--diff-mod); padding: 0 4px; border-radius: var(--radius-xs); }
+
+.diff-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 600; white-space: nowrap; }
+.diff-tag--added { background: var(--ok-soft); color: var(--ok); }
+.diff-tag--changed { background: var(--indigo-soft); color: var(--indigo); }
+.diff-tag--removed { background: var(--bad-soft); color: var(--bad); }
+
+/* Marks on the diagram. */
+.dg-node--added > rect, .dg-node--added > circle, .dg-node--added > path { fill: var(--diff-add); stroke: var(--ok-fill); stroke-width: 2.5; }
+.dg-node--changed > rect, .dg-node--changed > circle, .dg-node--changed > path { fill: var(--diff-mod); stroke: var(--indigo); stroke-width: 2.5; }
+.dg-node--removed > rect, .dg-node--removed > circle, .dg-node--removed > path { fill: var(--diff-del); stroke: var(--bad-fill); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.dg-node--removed .dg-node__name { text-decoration: line-through; }
+.dg-node.is-selected > rect, .dg-node.is-selected > circle, .dg-node.is-selected > path { stroke: var(--accent); stroke-width: 3.5; }
+.dg-node .dg-mark circle { stroke: var(--canvas); stroke-width: 2; stroke-dasharray: none; filter: none; }
+.dg-node g.dg-mark text { fill: var(--surface); font: 700 13px/1 var(--font-ui); }
+.dg-node .dg-mark--added circle, .dg-mark--added circle { fill: var(--ok); }
+.dg-node .dg-mark--changed circle, .dg-mark--changed circle { fill: var(--indigo); }
+.dg-node .dg-mark--removed circle, .dg-mark--removed circle { fill: var(--bad); }
+.dg-edge--added path:first-child { stroke: var(--ok-fill); stroke-width: 2.5; }
+.dg-edge--removed path:first-child { stroke: var(--bad-fill); stroke-width: 2.5; stroke-dasharray: 6 4; }
+.dg-arrow--added { fill: var(--ok-fill); }
+.dg-arrow--removed { fill: var(--bad-fill); }
+
+/* The docked decision of a process change. */
+.pdock { grid-template-columns: auto minmax(0, 1fr) auto; }
+.pdock__reason { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; padding: 8px 12px; border-radius: var(--radius-m); background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font: var(--type-label); }
+.pdock__reason > span[aria-hidden] { color: var(--muted); font-weight: 700; }
+.pdock .btn--primary:disabled { opacity: 1; background: var(--surface-3); border-color: transparent; color: var(--muted); cursor: not-allowed; }
+.pdock .btn--danger-quiet:disabled { opacity: 1; background: var(--surface-2); border-color: var(--line); color: var(--muted); }
+.pdock__problem { grid-column: 2 / -1; display: flex; align-items: flex-start; gap: 8px; }
+.pdock__problem > .notice { flex: 1 1 auto; }
+.pdock__done { margin: 0; display: flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 600; }
+.pdock__check { color: var(--ok); font-weight: 700; }
+.pdock--done { grid-template-columns: auto minmax(0, 1fr); }
+@media (max-width: 1180px) { .pdock__problem { grid-column: auto; } }
+
 /* ---------- Case on its diagram (CKP-017) ---------- */
 /* Badges: a token is the token blue with its numeral colour; an incident is the error hue; a completed step a small
  * check in the "passed" green. Each badge also carries a word or an accessible name, never colour alone. */

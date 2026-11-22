@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:processes.task.delegated.v1",
+  "title": "processes.task.delegated.v1",
+  "description": "A claimed user task was handed to another user, who now claims it (PD-110). Handed to the host publisher in the transaction of the state change it reports. Additive changes only within v1 (DESIGN section 6.4).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
+    "payload"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Stable id of this event, 26 characters; consumers de-duplicate by it",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "eventType": {
+      "const": "processes.task.delegated.v1"
+    },
+    "occurredAt": {
+      "type": "string",
+      "description": "The engine clock time of the change, ISO 8601 UTC",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "type": "string",
+      "description": "The tenant, from the authenticated context; consumers must filter by it"
+    },
+    "correlationId": {
+      "type": "string",
+      "description": "The request's X-Correlation-Id; for work a job starts, the id the job carries; otherwise the event id",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The id of the command (Idempotency-Key) or job that caused the change, or null"
+    },
+    "producer": {
+      "const": "horus-process-engine"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "taskId",
+        "instanceId",
+        "nodeId",
+        "claimedBy",
+        "reason"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "instanceId": {
+          "type": "string",
+          "description": "The process instance id (ULID)"
+        },
+        "definitionKey": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "businessKey": {
+          "type": "string",
+          "description": "Present when the instance has a business key; the only personal data an event may carry (TR-SEC-05)"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "assignee": {
+          "type": "string"
+        },
+        "claimedBy": {
+          "type": "string",
+          "description": "The user the task now belongs to"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why, as the person who moved the task wrote it (1 to 500 characters)"
+        },
+        "delegatedBy": {
+          "type": "string",
+          "description": "The holder of processes:task:manage who moved it"
+        },
+        "previousClaimant": {
+          "type": "string",
+          "description": "The user who held the task before"
+        }
+      }
+    }
+  }
+}

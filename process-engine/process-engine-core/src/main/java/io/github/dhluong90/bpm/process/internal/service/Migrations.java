@@ -179,7 +179,8 @@ public final class Migrations implements MigrationService {
         return report;
     }
 
-    private MigrationDryRun dryRun(String tenant, StoredPlan stored) {
+    /** The dry run of a stored plan, read-only; also what an execution repeats at its proposal and approval. */
+    MigrationDryRun dryRun(String tenant, StoredPlan stored) {
         MigrationPlan plan = stored.view();
         StoredDefinition source = definitions.definition(tenant, stored.sourceDefinitionId()).orElseThrow();
         StoredDefinition target = definitions.definition(tenant, stored.targetDefinitionId()).orElseThrow();
@@ -234,12 +235,12 @@ public final class Migrations implements MigrationService {
     }
 
     /** A step's readable name and canonical type. */
-    private record Step(String name, String type) {
+    record Step(String name, String type) {
     }
 
-    private static Map<String, Step> steps(Process process) {
+    static Map<String, Step> steps(Process process) {
         Map<String, String> names = new HashMap<>();
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof FlowNode node) {
                 names.put(node.id(), node.name());
             }
@@ -263,7 +264,7 @@ public final class Migrations implements MigrationService {
                 new DefinitionNotFoundException("No definition " + key + " v" + version + " in this tenant"));
     }
 
-    private StoredPlan stored(String tenant, String migrationId) {
+    StoredPlan stored(String tenant, String migrationId) {
         if (migrationId == null || !ID.matcher(migrationId).matches()) {
             throw new MigrationNotFoundException("No migration plan with that id in this tenant");
         }

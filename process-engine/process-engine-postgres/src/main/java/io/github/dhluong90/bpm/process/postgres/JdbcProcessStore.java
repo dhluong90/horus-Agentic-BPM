@@ -127,6 +127,20 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public List<PendingApprovalRow> pendingApprovals(String tenant, Instant afterRequestedAt, String afterId,
+            int limit) {
+        org.springframework.jdbc.core.RowMapper<PendingApprovalRow> mapper = (rs, row) -> new PendingApprovalRow(
+                rs.getString("id"), rs.getString("key_name"), rs.getString("name"), rs.getInt("version_num"),
+                rs.getString("definition_hash"), rs.getLong("lock_version"), rs.getString("created_by"),
+                rs.getString("requested_by"), instant(rs, "requested_at"));
+        if (afterRequestedAt == null) {
+            return ProcessListQueries.PENDING_APPROVALS.list(jdbc, List.of(tenant, limit), mapper);
+        }
+        return ProcessListQueries.PENDING_APPROVALS_AFTER.list(jdbc, List.of(tenant, ts(afterRequestedAt), afterId,
+                limit), mapper);
+    }
+
+    @Override
     public void insertDefinition(StoredDefinition d) {
         jdbc.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
                         + "definition_hash, source_format, source_document, source_hash, node_count, source, effective_from, "
@@ -343,10 +357,71 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public int handOverTask(String tenant, String id, long expectedLockVersion, String expectedStatus,
+            String previousClaimant, String newClaimant, Instant at) {
+        return jdbc.sql("UPDATE pre_task SET status = 'CLAIMED', claimed_by = ?, claimed_at = ?, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
+                        + "AND status = ? AND claimed_by IS NOT DISTINCT FROM ?")
+                .params(newClaimant, ts(at), tenant, id, expectedLockVersion, expectedStatus, previousClaimant)
+                .update();
+    }
+
+    @Override
     public void cancelTask(String tenant, String id) {
         jdbc.sql("UPDATE pre_task SET status = 'CANCELLED', lock_version = lock_version + 1 "
                         + "WHERE tenant_id = ? AND id = ? AND status IN ('OPEN','CLAIMED')")
                 .params(tenant, id).update();
+    }
+
+    @Override
+    public void scheduleEscalation(String tenant, String taskId, String json, Instant firstAt) {
+        jdbc.sql("UPDATE pre_task SET escalation_json = ?::jsonb, escalation_level = 0, next_escalation_at = ? "
+                        + "WHERE tenant_id = ? AND id = ?")
+                .params(json, ts(firstAt), tenant, taskId).update();
+    }
+
+    @Override
+    public List<EscalationRow> dueEscalations(Instant now, int limit) {
+        return ProcessListQueries.ESCALATIONS_DUE.list(jdbc, List.of(ts(now), limit),
+                (rs, n) -> new EscalationRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("instance_id"), 0, null, null));
+    }
+
+    @Override
+    public Optional<EscalationRow> escalation(String tenant, String taskId) {
+        return jdbc.sql("SELECT tenant_id, id, instance_id, COALESCE(escalation_level, 0) AS escalation_level, "
+                        + "next_escalation_at, escalation_json::text AS escalation_json FROM pre_task "
+                        + "WHERE tenant_id = ? AND id = ? AND escalation_json IS NOT NULL")
+                .params(tenant, taskId)
+                .query((rs, n) -> new EscalationRow(rs.getString("tenant_id"), rs.getString("id"),
+                        rs.getString("instance_id"), rs.getInt("escalation_level"), instant(rs, "next_escalation_at"),
+                        rs.getString("escalation_json")))
+                .optional();
+    }
+
+    @Override
+    public int escalateTask(String tenant, String id, long expectedLockVersion, String assignee, boolean releaseClaim,
+            int level, Instant nextAt) {
+        String kind = assignee == null ? null : assignee.substring(0, assignee.indexOf(':'));
+        String value = assignee == null ? null : assignee.substring(assignee.indexOf(':') + 1);
+        String move = assignee == null ? "" : "assignee_user = ?, assignee_role = ?, assignee_group = ?, ";
+        String release = releaseClaim && assignee != null
+                ? "status = 'OPEN', claimed_by = NULL, claimed_at = NULL, " : "";
+        List<Object> params = new ArrayList<>();
+        if (assignee != null) {
+            params.add("user".equals(kind) ? value : null);
+            params.add("role".equals(kind) ? value : null);
+            params.add("group".equals(kind) ? value : null);
+        }
+        params.add(level);
+        params.add(nextAt == null ? null : ts(nextAt));
+        params.add(tenant);
+        params.add(id);
+        params.add(expectedLockVersion);
+        return jdbc.sql("UPDATE pre_task SET " + move + release + "escalation_level = ?, next_escalation_at = ?, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? AND lock_version = ? "
+                        + "AND status IN ('OPEN','CLAIMED')")
+                .params(params).update();
     }
 
     @Override
@@ -453,6 +528,40 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         i.causeSummary(), i.retryCount(), i.status(), i.lockVersion(), ts(i.createdAt()),
                         i.resolvedAt() == null ? null : ts(i.resolvedAt()))
                 .update();
+    }
+
+    @Override
+    public void pushCompensation(CompensationEntry e) {
+        jdbc.sql("INSERT INTO pre_compensation_stack (tenant_id, id, instance_id, scope_token_id, seq, step_id, "
+                        + "forward_job_id, forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, "
+                        + "completed_at) SELECT ?, ?, ?, ?, coalesce(max(seq), 0) + 1, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ? "
+                        + "FROM pre_compensation_stack WHERE tenant_id = ? AND instance_id = ? AND scope_token_id = ?")
+                .params(e.tenantId(), e.id(), e.instanceId(), e.scopeTokenId(), e.stepId(), e.forwardJobId(),
+                        e.forwardAttemptId(), e.handler(), e.mode(), e.inputSnapshotJson(), e.status(), e.jobId(),
+                        ts(e.pushedAt()), ts(e.completedAt()), e.tenantId(), e.instanceId(), e.scopeTokenId())
+                .update();
+    }
+
+    @Override
+    public List<CompensationEntry> compensationEntries(String tenant, String instanceId) {
+        return ProcessListQueries.COMPENSATION_STACK.list(jdbc, List.of(tenant, instanceId),
+                JdbcProcessStore::compensation);
+    }
+
+    @Override
+    public int updateCompensation(CompensationEntry e) {
+        return jdbc.sql("UPDATE pre_compensation_stack SET status = ?, job_id = ?, completed_at = ? "
+                        + "WHERE tenant_id = ? AND id = ? AND instance_id = ?")
+                .params(e.status(), e.jobId(), ts(e.completedAt()), e.tenantId(), e.id(), e.instanceId())
+                .update();
+    }
+
+    private static CompensationEntry compensation(ResultSet rs, int row) throws SQLException {
+        return new CompensationEntry(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
+                rs.getString("scope_token_id"), rs.getInt("seq"), rs.getString("step_id"),
+                rs.getString("forward_job_id"), rs.getString("forward_attempt_id"), rs.getString("handler"),
+                rs.getString("mode"), rs.getString("input_snapshot"), rs.getString("status"), rs.getString("job_id"),
+                instant(rs, "pushed_at"), instant(rs, "completed_at"));
     }
 
     @Override

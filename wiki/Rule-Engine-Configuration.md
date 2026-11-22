@@ -24,12 +24,12 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 | `definitions-auto-publish` | `false` | 0.1 (M1) | Publish loaded drafts without maker-checker. Refused unless the `dev` profile is active |
 | `rest.enabled` | `true` | 0.1 (M1) | Expose the REST API |
 | `rest.base-path` | `/api/bpm/rules/v1` | 0.1 (M1) | Base path of the REST API. Keep the version segment when you change it; the cockpit reads the same value |
-| `rest.cors.allowed-origins` | empty | 0.1 (M1) | Origins allowed to call the REST API, needed only for a standalone cockpit. Empty disables CORS |
+| `rest.cors.allowed-origins` | empty | Built as the host-wide `horus.bpm.rest.cors.allowed-origins` | Exact origins allowed to call the engine API from a browser, needed only for a standalone cockpit on another origin. Empty (the default) sends no CORS header, so a browser refuses every cross-origin call. See [Standalone cockpit settings](#standalone-cockpit-settings) |
 | `decision-log.enabled` | `true` | 0.1 (M1) | Write `rle_decision` rows |
 | `decision-log.mode` | `transactional` | `transactional` 0.1 (M1); `async` M2 (March 2027), may move to M3 | `transactional`: one `INSERT` in the caller's transaction. `async`: insert into `rle_decision_outbox`, relayed by the scheduler thread, for high-volume hosts. Until `async` ships, setting it stops start-up with a message naming the milestone |
 | `decision-log.async.batch-size` | `100` | M2, may move to M3 | Outbox rows relayed per poll in `async` mode |
 | `decision-log.partitions-ahead` | `P7D` | Built (0.2) | How far ahead of the host clock monthly `rle_decision` partitions are created, at start-up and daily while the host runs; `PT0S` to `P366D`. The current and the next month always exist. See [Decision log partitions](#decision-log-partitions) |
-| `decision-log.retention` | unset: keeps everything, warns | Built (0.2) | How long decisions are kept: `keep-forever`, or an ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M`, `P120M` or `P10Y`. Retention is never on by default, so an existing host upgrades without setting it. The engine refuses a value below the floor or in days, naming the property. The daily partition job drops each whole monthly partition that ends at or before the host clock minus this period, and records each drop in `rle_decision_log_drop`. Unset, on every profile, nothing is ever dropped and start-up is not affected, but a WARN at every start-up says the setting is unset and everything is kept. `keep-forever` is the explicit way to say so and logs INFO. Only an explicit period enables drops. A later release, 1.0, requires the setting; see [[Rule Engine Decision Log and Audit]]. No decision row is ever deleted by date. See [[Rule Engine Decision Log and Audit]] |
+| `decision-log.retention` | required from 1.0; before, unset keeps everything and warns | Built (0.2) | How long decisions are kept: `keep-forever`, or an ISO 8601 period in whole months, at least `decision-log.retention-floor`, for example `P12M`, `P120M` or `P10Y`. Retention is never on by default, so an existing host upgrades without setting it. The engine refuses a value below the floor or in days, naming the property. The daily partition job drops each whole monthly partition that ends at or before the host clock minus this period, and records each drop in `rle_decision_log_drop`. Unset before 1.0, on every profile, nothing is ever dropped and start-up is not affected, but a WARN at every start-up says the setting is unset and everything is kept. `keep-forever` is the explicit way to say so and logs INFO. Only an explicit period enables drops. From 1.0 the setting is required: unset stops start-up, naming the property, on every profile except `dev` on its own (optionally with `test`); see [[Rule Engine Decision Log and Audit]]. No decision row is ever deleted by date. See [[Rule Engine Decision Log and Audit]] |
 | `decision-log.mask-default` | `false` | Built | Mask every input that declares no `mask`; an input with `mask: false` is never masked by this default. A change is logged at start-up, one line per tenant with the old and new value, and the value in force is shown in `/api/bpm/meta`. See [Personal data guards](#personal-data-guards) |
 | `decision-log.require-explicit-mask` | `false` | 0.2 | Strict mode: every input must declare `mask: true` or `mask: false`. An undeclared input is `422 VALIDATION_FAILED` naming it, at import, draft replacement, publication request and approval. Shown in `/api/bpm/meta`. Turn it on for production |
 | `lifecycle.acknowledge-warnings` | `[UNMASKED_PERSONAL_DATA]` | 0.2 | Warning codes an approver must accept before a version is published: the approve request lists the exact `{ code, input }` pairs shown in `acknowledgedWarnings`, else `409 WARNINGS_NOT_ACKNOWLEDGED`. The acceptance is recorded on the approval history row and the published event. An input masked only by the tenant's `decision-log.mask-default` needs no acceptance; the approval records it in `maskedByDefaultInputs`. Removing `UNMASKED_PERSONAL_DATA` relaxes a control: it is logged at WARN at start-up and shown in `/api/bpm/meta` |
@@ -182,7 +182,14 @@ These are under `horus.bpm.` and apply to every engine in the host. They are rea
 | `tenancy.claim` | `tenant_id` | Built | Attribute of the authenticated principal that the default `TenantResolver` reads: the claim of a validated token, or the attribute of a session principal from an OIDC or OAuth2 login (PD-079). Whatever the resolver, a principal with this attribute must match the resolved tenant |
 | `tenancy.dev-tenant` | unset | Built | Fixed tenant for principals that carry none, for local work without an identity provider. Accepted on the `dev` profile only; start-up is refused when it is set elsewhere |
 
-There is no header-based tenant mode: the engines never take the tenant from what the browser sends, and `tenancy.resolver` and `tenancy.trusted-gateway` stop the start-up with a message (PD-079). A host whose principal has no tenant attribute declares its own `TenantResolver` bean.
+| `tenancy.switching.enabled` | `false` | Built | Accept `X-Tenant-Id` for a tenant in the caller's allowed-tenants claim. Off: a header that differs from the caller's tenant is `403 TENANT_NOT_ALLOWED`. See [Standalone cockpit settings](#standalone-cockpit-settings) |
+| `tenancy.allowed-tenants-claim` | `allowed_tenants` | Built | Claim or principal attribute listing the tenants the caller may select: a JSON array, or one space-separated string. Read only while switching is on; must differ from `tenancy.claim` |
+| `security.audiences` | empty | Built | Audiences this host accepts in a bearer token's `aud` claim. A token for none of them is `401`. Required, here or as `spring.security.oauth2.resourceserver.jwt.audiences`, whenever a CORS origin is set outside the `dev` profile |
+| `rest.cors.allowed-origins` | empty | Built | Exact origins, for example `https://cockpit.bank.example`; `http` only for `localhost`, `127.0.0.1` or `[::1]`; never `*`, a pattern, a path or a trailing slash. Each value is checked at start-up |
+| `rest.cors.allowed-headers`, `rest.cors.allowed-methods`, `rest.cors.exposed-headers` | the cockpit's headers, `GET POST PUT PATCH DELETE`, `ETag Location Retry-After X-Correlation-Id` | Built | What a cross-origin call may send and read. `*` is refused for headers. Credentials mode is never on |
+| `rest.cors.max-age` | `PT10M` | Built | How long a browser may cache a preflight answer, `PT0S` to `PT24H` |
+
+There is no header-based tenant source: the engines never take the tenant from what the browser sends (`X-Tenant-Id` is only the opt-in switch request above, checked against the token), and `tenancy.resolver` and `tenancy.trusted-gateway` stop the start-up with a message (PD-079). A host whose principal has no tenant attribute declares its own `TenantResolver` bean.
 | `security.challenge` | `Bearer` | Built | `WWW-Authenticate` value of a `401` the engine endpoints raise themselves |
 
 ### Decided settings without a property name yet
@@ -380,3 +387,28 @@ UserDetailsService devUsers(PasswordEncoder enc) {
 }
 ```
 With HTTP basic enabled, `curl -u dev:dev ...` holds `rules:evaluate` and runs as tenant `dev`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses to start with `definitions-auto-publish: true`, `maker-checker.enabled: false` or any `tenancy.dev-tenant` value.
+
+## Standalone cockpit settings
+
+A cockpit served from another origin than the host (ADR-0014) needs three host settings. All are under `horus.bpm.` and shared by both engines, so a host with both sets them once. Environment variable names follow Spring's rule: `HORUS_BPM_REST_CORS_ALLOWED_ORIGINS`, `HORUS_BPM_SECURITY_AUDIENCES`, `HORUS_BPM_TENANCY_SWITCHING_ENABLED`.
+
+| Need | Setting | What the host does |
+|---|---|---|
+| Let the cockpit's page call the API | `rest.cors.allowed-origins: [https://cockpit.bank.example]` | Answers the preflight (it carries no token) for exactly those origins and refuses any other origin with `403` and no CORS header. With nothing listed, CORS is off. A call from the host's own origin is not cross-origin and is unaffected. Bearer tokens only: no credentials mode, no wildcard |
+| Refuse another host's token | `security.audiences: [loans-bpm]` | Registers an audience check that Spring Boot's JWT decoder applies beside the issuer check; a token whose `aud` names none of the values is `401`. A host that builds its own `JwtDecoder` adds the `OAuth2TokenValidator<Jwt>` beans itself. Spring Boot's `spring.security.oauth2.resourceserver.jwt.audiences` does the same and also satisfies the next rule |
+| Let a user work for several tenants | `tenancy.switching.enabled: true` | Accepts `X-Tenant-Id` for the signed-in tenant or a tenant in the `allowed_tenants` claim of the verified token. The header alone grants nothing. Any other value, a blank or repeated header is `403 TENANT_NOT_ALLOWED`. Each accepted switch writes `tenant.switch.accepted` on the security log |
+
+Outside the `dev` profile the host refuses to start with a CORS origin and no audience (`TR-SEC-12`), naming `horus.bpm.security.audiences`. A wrong value, such as `*` in the origin list, stops the start-up naming the property.
+
+```yaml
+horus:
+  bpm:
+    rest:
+      cors:
+        allowed-origins: https://cockpit.bank.example
+    security:
+      audiences: loans-bpm
+    tenancy:
+      switching:
+        enabled: true
+```

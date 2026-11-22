@@ -12,7 +12,7 @@ This page explains what the Process Engine does, which guarantees it gives for h
 | Human tasks | Assign by user, role or group; claim, complete, delegate, reassign; SLA timers and escalation; four-eyes approval enforced by the engine |
 | Runtime | State in the host database (`pre_*`); execution tokens; database-backed timers and async jobs with leases; history of every transition; retry and incidents |
 | Reliability | Idempotency keys on every mutating call; unique business key per tenant and definition; optimistic locking on tasks, instances and incidents |
-| Compensation | `compensate` handlers on `serviceTask` and `agentTask`; `saga` blocks; reverse-order execution with retry and incidents |
+| Compensation | `compensate` handlers on `serviceTask` and `agentTask`; `saga` blocks (BPMN `transaction`); reverse-order execution with retry and incidents (0.3.0, #67) |
 | SLA | Deadlines computed through a `BusinessCalendar` SPI: working hours, holidays, time zone per tenant |
 | Migration | Plan, dry run and batched execution of running instances from one definition version to another |
 | Out of scope | Full BPMN 2.0, CMMN, cross-process message correlation (later), distributed job executor, standalone server |
@@ -159,25 +159,32 @@ Java API methods take the same keys as parameters (ADR-0006). The idempotency re
 
 ![Compensation flow](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/compensation-flow.svg)
 
-```yaml
-- id: reserve-funds
-  type: serviceTask
-  mode: remote
-  handler: fundsReservation.reserve
-  compensate: fundsReservation.release        # host bean method, must be idempotent by attemptId
-- id: open-account
-  type: serviceTask
-  mode: remote
-  handler: coreBanking.openAccount
-  compensate: coreBanking.closeAccount
-- id: notify-partner
-  type: serviceTask
-  mode: remote
-  handler: partnerApi.notify
-  compensate: manual                           # raises an incident for operations instead
-  onFailure: compensate                        # after retries: run compensations of completed steps in reverse
+Since 0.3.0 (#67) a `saga` block is a BPMN `transaction`, and each step names its undo and its failure action:
+
+```xml
+<bpmn:transaction id="transfer" name="Move the money">
+  <bpmn:startEvent id="transfer-start"/>
+  <!-- local: release-hold is a ServiceTaskHandler, run in its own transaction -->
+  <bpmn:serviceTask id="hold-funds" horus:handler="place-hold" horus:compensate="release-hold"/>
+  <!-- remote: credit-back is a ServiceAdapter, called with no transaction open -->
+  <bpmn:serviceTask id="debit-source" horus:handler="core-banking" horus:mode="remote"
+                    horus:compensate="credit-back"/>
+  <!-- when this step fails for good, the completed steps of the block are undone newest first -->
+  <bpmn:serviceTask id="credit-target" horus:handler="core-banking" horus:mode="remote"
+                    horus:onFailure="compensate"/>
+  <bpmn:endEvent id="transfer-end"/>
+  <!-- sequence flows inside the block -->
+</bpmn:transaction>
 ```
-A `saga` block groups steps that compensate together: each entered block gets its own scope token, and a failure inside it runs only the compensations recorded under that block, newest first (ADR-0020). Steps outside any block compensate under the instance's scope. `throwCompensation` ends a block explicitly. Compensation handlers are Async Wait-State steps themselves. Every compensation is a history row (ADR-0007).
+
+How it runs:
+
+- Each entered block gets its own scope token. A completed step with `horus:compensate` pushes one entry onto the stack of that scope token, and a failure inside the block undoes only the entries of that block, newest first (ADR-0020, `PRE-044`). Steps outside any block are undone under the instance's root scope.
+- A step with `horus:onFailure="compensate"` starts the compensation when it fails for good: a business error, a failure that is not retryable, or its last attempt. Without it, the failure opens an incident as before. A `throwCompensation` (an `intermediateThrowEvent` with a `compensateEventDefinition`) inside a block starts it explicitly.
+- The instance is `COMPENSATING` while the walk runs and ends `FAILED`. A `COMPENSATING` instance cannot be cancelled (`409 INVALID_STATE`): an undo is never abandoned half way.
+- Each undo is its own `COMPENSATION` job, keyed by its own job id on every retry, with the `runners.compensation.*` retry policy. A remote undo receives `forwardJobId` (the key the forward call was posted under) and `forwardAttemptId` on `AdapterCall`, so the remote side can find and reverse the original. A local undo receives `forwardAttemptId` on `ServiceCall`. Both receive the forward inputs and, under `forwardResult`, the forward result.
+- An undo that fails for good opens `COMPENSATION_FAILED` and pauses the walk; `horus:compensate="manual"` opens `COMPENSATION_MANUAL_REQUIRED`. An operator retries the first, which runs the same job again, or resolves either with a second person's approval, which marks the undo done by hand. The walk then goes on.
+- Every step of the walk is a history row: `COMPENSATION_STARTED`, `COMPENSATION_STEP_SCHEDULED`, `COMPENSATION_STEP_COMPLETED`, `COMPENSATION_STEP_FAILED`, `COMPENSATION_STEP_MANUAL` and `COMPENSATED` (ADR-0007).
 
 ## Business calendar for SLA
 ```xml
@@ -190,7 +197,7 @@ public interface BusinessCalendar {
   boolean isBusinessTime(String tenantId, String calendarKey, Instant at);
 }
 ```
-The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`. A calendar is created or changed by a proposal that a second holder of `processes:calendar:manage` approves (four eyes by default; one person only in the `dev` profile). A task without `horus:calendar` counts elapsed time. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`). Escalation of an overdue task (`escalateTo`) follows in a later release. See [[Process Engine API]] for an example.
+The default implementation reads weekly hours, holidays and time zone from `pre_calendar` and `pre_holiday`. A calendar is created or changed by a proposal that a second holder of `processes:calendar:manage` approves (four eyes by default; one person only in the `dev` profile). A task without `horus:calendar` counts elapsed time. A computed `due_at` does not move when the calendar changes later (`TR-CAL-02`). An overdue task escalates to the next level of its `horus:escalation` on the same calendar (0.3.0). See [[Process Engine API]] for an example.
 
 ## Instance migration
 ![Instance migration](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/instance-migration.svg)
@@ -243,8 +250,8 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | `processes:approve` | Approve, reject and retire versions; a retirement needs a reason, and the last version in effect needs a confirmation (PD-101, PD-102) |
 | `processes:start` | Start instances |
 | `processes:cancel` | Cancel a running instance, with a reason (PD-103) |
-| `processes:task:work` | Claim, complete and delegate tasks in the caller's own queues |
-| `processes:task:manage` | Reassign any task, recompute SLAs |
+| `processes:task:work` | Claim, unclaim and complete tasks in the caller's own queues |
+| `processes:task:manage` | List every task of the tenant, and reassign an open task or delegate a claimed one to a named user, with a reason (0.3.0, PD-110) |
 | `processes:incident:manage` | Retry an incident, propose its resolution, and approve or reject another person's proposal (0.3.0, PD-126) |
 | `processes:migration:manage` | Create, validate and execute migration plans |
 | `processes:calendar:manage` | Propose, approve and reject changes of business calendars and holidays; a proposer never approves their own |

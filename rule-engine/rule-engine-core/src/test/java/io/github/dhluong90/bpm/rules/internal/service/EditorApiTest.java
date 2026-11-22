@@ -415,10 +415,10 @@ class EditorApiTest {
         // a requester without rules:author (approve only) cannot withdraw: PD-089 accepted edge case
         assertThat(VersionActions.allowed(pending.status(), pending.createdBy(), pending.requestedBy(), "alice", APPROVER))
                 .isEmpty();
-        // and once withdrawn, the draft offers request-publish again
+        // and once withdrawn, the draft offers request-publish again, and discard to its author
         RuleSetVersion draft = versions.withdraw("card-fee", 2, new WriteOptions(null, pending.lockVersion(), null));
         assertThat(VersionActions.allowed(draft.status(), draft.createdBy(), draft.requestedBy(), "alice", AUTHOR))
-                .containsExactly("request-publish");
+                .containsExactly("request-publish", "discard");
     }
 
     // ---------------------------------------------------------------- RLE-039 rule set list
@@ -825,7 +825,7 @@ class EditorApiTest {
                 .containsExactly("reject");
         // v3 draft by lan
         assertThat(VersionActions.allowed(VersionStatus.DRAFT, "lan", null, "lan", AUTHOR_APPROVER))
-                .containsExactly("request-publish");
+                .containsExactly("request-publish", "discard");
         assertThat(VersionActions.allowed(VersionStatus.DRAFT, "lan", null, "minh", APPROVER)).isEmpty();
         // v1 published: an approver may retire it (#28), anyone else nothing; a retired version allows nothing
         assertThat(VersionActions.allowed(VersionStatus.PUBLISHED, "lan", "lan", "lan", AUTHOR_APPROVER))

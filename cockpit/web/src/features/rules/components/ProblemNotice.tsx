@@ -89,8 +89,10 @@ const asIs = (name: string) => name;
  * `located` lists every violation of a refused document by row and column, for screens without the editor grid.
  * `refusedFile` is for an import: the title says nothing was saved, and each place names the file.
  */
-export function ProblemNotice({ error, onReload, onRestart, showDetail = true, located = false, refusedFile, columnLabel = asIs }: {
+export function ProblemNotice({ error, onReload, onRestart, showDetail = true, located = false, refusedFile, columnLabel = asIs, message }: {
   error: unknown;
+  /** The sentence to show instead of the generic one for the error's code, for a screen that knows the action better. */
+  message?: string | undefined;
   onReload?: () => void;
   onRestart?: () => void;
   showDetail?: boolean;
@@ -104,17 +106,19 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
   // A 4xx refusal of an import stored nothing; an answer that never came (or a 5xx) cannot promise that.
   const refused = refusedFile !== undefined && problem !== undefined && problem.status >= 400 && problem.status < 500;
   const places = (located || refused) && problem ? violationsOf(problem) : [];
-  const title = refused ? t('import.refused') : t(messageKey(hostError));
+  const title = refused ? t('import.refused') : (message ?? t(messageKey(hostError)));
   const correlationId = hostError.kind === 'problem' || hostError.kind === 'unexpected-response' ? hostError.correlationId : undefined;
   const detail = showDetail ? problem?.detail : undefined;
   const hasDetails = problem?.code !== undefined || correlationId !== undefined || detail !== undefined;
   const [open, setOpen] = useState(false);
   const detailsId = useId();
+  // The content moved on since it was reviewed: nothing failed, the reviewer looks again. Said calmly, as information.
+  const calm = problem?.code === 'CONTENT_CHANGED';
   return (
-    <div className="notice notice--bad notice--line" role="alert">
+    <div className={calm ? 'notice notice--info notice--line' : 'notice notice--bad notice--line'} role={calm ? 'status' : 'alert'}>
       <div className="notice__row">
         <p className="notice__title">
-          <span className="notice__icon" aria-hidden="true">✕</span>
+          <span className="notice__icon" aria-hidden="true">{calm ? '↻' : '✕'}</span>
           {title}
         </p>
         {hasDetails ? (
@@ -147,9 +151,9 @@ export function ProblemNotice({ error, onReload, onRestart, showDetail = true, l
           </dl>
         </div>
       ) : null}
-      {onReload && problem?.code === 'VERSION_CONFLICT' ? (
+      {onReload && (problem?.code === 'VERSION_CONFLICT' || problem?.code === 'CONTENT_CHANGED') ? (
         <button type="button" className="btn btn--small hit" onClick={onReload}>
-          {t('problem.reload')}
+          {problem.code === 'CONTENT_CHANGED' ? t('approval.reload') : t('problem.reload')}
         </button>
       ) : null}
       {onRestart ? (

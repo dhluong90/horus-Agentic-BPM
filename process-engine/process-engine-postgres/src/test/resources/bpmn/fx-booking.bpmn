@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRE-076: an account is opened in the root scope, then two FX legs run as saga blocks of two steps each. A leg
+     whose dealer flags the deal throws compensation; the second leg's confirmation can fail with onFailure
+     compensate. Either way only the steps of that leg are undone. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_fx-booking"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="fx-booking" name="FX booking" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="open-account" horus:handler="open-account" horus:compensate="close-account"
+                      horus:resultVariable="account"/>
+    <bpmn:transaction id="fx-leg-1" name="First leg">
+      <bpmn:startEvent id="leg1-start"/>
+      <bpmn:serviceTask id="leg1-buy" horus:handler="fx-buy" horus:compensate="fx-unbuy" horus:resultVariable="leg1Buy"/>
+      <bpmn:serviceTask id="leg1-sell" horus:handler="fx-sell" horus:compensate="fx-unsell" horus:resultVariable="leg1Sell"/>
+      <bpmn:exclusiveGateway id="leg1-check" default="leg1-ok"/>
+      <bpmn:intermediateThrowEvent id="leg1-abort" name="Undo the first leg">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:intermediateThrowEvent>
+      <bpmn:endEvent id="leg1-end"/>
+      <bpmn:sequenceFlow id="l1" sourceRef="leg1-start" targetRef="leg1-buy"/>
+      <bpmn:sequenceFlow id="l2" sourceRef="leg1-buy" targetRef="leg1-sell"/>
+      <bpmn:sequenceFlow id="l3" sourceRef="leg1-sell" targetRef="leg1-check"/>
+      <bpmn:sequenceFlow id="leg1-flagged" sourceRef="leg1-check" targetRef="leg1-abort">
+        <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">dealerFlag &gt;= 1</bpmn:conditionExpression>
+      </bpmn:sequenceFlow>
+      <bpmn:sequenceFlow id="leg1-ok" sourceRef="leg1-check" targetRef="leg1-end"/>
+    </bpmn:transaction>
+    <bpmn:transaction id="fx-leg-2" name="Second leg">
+      <bpmn:startEvent id="leg2-start"/>
+      <bpmn:serviceTask id="leg2-buy" horus:handler="fx-buy" horus:compensate="fx-unbuy" horus:resultVariable="leg2Buy"/>
+      <bpmn:serviceTask id="leg2-sell" horus:handler="fx-sell" horus:compensate="fx-unsell" horus:resultVariable="leg2Sell"/>
+      <bpmn:serviceTask id="leg2-confirm" horus:handler="fx-confirm" horus:onFailure="compensate"
+                        horus:resultVariable="leg2Confirmation"/>
+      <bpmn:endEvent id="leg2-end"/>
+      <bpmn:sequenceFlow id="m1" sourceRef="leg2-start" targetRef="leg2-buy"/>
+      <bpmn:sequenceFlow id="m2" sourceRef="leg2-buy" targetRef="leg2-sell"/>
+      <bpmn:sequenceFlow id="m3" sourceRef="leg2-sell" targetRef="leg2-confirm"/>
+      <bpmn:sequenceFlow id="m4" sourceRef="leg2-confirm" targetRef="leg2-end"/>
+    </bpmn:transaction>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="open-account"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="open-account" targetRef="fx-leg-1"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="fx-leg-1" targetRef="fx-leg-2"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="fx-leg-2" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

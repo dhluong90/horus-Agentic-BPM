@@ -23,8 +23,10 @@ public final class CompiledProcess {
     private final Map<String, SequenceFlow> flows;
     private final Map<String, List<SequenceFlow>> outgoing;
     private final Map<FacetKey<?>, Object> facets;
+    private final Map<String, String> containers;
 
     private CompiledProcess(Builder builder) {
+        this.containers = Map.copyOf(builder.containers);
         this.definitionId = builder.definitionId;
         this.process = builder.process;
         this.nodes = Collections.unmodifiableMap(builder.nodes);
@@ -78,7 +80,29 @@ public final class CompiledProcess {
         return outgoing.getOrDefault(nodeId, List.of());
     }
 
-    /** @return every flow node, in document order */
+    /**
+     * The container a node stands in (#67): the id of its {@code saga} block, or the process id for a node of the
+     * process itself.
+     *
+     * @param nodeId node id
+     * @return the container id
+     */
+    public String containerOf(String nodeId) {
+        return containers.getOrDefault(nodeId, process.id());
+    }
+
+    /**
+     * @param containerId a {@code saga} block id, or the process id
+     * @return the none start event of that container, if it has one
+     */
+    public Optional<FlowNode> startOf(String containerId) {
+        return nodes.values().stream()
+                .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
+                        && s.eventDefinitions().isEmpty() && containerOf(n.id()).equals(containerId))
+                .findFirst();
+    }
+
+    /** @return every flow node, in document order, those of {@code saga} blocks included */
     public List<FlowNode> nodes() {
         return List.copyOf(nodes.values());
     }
@@ -100,13 +124,23 @@ public final class CompiledProcess {
         private final Map<String, SequenceFlow> flows = new LinkedHashMap<>();
         private final Map<String, List<SequenceFlow>> outgoing = new HashMap<>();
         private final Map<FacetKey<?>, Object> facets = new HashMap<>();
+        private final Map<String, String> containers = new HashMap<>();
 
         private Builder(String definitionId, Process process) {
             this.definitionId = Objects.requireNonNull(definitionId, "definitionId must not be null");
             this.process = Objects.requireNonNull(process, "process must not be null");
-            process.flowElements().forEach(element -> {
+            index(process.id(), process.flowElements());
+        }
+
+        private void index(String containerId, List<io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement>
+                elements) {
+            elements.forEach(element -> {
                 if (element instanceof FlowNode node) {
                     nodes.put(node.id(), node);
+                    containers.put(node.id(), containerId);
+                    if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer c) {
+                        index(node.id(), c.flowElements());
+                    }
                 } else if (element instanceof SequenceFlow flow) {
                     flows.put(flow.id(), flow);
                     outgoing.computeIfAbsent(flow.sourceRef(), k -> new ArrayList<>()).add(flow);

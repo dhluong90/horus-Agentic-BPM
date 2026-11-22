@@ -64,8 +64,21 @@ public final class RuleSetReader {
     private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
     private static final Pattern RULE_ID = Pattern.compile("^[A-Za-z][A-Za-z0-9_-]*$");
     private static final Set<String> ROOT_KEYS = Set.of("schemaVersion", "ruleSet", "description",
-            "expressionLanguage", "timeZone", "hitPolicy", "effectiveFrom", "moneyRounding", "explanations", "inputs",
-            "outputs", "rules");
+            "expressionLanguage", "timeZone", "hitPolicy", "errorMode", "effectiveFrom", "moneyRounding", "explanations",
+            "inputs", "outputs", "rules");
+
+    /** The error mode of every schema version 1 rule set, left out of the canonical form (PD-066, PD-125). */
+    public static final String ERROR_MODE_STRICT = "strict";
+
+    /**
+     * Hit policies of DMN 1.5 that schema version 1 reserves under these names; they arrive in stage S1
+     * (standards-compliance.md section 6.2), so a document that uses one is refused by name (RLE-095).
+     */
+    private static final Set<String> RESERVED_HIT_POLICIES = Set.of("any", "priority", "ruleOrder", "outputOrder");
+
+    /** FEEL by its short id or by an OMG FEEL namespace URI of DMN 1.2 to 1.5 (standards-compliance.md 4.6). */
+    private static final Pattern FEEL_LANGUAGE =
+            Pattern.compile("^(feel|https?://www\\.omg\\.org/spec/DMN/\\d{8}/FEEL/?)$", Pattern.CASE_INSENSITIVE);
 
     private static final Set<String> INPUT_KEYS = Set.of("name", "type", "label", "description", "allowed", "mask");
     private static final Set<String> OUTPUT_KEYS = Set.of("name", "type", "label", "description", "default", "collect");
@@ -137,6 +150,9 @@ public final class RuleSetReader {
         // rle_version.effective_from) but never printed, so the same rules have one hash whatever date they take
         // effect (ADR-0026 decision 1, DESIGN section 3.1, #233).
         ((ObjectNode) tree).remove("effectiveFrom");
+        // errorMode strict is what every schema version 1 rule set evaluates in, written or not: one behaviour, one
+        // hash, and a DMN round trip keeps it (PD-125, RLE-045, RLE-096). Only another mode will be printed.
+        ((ObjectNode) tree).remove("errorMode");
         String canonical = printed.apply(CanonicalJson.write(tree));
         // What runs is what was hashed: the printed form must parse back to the same model (fail closed).
         JsonNode reread = EngineJson.JSON.readTree(canonical);
@@ -166,7 +182,12 @@ public final class RuleSetReader {
             }
         }
         JsonNode schemaVersion = required(root, "schemaVersion");
-        if (!schemaVersion.isIntegralNumber() || schemaVersion.asInt() != 1) {
+        if (schemaVersion.isIntegralNumber() && schemaVersion.canConvertToInt() && schemaVersion.asInt() > 1) {
+            // A later format, such as the one that holds several decisions: named, never read as version 1 (RLE-095).
+            throw invalid("schemaVersion " + schemaVersion.asInt() + " is written for a later engine release; this"
+                    + " release reads schema version 1");
+        }
+        if (!schemaVersion.isIntegralNumber() || !schemaVersion.canConvertToInt() || schemaVersion.asInt() != 1) {
             throw invalid("schemaVersion must be 1");
         }
         String name = text(root, "ruleSet");
@@ -175,6 +196,10 @@ public final class RuleSetReader {
         }
         String language = optionalText(root, "expressionLanguage", EXPR_V1);
         if (!EXPR_V1.equals(language)) {
+            if (FEEL_LANGUAGE.matcher(language).matches()) {
+                throw invalid("expressionLanguage FEEL is added in stage S1 with a later schema version; schema"
+                        + " version 1 is written in " + EXPR_V1);
+            }
             throw invalid("expressionLanguage must be " + EXPR_V1);
         }
         ZoneId zone;
@@ -183,12 +208,26 @@ public final class RuleSetReader {
         } catch (DateTimeException e) {
             throw invalid("timeZone is not an IANA zone id");
         }
-        HitPolicy hitPolicy = switch (text(root, "hitPolicy")) {
+        String hitPolicyName = text(root, "hitPolicy");
+        HitPolicy hitPolicy = switch (hitPolicyName) {
             case "first" -> HitPolicy.FIRST;
             case "unique" -> HitPolicy.UNIQUE;
             case "collect" -> HitPolicy.COLLECT;
-            default -> throw invalid("hitPolicy must be first, unique or collect");
+            default -> throw invalid(RESERVED_HIT_POLICIES.contains(hitPolicyName)
+                    ? "hitPolicy " + hitPolicyName + " is added in stage S1; this release reads first, unique and"
+                            + " collect"
+                    : "hitPolicy must be first, unique or collect");
         };
+        if (root.has("errorMode")) {
+            String errorMode = text(root, "errorMode");
+            if ("spec".equals(errorMode)) {
+                throw invalid("errorMode spec is added in stage S1; this release evaluates every rule set in"
+                        + " errorMode strict");
+            }
+            if (!ERROR_MODE_STRICT.equals(errorMode)) {
+                throw invalid("errorMode must be strict or spec");
+            }
+        }
         Instant effectiveFrom = null;
         if (root.has("effectiveFrom")) {
             try {

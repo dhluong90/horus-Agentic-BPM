@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
-      "description": "Version of this definition format. Documents written for an older schema version import forever.",
+      "description": "Version of this definition format. Documents written for an older schema version import forever; a document of a later schema version is refused by name, never read as an earlier one.",
       "const": 1
     },
     "ruleSet": {
@@ -19,7 +19,7 @@
     },
     "description": { "type": "string", "maxLength": 2000 },
     "expressionLanguage": {
-      "description": "Language of every expression in this document. Only urn:horus-bpm:expr:v1 is accepted in schema version 1; FEEL arrives with a later schema version (ADR-0017, ADR-0019). Stored with the version.",
+      "description": "Language of every expression in this document. Only urn:horus-bpm:expr:v1 is accepted in schema version 1; FEEL (feel or an OMG FEEL namespace URI) is refused by name until it arrives with a later schema version in stage S1 (ADR-0017, ADR-0019). Stored with the version.",
       "enum": ["urn:horus-bpm:expr:v1"],
       "default": "urn:horus-bpm:expr:v1"
     },
@@ -30,7 +30,14 @@
       "maxLength": 64,
       "default": "UTC"
     },
-    "hitPolicy": { "description": "DMN hit policies F (first), U (unique) and C (collect). The other DMN hit policies (A, P, R, O) arrive in a later schema version (standards-compliance.md section 6.2).", "enum": ["first", "unique", "collect"] },
+    "hitPolicy": { "description": "DMN hit policies F (first), U (unique) and C (collect). The names any, priority, ruleOrder and outputOrder are reserved for the other DMN hit policies (A, P, R, O) and refused by name until stage S1 (standards-compliance.md section 6.2).", "enum": ["first", "unique", "collect"] },
+    "errorMode": {
+      "description": "How an evaluation error is answered. strict, the only mode of schema version 1, fails the decision with EVALUATION_ERROR; it is the same as leaving the member out and is left out of the canonical form, so it does not change the canonical hash. spec (FEEL semantics with warnings) is reserved and refused by name until stage S1 (PD-066, PD-125).",
+      "enum": [
+        "strict"
+      ],
+      "default": "strict"
+    },
     "effectiveFrom": {
       "description": "Optional. The instant the version becomes effective, ISO 8601 with Z or an offset (RFC 3339 date-time), for example 2027-01-01T00:00:00+07:00. A bare date is rejected because it does not name an instant. Without it the version is effective when approved.",
       "type": "string",

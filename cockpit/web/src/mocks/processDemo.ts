@@ -82,6 +82,18 @@ export const KYC_ONBOARDING_BPMN = `${HEAD}
   </bpmn:process>
 </bpmn:definitions>`;
 
+/*
+ * Version 3 of the onboarding process, waiting for approval: a fraud check after the document check, the high-risk
+ * approval moved to senior credit officers, and the one-day wait before opening the account removed (CKP-024).
+ */
+export const KYC_ONBOARDING_V3_BPMN = KYC_ONBOARDING_BPMN
+  .replace(flow('k5', 'verify-docs', 'join'), `${flow('k5a', 'verify-docs', 'fraud-check')}\n    ${flow('k5b', 'fraud-check', 'join')}`)
+  .replace('<bpmn:parallelGateway id="join"', '<bpmn:serviceTask id="fraud-check" name="Check for fraud" horus:handler="kyc.fraudCheck"/>\n    <bpmn:parallelGateway id="join"')
+  .replace('horus:assignee="role:CREDIT_OFFICER"', 'horus:assignee="role:SENIOR_CREDIT_OFFICER"')
+  .replace(/\s*<bpmn:intermediateCatchEvent id="cooling"[\s\S]*?<\/bpmn:intermediateCatchEvent>/, '')
+  .replace(flow('k8', 'approve', 'cooling'), flow('k8', 'approve', 'open-account'))
+  .replace(/\s*<bpmn:sequenceFlow id="k9"[^>]*\/>/, '');
+
 export const CARD_DISPUTE_BPMN = `${HEAD}
   <bpmn:process id="card-dispute" name="Card dispute" isExecutable="true">
     <bpmn:startEvent id="start" name="Dispute raised"/>
@@ -103,11 +115,25 @@ export interface DemoDefinition {
   nodeCount: number;
   lastChangedAt: string;
   bpmn: string;
+  /** SHA-256 of the canonical form, 64 lower-case hexadecimal characters. */
+  definitionHash?: string;
+  createdBy?: string;
+  requestedBy?: string;
+  requestedAt?: string;
+  /** On a pending version, the requested date it takes effect. */
+  effectiveFrom?: string;
 }
+
+export const KYC_V2_HASH = '3f1c0b9e5d7a4b2c8e6f0a1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d5e4f3';
+export const KYC_V3_HASH = '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b';
 
 export const DEMO_DEFINITIONS: readonly DemoDefinition[] = [
   { key: 'card-dispute', name: 'Card dispute', version: 1, status: 'DRAFT', effectiveVersion: null, nodeCount: 4, lastChangedAt: '2026-11-19T07:45:00Z', bpmn: CARD_DISPUTE_BPMN },
-  { key: 'kyc-onboarding', name: 'Customer onboarding (KYC)', version: 2, status: 'ACTIVE', effectiveVersion: 2, nodeCount: 11, lastChangedAt: '2026-11-12T02:10:00Z', bpmn: KYC_ONBOARDING_BPMN },
+  { key: 'kyc-onboarding', name: 'Customer onboarding (KYC)', version: 2, status: 'ACTIVE', effectiveVersion: 2, nodeCount: 11, lastChangedAt: '2026-11-12T02:10:00Z', bpmn: KYC_ONBOARDING_BPMN, definitionHash: KYC_V2_HASH },
+  {
+    key: 'kyc-onboarding', name: 'Customer onboarding (KYC)', version: 3, status: 'PENDING_APPROVAL', effectiveVersion: 2, nodeCount: 11, lastChangedAt: '2026-11-20T08:40:00Z',
+    bpmn: KYC_ONBOARDING_V3_BPMN, definitionHash: KYC_V3_HASH, createdBy: 'lan', requestedBy: 'lan', requestedAt: '2026-11-20T08:40:00Z', effectiveFrom: '2027-05-31T17:00:00Z',
+  },
   { key: 'loan-origination', name: 'Loan origination', version: 3, status: 'ACTIVE', effectiveVersion: 3, nodeCount: 13, lastChangedAt: '2026-11-18T09:20:00Z', bpmn: LOAN_ORIGINATION_BPMN },
 ];
 
@@ -168,6 +194,7 @@ const VI_NAMES: Readonly<Record<string, string>> = {
   'Wait one day': 'Chờ một ngày',
   'Open account': 'Mở tài khoản',
   'Customer onboarded': 'Đã mở khách hàng',
+  'Check for fraud': 'Kiểm tra gian lận',
   High: 'Cao',
   Standard: 'Thường',
   'Card dispute': 'Khiếu nại thẻ',
@@ -196,3 +223,37 @@ export const REVIEW_TASK_NAME = { en: 'Assess documents', vi: 'Thẩm định ch
 export const FORM_TASK_NAME = { en: 'Capture application', vi: 'Nhập hồ sơ vay' } as const;
 /** The answer's allowed recommendations, as the step's output schema lists them for each tenant. */
 export const RECOMMENDATIONS = { en: ['APPROVE', 'REFER', 'DECLINE'], vi: ['Duyệt', 'Xem lại', 'Từ chối'] } as const;
+
+/**
+ * The engine's change list from version 2 of the onboarding process (in effect) to version 3 (waiting), as
+ * getDefinitionDiff answers it, in the tenant's language. `truncated` is the answer for a change too large to list:
+ * the hashes are then left out and nothing may be approved against it (PD-139).
+ */
+export function kycDiff(locale: 'en' | 'vi', truncated = false) {
+  const name = (value: string) => (locale === 'vi' ? viName(value) : value);
+  const link = (id: string, from: string, fromName: string, to: string, toName: string, kind = 'next') => ({ id, from, fromName: name(fromName), to, toName: name(toName), kind });
+  return {
+    definitionKey: 'kyc-onboarding',
+    approvableHash: truncated ? null : KYC_V3_HASH,
+    base: { version: 2, status: 'ACTIVE', ...(truncated ? {} : { definitionHash: KYC_V2_HASH }) },
+    target: { version: 3, status: 'PENDING_APPROVAL', ...(truncated ? {} : { definitionHash: KYC_V3_HASH }) },
+    identical: false,
+    nodesAdded: [{ id: 'fraud-check', name: name('Check for fraud'), type: 'serviceTask' }],
+    nodesRemoved: [{ id: 'cooling', name: name('Wait one day'), type: 'timer' }],
+    nodesChanged: [
+      { id: 'approve', name: name('Approve high-risk customer'), type: 'userTask', path: '/assignee/role', from: 'CREDIT_OFFICER', to: 'SENIOR_CREDIT_OFFICER' },
+      { id: 'risk-rating', name: name('Rate customer risk'), type: 'decision', path: '/inputs/highRiskAmount', from: { currency: 'VND', amount: 500000000 }, to: { currency: 'VND', amount: 300000000 } },
+    ],
+    edgesAdded: [
+      link('k8', 'approve', 'Approve high-risk customer', 'open-account', 'Open account'),
+      link('k5b', 'fraud-check', 'Check for fraud', 'join', 'Both checks done'),
+      link('k5a', 'verify-docs', 'Verify identity documents', 'fraud-check', 'Check for fraud'),
+    ],
+    edgesRemoved: [
+      link('k8', 'approve', 'Approve high-risk customer', 'cooling', 'Wait one day'),
+      link('k9', 'cooling', 'Wait one day', 'open-account', 'Open account'),
+      link('k5', 'verify-docs', 'Verify identity documents', 'join', 'Both checks done'),
+    ],
+    truncated,
+  };
+}

@@ -35,7 +35,9 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     public Transition apply(InstanceState state, Command command, Clock clock) {
         Objects.requireNonNull(state, "state must not be null");
         Objects.requireNonNull(command, "command must not be null");
-        if (state.status() != InstanceStatus.RUNNING) {
+        InstanceStatus required = command instanceof Command.EndCompensation ? InstanceStatus.COMPENSATING
+                : InstanceStatus.RUNNING;
+        if (state.status() != required) {
             throw new ExecutionException("INVALID_STATE", null, "Instance " + state.instanceId() + " is " + state.status());
         }
         WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command));
@@ -49,6 +51,8 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     review, ctx);
             case Command.Cancel cancel -> cancel(cancel, ctx);
             case Command.RetryStep retry -> retry(retry, ctx);
+            case Command.Compensate compensate -> compensate(compensate, ctx);
+            case Command.EndCompensation end -> ctx.endCompensation(end.scopeTokenId());
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");
         }
@@ -109,6 +113,23 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         Token active = token.withStatus(TokenStatus.ACTIVE);
         ctx.update(active);
         ctx.enqueue(active);
+    }
+
+    /** PRE-073: a step whose job failed for good, and which declares onFailure compensate, starts compensation. */
+    private void compensate(Command.Compensate compensate, WorkingContext ctx) {
+        Token token = ctx.tree().get(compensate.tokenId()).orElseThrow(() ->
+                new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + compensate.tokenId()));
+        if (token.status() != TokenStatus.WAITING_ASYNC || !compensate.attemptId().equals(token.activityInstanceId())) {
+            throw new ExecutionException("INVALID_STATE", token.nodeId(), "Token " + compensate.tokenId()
+                    + " does not wait on attempt " + compensate.attemptId());
+        }
+        FlowNode node = node(token.nodeId());
+        if (!node.extensions().first(io.github.dhluong90.bpm.process.internal.model.horus.OnFailure.class)
+                .map(io.github.dhluong90.bpm.process.internal.model.horus.OnFailure::compensates).orElse(false)) {
+            throw new ExecutionException("INVALID_STATE", node.id(), "Step " + node.id()
+                    + " does not declare onFailure compensate");
+        }
+        ctx.compensate(token, compensate.cause());
     }
 
     private void cancel(Command.Cancel cancel, WorkingContext ctx) {

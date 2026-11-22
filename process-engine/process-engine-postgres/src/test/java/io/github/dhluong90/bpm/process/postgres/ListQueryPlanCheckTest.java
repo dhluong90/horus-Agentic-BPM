@@ -66,6 +66,16 @@ class ListQueryPlanCheckTest {
                             + "'Process', '{}'::jsonb, repeat('a', 64), 'BPMN_XML', '<definitions/>', repeat('b', 64), 6, "
                             + "'IMPORT', ?, 'lan', ?, 'minh', ? FROM generate_series(1, 4) g")
                     .params(tenant, p, T, T, T).update();
+            // Versions 3 and 4 of both keys wait for a second person, requested one minute apart (V35)
+            seed.sql("INSERT INTO pre_definition (tenant_id, id, key_name, version_num, status, name, definition_json, "
+                            + "definition_hash, source_format, source_document, source_hash, node_count, source, "
+                            + "created_by, created_at, requested_by, requested_at) "
+                            + "SELECT ?, ? || 'DEF' || lpad(g::text, 22, '0'), "
+                            + "CASE WHEN g <= 6 THEN 'loan-origination' ELSE 'card-dispute' END, 3 + g % 2, "
+                            + "'PENDING_APPROVAL', 'Process', '{}'::jsonb, repeat('c', 64), 'BPMN_XML', '<definitions/>', "
+                            + "repeat('d', 64), 6, 'IMPORT', 'lan', ?, 'lan', ?::timestamptz + (g || ' minutes')::interval "
+                            + "FROM generate_series(5, 8) g")
+                    .params(tenant, p, T, T).update();
             seed.sql("INSERT INTO pre_definition_history (tenant_id, id, definition_id, action, to_status, actor_id, "
                             + "occurred_at) SELECT ?, ? || 'DH' || lpad(g::text, 23, '0'), "
                             + "? || 'DEF' || lpad((g % 4 + 1)::text, 22, '0'), 'APPROVED', 'ACTIVE', 'minh', ? "
@@ -164,6 +174,9 @@ class ListQueryPlanCheckTest {
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));
         samples.put("instance-tasks", List.of("bank-a", INSTANCE));
         samples.put("instance-open-incidents", List.of("bank-a", INSTANCE));
+        samples.put("pending-approvals", List.of("bank-a", 51));
+        samples.put("pending-approvals-after", List.of("bank-a", T, "A" + "DEF" + "%022d".formatted(5), 51));
+        samples.put("instance-compensation-stack", List.of("bank-a", INSTANCE));
         samples.put("incidents", List.of("bank-a", "OPEN", 50));
         samples.put("incidents-after", List.of("bank-a", "OPEN", T, "AIC" + "%023d".formatted(500), 50));
         samples.put("instance-step-results", List.of("bank-a", INSTANCE, new String[] {"credit-review", "kyc-agent"}));
@@ -182,6 +195,12 @@ class ListQueryPlanCheckTest {
         samples.put("migration-live-nodes", List.of("bank-a", DEFINITION));
         samples.put("migration-instances-at-node", List.of("bank-a", DEFINITION, "credit-review", 100));
         samples.put("migration-movable-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-review"}, 100));
+        samples.put("migration-batch", List.of("bank-a", DEFINITION, "AIN" + "%023d".formatted(1000), 100));
+        samples.put("migration-instance-tokens", List.of("bank-a", INSTANCE));
+        samples.put("migration-outcomes", List.of("bank-a", "AMG" + "%023d".formatted(1), "", 100));
+        samples.put("migration-outcomes-of", List.of("bank-a", "AMG" + "%023d".formatted(1), "", "FAILED", 100));
+        samples.put("migration-failures-without-incident", List.of("bank-a", "AMG" + "%023d".formatted(1), "", 100));
+        samples.put("layout-revisions", List.of("bank-a", DEFINITION, 0, 100));
         Timestamp sliceFrom = Timestamp.from(NOW.minusSeconds(3600));
         Timestamp sliceTo = Timestamp.from(NOW.minusSeconds(3540));
         samples.put("instance-token-entered-at", List.of("bank-a", INSTANCE));
@@ -192,6 +211,11 @@ class ListQueryPlanCheckTest {
         samples.put("gauge-open-incidents", List.of());
         samples.put("gauge-oldest-due-job", List.of("TIMER"));
         samples.put("calendar-holidays", List.of("bank-a", "ACAL1"));
+        samples.put("escalations-due", List.of(T, 100));
+        samples.put("calendars", List.of("bank-a", 51));
+        samples.put("calendars-after", List.of("bank-a", "vn-banking-hours", 51));
+        samples.put("calendar-changes", List.of("bank-a", "PENDING", 51));
+        samples.put("calendar-changes-after", List.of("bank-a", "PENDING", T, "ACC" + "%023d".formatted(9), 51));
         String[] both = {"CLAIMED", "OPEN"};
         Timestamp end = Timestamp.from(Instant.parse("9999-12-31T00:00:00Z"));
         Timestamp epoch = Timestamp.from(Instant.EPOCH);
@@ -229,6 +253,27 @@ class ListQueryPlanCheckTest {
         assertThat(violations).as("list queries whose plan is not bounded").isEmpty();
         assertThat(samples.keySet()).as("sample parameters of queries no longer registered")
                 .containsExactlyInAnyOrderElementsOf(ProcessListQueries.all().stream().map(ListQuery::name).toList());
+    }
+
+    @Test
+    void PRE_190_the_pending_approvals_pages_read_the_partial_index_in_order_without_a_sort() {
+        // Given the first and a later page of the pending approvals list, planned the way a large queue is: the
+        // seed holds few pending rows, where a bitmap scan and a small sort are the cheaper plan
+        Map<String, List<Object>> samples = samples();
+        jdbc.sql("SET enable_bitmapscan = off").update();
+        try {
+            for (ListQuery query : List.of(ProcessListQueries.PENDING_APPROVALS, ProcessListQueries.PENDING_APPROVALS_AFTER)) {
+                List<JsonNode> nodes = new ArrayList<>();
+                collect(plan(query, samples.get(query.name())), nodes);
+
+                // Then the plan walks idx_pre_definition_pending_page (V35) in (requested_at, id) order: no Sort node
+                assertThat(nodes).as(query.name()).anySatisfy(n -> assertThat(n.path("Index Name").asString(""))
+                        .isEqualTo("idx_pre_definition_pending_page"));
+                assertThat(nodes).as(query.name()).noneMatch(n -> n.path("Node Type").asString("").equals("Sort"));
+            }
+        } finally {
+            jdbc.sql("RESET enable_bitmapscan").update();
+        }
     }
 
     @Test

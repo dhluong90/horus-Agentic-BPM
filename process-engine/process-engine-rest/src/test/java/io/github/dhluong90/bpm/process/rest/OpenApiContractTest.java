@@ -13,6 +13,7 @@ import java.util.TreeSet;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import tools.jackson.databind.JsonNode;
 
 /** The controllers and process-engine/api/openapi.yaml list the same operations and the same problem codes. */
@@ -36,7 +37,8 @@ class OpenApiContractTest {
 
         Set<String> implemented = new TreeSet<>();
         for (Method method : java.util.stream.Stream.of(ProcessController.class, AgentReplayController.class,
-                MigrationController.class, IncidentController.class)
+                MigrationController.class, MigrationExecutionController.class, LayoutController.class, IncidentController.class,
+                CalendarController.class)
                 .flatMap(type -> java.util.Arrays.stream(type.getDeclaredMethods())).toList()) {
             PostMapping post = method.getAnnotation(PostMapping.class);
             GetMapping get = method.getAnnotation(GetMapping.class);
@@ -45,6 +47,10 @@ class OpenApiContractTest {
             }
             if (get != null) {
                 implemented.add("GET " + get.value()[0]);
+            }
+            PutMapping put = method.getAnnotation(PutMapping.class);
+            if (put != null) {
+                implemented.add("PUT " + put.value()[0]);
             }
         }
         assertThat(implemented).isEqualTo(documented);

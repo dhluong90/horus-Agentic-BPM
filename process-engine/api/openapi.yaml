@@ -5,7 +5,7 @@ info:
   description: |
     REST API of the Process Engine, served by the host application under `/api/bpm/processes/v1`.
     Preview: this file covers importing a BPMN document, reading and listing definitions, starting, listing,
-    reading and cancelling instances, listing, reading, claiming, unclaiming and completing user tasks, the live token
+    reading and cancelling instances, listing, reading, claiming, unclaiming, reassigning, delegating and completing user tasks, the live token
     counts per node and the BPMN export of a version. From 0.2.0
     it also covers the definition lifecycle with four eyes: an import is a `DRAFT`; a person requests
     approval, optionally with an effective date; a second person approves it and it becomes the effective version
@@ -16,7 +16,8 @@ info:
     content is not the content reviewed it is `409 CONTENT_CHANGED` with the current hash. It also covers the graph
     diff between two stored versions, and migration plans with their dry run; executing a plan follows in a later
     release. It also covers incidents: an operator lists them, retries a failed step, or proposes a resolution that a
-    second person approves (PD-126). The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
+    second person approves (PD-126). The pending approvals queue lists the versions that wait for a second person, with the
+    hash a reviewer sends back. The remaining endpoints of process-engine/docs/DESIGN.md section 6.2 follow with the
     features that implement them.
 
     Every body is read and written with the engine's own JSON mapper, so the host's `spring.jackson.*` settings
@@ -43,16 +44,66 @@ tags:
   - name: instances
     description: Start, list, read and cancel process instances
   - name: tasks
-    description: List, read, claim, unclaim and complete user tasks
+    description: List, read, claim, unclaim, reassign, delegate and complete user tasks
   - name: async-steps
     description: Report the result of a remote step whose adapter handed the call off
   - name: agent-replays
     description: Replay recorded agent answers against a candidate guardrail or output schema
   - name: migrations
-    description: Plan moving running instances to another version, and check the plan with a dry run
+    description: Plan moving running instances to another version, check it with a dry run, and run it with a second person's approval
   - name: incidents
     description: List incidents, retry a failed step, and resolve one with a second person's approval
+  - name: calendars
+    description: Read the tenant's business calendars, propose a change, and approve or reject it as a second person
 paths:
+  /approvals:
+    get:
+      tags: [lifecycle]
+      operationId: listPendingApprovals
+      summary: List the definition versions waiting for a second person, oldest request first
+      description: |
+        The pending approvals queue of the caller's tenant (#31, `PRE-190`): every definition version in
+        `PENDING_APPROVAL` across all keys, including one that is not the latest version of its key. Permission
+        `processes:read`; the answer shows what the caller may do, it does not need `processes:approve`. Ordered by
+        `(requestedAt, id)`, keyset-paged with a signed cursor bound to the tenant and this list; at most
+        `query.max-page-size` (200) per page, 50 by default. A cursor from another list, another tenant or an edited
+        one is `400 QUERY_INVALID`.
+
+        Each item has what a reviewer needs to open the version and to approve exactly the content that was reviewed
+        (`PRE-177`, PD-139): the `definitionHash` to send back as `expectedDefinitionHash` and the `lockVersion` to
+        send as `If-Match`. Items never carry the definition, the source or a variable.
+
+        `allowedActions` is what the caller may send now, in the order `approve`, `reject`. `deniedActions` gives, for
+        `approve` and `reject` only, why the caller may not send one, as a code: `PERMISSION_REQUIRED` (no
+        `processes:approve`) or `SELF_APPROVAL_FORBIDDEN` (the caller requested the version, or made it under
+        `lifecycle.approver-must-differ-from: makers`; a maker may still reject). An action in `allowedActions` has no
+        entry. The commands check again and stay the authority. Writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of pending versions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PendingApprovalPage' }
+              example:
+                data:
+                  - key: kyc-onboarding
+                    name: KYC onboarding
+                    version: 2
+                    definitionHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b
+                    lockVersion: 1
+                    requestedBy: alice
+                    requestedAt: '2027-04-05T03:30:00Z'
+                    allowedActions: []
+                    deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
+                nextCursor: null
+                hasNext: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /definitions:
     post:
       tags: [definitions]
@@ -513,6 +564,123 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/layout:
+    get:
+      tags: [definitions]
+      operationId: getDefinitionLayout
+      summary: Read the diagram layout of a version
+      description: |
+        The latest layout revision of a version of any status in the caller's tenant, or revision `revision` when it
+        is named (PRE-026). The layout is stored apart from the definition and never part of its hash. The `ETag` is
+        the revision, quoted; a version that has no layout answers `204` with `ETag: "0"`, so the first save sends
+        `If-Match: "0"` and a client draws the version with automatic layout. A revision that does not exist is
+        `404 LAYOUT_NOT_FOUND`; another tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - name: revision
+          in: query
+          required: false
+          description: A revision number, from 1. Absent means the latest. Anything else is `400 QUERY_INVALID`.
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: The revision with its layout document
+          headers:
+            ETag: { schema: { type: string }, description: 'The revision, quoted' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutRevision' }
+        '204':
+          description: The version has no saved layout
+          headers:
+            ETag: { schema: { type: string, example: '"0"' } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [definitions]
+      operationId: saveDefinitionLayout
+      summary: Save a new layout revision
+      description: |
+        Appends a revision to the layout of a version of any status (PRE-026, ADR-0013). It needs no approval and it
+        never writes the definition: the version's status, `definitionHash` and `lockVersion` are unchanged. It is
+        allowed while `authoring.cockpit-drafts` is `false`, because a layout is not a draft. The body is the layout
+        document (`definition-layout.v1`, at most 256 KB). It may list a subset of the steps. A step id that is not in
+        the definition, or a document that breaks the schema, is `422 LAYOUT_INVALID` with each problem in `paths`
+        (never a value) and nothing is written. `If-Match` is the revision the client saw, quoted, `"0"` when none:
+        a stale value, or a save that lost a race, is `409 VERSION_CONFLICT`; missing is `428 PRECONDITION_REQUIRED`.
+        A repeat with the same `Idempotency-Key` returns the first answer. The revision records who saved it and
+        when; revisions are never changed or deleted. Publishes `processes.definition.layout-saved.v1`. Another
+        tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:author`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - name: If-Match
+          in: header
+          required: true
+          description: The latest revision the client saw, quoted; `"0"` for a version without a layout.
+          schema: { type: string, example: '"3"' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DefinitionLayout' }
+            example:
+              schemaVersion: 1
+              direction: LR
+              nodes:
+                start: { x: 40, y: 120 }
+                verify-docs: { x: 200, y: 100, width: 140, height: 80 }
+      responses:
+        '200':
+          description: The saved revision
+          headers:
+            ETag: { schema: { type: string }, description: 'The new revision, quoted' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutRevision' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}/layout/revisions:
+    get:
+      tags: [definitions]
+      operationId: listDefinitionLayoutRevisions
+      summary: List the layout revisions of a version
+      description: |
+        Every revision with its author and time, oldest first, without the layout documents; read one with
+        `GET .../layout?revision=n`. Keyset-paged by revision: pass `nextAfter` as `after`. Another tenant's version is
+        `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - name: after
+          in: query
+          required: false
+          description: List the revisions after this one; 0 when absent.
+          schema: { type: integer, minimum: 0 }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of revisions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutRevisionPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /definitions/{key}/versions/{version}/export:
     get:
       tags: [definitions]
@@ -709,9 +877,11 @@ paths:
       description: |
         Cancels every live token and open task of the instance in one transaction, writes the `INSTANCE_ENDED`
         history entry and hands `processes.instance.cancelled.v1` to the host publisher, both carrying the actor and
-        the reason. Only a `RUNNING` instance can be cancelled (`409 INVALID_STATE`). Permission `processes:cancel`,
-        which `processes:start` does not grant (PD-103). Cancel makes no adapter call and runs no compensation in
-        0.2.0; compensation on cancel is planned for 1.2.
+        the reason. Only a `RUNNING` instance can be cancelled (`409 INVALID_STATE`). A `COMPENSATING` instance is
+        refused the same way, with a detail that says a compensation is running: an undo is never abandoned half way,
+        so an operator resolves its incidents first (PRE-076). Permission `processes:cancel`, which
+        `processes:start` does not grant (PD-103). Cancel makes no adapter call and runs no compensation; compensation
+        on cancel is planned for 1.2.
       parameters:
         - name: id
           in: path
@@ -888,7 +1058,8 @@ paths:
       summary: Read a user task with the actions the caller may take
       description: |
         The task, its instance and step, its assignment, claim and completion, and `allowedActions`: what this caller
-        may do now (`claim`, `unclaim`, `complete`), from the task status, the caller's assignment and four eyes. The
+        may do now (`claim`, `unclaim`, `complete`, and for a holder of `processes:task:manage` `reassign` on an open task or
+        `delegate` on a claimed one), from the task status, the caller's assignment, permissions and four eyes. The
         `ETag` is the task's `lockVersion`, quoted, to send as `If-Match`. Permission `processes:task:work`.
       parameters:
         - $ref: '#/components/parameters/TaskId'
@@ -946,6 +1117,82 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:reassign:
+    post:
+      tags: [tasks]
+      operationId: reassignTask
+      summary: Assign an open task to a named user
+      description: |
+        `OPEN` to CLAIMED by the named user (PD-110). Permission `processes:task:manage`; `processes:task:work` is not needed. The
+        body carries the `assignee` (a user id) and a required `reason` of 1 to 500 characters. The target must hold
+        the task's role or belong to its group, as the host's user directory answers; a task assigned to one user can
+        go to anyone. On a four-eyes task the identity that started the instance or completed an earlier task of it
+        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED` and
+        writes nothing. A task in another state, a completed one included, is `409 INVALID_STATE`; a stale `If-Match`
+        is `409 VERSION_CONFLICT`; another tenant's task is `404 TASK_NOT_FOUND`. Writes a `TASK_REASSIGNED`
+        history entry with the actor, the previous and new holder and the reason, and hands
+        `processes.task.reassigned.v1` to the host publisher in the same transaction. A replay with the same
+        `Idempotency-Key` returns the first answer.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/TaskIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskHandOver' }
+            example: { assignee: minh, reason: An is on leave until Monday }
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}:delegate:
+    post:
+      tags: [tasks]
+      operationId: delegateTask
+      summary: Hand a claimed task to another user
+      description: |
+        `CLAIMED` to CLAIMED by the named user, who replaces the claimant (PD-110). Permission `processes:task:manage`; `processes:task:work` is not needed. The
+        body carries the `assignee` (a user id) and a required `reason` of 1 to 500 characters. The target must hold
+        the task's role or belong to its group, as the host's user directory answers; a task assigned to one user can
+        go to anyone. On a four-eyes task the identity that started the instance or completed an earlier task of it
+        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED` and
+        writes nothing. A task in another state, a completed one included, is `409 INVALID_STATE`; a stale `If-Match`
+        is `409 VERSION_CONFLICT`; another tenant's task is `404 TASK_NOT_FOUND`. Writes a `TASK_DELEGATED`
+        history entry with the actor, the previous and new holder and the reason, and hands
+        `processes.task.delegated.v1` to the host publisher in the same transaction. A replay with the same
+        `Idempotency-Key` returns the first answer.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/TaskIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TaskHandOver' }
+            example: { assignee: minh, reason: An is on leave until Monday }
+      responses:
+        '200':
+          $ref: '#/components/responses/Task'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
@@ -1151,7 +1398,7 @@ paths:
         The plan records the approval its execution needs, fixed when it is created (PRE-174): `four-eyes`, so a
         second holder of `processes:migration:manage`, never the proposer, approves the execution. `single` is
         recorded only when the host sets `migration.approval=single`, which start-up accepts only on the `dev`
-        profile alone. Executing a plan follows in a later release.
+        profile alone. `POST /migrations/{id}:execute` proposes the execution.
 
         The target must be `ACTIVE` and the source `ACTIVE` or `RETIRED`, otherwise `409 INVALID_STATE`; the same
         version twice is `400 INPUT_INVALID`; a version the caller's tenant does not have is
@@ -1231,6 +1478,183 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:execute:
+    post:
+      tags: [migrations]
+      operationId: proposeMigrationExecution
+      summary: Propose moving the running instances, with a reason
+      description: |
+        Proposes the execution of a plan (PRE-195, PD-114, PD-131). The engine runs the dry run of the plan itself
+        and the plan must have no conflict, otherwise `409 DRY_RUN_REQUIRED`; a plan that is not `PLANNED` or
+        `REJECTED` (or a proposal whose dry run has expired) is `409 INVALID_STATE`. The proposal moves nothing: a
+        second holder of `processes:migration:manage`, never the proposer, approves it with `:approve`. Only the
+        approval lets the runner move instances. With `migration.approval=single` (accepted on the `dev` profile
+        only) the proposal is approved by the proposer at once and recorded as `single`. Writes the proposal, one
+        history row and `processes.migration.proposed.v1` in one transaction. A repeat with the same
+        `Idempotency-Key` returns the first answer. Another tenant's plan is `404 MIGRATION_NOT_FOUND`. Permission
+        `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+            example: { reason: 'Retire the legacy committee step, ticket CHG-2041' }
+      responses:
+        '202':
+          description: The proposal, `PROPOSED` (or `APPROVED` in the single mode)
+          headers:
+            ETag: { schema: { type: string }, description: 'The proposal lockVersion, quoted' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:approve:
+    post:
+      tags: [migrations]
+      operationId: approveMigrationExecution
+      summary: Approve a proposed execution as a second person
+      description: |
+        The proposer is refused with `403 SELF_APPROVAL_FORBIDDEN` and nothing is written (PRE-195). The engine runs
+        the dry run again: the proposal's dry run must be no older than `migration.dry-run-validity` and the plan must
+        still have no conflict, otherwise `409 DRY_RUN_REQUIRED`. `If-Match` is the proposal's `lockVersion`; stale is
+        `409 VERSION_CONFLICT`, missing `428 PRECONDITION_REQUIRED`. The plan becomes `APPROVED`; the runner moves the
+        instances in batches of `migration.batch-size`, and `GET /migrations/{id}/execution` shows the progress.
+        Publishes `processes.migration.approved.v1` with both people. Permission `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - name: If-Match
+          in: header
+          required: true
+          description: The proposal's `lockVersion`, quoted.
+          schema: { type: string, example: '"1"' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: The execution, `APPROVED`
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}:reject:
+    post:
+      tags: [migrations]
+      operationId: rejectMigrationExecution
+      summary: Reject a proposed execution
+      description: |
+        A second holder rejects the proposal with a reason; the plan becomes `REJECTED` and may be proposed again.
+        The proposer is refused with `403 SELF_APPROVAL_FORBIDDEN`. `If-Match` is the proposal's `lockVersion`.
+        Publishes `processes.migration.rejected.v1`. Permission `processes:migration:manage`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - name: If-Match
+          in: header
+          required: true
+          description: The proposal's `lockVersion`, quoted.
+          schema: { type: string, example: '"1"' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              additionalProperties: false
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+      responses:
+        '200':
+          description: The execution, `REJECTED`
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}/execution:
+    get:
+      tags: [migrations]
+      operationId: getMigrationExecution
+      summary: Progress of a migration
+      description: |
+        The proposal, the approval and the progress of the plan: how many instances were moved, failed or skipped
+        (PRE-015, PRE-196). The counts are exact. `RUNNING` shows a runner at work; `COMPLETED_WITH_FAILURES` means
+        every failed instance has an incident. The `ETag` is the proposal's `lockVersion`. Permission
+        `processes:migration:manage` or `processes:read`; another tenant's plan is `404 MIGRATION_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+      responses:
+        '200':
+          description: The execution
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationExecution' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /migrations/{id}/instances:
+    get:
+      tags: [migrations]
+      operationId: listMigrationInstances
+      summary: What happened to each instance
+      description: |
+        The per-instance outcomes in instance id order, one bounded page; pass `nextAfter` as `after`. `outcome` keeps
+        one of `MIGRATED`, `FAILED` and `SKIPPED`. A failure carries its `code`, a detail built from codes and step ids
+        only, and the id of its incident. Permission `processes:migration:manage` or `processes:read`; another
+        tenant's plan is `404 MIGRATION_NOT_FOUND`.
+      parameters:
+        - $ref: '#/components/parameters/MigrationId'
+        - name: outcome
+          in: query
+          required: false
+          schema: { type: string, enum: [MIGRATED, FAILED, SKIPPED] }
+        - name: after
+          in: query
+          required: false
+          description: List the instances after this id.
+          schema: { type: string, minLength: 1, maxLength: 26 }
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: One page of outcomes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationOutcomePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /incidents:
     get:
       tags: [incidents]
@@ -1289,8 +1713,12 @@ paths:
         is accepted (`RESOLVED`, `RETRY_SUCCEEDED`, `processes.incident.resolved.v1`) or fails again, which keeps the
         same incident open with the new cause. A repeat with the same key replays the first answer and writes nothing.
 
+        An undo of a compensation walk that failed (`COMPENSATION_FAILED`, PRE-074) runs again under the same job id
+        with a new attempt id; its success resolves the incident and the walk goes on.
+
         Refusals write nothing: a stale `If-Match` is `409 VERSION_CONFLICT`; an incident that is not `OPEN`, one
-        being retried, or an agent step whose memory failed before any call is `409 INVALID_STATE`. One person's
+        being retried, an agent step whose memory failed before any call, or a manual undo
+        (`COMPENSATION_MANUAL_REQUIRED`, which is resolved instead) is `409 INVALID_STATE`. One person's
         action: it runs the same step again and decides nothing. Permission `processes:incident:manage`.
       parameters:
         - $ref: '#/components/parameters/IncidentId'
@@ -1325,8 +1753,10 @@ paths:
         four-eyes` (the default) the incident becomes `RESOLUTION_PENDING` with the proposal and its proposer, and
         nothing moves until a second holder of `processes:incident:manage` approves; `single` is accepted on the
         `dev` profile only and applies the resolution at once. History records `INCIDENT_RESOLUTION_PROPOSED` with the
-        proposer, the reason and the output, and `processes.incident.resolution-proposed.v1` is published. Permission
-        `processes:incident:manage`.
+        proposer, the reason and the output, and `processes.incident.resolution-proposed.v1` is published. For an
+        undo incident (`COMPENSATION_FAILED`, `COMPENSATION_MANUAL_REQUIRED`, PRE-074, PRE-075) the output records how
+        the undo was done by hand, for example a reversal reference; the approval marks the undo done and the
+        compensation walk goes on. Permission `processes:incident:manage`.
       parameters:
         - $ref: '#/components/parameters/IncidentId'
         - $ref: '#/components/parameters/IncidentIfMatch'
@@ -1429,6 +1859,222 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /calendars:
+    get:
+      tags: [calendars]
+      operationId: listCalendars
+      summary: List the tenant's business calendars by key
+      description: |
+        PRE-181. The calendars of the caller's tenant only, by key, keyset-paged with a signed cursor bound to the
+        tenant; at most `query.max-page-size` (200) per page. Each item is a summary without working hours or
+        holidays: read one calendar for those. Read only. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of calendar summaries
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarPage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendars/{key}:
+    get:
+      tags: [calendars]
+      operationId: getCalendar
+      summary: Read one calendar in force
+      description: |
+        PRE-181. The calendar as the last approved change left it. The `ETag` is its version, quoted: send it as
+        `If-Match` when proposing a change. Another tenant's calendar is `404 CALENDAR_NOT_FOUND`. Permission
+        `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarKey'
+      responses:
+        '200':
+          description: The calendar
+          headers:
+            ETag:
+              description: The calendar's version, quoted; send it as `If-Match` with a proposal
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Calendar' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendars/{key}/changes:
+    post:
+      tags: [calendars]
+      operationId: proposeCalendarChange
+      summary: Propose a new calendar or a change of one
+      description: |
+        PRE-114, PRE-181, PRE-182. Proposes the whole calendar as it should be (`calendar`) with a `reason`. `If-Match`
+        is the version the change is made against: `"0"` for a new calendar. Under four eyes (the default, PD-131)
+        the change is `PENDING` and applies only when a second holder of `processes:calendar:manage` approves it, and
+        then only to deadlines set after that; due times already set never move. Under `calendar.approval=single`,
+        which start-up accepts only on the `dev` profile alone, the proposal applies at once and is recorded as
+        `SINGLE`. Every proposal and decision is kept with the people, the time and the old and new value.
+
+        A repeat with the same `Idempotency-Key` and the same request returns the first answer, status and body, and
+        writes nothing: no second change, no second event. The same key with another request is
+        `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. A calendar that is not at the `If-Match` version is
+        `409 VERSION_CONFLICT`. A key or a calendar that is not valid is `400 INPUT_INVALID`. Permission
+        `processes:calendar:manage`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarKey'
+        - $ref: '#/components/parameters/CalendarIfMatch'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalendarProposal' }
+            example:
+              reason: Tet holiday 2027 added
+              calendar:
+                zone: Asia/Ho_Chi_Minh
+                week:
+                  MONDAY: ['08:00-17:00']
+                  TUESDAY: ['08:00-17:00']
+                  WEDNESDAY: ['08:00-17:00']
+                  THURSDAY: ['08:00-17:00']
+                  FRIDAY: ['08:00-17:00']
+                holidays: { '2027-02-08': Tet }
+      responses:
+        '201':
+          description: The change
+          headers:
+            Location: { schema: { type: string }, description: The change's address }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes:
+    get:
+      tags: [calendars]
+      operationId: listCalendarChanges
+      summary: List the calendar changes of one status, newest first
+      description: |
+        PRE-181. The changes of the caller's tenant only, newest first on `(proposedAt, id)`, keyset-paged with a
+        signed cursor bound to the tenant and the status; at most `query.max-page-size` (200) per page. Read only.
+        Permission `processes:read`.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: '`PENDING` when absent. Another value is `400 QUERY_INVALID`.'
+          schema: { type: string, enum: [PENDING, APPROVED, REJECTED], default: PENDING }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChangePage' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes/{id}:
+    get:
+      tags: [calendars]
+      operationId: getCalendarChange
+      summary: Read one calendar change with its old and new value
+      description: |
+        PRE-181. Another tenant's change is `404 CALENDAR_NOT_FOUND`. Permission `processes:read`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarChangeId'
+      responses:
+        '200':
+          description: The change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes/{id}:approve:
+    post:
+      tags: [calendars]
+      operationId: approveCalendarChange
+      summary: Approve a pending change as a second person and apply it
+      description: |
+        PRE-114, PRE-182. In one transaction under the calendar's row lock the calendar moves to its next version, the
+        decision is recorded and `processes.calendar.changed.v1` is published. The approver is never the proposer
+        (`403 SELF_APPROVAL_FORBIDDEN`, and the table refuses it too). A change that is no longer `PENDING` is
+        `409 INVALID_STATE`; a calendar that changed since the proposal is `409 VERSION_CONFLICT` and the change stays
+        `PENDING`. A change needs no `If-Match`: it cannot be edited, and the calendar version it was proposed against
+        is checked under the lock. A repeat with the same `Idempotency-Key` returns the first answer and writes
+        nothing. Permission `processes:calendar:manage`.
+      parameters:
+        - $ref: '#/components/parameters/CalendarChangeId'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalendarDecision' }
+            example: { comment: Checked against the State Bank notice }
+      responses:
+        '200':
+          description: The approved change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /calendar-changes/{id}:reject:
+    post:
+      tags: [calendars]
+      operationId: rejectCalendarChange
+      summary: Reject a pending change; the calendar stays as it is
+      description: |
+        PRE-114, PRE-182. A holder of `processes:calendar:manage` rejects with a `comment` that says why; the proposer
+        may withdraw their own. The calendar and its version do not change. A change that is no longer `PENDING` is
+        `409 INVALID_STATE`. A repeat with the same `Idempotency-Key` returns the first answer and writes nothing.
+      parameters:
+        - $ref: '#/components/parameters/CalendarChangeId'
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CalendarDecision' }
+            example: { comment: The date is not a bank holiday }
+      responses:
+        '200':
+          description: The rejected change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalendarChange' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -1436,6 +2082,25 @@ components:
       scheme: bearer
       description: The host's own authentication. The engine reads the caller and tenant from the host's security context.
   parameters:
+    CalendarKey:
+      name: key
+      in: path
+      required: true
+      schema: { type: string, maxLength: 100, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+    CalendarChangeId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 26 }
+    CalendarIfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: |
+        The version of the calendar the change is made against, quoted: the `ETag` of `GET /calendars/{key}`, or `"0"`
+        for a calendar that does not exist yet. Missing is `428 PRECONDITION_REQUIRED`; stale is
+        `409 VERSION_CONFLICT`.
+      schema: { type: string, example: '"1"' }
     IncidentId:
       name: id
       in: path
@@ -1562,12 +2227,12 @@ components:
         RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`,
         `QUERY_INVALID` (a list limit, cursor or range) or `CONTENT_HASH_REQUIRED` (an approval that names no reviewed
         content). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`,
-        `INCIDENT_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
+        `INCIDENT_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND`, `CALENDAR_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE` or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
@@ -1583,6 +2248,96 @@ components:
         application/problem+json:
           schema: { $ref: '#/components/schemas/Problem' }
   schemas:
+    CalendarWeek:
+      type: object
+      description: Working hours per weekday as local ranges; a weekday that is absent is not a working day.
+      propertyNames: { enum: [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY] }
+      additionalProperties:
+        type: array
+        maxItems: 8
+        items: { type: string, pattern: '^[0-2][0-9]:[0-5][0-9]-([0-2][0-9]:[0-5][0-9]|24:00)$', example: '08:00-17:00' }
+    WorkingCalendar:
+      type: object
+      required: [zone, week, holidays]
+      description: A time zone, working hours per weekday and holidays. Every computation uses the zone, never the host's.
+      properties:
+        zone: { type: string, example: Asia/Ho_Chi_Minh }
+        week: { $ref: '#/components/schemas/CalendarWeek' }
+        holidays:
+          type: object
+          description: Local dates that are not working days, each with a description of at most 200 characters; at most 2,000.
+          additionalProperties: { type: string, maxLength: 200 }
+    Calendar:
+      type: object
+      required: [key, version, calendar, updatedBy, approvedBy, updatedAt]
+      properties:
+        key: { type: string }
+        version: { type: integer, minimum: 1, description: 1 after creation, one more after each approved change }
+        calendar: { $ref: '#/components/schemas/WorkingCalendar' }
+        updatedBy: { type: string, description: Who proposed the change in force }
+        approvedBy: { type: string, description: Who approved it; the proposer only under `calendar.approval=single` }
+        updatedAt: { type: string, format: date-time }
+    CalendarSummary:
+      type: object
+      required: [key, version, zone, updatedBy, approvedBy, updatedAt]
+      properties:
+        key: { type: string }
+        version: { type: integer, minimum: 1 }
+        zone: { type: string }
+        updatedBy: { type: string }
+        approvedBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+    CalendarPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/CalendarSummary' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
+    CalendarProposal:
+      type: object
+      required: [calendar, reason]
+      additionalProperties: false
+      properties:
+        calendar: { $ref: '#/components/schemas/WorkingCalendar' }
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    CalendarDecision:
+      type: object
+      additionalProperties: false
+      properties:
+        comment: { type: string, maxLength: 500, description: Optional on approval; required, with a reason, on rejection }
+    CalendarChange:
+      type: object
+      required: [id, calendarKey, status, approval, baseVersion, previous, proposed, reason, proposedBy, proposedAt,
+        decidedBy, decidedAt, comment]
+      properties:
+        id: { type: string }
+        calendarKey: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        approval: { type: string, enum: [FOUR_EYES, SINGLE], description: '`SINGLE` only when the dev profile let the proposer apply it alone' }
+        baseVersion: { type: integer, minimum: 0, description: The calendar version the proposal was made against, 0 for a new calendar }
+        previous:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/WorkingCalendar'
+        proposed: { $ref: '#/components/schemas/WorkingCalendar' }
+        reason: { type: string }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        comment: { type: [string, 'null'] }
+    CalendarChangePage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/CalendarChange' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     IncidentReason:
       type: object
       required: [reason]
@@ -1601,7 +2356,7 @@ components:
         instanceId: { type: string }
         nodeId: { type: string }
         tokenId: { type: [string, 'null'] }
-        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`' }
+        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`; an undo of a compensation walk that failed is `COMPENSATION_FAILED` and a manual undo `COMPENSATION_MANUAL_REQUIRED` (#67): their `nodeId` is the step being undone, their `tokenId` the scope token walked, and their resolution marks the undo done by hand' }
         causeSummary: { type: string, description: Built from codes and numbers only, never from a handler's detail }
         retryCount: { type: integer, minimum: 0 }
         status: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED] }
@@ -1734,9 +2489,16 @@ components:
         allowedActions:
           type: array
           description: What this caller may do now; computed per caller, never stored
-          items: { type: string, enum: [claim, unclaim, complete] }
+          items: { type: string, enum: [claim, unclaim, complete, reassign, delegate] }
         review:
           $ref: '#/components/schemas/ReviewContext'
+    TaskHandOver:
+      type: object
+      required: [assignee, reason]
+      additionalProperties: false
+      properties:
+        assignee: { type: string, minLength: 1, maxLength: 200, description: The user id the task is handed to }
+        reason: { type: string, minLength: 1, maxLength: 500, description: Why; recorded in the history and the event }
     TaskSummary:
       type: object
       required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, status, lockVersion, createdAt]
@@ -1795,6 +2557,42 @@ components:
           type: [integer, 'null']
           description: The version a start uses now, or null when the key has no active version
         lastChangedAt: { type: string, format: date-time }
+    PendingApproval:
+      type: object
+      required: [key, version, definitionHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions]
+      properties:
+        key: { type: string }
+        name: { type: [string, 'null'] }
+        version: { type: integer, minimum: 1 }
+        definitionHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The value the reviewer sends back as `expectedDefinitionHash` (`PRE-177`, PD-139)
+        lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
+        requestedBy: { type: string }
+        requestedAt: { type: string, format: date-time }
+        allowedActions:
+          type: array
+          items: { type: string, enum: [approve, reject] }
+        deniedActions:
+          type: object
+          description: For `approve` and `reject` the caller may not send, the reason as a code
+          properties:
+            approve: { $ref: '#/components/schemas/PendingDenial' }
+            reject: { $ref: '#/components/schemas/PendingDenial' }
+          additionalProperties: false
+    PendingDenial:
+      type: string
+      enum: [PERMISSION_REQUIRED, SELF_APPROVAL_FORBIDDEN]
+    PendingApprovalPage:
+      type: object
+      required: [data, nextCursor, hasNext]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/PendingApproval' }
+        nextCursor: { type: [string, 'null'] }
+        hasNext: { type: boolean }
     DefinitionSummaryPage:
       type: object
       required: [data, nextCursor, hasNext]
@@ -2184,7 +2982,9 @@ components:
         definitionKey: { type: string }
         sourceVersion: { type: integer, minimum: 1 }
         targetVersion: { type: integer, minimum: 1 }
-        status: { type: string, enum: [PLANNED] }
+        status:
+          type: string
+          enum: [PLANNED, PROPOSED, REJECTED, APPROVED, RUNNING, COMPLETED, COMPLETED_WITH_FAILURES]
         planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
         approval: { $ref: '#/components/schemas/MigrationApproval' }
         createdBy: { type: string }
@@ -2242,6 +3042,121 @@ components:
               name: { type: [string, 'null'] }
               instances: { $ref: '#/components/schemas/MigrationInstanceSample' }
         movable: { $ref: '#/components/schemas/MigrationInstanceSample' }
+    DefinitionLayout:
+      type: object
+      description: >-
+        The layout document, `definition-layout.v1` (api/schema/definition-layout.v1.schema.json): box positions, link
+        waypoints and lanes of one version. Step ids must exist in the definition.
+      required: [schemaVersion, nodes]
+      additionalProperties: false
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        direction: { type: string, enum: [LR, TB] }
+        nodes:
+          type: object
+          maxProperties: 500
+          additionalProperties:
+            type: object
+            required: [x, y]
+            additionalProperties: false
+            properties:
+              x: { type: number, minimum: -100000, maximum: 100000 }
+              y: { type: number, minimum: -100000, maximum: 100000 }
+              width: { type: number, exclusiveMinimum: 0, maximum: 2000 }
+              height: { type: number, exclusiveMinimum: 0, maximum: 2000 }
+        edges:
+          type: object
+          maxProperties: 2000
+          description: 'Waypoints keyed by `from->to`'
+          additionalProperties:
+            type: array
+            maxItems: 50
+            items:
+              type: object
+              required: [x, y]
+              additionalProperties: false
+              properties:
+                x: { type: number, minimum: -100000, maximum: 100000 }
+                y: { type: number, minimum: -100000, maximum: 100000 }
+        lanes:
+          type: array
+          maxItems: 50
+          items:
+            type: object
+            required: [id, label, nodes]
+            additionalProperties: false
+            properties:
+              id: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$' }
+              label: { type: string, maxLength: 200 }
+              nodes: { type: array, uniqueItems: true, items: { type: string } }
+    LayoutRevision:
+      type: object
+      required: [revision, layoutHash, definitionHash, source, createdBy, createdAt]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        layout:
+          description: The layout document; absent in a revision list.
+          allOf: [{ $ref: '#/components/schemas/DefinitionLayout' }]
+        layoutHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        definitionHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The hash of the definition the layout was drawn for; it never changes with a save.
+        source: { type: string, enum: [IMPORT, BPMN, COCKPIT, API] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+    LayoutRevisionPage:
+      type: object
+      required: [items, nextAfter]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/LayoutRevision' } }
+        nextAfter: { type: [integer, 'null'], description: 'Pass as `after` for the next page; null on the last page' }
+    MigrationExecution:
+      type: object
+      required: [migrationId, status, approval, lockVersion, progress]
+      properties:
+        migrationId: { type: string }
+        status:
+          type: string
+          enum: [PLANNED, PROPOSED, REJECTED, APPROVED, RUNNING, COMPLETED, COMPLETED_WITH_FAILURES]
+        approval: { $ref: '#/components/schemas/MigrationApproval' }
+        lockVersion: { type: integer, minimum: 0, description: 'The `ETag`; send it in `If-Match` to approve or reject' }
+        proposedBy: { type: [string, 'null'] }
+        proposedAt: { type: [string, 'null'], format: date-time }
+        reason: { type: [string, 'null'] }
+        approvedBy: { type: [string, 'null'], description: 'The proposer in the single mode' }
+        approvedAt: { type: [string, 'null'], format: date-time }
+        rejectedBy: { type: [string, 'null'] }
+        rejectedAt: { type: [string, 'null'], format: date-time }
+        rejectionReason: { type: [string, 'null'] }
+        progress:
+          type: object
+          required: [total, migrated, failed, skipped]
+          properties:
+            total: { type: integer, minimum: 0, description: 'Running instances of the source version when the execution was proposed or approved' }
+            migrated: { type: integer, minimum: 0 }
+            failed: { type: integer, minimum: 0, description: 'Each has an incident' }
+            skipped: { type: integer, minimum: 0, description: 'Ended or moved on before the runner reached them' }
+        startedAt: { type: [string, 'null'], format: date-time }
+        finishedAt: { type: [string, 'null'], format: date-time }
+    MigrationOutcome:
+      type: object
+      required: [instanceId, outcome, code, detail, occurredAt]
+      properties:
+        instanceId: { type: string }
+        outcome: { type: string, enum: [MIGRATED, FAILED, SKIPPED] }
+        code:
+          type: string
+          description: '`MOVED`; for a failure `STEP_NOT_IN_TARGET`, `STEP_TYPE_CHANGED` or `LOCK_CONFLICT`; for a skip `NOT_RUNNING`, `NOT_ON_SOURCE` or `INSTANCE_GONE`'
+        detail: { type: string, maxLength: 500 }
+        incidentId: { type: [string, 'null'] }
+        occurredAt: { type: string, format: date-time }
+    MigrationOutcomePage:
+      type: object
+      required: [items, nextAfter]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MigrationOutcome' } }
+        nextAfter: { type: [string, 'null'] }
     Problem:
       type: object
       required: [type, title, status, code, correlationId]
@@ -2258,7 +3173,7 @@ components:
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
-            INCIDENT_NOT_FOUND,
+            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND, ASSIGNEE_NOT_ALLOWED,
             OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
@@ -2290,7 +3205,7 @@ components:
         currentLockVersion: { type: integer, description: 'Present on `CONTENT_CHANGED`, the lock version stored now' }
         paths:
           type: array
-          description: 'Present on `OUTPUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required`, never a value'
+          description: 'Present on `OUTPUT_INVALID` and `LAYOUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required` or `$.nodes.ghost-step names a step that is not in the definition`, never a value'
           items: { type: string }
         definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
         version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }

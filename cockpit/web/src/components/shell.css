@@ -166,6 +166,7 @@ body { background: var(--bg); background-image: none; }
 .panel__details dl > div { display: contents; }
 .panel__details dt { color: var(--ink-2); }
 .panel__details dd { color: var(--ink); overflow-wrap: anywhere; }
+.panel--calm .panel__title { font-weight: 600; }
 .panel__title { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 650; }
 .panel__body { color: var(--ink-2); }
 .panel__hint { color: var(--muted); font-size: 13px; }

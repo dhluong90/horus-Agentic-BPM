@@ -3,18 +3,23 @@ package io.github.dhluong90.bpm.process.internal.exec;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -54,38 +59,59 @@ public final class ProcessCompiler {
      */
     public CompiledProcess compile(String definitionId, Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
-        Map<String, FlowNode> nodes = process.flowElements().stream().filter(FlowNode.class::isInstance)
+        // Every node and flow, those of saga blocks included (#67), and the container each stands in.
+        Map<String, String> containerOf = new HashMap<>();
+        List<FlowElement> all = new ArrayList<>();
+        collect(process.id(), process.flowElements(), all, containerOf);
+        Map<String, FlowNode> nodes = all.stream().filter(FlowNode.class::isInstance)
                 .map(FlowNode.class::cast).collect(Collectors.toMap(FlowNode::id, Function.identity(), (a, b) -> {
                     problems.add(DefinitionProblem.of("DUPLICATE_ID", "Duplicate id", a.id()));
                     return a;
-                }));
-        List<SequenceFlow> allFlows = process.flowElements().stream().filter(SequenceFlow.class::isInstance)
+                }, HashMap::new));
+        List<SequenceFlow> allFlows = all.stream().filter(SequenceFlow.class::isInstance)
                 .map(SequenceFlow.class::cast).toList();
         // Flows with a missing end are reported below and left out of the graph checks.
         List<SequenceFlow> flows = allFlows.stream().filter(f -> f.sourceRef() != null && f.targetRef() != null).toList();
         if (nodes.size() > maxNodes) {
             problems.add(DefinitionProblem.of("TOO_MANY_NODES", nodes.size() + " flow nodes; at most " + maxNodes, null));
         }
-        for (FlowElement element : process.flowElements()) {
+        for (FlowElement element : all) {
             if (element.id() == null || !NODE_ID.matcher(element.id()).matches()) {
                 problems.add(DefinitionProblem.of("ID_INVALID", "An id must start with a letter or underscore and have at"
                         + " most 100 letters, digits, '_', '.' or '-'", element.id()));
             }
         }
-        List<StartEvent> starts = nodes.values().stream().filter(StartEvent.class::isInstance)
-                .map(StartEvent.class::cast).toList();
-        if (starts.size() != 1) {
-            problems.add(DefinitionProblem.of("START_EVENT_COUNT", "A process needs exactly one start event, found "
-                    + starts.size(), process.id()));
-        }
-        if (nodes.values().stream().noneMatch(EndEvent.class::isInstance)) {
-            problems.add(DefinitionProblem.of("NO_END_EVENT", "A process needs at least one end event", process.id()));
+        List<String> containerIds = new ArrayList<>();
+        containerIds.add(process.id());
+        nodes.values().stream().filter(Transaction.class::isInstance).map(FlowNode::id).forEach(containerIds::add);
+        Map<String, StartEvent> startOf = new HashMap<>();
+        for (String container : containerIds) {
+            boolean root = container.equals(process.id());
+            List<StartEvent> starts = nodes.values().stream().filter(StartEvent.class::isInstance)
+                    .filter(n -> container.equals(containerOf.get(n.id()))).map(StartEvent.class::cast).toList();
+            if (starts.size() != 1) {
+                problems.add(DefinitionProblem.of("START_EVENT_COUNT", (root ? "A process" : "A saga block")
+                        + " needs exactly one start event, found " + starts.size(), container));
+            } else {
+                startOf.put(container, starts.get(0));
+            }
+            if (nodes.values().stream().noneMatch(n -> n instanceof EndEvent
+                    && container.equals(containerOf.get(n.id())))) {
+                problems.add(DefinitionProblem.of("NO_END_EVENT", (root ? "A process" : "A saga block")
+                        + " needs at least one end event", container));
+            }
         }
         for (SequenceFlow flow : allFlows) {
             if (flow.sourceRef() == null || flow.targetRef() == null
                     || !nodes.containsKey(flow.sourceRef()) || !nodes.containsKey(flow.targetRef())) {
                 problems.add(DefinitionProblem.of("FLOW_REF_INVALID", "Sequence flow refers to a missing node "
                         + flow.sourceRef() + " -> " + flow.targetRef(), flow.id()));
+            } else if (!containerOf.get(flow.id()).equals(containerOf.get(flow.sourceRef()))
+                    || !containerOf.get(flow.id()).equals(containerOf.get(flow.targetRef()))) {
+                // A flow never crosses a saga boundary: the block is entered and left through its own node.
+                problems.add(DefinitionProblem.of("FLOW_CROSSES_SAGA", "Sequence flow " + flow.sourceRef() + " -> "
+                        + flow.targetRef() + " crosses the boundary of a saga block; connect the block itself",
+                        flow.id()));
             }
             if (flow.conditionExpression() != null && flow.conditionExpression().text() != null) {
                 try {
@@ -97,9 +123,13 @@ public final class ProcessCompiler {
         }
         for (FlowNode node : nodes.values()) {
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
-            if (!(node instanceof EndEvent) && out.isEmpty()) {
+            if (!(node instanceof EndEvent) && !throwsCompensation(node) && out.isEmpty()) {
                 problems.add(DefinitionProblem.of("NO_OUTGOING_FLOW", "Only an end event may have no outgoing flow",
                         node.id()));
+            }
+            if (throwsCompensation(node) && containerOf.get(node.id()).equals(process.id())) {
+                problems.add(DefinitionProblem.of("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
+                        + " steps of its saga block; put it inside a transaction", node.id()));
             }
             if (node instanceof ExclusiveGateway gateway) {
                 out.stream().filter(f -> f.id().equals(gateway.defaultFlow()) && f.conditionExpression() != null)
@@ -143,8 +173,14 @@ public final class ProcessCompiler {
                         node.getClass().getSimpleName(), node.id(), 0));
             }
         }
-        if (starts.size() == 1 && problems.isEmpty()) {
-            reachability(starts.get(0), nodes, flows, problems);
+        if (problems.isEmpty()) {
+            for (String container : containerIds) {
+                Map<String, FlowNode> inside = new java.util.LinkedHashMap<>();
+                nodes.values().stream().filter(n -> container.equals(containerOf.get(n.id())))
+                        .forEach(n -> inside.put(n.id(), n));
+                reachability(startOf.get(container), inside, flows.stream()
+                        .filter(f -> container.equals(containerOf.get(f.id()))).toList(), problems);
+            }
         }
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
@@ -159,8 +195,9 @@ public final class ProcessCompiler {
     private static void reachability(StartEvent start, Map<String, FlowNode> nodes, List<SequenceFlow> flows,
             List<DefinitionProblem> problems) {
         Set<String> forward = walk(start.id(), flows, true);
-        Set<String> ends = nodes.values().stream().filter(EndEvent.class::isInstance).map(FlowNode::id)
-                .collect(Collectors.toSet());
+        // A throwCompensation ends its path too: the instance does not go on after it (#67).
+        Set<String> ends = nodes.values().stream().filter(n -> n instanceof EndEvent || throwsCompensation(n))
+                .map(FlowNode::id).collect(Collectors.toSet());
         Set<String> backward = new HashSet<>();
         ends.forEach(e -> backward.addAll(walk(e, flows, false)));
         for (String id : nodes.keySet()) {
@@ -170,6 +207,26 @@ public final class ProcessCompiler {
                 problems.add(DefinitionProblem.of("NO_END_REACHABLE", "No path from here reaches an end event", id));
             }
         }
+    }
+
+    /** Adds the elements of a container and of the saga blocks in it, with the container of each. */
+    private static void collect(String container, List<FlowElement> elements, List<FlowElement> all,
+            Map<String, String> containerOf) {
+        for (FlowElement element : elements) {
+            all.add(element);
+            if (element.id() != null) {
+                containerOf.putIfAbsent(element.id(), container);
+            }
+            if (element instanceof FlowElementsContainer nested) {
+                collect(element.id(), nested.flowElements(), all, containerOf);
+            }
+        }
+    }
+
+    /** @return whether the node is a {@code throwCompensation}: a throw event with one compensate definition */
+    static boolean throwsCompensation(FlowNode node) {
+        return node instanceof IntermediateThrowEvent t && t.eventDefinitions().size() == 1
+                && t.eventDefinitions().get(0) instanceof CompensateEventDefinition;
     }
 
     private static Set<String> walk(String from, List<SequenceFlow> flows, boolean forward) {

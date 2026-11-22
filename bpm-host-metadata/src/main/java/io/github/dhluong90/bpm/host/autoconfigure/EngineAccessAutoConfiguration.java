@@ -24,7 +24,20 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.context.annotation.Condition;
+import org.springframework.context.annotation.ConditionContext;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.core.env.Environment;
+import org.springframework.core.type.AnnotatedTypeMetadata;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
 import org.springframework.security.core.Authentication;
 import org.springframework.util.ClassUtils;
 
@@ -62,6 +75,42 @@ public class EngineAccessAutoConfiguration {
                 new FilterRegistrationBean<>(new EngineApiCacheControlFilter());
         registration.addUrlPatterns(EngineApiCacheControlFilter.URL_PATTERNS);
         registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
+        return registration;
+    }
+
+    /**
+     * CORS for a standalone cockpit on another origin (ADR-0014 decision 4, TR-SEC-09). Off by default: with no
+     * origin in {@code horus.bpm.rest.cors.allowed-origins} the filter is registered disabled, so no CORS header is
+     * ever sent and a browser refuses every cross-origin call. With origins, a call from any other origin is
+     * {@code 403}, and so is its preflight; there is no wildcard and no credentials mode. The filter runs before
+     * the host's security chain, so a preflight, which carries no token, is answered there. A call from the
+     * host's own origin is not cross-origin and is untouched.
+     *
+     * <p>Outside the {@code dev} profile, an origin without a configured token audience stops the start-up
+     * (TR-SEC-12): a standalone cockpit sends tokens, and a token issued for another host must be refused.
+     */
+    @Bean
+    FilterRegistrationBean<CorsFilter> horusBpmCorsFilter(HostMetadataProperties properties, Environment environment) {
+        HostMetadataProperties.Rest.Cors cors = properties.rest().cors();
+        boolean on = !cors.allowedOrigins().isEmpty();
+        if (on && !environment.matchesProfiles(DEV_PROFILE) && !AudiencesConfigured.in(environment)) {
+            throw new IllegalStateException("horus.bpm.rest.cors.allowed-origins is set but no token audience is. "
+                    + "Set horus.bpm.security.audiences (HORUS_BPM_SECURITY_AUDIENCES) to this host's audience, "
+                    + "so a token issued for another host is refused (TR-SEC-12).");
+        }
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(cors.allowedOrigins());
+        configuration.setAllowedMethods(cors.allowedMethods());
+        configuration.setAllowedHeaders(cors.allowedHeaders());
+        configuration.setExposedHeaders(cors.exposedHeaders());
+        configuration.setAllowCredentials(false);
+        configuration.setMaxAge(cors.maxAge());
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/bpm/**", configuration);
+        FilterRegistrationBean<CorsFilter> registration = new FilterRegistrationBean<>(new CorsFilter(source));
+        registration.addUrlPatterns(EngineApiCacheControlFilter.URL_PATTERNS);
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 5);
+        registration.setEnabled(on);
         return registration;
     }
 
@@ -167,7 +216,7 @@ public class EngineAccessAutoConfiguration {
         @ConditionalOnMissingBean
         EngineAccess horusBpmEngineAccess(ObjectProvider<ModuleDescriptor> modules, HostMetadataProperties properties,
                 TenantResolver tenantResolver) {
-            return new DefaultEngineAccess(tenantResolver, properties.tenancy().claim(),
+            return new DefaultEngineAccess(tenantResolver, properties.tenancy(),
                     claims(EngineAccessAutoConfiguration.class.getClassLoader()), properties.security(),
                     modules(modules));
         }
@@ -184,6 +233,35 @@ public class EngineAccessAutoConfiguration {
         @ConditionalOnMissingBean
         BpmProblemAccessDeniedHandler horusBpmProblemAccessDeniedHandler() {
             return new BpmProblemAccessDeniedHandler();
+        }
+    }
+
+    /**
+     * Audience validation of bearer tokens (TR-SEC-12): when {@code horus.bpm.security.audiences} is set, a token
+     * whose {@code aud} claim names none of them is rejected with {@code 401}. Spring Boot's JWT decoder applies
+     * this validator beside its issuer check. A host that builds its own {@code JwtDecoder} adds it from the
+     * {@code OAuth2TokenValidator<Jwt>} beans itself.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "org.springframework.security.oauth2.jwt.Jwt")
+    static class AudienceConfiguration {
+
+        @Bean
+        @Conditional(StarterAudiencesCondition.class)
+        OAuth2TokenValidator<Jwt> horusBpmAudienceValidator(HostMetadataProperties properties) {
+            List<String> accepted = properties.security().audiences();
+            return new JwtClaimValidator<List<String>>(JwtClaimNames.AUD,
+                    aud -> aud != null && aud.stream().anyMatch(accepted::contains));
+        }
+    }
+
+    /** True when {@code horus.bpm.security.audiences} lists at least one audience. */
+    static final class StarterAudiencesCondition implements Condition {
+        @Override
+        public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
+            return Binder.get(context.getEnvironment())
+                    .bind(AudiencesConfigured.STARTER_PROPERTY, Bindable.listOf(String.class))
+                    .map(values -> values.stream().anyMatch(value -> !value.isBlank())).orElse(false);
         }
     }
 

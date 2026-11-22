@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.internal.store;
 
 import io.github.dhluong90.bpm.process.api.WorkingCalendar;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -76,4 +77,49 @@ public interface CalendarStore {
 
     /** Records the decision of a pending change. */
     void decideChange(String tenant, String id, String status, String decidedBy, Instant decidedAt, String comment);
+
+    /**
+     * A calendar in the tenant's list.
+     *
+     * @param key calendar key
+     * @param version lock version
+     * @param zone time zone
+     * @param updatedBy proposer of the change in force
+     * @param approvedBy approver of the change in force
+     * @param updatedAt when it was approved
+     */
+    record SummaryRow(String key, long version, String zone, String updatedBy, String approvedBy, Instant updatedAt) {
+    }
+
+    /**
+     * A page of the tenant's calendars by key.
+     *
+     * @param afterKey the last key of the previous page, or null
+     * @param limit most rows
+     * @return the rows, in key order
+     */
+    List<SummaryRow> calendars(String tenant, String afterKey, int limit);
+
+    /**
+     * A page of the tenant's changes of one status, newest first.
+     *
+     * @param afterAt keyset: {@code proposedAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id
+     * @param limit most rows
+     * @return the rows
+     */
+    List<ChangeRow> changes(String tenant, String status, Instant afterAt, String afterId, int limit);
+
+    /** @return the recorded answer of an idempotency key that has not expired */
+    Optional<ProcessStore.IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now);
+
+    /** Claims a key before the work runs; see {@link ProcessStore#claimIdempotency}. */
+    boolean claimIdempotency(String tenant, String operation, String key, String requestHash, Instant expiresAt,
+            Instant now);
+
+    /** Stores the answer of a claimed key in the same transaction as the work. */
+    void completeIdempotency(String tenant, String operation, String key, String responseJson);
+
+    /** @return the engine secret of this purpose, created when none exists; see {@link ProcessStore#engineKey} */
+    byte[] engineKey(String name, byte[] candidate, Instant now);
 }

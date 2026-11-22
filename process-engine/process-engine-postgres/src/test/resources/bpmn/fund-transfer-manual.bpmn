@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRE-075: the fund transfer of PRE-073, whose debit is reversed by hand: the saga block "transfer" places a hold on the source account in the host's
+     own table, debits the source in core banking and credits the target. When the credit fails, the debit is credited
+     back in core banking under the key it was posted with, then the hold is released, newest first. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_fund-transfer-manual"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="fund-transfer-manual" name="Fund transfer, manual reversal" isExecutable="true">
+    <bpmn:startEvent id="start" name="Transfer requested"/>
+    <bpmn:transaction id="transfer" name="Move the money">
+      <bpmn:startEvent id="transfer-start"/>
+      <bpmn:serviceTask id="hold-funds" name="Hold the funds" horus:handler="place-hold"
+                        horus:compensate="release-hold" horus:resultVariable="hold">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="sourceAccount" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:serviceTask id="debit-source" name="Debit the source" horus:handler="core-banking" horus:mode="remote"
+                        horus:compensate="manual" horus:resultVariable="debit">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:serviceTask id="credit-target" name="Credit the target" horus:handler="core-banking" horus:mode="remote"
+                        horus:onFailure="compensate" horus:resultVariable="credit">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.targetAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:endEvent id="transfer-end"/>
+      <bpmn:sequenceFlow id="transfer-start__hold" sourceRef="transfer-start" targetRef="hold-funds"/>
+      <bpmn:sequenceFlow id="hold__debit" sourceRef="hold-funds" targetRef="debit-source"/>
+      <bpmn:sequenceFlow id="debit__credit" sourceRef="debit-source" targetRef="credit-target"/>
+      <bpmn:sequenceFlow id="credit__transfer-end" sourceRef="credit-target" targetRef="transfer-end"/>
+    </bpmn:transaction>
+    <bpmn:endEvent id="end" name="Transferred"/>
+    <bpmn:sequenceFlow id="start__transfer" sourceRef="start" targetRef="transfer"/>
+    <bpmn:sequenceFlow id="transfer__end" sourceRef="transfer" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

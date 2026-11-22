@@ -255,7 +255,7 @@ test.describe('targets and fold (ux-design section 8)', () => {
       await rememberLocale(page, 'vi');
       await mockHost(page, scenario);
       await page.goto('./#/service');
-      await expect(scenario === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
+      await expect(scenario === 'ready' ? page.getByTestId('header-user') : scenario === 'signed-out' ? page.getByTestId('signed-out') : page.getByRole('alert')).toBeVisible();
       // Measure the Copy buttons too: open every Details disclosure first.
       await page.locator('details').evaluateAll((all) => { for (const details of all) (details as HTMLDetailsElement).open = true; });
 
