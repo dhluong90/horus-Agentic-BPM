@@ -169,6 +169,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-145](#pd-145-recommendation-strict-masking-by-default-outside-dev-before-the-freeze) | Recommendation: strict masking by default outside `dev`, before the freeze | Not adopted (product owner, PD-146) |
 | [PD-146](#pd-146-masking-stays-opt-in-the-engine-warns-about-unclassified-fields) | Masking stays opt-in; the engine warns about unclassified fields | Decided (product owner, 2026-11-22); supersedes PD-145, confirms PD-132 |
 | [PD-147](#pd-147-the-10-api-freeze-no-longer-gates-the-10-release) | The 1.0 API freeze no longer gates the 1.0 release | Decided (product owner, 2026-11-22); amends PD-135 |
+| [PD-148](#pd-148-release-only-after-a-final-demo-and-acceptance-test) | Release only after a final demo and acceptance test | Decided (product owner, 2026-11-22) |
 
 ---
 
@@ -4106,4 +4107,20 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.**
 - #115 leaves the 1.0 track and is no longer a prerequisite of #117 (Release 1.0).
 - PD-140 still defines what a freeze promises when it happens.
+- Nothing is closed by this decision.
+
+### PD-148 Release only after a final demo and acceptance test
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-22 |
+| Question | Should the team prepare the 1.0 release now? |
+| Raised by | Product owner |
+| Decision | Product owner decision (2026-11-22). |
+
+**Decision.** No 1.0 release work starts yet. When all the work is done, including the security audit, the team runs a final demo and acceptance test with the product owner. The product owner decides how and when to release at least one day after that demo.
+
+**Consequences.**
+- #117 (Release 1.0) stays open.
+- The final demo and acceptance test come first; release steps follow only after the product owner decides.
 - Nothing is closed by this decision.
