@@ -111,6 +111,8 @@ interface State {
   ready: (page: Page) => Promise<void>;
   after?: (page: Page, record: Calls) => Promise<void>;
   tall?: boolean;
+  /** Also photographed in the other language. */
+  both?: boolean;
 }
 
 const rows = (page: Page) => page.locator('table tbody tr');
@@ -123,7 +125,7 @@ const STATES: readonly State[] = [
   { name: 'incidents-merged', hash: '#/hosts/loans/incidents?scope=all', tall: true, ready: async (page) => { await expect(rows(page)).toHaveCount(2); } },
   { name: 'incidents-incomplete', hash: '#/hosts/loans/incidents?scope=all', setup: { kyc: 'down' }, ready: async (page) => { await expect(rows(page)).toHaveCount(1); await expect(page.locator('.alert--warn')).toBeVisible(); } },
   {
-    name: 'incidents-retry-on-owning-host', hash: '#/hosts/loans/incidents?scope=all',
+    name: 'incidents-retry-on-owning-host', both: true, hash: '#/hosts/loans/incidents?scope=all',
     ready: async (page) => { await expect(rows(page)).toHaveCount(2); },
     after: async (page, record) => {
       const inspector = page.getByRole('complementary');
@@ -131,7 +133,7 @@ const STATES: readonly State[] = [
       await inspector.getByRole('button', { name: /^(Retry|Chạy lại)$/ }).click();
       await page.getByRole('dialog').getByRole('textbox').fill('Agent service is back');
       await page.getByRole('dialog').getByRole('button', { name: /^(Retry|Chạy lại)$/ }).click();
-      await expect(page.locator('table tbody tr').filter({ hasText: /Retrying|Đang chạy lại/ })).toHaveCount(1);
+      await expect(page.locator('table tbody tr').filter({ hasText: /Retrying|Đang chạy/ })).toHaveCount(1);
       expect(record.posts).toHaveLength(1);
       expect(record.posts[0]?.host).toBe('loans');
     },
@@ -139,9 +141,13 @@ const STATES: readonly State[] = [
   { name: 'incidents-waiting-for-approval', hash: '#/hosts/loans/incidents?scope=all&view=pending', ready: async (page) => { await expect(rows(page)).toHaveCount(1); } },
 ];
 
-STATES.forEach((state, index) => {
-  const theme = index % 2 === 0 ? 'light' : 'dark';
-  const locale = Math.floor(index / 2) % 2 === 0 ? 'en' : 'vi';
+const RUNS = STATES.flatMap((state, index) => {
+  const theme = index % 2 === 0 ? 'light' as const : 'dark' as const;
+  const locale = Math.floor(index / 2) % 2 === 0 ? 'en' as const : 'vi' as const;
+  return [{ state, theme, locale }, ...(state.both === true ? [{ state, theme: theme === 'light' ? 'dark' as const : 'light' as const, locale: locale === 'en' ? 'vi' as const : 'en' as const }] : [])];
+});
+
+RUNS.forEach(({ state, theme, locale }) => {
   test(`CKP_019_CKP_020_merged_${state.name}_1440x900_${theme}_${locale}`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });

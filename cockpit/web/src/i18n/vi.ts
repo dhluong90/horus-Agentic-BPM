@@ -1018,6 +1018,7 @@ export const vi: Record<MessageKey, string> = {
   'incidents.empty.pending': 'Không có kết quả nào chờ phê duyệt.',
   'incidents.state.open': 'Đang mở',
   'incidents.state.retrying': 'Đang chạy lại',
+  'incidents.state.retryingShort': 'Đang chạy',
   'incidents.state.resolved': 'Đã xử lý',
   'incidents.state.pending': 'Chờ duyệt, do {who} đề xuất',
   'incidents.state.pendingShort': 'Chờ duyệt',

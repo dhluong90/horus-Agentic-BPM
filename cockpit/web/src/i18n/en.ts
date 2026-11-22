@@ -1016,6 +1016,7 @@ export const en = {
   'incidents.empty.pending': 'No result is waiting for approval.',
   'incidents.state.open': 'Open',
   'incidents.state.retrying': 'Retrying',
+  'incidents.state.retryingShort': 'Retrying',
   'incidents.state.resolved': 'Resolved',
   'incidents.state.pending': 'Proposed by {who}',
   'incidents.state.pendingShort': 'Waiting for approval',

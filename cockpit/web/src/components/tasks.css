@@ -59,3 +59,8 @@
 .merged__scope { white-space: nowrap; }
 /* A case number never breaks inside its id. */
 .tasks__case { white-space: nowrap; }
+/* Seven columns fit the list card: headers wrap and cells keep tighter side padding, so the last pill is never clipped. */
+.tasks .qtable.tasks__table thead th { white-space: normal; }
+.tasks .qtable.tasks__table th, .tasks .qtable.tasks__table td { padding-left: 10px; padding-right: 10px; }
+.tasks .qtable.tasks__table th:first-child { padding-left: 16px; }
+.tasks .qtable.tasks__table th:last-child, .tasks .qtable.tasks__table td:last-child { padding-right: 16px; }
