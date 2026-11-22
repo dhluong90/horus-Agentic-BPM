@@ -1,19 +1,13 @@
 import { useCrumbLabel, useCrumbTrail } from '../app/crumbs';
 import { formatRoute, useRoute, type Route } from '../app/route';
 import { lastDecisionQuery } from '../features/decisions/lastQuery';
-import { shortId } from '../features/decisions/model/references';
 import type { MessageKey } from '../i18n/en';
 import { useI18n } from '../i18n/I18nProvider';
 
-const AREA_TITLE: Record<Exclude<Route['name'], 'home' | 'rule-set' | 'process' | 'instance' | 'task' | 'decision'>, MessageKey> = {
-  'rule-sets': 'menu.rules',
-  approvals: 'menu.approvals',
-  decisions: 'menu.decisions',
-  processes: 'menu.processes',
-  tasks: 'menu.tasks',
-};
-
-/** Where the user is, over the content: `Rules / card-fee / Version 2`. Nothing on Home. */
+/**
+ * Where the user is, over the content: `Rules / card-fee / Version 2`. Nothing on Home or on an area's own page,
+ * whose title already says where the user is; no segment repeats the page title or shows a raw id.
+ */
 export function Breadcrumb() {
   const { t } = useI18n();
   const [route] = useRoute();
@@ -33,7 +27,7 @@ export function Breadcrumb() {
       <ol>
         {crumbs.map((crumb, index) => (
           <li key={crumb.label}>
-            {index < crumbs.length - 1 && crumb.href !== undefined ? <a href={crumb.href}>{crumb.label}</a> : <span aria-current="page">{crumb.label}</span>}
+            {(index < crumbs.length - 1 || crumbs.length === 1) && crumb.href !== undefined ? <a href={crumb.href}>{crumb.label}</a> : <span aria-current="page">{crumb.label}</span>}
           </li>
         ))}
       </ol>
@@ -59,16 +53,14 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
         { label: route.key },
         { label: t('rules.version', { version: String(route.version) }) },
       ];
+    // Until the page sets its trail, a task leads back to Tasks and a case to Processes (the title names it).
     case 'task':
-      return [{ label: t('menu.tasks'), href: formatRoute({ name: 'tasks' }) }, { label: t('review.crumb') }];
+      return [{ label: t('menu.tasks'), href: formatRoute({ name: 'tasks' }) }];
     case 'instance':
       return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }];
     case 'decision':
-      return [
-        { label: t('menu.decisions'), href: formatRoute({ name: 'decisions', query: lastDecisionQuery() }) },
-        { label: t('dlog.crumb', { id: shortId(route.decisionId) }) },
-      ];
+      return [{ label: t('menu.decisions'), href: formatRoute({ name: 'decisions', query: lastDecisionQuery() }) }];
     default:
-      return [{ label: t(AREA_TITLE[route.name]) }];
+      return [];
   }
 }

@@ -32,7 +32,9 @@ import tools.jackson.databind.json.JsonMapper;
  * principal, never from a header.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = "HORUS_DEMO_PASSWORD=test-only-password")
+        // The test client is java.net.CookieManager over plain http, which never returns a Secure cookie;
+        // SecureCookiesIT checks the attributes the example sends by default.
+        properties = {"HORUS_DEMO_PASSWORD=test-only-password", "server.servlet.session.cookie.secure=false"})
 @ActiveProfiles("dev")
 @Testcontainers
 class SessionSignInIT {

@@ -70,10 +70,11 @@ describe('CKP-024 process approval with the graph diff', () => {
     resetProcessEngine({ truncatedDiff: true });
     setScenario('processes-approver');
     open('#/processes/kyc-onboarding/3');
-    expect(await screen.findByText('Too large to approve here')).toBeInTheDocument();
-    expect(screen.getByText('The change list stops at 1,000 values, so it is not the whole change.')).toBeInTheDocument();
+    expect(await screen.findByText('The change list stops at 1,000 values, so it is not the whole change.')).toBeInTheDocument();
     expect(approve()).toBeDisabled();
     expect(approve()).toHaveAccessibleDescription('Too large to approve here: the change list is cut off.');
+    // The reason is said once, beside Approve (#443); the list says only what it holds.
+    expect(screen.getAllByText(/Too large to approve here/)).toHaveLength(1);
     expect(dock()).not.toHaveTextContent('Approves content');
   });
 

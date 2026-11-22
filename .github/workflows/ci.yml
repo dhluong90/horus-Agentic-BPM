@@ -573,7 +573,9 @@ jobs:
     # Vitest, then Playwright on the Chromium of the Playwright image against the production build.
     name: Cockpit (lint, typecheck, Vitest, Playwright)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # About 1,500 Playwright checks (every state at two sizes, two themes, two languages, with axe) take 17 to
+    # 20 minutes on a hosted runner; 30 leaves room without hiding a hung run.
+    timeout-minutes: 30
     # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
     # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
     # is the @playwright/test version in cockpit/web/package-lock.json; the first step below reads the tag

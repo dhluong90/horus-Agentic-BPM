@@ -13,13 +13,14 @@ export function taskTitle(task: Pick<TaskSummary, 'name'>, t: Translate): string
 
 /** Who a task is for, in words: "Role: Credit officer", "Group: Loans operations", or a person's name. */
 export function useAssigneeLabel(): (assignee: string) => string {
-  const { t } = useI18n();
+  const { t, label } = useI18n();
   const personName = usePersonName();
+  const roleName = (name: string) => label(`label.role.${name.replace(/^ROLE_/, '').replace(/[-.\s]+/g, '_').toUpperCase()}`) ?? readableName(name);
   return (value: string) => {
     const assignee = parseAssignee(value);
     switch (assignee.kind) {
       case 'role':
-        return t('tasks.assignee.role', { name: readableName(assignee.name) });
+        return t('tasks.assignee.role', { name: roleName(assignee.name) });
       case 'group':
         return t('tasks.assignee.group', { name: readableName(assignee.name) });
       case 'user':

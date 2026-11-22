@@ -12,6 +12,8 @@ const LOCALES = ['en', 'vi'] as const;
 const STATES: ReadonlyArray<{ name: string; scenario: Scenario }> = [
   { name: 'ready', scenario: 'ready' },
   { name: 'me-error', scenario: 'me-forbidden' },
+  // The host session ended: one calm line and Sign in again.
+  { name: 'session-ended', scenario: 'signed-out' },
 ];
 
 for (const { name, scenario } of STATES) {
@@ -25,7 +27,7 @@ for (const { name, scenario } of STATES) {
           await rememberLocale(page, locale);
           await mockHost(page, scenario);
           await page.goto('./#/service');
-          await expect(name === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
+          await expect(name === 'ready' ? page.getByTestId('header-user') : name === 'session-ended' ? page.getByTestId('signed-out') : page.getByRole('alert')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await expect(page.locator('html')).toHaveAttribute('lang', locale);
           const header = await page.getByTestId('session-header').boundingBox();

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { TaskHandOver } from '../../api/processes/processesClient';
+import { ErrorAlert } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
 import { ASSIGNEE_MAX, handOverProblems, REASON_MAX } from './model/queue';
 
@@ -12,15 +13,15 @@ export function ReassignDialog({ title, sending, onClose, onSubmit }: {
   title: string;
   sending: boolean;
   onClose: () => void;
-  /** Sends the hand-over; resolves to the refusal sentence, or undefined when the engine accepted it. */
-  onSubmit: (handOver: TaskHandOver) => Promise<string | undefined>;
+  /** Sends the hand-over; resolves to the refusal sentence and the engine's answer, or undefined when it accepted it. */
+  onSubmit: (handOver: TaskHandOver) => Promise<{ text: string; error: unknown } | undefined>;
 }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const base = useId();
   const [assignee, setAssignee] = useState('');
   const [reason, setReason] = useState('');
-  const [refusal, setRefusal] = useState<string | undefined>(undefined);
+  const [refusal, setRefusal] = useState<{ text: string; error: unknown } | undefined>(undefined);
   const problems = handOverProblems(assignee, reason);
   const blocked = problems.length === 2 ? t('tasks.dialog.needBoth') : problems[0] === 'assignee-missing' ? t('tasks.dialog.needAssignee') : problems[0] === 'reason-missing' ? t('tasks.dialog.needReason') : undefined;
   const unavailable = blocked !== undefined || sending;
@@ -61,10 +62,7 @@ export function ReassignDialog({ title, sending, onClose, onSubmit }: {
           <p id={`${base}-reason-count`} className="field__hint tnum">{t('tasks.dialog.reasonCount', { count: String(reason.length), max: String(REASON_MAX) })}</p>
         </div>
         {refusal !== undefined ? (
-          <div className="alert alert--error" role="alert">
-            <span className="alert__icon" aria-hidden="true">✕</span>
-            <div className="alert__body"><p>{refusal}</p></div>
-          </div>
+          <ErrorAlert text={refusal.text} error={refusal.error} />
         ) : null}
         <div className="tasks-dialog__foot">
           {blocked !== undefined ? <p className="tasks__why" id={`${base}-blocked`}>{blocked}</p> : <span />}

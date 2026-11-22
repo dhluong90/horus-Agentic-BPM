@@ -245,6 +245,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
                 {versions.map((v) => <option key={v.version} value={v.version}>{t(`versionState.${v.status}`, { version: String(v.version) })}</option>)}
               </select>
               <HeaderActions version={version} demoteRequest={lens === 'simulate'} onEdit={() => { go({ lens: 'edit' }); }}
+                onDiscarded={(discarded) => {
+                  say(t('discard.done', { version: String(discarded.version) }));
+                  // Back to where the author came from: the rule set's version in front, or the list when none is left.
+                  navigate(versions.some((v) => v.version !== discarded.version) ? { name: 'rule-set', ruleSet: discarded.ruleSet, version: undefined, lens: undefined } : { name: 'rule-sets' });
+                }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
                 requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>

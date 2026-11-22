@@ -263,3 +263,48 @@ export const instanceActivities = z
   })
   .loose();
 export type InstanceActivities = z.infer<typeof instanceActivities>;
+
+/** Incident statuses (PRE-077, PRE-078): open, a resolution waiting for a second person (PD-126), resolved. */
+export const INCIDENT_STATUSES = ['OPEN', 'RESOLUTION_PENDING', 'RESOLVED'] as const;
+export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
+
+/** What this caller may do with an incident now; computed per caller by the engine. Unknown actions are dropped. */
+export const INCIDENT_ACTIONS = ['retry', 'resolve', 'approve-resolution', 'reject-resolution'] as const;
+export type IncidentAction = (typeof INCIDENT_ACTIONS)[number];
+const incidentActions = z.array(z.string()).transform((items) => items.filter((item): item is IncidentAction => (INCIDENT_ACTIONS as readonly string[]).includes(item)));
+
+/** A proposed resolution: the output and reason one operator supplied, waiting for a second (PD-126). */
+export const pendingResolution = z
+  .object({
+    proposedBy: z.string(),
+    proposedAt: z.string(),
+    reason: nullableString,
+    output: z.record(z.string(), z.unknown()),
+    approvalMode: z.string().nullable().optional(),
+  })
+  .loose();
+export type PendingResolution = z.infer<typeof pendingResolution>;
+
+/** One incident of `GET /incidents` and `GET /incidents/{id}`, with the actions this caller may take. */
+export const incident = z
+  .object({
+    id: z.string(),
+    instanceId: z.string(),
+    nodeId: z.string(),
+    tokenId: nullableString,
+    errorCode: z.string(),
+    causeSummary: z.string(),
+    retryCount: z.number().int().min(0),
+    status: z.enum(INCIDENT_STATUSES),
+    lockVersion: z.number().int().min(0),
+    retrying: z.boolean(),
+    createdAt: z.string(),
+    resolvedAt: nullableString,
+    resolution: nullableString,
+    resolvedBy: nullableString,
+    pendingResolution: pendingResolution.nullable(),
+    allowedActions: incidentActions,
+  })
+  .loose();
+export type Incident = z.infer<typeof incident>;
+export const incidentPage = page(incident);

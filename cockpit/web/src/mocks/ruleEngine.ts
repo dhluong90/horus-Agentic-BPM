@@ -16,15 +16,15 @@ import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from '.
 const READINGS_MAX = 500;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
+interface Rule { id: string; when: Record<string, string>; then: Record<string, Json>; explain?: Partial<Record<'en' | 'vi', string>> }
 interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
-export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
+export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN' | 'DISCARDED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
 export interface StoredVersion {
   ruleSet: string;
   version: number;
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'PUBLISHED' | 'RETIRED';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'PUBLISHED' | 'RETIRED' | 'DISCARDED';
   lockVersion: number;
   createdBy: string;
   createdAt: string;
@@ -85,7 +85,8 @@ const json = (body: unknown, extra: Record<string, string> = {}): FakeResponse =
 /** allowedActions for this caller, by status, permission and four eyes (rule-engine VersionActions). */
 function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   const can = (permission: string) => request.permissions.includes(permission);
-  if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish'] : [];
+  // RLE-098: the author of a draft may also discard it.
+  if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish', ...(v.createdBy === request.user ? ['discard'] : [])] : [];
   if (v.status !== 'PENDING_APPROVAL' || !can('rules:approve')) return [];
   // PD-089: neither the requester nor the author may approve or reject; withdrawing is its own action.
   const self = v.requestedBy === request.user || v.createdBy === request.user;
@@ -447,7 +448,9 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
   const listed = acknowledgement.acknowledgeWarnings ?? ACKNOWLEDGE_WARNINGS;
   const now = () => new Date('2026-11-19T03:00:00Z').toISOString();
   const find = (name: string, version: number) => store.find((v) => v.ruleSet === name && v.version === version);
-  const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name);
+  // A discarded version is left out of every list and of latestVersion (RLE-098); its number is never used again.
+  const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name && v.status !== 'DISCARDED');
+  const nextNumber = (name: string) => store.filter((v) => v.ruleSet === name).length + 1;
   const audit = createAuditRoutes({
     versions: () => store.map((v) => ({
       ruleSet: v.ruleSet, version: v.version, status: v.status, createdBy: v.createdBy, createdAt: v.createdAt, requestedBy: v.requestedBy, requestedAt: v.requestedAt,
@@ -480,7 +483,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return problem(422, 'VALIDATION_FAILED', `${where}${first.message}${more}`, violations);
     }
     const stored: StoredVersion = {
-      ruleSet: parsed.ruleSet, version: versionsOf(parsed.ruleSet).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      ruleSet: parsed.ruleSet, version: nextNumber(parsed.ruleSet), status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
       requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: request.body, definition: parsed,
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
     };
@@ -498,7 +501,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     const from = find(name, number);
     if (!from) return problem(404, 'VERSION_NOT_FOUND', `Version ${copyOf} of rule set ${name} not found`);
     const stored: StoredVersion = {
-      ruleSet: name, version: versionsOf(name).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      ruleSet: name, version: nextNumber(name), status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
       requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: from.source, definition: structuredClone(from.definition),
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
     };
@@ -674,6 +677,19 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     return view(v, request, marks);
   }
 
+  /** discardDraft (RLE-098): the draft's author only; DISCARDED, kept for the audit trail, left out of every list. */
+  function discard(v: StoredVersion, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    if (request.headers['if-match'] === undefined) return problem(428, 'PRECONDITION_REQUIRED', 'If-Match is required');
+    if (v.createdBy !== request.user) return problem(403, 'PERMISSION_DENIED', `Only the author of ${v.ruleSet} v${String(v.version)} may discard it`);
+    if (v.status !== 'DRAFT') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
+    if (request.headers['if-match'] !== `"${String(v.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT', `${v.ruleSet} v${String(v.version)} is at ${String(v.lockVersion)}`);
+    const body = request.body === '' ? {} : (JSON.parse(request.body) as { reason?: string });
+    Object.assign(v, { status: 'DISCARDED', lockVersion: v.lockVersion + 1 });
+    record(v, 'DISCARDED', 'DRAFT', request.user, body.reason ?? null);
+    return json({ ruleSet: v.ruleSet, version: v.version, status: v.status, lockVersion: v.lockVersion, hitPolicy: v.definition.hitPolicy, canonicalHash: hash(JSON.stringify(v.definition)) });
+  }
+
   function evaluate(name: string, request: FakeRequest): FakeResponse {
     if (request.body.length > EVALUATE_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(EVALUATE_LIMIT)} bytes`);
     const effective = [...versionsOf(name)].reverse().find((v) => v.status === 'PUBLISHED');
@@ -760,7 +776,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/readings|\/diff\/readings|:simulate-readings)$/.exec(path))) return readings(m[1] ?? '', Number(m[2]), m[3] ?? '', url, request);
-    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw)?$/.exec(path))) {
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw|:discard)?$/.exec(path))) {
       const name = m[1] ?? '';
       if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
       const v = find(name, Number(m[2]));
@@ -780,6 +796,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       if (request.method === 'PUT' && tail === undefined) return replaceDraft(v, request);
       if (request.method === 'POST' && tail === ':validate') return validateDraft(v, request);
       if (request.method === 'POST' && tail === ':withdraw') return withdraw(v, request);
+      if (request.method === 'POST' && tail === ':discard') return discard(v, request);
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
     }
     if (request.method === 'POST' && (m = /^\/decisions\/([^/:]+):evaluate$/.exec(path))) return evaluate(m[1] ?? '', request);
@@ -797,7 +814,14 @@ const CARD_FEE_V1: Definition = {
   outputs: [{ name: 'fee', type: 'money' }, { name: 'waived', type: 'boolean' }],
   rules: [
     { id: 'R1', when: { tier: "== 'PLATINUM'" }, then: { fee: '0 VND', waived: true } },
-    { id: 'R2', when: { tier: "== 'GOLD'", balance: '>= 50000000 VND' }, then: { fee: '0 VND', waived: true } },
+    {
+      id: 'R2', when: { tier: "== 'GOLD'", balance: '>= 50000000 VND' }, then: { fee: '0 VND', waived: true },
+      // The author's sentence per language (the rule set's explain), which the engine fills with grouped values.
+      explain: {
+        en: 'The card fee is waived because a Gold customer keeps a balance of {input.balance}, at least 50,000,000 VND.',
+        vi: 'Phí thẻ được miễn vì khách hàng hạng Vàng duy trì số dư {input.balance}, từ 50.000.000 VND trở lên.',
+      },
+    },
     { id: 'R3', when: { tier: "== 'GOLD'" }, then: { fee: '30000 VND', waived: false } },
     { id: 'R4', when: { txCount: '>= 20' }, then: { fee: '15000 VND', waived: false } },
     { id: 'R5', when: {}, then: { fee: '50000 VND', waived: false } },

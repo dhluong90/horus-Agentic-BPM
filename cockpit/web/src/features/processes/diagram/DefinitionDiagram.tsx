@@ -288,6 +288,12 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     window.addEventListener('resize', measure);
     const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure);
     observer?.observe(element.parentElement ?? element);
+    // The canvas also moves when something above it grows after the first measure: a toolbar note, a wrapped
+    // legend, a header that loads late. The diagram block and the page are watched, so the canvas keeps its
+    // room above the docked decision (#443).
+    const block = element.closest('.dg');
+    if (block !== null) observer?.observe(block);
+    observer?.observe(document.body);
     return () => {
       window.removeEventListener('resize', measure);
       observer?.disconnect();
@@ -296,8 +302,9 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
 
   const fit = canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
   const whole = canvas !== undefined ? fitScale(layout, canvas, undefined, WHOLE_FIT_MIN_SCALE) : MIN_SCALE;
-  // "Whole case" is offered only when the case does not fit at the 12 px floor.
-  const offerWhole = withBadges && whole < MIN_SCALE;
+  // "Whole case" (a case) or "Whole process" (a change) is offered only when the drawing does not fit at the 12 px
+  // floor, so no edge of a change is ever out of reach (#443).
+  const offerWhole = (withBadges || marks !== undefined) && whole < MIN_SCALE;
   const mode: Zoom = zoom === 'whole' && !offerWhole ? 'fit' : zoom;
   const scale = mode === 'fit' ? fit : mode === 'whole' ? whole : MIN_SCALE;
   const width = Math.ceil(layout.width * scale);
@@ -378,13 +385,13 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     <div className="dg">
       <div className={toolbar !== undefined ? 'dg__toolbar dg__bar' : 'dg__toolbar'}>
         {toolbar}
-        {mode === 'whole' ? <p className="dg__note" id={noteId}>{t('diagram.wholeNote')}</p> : null}
+        {mode === 'whole' ? <p className="dg__note" id={noteId}>{withBadges ? t('diagram.wholeNote') : t('diagram.wholeProcessNote')}</p> : null}
         <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
           <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
           <button type="button" className="hit" aria-pressed={mode === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
           {offerWhole ? (
             <button type="button" className="hit" aria-pressed={mode === 'whole'} aria-describedby={mode === 'whole' ? noteId : undefined}
-              onClick={() => { setZoom('whole'); }}>{t('diagram.whole')}</button>
+              onClick={() => { setZoom('whole'); }}>{withBadges ? t('diagram.whole') : t('diagram.wholeProcess')}</button>
           ) : null}
         </div>
       </div>

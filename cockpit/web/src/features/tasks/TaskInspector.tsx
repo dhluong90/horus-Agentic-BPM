@@ -16,6 +16,8 @@ import { ReassignDialog } from './ReassignDialog';
 /** A refusal shown above the list, so it stays when the task leaves the list. */
 export interface Notice {
   text: string;
+  /** The engine's answer, so the code and the reference sit behind Details. */
+  error?: unknown;
 }
 
 /**
@@ -77,8 +79,8 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
       const text = fresh?.claimedBy && fresh.claimedBy !== userId
         ? t('tasks.refused.claimedFirst', { who: personName(fresh.claimedBy) })
         : refusalText(host, next, fresh, personName, t);
-      if (next.kind === 'reassign' || next.kind === 'delegate') throw new RefusedHandOver(text);
-      onNotice({ text });
+      if (next.kind === 'reassign' || next.kind === 'delegate') throw new RefusedHandOver(text, error);
+      onNotice({ text, error });
       return false;
     }
   };
@@ -142,7 +144,7 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
               setDialog(false);
               return undefined;
             } catch (error) {
-              return error instanceof RefusedHandOver ? error.message : t('tasks.refused.other');
+              return error instanceof RefusedHandOver ? { text: error.message, error: error.answer } : { text: t('tasks.refused.other'), error };
             }
           }}
         />
@@ -152,7 +154,11 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
 }
 
 /** A refused hand-over: its sentence stays in the dialog beside the fields the user fixes. */
-class RefusedHandOver extends Error {}
+class RefusedHandOver extends Error {
+  constructor(message: string, readonly answer: unknown) {
+    super(message);
+  }
+}
 
 function doneText(command: QueueCommand, title: string, personName: (login: string) => string, t: Translate): string {
   switch (command.kind) {

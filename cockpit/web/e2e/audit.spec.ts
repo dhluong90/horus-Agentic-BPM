@@ -173,7 +173,7 @@ test('CKP_071_an_auditor_finds_a_decision_by_month_and_reads_why', async ({ page
   await page.getByRole('button', { name: 'Show decisions' }).click();
   await expect(page.getByRole('heading', { name: 'card-fee, November 2026' })).toBeVisible();
   await page.getByRole('link', { name: /^Open decision 01KF2Q…P7T9/ }).click();
-  await expect(page.locator('.why__text')).toHaveText(/^Rule R2 of card-fee version 1 matched because/);
+  await expect(page.locator('.why__text')).toHaveText(/^The card fee is waived because a Gold customer keeps a balance of 60,000,000 VND/);
   await page.getByRole('tab', { name: 'Inputs' }).click();
   await expect(page.getByRole('row', { name: /National id/ })).toContainText('Masked');
   // The breadcrumb leads back to the same search.

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -64,6 +65,7 @@ import org.springframework.util.ClassUtils;
 public class EngineAccessAutoConfiguration {
 
     static final String DEV_PROFILE = "dev";
+    static final String TEST_PROFILE = "test";
     static final List<String> REMOVED_TENANCY_PROPERTIES =
             List.of("horus.bpm.tenancy.resolver", "horus.bpm.tenancy.trusted-gateway");
     private static final Log LOG = LogFactory.getLog(EngineAccessAutoConfiguration.class);
@@ -126,6 +128,56 @@ public class EngineAccessAutoConfiguration {
         return descriptors;
     }
 
+    /**
+     * The removed header mode is refused rather than ignored, so a host that relied on it fails at start-up
+     * instead of silently changing behaviour. A bean of its own, so the check also runs when the host declares
+     * its own {@link TenantResolver}.
+     */
+    @Bean
+    RemovedTenancyProperties horusBpmRemovedTenancyProperties(Environment environment) {
+        for (String removed : REMOVED_TENANCY_PROPERTIES) {
+            if (environment.containsProperty(removed)) {
+                throw new IllegalStateException(removed + " is no longer supported: the engines take the tenant "
+                        + "only from the authenticated principal (PD-079). Remove it; for local work without an "
+                        + "identity provider use horus.bpm.tenancy.dev-tenant on the dev profile.");
+            }
+        }
+        return new RemovedTenancyProperties();
+    }
+
+    /** Marker of the start-up check above; it holds nothing. */
+    static final class RemovedTenancyProperties {
+    }
+
+    /**
+     * {@code tenancy.dev-tenant} is for a purely local start-up: the {@code dev} profile, matched the way
+     * {@code @Profile} matches (default profiles included), and no profile other than {@code dev} or
+     * {@code test} beside it, so a production manifest with a leftover {@code dev} ({@code prod,dev}) stops.
+     */
+    static void requireLocalStartUp(Environment environment) {
+        if (!environment.matchesProfiles(DEV_PROFILE)) {
+            throw new IllegalStateException("horus.bpm.tenancy.dev-tenant fixes the tenant for local work and "
+                    + "is accepted on the dev profile only. Remove it outside local development.");
+        }
+        String[] profiles = environment.getActiveProfiles().length > 0
+                ? environment.getActiveProfiles() : environment.getDefaultProfiles();
+        for (String profile : profiles) {
+            if (!profile.equals(DEV_PROFILE) && !profile.equals(TEST_PROFILE)) {
+                throw new IllegalStateException("horus.bpm.tenancy.dev-tenant fixes the tenant for local work and "
+                        + "is accepted on the dev profile only, but profile '" + profile + "' is active too. "
+                        + "Remove horus.bpm.tenancy.dev-tenant outside local development.");
+            }
+        }
+    }
+
+    /** Recognises token principals when Spring Security OAuth2 is present; otherwise no principal is a token. */
+    static Predicate<Object> isToken(ClassLoader classLoader) {
+        if (ClassUtils.isPresent(OAuth2Claims.CLAIM_ACCESSOR, classLoader)) {
+            return OAuth2Claims::isToken;
+        }
+        return principal -> false;
+    }
+
     /** Token claims when Spring Security OAuth2 is present; otherwise a principal has no claims. */
     static Function<Authentication, Map<String, Object>> claims(ClassLoader classLoader) {
         if (ClassUtils.isPresent(OAuth2Claims.CLAIM_ACCESSOR, classLoader)) {
@@ -144,31 +196,20 @@ public class EngineAccessAutoConfiguration {
 
         /**
          * The default tenant resolver, unless the host declares its own: the {@code tenancy.claim} attribute
-         * of the authenticated principal, session or token (PD-079). {@code tenancy.dev-tenant} is refused
-         * outside the {@code dev} profile, and the removed header mode is refused rather than ignored, so a
-         * host that relied on it fails at start-up instead of silently changing behaviour. The profile check
-         * matches profiles the way {@code @Profile} does, default profiles included.
+         * of the authenticated principal, session or token (PD-079). {@code tenancy.dev-tenant} is accepted
+         * on a purely local start-up only (see {@link #requireLocalStartUp}) and serves only principals that
+         * are not tokens (RLE-037).
          */
         @Bean
         @ConditionalOnMissingBean
         TenantResolver horusBpmTenantResolver(HostMetadataProperties properties, Environment environment) {
-            for (String removed : REMOVED_TENANCY_PROPERTIES) {
-                if (environment.containsProperty(removed)) {
-                    throw new IllegalStateException(removed + " is no longer supported: the engines take the tenant "
-                            + "only from the authenticated principal (PD-079). Remove it; for local work without an "
-                            + "identity provider use horus.bpm.tenancy.dev-tenant on the dev profile.");
-                }
-            }
             HostMetadataProperties.Tenancy tenancy = properties.tenancy();
             if (tenancy.devTenant() != null) {
-                if (!environment.matchesProfiles(DEV_PROFILE)) {
-                    throw new IllegalStateException("horus.bpm.tenancy.dev-tenant fixes the tenant for local work and "
-                            + "is accepted on the dev profile only. Remove it outside local development.");
-                }
-                LOG.warn("Principals without a " + tenancy.claim() + " attribute get the fixed development tenant '"
-                        + tenancy.devTenant() + "' (horus.bpm.tenancy.dev-tenant, dev profile).");
+                requireLocalStartUp(environment);
+                LOG.warn("Principals without a " + tenancy.claim() + " attribute that are not tokens get the fixed "
+                        + "development tenant '" + tenancy.devTenant() + "' (horus.bpm.tenancy.dev-tenant, dev profile).");
             }
-            return new PrincipalTenantResolver(tenancy.claim(), tenancy.devTenant());
+            return new PrincipalTenantResolver(tenancy.claim(), tenancy.devTenant(), isToken(getClass().getClassLoader()));
         }
 
         /**

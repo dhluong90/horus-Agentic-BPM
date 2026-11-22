@@ -1,17 +1,16 @@
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../../api/generated/bpm-meta.v1';
 import { createHostClient, type HostClient } from '../../api/hostClient';
 import { HostCallError, toHostError, type HostError } from '../../api/hostError';
-import { loadRegistry, selectHost, type HostRegistry, type RegistryHost, type RegistryProblem } from '../config/registry';
+import { selectHost, type HostRegistry, type RegistryHost, type RegistryProblem } from '../config/registry';
 
-export type ConfigProblem = RegistryProblem | { reason: 'oidc-not-available' };
+export type ConfigProblem = RegistryProblem;
 
-/** Everything the shell can be in. Exactly one variant at a time; no flag soup. */
+/** Everything the embedded shell can be in. Exactly one variant at a time; no flag soup. */
 export type SessionState =
   | { status: 'loading' }
-  | { status: 'config-error'; problem: ConfigProblem }
   | { status: 'host-error'; error: HostError; retry: () => void }
   | { status: 'ready'; registry: HostRegistry; host: RegistryHost; meta: BpmMetaV1; me: BpmMeV1 };
 
@@ -21,17 +20,10 @@ export interface SessionDependencies {
 
 export const registryQueryKey = ['registry'] as const;
 
-export function useHostSession({ fetchImpl }: SessionDependencies = {}): SessionState {
-  const registryQuery = useQuery({
-    queryKey: registryQueryKey,
-    queryFn: () => loadRegistry(fetchImpl),
-    staleTime: Number.POSITIVE_INFINITY,
-    retry: false,
-  });
-
-  const registry = registryQuery.data?.ok ? registryQuery.data.registry : undefined;
-  const host = registry ? selectHost(registry) : undefined;
-  const sessionHost = registry?.auth.mode === 'host-session' ? host : undefined;
+/** Embedded mode (`auth.mode: host-session`): the one host, on the host's own session cookie. */
+export function useHostSession(registry: HostRegistry, { fetchImpl }: SessionDependencies = {}): SessionState {
+  const host = selectHost(registry);
+  const sessionHost = registry.auth.mode === 'host-session' ? host : undefined;
 
   const client: HostClient | undefined = useMemo(
     () => (sessionHost ? createHostClient(sessionHost.baseUrl, fetchImpl) : undefined),
@@ -60,9 +52,7 @@ export function useHostSession({ fetchImpl }: SessionDependencies = {}): Session
     ],
   });
 
-  if (registryQuery.data && !registryQuery.data.ok) return { status: 'config-error', problem: registryQuery.data.problem };
-  if (!registry || !host) return { status: 'loading' };
-  if (registry.auth.mode !== 'host-session') return { status: 'config-error', problem: { reason: 'oidc-not-available' } };
+  if (!host) return { status: 'loading' };
 
   const retry = () => {
     void metaQuery.refetch();

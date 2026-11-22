@@ -41,6 +41,12 @@ const PATHS: Record<Area, ReactElement> = {
       <path d="M6.5 8.2 8 9.7l2.6-2.7M6.5 13h7" />
     </>
   ),
+  incidents: (
+    <>
+      <path d="M10 3 17.5 16.5h-15z" />
+      <path d="M10 8.5v3.5M10 14.2v.1" />
+    </>
+  ),
 };
 
 export function AreaIcon({ area }: { area: Area }) {
@@ -57,6 +63,14 @@ export function CollapseIcon({ collapsed }: { collapsed: boolean }) {
       <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
       <path d="M7.5 3.5v13" />
       <path d={collapsed ? 'M11 8l2 2-2 2' : 'M13 8l-2 2 2 2'} />
+    </svg>
+  );
+}
+
+export function CheckIcon() {
+  return (
+    <svg className="check-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
     </svg>
   );
 }

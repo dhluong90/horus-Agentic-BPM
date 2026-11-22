@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from 'react';
-import { readPendingWarnings, type AcknowledgedWarning, type RuleSetVersion } from '../../../api/rules/schemas';
+import { readPendingWarnings, type AcknowledgedWarning, type DiscardedVersion, type RuleSetVersion } from '../../../api/rules/schemas';
+import { DiscardDraft } from './DiscardDraft';
 import { useI18n } from '../../../i18n/I18nProvider';
 import type { MessageKey } from '../../../i18n/en';
 import { useRulesSession } from '../api/rulesContext';
@@ -58,7 +59,7 @@ function EditButton({ version, onEdit }: { version: RuleSetVersion; onEdit: () =
  * Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen: where the
  * view has its own focal action (the Simulate view's Run), Request publish is drawn secondary.
  */
-export function HeaderActions({ version, onEdit, newDraft, requestPublish, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action; demoteRequest?: boolean }) {
+export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDiscarded, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action; onDiscarded: (discarded: DiscardedVersion) => void; demoteRequest?: boolean }) {
   const { t } = useI18n();
   const session = useRulesSession();
   // Every edit is of a stored draft: it needs rules:author, and the host may keep changes in its release pipeline.
@@ -68,6 +69,7 @@ export function HeaderActions({ version, onEdit, newDraft, requestPublish, demot
     const canRequest = version.allowedActions.includes('request-publish');
     return (
       <>
+        <DiscardDraft version={version} onDiscarded={onDiscarded} />
         {edit}
         {canRequest ? (
           <button type="button" className={demoteRequest ? 'btn' : 'btn btn--primary'} disabled={requestPublish.isPending} aria-busy={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
