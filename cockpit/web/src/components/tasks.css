@@ -50,3 +50,10 @@
 
 .tasks .badge--warn { background: var(--warn-soft); color: var(--warn); }
 .tasks .badge--neutral { background: var(--surface-3); color: var(--ink-2); }
+
+/* ---------- Merged lists across hosts (CK-F-28, CK-F-29) ---------- */
+.alert--warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-fill); }
+.alert--warn .alert__icon { color: var(--warn); }
+.merged__host { max-width: 20ch; white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; line-height: 1.25; }
+.merged__more { display: flex; justify-content: center; padding: 12px 0 4px; }
+.merged__scope { white-space: nowrap; }

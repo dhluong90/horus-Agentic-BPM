@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import { callHost, downloadFromHost, type HostRequest } from '../hostCall';
+import { callHost, callHostIfChanged, downloadFromHost, type Conditional, type HostRequest } from '../hostCall';
 import { chunksOf, displayNames, DISPLAY_NAMES_PATH, mergeNames, namesQuery, NO_NAMES, type DisplayNames, type WantedNames } from '../displayNames';
 import type { Page } from '../rules/schemas';
 import {
@@ -102,6 +102,8 @@ export interface ProcessesClient {
   getInstanceActivities(id: string, signal?: AbortSignal): Promise<InstanceActivities>;
   /** listTasks: one page in due-time order, tasks without a due time last */
   listTasks(query: TaskQuery): Promise<Page<TaskSummary>>;
+  /** listTasks as a conditional read: sends If-None-Match when `etag` is given; 304 is `changed: false` (CKP-019) */
+  readTasks(query: TaskQuery, etag?: string): Promise<Conditional<Page<TaskSummary>>>;
   /** claimTask */
   claimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
   /** unclaimTask: hand a claimed task back to its candidates */
@@ -112,6 +114,8 @@ export interface ProcessesClient {
   delegateTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
   /** listIncidents: one page of the incidents of one status, newest first */
   listIncidents(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<Incident>>;
+  /** listIncidents as a conditional read: sends If-None-Match when `etag` is given; 304 is `changed: false` (CKP-019) */
+  readIncidents(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }, etag?: string): Promise<Conditional<Page<Incident>>>;
   /** getIncident: one incident with the actions this caller may take */
   getIncident(id: string, signal?: AbortSignal): Promise<Incident>;
   /** retryIncident: run the failed step again, with a reason; one person's action (PRE-077) */
@@ -127,6 +131,23 @@ export interface ProcessesClient {
 }
 
 const segment = encodeURIComponent;
+
+function tasksPath(request: TaskQuery): string {
+  const query = new URLSearchParams();
+  query.set('assignment', request.assignment.join(','));
+  if (request.status !== undefined && request.status.length > 0) query.set('status', request.status.join(','));
+  if (request.slaBreached !== undefined) query.set('slaBreached', String(request.slaBreached));
+  if (request.limit !== undefined) query.set('limit', String(request.limit));
+  if (request.cursor !== undefined) query.set('cursor', request.cursor);
+  return `${PROCESSES_BASE}/tasks?${query.toString()}`;
+}
+
+function incidentsPath(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined }): string {
+  const query = new URLSearchParams({ status: request.status });
+  if (request.limit !== undefined) query.set('limit', String(request.limit));
+  if (request.cursor !== undefined) query.set('cursor', request.cursor);
+  return `${PROCESSES_BASE}/incidents?${query.toString()}`;
+}
 
 export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch): ProcessesClient {
   const call = <T,>(request: HostRequest, schema: z.ZodType<T>) => callHost(fetchImpl, baseUrl, request, schema);
@@ -191,6 +212,12 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     },
     async getInstanceActivities(id, signal) {
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/instances/${segment(id)}/activities`, ...withSignal(signal) }, instanceActivities)).data;
+    },
+    async readTasks(request, etag) {
+      return callHostIfChanged(fetchImpl, baseUrl, { method: 'GET', path: tasksPath(request), ...withSignal(request.signal) }, taskSummaryPage, etag);
+    },
+    async readIncidents(request, etag) {
+      return callHostIfChanged(fetchImpl, baseUrl, { method: 'GET', path: incidentsPath(request), ...withSignal(request.signal) }, incidentPage, etag);
     },
     async listTasks(request) {
       const query = new URLSearchParams();

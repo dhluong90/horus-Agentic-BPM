@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import type { Task, TaskSummary } from '../../api/processes/schemas';
 import { toHostError } from '../../api/hostError';
-import { formatRoute } from '../../app/route';
+import { useHostLink } from '../federation/HostScope';
 import { AreaError, LoadingRows } from '../../components/PageParts';
 import { useI18n, type Translate } from '../../i18n/I18nProvider';
 import { useNames, useWantNames, wantedOf, type Names } from '../processes/api/displayNames';
@@ -57,6 +57,7 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
   const { userId, client } = useProcessesSession();
   const names = useNames();
   const personName = names.user;
+  const hostLink = useHostLink();
   const assigneeLabel = names.assignee;
   useWantNames(wantedOf([task.assignee], [task.claimedBy]));
   const command = useQueueCommand(task);
@@ -126,7 +127,7 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
             // Kept in place with its reason, not actionable: aria-disabled keeps it focusable so the reason is read.
             <button type="button" className="btn btn--primary" aria-disabled="true" aria-describedby={whyId} onClick={(event) => { event.preventDefault(); }}>{t('tasks.action.claim')}</button>
           ) : null}
-          {mineToWork && allowed.has('complete') ? <a className="btn btn--primary" href={formatRoute({ name: 'task', taskId: task.id })}>{t('tasks.action.open')}</a> : null}
+          {mineToWork && allowed.has('complete') ? <a className="btn btn--primary" href={hostLink({ name: 'task', taskId: task.id })}>{t('tasks.action.open')}</a> : null}
           {mineToWork && allowed.has('unclaim') ? (
             <button type="button" className="btn" disabled={command.isPending} aria-busy={pending?.kind === 'unclaim'} onClick={() => { void run({ kind: 'unclaim' }); }}>
               {pending?.kind === 'unclaim' ? t('tasks.action.releasing') : t('tasks.action.release')}
