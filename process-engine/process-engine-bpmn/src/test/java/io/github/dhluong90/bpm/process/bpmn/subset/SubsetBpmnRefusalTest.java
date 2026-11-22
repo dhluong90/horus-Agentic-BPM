@@ -109,6 +109,45 @@ class SubsetBpmnRefusalTest {
     }
 
     @Test
+    void PRE_108_a_successful_read_returns_the_vendor_attributes_it_ignored_as_warnings() {
+        byte[] file = (HEAD.replace("xmlns:horus", "xmlns:camunda=\"http://camunda.org/schema/1.0/bpmn\" xmlns:horus")
+                + "<bpmn:startEvent id=\"s\"/><bpmn:serviceTask id=\"t\" camunda:class=\"x.Y\" horus:handler=\"h\"/>"
+                + "<bpmn:endEvent id=\"e\"/><bpmn:sequenceFlow id=\"f1\" sourceRef=\"s\" targetRef=\"t\"/>"
+                + "<bpmn:sequenceFlow id=\"f2\" sourceRef=\"t\" targetRef=\"e\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
+
+        var read = reader.readWithWarnings(file);
+
+        assertThat(read.process().id()).isEqualTo("p");
+        assertThat(read.warnings()).singleElement().satisfies(w -> {
+            assertThat(w.code()).isEqualTo("FOREIGN_EXTENSION_IGNORED");
+            assertThat(w.element()).isEqualTo("camunda:class");
+            assertThat(w.elementId()).isEqualTo("t");
+        });
+    }
+
+    @Test
+    void PRE_108_a_file_without_vendor_attributes_reads_with_no_warnings() {
+        byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/><bpmn:endEvent id=\"e\"/>"
+                + "<bpmn:sequenceFlow id=\"f1\" sourceRef=\"s\" targetRef=\"e\"/>" + TAIL)
+                .getBytes(StandardCharsets.UTF_8);
+
+        assertThat(reader.readWithWarnings(file).warnings()).isEmpty();
+    }
+
+    @Test
+    void PRE_108_a_throw_event_takes_its_stage_from_its_event_definition() {
+        byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
+                + "<bpmn:intermediateThrowEvent id=\"sig\"><bpmn:signalEventDefinition/></bpmn:intermediateThrowEvent>"
+                + "<bpmn:intermediateThrowEvent id=\"msg\"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>"
+                + "<bpmn:intermediateThrowEvent id=\"esc\"><bpmn:escalationEventDefinition/></bpmn:intermediateThrowEvent>"
+                + "<bpmn:intermediateThrowEvent id=\"none\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
+                assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
+                        tuple("sig", "S2"), tuple("msg", "S2"), tuple("esc", "S1"), tuple("none", "S0")));
+    }
+
+    @Test
     void PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
                 + "<bpmn:serviceTask id=\"undo\" isForCompensation=\"true\" horus:handler=\"h\"/>"
@@ -152,13 +191,13 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date() {
-        byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/><bpmn:callActivity id=\"c\"/>"
+        byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
                 + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:scriptTask id=\"sc\"/><bpmn:choreographyTask id=\"ch\"/>"
                 + "<bpmn:eventBasedGateway id=\"eg\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {
             assertThat(e.problems()).extracting(DefinitionProblem::stage)
-                    .containsExactly("S0", "S0", "S1", "not planned", "S2");
+                    .containsExactly("S0", "S1", "not planned", "S2");
             assertThat(e.problems()).extracting(DefinitionProblem::message)
                     .allSatisfy(m -> assertThat(m).doesNotContainIgnoringCase("sprint").doesNotContain("next")
                             .doesNotContain("later").doesNotContainPattern("20\\d\\d"));

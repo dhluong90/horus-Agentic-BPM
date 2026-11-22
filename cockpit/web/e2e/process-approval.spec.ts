@@ -25,7 +25,7 @@ const T = {
   en: {
     approve: 'Approve change', reject: 'Reject', review: 'Review change', processes: 'Processes', comment: 'Comment', signIn: 'Sign in again',
     self: 'You requested this change, so someone else approves it.', waiting: 'Waiting for a second person to approve.',
-    tooLarge: 'Too large to approve here', tooLargeLine: 'Too large to approve here: the change list is cut off.',
+    tooLarge: 'Too large to approve here', tooLargeLine: 'Too large to approve here: the change list is cut off.', whole: 'Whole process',
     changed: 'This version changed after you opened it. Check the changes again before you decide.',
     done: 'Approved. In effect from', rejected: 'Rejected. Version 3 is a draft again.', first: 'First version: nothing in effect to compare.',
     removedStep: 'Wait one day', inEffect: 'In effect · version 2', kyc: 'Customer onboarding (KYC)', card: 'Card dispute',
@@ -33,7 +33,7 @@ const T = {
   vi: {
     approve: 'Duyệt thay đổi', reject: 'Từ chối', review: 'Xem thay đổi', processes: 'Quy trình', comment: 'Ghi chú', signIn: 'Đăng nhập lại',
     self: 'Bạn đã gửi duyệt thay đổi này, nên người khác sẽ duyệt.', waiting: 'Đang chờ người thứ hai duyệt.',
-    tooLarge: 'Quá lớn để duyệt tại đây', tooLargeLine: 'Quá lớn để duyệt tại đây: danh sách thay đổi bị cắt.',
+    tooLarge: 'Quá lớn để duyệt tại đây', tooLargeLine: 'Quá lớn để duyệt tại đây: danh sách thay đổi bị cắt.', whole: 'Cả quy trình',
     changed: 'Phiên bản này đã thay đổi sau khi bạn mở. Hãy kiểm tra lại trước khi quyết định.',
     done: 'Đã duyệt. Áp dụng từ', rejected: 'Đã từ chối. Phiên bản 3 trở lại bản nháp.', first: 'Phiên bản đầu tiên: chưa có phiên bản đang áp dụng để so sánh.',
     removedStep: 'Chờ một ngày', inEffect: 'Đang áp dụng · phiên bản 2', kyc: 'Mở khách hàng mới (KYC)', card: 'Khiếu nại thẻ',
@@ -84,7 +84,13 @@ const SCREENS: readonly Screen[] = [
   { name: 'approval-reader-waiting', scenario: 'processes-reviewer', hash: PENDING, focus: (page, l) => dock(page, l).getByText(T[l].waiting), action: approveButton },
   {
     name: 'approval-truncated', scenario: 'processes-approver', hash: PENDING, seed: { truncatedDiff: true },
-    focus: (page, l) => page.getByText(T[l].tooLarge, { exact: true }), action: approveButton,
+    // The reason is said once, beside Approve in the dock (#443).
+    focus: (page, l) => dock(page, l).getByText(T[l].tooLargeLine, { exact: true }), action: approveButton,
+  },
+  {
+    name: 'approval-whole-process', scenario: 'processes-approver', hash: PENDING,
+    prepare: async (page, l) => { await page.getByRole('button', { name: T[l].whole }).click(); },
+    focus: (page) => page.locator('.dg__note'), action: approveButton,
   },
   {
     name: 'approval-content-changed', scenario: 'processes-approver', hash: PENDING,
@@ -144,6 +150,11 @@ for (const screen of SCREENS) {
             expect((action?.y ?? viewport.height) + (action?.height ?? 0), 'the primary action stays above the fold').toBeLessThanOrEqual(viewport.height);
           }
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'no sideways scrolling').toBe(true);
+          // The docked decision never covers the changes card, however much it says (#443).
+          const docked = await page.locator('.decision--dock').count() > 0 ? await page.locator('.decision--dock').boundingBox() : null;
+          const card = await page.locator('.card--diagram').count() > 0 ? await page.locator('.card--diagram').boundingBox() : null;
+          if (docked !== null && card !== null) expect(card.y + card.height, 'the dock never covers the changes card').toBeLessThanOrEqual(docked.y + 1);
+          if (screen.name === 'approval-truncated') expect(await page.getByText(new RegExp(T[locale].tooLarge)).count(), 'the too-large reason is said once').toBe(1);
           const main = page.locator(screen.signedOut === true ? 'body' : 'main');
           await expect(main).not.toContainText(/CKP-0|PD-1|PRE-1|\{"|9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b/);
           await page.evaluate(async () => { await document.fonts.ready; });
@@ -184,7 +195,8 @@ for (const locale of LOCALES) {
     await expect(requester.locator('[data-node="approve"][data-mark="changed"]')).toBeVisible();
     const list = requester.getByRole('region', { name: locale === 'en' ? 'What changed' : 'Những gì thay đổi' });
     await expect(list).toContainText(locale === 'en' ? 'Assignee › Role' : 'Người được giao › Vai trò');
-    await expect(list).toContainText(/CREDIT_OFFICER → .*SENIOR_CREDIT_OFFICER/);
+    await expect(list).toContainText(locale === 'en' ? /Credit officer → .*Senior credit officer/ : /Cán bộ tín dụng → .*Cán bộ tín dụng cao cấp/);
+    await expect(list).not.toContainText('CREDIT_OFFICER');
     // Money in a changed value reads with the language's separators and its currency.
     await expect(list).toContainText(locale === 'en' ? '500,000,000' : '500.000.000');
     const line = dock(requester, locale).getByText(T[locale].self);
@@ -227,7 +239,7 @@ test('CKP_024_a_cut_off_change_list_is_too_large_to_approve_and_sends_nothing', 
   await page.setViewportSize({ width: 1440, height: 900 });
   const engine = await mockEngines(page, 'processes-approver', { truncatedDiff: true });
   await page.goto(`./${PENDING}`);
-  await expect(page.getByText(T.en.tooLarge, { exact: true })).toBeVisible();
+  await expect(page.getByText(T.en.tooLargeLine, { exact: true })).toBeVisible();
   await expect(page.getByText('The change list stops at 1,000 values, so it is not the whole change.')).toBeVisible();
   const approve = approveButton(page, 'en');
   await looksDisabled(approve);

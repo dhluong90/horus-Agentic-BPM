@@ -59,7 +59,7 @@ class RuleLifecycleAcceptancePostgresIT {
         host = new TransactionTemplate(transactionManager);
         jdbc = JdbcClient.create(db);
         engines = PostgresRuleEngines.create(db, transactions, caller, caller, Clock.fixed(NOW, ZoneOffset.UTC),
-                io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults().withRequireContentHash(false));
+                io.github.dhluong90.bpm.rules.internal.service.EngineSettings.defaults());
     }
 
     @Test
@@ -216,7 +216,7 @@ class RuleLifecycleAcceptancePostgresIT {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.as(tenant, tenant + "-checker");
-        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null));
     }
 
     private long count(String table) {
@@ -237,5 +237,12 @@ class RuleLifecycleAcceptancePostgresIT {
         ds.setUser(POSTGRES.getUsername());
         ds.setPassword(POSTGRES.getPassword());
         return ds;
+    }
+
+    /** The options of an approval that names the content the approver reviewed, by its canonical hash (RLE-084, #411). */
+    private WriteOptions reviewed(String ruleSet, int version, String key, Long lock, String comment) {
+        String hash = engines.versionService().find(ruleSet, version, false)
+                .map(io.github.dhluong90.bpm.rules.api.RuleSetVersion::canonicalHash).orElse(null);
+        return new WriteOptions(key, lock, comment, null, hash, java.util.List.of());
     }
 }

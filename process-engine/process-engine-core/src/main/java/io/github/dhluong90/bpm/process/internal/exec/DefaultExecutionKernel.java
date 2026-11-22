@@ -47,6 +47,9 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.AsyncResult result -> trigger(result.tokenId(), TokenStatus.WAITING_ASYNC, result.attemptId(),
                     result, ctx);
             case Command.JobDue due -> trigger(due.tokenId(), TokenStatus.WAITING_TIMER, due.jobId(), due, ctx);
+            case Command.ChildEnded ended -> trigger(ended.tokenId(), TokenStatus.WAITING_CHILD, ended.attemptId(),
+                    ended, ctx);
+            case Command.MoveToken move -> moveToken(move, ctx);
             case Command.RouteToReview review -> trigger(review.tokenId(), TokenStatus.WAITING_ASYNC, review.attemptId(),
                     review, ctx);
             case Command.Cancel cancel -> cancel(cancel, ctx);
@@ -106,7 +109,8 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private void retry(Command.RetryStep retry, WorkingContext ctx) {
         Token token = ctx.tree().get(retry.tokenId()).orElseThrow(() ->
                 new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + retry.tokenId()));
-        if (token.status() != TokenStatus.WAITING_ASYNC || !retry.attemptId().equals(token.activityInstanceId())) {
+        if (token.status() != TokenStatus.WAITING_ASYNC && token.status() != TokenStatus.WAITING_CHILD
+                || !retry.attemptId().equals(token.activityInstanceId())) {
             throw new ExecutionException("INVALID_STATE", token.nodeId(), "Token " + retry.tokenId()
                     + " does not wait on attempt " + retry.attemptId());
         }
@@ -115,11 +119,31 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.enqueue(active);
     }
 
+    /**
+     * PRE-208: a migration moves a waiting token to a step of the instance's new version. The shell has cancelled what
+     * the token waited for; the token enters the step as on arrival, so its behaviour opens a task or parks a job.
+     */
+    private void moveToken(Command.MoveToken move, WorkingContext ctx) {
+        Token token = ctx.tree().get(move.tokenId()).orElseThrow(() ->
+                new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + move.tokenId()));
+        if (!token.status().live() || token.kind() != TokenKind.FLOW) {
+            throw new ExecutionException("INVALID_STATE", token.nodeId(), "Token " + move.tokenId() + " is "
+                    + token.status() + " and cannot be moved");
+        }
+        node(move.nodeId());
+        Token active = new Token(token.id(), token.kind(), TokenStatus.ACTIVE, token.scopeTokenId(), move.nodeId(), null,
+                token.locals());
+        ctx.update(active);
+        ctx.history("TOKEN_MOVED", token, Map.of("from", token.nodeId(), "to", move.nodeId()));
+        ctx.enqueue(active);
+    }
+
     /** PRE-073: a step whose job failed for good, and which declares onFailure compensate, starts compensation. */
     private void compensate(Command.Compensate compensate, WorkingContext ctx) {
         Token token = ctx.tree().get(compensate.tokenId()).orElseThrow(() ->
                 new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + compensate.tokenId()));
-        if (token.status() != TokenStatus.WAITING_ASYNC || !compensate.attemptId().equals(token.activityInstanceId())) {
+        if (token.status() != TokenStatus.WAITING_ASYNC && token.status() != TokenStatus.WAITING_CHILD
+                || !compensate.attemptId().equals(token.activityInstanceId())) {
             throw new ExecutionException("INVALID_STATE", token.nodeId(), "Token " + compensate.tokenId()
                     + " does not wait on attempt " + compensate.attemptId());
         }

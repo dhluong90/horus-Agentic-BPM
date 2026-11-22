@@ -27,7 +27,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 public final class JdbcMigrationStore implements MigrationStore {
 
     private static final String PLAN_COLUMNS = "tenant_id, id, definition_key, source_definition_id, source_version, "
-            + "target_definition_id, target_version, plan_hash, approval, status, created_by, created_at";
+            + "target_definition_id, target_version, plan_hash, approval, status, created_by, created_at, instructions";
 
     /** Running instances of one version, on {@code idx_pre_instance_running_definition} (V25). */
     static final String RUNNING_SQL = "SELECT count(*) FROM pre_instance WHERE tenant_id = ? AND definition_id = ? "
@@ -36,6 +36,11 @@ public final class JdbcMigrationStore implements MigrationStore {
     static final String INSTANCES_AT_SQL = "SELECT count(DISTINCT instance_id) FROM pre_token WHERE tenant_id = ? "
             + "AND definition_id = ? AND status IN " + ProcessListQueries.LIVE_STATUSES
             + " AND current_node_id = ANY (?::text[])";
+
+    /** Instances with a call in flight at any of the steps, on {@code idx_pre_timer_inflight} (V41). */
+    static final String IN_FLIGHT_COUNT_SQL = "SELECT count(DISTINCT instance_id) FROM pre_timer WHERE tenant_id = ? "
+            + "AND definition_id = ? AND node_id = ANY (?::text[]) AND status = 'CLAIMED' "
+            + "AND job_kind IN ('ASYNC_SERVICE','ASYNC_AGENT')";
 
     private final JdbcClient jdbc;
 
@@ -47,11 +52,43 @@ public final class JdbcMigrationStore implements MigrationStore {
     @Override
     public void insertPlan(StoredPlan plan) {
         MigrationPlan p = plan.view();
-        jdbc.sql("INSERT INTO pre_migration (" + PLAN_COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        jdbc.sql("INSERT INTO pre_migration (" + PLAN_COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)")
                 .params(plan.tenantId(), p.id(), p.definitionKey(), plan.sourceDefinitionId(), p.sourceVersion(),
                         plan.targetDefinitionId(), p.targetVersion(), p.planHash(), p.approval().value(), p.status(),
-                        p.createdBy(), Timestamp.from(p.createdAt()))
+                        p.createdBy(), Timestamp.from(p.createdAt()), instructions(p))
                 .update();
+    }
+
+    /** The step instructions of a plan as the JSON stored in {@code pre_migration.instructions} (V40). */
+    static String instructions(MigrationPlan p) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("mappings", p.mappings().stream().map(m -> {
+            Map<String, Object> o = new LinkedHashMap<>();
+            o.put("from", m.from());
+            o.put("to", m.to());
+            return o;
+        }).toList());
+        out.put("cancellations", p.cancellations().stream().map(c -> {
+            Map<String, Object> o = new LinkedHashMap<>();
+            o.put("step", c.step());
+            o.put("moveTo", c.moveTo());
+            o.put("reason", c.reason());
+            return o;
+        }).toList());
+        return Values.write(out);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static MigrationPlan withInstructions(MigrationPlan p, String json) {
+        Map<String, Object> m = Values.readMap(json);
+        List<Map<String, Object>> maps = (List<Map<String, Object>>) m.getOrDefault("mappings", List.of());
+        List<Map<String, Object>> cancels = (List<Map<String, Object>>) m.getOrDefault("cancellations", List.of());
+        return new MigrationPlan(p.id(), p.definitionKey(), p.sourceVersion(), p.targetVersion(), p.status(),
+                p.planHash(), p.approval(), p.createdBy(), p.createdAt(),
+                maps.stream().map(e -> new io.github.dhluong90.bpm.process.api.MigrationStepMapping(
+                        (String) e.get("from"), (String) e.get("to"))).toList(),
+                cancels.stream().map(e -> new io.github.dhluong90.bpm.process.api.MigrationStepCancellation(
+                        (String) e.get("step"), (String) e.get("moveTo"), (String) e.get("reason"))).toList());
     }
 
     @Override
@@ -101,6 +138,56 @@ public final class JdbcMigrationStore implements MigrationStore {
             int limit) {
         return ProcessListQueries.MIGRATION_MOVABLE_INSTANCES.list(jdbc, List.of(tenant, definitionId,
                 blockedNodeIds.toArray(String[]::new), limit), (rs, n) -> rs.getString(1));
+    }
+
+    @Override
+    public long inFlightInstances(String tenant, String definitionId, Collection<String> nodeIds) {
+        return jdbc.sql(IN_FLIGHT_COUNT_SQL).params(tenant, definitionId, nodeIds.toArray(String[]::new))
+                .query(Long.class).single();
+    }
+
+    @Override
+    public List<String> inFlightInstanceIds(String tenant, String definitionId, Collection<String> nodeIds,
+            int limit) {
+        return ProcessListQueries.MIGRATION_IN_FLIGHT_INSTANCES.list(jdbc, List.of(tenant, definitionId,
+                nodeIds.toArray(String[]::new), limit), (rs, n) -> rs.getString(1));
+    }
+
+    @Override
+    public boolean callInFlight(String tenant, String instanceId, String tokenId) {
+        return jdbc.sql("SELECT count(*) FROM pre_timer WHERE tenant_id = ? AND instance_id = ? AND token_id = ? "
+                        + "AND status = 'CLAIMED' AND job_kind IN ('ASYNC_SERVICE','ASYNC_AGENT')")
+                .params(tenant, instanceId, tokenId).query(Long.class).single() > 0;
+    }
+
+    @Override
+    public void renameStep(String tenant, String instanceId, String tokenId, String fromNode, String toNode) {
+        jdbc.sql("UPDATE pre_token SET current_node_id = ? WHERE tenant_id = ? AND id = ? AND current_node_id = ?")
+                .params(toNode, tenant, tokenId, fromNode).update();
+        jdbc.sql("UPDATE pre_task SET node_id = ? WHERE tenant_id = ? AND instance_id = ? AND token_id = ? "
+                + "AND status IN ('OPEN','CLAIMED')").params(toNode, tenant, instanceId, tokenId).update();
+        jdbc.sql("UPDATE pre_timer SET node_id = ? WHERE tenant_id = ? AND instance_id = ? AND token_id = ? "
+                + "AND status IN ('DUE','CLAIMED')").params(toNode, tenant, instanceId, tokenId).update();
+        jdbc.sql("UPDATE pre_incident SET node_id = ? WHERE tenant_id = ? AND instance_id = ? AND token_id = ? "
+                + "AND status IN ('OPEN','RESOLUTION_PENDING')").params(toNode, tenant, instanceId, tokenId).update();
+    }
+
+    @Override
+    public CancelledWork cancelOpenWork(String tenant, String instanceId, String tokenId, Instant now) {
+        // What a waiting token waits for is its activity instance: the task id of a user task, the job id of a timer or
+        // a remote step. Both are read by primary key, so no list is read.
+        String task = jdbc.sql("UPDATE pre_task SET status = 'CANCELLED', next_escalation_at = NULL, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND instance_id = ? AND id = "
+                        + "(SELECT activity_instance_id FROM pre_token WHERE tenant_id = ? AND id = ?) "
+                        + "AND status IN ('OPEN','CLAIMED') RETURNING id")
+                .params(tenant, instanceId, tenant, tokenId).query(String.class).optional().orElse(null);
+        String job = jdbc.sql("UPDATE pre_timer SET status = 'CANCELLED', completed_at = ?, locked_until = NULL "
+                        + "WHERE tenant_id = ? AND instance_id = ? AND id = "
+                        + "(SELECT activity_instance_id FROM pre_token WHERE tenant_id = ? AND id = ?) "
+                        + "AND status = 'DUE' RETURNING id")
+                .params(Timestamp.from(now), tenant, instanceId, tenant, tokenId).query(String.class).optional()
+                .orElse(null);
+        return new CancelledWork(task, job == null ? List.of() : List.of(job));
     }
 
     // ---- execution (#90) -------------------------------------------------------------------------------------
@@ -305,6 +392,7 @@ public final class JdbcMigrationStore implements MigrationStore {
                 rs.getInt("source_version"), rs.getInt("target_version"), rs.getString("status"),
                 rs.getString("plan_hash"), MigrationPlan.Approval.of(rs.getString("approval")),
                 rs.getString("created_by"), rs.getObject("created_at", OffsetDateTime.class).toInstant());
+        view = withInstructions(view, rs.getString("instructions"));
         return new StoredPlan(rs.getString("tenant_id"), view, rs.getString("source_definition_id"),
                 rs.getString("target_definition_id"));
     }

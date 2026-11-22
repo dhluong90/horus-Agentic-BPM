@@ -104,11 +104,13 @@
 .card > .empty-state:only-child { padding: 20px 0; }
 .skeleton { display: flex; flex-direction: column; gap: 12px; padding: 8px 0; }
 .skeleton__row { display: block; height: 36px; border-radius: var(--radius-m); background: var(--surface-3); }
-.alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-m); border: 1px solid; border-left-width: 3px; color: var(--ink); }
-.alert--error { background: var(--bad-soft); border-color: var(--bad-fill); }
+/* Styleguide section 9: soft fill and a 3 px left edge only, never a full outline. */
+.alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-m); border: 0; color: var(--ink); }
+.alert--error { background: var(--bad-soft); box-shadow: inset 3px 0 0 var(--bad-fill); }
 .alert__icon { color: var(--bad); font-weight: 800; line-height: 1.5; }
 .alert__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.alert__details summary { cursor: pointer; color: var(--ink-2); font: var(--type-label); }
+.alert__details summary { cursor: pointer; color: var(--ink-2); font: var(--type-label); font-weight: 600; min-height: 32px; display: flex; align-items: center; gap: 4px; }
+.alert__details dd { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; overflow-wrap: anywhere; }
 .alert__details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin-top: 6px; font: var(--type-label); }
 .alert__details dl > div { display: contents; }
 .alert__details dt { color: var(--muted); }
@@ -179,6 +181,8 @@
 .dialog__text { color: var(--ink-2); }
 .dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .field__label { font: var(--type-label); font-weight: 600; }
+/* In a dialog a label sits one 8 px step above its field (styleguide section 5). */
+.dialog .field { gap: var(--space-2, 8px); }
 .field__input { min-height: 40px; padding: 10px 12px; border: 1px solid var(--control); border-radius: var(--radius-m); background: var(--surface); color: var(--ink); resize: vertical; font: var(--type-body); }
 .field__error { color: var(--bad); font: var(--type-label); }
 
@@ -196,3 +200,21 @@
   .navrail__heading, .navrail__foot { display: none; }
   .frame .main { padding: 20px 16px 40px; }
 }
+
+/* Tabs with a control beside them (a filter of the list below): the tabs keep their underline, the control sits at the end. */
+.tabs-row { display: flex; align-items: center; gap: var(--space-4, 16px); border-bottom: 1px solid var(--line); }
+.tabs-row > .tabs { border-bottom: 0; flex: 1 1 auto; min-width: 0; }
+.tabs-row__aside { flex: none; display: flex; align-items: center; gap: var(--space-2, 8px); padding-bottom: 4px; }
+
+/* A filter toggle (styleguide: segmented filter, one item): neutral when off, the selected treatment when on. */
+.filter-toggle {
+  display: inline-flex; align-items: center; gap: var(--space-2, 8px); min-height: 36px; padding: 0 12px;
+  border: 1px solid var(--control); border-radius: var(--radius-m); background: var(--surface); color: var(--ink-2);
+  font: var(--type-label); font-weight: 600; cursor: pointer;
+}
+.filter-toggle:hover { background: var(--surface-2); color: var(--ink); }
+.filter-toggle:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.filter-toggle[aria-pressed="true"] { background: var(--select); border-color: var(--accent); color: var(--accent); }
+.filter-toggle__icon { color: var(--warn); font-size: 11px; }
+.filter-toggle__count { min-width: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--ink); font: var(--type-caption); font-weight: 600; text-align: center; }
+.filter-toggle[aria-pressed="true"] .filter-toggle__count { background: var(--surface); color: var(--accent); }

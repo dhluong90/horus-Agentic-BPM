@@ -34,18 +34,19 @@ class RefusedStandardsProblemTest {
     }
 
     @Test
-    void RLE_061_each_entry_carries_element_id_line_and_stage() {
+    void RLE_061_each_entry_carries_element_id_line_stage_and_message_in_unsupported_elements() {
         JsonNode body = body(details.handle(UnsupportedStandardException.dmnElements(List.of(
                 new UnsupportedElement("businessKnowledgeModel", "bkm-1", 55, "S2"),
                 new UnsupportedElement("decisionService", "ds-1", 70, "S2"))),
                 new ServletWebRequest(new MockHttpServletRequest())));
 
         assertThat(body.get("code").stringValue()).isEqualTo("DMN_UNSUPPORTED_ELEMENT");
-        assertThat(body.get("elements")).hasSize(2);
-        assertThat(body.at("/elements/0/element").stringValue()).isEqualTo("businessKnowledgeModel");
-        assertThat(body.at("/elements/0/id").stringValue()).isEqualTo("bkm-1");
-        assertThat(body.at("/elements/0/line").intValue()).isEqualTo(55);
-        assertThat(body.at("/elements/1/stage").stringValue()).isEqualTo("S2");
+        assertThat(body.get("unsupportedElements")).hasSize(2);
+        assertThat(body.at("/unsupportedElements/0/element").stringValue()).isEqualTo("businessKnowledgeModel");
+        assertThat(body.at("/unsupportedElements/0/elementId").stringValue()).isEqualTo("bkm-1");
+        assertThat(body.at("/unsupportedElements/0/line").intValue()).isEqualTo(55);
+        assertThat(body.at("/unsupportedElements/0/message").stringValue()).contains("businessKnowledgeModel", "stage S2");
+        assertThat(body.at("/unsupportedElements/1/stage").stringValue()).isEqualTo("S2");
         assertThat(body.has("violationsTruncated")).isFalse();
     }
 
@@ -59,7 +60,7 @@ class RefusedStandardsProblemTest {
         JsonNode body = body(details.handle(UnsupportedStandardException.dmnElements(found),
                 new ServletWebRequest(new MockHttpServletRequest())));
 
-        assertThat(body.get("elements")).hasSize(100);
+        assertThat(body.get("unsupportedElements")).hasSize(100);
         assertThat(body.get("violationsTruncated").booleanValue()).isTrue();
     }
 

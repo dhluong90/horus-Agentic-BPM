@@ -49,6 +49,13 @@ final class TestEngine {
                 "processes:task:work");
         volatile Set<String> roles = Set.of();
         volatile Set<String> groups = Set.of();
+        /** The host directory's names of users, as a host's {@code DisplayNames} would give them (#442). */
+        volatile java.util.Map<String, String> names = java.util.Map.of();
+
+        @Override
+        public java.util.Optional<String> displayNameOf(String userId) {
+            return java.util.Optional.ofNullable(names.get(userId));
+        }
 
         @Override
         public Set<String> currentRoles() {
@@ -145,7 +152,7 @@ final class TestEngine {
         EngineSettings settings = new EngineSettings(b.autoApprove, EngineDefaults.MAX_NODES, EngineDefaults.MAX_BYTES,
                 EngineDefaults.IDEMPOTENCY_RETENTION, EngineDefaults.SLOW_CALL_WARNING, EngineDefaults.MAX_PAGE_SIZE,
                 EngineDefaults.MAX_RANGE, EngineDefaults.MAX_REASON_LENGTH, b.makerChecker, b.approverRule,
-                b.retireLastVersion, b.requireContentHash, b.resolveApproval);
+                b.retireLastVersion, b.requireContentHash, b.resolveApproval, b.warnUnclassified);
         Identity id = identity;
         ProcessEventPublisher publisher = b.publisher != null ? b.publisher : events::add;
         this.replicaPublisher = publisher;
@@ -173,6 +180,14 @@ final class TestEngine {
                         .collect(Collectors.toSet()), b.agents.stream()
                         .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
                 b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits, calendars.businessCalendar());
+        if (b.roleCatalogue != null) {
+            services.useRoleCatalogue(b.roleCatalogue);
+        }
+        if (b.importedLayouts) {
+            // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
+            this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
+                    new io.github.dhluong90.bpm.process.bpmn.subset.BpmnLayoutReader(Limits.DEFAULTS)::read));
+        }
         this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
                 new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
                         tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
@@ -302,6 +317,7 @@ final class TestEngine {
         private boolean autoApprove = true;
         private boolean makerChecker = true;
         private boolean requireContentHash = true;
+        private boolean warnUnclassified = true;
         private EngineSettings.ResolveApproval resolveApproval = EngineSettings.ResolveApproval.FOUR_EYES;
         private EngineSettings.ApproverRule approverRule = EngineSettings.ApproverRule.MAKERS;
         private EngineSettings.RetireLastVersionRule retireLastVersion = EngineSettings.RetireLastVersionRule.CONFIRM;
@@ -317,6 +333,8 @@ final class TestEngine {
         private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
+        private io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue;
+        private boolean importedLayouts;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -331,6 +349,18 @@ final class TestEngine {
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
             this.clock = clock;
+        }
+
+        /** The host's role list that approval asks about escalation targets (PRE-180); none by default. */
+        Builder roleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue value) {
+            this.roleCatalogue = value;
+            return this;
+        }
+
+        /** Stores the diagram of an imported BPMN file as layout revision 1, as the starter does (#445). */
+        Builder importedLayouts() {
+            importedLayouts = true;
+            return this;
         }
 
         Builder lease(Duration value) {
@@ -371,6 +401,11 @@ final class TestEngine {
         /** {@code approval.require-content-hash} (PD-139); {@code false} is the dev-profile relaxation. */
         Builder requireContentHash(boolean value) {
             requireContentHash = value;
+            return this;
+        }
+
+        Builder warnUnclassified(boolean value) {
+            warnUnclassified = value;
             return this;
         }
 

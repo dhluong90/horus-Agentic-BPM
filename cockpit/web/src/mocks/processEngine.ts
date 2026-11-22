@@ -1,9 +1,11 @@
+import { DEMO_NAMES } from './displayNames';
 import {
   DEMO_DEFINITIONS, FORM_TASK_ID, FORM_TASK_NAME, INSTANCE_ID, kycDiff, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_CONTEXT, REVIEW_TASK_ID, REVIEW_TASK_NAME,
   VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
 } from './processDemo';
 import { demoCases } from './caseDemo';
 import { DIRECTORY, QUEUE_NOW, QUEUE_SEED } from './taskQueueDemo';
+import { demoIncidents, type StoredIncident } from './incidentDemo';
 
 /*
  * An in-memory Process Engine for the dev server, Vitest and Playwright, in the response shapes of
@@ -99,7 +101,29 @@ export interface ProcessSeed {
   activities?: 'ok' | 'missing' | 'failing';
   /** The loan origination task queue beside the review tasks; on by default. */
   queue?: boolean;
+  /** The demo incidents (CKP-008); on by default. */
+  incidents?: boolean;
+  /** The host's `incidents.resolve-approval` (PD-126): `four-eyes` by default, `single` on the dev profile only. */
+  resolveApproval?: 'four-eyes' | 'single';
+  /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
+  unclassified?: boolean;
 }
+
+/** A command on an incident, as the engine received it. */
+export interface RecordedIncidentCommand {
+  incidentId: string;
+  command: 'retry' | 'resolve' | 'approve-resolution' | 'reject-resolution';
+  actor: string;
+  body: Record<string, unknown>;
+  ifMatch: string | undefined;
+  idempotencyKey: string | undefined;
+}
+
+/** What the engine lists for the pending onboarding version when fields are left unclassified: names only (PRE-205). */
+const UNCLASSIFIED_DEMO = [
+  { code: 'UNCLASSIFIED_FIELD', step: 'verify-docs', field: 'documentType', direction: 'INPUT', message: 'Input documentType of step verify-docs is not classified: it declares neither mask true nor mask false. This does not block approval.' },
+  { code: 'UNCLASSIFIED_FIELD', step: 'verify-docs', field: 'summary', direction: 'OUTPUT', message: 'Output summary of step verify-docs is not classified: it declares neither mask true nor mask false. This does not block approval.' },
+];
 
 export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const locale = seed.locale ?? 'en';
@@ -129,6 +153,10 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const replies = new Map<string, ProcessAnswer>();
   const overrides: RecordedOverride[] = [];
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
+  const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
+  const incidentCommands: RecordedIncidentCommand[] = [];
+  // A retried step is accepted after the list has been read once more: the row says Retrying, then leaves.
+  const settling = new Map<string, number>();
 
   const json = (status: number, body: unknown, headers: Record<string, string> = {}): ProcessAnswer => ({ status, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
   const problem = (status: number, code: string, extra: Record<string, unknown> = {}): ProcessAnswer => ({
@@ -219,9 +247,11 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (assignee.length < 1 || assignee.length > 200 || reason.length < 1 || reason.length > 500) return problem(400, 'INPUT_INVALID');
     if (task.status !== (command === 'reassign' ? 'OPEN' : 'CLAIMED')) return problem(409, 'INVALID_STATE');
     const directUser = task.assignee.startsWith('user:');
-    if (fourEyesRefuses(task, assignee) || task.claimedBy === assignee || (!directUser && !mayWork(task, assignee))) {
-      return problem(409, 'ASSIGNEE_NOT_ALLOWED', { detail: 'The named user may not work this task' });
-    }
+    // The refusals say which rule applied (PRE-206): reason, and for a missing role or group, what the target lacks.
+    const refuse = (reason: string, required?: string) => problem(409, 'ASSIGNEE_NOT_ALLOWED', { detail: 'The named user may not work this task', reason, ...(required !== undefined ? { required } : {}) });
+    if (task.claimedBy === assignee) return refuse('ALREADY_ASSIGNED');
+    if (fourEyesRefuses(task, assignee)) return refuse('FOUR_EYES_PARTICIPANT');
+    if (!directUser && !mayWork(task, assignee)) return refuse(task.assignee.startsWith('group:') ? 'MISSING_GROUP' : 'MISSING_ROLE', task.assignee);
     handOvers.push({ taskId: task.id, command, actor: request.user, from: task.claimedBy, to: assignee, reason });
     Object.assign(task, { status: 'CLAIMED', claimedBy: assignee, claimedAt: QUEUE_NOW, lockVersion: task.lockVersion + 1 });
     return json(200, taskBody(task, request), { ETag: `"${String(task.lockVersion)}"` });
@@ -252,6 +282,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       createdBy: found.createdBy ?? 'lan', createdAt: found.lastChangedAt, source: 'IMPORT', lockVersion: found.lockVersion,
       effectiveFrom: found.effectiveFrom ?? (found.status === 'ACTIVE' ? '2026-11-01T00:00:00Z' : null),
       requestedBy: found.requestedBy ?? null, requestedAt: found.requestedAt ?? null, decisionComment: found.decisionComment,
+      warnings: seed.unclassified === true && found.key === 'kyc-onboarding' && found.version === 3 ? UNCLASSIFIED_DEMO : [],
     };
   }
 
@@ -328,7 +359,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : undefined;
         return {
           key: d.key, name: d.name, version: d.version, definitionHash: d.definitionHash ?? DEFAULT_HASH, lockVersion: d.lockVersion,
-          requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
+          requestedBy, requestedByName: DEMO_NAMES[locale].users[requestedBy] ?? requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
           allowedActions: denial === undefined ? ['approve', 'reject'] : [],
           deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
         };
@@ -337,6 +368,96 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       .slice(0, limit);
     return json(200, { data, nextCursor: null, hasNext: false });
   }
+
+  /** allowedActions of an incident for this caller (PRE-077, PRE-078): empty without processes:incident:manage. */
+  const incidentActions = (item: StoredIncident, request: ProcessRequest): string[] => {
+    if (!request.permissions.includes('processes:incident:manage')) return [];
+    if (item.status === 'OPEN' && !item.retrying) return [...(item.errorCode === 'COMPENSATION_MANUAL_REQUIRED' ? [] : ['retry']), 'resolve'];
+    if (item.status === 'RESOLUTION_PENDING' && item.pendingResolution?.proposedBy !== request.user) return ['approve-resolution', 'reject-resolution'];
+    return [];
+  };
+  const incidentBody = (item: StoredIncident, request: ProcessRequest) => {
+    const body: Record<string, unknown> = { ...item, allowedActions: incidentActions(item, request) };
+    delete body['requires'];
+    return body;
+  };
+
+  /** listIncidents: one status, newest first; a retried step settles on the read after the one that showed it retrying. */
+  const listIncidents = (url: URL, request: ProcessRequest): ProcessAnswer => {
+    if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+    const status = url.searchParams.get('status') ?? 'OPEN';
+    if (!['OPEN', 'RESOLUTION_PENDING', 'RESOLVED'].includes(status)) return problem(400, 'QUERY_INVALID');
+    if (status === 'OPEN') {
+      for (const [id, reads] of [...settling]) {
+        const item = incidents.find((candidate) => candidate.id === id);
+        if (item === undefined || reads + 1 < 2) { settling.set(id, reads + 1); continue; }
+        Object.assign(item, { status: 'RESOLVED', retrying: false, resolution: 'RETRY_SUCCEEDED', resolvedAt: QUEUE_NOW, lockVersion: item.lockVersion + 1 });
+        settling.delete(id);
+      }
+    }
+    const data = incidents.filter((item) => item.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    return json(200, { data: data.map((item) => incidentBody(item, request)), nextCursor: null, hasNext: false });
+  };
+
+  const incidentCommand = (item: StoredIncident, command: RecordedIncidentCommand['command'], request: ProcessRequest, header: (name: string) => string | undefined): ProcessAnswer => {
+    if (!request.permissions.includes('processes:incident:manage')) return problem(403, 'PERMISSION_DENIED');
+    const ifMatch = header('If-Match');
+    const idempotencyKey = header('Idempotency-Key');
+    if (ifMatch === undefined || idempotencyKey === undefined) return problem(428, 'PRECONDITION_REQUIRED');
+    const replayKey = `${request.user}:${idempotencyKey}`;
+    const replay = replies.get(replayKey);
+    if (replay !== undefined) return replay;
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(request.body || '{}') as Record<string, unknown>;
+    } catch {
+      return problem(400, 'INPUT_INVALID');
+    }
+    incidentCommands.push({ incidentId: item.id, command, actor: request.user, body, ifMatch, idempotencyKey });
+    if (ifMatch !== `"${String(item.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT');
+    const reason = typeof body['reason'] === 'string' ? body['reason'].trim() : '';
+    const answer = (status: number) => {
+      const reply = json(status, incidentBody(item, request), { ETag: `"${String(item.lockVersion)}"` });
+      replies.set(replayKey, reply);
+      return reply;
+    };
+    switch (command) {
+      case 'retry':
+        if (reason === '') return problem(400, 'INPUT_INVALID');
+        if (item.status !== 'OPEN' || item.retrying || item.errorCode === 'COMPENSATION_MANUAL_REQUIRED') return problem(409, 'INVALID_STATE');
+        Object.assign(item, { retrying: true, retryCount: item.retryCount + 1, lockVersion: item.lockVersion + 1 });
+        settling.set(item.id, 0);
+        return answer(202);
+      case 'resolve': {
+        if (reason === '' || reason.length > 2000) return problem(400, 'INPUT_INVALID');
+        if (item.status !== 'OPEN' || item.retrying) return problem(409, 'INVALID_STATE');
+        const output = body['output'];
+        if (typeof output !== 'object' || output === null || Array.isArray(output)) return problem(400, 'INPUT_INVALID');
+        const missing = item.requires.filter((name) => !(name in output));
+        if (missing.length > 0) return problem(422, 'OUTPUT_INVALID', { paths: missing.map((name) => `/${name}`) });
+        if ((seed.resolveApproval ?? 'four-eyes') === 'single') {
+          Object.assign(item, { status: 'RESOLVED', resolution: 'COMPLETED_MANUALLY', resolvedBy: request.user, resolvedAt: QUEUE_NOW, lockVersion: item.lockVersion + 1 });
+        } else {
+          Object.assign(item, {
+            status: 'RESOLUTION_PENDING', lockVersion: item.lockVersion + 1,
+            pendingResolution: { proposedBy: request.user, proposedAt: QUEUE_NOW, reason, output: output as Record<string, unknown>, approvalMode: 'four-eyes' },
+          });
+        }
+        return answer(200);
+      }
+      case 'approve-resolution':
+      case 'reject-resolution':
+        if (item.status !== 'RESOLUTION_PENDING' || item.pendingResolution === null) return problem(409, 'INVALID_STATE');
+        if (item.pendingResolution.proposedBy === request.user) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
+        if (command === 'reject-resolution') {
+          if (reason === '') return problem(400, 'INPUT_INVALID');
+          Object.assign(item, { status: 'OPEN', pendingResolution: null, lockVersion: item.lockVersion + 1 });
+        } else {
+          Object.assign(item, { status: 'RESOLVED', resolution: 'COMPLETED_MANUALLY', resolvedBy: request.user, resolvedAt: QUEUE_NOW, lockVersion: item.lockVersion + 1 });
+        }
+        return answer(200);
+    }
+  };
 
   function handle(request: ProcessRequest): ProcessAnswer {
     const url = new URL(request.path, 'http://host.test');
@@ -385,6 +506,17 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       if (seed.activities === 'failing') return problem(500, 'INTERNAL');
       if (!found.activities) return problem(404, 'INSTANCE_NOT_FOUND');
       return json(200, found.activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
+    }
+    if (request.method === 'GET' && path === `${BASE}/incidents`) return listIncidents(url, request);
+    const incidentMatch = /^\/api\/bpm\/processes\/v1\/incidents\/([^/:]+)(?::(retry|resolve|approve-resolution|reject-resolution))?$/.exec(path);
+    if (incidentMatch) {
+      const item = incidents.find((candidate) => candidate.id === incidentMatch[1]);
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      if (!item) return problem(404, 'INCIDENT_NOT_FOUND');
+      const command = incidentMatch[2] as RecordedIncidentCommand['command'] | undefined;
+      if (request.method === 'GET' && command === undefined) return json(200, incidentBody(item, request), { ETag: `"${String(item.lockVersion)}"` });
+      if (request.method !== 'POST' || command === undefined) return problem(400, 'INPUT_INVALID');
+      return incidentCommand(item, command, request, header);
     }
     if (request.method === 'GET' && path === `${BASE}/tasks`) return listTasks(url, request);
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete|reassign|delegate))?$/.exec(path);
@@ -454,5 +586,11 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (task?.status === 'OPEN') Object.assign(task, { status: 'CLAIMED', claimedBy: user, claimedAt: QUEUE_NOW, lockVersion: task.lockVersion + 1 });
   };
 
-  return { handle, overrides, requests, decisions, handOvers, claimAs };
+  /** A step fails again while its retry runs: the same incident stays open with one more retry (PRE-077). */
+  const touchIncident = (id: string) => {
+    const item = incidents.find((candidate) => candidate.id === id);
+    if (item) item.lockVersion += 1;
+  };
+
+  return { handle, overrides, requests, decisions, handOvers, claimAs, incidentCommands, touchIncident };
 }

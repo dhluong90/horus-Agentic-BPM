@@ -20,7 +20,8 @@ final class ProcessListQueries {
      * {@code idx_pre_token_live_node_instance} (V24), so the planner can answer the count with an index-only scan of
      * a partial index and never touches {@code pre_history}.
      */
-    static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT')";
+    static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT',"
+            + "'WAITING_CHILD')";
 
     static final String DEFINITION_COLUMNS = "tenant_id, id, key_name, version_num, status, name, "
             + "definition_json::text AS definition_json, definition_hash, source_format, source_document, source_hash, "
@@ -46,6 +47,15 @@ final class ProcessListQueries {
             new Bound.ParentKey("key_name", "the versions of one definition key"),
             "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND key_name = ? "
                     + "ORDER BY version_num FOR UPDATE");
+
+    /**
+     * The active versions of every tenant, read once at start-up for the unclassified-field summary (PD-146), through
+     * the partial index {@code idx_pre_definition_active} (V45).
+     */
+    static final ListQuery ACTIVE_DEFINITIONS = new ListQuery("active-definition-versions",
+            new Bound.EngineSweep(null, "at most 1,000 active versions, over idx_pre_definition_active (V45)"),
+            "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE status = 'ACTIVE' "
+                    + "ORDER BY tenant_id, key_name, version_num LIMIT ?");
 
     /** The lifecycle actions of one definition version. */
     static final ListQuery DEFINITION_HISTORY = new ListQuery("definition-history",
@@ -163,6 +173,26 @@ final class ProcessListQueries {
                     + "AND NOT EXISTS (SELECT 1 FROM pre_token t WHERE t.tenant_id = i.tenant_id "
                     + "AND t.instance_id = i.id AND t.status IN " + LIVE_STATUSES + " "
                     + "AND t.current_node_id = ANY (?::text[])) ORDER BY i.id LIMIT ?");
+
+    /**
+     * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent} (V43).
+     * A cancel of the parent reads them to cancel them (#92, PRE-213). Parameters: tenant, parent instance, limit.
+     */
+    static final ListQuery INSTANCE_CHILDREN = new ListQuery("instance-children",
+            new Bound.ParentKey("parent_instance_id", "the calls of one instance, bounded by its definition's steps "
+                    + "and the retries of each; read a page at a time"),
+            "SELECT id FROM pre_instance WHERE tenant_id = ? AND parent_instance_id = ? "
+                    + "AND status IN ('RUNNING','COMPENSATING') ORDER BY id LIMIT ?");
+
+    /**
+     * The instances with a remote call in flight at any of the given steps of a definition version, in id order, on
+     * {@code idx_pre_timer_inflight} (V41). Parameters: tenant, definition id, the steps as a text array, limit (#106).
+     */
+    static final ListQuery MIGRATION_IN_FLIGHT_INSTANCES = new ListQuery("migration-in-flight-instances",
+            new Bound.Page("instance id order of idx_pre_timer_inflight (V41), claimed jobs only"),
+            "SELECT DISTINCT instance_id FROM pre_timer WHERE tenant_id = ? AND definition_id = ? "
+                    + "AND node_id = ANY (?::text[]) AND status = 'CLAIMED' "
+                    + "AND job_kind IN ('ASYNC_SERVICE','ASYNC_AGENT') ORDER BY instance_id LIMIT ?");
 
     /**
      * The next running instances of the source version of an approved migration, after the plan's cursor, in id order,
@@ -410,8 +440,20 @@ final class ProcessListQueries {
      */
     static final ListQuery HISTORY_ENTRIES = new ListQuery("instance-history-entries",
             new Bound.Page("oldest first on idx_pre_history_instance (tenant_id, instance_id, occurred_at, id)"),
-            "SELECT id, event_type, node_id, actor_id, occurred_at FROM pre_history "
+            "SELECT id, event_type, node_id, actor_id, occurred_at, token_id, attempt_id, details FROM pre_history "
                     + "WHERE tenant_id = ? AND instance_id = ? AND occurred_at >= ? AND occurred_at <= ? "
+                    + "ORDER BY occurred_at, id LIMIT ?");
+
+    /**
+     * The undo of one instance (#80, PRE-203): the history types a compensation writes, on the same index and within the
+     * same lifetime bound as {@link #HISTORY_ENTRIES}, so the scopes of the timeline never depend on its entry limit.
+     * Parameters: tenant, instance, from, to, limit.
+     */
+    static final ListQuery COMPENSATION_ENTRIES = new ListQuery("instance-compensation-entries",
+            new Bound.Page("oldest first on idx_pre_history_instance (tenant_id, instance_id, occurred_at, id)"),
+            "SELECT id, event_type, node_id, actor_id, occurred_at, token_id, attempt_id, details FROM pre_history "
+                    + "WHERE tenant_id = ? AND instance_id = ? AND occurred_at >= ? AND occurred_at <= ? "
+                    + "AND (event_type LIKE 'COMPENSATION\\_%' OR event_type = 'COMPENSATED') "
                     + "ORDER BY occurred_at, id LIMIT ?");
 
     /** Due timers, for every tenant: the poll of each replica. */
@@ -426,12 +468,13 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
                 OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
-                NODE_ACTIVITIES, HISTORY_ENTRIES,
+                NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
-                CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
+                CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES, MIGRATION_IN_FLIGHT_INSTANCES,
+                INSTANCE_CHILDREN,
                 MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,

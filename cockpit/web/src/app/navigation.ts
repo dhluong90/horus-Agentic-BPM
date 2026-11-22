@@ -28,6 +28,8 @@ export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
   const approvals = rules || (modules.has('processes') && me.permissions.includes('processes:read'));
   // Tasks holds the queue: shown where a Process Engine runs and the user may work or manage tasks (#71).
   const tasks = modules.has('processes') && me.permissions.some((permission) => TASK_PERMISSIONS.has(permission));
+  // Incidents holds the incident queue (CKP-008): read with processes:read; retry and resolve follow allowedActions.
+  const incidents = modules.has('processes') && me.permissions.includes('processes:read');
   return [
     'home',
     ...(rules ? (['rules'] as const) : []),
@@ -35,6 +37,7 @@ export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
     ...(rules && me.permissions.includes(DECISION_LOG) ? (['decisions'] as const) : []),
     ...(processes ? (['processes'] as const) : []),
     ...(tasks ? (['tasks'] as const) : []),
+    ...(incidents ? (['incidents'] as const) : []),
   ];
 }
 
@@ -42,7 +45,7 @@ export function availableAreas(meta: BpmMetaV1, me: BpmMeV1): Area[] {
  * Areas shown with a plain "Preview" label: Processes and Tasks, whose engine is not released, and Decisions, whose
  * read API arrives with input masking in 0.2.0 (decision records can hold personal data).
  */
-export const PREVIEW_AREAS: ReadonlySet<Area> = new Set<Area>(['decisions', 'processes', 'tasks']);
+export const PREVIEW_AREAS: ReadonlySet<Area> = new Set<Area>(['decisions', 'processes', 'tasks', 'incidents']);
 
 /**
  * Values of the host setting `cockpit.landing` (PD-092): `home` (the default), `rules` or `approvals`.

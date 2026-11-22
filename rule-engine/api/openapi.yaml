@@ -68,6 +68,7 @@ paths:
                     canonicalHash: 3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d
                     lockVersion: 1
                     requestedBy: lan
+                    requestedByName: Trần Thị Lan
                     requestedAt: '2026-12-15T01:30:00Z'
                     allowedActions: []
                     deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
@@ -133,12 +134,15 @@ paths:
         A file in another standard, or with an element outside the current stage, is refused by name and
         nothing is stored. A CMMN root element is `422 CMMN_UNSUPPORTED` (`RLE-060`), decided at the root
         before anything else is read. DMN elements the engine does not execute are `422
-        DMN_UNSUPPORTED_ELEMENT`, listing every one with its `element`, `id`, `line` and `stage` (`S1`, `S2`,
-        `S3` or `not planned`) in `elements` (`RLE-061`). An expression language other than FEEL is `422
+        DMN_UNSUPPORTED_ELEMENT`, listing every one with its `element`, `elementId`, `line`, `stage` (`S1`, `S2`,
+        `S3` or `not planned`) and `message` in `unsupportedElements` (`RLE-061`, PD-141: the same field and
+        item shape as the Process Engine). An expression language other than FEEL is `422
         EXPRESSION_LANGUAGE_UNSUPPORTED` with its line and stage.
 
         Personal data (PD-099): every input that declares no `mask` and whose name matches the
         tenant's personal-data names is listed in `warnings` (`UNMASKED_PERSONAL_DATA`, `RLE-049`).
+        Every input that declares no `mask` at all is also listed as `UNCLASSIFIED_INPUT` (PD-146,
+        `RLE-195`), a reminder that never blocks, unless `classification.warn-unclassified` is `false`.
         With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
         `mask` is `422 VALIDATION_FAILED` with one violation per input, its `column` naming it, and
         nothing is stored (`RLE-050`).
@@ -348,6 +352,8 @@ paths:
 
         Personal data (PD-099): every input that declares no `mask` and whose name matches the
         tenant's personal-data names is listed in `warnings` (`UNMASKED_PERSONAL_DATA`, `RLE-049`).
+        Every input that declares no `mask` at all is also listed as `UNCLASSIFIED_INPUT` (PD-146,
+        `RLE-195`), a reminder that never blocks, unless `classification.warn-unclassified` is `false`.
         With `decision-log.require-explicit-mask` on for the tenant, an input that declares no
         `mask` is `422 VALIDATION_FAILED` with one violation per input, its `column` naming it, and
         nothing is stored (`RLE-050`).
@@ -362,8 +368,30 @@ paths:
         `authoring.cockpit-drafts` says (PD-121). `v` is read in the caller's tenant only. A
         `copyOf` that is not a version number of 1 or more, or a body sent with it, is
         `400 INPUT_INVALID`; an unknown `v` is `404 VERSION_NOT_FOUND`. A failure writes nothing.
+
+        With `Content-Type: text/csv` and `base={v}` the body is a spreadsheet file (`RLE-192`, PD-107,
+        PD-142; issue #39): one header line, then one line per rule. The columns are `Rule`, each input by
+        name, each output by name, then an optional `Description`, exactly the inputs and outputs of version
+        `v` in its order; the hit policy, masks and everything else outside the rows are `v`'s. The file is
+        UTF-8 (a byte order mark is optional), comma or semicolon separated as its header line shows, at
+        most 1,048,576 bytes. Cells use the shorthand `GOLD, PLATINUM`, `>= 50000000 VND`, `18 to 65`,
+        `[18..65)`, `!= VN`, `null` and `-` for any. A blank `Rule` cell gets the next free id; a duplicate
+        id is refused. The rows are then checked as a document is (`RLE-041`), so the same problems are
+        listed. Scientific notation (`5E+07`), thousands separators, dates that are not ISO dates and text in
+        a number column are refused, never read as another value. A refusal is `422 VALIDATION_FAILED` with
+        one violation per problem, its `ruleId` and `column` naming the cell and a `CSV_*` `code`; no problem
+        quotes a cell, so a value of a masked input never leaves in an error (`RLE-193`, `RLE-194`).
+        `base` with another content type, or a CSV body without `base`, is `400 INPUT_INVALID`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
+        - name: base
+          in: query
+          required: false
+          description: >-
+            With `Content-Type: text/csv`, the version whose inputs, outputs, hit policy and masks the rows use
+          schema:
+            type: integer
+            minimum: 1
         - name: copyOf
           in: query
           required: false
@@ -380,6 +408,9 @@ paths:
             schema:
               type: string
           application/xml:
+            schema:
+              type: string
+          text/csv:
             schema:
               type: string
       responses:
@@ -524,6 +555,10 @@ paths:
         A `SYNTAX_ERROR` also carries `position`, `expected` (the token or form the parser expected there, by
         language) and `example` (a short correct expression), when the parser knows what it expected (#419). These come
         from the catalogue by the kind of error, never from the cell, so a masked value is not echoed.
+
+        A valid document lists in `warnings` each input that declares neither `mask: true` nor `mask: false`
+        (`UNCLASSIFIED_INPUT`, PD-146, `RLE-195`). The warnings never change `valid`, and are empty while
+        `horus.bpm.rules.classification.warn-unclassified` is `false`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -572,6 +607,7 @@ paths:
                 readings: []
                 readingsTruncated: false
                 readingsReason: null
+                warnings: []
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -775,7 +811,13 @@ paths:
       summary: Export a version as a file that imports back with the same canonical hash
       description: |
         `format=json` is the RFC 8785 canonical document; `format=dmn` is a DMN 1.5 document with
-        one decision table. The file carries no tenant, status, lock version, requester, approver or
+        one decision table; `format=csv` is the spreadsheet file (`RLE-191`, PD-107): UTF-8 with a byte
+        order mark, comma separated, CRLF line ends, RFC 4180 quoting, a header line of `Rule`, the inputs,
+        the outputs and `Description`, one line per rule in table order, amounts without thousands separators
+        (`50000000 VND`), ISO dates and `-` for any. A version that uses `any` or `all` groups, a list input or
+        output, or a calculated cell has no table form and is `422 VALIDATION_FAILED` with the code
+        `CSV_NO_TABLE_FORM`, naming the rule. Imported back against the same version with no edit, it gives the
+        same canonical hash. The file carries no tenant, status, lock version, requester, approver or
         decision data. A version that uses `any` or `all` groups, output defaults, collect
         aggregates or calculated cells has no decision table form and is `422 VALIDATION_FAILED`
         naming the rule and the cell. YAML export is not available yet. Writes nothing. Permission
@@ -788,15 +830,18 @@ paths:
           required: true
           schema:
             type: string
-            enum: [json, dmn]
+            enum: [json, dmn, csv]
       responses:
         '200':
-          description: The file, with `Content-Disposition` `attachment; filename="<name>-v<version>.<json|dmn>"`
+          description: The file, with `Content-Disposition` `attachment; filename="<name>-v<version>.<json|dmn|csv>"`
           content:
             application/json:
               schema:
                 type: object
             application/xml:
+              schema:
+                type: string
+            text/csv:
               schema:
                 type: string
         '400': { $ref: '#/components/responses/Problem' }
@@ -2460,12 +2505,17 @@ components:
       properties:
         code:
           type: string
-          enum: [UNMASKED_PERSONAL_DATA]
-          description: '`UNMASKED_PERSONAL_DATA`: an input that declares no `mask` has a name that looks like personal data (PD-099)'
+          enum: [UNMASKED_PERSONAL_DATA, UNCLASSIFIED_INPUT]
+          description: |
+            `UNMASKED_PERSONAL_DATA`: an input that declares no `mask` has a name that looks like personal data
+            (PD-099). `UNCLASSIFIED_INPUT`: an input declares neither `mask: true` nor `mask: false` (PD-146,
+            `RLE-195`); a reminder that never blocks, never needs an acknowledgement and is not listed while
+            `horus.bpm.rules.classification.warn-unclassified` is `false`. Clients show it calmly, for example as
+            "not classified". New codes may be added.
         input: { type: string }
         matchedName:
           type: [string, 'null']
-          description: The configured personal-data name the input matched, for example `national id`
+          description: The configured personal-data name the input matched, for example `national id`; null for `UNCLASSIFIED_INPUT`
         message: { type: string }
         requiresAcknowledgement:
           type: boolean
@@ -2644,7 +2694,7 @@ components:
           type: boolean
     PendingApproval:
       type: object
-      required: [ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions]
+      required: [ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedByName, requestedAt, allowedActions, deniedActions]
       properties:
         ruleSet: { type: string }
         version: { type: integer, minimum: 1 }
@@ -2653,7 +2703,12 @@ components:
           pattern: '^[0-9a-f]{64}$'
           description: The value the reviewer sends back as `expectedCanonicalHash` (`RLE-084`, PD-139)
         lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
-        requestedBy: { type: string }
+        requestedBy: { type: string, description: The requester's user id, which the four-eyes checks compare }
+        requestedByName:
+          type: string
+          description: |
+            The requester as a screen shows them, from the host's `DisplayNames` in the caller's language (#442,
+            `RLE-196`); the user id when the host knows no name. A label only.
         requestedAt: { type: string, format: date-time }
         allowedActions:
           type: array
@@ -3169,10 +3224,14 @@ components:
         in force when the diff is read decides.
     UnsupportedElement:
       type: object
-      required: [element, id, line, stage]
+      required: [element, elementId, line, stage, message]
+      description: >-
+        One element of an imported file that the engine refuses by name. The same schema is in the Process Engine
+        OpenAPI file (PD-141)
       properties:
         element: { type: string, description: 'The element name, for example `businessKnowledgeModel`' }
-        id:
+        message: { type: string, description: 'Plain English; the wording may change, the element and the stage are the contract' }
+        elementId:
           type: [string, 'null']
           maxLength: 200
           description: The element's `id`; control characters are removed and it is cut at 200 characters
@@ -3211,6 +3270,12 @@ components:
             `mask: true`), `TEMPLATE_TOO_LONG` (over 500 characters) and `INPUT_INVALID` (a language tag that is not
             BCP 47, or more than 10 languages). A table whose worst case is over the step budget:
             `EVALUATION_BUDGET_EXCEEDED`, on the first rule from which it is over, with a null `column`.
+            Spreadsheet files (`text/csv` with `base`, and the CSV export), none of which quotes a cell:
+            `CSV_NO_TABLE_FORM`, `CSV_EMPTY`, `CSV_ENCODING`, `CSV_FILE_INVALID`, `CSV_COLUMN_UNKNOWN`,
+            `CSV_COLUMN_MISSING`, `CSV_COLUMN_DUPLICATE`, `CSV_COLUMN_ORDER` (these name the file's column in
+            `column`), `CSV_RULE_ID_INVALID`, `CSV_RULE_DUPLICATE`, `CSV_ROW_SHAPE`, `CSV_CELL_INVALID`,
+            `CSV_CELL_EMPTY`, `CSV_CELL_SCIENTIFIC`, `CSV_CELL_SEPARATORS`, `CSV_CELL_DATE`,
+            `CSV_CELL_NOT_A_NUMBER` and `CSV_CELL_NO_CURRENCY`.
             Null for a problem of the document as a whole. New codes may be added.
           examples: [TYPE_MISMATCH]
         position:
@@ -3223,7 +3288,7 @@ components:
           examples: [8]
     DraftValidation:
       type: object
-      required: [ruleSet, version, valid, problems, problemsTruncated, readings, readingsTruncated, readingsReason]
+      required: [ruleSet, version, valid, problems, problemsTruncated, readings, readingsTruncated, readingsReason, warnings]
       properties:
         ruleSet: { type: string }
         version: { type: integer, minimum: 1 }
@@ -3254,6 +3319,14 @@ components:
           type: [string, 'null']
           enum: [TABLE_TOO_LARGE, null]
           description: Why `readings` is left out; `TABLE_TOO_LARGE`, or null when `readingsTruncated` is false
+        warnings:
+          type: array
+          description: |
+            Reminders that never make the document invalid: one `UNCLASSIFIED_INPUT` per input that declares no
+            `mask` (PD-146, `RLE-195`), in input order. Empty when `valid` is false, when every input is classified, or
+            while `horus.bpm.rules.classification.warn-unclassified` is `false`.
+          items:
+            $ref: '#/components/schemas/VersionWarning'
     ValidationProblem:
       type: object
       required: [ruleId, column, code, position, message]
@@ -3967,11 +4040,12 @@ components:
         line:
           type: integer
           description: Present on `CMMN_UNSUPPORTED`, the line of the root element
-        elements:
+        unsupportedElements:
           type: array
           description: >-
             Present on `DMN_UNSUPPORTED_ELEMENT` and `EXPRESSION_LANGUAGE_UNSUPPORTED`, in document order, at most
-            100 (`violationsTruncated` is true when there were more)
+            100 (`violationsTruncated` is true when there were more). The same field and item shape as the Process
+            Engine's refusals of a standard (PD-141)
           items: { $ref: '#/components/schemas/UnsupportedElement' }
         violations:
           type: array

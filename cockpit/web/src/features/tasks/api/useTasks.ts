@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import type { TaskHandOver } from '../../../api/processes/processesClient';
 import type { Task } from '../../../api/processes/schemas';
 import { useProcessesSession } from '../../processes/api/processesContext';
-import { overdueAssignment, queryOf, type QueueView } from '../model/queue';
+import { queryOf, type QueueView } from '../model/queue';
 
 /*
  * Server state of the task queue. Every key starts with host and tenant (cockpit DESIGN section 12). A command never
@@ -18,8 +18,7 @@ function useKeys() {
   const base = [hostId, tenant, 'processes', 'tasks'] as const;
   return {
     all: base,
-    view: (view: QueueView) => [...base, 'view', view] as const,
-    overdue: (assignment: string) => [...base, 'overdue', assignment] as const,
+    view: (view: QueueView, overdue: boolean) => [...base, 'view', view, overdue ? 'overdue' : 'all'] as const,
     task: (id: string) => [hostId, tenant, 'processes', 'task', id] as const,
   };
 }
@@ -32,31 +31,17 @@ function jittered(seconds: number): () => number {
   return () => Math.round(seconds * 1000 * (0.9 + Math.random() * 0.2));
 }
 
-/** One tab's first page, in the engine's due-time order. */
-export function useQueue(view: QueueView, enabled: boolean, refreshSeconds: number) {
+/**
+ * One tab's first page, in the engine's due-time order. `overdue` adds `slaBreached=true` (CKP-034, CKP-050): which
+ * tasks are overdue is the engine's answer, never worked out in the browser.
+ */
+export function useQueue(view: QueueView, enabled: boolean, refreshSeconds: number, overdue = false) {
   const { client } = useProcessesSession();
   const keys = useKeys();
   return useQuery({
-    queryKey: keys.view(view),
-    queryFn: ({ signal }) => client.listTasks({ ...queryOf(view), limit: QUEUE_LIMIT, signal }),
+    queryKey: keys.view(view, overdue),
+    queryFn: ({ signal }) => client.listTasks({ ...queryOf(view), ...(overdue ? { slaBreached: true } : {}), limit: QUEUE_LIMIT, signal }),
     enabled,
-    refetchInterval: jittered(refreshSeconds),
-    staleTime: 5_000,
-  });
-}
-
-/** The ids of the tasks the engine says are overdue (`slaBreached=true`), over every tab this user sees. */
-export function useOverdue(views: readonly QueueView[], refreshSeconds: number) {
-  const { client } = useProcessesSession();
-  const keys = useKeys();
-  const assignment = overdueAssignment(views);
-  return useQuery({
-    queryKey: keys.overdue(assignment.join(',')),
-    queryFn: async ({ signal }) => {
-      const page = await client.listTasks({ assignment, slaBreached: true, limit: QUEUE_LIMIT, signal });
-      return new Set(page.data.map((task) => task.id));
-    },
-    enabled: views.length > 0,
     refetchInterval: jittered(refreshSeconds),
     staleTime: 5_000,
   });

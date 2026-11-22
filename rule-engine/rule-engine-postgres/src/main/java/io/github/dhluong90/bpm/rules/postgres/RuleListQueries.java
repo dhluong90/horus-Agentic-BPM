@@ -227,6 +227,17 @@ final class RuleListQueries {
             "SELECT tenant_id FROM rle_masking_key_check WHERE key_id = :keyId");
 
     /** The inputs of every version not retired, for the start-up masking check (RLE-035). */
+    static final ListQuery PUBLISHED_VERSION_INPUTS = new ListQuery("published-version-inputs",
+            new Bound.Sweep("the published versions of every tenant, read once at start-up for the unclassified-input "
+                    + "summary (PD-146)"),
+            """
+                    SELECT v.tenant_id, s.name, v.version_num, (v.canonical_json -> 'inputs')::text AS inputs
+                    FROM rle_version v
+                    JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
+                    WHERE v.status = 'PUBLISHED'
+                    ORDER BY v.tenant_id, s.name, v.version_num
+                    """);
+
     static final ListQuery LIVE_VERSION_INPUTS = new ListQuery("live-version-inputs",
             new Bound.Sweep("the versions in service of every tenant, read once at start-up; retired versions are left out"),
             """
@@ -313,7 +324,7 @@ final class RuleListQueries {
     static List<ListQuery> all() {
         return List.of(CACHE_EPOCHS, RULE_SETS, VERSIONS, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, VERSION_HISTORY, HISTORY_VERSIONS, VERSIONS_BY_NUMBER,
                 HISTORY_OF_VERSIONS, RULE_SET_EVENTS, DECLARED_INPUTS, MASKED_BY_DEFAULT, RETIRE_SUPERSEDED,
-                MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, VERSION_FUNCTIONS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
+                MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, PUBLISHED_VERSION_INPUTS, VERSION_FUNCTIONS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
                 DECISIONS_BY_LOGGED_INPUT, DECISION_COUNT, byCorrelation(false, false), byCorrelation(true, true),
                 byInput(false), byInput(true));
     }

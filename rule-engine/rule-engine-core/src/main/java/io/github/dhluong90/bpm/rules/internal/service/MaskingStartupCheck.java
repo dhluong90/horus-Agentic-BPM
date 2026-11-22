@@ -104,6 +104,46 @@ public final class MaskingStartupCheck {
         throw new IllegalStateException(message.toString());
     }
 
+    /** Most approved versions the start-up summary names; the rest are counted. */
+    static final int UNCLASSIFIED_SUMMARY_MAX = 50;
+
+    /**
+     * The one start-up summary of PD-146 (#438): how many inputs of each approved (published) version declare no
+     * {@code mask}, for the tenants whose policy keeps the reminder on. Names the tenant, rule set, version and count,
+     * never an input value. Reads the stored declarations only; nothing is inferred from a name.
+     *
+     * @return the WARN text, or empty when every input of every approved version is classified or the reminder is off
+     */
+    public java.util.Optional<String> unclassifiedSummary() {
+        List<String> versions = new ArrayList<>();
+        int total = 0;
+        int count = 0;
+        for (VersionInputs version : store.publishedVersionInputs()) {
+            if (!policy.warnUnclassified(version.tenantId())) {
+                continue;
+            }
+            int unclassified = MaskDeclarations.unclassifiedCount(version.inputsJson());
+            if (unclassified == 0) {
+                continue;
+            }
+            count++;
+            total += unclassified;
+            if (versions.size() < UNCLASSIFIED_SUMMARY_MAX) {
+                versions.add(version.tenantId() + "/" + version.ruleSet() + " v" + version.version() + ": "
+                        + unclassified);
+            }
+        }
+        if (count == 0) {
+            return java.util.Optional.empty();
+        }
+        String more = count > versions.size() ? " and " + (count - versions.size()) + " more versions" : "";
+        return java.util.Optional.of("Rule Engine: " + total + " inputs of " + count + " approved rule set versions "
+                + "are not classified (they declare neither mask: true nor mask: false): " + String.join(", ", versions)
+                + more + ". Masking stays opt-in, so these inputs are logged in plain text unless the tenant masks "
+                + "undeclared inputs. Declare each one, or set horus.bpm.rules.classification.warn-unclassified=false "
+                + "to silence this reminder (PD-146).");
+    }
+
     /**
      * Checks the keys of TR-SEC-10, each problem named by scope and key id, never by the key:
      * <ol>

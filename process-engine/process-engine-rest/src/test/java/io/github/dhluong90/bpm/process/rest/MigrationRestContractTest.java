@@ -9,7 +9,10 @@ import io.github.dhluong90.bpm.process.api.InvalidStateException;
 import io.github.dhluong90.bpm.process.api.MigrationDryRun;
 import io.github.dhluong90.bpm.process.api.MigrationNotFoundException;
 import io.github.dhluong90.bpm.process.api.MigrationPlan;
+import io.github.dhluong90.bpm.process.api.MigrationPlanInvalidException;
 import io.github.dhluong90.bpm.process.api.MigrationPlanRequest;
+import io.github.dhluong90.bpm.process.api.MigrationStepCancellation;
+import io.github.dhluong90.bpm.process.api.MigrationStepMapping;
 import io.github.dhluong90.bpm.process.api.MigrationService;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
 import java.time.Instant;
@@ -52,6 +55,54 @@ class MigrationRestContractTest {
 
         MvcResult read = exchange(get(BASE + "/migrations/" + PLAN));
         assertThat(read.getResponse().getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void PRE_207_a_plan_with_mappings_and_cancellations_reaches_the_service_and_comes_back_with_them() throws Exception {
+        MvcResult created = exchange(post(BASE + "/migrations").contentType(MediaType.APPLICATION_JSON)
+                .header("Idempotency-Key", "plan-2").content("{\"definitionKey\":\"loan-origination\",\"sourceVersion\":1,"
+                        + "\"targetVersion\":2,\"mappings\":[{\"from\":\"credit-review\",\"to\":\"credit-assessment\"}],"
+                        + "\"cancellations\":[{\"step\":\"legacy-manual-check\",\"moveTo\":\"credit-assessment\","
+                        + "\"reason\":\"Check merged into credit assessment\"}]}"));
+
+        assertThat(created.getResponse().getStatus()).isEqualTo(201);
+        assertThat(migrations.requests).containsExactly(new MigrationPlanRequest("loan-origination", 1, 2, "plan-2",
+                List.of(new MigrationStepMapping("credit-review", "credit-assessment")),
+                List.of(new MigrationStepCancellation("legacy-manual-check", "credit-assessment",
+                        "Check merged into credit assessment"))));
+        assertThat(created.getResponse().getContentAsString())
+                .contains("\"mappings\":[{\"from\":\"credit-review\",\"to\":\"credit-assessment\"}]")
+                .contains("\"cancellations\":[{\"step\":\"legacy-manual-check\",\"moveTo\":\"credit-assessment\","
+                        + "\"reason\":\"Check merged into credit assessment\"}]");
+    }
+
+    @Test
+    void PRE_207_a_dry_run_reports_what_each_instruction_does() throws Exception {
+        MvcResult report = exchange(post(BASE + "/migrations/" + PLAN + ":validate"));
+
+        assertThat(report.getResponse().getContentAsString())
+                .contains("\"impact\":{\"mapped\":40,\"cancelled\":14,\"inFlight\":1,\"unmapped\":0}");
+    }
+
+    @Test
+    void PRE_209_instructions_that_cannot_be_carried_out_are_422_with_each_problem_in_paths() throws Exception {
+        MvcResult refused = exchange(post(BASE + "/migrations").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"definitionKey\":\"bad-steps\",\"sourceVersion\":1,\"targetVersion\":2}"));
+
+        assertThat(refused.getResponse().getStatus()).isEqualTo(422);
+        assertThat(refused.getResponse().getContentAsString()).contains("\"code\":\"MIGRATION_PLAN_INVALID\"")
+                .contains("\"paths\":[\"legacy-review is handled twice\"");
+        // and an instruction with an unknown field or the wrong type is a malformed body
+        for (String body : new String[] {
+                "{\"definitionKey\":\"loan-review\",\"sourceVersion\":1,\"targetVersion\":2,\"mappings\":[{\"from\":\"a\","
+                        + "\"to\":\"b\",\"tenantId\":\"bank-b\"}]}",
+                "{\"definitionKey\":\"loan-review\",\"sourceVersion\":1,\"targetVersion\":2,\"cancellations\":[{\"step\":1}]}",
+                "{\"definitionKey\":\"loan-review\",\"sourceVersion\":1,\"targetVersion\":2,\"cancellations\":\"x\"}"}) {
+            MvcResult malformed = mvc.perform(post(BASE + "/migrations").contentType(MediaType.APPLICATION_JSON)
+                    .content(body)).andReturn();
+            BODIES.assertResponseOf(malformed);
+            assertThat(malformed.getResponse().getStatus()).as(body).isEqualTo(400);
+        }
     }
 
     @Test
@@ -119,8 +170,13 @@ class MigrationRestContractTest {
             if (request.sourceVersion() == 2) {
                 throw new InvalidStateException("Definition loan-review v1 is RETIRED");
             }
+            if (request.definitionKey().equals("bad-steps")) {
+                throw new MigrationPlanInvalidException("legacy-review is handled twice",
+                        List.of("legacy-review is handled twice"));
+            }
             requests.add(request);
-            return plan();
+            return new MigrationPlan(PLAN, request.definitionKey(), 1, 2, "PLANNED", "c".repeat(64),
+                    MigrationPlan.Approval.FOUR_EYES, "ops-lead-thu", NOW, request.mappings(), request.cancellations());
         }
 
         @Override
@@ -149,7 +205,8 @@ class MigrationRestContractTest {
                                     "review", "userTask")),
                     List.of(new MigrationDryRun.Conflict(MigrationDryRun.STEP_NOT_IN_TARGET, "legacy-review",
                             "Legacy committee review", new MigrationDryRun.InstanceSample(50, legacy, false))),
-                    new MigrationDryRun.InstanceSample(450, List.of("01JLOAN0000000000000000100"), true));
+                    new MigrationDryRun.InstanceSample(450, List.of("01JLOAN0000000000000000100"), true),
+                    new MigrationDryRun.Impact(40, 14, 1, 0));
         }
     }
 }

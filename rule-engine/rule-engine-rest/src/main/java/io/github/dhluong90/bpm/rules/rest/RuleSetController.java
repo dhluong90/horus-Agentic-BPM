@@ -112,7 +112,7 @@ public class RuleSetController {
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         // Permission first, then a bounded read: a caller without rules:author never makes the host buffer a body.
         RestSupport.require(callers, "rules:author");
-        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
+        ImportRequest request = new ImportRequest(documentFormat(contentType), RestSupport.boundedBody(body, contentLength),
                 idempotencyKey, ProblemDetails.correlationId(correlationId));
         return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request), callers);
     }
@@ -125,6 +125,7 @@ public class RuleSetController {
     public ResponseEntity<byte[]> importVersion(
             @PathVariable("name") String name,
             @RequestParam(value = "copyOf", required = false) String copyOf,
+            @RequestParam(value = "base", required = false) String base,
             InputStream body,
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
@@ -142,8 +143,21 @@ public class RuleSetController {
             return RestSupport.version(HttpStatus.CREATED, versions.copyVersion(name, source, new WriteOptions(
                     idempotencyKey, null, null, ProblemDetails.correlationId(correlationId))), callers);
         }
-        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength),
+        SourceFormat format = format(contentType);
+        ImportRequest request = new ImportRequest(format, RestSupport.boundedBody(body, contentLength),
                 idempotencyKey, ProblemDetails.correlationId(correlationId));
+        if (format == SourceFormat.CSV) {
+            // RLE-192: a spreadsheet file is read against the base version whose columns it must keep
+            int baseVersion = base != null && base.matches("[0-9]{1,9}") ? Integer.parseInt(base) : 0;
+            if (baseVersion < 1) {
+                throw new InputInvalidException("a CSV import needs base, the version number (1 or more) whose inputs"
+                        + " and outputs the file uses");
+            }
+            return RestSupport.version(HttpStatus.CREATED, versions.importCsv(name, baseVersion, request), callers);
+        }
+        if (base != null) {
+            throw new InputInvalidException("base applies to a CSV import (Content-Type text/csv) only");
+        }
         return RestSupport.version(HttpStatus.CREATED, versions.importVersion(name, request), callers);
     }
 
@@ -177,7 +191,7 @@ public class RuleSetController {
         RestSupport.require(callers, "rules:author");
         String key = RestSupport.requiredIdempotencyKey(idempotencyKey, "PUT of a draft");
         long lock = RestSupport.requiredIfMatch(ifMatch, "PUT of a draft");
-        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength), key);
+        ImportRequest request = new ImportRequest(documentFormat(contentType), RestSupport.boundedBody(body, contentLength), key);
         return RestSupport.version(HttpStatus.OK,
                 versions.replaceDraft(name, version, request,
                         new WriteOptions(key, lock, null, ProblemDetails.correlationId(correlationId))), callers);
@@ -196,7 +210,7 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType) throws IOException {
         RestSupport.require(callers, "rules:author");
-        ImportRequest request = new ImportRequest(format(contentType), RestSupport.boundedBody(body, contentLength), null);
+        ImportRequest request = new ImportRequest(documentFormat(contentType), RestSupport.boundedBody(body, contentLength), null);
         return RestSupport.json(HttpStatus.OK, RestSupport.validation(versions.validateDraft(name, version, request)));
     }
 
@@ -546,7 +560,7 @@ public class RuleSetController {
     }
 
     /**
-     * {@code GET /rule-sets/{name}/versions/{v}/export?format=json|dmn}: the version as a file that imports back with
+     * {@code GET /rule-sets/{name}/versions/{v}/export?format=json|dmn|csv}: the version as a file that imports back with
      * the same canonical hash. Writes nothing.
      */
     @GetMapping("/{name}/versions/{version:\\d+}/export")
@@ -558,15 +572,29 @@ public class RuleSetController {
         SourceFormat sourceFormat = switch (format == null ? "" : format) {
             case "json" -> SourceFormat.JSON;
             case "dmn" -> SourceFormat.DMN_XML;
-            default -> throw new InputInvalidException("format must be json or dmn");
+            case "csv" -> SourceFormat.CSV;
+            default -> throw new InputInvalidException("format must be json, dmn or csv");
         };
         String document = versions.export(name, version, sourceFormat);
         String extension = sourceFormat == SourceFormat.DMN_XML ? "dmn" : sourceFormat.name().toLowerCase(Locale.ROOT);
-        String mediaType = sourceFormat == SourceFormat.DMN_XML ? "application/xml" : "application/json";
+        String mediaType = switch (sourceFormat) {
+            case DMN_XML -> "application/xml";
+            case CSV -> "text/csv";
+            default -> "application/json";
+        };
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE, mediaType + ";charset=UTF-8")
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + name + "-v" + version + "." + extension + "\"")
                 .body(document.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The format of a document body; a spreadsheet is imported against a base version only (RLE-192). */
+    private static SourceFormat documentFormat(String contentType) {
+        SourceFormat format = format(contentType);
+        if (format == SourceFormat.CSV) {
+            throw new InputInvalidException("text/csv is accepted only by POST /rule-sets/{name}/versions?base={v}");
+        }
+        return format;
     }
 
     private static SourceFormat format(String contentType) {
@@ -577,10 +605,13 @@ public class RuleSetController {
         if (type.contains("json")) {
             return SourceFormat.JSON;
         }
+        if (type.startsWith("text/csv")) {
+            return SourceFormat.CSV;
+        }
         // application/xml, text/xml and the DMN media types such as application/dmn+xml
         if (type.contains("xml") || type.contains("dmn")) {
             return SourceFormat.DMN_XML;
         }
-        throw new InputInvalidException("Content-Type must be application/yaml or application/xml (a DMN file)");
+        throw new InputInvalidException("Content-Type must be application/yaml, application/xml (a DMN file) or text/csv (with base)");
     }
 }

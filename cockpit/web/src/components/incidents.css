@@ -1,0 +1,41 @@
+/* Incident queue (CKP-008, PD-126). Built on the task queue's list and inspector (tasks.css); tokens only. The open
+   state is neutral, retrying and a pending proposal carry the accent; red is kept for errors and the Reject action. */
+
+.incidents .qtable .num { text-align: right; }
+.incidents__more { margin: 0; padding: 12px var(--card-pad); }
+.incidents__engine { font: var(--type-label); }
+.incidents__engine dl { grid-template-columns: max-content minmax(0, 1fr); }
+.incidents__proposal { display: flex; flex-direction: column; gap: var(--space-2, 8px); padding: 12px 14px; border-radius: var(--radius-m); background: var(--surface-2); border: 1px solid var(--line); }
+.incidents__subtitle { margin: 0; font: var(--type-h2); color: var(--ink); }
+.incidents__proposal .tasks__line { margin: 0; }
+.incidents__output { gap: 6px 16px; }
+.incidents__readonly { padding-top: 14px; border-top: 1px solid var(--line); }
+.tasks__table tr { scroll-margin-top: calc(var(--topbar-h) + 16px); }
+
+/* The resolve dialog: one row per result field, the money field with its currency inside (styleguide section 9). */
+.dialog.incidents-dialog--wide { width: min(720px, calc(100vw - 32px)); }
+.incidents-fields { display: flex; flex-direction: column; gap: var(--space-2, 8px); margin: 0; padding: 0; border: 0; min-width: 0; }
+.incidents-fields legend { padding: 0; margin-bottom: var(--space-2, 8px); }
+.incidents-fields__head, .incidents-fields__row { display: grid; grid-template-columns: minmax(0, 1.1fr) 132px minmax(0, 1.4fr) 44px; gap: var(--space-2, 8px); align-items: center; }
+.incidents-fields__head { font: var(--type-caption); color: var(--muted); }
+.incidents-fields__rows { display: flex; flex-direction: column; gap: var(--space-2, 8px); margin: 0; padding: 0; list-style: none; }
+.incidents-fields__error { grid-column: 1 / -1; margin: 0; display: flex; gap: 6px; }
+.incidents-fields__remove { justify-self: center; }
+.incidents-fields .seg { justify-self: start; }
+.incidents-fields > .btn { align-self: flex-start; }
+
+.money-field {
+  display: flex; align-items: center; min-width: 0; height: var(--target-min, 44px);
+  border: 1px solid var(--control); border-radius: var(--radius-m); background: var(--surface);
+}
+.money-field:hover { border-color: var(--ink-2); }
+.money-field:focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus); }
+.money-field__input.field__input { flex: 1 1 auto; min-width: 0; height: 100%; border: 0; box-shadow: none; background: transparent; text-align: right; }
+.money-field__input.field__input:focus, .money-field__input.field__input:focus-visible { outline: none; box-shadow: none; }
+.money-field__input[aria-invalid="true"] { color: var(--ink); }
+.money-field__currency {
+  flex: none; width: 56px; height: 28px; padding: 0 8px; border: 0; border-left: 1px solid var(--line); background: transparent;
+  color: var(--ink-2); font: var(--type-label); font-weight: 600; text-align: center; text-transform: uppercase;
+}
+.money-field__currency:focus, .money-field__currency:focus-visible { outline: none; color: var(--ink); }
+.money-field:has([aria-invalid="true"]) { border-color: var(--bad-fill); }

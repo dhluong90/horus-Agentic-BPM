@@ -4,12 +4,14 @@
  * cockpit uses: paged lists of rule sets and versions with a cursor, allowedActions computed for the caller,
  * history, the row-level diff of two versions, reject with a reason, and the problems the screens must show: 422 VALIDATION_FAILED with
  * violations, 403 SELF_APPROVAL_FORBIDDEN, 409 VERSION_CONFLICT, 400 QUERY_INVALID, 413 PAYLOAD_TOO_LARGE.
- * Export answers the canonical JSON document (keys sorted, no white space) or a small DMN 1.5 table, with
+ * Export answers the canonical JSON document (keys sorted, no white space), a small DMN 1.5 table or a spreadsheet file (csvTable.ts), with
  * Content-Disposition; a POST repeated with the same Idempotency-Key replays the first answer.
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
 
+import { DEMO_NAMES } from './displayNames';
 import { createAuditRoutes, type AuditOptions } from './auditEngine';
+import { fromCsv, toCsv } from './csvTable';
 import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from './ruleReadings';
 
 /** The most rows or samples one readings request covers, as the engine's limit. */
@@ -19,12 +21,12 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json>; explain?: Partial<Record<'en' | 'vi', string>> }
 interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
-export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
+export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN' | 'DISCARDED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
 export interface StoredVersion {
   ruleSet: string;
   version: number;
-  status: 'DRAFT' | 'PENDING_APPROVAL' | 'PUBLISHED' | 'RETIRED';
+  status: 'DRAFT' | 'PENDING_APPROVAL' | 'PUBLISHED' | 'RETIRED' | 'DISCARDED';
   lockVersion: number;
   createdBy: string;
   createdAt: string;
@@ -85,11 +87,17 @@ const json = (body: unknown, extra: Record<string, string> = {}): FakeResponse =
 /** allowedActions for this caller, by status, permission and four eyes (rule-engine VersionActions). */
 function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   const can = (permission: string) => request.permissions.includes(permission);
-  if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish'] : [];
+  // RLE-098: the author of a draft may also discard it.
+  if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish', ...(v.createdBy === request.user ? ['discard'] : [])] : [];
   if (v.status !== 'PENDING_APPROVAL' || !can('rules:approve')) return [];
   // PD-089: neither the requester nor the author may approve or reject; withdrawing is its own action.
   const self = v.requestedBy === request.user || v.createdBy === request.user;
   return self ? [] : ['approve', 'reject'];
+}
+
+/** The requester as the host's `DisplayNames` gives them in the caller's language; the login when none is known (#442). */
+function namedUser(login: string, request: FakeRequest): string {
+  return DEMO_NAMES[(request.headers['accept-language'] ?? '').toLowerCase().startsWith('vi') ? 'vi' : 'en'].users[login] ?? login;
 }
 
 /**
@@ -103,7 +111,7 @@ function pendingItem(v: StoredVersion, request: FakeRequest) {
   const withdraw = v.requestedBy === request.user && request.permissions.includes('rules:author');
   return {
     ruleSet: v.ruleSet, version: v.version, canonicalHash: hash(JSON.stringify(v.definition)), lockVersion: v.lockVersion,
-    requestedBy: v.requestedBy ?? '', requestedAt: v.requestedAt ?? v.createdAt,
+    requestedBy: v.requestedBy ?? '', requestedByName: namedUser(v.requestedBy ?? '', request), requestedAt: v.requestedAt ?? v.createdAt,
     allowedActions: [...(denial === undefined ? ['approve', 'reject'] : []), ...(withdraw ? ['withdraw'] : [])],
     deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
   };
@@ -129,13 +137,16 @@ export interface AcknowledgementSettings {
   acknowledgeWarnings?: readonly string[];
   maskDefault?: boolean;
   requiresAcknowledgement?: (warning: { code: string; input: string }) => boolean;
+  /** classification.warn-unclassified (PD-146): list UNCLASSIFIED_INPUT reminders; off here so older demos stay as they were. */
+  warnUnclassified?: boolean;
 }
 
 /** Whether an approval must accept a warning: one rule for the version view and the approve check, as the engine. */
-type Marker = (warning: { code: string; input: string }) => boolean;
+type Marker = ((warning: { code: string; input: string }) => boolean) & { warnUnclassified?: boolean };
 
-function markerOf({ acknowledgeWarnings = ACKNOWLEDGE_WARNINGS, maskDefault = false, requiresAcknowledgement }: AcknowledgementSettings): Marker {
-  return requiresAcknowledgement ?? ((warning) => acknowledgeWarnings.includes(warning.code) && !maskDefault);
+function markerOf({ acknowledgeWarnings = ACKNOWLEDGE_WARNINGS, maskDefault = false, requiresAcknowledgement, warnUnclassified = false }: AcknowledgementSettings): Marker {
+  const marks = requiresAcknowledgement ?? ((warning: { code: string; input: string }) => acknowledgeWarnings.includes(warning.code) && !maskDefault);
+  return Object.assign((warning: { code: string; input: string }) => marks(warning), { warnUnclassified });
 }
 
 /** A part of the engine's built-in personal-data names (RLE-049), as words. */
@@ -155,6 +166,16 @@ function personalDataName(input: string): string | undefined {
 
 /** UNMASKED_PERSONAL_DATA for every input that declares no mask and looks like personal data, marked by the engine. */
 function warningsOf(definition: Definition, marks: Marker) {
+  const reminders = marks.warnUnclassified === true
+    ? definition.inputs.filter((input) => input.mask === undefined).map((input) => ({
+      code: 'UNCLASSIFIED_INPUT', input: input.name, matchedName: null, requiresAcknowledgement: false,
+      message: `Input ${input.name} is not classified: it declares neither mask true nor mask false. This does not block approval.`,
+    }))
+    : [];
+  return [...personalDataWarnings(definition, marks), ...reminders];
+}
+
+function personalDataWarnings(definition: Definition, marks: Marker) {
   return definition.inputs.flatMap((input) => {
     const matched = input.mask === undefined ? personalDataName(input.name) : undefined;
     if (matched === undefined) return [];
@@ -436,7 +457,13 @@ function exportOf(v: StoredVersion, format: string | null): FakeResponse {
   if (format === 'dmn') {
     return { status: 200, headers: { 'Content-Type': 'application/xml', 'Content-Disposition': `attachment; filename="${fileName}.dmn"` }, body: toDmn(v.definition) };
   }
-  return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn');
+  if (format === 'csv') {
+    // A group of conditions, a list or a calculated cell has no table form (RLE-191); the fake reads a `{` or `any(` as one.
+    const grouped = v.definition.rules.find((r) => Object.values(r.when).some((c) => /\b(any|all)\b|\(/.test(c)));
+    if (grouped) return problem(422, 'VALIDATION_FAILED', `Rule ${grouped.id} has no spreadsheet form`, [{ ruleId: grouped.id, column: null, message: 'The rule uses a grouped condition, which a table cannot show.', code: 'CSV_NO_TABLE_FORM' }]);
+    return { status: 200, headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${fileName}.csv"` }, body: toCsv(v.definition) };
+  }
+  return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn, csv');
 }
 
 export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}, auditOptions: AuditOptions = {}) {
@@ -447,7 +474,9 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
   const listed = acknowledgement.acknowledgeWarnings ?? ACKNOWLEDGE_WARNINGS;
   const now = () => new Date('2026-11-19T03:00:00Z').toISOString();
   const find = (name: string, version: number) => store.find((v) => v.ruleSet === name && v.version === version);
-  const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name);
+  // A discarded version is left out of every list and of latestVersion (RLE-098); its number is never used again.
+  const versionsOf = (name: string) => store.filter((v) => v.ruleSet === name && v.status !== 'DISCARDED');
+  const nextNumber = (name: string) => store.filter((v) => v.ruleSet === name).length + 1;
   const audit = createAuditRoutes({
     versions: () => store.map((v) => ({
       ruleSet: v.ruleSet, version: v.version, status: v.status, createdBy: v.createdBy, createdAt: v.createdAt, requestedBy: v.requestedBy, requestedAt: v.requestedAt,
@@ -465,6 +494,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (name !== undefined && copyOf !== null) return copyVersion(name, copyOf, request);
     // The import limit as #145 answers it (an engine before #145 says 422 "Document larger than ...").
     if (request.body.length > IMPORT_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(IMPORT_LIMIT)} bytes`);
+    if ((request.headers['content-type'] ?? '').includes('text/csv')) return name === undefined ? problem(400, 'INPUT_INVALID', 'A spreadsheet builds on an existing version') : spreadsheet(name, request);
     // As the engine of this release: the media type names the source format, and only YAML is imported.
     if ((request.headers['content-type'] ?? '').includes('json')) return problem(400, 'INPUT_INVALID', 'Only YAML import is available in this release');
     const parsed = parseDocument(request.body);
@@ -480,13 +510,34 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return problem(422, 'VALIDATION_FAILED', `${where}${first.message}${more}`, violations);
     }
     const stored: StoredVersion = {
-      ruleSet: parsed.ruleSet, version: versionsOf(parsed.ruleSet).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      ruleSet: parsed.ruleSet, version: nextNumber(parsed.ruleSet), status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
       requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: request.body, definition: parsed,
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
     };
     store.push(stored);
     const answer = view(stored, request, marks);
     return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${stored.ruleSet}/versions/${String(stored.version)}` } };
+  }
+
+  /** A spreadsheet as the next draft, on the columns, hit policy and masks of version `base` (RLE-192); a refusal stores nothing. */
+  function spreadsheet(name: string, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    const baseNumber = Number(new URL(request.path, 'http://host').searchParams.get('base'));
+    if (!Number.isInteger(baseNumber) || baseNumber < 1) return problem(400, 'INPUT_INVALID', 'A spreadsheet needs base, a version number of 1 or more');
+    if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+    const from = find(name, baseNumber);
+    if (!from) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${name} not found`);
+    const read = fromCsv(request.body, from.definition);
+    if ('problems' in read) return problem(422, 'VALIDATION_FAILED', `${String(read.problems.length)} problems in the file`, read.problems);
+    const definition: Definition = { ...structuredClone(from.definition), rules: read.rules };
+    const stored: StoredVersion = {
+      ruleSet: name, version: versionsOf(name).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(definition, null, 2), definition,
+      history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
+    };
+    store.push(stored);
+    const answer = view(stored, request, marks);
+    return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${name}/versions/${String(stored.version)}` } };
   }
 
   /** The next draft as a byte-for-byte copy of version `copyOf` (RLE-062); a body sent with it is refused. */
@@ -498,7 +549,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     const from = find(name, number);
     if (!from) return problem(404, 'VERSION_NOT_FOUND', `Version ${copyOf} of rule set ${name} not found`);
     const stored: StoredVersion = {
-      ruleSet: name, version: versionsOf(name).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      ruleSet: name, version: nextNumber(name), status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
       requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: from.source, definition: structuredClone(from.definition),
       history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
     };
@@ -674,6 +725,19 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     return view(v, request, marks);
   }
 
+  /** discardDraft (RLE-098): the draft's author only; DISCARDED, kept for the audit trail, left out of every list. */
+  function discard(v: StoredVersion, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    if (request.headers['if-match'] === undefined) return problem(428, 'PRECONDITION_REQUIRED', 'If-Match is required');
+    if (v.createdBy !== request.user) return problem(403, 'PERMISSION_DENIED', `Only the author of ${v.ruleSet} v${String(v.version)} may discard it`);
+    if (v.status !== 'DRAFT') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
+    if (request.headers['if-match'] !== `"${String(v.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT', `${v.ruleSet} v${String(v.version)} is at ${String(v.lockVersion)}`);
+    const body = request.body === '' ? {} : (JSON.parse(request.body) as { reason?: string });
+    Object.assign(v, { status: 'DISCARDED', lockVersion: v.lockVersion + 1 });
+    record(v, 'DISCARDED', 'DRAFT', request.user, body.reason ?? null);
+    return json({ ruleSet: v.ruleSet, version: v.version, status: v.status, lockVersion: v.lockVersion, hitPolicy: v.definition.hitPolicy, canonicalHash: hash(JSON.stringify(v.definition)) });
+  }
+
   function evaluate(name: string, request: FakeRequest): FakeResponse {
     if (request.body.length > EVALUATE_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(EVALUATE_LIMIT)} bytes`);
     const effective = [...versionsOf(name)].reverse().find((v) => v.status === 'PUBLISHED');
@@ -760,7 +824,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/readings|\/diff\/readings|:simulate-readings)$/.exec(path))) return readings(m[1] ?? '', Number(m[2]), m[3] ?? '', url, request);
-    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw)?$/.exec(path))) {
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw|:discard)?$/.exec(path))) {
       const name = m[1] ?? '';
       if (m[3] === '/diff' && versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
       const v = find(name, Number(m[2]));
@@ -780,6 +844,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       if (request.method === 'PUT' && tail === undefined) return replaceDraft(v, request);
       if (request.method === 'POST' && tail === ':validate') return validateDraft(v, request);
       if (request.method === 'POST' && tail === ':withdraw') return withdraw(v, request);
+      if (request.method === 'POST' && tail === ':discard') return discard(v, request);
       if (request.method === 'POST' && tail?.startsWith(':')) return transition(v, request, tail.slice(1) as 'request-publish' | 'approve' | 'reject');
     }
     if (request.method === 'POST' && (m = /^\/decisions\/([^/:]+):evaluate$/.exec(path))) return evaluate(m[1] ?? '', request);

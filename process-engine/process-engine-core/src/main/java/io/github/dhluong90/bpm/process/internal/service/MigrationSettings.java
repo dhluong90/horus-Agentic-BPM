@@ -17,9 +17,11 @@ import java.util.Objects;
  *     after every instance, so a crashed runner's plan is taken over after this time (#90)
  * @param lockWait how long the runner waits for an instance row another transaction holds when it opens the incident of
  *     a failed instance, {@code PT1S} to {@code PT30S}; a longer wait stops the run and the next poll tries again
+ * @param reasonMaxLength longest reason of a step cancellation (#106), 1 to {@code lifecycle.reason-max-length}'s
+ *     engine bound; the starter passes {@code lifecycle.reason-max-length}
  */
 public record MigrationSettings(MigrationPlan.Approval approval, int dryRunSampleSize, Duration dryRunValidity,
-        int batchSize, Duration lease, Duration lockWait) {
+        int batchSize, Duration lease, Duration lockWait, int reasonMaxLength) {
 
     /** The engine bound of {@code migration.dry-run-sample-size}. */
     public static final int MAX_SAMPLE_SIZE = 500;
@@ -40,6 +42,29 @@ public record MigrationSettings(MigrationPlan.Approval approval, int dryRunSampl
     /** Four-eyes, 100 ids, one hour, batches of 100, a two-minute lease and a five-second lock wait. */
     public static final MigrationSettings DEFAULTS = new MigrationSettings(MigrationPlan.Approval.FOUR_EYES, 100,
             MAX_VALIDITY);
+
+    /**
+     * Settings with the default reason length.
+     *
+     * @param approval the approval a new plan records
+     * @param dryRunSampleSize most ids a dry run lists
+     * @param dryRunValidity how long a dry run may be relied on
+     * @param batchSize instances read at a time
+     * @param lease how long a runner holds a plan
+     * @param lockWait how long the runner waits for an instance row
+     */
+    public MigrationSettings(MigrationPlan.Approval approval, int dryRunSampleSize, Duration dryRunValidity,
+            int batchSize, Duration lease, Duration lockWait) {
+        this(approval, dryRunSampleSize, dryRunValidity, batchSize, lease, lockWait, EngineDefaults.MAX_REASON_LENGTH);
+    }
+
+    /**
+     * @param length {@code lifecycle.reason-max-length}
+     * @return the same settings with that longest cancellation reason
+     */
+    public MigrationSettings withReasonMaxLength(int length) {
+        return new MigrationSettings(approval, dryRunSampleSize, dryRunValidity, batchSize, lease, lockWait, length);
+    }
 
     /**
      * Settings with the default lock wait.
@@ -84,6 +109,10 @@ public record MigrationSettings(MigrationPlan.Approval approval, int dryRunSampl
         Objects.requireNonNull(lease, "migration.lease");
         if (lease.compareTo(MIN_LEASE) < 0 || lease.compareTo(MAX_LEASE) > 0) {
             throw new IllegalArgumentException("migration.lease must be between PT10S and PT10M, was " + lease);
+        }
+        if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
+            throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to "
+                    + EngineDefaults.MAX_REASON_LENGTH + ", was " + reasonMaxLength);
         }
         Objects.requireNonNull(lockWait, "migration.lock-wait");
         if (lockWait.compareTo(MIN_LOCK_WAIT) < 0 || lockWait.compareTo(MAX_LOCK_WAIT) > 0) {

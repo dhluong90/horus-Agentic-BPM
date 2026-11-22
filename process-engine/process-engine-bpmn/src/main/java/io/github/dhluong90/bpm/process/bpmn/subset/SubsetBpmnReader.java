@@ -14,6 +14,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.AssociationDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
+import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
+import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
@@ -30,6 +33,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
+import io.github.dhluong90.bpm.process.internal.service.DefinitionReader;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
@@ -93,7 +97,7 @@ import javax.xml.stream.XMLStreamReader;
  * <p>Owned by the walking skeleton. Replaced by {@code BpmnXmlReader} when the BPMN XML stream lands; the subset
  * tests stay and run against that reader.
  */
-public final class SubsetBpmnReader {
+public final class SubsetBpmnReader implements DefinitionReader {
 
     private static final String BPMN = BpmnNamespaces.BPMN;
     private static final String HORUS = BpmnNamespaces.HORUS;
@@ -103,6 +107,8 @@ public final class SubsetBpmnReader {
     private static final int MAX_CALENDAR_KEY = 100;
     private static final Pattern ASSIGNEE = Pattern.compile("^(user|role|group):[A-Za-z0-9_.@-]{1,100}$");
     /** A {@code horus:compensate} value: a handler or adapter name, or {@code manual}. */
+    /** The key of a called definition: lower-case words joined by hyphens, as every definition key. */
+    private static final Pattern CALLED_ELEMENT = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final Pattern COMPENSATE_HANDLER = Pattern.compile("^[A-Za-z][A-Za-z0-9_.-]{0,99}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
     /** The step id a {@code horus:memory} entry reads from: an id, never an expression or a variable path. */
@@ -137,6 +143,11 @@ public final class SubsetBpmnReader {
         this.limits = limits;
     }
 
+    /** @return the limits this reader applies, which the layout reader of the same import reuses */
+    public Limits limits() {
+        return limits;
+    }
+
     /**
      * @param group a group read by this reader
      * @return the label of the category value the group refers to, or {@code null} when the document has none
@@ -158,6 +169,15 @@ public final class SubsetBpmnReader {
      * @return the executable process of the document
      */
     public Process read(byte[] source) {
+        return readWithWarnings(source).process();
+    }
+
+    /**
+     * @param source the XML bytes
+     * @return the executable process and the vendor extensions that were kept but not read
+     */
+    @Override
+    public Result readWithWarnings(byte[] source) {
         if (source.length > limits.maxBytes()) {
             throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
                     + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
@@ -168,7 +188,9 @@ public final class SubsetBpmnReader {
             XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));
             try {
                 XmlHardening.requireUtf8Declaration(xml);
-                return new Pass(xml).document();
+                Pass pass = new Pass(xml);
+                Process process = pass.document();
+                return new Result(process, pass.warnings);
             } finally {
                 xml.close();
             }
@@ -338,6 +360,7 @@ public final class SubsetBpmnReader {
                     case "serviceTask" -> elements.add(serviceTask());
                     case "businessRuleTask" -> elements.add(businessRuleTask());
                     case "userTask" -> elements.add(userTask());
+                    case "callActivity" -> elements.add(callActivity());
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
                     case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
                     case "transaction" -> elements.add(saga());
@@ -390,6 +413,14 @@ public final class SubsetBpmnReader {
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
             container(elements, artifacts, true);
+            for (FlowElement e : elements) {
+                // PD-127: a completed child is never left silently in place, so a call inside a saga declares its undo.
+                if (e instanceof CallActivity c && c.info().extensions().first(CompensateHandlerRef.class).isEmpty()) {
+                    invalid.add(new DefinitionProblem("COMPENSATION_REQUIRED", "A callProcess step inside a saga declares"
+                            + " its undo with horus:compensate (a handler, another callProcess, or manual)",
+                            "callActivity", safe(c.id()), line()));
+                }
+            }
             return new Transaction(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
                     withRefs(elements), artifacts, List.of(), null);
         }
@@ -1092,6 +1123,43 @@ public final class SubsetBpmnReader {
             }
         }
 
+        /**
+         * A {@code callActivity} (#92, PRE-211): {@code calledElement} is the definition key of the child, the
+         * optional {@code horus:calledVersion} pins its version, {@code <horus:input>} passes a value in and
+         * {@code <horus:output>} brings a named child variable back. {@code horus:in="all"} is refused: a child gets
+         * only what the step names.
+         */
+        private FlowElement callActivity() throws XMLStreamException {
+            String id = id();
+            int line = line();
+            String name = attr("name");
+            String called = attr("calledElement");
+            String version = horus("calledVersion");
+            if (called == null || !CALLED_ELEMENT.matcher(called).matches()) {
+                invalid.add(new DefinitionProblem("CALLED_ELEMENT_INVALID", "A callActivity needs calledElement, the"
+                        + " key of the definition it calls (lower-case words joined by hyphens)", "callActivity",
+                        safe(id), line));
+            }
+            List<HorusExtension> ext = new ArrayList<>();
+            if (horus("in") != null) {
+                invalid.add(new DefinitionProblem("CALL_INPUT_ALL_REFUSED", "A callActivity passes only the variables"
+                        + " it names with <horus:input>; horus:in is not supported", "callActivity", safe(id), line));
+            }
+            if (version != null) {
+                try {
+                    ext.add(new CalledVersion(Integer.parseInt(version.strip())));
+                } catch (IllegalArgumentException e) {
+                    invalid.add(new DefinitionProblem("CALLED_VERSION_INVALID", "horus:calledVersion is a version"
+                            + " number, 1 or more", "callActivity", safe(id), line));
+                }
+            }
+            compensation(id, line, ext);
+            Node children = children("callActivity", id, true);
+            ext.addAll(children.horus());
+            return new CallActivity(id, name, List.of(), List.of(), ActivityAttributes.defaults(),
+                    called == null ? "" : called, info(ext, children.foreign()));
+        }
+
         private FlowElement businessRuleTask() throws XMLStreamException {
             String id = id();
             int line = line();
@@ -1244,7 +1312,21 @@ public final class SubsetBpmnReader {
                     skip();
                     continue;
                 }
-                if (HORUS.equals(ns) && "input".equals(xml.getLocalName()) && inputs) {
+                if (HORUS.equals(ns) && "output".equals(xml.getLocalName()) && "callActivity".equals(element)) {
+                    String outputName = attr("name");
+                    String from = attr("from");
+                    if (outputName == null || from == null || !outputName.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+                            || !from.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}(\\.[A-Za-z_][A-Za-z0-9_]{0,63}){0,3}$")) {
+                        invalid.add(new DefinitionProblem("OUTPUT_INVALID", "horus:output needs name (the parent's"
+                                + " variable) and from (the child's variable)", element, safe(id), line()));
+                    } else if (!names.add("out:" + outputName)) {
+                        invalid.add(new DefinitionProblem("OUTPUT_DUPLICATE", "Duplicate horus:output " + outputName,
+                                element, safe(id), line()));
+                    } else {
+                        horus.add(new OutputMapping(outputName, from));
+                    }
+                    skip();
+                } else if (HORUS.equals(ns) && "input".equals(xml.getLocalName()) && inputs) {
                     String inputName = attr("name");
                     String value = xml.getAttributeValue(null, "value");
                     String mask = attr("mask");
@@ -1260,7 +1342,7 @@ public final class SubsetBpmnReader {
                         invalid.add(new DefinitionProblem("INPUT_DUPLICATE", "Duplicate horus:input " + inputName,
                                 element, safe(id), line()));
                     } else {
-                        horus.add(new InputMapping(inputName, value, "true".equals(mask)));
+                        horus.add(new InputMapping(inputName, value, "true".equals(mask), mask != null));
                     }
                     skip();
                 } else if (HORUS.equals(ns)) {
@@ -1484,6 +1566,8 @@ public final class SubsetBpmnReader {
                 case BusinessRuleTask t -> new BusinessRuleTask(t.id(), t.name(), in, o, t.activity(), t.implementation(),
                         t.info());
                 case UserTask t -> new UserTask(t.id(), t.name(), in, o, t.activity(), t.implementation(), t.info());
+                case CallActivity c -> new CallActivity(c.id(), c.name(), in, o, c.activity(), c.calledElement(),
+                        c.info());
                 case ExclusiveGateway g -> new ExclusiveGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
                         g.defaultFlow(), g.info());
                 case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), in, o, c.eventDefinitions(),

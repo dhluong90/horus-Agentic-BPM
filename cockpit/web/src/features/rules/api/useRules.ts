@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, DraftValidation, RuleSetVersion, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, RuleSetVersion, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -147,6 +147,30 @@ export function useSaveDraft(name: string, onDone: (version: RuleSetVersion) => 
   );
 }
 
+/** A spreadsheet file the user picked: its exact bytes, a fingerprint of them, and the name it had. */
+export interface PickedSheet {
+  bytes: ArrayBuffer;
+  fileName: string;
+  /** SHA-256 of the bytes: one Idempotency-Key per file and base, so a repeat of the same file creates one draft. */
+  fingerprint: string;
+}
+
+/**
+ * Imports a spreadsheet as the next draft on the columns of version `base` (RLE-192). One request per intent; the
+ * same file and `attempt` reuse their Idempotency-Key, and a deliberate retry (a higher `attempt`) sends a new one.
+ */
+export function useImportSpreadsheet(name: string, onDone: (version: RuleSetVersion) => void) {
+  const { client } = useRulesSession();
+  const refresh = useRefreshVersions();
+  return useSingleFlight(
+    (args: { base: number; sheet: PickedSheet; attempt: number }, key) => client.importSpreadsheet(name, args.base, args.sheet.bytes, key),
+    async (version) => {
+      await refresh();
+      onDone(version);
+    },
+  );
+}
+
 /**
  * Creates the next draft as a copy of `copyOf` (RLE-062), so the grid always edits a stored draft and never the
  * version it starts from.
@@ -213,6 +237,30 @@ export function useRequestPublish(onDone: (version: RuleSetVersion) => void) {
     async (version) => {
       await refresh();
       onDone(version);
+    },
+  );
+}
+
+/**
+ * Discards the author's own draft (RLE-098). Nothing is deleted: the version becomes DISCARDED and leaves every list,
+ * so after the engine answers the lists are read again and the screen moves on.
+ */
+export function useDiscardDraft(onDone: (version: DiscardedVersion) => void) {
+  const { client } = useRulesSession();
+  const queryClient = useQueryClient();
+  const keys = useKeys();
+  return useSingleFlight(
+    ({ version, reason }: { version: VersionSummary; reason: string | undefined }, key) => client.discardDraft(version.ruleSet, version.version, version.lockVersion, reason, key),
+    async (discarded) => {
+      // The version list first, so the screen opens the version now in front; the discarded one is never read again.
+      await queryClient.invalidateQueries({ queryKey: keys.versions(discarded.ruleSet) });
+      queryClient.removeQueries({ queryKey: keys.version(discarded.ruleSet, discarded.version) });
+      onDone(discarded);
+      await queryClient.invalidateQueries({ queryKey: keys.all, predicate: (query) => {
+        // [host, tenant, 'rules', name, kind, version, ...]: nothing about the discarded version is read again.
+        const [, , , name, , number] = query.queryKey;
+        return !(name === discarded.ruleSet && number === discarded.version);
+      } });
     },
   );
 }

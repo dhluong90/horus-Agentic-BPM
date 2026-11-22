@@ -55,6 +55,16 @@ public interface NodeStatsStore {
     /** Moves the watermark to {@code to}, in the transaction that added the slice. */
     void advance(String job, Instant to, String replicaId, Instant now);
 
+    /**
+     * Deletes at most {@code limit} hours whose start is before {@code cutoff}, in the caller's transaction (#410). A
+     * row another transaction holds is skipped, so two replicas purging at once never wait for each other.
+     *
+     * @param cutoff hours starting before this instant are deleted
+     * @param limit most rows deleted by the call
+     * @return the number of rows deleted
+     */
+    int deleteBefore(Instant cutoff, int limit);
+
     /** @return the watermark, empty before the first run */
     Optional<Instant> watermark(String job);
 

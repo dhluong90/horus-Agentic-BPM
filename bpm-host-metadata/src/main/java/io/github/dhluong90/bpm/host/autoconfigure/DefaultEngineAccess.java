@@ -8,7 +8,9 @@ import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.host.spi.TenantResolver;
+import io.github.dhluong90.bpm.host.spi.TenantSwitchAudit;
 import jakarta.servlet.http.HttpServletRequest;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -45,7 +47,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * the signed-in tenant is always allowed). A mismatch, an unlisted tenant, a repeated header, or a tenant
  * outside the allowed format, is {@code 403 TENANT_NOT_ALLOWED} with a {@code tenant.switch.refused}
  * security log entry (ADR-0014); an accepted switch writes {@code tenant.switch.accepted} with the user, both
- * tenants and the correlation id. The current request is taken from Spring's
+ * tenants and the correlation id, and hands one record to the {@link TenantSwitchAudit} (#451) before the call
+ * reaches engine data; a refused switch writes no audit record. The current request is taken from Spring's
  * request context; outside a request (a host job running as a user) there is no header to check.
  *
  * <p>Before any of that, a caller whose id starts with {@value #RESERVED_PREFIX} is refused with
@@ -82,10 +85,20 @@ final class DefaultEngineAccess implements EngineAccess {
     private final String groupsClaim;
     private final List<String> displayNameClaims;
     private final List<ModuleDescriptor> modules;
+    private final TenantSwitchAudit audit;
+    private final Clock clock;
 
     DefaultEngineAccess(TenantResolver resolver, HostMetadataProperties.Tenancy tenancy,
             Function<Authentication, Map<String, Object>> claims, HostMetadataProperties.Security security,
             List<ModuleDescriptor> modules) {
+        this(resolver, tenancy, claims, security, modules, new LoggingTenantSwitchAudit(), Clock.systemUTC());
+    }
+
+    DefaultEngineAccess(TenantResolver resolver, HostMetadataProperties.Tenancy tenancy,
+            Function<Authentication, Map<String, Object>> claims, HostMetadataProperties.Security security,
+            List<ModuleDescriptor> modules, TenantSwitchAudit audit, Clock clock) {
+        this.audit = java.util.Objects.requireNonNull(audit, "audit must not be null");
+        this.clock = java.util.Objects.requireNonNull(clock, "clock must not be null");
         this.resolver = resolver;
         this.tenantClaim = tenancy.claim();
         this.switching = tenancy.switching().enabled();
@@ -181,11 +194,14 @@ final class DefaultEngineAccess implements EngineAccess {
                 throw refused(request, authentication, tokenTenant, requested, "not-in-allowed-list");
             }
             effective = requested;
+            String correlationId = correlationId(request);
             SECURITY_LOG.info("tenant.switch.accepted user=" + CorrelationIds.loggable(authentication.getName())
                     + " fromTenant=" + CorrelationIds.loggable(tenant)
                     + " requestedTenant=" + CorrelationIds.loggable(requested)
-                    + " correlationId=" + correlationId(request)
+                    + " correlationId=" + correlationId
                     + " clientCorrelationId=" + clientCorrelationId(request));
+            audit.accepted(new TenantSwitchAudit.TenantSwitch(authentication.getName(), tenant, requested,
+                    clock.instant(), correlationId));
         }
         return new EngineCaller(authentication.getName(), displayName(context), effective, authorities,
                 stringList(context.attributes().get(groupsClaim)), allowed);

@@ -221,6 +221,20 @@ final class RestSupport {
         } else {
             node.put("readingsReason", result.readingsReason());
         }
+        // #438, PD-146: reminders that never make the document invalid, such as an input that declares no mask
+        ArrayNode warnings = node.putArray("warnings");
+        for (io.github.dhluong90.bpm.rules.api.VersionWarning w : result.warnings()) {
+            ObjectNode item = warnings.addObject();
+            item.put("code", w.code());
+            item.put("input", w.input());
+            if (w.matchedName() == null) {
+                item.putNull("matchedName");
+            } else {
+                item.put("matchedName", w.matchedName());
+            }
+            item.put("message", w.message());
+            item.put("requiresAcknowledgement", w.requiresAcknowledgement());
+        }
         return node;
     }
 

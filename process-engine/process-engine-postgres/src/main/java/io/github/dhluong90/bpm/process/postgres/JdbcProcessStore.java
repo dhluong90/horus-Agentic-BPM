@@ -76,8 +76,41 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public List<InstanceActivities.Entry> historyEntries(String tenant, String instanceId, Instant from, Instant to,
             int limit) {
         return ProcessListQueries.HISTORY_ENTRIES.list(jdbc, List.of(tenant, instanceId, ts(from), ts(to), limit),
-                (rs, row) -> new InstanceActivities.Entry(rs.getString("id"), rs.getString("event_type"),
-                        rs.getString("node_id"), rs.getString("actor_id"), instant(rs, "occurred_at")));
+                (rs, row) -> historyEntry(rs));
+    }
+
+    @Override
+    public List<InstanceActivities.Entry> compensationEntries(String tenant, String instanceId, Instant from,
+            Instant to, int limit) {
+        return ProcessListQueries.COMPENSATION_ENTRIES.list(jdbc,
+                List.of(tenant, instanceId, ts(from), ts(to), limit), (rs, row) -> historyEntry(rs));
+    }
+
+    /** An entry as the timeline shows it: the undo's own fields come from the history row's token, attempt and details. */
+    private static InstanceActivities.Entry historyEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String type = rs.getString("event_type");
+        String id = rs.getString("id");
+        String node = rs.getString("node_id");
+        String actor = rs.getString("actor_id");
+        Instant at = instant(rs, "occurred_at");
+        if (!InstanceActivities.Entry.isCompensationType(type)) {
+            return new InstanceActivities.Entry(id, type, node, actor, at);
+        }
+        Map<String, Object> details = Values.readMap(rs.getString("details"));
+        boolean step = type.startsWith("COMPENSATION_STEP_");
+        Object attempt = details.get("attempt");
+        Object error = details.get("errorCode");
+        Object handler = details.get("handler");
+        Object cause = details.get("cause");
+        Object scope = details.get("scope");
+        // The start of an undo is recorded on the failing token; its details name the scope the undo walks.
+        Object scopeToken = details.get("scopeTokenId");
+        return new InstanceActivities.Entry(id, type, node, actor, at, InstanceActivities.KIND_COMPENSATION,
+                step ? node : null, rs.getString("attempt_id"),
+                scopeToken == null ? rs.getString("token_id") : scopeToken.toString(),
+                scope == null ? ("COMPENSATED".equals(type) ? node : null) : scope.toString(),
+                attempt instanceof Number n ? n.intValue() : null, error == null ? null : error.toString(),
+                handler == null ? null : handler.toString(), cause == null ? null : cause.toString());
     }
 
     // ---- definitions --------------------------------------------------------------------------------------
@@ -169,6 +202,12 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public List<StoredDefinition> activeDefinitions(int limit) {
+        // Engine-internal, across tenants on purpose: the start-up summary of unclassified fields (PD-146).
+        return ProcessListQueries.ACTIVE_DEFINITIONS.list(jdbc, List.of(limit), JdbcProcessStore::definition);
+    }
+
+    @Override
     public int updateDefinition(StoredDefinition d) {
         return jdbc.sql("UPDATE pre_definition SET status = ?, effective_from = ?, approved_by = ?, approved_at = ?, "
                         + "requested_by = ?, requested_at = ?, decision_comment = ?, retired_by = ?, retired_at = ?, "
@@ -200,6 +239,35 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     // ---- instances ----------------------------------------------------------------------------------------
 
     private static final String INSTANCE_COLUMNS = ProcessListQueries.INSTANCE_COLUMNS;
+
+    @Override
+    public Optional<ParentLink> parentLink(String tenant, String instanceId) {
+        return jdbc.sql("SELECT parent_instance_id, parent_token_id, call_attempt, call_depth FROM pre_instance "
+                        + "WHERE tenant_id = ? AND id = ? AND parent_instance_id IS NOT NULL")
+                .params(tenant, instanceId)
+                .query((rs, n) -> new ParentLink(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getInt(4)))
+                .optional();
+    }
+
+    @Override
+    public int callAttempts(String tenant, String parentTokenId) {
+        return jdbc.sql("SELECT count(*) FROM pre_instance WHERE tenant_id = ? AND parent_token_id = ?")
+                .params(tenant, parentTokenId).query(Integer.class).single();
+    }
+
+    @Override
+    public void linkChild(String tenant, String childId, String parentInstanceId, String parentTokenId,
+            int callAttempt, int callDepth) {
+        jdbc.sql("UPDATE pre_instance SET parent_instance_id = ?, parent_token_id = ?, call_attempt = ?, "
+                        + "call_depth = ? WHERE tenant_id = ? AND id = ?")
+                .params(parentInstanceId, parentTokenId, callAttempt, callDepth, tenant, childId).update();
+    }
+
+    @Override
+    public List<String> activeChildren(String tenant, String parentInstanceId, int limit) {
+        return ProcessListQueries.INSTANCE_CHILDREN.list(jdbc, List.of(tenant, parentInstanceId, limit),
+                (rs, n) -> rs.getString(1));
+    }
 
     @Override
     public boolean insertInstance(InstanceRow r) {

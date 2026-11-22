@@ -242,6 +242,91 @@ class NodeStatsRollupPostgresIT {
         assertThat(watermark()).isBefore(T_1050.minus(Duration.ofMinutes(5)));
     }
 
+    private void staleHour(String tenantId, String definitionId, Instant hour) {
+        jdbc.sql("INSERT INTO pre_node_stats_hourly (tenant_id, definition_id, bucket_start, node_id, completed_count, "
+                + "duration_hist, updated_at) VALUES (?, ?, ?, 'approve', 3, array_fill(0, ARRAY[64]), ?)")
+                .params(tenantId, definitionId, java.sql.Timestamp.from(hour), java.sql.Timestamp.from(hour)).update();
+    }
+
+    private long hourRows() {
+        return jdbc.sql("SELECT count(*) FROM pre_node_stats_hourly").query(Long.class).single();
+    }
+
+    @Test
+    void PRE_200_hourly_rows_older_than_the_retention_are_deleted_by_the_rollup_run() {
+        // Given hourly statistics kept for 90 days, with one hour from 15 July, one from 22 August (the first day
+        // kept) and today's, in two tenants
+        Instant july = Instant.parse("2026-07-15T10:00:00Z");
+        Instant august = Instant.parse("2026-08-22T10:00:00Z");
+        staleHour("bank-a", DEFINITION_A, july);
+        staleHour("bank-b", DEFINITION_B, july);
+        staleHour("bank-a", DEFINITION_A, august);
+        seedApprovals("bank-a", DEFINITION_A);
+        NodeStatsSettings ninetyDays = new NodeStatsSettings(true, Duration.ofMinutes(5), Duration.ofMinutes(5),
+                Duration.ofMinutes(1), Duration.ofSeconds(60), Duration.ofMinutes(45), Duration.ofMinutes(5),
+                java.time.Period.ofDays(90));
+
+        // When the rollup runs on 20 November, after the 90 days of the July hours have passed
+        NodeStatsRollup.RunResult result = new NodeStatsRollup(clock, tx, store, ninetyDays, "pod-1").run();
+
+        // Then the two July hours (older than 90 days, whole days counted back from today) are gone, in both tenants,
+        // and the August hour and today's statistics stay
+        assertThat(result.purged()).isEqualTo(2);
+        assertThat(jdbc.sql("SELECT count(*) FROM pre_node_stats_hourly WHERE bucket_start = ?")
+                .param(java.sql.Timestamp.from(july)).query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM pre_node_stats_hourly WHERE bucket_start = ?")
+                .param(java.sql.Timestamp.from(august)).query(Long.class).single()).isOne();
+        assertThat(completed("bank-a", DEFINITION_A)).isEqualTo(1200);
+
+        // And a run with nothing older deletes nothing
+        assertThat(new NodeStatsRollup(clock, tx, store, ninetyDays, "pod-1").run().purged()).isZero();
+    }
+
+    @Test
+    void PRE_200_a_purge_takes_bounded_batches_and_the_next_run_continues() {
+        // Given more expired hours than one run deletes
+        int expired = NodeStatsRollup.PURGE_BATCH * NodeStatsRollup.PURGE_MAX_BATCHES + 1;
+        jdbc.sql("INSERT INTO pre_node_stats_hourly (tenant_id, definition_id, bucket_start, node_id, duration_hist, "
+                + "updated_at) SELECT 'bank-a', ?, timestamptz '2025-01-01 00:00:00+00' + (n * interval '1 minute'), "
+                + "'approve', array_fill(0, ARRAY[64]), now() FROM generate_series(1, ?) AS n")
+                .params(DEFINITION_A, expired).update();
+
+        // When the rollup runs twice
+        NodeStatsRollup rollup = replica("pod-1", store);
+        long first = rollup.run().purged();
+        long second = rollup.run().purged();
+
+        // Then the first run stops at its batch limit and the second finishes the job
+        assertThat(first).isEqualTo((long) NodeStatsRollup.PURGE_BATCH * NodeStatsRollup.PURGE_MAX_BATCHES);
+        assertThat(second).isOne();
+        assertThat(hourRows()).isZero();
+    }
+
+    @Test
+    void PRE_200_no_slice_is_rolled_up_within_the_write_lag_window() {
+        // Given a write-lag window of 10 minutes, and completions at 10:30 and 10:45 while the clock reads 10:50
+        NodeStatsSettings tenMinutes = new NodeStatsSettings(true, Duration.ofMinutes(5), Duration.ofMinutes(10),
+                Duration.ofMinutes(1), Duration.ofSeconds(60), Duration.ofMinutes(60), Duration.ofMinutes(10),
+                java.time.Period.ofMonths(13));
+        history("bank-a", DEFINITION_A, "INST0000000000000000000001", "TOK00000000000000000000001", "NODE_COMPLETED",
+                T_1000.plus(Duration.ofMinutes(30)), "HC000000000000000000000001");
+        history("bank-a", DEFINITION_A, "INST0000000000000000000002", "TOK00000000000000000000002", "NODE_COMPLETED",
+                T_1000.plus(Duration.ofMinutes(45)), "HC000000000000000000000002");
+
+        // When the rollup runs
+        NodeStatsRollup.RunResult result = new NodeStatsRollup(clock, tx, store, tenMinutes, "pod-1").run();
+
+        // Then only history before 10:40 is counted, and the watermark stops there
+        assertThat(result.caughtUp()).isTrue();
+        assertThat(watermark()).isEqualTo(T_1000.plus(Duration.ofMinutes(40)));
+        assertThat(completed("bank-a", DEFINITION_A)).isOne();
+
+        // And once the clock passes 10:55 the later completion is counted too
+        clock.advance(Duration.ofMinutes(6));
+        new NodeStatsRollup(clock, tx, store, tenMinutes, "pod-1").run();
+        assertThat(completed("bank-a", DEFINITION_A)).isEqualTo(2);
+    }
+
     @Test
     void PRE_029_the_window_read_is_tenant_scoped_and_permission_checked_and_writes_nothing() {
         // Given bank-a's loan-approval statistics and bank-b's definition with the same key and version
@@ -314,6 +399,11 @@ class NodeStatsRollupPostgresIT {
         @Override
         public void ensureWatermark(String job, Instant initial, String replicaId, Instant now) {
             delegate.ensureWatermark(job, initial, replicaId, now);
+        }
+
+        @Override
+        public int deleteBefore(Instant cutoff, int limit) {
+            return delegate.deleteBefore(cutoff, limit);
         }
 
         @Override

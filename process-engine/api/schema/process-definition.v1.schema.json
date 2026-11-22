@@ -359,7 +359,14 @@
       "properties": {
         "process": { "$ref": "#/$defs/kebabId" },
         "version": { "description": "Pin a version; omitted means the latest at call time.", "type": "integer", "minimum": 1 },
-        "inputs": { "$ref": "#/$defs/inputs" },
+        "inputs": { "description": "What the child receives, by the child's variable name; nothing else is passed.", "$ref": "#/$defs/inputs" },
+        "outputs": {
+          "description": "What comes back: the parent's variable name to the child's variable it is set from. Nothing else the child holds is copied.",
+          "type": "object",
+          "maxProperties": 50,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "type": "string", "maxLength": 300 }
+        },
         "resultVariable": { "$ref": "#/$defs/identifier" },
         "next": { "$ref": "#/$defs/next" }
       }

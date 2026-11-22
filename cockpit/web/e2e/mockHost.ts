@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from '../src/mocks/fixtures';
 import type { AuditOptions } from '../src/mocks/auditEngine';
+import { displayNamesAnswer } from '../src/mocks/displayNames';
 import { createFakeEngine, demoSeed, type StoredVersion } from '../src/mocks/ruleEngine';
 
 /** Answers the registry, /api/bpm/meta and /api/bpm/me from the shared fixtures, and records the calls. */
@@ -22,6 +23,11 @@ export async function mockHost(page: Page, scenario: Scenario = 'ready'): Promis
   await page.route('**/api/bpm/me', async (route) => {
     calls.push(new URL(route.request().url()).pathname);
     await route.fulfill(fulfil(responses.me));
+  });
+  // The host's display names (#442): roles, groups and users of the demo tenant, in the language asked for.
+  await page.route('**/api/bpm/display-names**', async (route) => {
+    const request = route.request();
+    await route.fulfill({ json: displayNamesAnswer(request.url(), request.headers()['accept-language']) });
   });
   return calls;
 }

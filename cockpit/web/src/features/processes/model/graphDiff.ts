@@ -149,10 +149,6 @@ export function approvalBlock(input: {
   return undefined;
 }
 
-/** A short form of a content hash for people to compare: the first twelve characters. */
-export function shortHash(hash: string): string {
-  return hash.slice(0, 12);
-}
 
 /** The diagram's node type key for a step type of the canonical form, so both read with the same words. */
 const CANONICAL_TYPES: Readonly<Record<string, string>> = {

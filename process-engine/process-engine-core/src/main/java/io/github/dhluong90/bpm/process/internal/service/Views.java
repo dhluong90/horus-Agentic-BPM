@@ -50,6 +50,9 @@ public final class Views {
         } else {
             o.put("supersededBy", v.supersededBy().intValue());
         }
+        if (!v.warnings().isEmpty()) {
+            o.set("warnings", problems(v.warnings()));
+        }
         return o;
     }
 
@@ -81,7 +84,20 @@ public final class Views {
                 n.has("lockVersion") ? n.get("lockVersion").longValue() : 0, instant(n, "effectiveFrom"),
                 text(n, "requestedBy"), instant(n, "requestedAt"), instant(n, "approvedAt"), text(n, "decisionComment"),
                 text(n, "retiredBy"), instant(n, "retiredAt"),
-                n.has("supersededBy") && !n.get("supersededBy").isNull() ? n.get("supersededBy").intValue() : null);
+                n.has("supersededBy") && !n.get("supersededBy").isNull() ? n.get("supersededBy").intValue() : null,
+                warningsFromJson(n.get("warnings")));
+    }
+
+    private static List<DefinitionProblem> warningsFromJson(JsonNode array) {
+        List<DefinitionProblem> out = new java.util.ArrayList<>();
+        if (array != null && array.isArray()) {
+            for (JsonNode w : array) {
+                out.add(new DefinitionProblem(w.get("code").stringValue(), w.get("message").stringValue(),
+                        text(w, "element"), text(w, "elementId"), w.has("line") ? w.get("line").intValue() : 0,
+                        text(w, "stage")));
+            }
+        }
+        return out;
     }
 
     /** @param i instance @return JSON tree */
@@ -147,6 +163,25 @@ public final class Views {
         JsonNode n = EngineJson.JSON.readTree(json);
         return new ProcessServices.Started(instanceFromJson(EngineJson.JSON.writeValueAsString(n.get("instance"))),
                 n.get("created").booleanValue());
+    }
+
+    /**
+     * The refusal of a standard (PD-141): one item shape in both engines.
+     *
+     * @param found the unsupported elements, in document order
+     * @return JSON array of {@code element}, {@code elementId}, {@code line}, {@code stage}, {@code message}
+     */
+    public static ArrayNode unsupportedElements(List<DefinitionProblem> found) {
+        ArrayNode a = EngineJson.NODES.arrayNode();
+        for (DefinitionProblem p : found) {
+            ObjectNode o = a.addObject();
+            putNullable(o, "element", p.element());
+            putNullable(o, "elementId", p.elementId());
+            o.put("line", Math.max(p.line(), 1));
+            o.put("stage", p.stage() == null ? DefinitionProblem.NOT_PLANNED : p.stage());
+            o.put("message", p.message());
+        }
+        return a;
     }
 
     /** @param problems problems @return JSON array */
@@ -304,6 +339,8 @@ public final class Views {
         putNullable(o, "name", a.name());
         o.put("version", a.version()).put("definitionHash", a.definitionHash()).put("lockVersion", a.lockVersion())
                 .put("requestedBy", a.requestedBy()).put("requestedAt", a.requestedAt().toString());
+        // #442: the requester as the screen shows them; the id when the host knows no name
+        putNullable(o, "requestedByName", a.requestedByName());
         ArrayNode actions = o.putArray("allowedActions");
         a.allowedActions().forEach(actions::add);
         ObjectNode denied = o.putObject("deniedActions");

@@ -33,6 +33,15 @@ public final class RuleEngineMaskingCheck {
     }
 
     static RuleEngineMaskingCheck of(MaskingStartupCheck check, MaskingPolicy policy, Clock clock) {
+        return of(check, policy, clock, false);
+    }
+
+    /**
+     * @param summariseUnclassified whether to log the one start-up WARN of PD-146 that counts the unclassified inputs
+     *     of approved versions: outside the {@code dev} profile
+     */
+    static RuleEngineMaskingCheck of(MaskingStartupCheck check, MaskingPolicy policy, Clock clock,
+            boolean summariseUnclassified) {
         Objects.requireNonNull(check, "check must not be null");
         Objects.requireNonNull(policy, "policy must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
@@ -50,6 +59,9 @@ public final class RuleEngineMaskingCheck {
             }
             check.recordMaskDefaults(policy instanceof PropertyMaskingPolicy properties
                     ? properties.configuredTenants() : Set.of(), clock.instant());
+            if (summariseUnclassified) {
+                check.unclassifiedSummary().ifPresent(LOG::warn);
+            }
         });
     }
 

@@ -169,6 +169,7 @@ class ListQueryPlanCheckTest {
         Timestamp from = Timestamp.from(NOW.minusSeconds(31L * 24 * 3600));
         Map<String, List<Object>> samples = new LinkedHashMap<>();
         samples.put("live-token-counts", List.of("bank-a", DEFINITION));
+        samples.put("active-definition-versions", List.of(1000));
         samples.put("lock-definition-versions", List.of("bank-a", "loan-origination"));
         samples.put("definition-history", List.of("bank-a", DEFINITION));
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));
@@ -195,6 +196,8 @@ class ListQueryPlanCheckTest {
         samples.put("migration-live-nodes", List.of("bank-a", DEFINITION));
         samples.put("migration-instances-at-node", List.of("bank-a", DEFINITION, "credit-review", 100));
         samples.put("migration-movable-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-review"}, 100));
+        samples.put("migration-in-flight-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-score"}, 100));
+        samples.put("instance-children", List.of("bank-a", INSTANCE, 100));
         samples.put("migration-batch", List.of("bank-a", DEFINITION, "AIN" + "%023d".formatted(1000), 100));
         samples.put("migration-instance-tokens", List.of("bank-a", INSTANCE));
         samples.put("migration-outcomes", List.of("bank-a", "AMG" + "%023d".formatted(1), "", 100));
@@ -231,6 +234,7 @@ class ListQueryPlanCheckTest {
         samples.put("tasks-any-undated", List.of("bank-a", both, INSTANCE, 51));
         samples.put("instance-node-activities", List.of("bank-a", INSTANCE, from, T));
         samples.put("instance-history-entries", List.of("bank-a", INSTANCE, from, T, 201));
+        samples.put("instance-compensation-entries", List.of("bank-a", INSTANCE, from, T, 2000));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));

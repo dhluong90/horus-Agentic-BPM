@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { setCrumbLabel } from '../../app/crumbs';
-import { suppliedName, usePersonName } from '../../app/people';
+import { suppliedName } from '../../app/people';
+import { useNames, useWantNames } from './api/displayNames';
+import { UnclassifiedNote } from '../../components/UnclassifiedNote';
+import { readableName } from '../tasks/model/queue';
 import { formatRoute, type ProcessLens } from '../../app/route';
 import type { DefinitionVersion } from '../../api/processes/schemas';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
@@ -10,9 +13,9 @@ import { formatDateTime } from '../rules/model/dates';
 import { useProcessesSession } from './api/processesContext';
 import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useInstances, useRejectDefinition } from './api/useProcesses';
 import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
-import { DOCK_RESERVE } from './approval/dock';
+import { useDockReserve } from './approval/dock';
 import { InstanceStatusPill } from './InstanceStatusPill';
-import { approvalBlock, reviewedHash, type DiffState } from './model/graphDiff';
+import { approvalBlock, humanise, reviewedHash, type DiffState } from './model/graphDiff';
 import { flowOrder, type DiagramGraph } from './model/bpmnGraph';
 import { nodeTypeLabel } from './model/nodeLabels';
 import { DefinitionStatusPill } from './ProcessesPage';
@@ -35,13 +38,14 @@ type Reject = ReturnType<typeof useRejectDefinition>;
  */
 export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { definitionKey: string; version: number; lens?: ProcessLens | undefined; pageLimit: number }) {
   const { t } = useI18n();
-  const personName = usePersonName();
+  const { user: personName } = useNames();
   const details = useDefinitionVersion(definitionKey, version);
   const graph = useDefinitionGraph(definitionKey, version);
   const reviewable = hasChanges(details.data);
   const diff = useDefinitionDiff(definitionKey, version, reviewable);
   const approve = useApproveDefinition(definitionKey);
   const reject = useRejectDefinition(definitionKey);
+  const dockReserve = useDockReserve();
   // The outcome is the engine's answer to this page's decision; nothing is shown as decided before it.
   const decided = approve.isSuccess ? 'approved' : reject.isSuccess ? 'rejected' : undefined;
   const pending = details.data?.status === 'PENDING_APPROVAL';
@@ -54,10 +58,17 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
   }, [name]);
   const select = (next: ProcessLens) => { window.location.hash = formatRoute({ name: 'process', key: definitionKey, version, lens: next }); };
   const requester = details.data?.requestedBy;
+  useWantNames({ users: requester ? [requester] : [] });
   const subtitle = pending && requester !== null && requester !== undefined
     ? t('definition.subtitlePending', { version: String(version), who: personName(requester, suppliedName(details.data, 'requestedBy')) })
     : t('definition.subtitle', { version: String(version) });
   const docked = pending || decided !== undefined;
+  const pendingOrDraft = pending || details.data?.status === 'DRAFT';
+  // Fields whose masking nobody set (PD-146): a calm note, apart from the decision; it never blocks approval.
+  const stepNames = new Map(graph.data?.nodes.map((node) => [node.id, node.name ?? undefined]));
+  const unclassified = (details.data?.warnings ?? []).map((w) => t('unclassified.process', {
+    step: stepNames.get(w.step) ?? readableName(w.step), field: humanise(w.field), direction: t(w.direction === 'INPUT' ? 'unclassified.input' : 'unclassified.output'),
+  }));
   const steps = graph.data?.nodes.length;
   const items = [
     ...(reviewable ? [{ id: 'changes' as const, label: t('definition.lens.changes') }] : []),
@@ -69,6 +80,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
     <section className={docked ? 'workspace workspace--docked' : 'workspace'} aria-labelledby="definition-title">
       <PageHead id="definition-title" title={title} subtitle={subtitle}
         action={details.data ? <DefinitionStatusPill status={details.data.status} /> : undefined} />
+      {pendingOrDraft && unclassified.length > 0 ? <UnclassifiedNote fields={unclassified} /> : null}
       <article className="card card--diagram">
         <Tabs label={t('definition.lenses')} selected={shown} onSelect={select} items={items}>
           {shown === 'cases' ? <CaseList definitionKey={definitionKey} pageLimit={pageLimit} /> : graph.isPending ? <LoadingRows rows={6} /> : graph.isError ? (
@@ -83,7 +95,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
             )
           ) : shown === 'diagram' ? (
             <Suspense fallback={<LoadingRows rows={6} />}>
-              <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: DOCK_RESERVE } : {})} />
+              <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: dockReserve } : {})} />
             </Suspense>
           ) : <StepList graph={graph.data} />}
         </Tabs>
@@ -112,7 +124,7 @@ function Decision({ version, diff, approve, reject, onReload }: {
   if (seen === undefined && current !== undefined) setSeen(current);
   const block = approvalBlock({ version, state, userId, canApprove: can('processes:approve'), seenHash: seen });
   return (
-    <ApprovalDock version={version} block={block} hash={seen}
+    <ApprovalDock version={version} block={block}
       approve={{
         start: ({ comment }) => { if (seen !== undefined) approve.mutate({ version, args: { expectedDefinitionHash: seen, comment } }); },
         isPending: approve.isPending,
@@ -153,7 +165,9 @@ function StepList({ graph }: { graph: DiagramGraph }) {
 function CaseList({ definitionKey, pageLimit }: { definitionKey: string; pageLimit: number }) {
   const { t, locale } = useI18n();
   const cases = useInstances(definitionKey, pageLimit);
-  const person = usePersonName();
+  const { user: person } = useNames();
+  const started = cases.data?.pages.flatMap((page) => page.data.map((item) => item.startedBy)) ?? [];
+  useWantNames({ users: [...new Set(started.filter((login): login is string => login !== null && login !== undefined))] });
   if (cases.isPending) return <LoadingRows rows={4} />;
   if (cases.isError) return <AreaError error={cases.error} onRetry={() => { void cases.refetch(); }} />;
   const items = cases.data.pages.flatMap((page) => page.data);

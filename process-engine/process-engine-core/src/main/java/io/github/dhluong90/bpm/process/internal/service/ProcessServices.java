@@ -76,6 +76,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
@@ -221,6 +222,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    private volatile io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue =
+            io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
+    /** {@code calls.max-depth} (#92). */
+    private volatile int maxCallDepth = EngineDefaults.MAX_CALL_DEPTH;
+    private volatile io.github.dhluong90.bpm.process.internal.store.LayoutStore importedLayouts;
+    private volatile Map<SourceFormat, java.util.function.BiFunction<byte[], Process, String>> layoutExtractors =
+            Map.of();
     private volatile io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory =
             io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
@@ -612,7 +620,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new InputInvalidException("Source format " + request.format() + " is not supported");
         }
         // Parse, validate and hash before any transaction opens (DESIGN section 4).
-        Process process = reader.apply(bytes);
+        List<DefinitionProblem> warnings = List.of();
+        Process process;
+        if (reader instanceof DefinitionReader withWarnings) {
+            DefinitionReader.Result read = withWarnings.readWithWarnings(bytes);
+            process = read.process();
+            warnings = read.warnings();
+        } else {
+            process = reader.apply(bytes);
+        }
+        final List<DefinitionProblem> importWarnings = warnings;
         compiler.compile("validation", process);
         checkBindings(process);
         checkGuardrailContracts(tenant, process);
@@ -620,13 +637,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String hash = Hashes.sha256(canonical);
         int nodeCount = (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count();
         String requestHash = Hashes.sha256Parts("import", caller, request.format().name(), Hashes.sha256(bytes));
+        String layout = importedLayout(request, process);
         return transactions.inTransaction(() -> idempotent(tenant, "import", request.idempotencyKey(), requestHash,
                 () -> {
                     // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
                     List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
                     StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
                     if (latest != null && latest.definitionHash().equals(hash)) {
-                        return view(latest);
+                        return view(latest).withWarnings(importWarnings);
                     }
                     Instant now = clock.instant();
                     boolean active = settings.definitionsAutoApprove();
@@ -636,6 +654,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                             active ? DEV_APPROVER : null, active ? now : null);
                     store.insertDefinition(stored);
+                    if (layout != null) {
+                        // #445: revision 1, from the file's own diagram, in the transaction of the import.
+                        importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
+                                1, layout, Hashes.sha256(layout), hash, "BPMN", caller, now));
+                    }
                     lifecycleHistory(stored, "IMPORTED", null, caller, null, Map.of("source", source), now);
                     // One event per stored version, so its id is derived from the version id.
                     Map<String, Object> payload = new LinkedHashMap<>();
@@ -659,7 +682,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 stored.version());
                         retireSuperseded(versions, stored, now);
                     }
-                    return view(stored);
+                    return view(stored).withWarnings(importWarnings);
                 }, Views::definitionToJson, Views::definitionFromJson));
     }
 
@@ -679,7 +702,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             requireLock(current, expectedLockVersion);
             // PRE-016: the guardrail rule set may have changed since import; checked again before anything is written.
             Process stored = storedProcess(current);
-            checkServiceRegistrations(stored);
+            checkServiceRegistrations(tenant, stored);
             checkGuardrailContracts(tenant, stored);
             Instant now = clock.instant();
             if (effectiveFrom != null && effectiveFrom.isBefore(now)) {
@@ -699,7 +722,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     @Override
     public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
-            String comment, String idempotencyKey) {
+            String expectedChangeSetHash, String comment, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
         // PRE-177 (PD-139): an approval names the content it reviewed, refused before anything is read when missing.
@@ -710,13 +733,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new InputInvalidException("expectedDefinitionHash must be 64 lower-case hexadecimal characters, the"
                     + " definitionHash of the version reviewed");
         }
+        if (expectedChangeSetHash != null && !CONTENT_HASH.matcher(expectedChangeSetHash).matches()) {
+            throw new InputInvalidException("expectedChangeSetHash must be 64 lower-case hexadecimal characters, the"
+                    + " changeSetHash on the last page of the diff");
+        }
         String note = boundedComment(comment, false);
-        // The hash joins the request hash only when named, so a request stored before the field existed still replays.
+        // The hashes join the request hash only when named, so a request stored before the fields existed still replays.
         String requestHash = expectedDefinitionHash == null
                 ? Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
                         Long.toString(expectedLockVersion), note)
-                : Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
-                        Long.toString(expectedLockVersion), note, expectedDefinitionHash);
+                : expectedChangeSetHash == null
+                        ? Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                                Long.toString(expectedLockVersion), note, expectedDefinitionHash)
+                        : Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                                Long.toString(expectedLockVersion), note, expectedDefinitionHash,
+                                expectedChangeSetHash);
         return transactions.inTransaction(() -> idempotent(tenant, "approve", idempotencyKey, requestHash, () -> {
             LockedKey locked = lockVersion(tenant, ref);
             StoredDefinition current = locked.version();
@@ -741,15 +772,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + expectedDefinitionHash + " but it is " + current.definitionHash() + ", at lock version "
                         + current.lockVersion(), current.definitionHash(), current.lockVersion());
             }
-            // PRE-177 (PD-139): an approval may not rest on a change list cut off at its limit. Pure computation on
-            // rows already read in this transaction; no call leaves the process.
-            if (expectedDefinitionHash != null) {
-                requireCompleteChangeSet(tenant, current);
+            // PRE-177, PRE-199 (PD-139): an approval may not rest on a change list cut off at its limit, unless it
+            // names the hash of the whole set read page by page. Pure computation on rows already read in this
+            // transaction; no call leaves the process.
+            if (expectedDefinitionHash != null || expectedChangeSetHash != null) {
+                requireReviewedChangeSet(tenant, current, expectedChangeSetHash);
             }
             // PRE-016: and again at approval, against the rule set version in effect now; PRE-072: and the host's
             // handlers and adapters, which may have been removed since the request.
             Process stored = storedProcess(current);
-            checkServiceRegistrations(stored);
+            checkServiceRegistrations(tenant, stored);
             checkGuardrailContracts(tenant, stored);
             // An older version never overtakes a newer active one (PRE-021).
             for (StoredDefinition other : locked.all()) {
@@ -774,6 +806,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             if (expectedDefinitionHash != null) {
                 approvedDetails.put("reviewedDefinitionHash", expectedDefinitionHash);
             }
+            if (expectedChangeSetHash != null) {
+                approvedDetails.put("reviewedChangeSetHash", expectedChangeSetHash);
+            }
             lifecycleHistory(updated, "APPROVED", current.status(), caller, note, approvedDetails, now);
             Map<String, Object> payload = definitionPayload(updated);
             payload.put("requestedBy", updated.requestedBy());
@@ -785,6 +820,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             payload.put("readerVersion", READER_VERSION);
             if (expectedDefinitionHash != null) {
                 payload.put("reviewedDefinitionHash", expectedDefinitionHash);
+            }
+            if (expectedChangeSetHash != null) {
+                payload.put("reviewedChangeSetHash", expectedChangeSetHash);
             }
             publishDefinition(updated, "processes.definition.approved.v1", payload, now);
             if (!effective.isAfter(now)) {
@@ -1082,6 +1120,67 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public List<io.github.dhluong90.bpm.process.api.UnclassifiedField> unclassifiedFields(DefinitionRef ref) {
+        String tenant = tenant();
+        // Whoever may read the version or request its approval sees the reminder
+        callerWithAny(PERMISSION_READ, PERMISSION_AUTHOR, PERMISSION_DEPLOY);
+        if (!isKey(ref.key()) || ref.version() < 1) {
+            throw new DefinitionNotFoundException("No definition " + safe(ref.key()) + " v" + ref.version());
+        }
+        StoredDefinition stored = transactions.inTransaction(() -> store.definitionVersion(tenant, ref.key(),
+                ref.version()).orElseThrow(() -> new DefinitionNotFoundException("No definition " + ref.key() + " v"
+                + ref.version())));
+        return settings.warnUnclassified() ? UnclassifiedFields.of(storedProcess(stored)) : List.of();
+    }
+
+    /** Most active versions the start-up summary of unclassified fields reads. */
+    static final int UNCLASSIFIED_SUMMARY_VERSIONS = 1_000;
+
+    /** Most active versions the start-up summary names; the rest are counted. */
+    static final int UNCLASSIFIED_SUMMARY_NAMED = 50;
+
+    /**
+     * The one start-up summary of PD-146 (#438): how many agent step fields of each active version declare no
+     * {@code mask}. Names the tenant, key, version and count, never a field value. Runs outside any request.
+     *
+     * @return the WARN text, or empty when every field is classified or {@code classification.warn-unclassified} is off
+     */
+    public java.util.Optional<String> unclassifiedSummary() {
+        if (!settings.warnUnclassified()) {
+            return java.util.Optional.empty();
+        }
+        List<String> named = new ArrayList<>();
+        int versions = 0;
+        int total = 0;
+        for (StoredDefinition definition : store.activeDefinitions(UNCLASSIFIED_SUMMARY_VERSIONS)) {
+            int count;
+            try {
+                count = UnclassifiedFields.of(storedProcess(definition)).size();
+            } catch (RuntimeException e) {
+                // A version whose source no longer reads is reported where it is used, not by this reminder
+                continue;
+            }
+            if (count == 0) {
+                continue;
+            }
+            versions++;
+            total += count;
+            if (named.size() < UNCLASSIFIED_SUMMARY_NAMED) {
+                named.add(definition.tenantId() + "/" + definition.key() + " v" + definition.version() + ": " + count);
+            }
+        }
+        if (versions == 0) {
+            return java.util.Optional.empty();
+        }
+        String more = versions > named.size() ? " and " + (versions - named.size()) + " more versions" : "";
+        return java.util.Optional.of("Process Engine: " + total + " agent step fields of " + versions + " active "
+                + "definition versions are not classified (they declare neither mask true nor mask false): "
+                + String.join(", ", named) + more + ". Masking stays opt-in, so these fields are kept in plain text. "
+                + "Declare each one, or set horus.bpm.processes.classification.warn-unclassified=false to silence this "
+                + "reminder (PD-146).");
+    }
+
+    @Override
     public DefinitionVersion version(String key, int version) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -1121,24 +1220,72 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
-     * Refuses an approval whose change set against the effective version is truncated (PRE-177, PD-139): no reviewer
-     * can have read it complete, so the diff exposes no approvable hash and the approval is refused before anything is
-     * written. A first version, or one approved while no version is effective, has no change list to cut off.
+     * The change set an approval rests on (PRE-177, PRE-199, PD-139): the complete one against the effective version.
+     * Within {@link GraphDiff#MAX_CHANGES} changed values the definition hash alone suffices, and a change-set hash,
+     * when named, must match. Beyond it a reviewer can only have read the set page by page, so the hash of the whole set
+     * is required: missing is {@code CHANGE_SET_TRUNCATED}, different is {@code CONTENT_CHANGED}. Nothing is written
+     * before this check. A first version, or one approved while no version is effective, has no change set.
      */
-    private void requireCompleteChangeSet(String tenant, StoredDefinition current) {
+    private void requireReviewedChangeSet(String tenant, StoredDefinition current, String expectedChangeSetHash) {
         java.util.Optional<StoredDefinition> effective = store.effectiveDefinition(tenant, current.key(),
                 clock.instant());
         if (effective.isEmpty() || effective.get().version() == current.version()) {
+            if (expectedChangeSetHash != null) {
+                throw new io.github.dhluong90.bpm.process.api.ContentChangedException("There is no change set against "
+                        + "an effective version of " + current.key() + " to approve with a change-set hash",
+                        current.definitionHash(), current.lockVersion());
+            }
             return;
         }
         StoredDefinition from = effective.get();
-        if (GraphDiffs.diff(current.key(), side(from), storedProcess(from), side(current), storedProcess(current))
-                .truncated()) {
+        io.github.dhluong90.bpm.process.api.GraphDiff all = GraphDiffs.complete(current.key(), side(from),
+                storedProcess(from), side(current), storedProcess(current));
+        boolean oversize = all.nodesChanged().size() > io.github.dhluong90.bpm.process.api.GraphDiff.MAX_CHANGES;
+        if (oversize && expectedChangeSetHash == null) {
             throw new io.github.dhluong90.bpm.process.api.ChangeSetTruncatedException("The change list from "
                     + current.key() + " v" + from.version() + " to v" + current.version() + " has more than "
                     + io.github.dhluong90.bpm.process.api.GraphDiff.MAX_CHANGES + " changed values and is cut off; "
-                    + "no approval can rest on it");
+                    + "read it page by page and approve with expectedChangeSetHash");
         }
+        if (expectedChangeSetHash != null) {
+            String now = GraphDiffPaging.changeSetHash(all);
+            if (!expectedChangeSetHash.equals(now)) {
+                throw new io.github.dhluong90.bpm.process.api.ContentChangedException("The change set of "
+                        + current.key() + " v" + current.version() + " against v" + from.version()
+                        + " is not the one reviewed: expected change-set hash " + expectedChangeSetHash
+                        + " but it is " + now, current.definitionHash(), current.lockVersion(), now);
+            }
+        }
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPage(DefinitionRef base, DefinitionRef target,
+            Integer limit, String cursor) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(base, "base must not be null");
+        Objects.requireNonNull(target, "target must not be null");
+        if (!base.key().equals(target.key())) {
+            throw new InputInvalidException("A diff compares two versions of one definition key");
+        }
+        StoredDefinition from = storedVersion(tenant, base);
+        StoredDefinition to = storedVersion(tenant, target);
+        return GraphDiffPaging.page(GraphDiffs.complete(to.key(), side(from), storedProcess(from), side(to),
+                storedProcess(to)), limit, cursor);
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPageFromEffective(DefinitionRef target,
+            Integer limit, String cursor) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(target, "target must not be null");
+        StoredDefinition to = storedVersion(tenant, target);
+        StoredDefinition from = store.effectiveDefinition(tenant, target.key(), clock.instant())
+                .orElseThrow(() -> new NoEffectiveVersionException("Definition " + target.key()
+                        + " has no effective version to compare with; pass base"));
+        return GraphDiffPaging.page(GraphDiffs.complete(to.key(), side(from), storedProcess(from), side(to),
+                storedProcess(to)), limit, cursor);
     }
 
     private StoredDefinition storedVersion(String tenant, DefinitionRef ref) {
@@ -1262,7 +1409,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             }
         }
         return new io.github.dhluong90.bpm.process.api.PendingApproval(row.key(), row.name(), row.version(),
-                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied);
+                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied,
+                displayName(row.requestedBy()));
+    }
+
+    /** A user's readable name from the host (#442); a lookup that fails leaves the id to show. */
+    private String displayName(String userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            return callers.displayNameOf(userId).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#instances(InstanceQuery)}. */
@@ -1420,11 +1580,38 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * PRE-072: every handler and adapter a service step names is registered in this host. Checked at request-approval
      * and approval, before anything is written; one problem per step, naming {@code step -> name}.
      */
-    private void checkServiceRegistrations(Process process) {
+    private void checkServiceRegistrations(String tenant, Process process) {
         List<DefinitionProblem> problems = serviceRegistrationProblems(process);
+        problems.addAll(escalationRoleProblems(tenant, process));
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
         }
+    }
+
+    /**
+     * PRE-180 (#449): every {@code role:} an escalation level hands an overdue task to is in the tenant's role list.
+     * One problem per step and role, naming {@code step -> role:NAME}.
+     */
+    private List<DefinitionProblem> escalationRoleProblems(String tenant, Process process) {
+        List<DefinitionProblem> problems = new ArrayList<>();
+        for (FlowElement element : process.allFlowElements()) {
+            if (!(element instanceof UserTask task)) {
+                continue;
+            }
+            java.util.Set<String> reported = new java.util.LinkedHashSet<>();
+            for (var spec : task.extensions().first(
+                    io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec.class).stream().toList()) {
+                for (var level : spec.levels()) {
+                    String to = level.to();
+                    if (to.startsWith("role:") && reported.add(to) && !roleCatalogue.exists(tenant,
+                            to.substring("role:".length()))) {
+                        problems.add(DefinitionProblem.of("ESCALATION_ROLE_UNKNOWN", task.id() + " -> " + safe(to)
+                                + ": the escalation names a role that is not in this tenant's role list", task.id()));
+                    }
+                }
+            }
+        }
+        return problems;
     }
 
     private List<DefinitionProblem> serviceRegistrationProblems(Process process) {
@@ -1625,7 +1812,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * @return the handlers
      */
     public Map<String, JobHandler> jobHandlers() {
-        return Map.of(JobStore.TIMER, this::fireTimer, JobStore.DEFINITION_EFFECTIVE, this::fireDefinitionEffective);
+        return Map.of(JobStore.TIMER, this::fireTimer, JobStore.DEFINITION_EFFECTIVE, this::fireDefinitionEffective,
+                JobStore.CALL_RESULT, this::fireCallResult);
     }
 
     /**
@@ -2385,6 +2573,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     boolean undo = COMPENSATION_INCIDENTS.contains(locked.incident().errorCode());
                     // #67: an undo's incident has no waiting step; its resolution marks the undo done by hand.
                     io.github.dhluong90.bpm.process.internal.exec.Token token = undo ? null : waitingToken(tenant, locked);
+                    if (token != null && token.status() == TokenStatus.WAITING_CHILD) {
+                        throw new InvalidStateException("The step of incident " + incidentId + " calls a process: retry"
+                                + " it to start a new child, or cancel the instance");
+                    }
                     JobRow job = undo ? null : jobs.findJob(tenant, token.activityInstanceId()).orElse(null);
                     // PRE-078: the step's output schema, as for any result; the guardrail is not run on a person's
                     // answer. A violation names the path and what is wrong there, never the value.
@@ -2553,8 +2745,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private io.github.dhluong90.bpm.process.internal.exec.Token waitingToken(String tenant, LockedIncident locked) {
         ProcessStore.IncidentRow incident = locked.incident();
         return store.tokens(tenant, incident.instanceId()).stream()
-                .filter(t -> t.id().equals(incident.tokenId()) && t.status() == TokenStatus.WAITING_ASYNC
-                        && t.nodeId().equals(incident.nodeId()))
+                .filter(t -> t.id().equals(incident.tokenId()) && (t.status() == TokenStatus.WAITING_ASYNC
+                        || t.status() == TokenStatus.WAITING_CHILD) && t.nodeId().equals(incident.nodeId()))
                 .findFirst()
                 .orElseThrow(() -> new InvalidStateException("The token of incident " + incident.id()
                         + " no longer waits on " + incident.nodeId()));
@@ -2731,6 +2923,207 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             actions.add("reject-resolution");
         }
         return actions;
+    }
+
+    // ---- called child processes (#92, PRE-211 to PRE-214, DESIGN section 4.2) ------------------------------------
+
+    private static final String CALL_ACTOR = "system:call";
+    /** Sequence of a child's end job in the id space of the child's own ids, far above any kernel id. */
+    private static final long CALL_RESULT_SEQUENCE = 2_000_000L;
+
+    /**
+     * Sets how deep one call may sit above another ({@code calls.max-depth}).
+     *
+     * @param depth 1 to {@link EngineDefaults#MAX_CALL_DEPTH}
+     */
+    public void useCallDepth(int depth) {
+        if (depth < 1 || depth > EngineDefaults.MAX_CALL_DEPTH) {
+            throw new IllegalArgumentException("calls.max-depth must be 1 to " + EngineDefaults.MAX_CALL_DEPTH);
+        }
+        this.maxCallDepth = depth;
+    }
+
+    /**
+     * Starts the child of a {@code callProcess} step in the parent's transaction, after the parent's rows are saved
+     * (PRE-211, PRE-212, PRE-214). The child is looked up and started in the parent's tenant, on the pinned version or
+     * the one effective now, and is unique per parent token and call attempt. A call that cannot start opens an
+     * incident on the parent's step and starts nothing.
+     */
+    private void startChild(StoredDefinition parentDefinition, InstanceRow parent, InstanceState parentState,
+            Effect.StartChildInstance call, List<IncidentSite> incidents, Instant now) {
+        String tenant = parentState.tenantId();
+        io.github.dhluong90.bpm.process.internal.exec.Token token = parentState.tokens().stream()
+                .filter(t -> t.id().equals(call.tokenId())).findFirst().orElseThrow();
+        int attempt = store.callAttempts(tenant, token.id());
+        int depth = store.parentLink(tenant, parent.id()).map(l -> l.callDepth()).orElse(0) + 1;
+        String failure = null;
+        StoredDefinition child = null;
+        if (depth > maxCallDepth) {
+            failure = "CALL_DEPTH_EXCEEDED";
+        } else if (call.version() != null) {
+            child = store.definitionVersion(tenant, call.calledElement(), call.version())
+                    .filter(d -> "ACTIVE".equals(d.status())).orElse(null);
+        } else {
+            child = store.effectiveDefinition(tenant, call.calledElement(), now).orElse(null);
+        }
+        if (failure == null && child == null) {
+            failure = "NO_EFFECTIVE_VERSION";
+        }
+        if (failure != null) {
+            incidents.add(new IncidentSite(tenant, parent.id(), parentDefinition.id(), token.id(), token.nodeId(), null,
+                    call.attemptId(), 0, failure, call.calledElement(), "The step could not start " + call.calledElement()
+                            + " (" + failure + (call.version() == null ? "" : ", pinned version " + call.version())
+                            + ")"));
+            return;
+        }
+        String childId = Ulid.next(now);
+        String base = parent.businessKey() == null ? null : parent.businessKey() + "/" + token.nodeId();
+        String businessKey = base == null ? null : (attempt == 0 ? base : base + "#" + attempt);
+        if (businessKey != null && businessKey.length() > EngineDefaults.MAX_BUSINESS_KEY_LENGTH) {
+            businessKey = null;
+        }
+        InstanceRow childRow = new InstanceRow(tenant, childId, child.id(), child.key(), child.version(), businessKey,
+                "RUNNING", "{}", 0, 0, CALL_ACTOR, now, null);
+        if (!store.insertInstance(childRow)) {
+            childRow = new InstanceRow(tenant, childId, child.id(), child.key(), child.version(), null, "RUNNING", "{}",
+                    0, 0, CALL_ACTOR, now, null);
+            store.insertInstance(childRow);
+            businessKey = null;
+        }
+        store.linkChild(tenant, childId, parent.id(), token.id(), attempt, depth);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("childInstanceId", childId);
+        details.put("calledElement", call.calledElement());
+        details.put("version", child.version());
+        details.put("callAttempt", attempt);
+        store.appendHistory(tenant, parent.id(), parentDefinition.id(), List.of(new HistoryEntry("CHILD_STARTED",
+                token.nodeId(), token.id(), call.attemptId(), CALL_ACTOR, now, details)));
+        // The child runs as engine work started by the parent's step, in the parent's tenant, with no caller.
+        run(child, childRow, InstanceState.created(childId, tenant, child.id(), businessKey),
+                new Command.Start(call.variables(), CALL_ACTOR), new RunAs.EngineWork(tenant, CALL_ACTOR));
+    }
+
+    /**
+     * Writes the job that resumes the parent of an instance that has just ended, in the transaction that ended it. The
+     * parent row is not locked here; the job fires in a transaction of its own that locks it (PRE-213).
+     */
+    private void scheduleCallResult(String tenant, InstanceState child, ProcessStore.ParentLink link,
+            List<HistoryEntry> history, Instant now) {
+        InstanceRow parent = store.findInstance(tenant, link.parentInstanceId()).orElse(null);
+        if (parent == null) {
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("childInstanceId", child.instanceId());
+        payload.put("outcome", child.status().name());
+        for (HistoryEntry e : history) {
+            if ("INSTANCE_ENDED".equals(e.type()) && e.details().get("reason") != null) {
+                payload.put("reason", String.valueOf(e.details().get("reason")));
+            }
+        }
+        jobs.insertJob(JobRow.due(tenant, Ids.child(child.instanceId(), CALL_RESULT_SEQUENCE), parent.id(),
+                parent.definitionId(), link.parentTokenId(), JobStore.CALL_RESULT, null, now, jobSettings.timerLease(),
+                jobSettings.maxAttempts(), Values.write(payload)), now);
+    }
+
+    /**
+     * Fires a {@code CALL_RESULT} job inside the fire transaction: locks the parent row (the child's end transaction
+     * never did), checks the claim, then tells the waiting {@code callProcess} step how its child ended. The child's
+     * declared outputs are read from the ended child, never from the job. A job for a parent that ended, a token that
+     * moved on, or a child that a retry replaced is consumed without effect.
+     */
+    private boolean fireCallResult(JobRow job, java.util.function.BooleanSupplier claimHeld) {
+        String tenant = job.tenantId();
+        InstanceRow row = store.lockInstance(tenant, job.instanceId()).orElse(null);
+        if (!claimHeld.getAsBoolean()) {
+            return false;
+        }
+        if (row == null || !"RUNNING".equals(row.status())) {
+            return true;
+        }
+        Map<String, Object> payload = Values.readMap(job.payloadJson());
+        String childId = (String) payload.get("childInstanceId");
+        List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = store.tokens(tenant, row.id());
+        io.github.dhluong90.bpm.process.internal.exec.Token token = tokens.stream()
+                .filter(t -> t.id().equals(job.tokenId()) && t.status() == TokenStatus.WAITING_CHILD).findFirst()
+                .orElse(null);
+        ProcessStore.ParentLink link = token == null ? null : store.parentLink(tenant, childId).orElse(null);
+        if (link == null || !link.parentTokenId().equals(token.id())
+                || link.callAttempt() != store.callAttempts(tenant, token.id()) - 1) {
+            LOG.log(System.Logger.Level.DEBUG, "process.call-result.obsolete tenant={0} job={1}", tenant, job.id());
+            return true;
+        }
+        InstanceRow child = store.findInstance(tenant, childId).orElse(null);
+        if (child == null) {
+            return true;
+        }
+        Command.ChildOutcome outcome = switch (child.status()) {
+            case "COMPLETED" -> Command.ChildOutcome.COMPLETED;
+            case "CANCELLED" -> Command.ChildOutcome.CANCELLED;
+            default -> Command.ChildOutcome.FAILED;
+        };
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        Map<String, Object> output = new LinkedHashMap<>();
+        if (outcome == Command.ChildOutcome.COMPLETED) {
+            Map<String, Object> childVariables = Values.readMap(child.variablesJson());
+            FlowNode node = compiled(definition).process().node(token.nodeId()).orElseThrow();
+            for (io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping out : node.extensions()
+                    .all(io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping.class)) {
+                Object value = childVariables;
+                for (String part : out.from().split("\\.")) {
+                    value = value instanceof Map<?, ?> map ? map.get(part) : null;
+                }
+                if (value != null) {
+                    output.put(out.name(), value);
+                }
+            }
+        }
+        InstanceState state = stateOf(tenant, row);
+        try (io.github.dhluong90.bpm.process.spi.EventScope ignored = jobScope(job.id())) {
+            run(definition, row, state, new Command.ChildEnded(token.id(), token.activityInstanceId(), childId, outcome,
+                    output, (String) payload.get("reason")), new RunAs.EngineWork(tenant, CALL_ACTOR));
+        }
+        return true;
+    }
+
+    /**
+     * Cancels the children of a parent that is being cancelled, newest lock order last: the caller holds the parent, and
+     * each child is locked and cancelled in turn with the reason {@code parent cancelled} and the actor of the
+     * cancellation, and so are its own children (PRE-213). A child that is compensating is left: an undo is never
+     * abandoned half way.
+     */
+    private void cancelChildren(String tenant, String parentId, String actor) {
+        for (String childId : store.activeChildren(tenant, parentId, EngineDefaults.MAX_PAGE_SIZE)) {
+            InstanceRow child = store.lockInstance(tenant, childId).orElse(null);
+            if (child == null || !"RUNNING".equals(child.status())) {
+                continue;
+            }
+            StoredDefinition definition = store.definition(tenant, child.definitionId()).orElseThrow();
+            run(definition, child, stateOf(tenant, child), new Command.Cancel("parent cancelled", actor),
+                    new RunAs.EngineWork(tenant, CALL_ACTOR));
+            closeOnCancel(tenant, child.id(), actor, clock.instant());
+            cancelChildren(tenant, child.id(), actor);
+        }
+    }
+
+    // ---- migration of a step's work (#106, PRE-208) ---------------------------------------------------------------
+
+    /**
+     * After a migration has repointed an instance at the target version and cancelled the work of a removed step, the
+     * token enters {@code nodeId} of the target as on arrival: a task opens, a job parks, a local step runs. It runs as
+     * engine work in the instance's tenant, in the migration's transaction.
+     *
+     * @param tenant the tenant of the plan
+     * @param instanceId the instance, already locked by the caller's transaction
+     * @param tokenId the token to move
+     * @param nodeId the step of the instance's current version to enter
+     * @param actor the engine actor that moves it
+     */
+    void enterStepAfterMigration(String tenant, String instanceId, String tokenId, String nodeId, String actor) {
+        InstanceRow row = store.lockInstance(tenant, instanceId).orElseThrow();
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        run(definition, row, stateOf(tenant, row), new Command.MoveToken(tokenId, nodeId),
+                new RunAs.EngineWork(tenant, actor));
     }
 
     private InstanceState stateOf(String tenant, InstanceRow row) {
@@ -2916,6 +3309,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     participants(tenant, row), row.sequence());
             run(definition, row, state, new Command.Cancel(reason, caller), RunAs.REQUEST);
             closeOnCancel(tenant, row.id(), caller, clock.instant());
+            // #92, PRE-213: lock order is parent, then child. The children end in this transaction.
+            cancelChildren(tenant, row.id(), caller);
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
     }
@@ -3417,15 +3812,17 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void requireAssigneeAllowed(String tenant, Locked locked, String assignee) {
         TaskRow task = locked.task();
         if (assignee.startsWith(SYSTEM_PREFIX)) {
-            throw new AssigneeNotAllowedException("Identities starting with " + SYSTEM_PREFIX + " are reserved for the"
-                    + " engine");
+            throw new AssigneeNotAllowedException(AssigneeNotAllowedException.RESERVED_IDENTITY, null,
+                    "Identities starting with " + SYSTEM_PREFIX + " are reserved for the engine");
         }
         if (assignee.equals(task.claimedBy())) {
-            throw new AssigneeNotAllowedException(assignee + " already holds task " + task.id());
+            throw new AssigneeNotAllowedException(AssigneeNotAllowedException.ALREADY_ASSIGNED, null,
+                    assignee + " already holds task " + task.id());
         }
         if (task.fourEyes() && participants(tenant, locked.instance()).contains(assignee)) {
-            throw new AssigneeNotAllowedException(assignee + " started this instance or completed an earlier task of"
-                    + " it, so cannot work its four-eyes task");
+            throw new AssigneeNotAllowedException(AssigneeNotAllowedException.FOUR_EYES_PARTICIPANT, null,
+                    assignee + " started this instance or completed an earlier task of it, so cannot work its"
+                    + " four-eyes task");
         }
         int colon = task.assignee().indexOf(':');
         String kind = task.assignee().substring(0, colon);
@@ -3436,8 +3833,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             default -> true;
         };
         if (!holds) {
-            throw new AssigneeNotAllowedException(assignee + " does not hold the " + kind + " the task is assigned to");
+            throw new AssigneeNotAllowedException("group".equals(kind) ? AssigneeNotAllowedException.MISSING_GROUP
+                    : AssigneeNotAllowedException.MISSING_ROLE, task.assignee(),
+                    assignee + " does not hold the " + kind + " the task is assigned to");
         }
+    }
+
+    /**
+     * Installs the host's role list, which approval asks about the target role of every escalation level (PRE-180).
+     * Called once while the engine is wired; without it no role is checked.
+     *
+     * @param catalogue the catalogue, or null for the default that accepts every role
+     */
+    public void useRoleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue catalogue) {
+        this.roleCatalogue = catalogue == null ? io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL
+                : catalogue;
     }
 
     /**
@@ -3448,6 +3858,48 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     public void useAssigneeDirectory(io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory) {
         this.directory = directory == null ? io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE : directory;
+    }
+
+    /**
+     * Turns on layout revision 1 at import (#445): the diagram part of an imported document is stored as the first
+     * layout revision of the version it creates, in the transaction of the import, apart from the definition. Without
+     * this call, or for a format with no reader, an import stores no layout, as before.
+     *
+     * @param layouts the layout store
+     * @param extractors per source format, reads the layout document (JSON) out of the imported bytes, or returns null
+     */
+    public void useImportedLayouts(io.github.dhluong90.bpm.process.internal.store.LayoutStore layouts,
+            Map<SourceFormat, java.util.function.BiFunction<byte[], Process, String>> extractors) {
+        this.importedLayouts = layouts;
+        this.layoutExtractors = extractors == null ? Map.of() : Map.copyOf(extractors);
+    }
+
+    /** The layout document of an import, validated against the layout schema and the steps, or null when none. */
+    private String importedLayout(ImportRequest request, Process process) {
+        var extractor = layoutExtractors.get(request.format());
+        if (importedLayouts == null || extractor == null) {
+            return null;
+        }
+        try {
+            String text = extractor.apply(request.source(), process);
+            if (text == null || text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > Layouts.MAX_BYTES) {
+                return null;
+            }
+            var node = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON.readTree(text);
+            java.util.Set<String> steps = new java.util.HashSet<>();
+            for (var element : process.allFlowElements()) {
+                if (element instanceof FlowNode n) {
+                    steps.add(n.id());
+                }
+            }
+            Layouts.check(node, steps);
+            return io.github.dhluong90.bpm.process.internal.json.CanonicalJson.write(node);
+        } catch (RuntimeException e) {
+            // A diagram that does not fit the schema is not stored; the definition does not depend on it.
+            LOG.log(System.Logger.Level.WARNING, "process.import.layout-skipped key={0} exception={1}", process.id(),
+                    e.getClass().getName());
+            return null;
+        }
     }
 
     @Override
@@ -3857,6 +4309,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // #67: undo entries in the order their steps completed, and a compensation the run started.
         List<Effect.PushCompensation> pushes = new ArrayList<>();
         Effect.StartCompensation[] compensation = new Effect.StartCompensation[1];
+        // #92: children are started after this instance's own rows are saved, in the same transaction.
+        List<Effect.StartChildInstance> childStarts = new ArrayList<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -3908,8 +4362,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                     .findFirst().orElse(null);
                             newIncidents.add(new IncidentSite(state.tenantId(), state.instanceId(), definition.id(),
                                     incident.tokenId(), incident.nodeId(), null, attemptId, 0, incident.errorCode(),
-                                    incident.detail(), "Business error " + incident.detail()
-                                            + " has no path in the process"));
+                                    incident.detail(), incident.errorCode().startsWith("CHILD_")
+                                            ? "The called process ended without completing (" + incident.errorCode()
+                                                    + "): " + incident.detail()
+                                            : "Business error " + incident.detail() + " has no path in the process"));
                         }
                         case Effect.RecordResult result when compiled.memorySources().contains(result.nodeId()) ->
                                 // #101: kept only for the steps a later agent step reads as memory.
@@ -3922,6 +4378,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         }
                         case Effect.PushCompensation push -> pushes.add(push);
                         case Effect.StartCompensation started -> compensation[0] = started;
+                        case Effect.StartChildInstance child -> childStarts.add(child);
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -4117,9 +4574,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
             store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, now));
         }
+        for (Effect.StartChildInstance call : childStarts) {
+            startChild(definition, row, state, call, newIncidents, now);
+        }
         newIncidents.forEach(site -> raiseIncident(site, now));
         if (compensation[0] != null) {
             startCompensation(definition, tenant, state.instanceId(), compensation[0]);
+        }
+        if (state.status() == InstanceStatus.COMPLETED || state.status() == InstanceStatus.CANCELLED
+                || state.status() == InstanceStatus.FAILED) {
+            // #92: the instance has ended; if it was called, its parent hears of it through a job, never a lock.
+            InstanceState ended = state;
+            store.parentLink(tenant, state.instanceId()).ifPresent(link -> scheduleCallResult(tenant, ended, link,
+                    history, now));
         }
         return newIncidents;
     }

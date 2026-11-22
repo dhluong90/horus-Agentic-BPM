@@ -144,7 +144,7 @@ class IncidentRestContractTest {
         return (io.github.dhluong90.bpm.process.api.DefinitionService) java.lang.reflect.Proxy.newProxyInstance(
                 IncidentRestContractTest.class.getClassLoader(),
                 new Class<?>[] {io.github.dhluong90.bpm.process.api.DefinitionService.class}, (self, method, args) -> {
-                    if (method.getName().equals("approve") && args.length == 5) {
+                    if (method.getName().equals("approve") && args.length == 6) {
                         if (args[2] == null) {
                             throw new ContentHashRequiredException();
                         }

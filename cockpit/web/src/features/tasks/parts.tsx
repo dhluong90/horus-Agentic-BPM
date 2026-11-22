@@ -1,10 +1,10 @@
 import type { SlaState, Task, TaskSummary } from '../../api/processes/schemas';
-import { usePersonName } from '../../app/people';
 import type { Translate } from '../../i18n/I18nProvider';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useNames } from '../processes/api/displayNames';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { formatDateTime } from '../rules/model/dates';
-import { overdueParts, parseAssignee, readableName } from './model/queue';
+import { overdueParts } from './model/queue';
 
 /** The task's step name; a task without one reads "Untitled task", never its node id. */
 export function taskTitle(task: Pick<TaskSummary, 'name'>, t: Translate): string {
@@ -13,19 +13,7 @@ export function taskTitle(task: Pick<TaskSummary, 'name'>, t: Translate): string
 
 /** Who a task is for, in words: "Role: Credit officer", "Group: Loans operations", or a person's name. */
 export function useAssigneeLabel(): (assignee: string) => string {
-  const { t } = useI18n();
-  const personName = usePersonName();
-  return (value: string) => {
-    const assignee = parseAssignee(value);
-    switch (assignee.kind) {
-      case 'role':
-        return t('tasks.assignee.role', { name: readableName(assignee.name) });
-      case 'group':
-        return t('tasks.assignee.group', { name: readableName(assignee.name) });
-      case 'user':
-        return personName(assignee.id);
-    }
-  };
+  return useNames().assignee;
 }
 
 export function AssigneeText({ assignee }: { assignee: string }) {
@@ -71,7 +59,7 @@ export function SlaMark({ sla, overdueBy }: { sla: SlaState; overdueBy: string |
 
 export function StatusMark({ status, claimedBy }: { status: Task['status']; claimedBy: string | null | undefined }) {
   const { t } = useI18n();
-  const personName = usePersonName();
+  const { user: personName } = useNames();
   const { userId } = useProcessesSession();
   if (status === 'CLAIMED') {
     const mine = claimedBy === userId;

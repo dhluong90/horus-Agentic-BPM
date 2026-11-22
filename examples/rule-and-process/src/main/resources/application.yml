@@ -30,6 +30,23 @@ management:
 horus:
   bpm:
     host-id: rule-and-process
+    # Readable names for the cockpit, by language (GET /api/bpm/display-names). Without one the cockpit shows the id.
+    display-names:
+      default-language: en
+      roles:
+        CARD_OFFICER: { en: Card officer, vi: Cán bộ thẻ }
+        TELLER: { en: Teller, vi: Giao dịch viên }
+        BRANCH_SUPERVISOR: { en: Branch supervisor, vi: Giám sát chi nhánh }
+        PRICING_AUTHOR: { en: Pricing author, vi: Người soạn biểu giá }
+        PRICING_APPROVER: { en: Pricing approver, vi: Người duyệt biểu giá }
+        PROCESS_DEPLOYER: { en: Process deployer, vi: Người triển khai quy trình }
+        PROCESS_APPROVER: { en: Process approver, vi: Người duyệt quy trình }
+      users:
+        lan: { en: Lan Pham, vi: Phạm Thị Lan }
+        minh: { en: Minh Vo, vi: Võ Quang Minh }
+        tuan: { en: Tuan Do, vi: Đỗ Anh Tuấn }
+        an: { en: An Nguyen, vi: Nguyễn Văn An }
+        hoa: { en: Hoa Tran, vi: Trần Thị Hoa }
     rules:
       decision-log:
         # How long decisions are kept: the bank's choice, in whole months, at least 12 (P12M). Monthly partitions

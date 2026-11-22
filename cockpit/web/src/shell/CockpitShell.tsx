@@ -88,7 +88,7 @@ function EmbeddedShell({ registry, dependencies }: { registry: HostRegistry; dep
   return (
     <div className="app">
       <SessionHeader session={summary(state.host, state.me, label)} banner={banner} breadcrumb={<Breadcrumb />} />
-      <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={dependencies.fetchImpl} inboxSeconds={registry.refresh?.inboxSeconds} />
+      <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={dependencies.fetchImpl} inboxSeconds={registry.refresh?.inboxSeconds} incidentsSeconds={registry.refresh?.incidentsSeconds} />
     </div>
   );
 }
@@ -196,7 +196,7 @@ function HostScreens({ registry, host, session, baseFetch, signOut, tenant, onSe
   return (
     <div className="app">
       <SessionHeader session={{ ...summary(host, state.me, label), signOut }} banner={banner} breadcrumb={<Breadcrumb />} service={picker} />
-      <AppFrame host={host} meta={state.meta} me={state.me} fetchImpl={state.fetchImpl} inboxSeconds={registry.refresh?.inboxSeconds} />
+      <AppFrame host={host} meta={state.meta} me={state.me} fetchImpl={state.fetchImpl} inboxSeconds={registry.refresh?.inboxSeconds} incidentsSeconds={registry.refresh?.incidentsSeconds} />
     </div>
   );
 }

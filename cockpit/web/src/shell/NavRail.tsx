@@ -13,6 +13,7 @@ const TITLE: Record<Area, MessageKey> = {
   decisions: 'menu.decisions',
   processes: 'menu.processes',
   tasks: 'menu.tasks',
+  incidents: 'menu.incidents',
 };
 
 /**

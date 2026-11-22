@@ -26,6 +26,11 @@ public interface JobStore {
      * with no transaction open, keyed by the job id; a local undo runs its handler in the result transaction.
      */
     String COMPENSATION = "COMPENSATION";
+    /**
+     * Job kind that resumes a parent whose called child has ended (#92, PRE-211): written in the child's end transaction,
+     * so that transaction never locks the parent, and fired in a transaction of its own that does.
+     */
+    String CALL_RESULT = "CALL_RESULT";
 
     /**
      * @param jobKind a job kind

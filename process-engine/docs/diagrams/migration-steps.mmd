@@ -1,0 +1,15 @@
+flowchart TD
+  P["Plan v1 to v2 with mappings and cancellations"] --> V{"Valid? same types, none twice, moveTo exists, reason given"}
+  V -- no --> R["422 MIGRATION_PLAN_INVALID, nothing written"]
+  V -- yes --> D["Dry run: MAPPED, CANCELLED, impact, STEP_IN_FLIGHT, unhandled steps as conflicts"]
+  D --> A["Four-eyes: propose with a reason, a second holder approves (unchanged, PD-131)"]
+  A --> I["Runner, one instance in one transaction under its row lock"]
+  I --> T{"Token at a mapped step, a cancelled step, or a step kept by id"}
+  T -- mapped --> M["Rename the token, its task, jobs and incidents in place: task id, claim, due time and four-eyes survive"]
+  T -- cancelled --> F{"Call in flight at the step?"}
+  F -- yes --> S["SKIPPED STEP_IN_FLIGHT: the instance stays on v1 for a later plan"]
+  F -- no --> C["Cancel the open task and the DUE job with the plan's reason, then MoveToken enters moveTo as on arrival"]
+  T -- kept --> K["Move as before"]
+  M --> H["MIGRATED history row names the steps"]
+  C --> H
+  K --> H

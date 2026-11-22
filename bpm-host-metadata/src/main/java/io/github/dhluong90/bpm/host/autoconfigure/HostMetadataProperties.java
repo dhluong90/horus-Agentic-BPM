@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.host.autoconfigure;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -18,11 +19,13 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     token audiences the host accepts
  * @param limits the read limits {@code /api/bpm/meta} reports to clients
  * @param rest cross-origin access for a standalone cockpit on another origin (ADR-0014 decision 4)
+ * @param displayNames readable, localised names of roles, groups and users (#442), read by the default
+ *     {@code DisplayNames}
  */
 @ConfigurationProperties("horus.bpm")
 public record HostMetadataProperties(
         @Nullable String hostId, @DefaultValue Tenancy tenancy, @DefaultValue Security security,
-        @DefaultValue Limits limits, @DefaultValue Rest rest) {
+        @DefaultValue Limits limits, @DefaultValue Rest rest, @DefaultValue DisplayNamesSettings displayNames) {
 
     static final int HOST_ID_MAX_LENGTH = 40;
     /** ADR-0015: the largest page any engine list returns; a host may lower it, never raise it. */
@@ -135,6 +138,34 @@ public record HostMetadataProperties(
      * @param maxPageSize the largest page clients may request, 1 to {@value HostMetadataProperties#MAX_PAGE_SIZE}; a
      *     host that lowers the engines' {@code query.max-page-size} lowers this too
      */
+    /**
+     * The names the default {@code DisplayNames} serves (#442): per identifier, a name per language, for example
+     * {@code roles.CARD_OFFICER.vi: Cán bộ thẻ}. An identifier with a dot is written in brackets, as
+     * {@code roles[ops.lead].en}. A host with its own {@code DisplayNames} bean ignores these.
+     *
+     * @param defaultLanguage the language used when the caller's has no name, two or three lower-case letters;
+     *     default {@code en}
+     * @param roles role identifier to language to name
+     * @param groups group identifier to language to name
+     * @param users user identifier to language to name, for a small host without a directory
+     */
+    public record DisplayNamesSettings(@DefaultValue("en") String defaultLanguage,
+            @DefaultValue Map<String, Map<String, String>> roles,
+            @DefaultValue Map<String, Map<String, String>> groups,
+            @DefaultValue Map<String, Map<String, String>> users) {
+
+        /** Checks the language. */
+        public DisplayNamesSettings {
+            if (defaultLanguage == null || !defaultLanguage.matches("^[a-z]{2,3}$")) {
+                throw new IllegalArgumentException("horus.bpm.display-names.default-language must be two or three "
+                        + "lower-case letters, was '" + defaultLanguage + "'.");
+            }
+            roles = roles == null ? Map.of() : Map.copyOf(roles);
+            groups = groups == null ? Map.of() : Map.copyOf(groups);
+            users = users == null ? Map.of() : Map.copyOf(users);
+        }
+    }
+
     public record Limits(@DefaultValue("200") int maxPageSize) {
 
         /** Checks that the limit only lowers the engines' maximum. */

@@ -182,4 +182,21 @@ class PendingApprovalsTest {
         assertThatThrownBy(() -> engine.queries.pendingApprovals(PageRequest.first()))
                 .isInstanceOf(PermissionDeniedException.class);
     }
+
+    @Test
+    void PRE_206_each_item_carries_the_requester_display_name_and_falls_back_to_the_id() {
+        // Given the host's directory names alice "Nguyen Thi Alice"
+        engine.identity.names = java.util.Map.of("alice", "Nguyen Thi Alice");
+
+        // When bob lists the queue
+        List<PendingApproval> named = list("bank-a", "bob", APPROVER);
+
+        // Then every item names the requester, and the id stays for the four-eyes checks
+        assertThat(named).extracting(PendingApproval::requestedByName).containsOnly("Nguyen Thi Alice");
+        assertThat(named).extracting(PendingApproval::requestedBy).containsOnly("alice");
+
+        // And a host that knows no name shows the id
+        engine.identity.names = java.util.Map.of();
+        assertThat(list("bank-a", "bob", APPROVER)).extracting(PendingApproval::requestedByName).containsOnly("alice");
+    }
 }

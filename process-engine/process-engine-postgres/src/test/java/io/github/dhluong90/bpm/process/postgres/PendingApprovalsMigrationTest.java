@@ -48,10 +48,10 @@ class PendingApprovalsMigrationTest {
         definitionOfTheLastRelease(jdbc);
 
         // When V35 runs with the migrator's settings
-        int applied = new ProcessEngineSchemaMigrator(ds).migrate();
+        int applied = flyway(ds, "35").migrate().migrationsExecuted;
 
         // Then the index is valid, led by the tenant, ordered by request time and id, over pending versions only
-        assertThat(applied).isEqualTo(1);
+        assertThat(applied).as("V35 and any migration after it").isGreaterThanOrEqualTo(1);
         assertThat(index(jdbc, INDEX)).containsEntry("valid", true);
         assertThat((String) index(jdbc, INDEX).get("def")).contains("(tenant_id, requested_at, id)")
                 .contains("PENDING_APPROVAL").doesNotContain("UNIQUE");

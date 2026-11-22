@@ -96,6 +96,24 @@ export const meSau: BpmMeV1 = {
   groups: ['loans-operations'],
 };
 
+/** An operations officer of the loan service: reads incidents, retries them and proposes results (CKP-008). */
+export const meTuan: BpmMeV1 = {
+  schemaVersion: 1,
+  user: { id: 'tuan', displayName: 'Trần Minh Tuấn' },
+  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  permissions: ['processes:read', 'processes:incident:manage'],
+  roles: ['operations-officer'],
+};
+
+/** A second operations officer: proposed the pending result of the demo, so a colleague approves it (PD-126). */
+export const meLinh: BpmMeV1 = {
+  schemaVersion: 1,
+  user: { id: 'linh', displayName: 'Đặng Thùy Linh' },
+  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  permissions: ['processes:read', 'processes:incident:manage'],
+  roles: ['operations-officer'],
+};
+
 /** The example host with the Process Engine beside the Rule Engine. */
 export const metaWithProcesses: BpmMetaV1 = {
   ...metaRulesOnly,
@@ -149,7 +167,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -211,6 +229,10 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, meta: json(metaWithProcesses), me: json(meAn) };
     case 'tasks-supervisor':
       return { ...ok, meta: json(metaWithProcesses), me: json(meSau) };
+    case 'incidents-operator':
+      return { ...ok, meta: json(metaWithProcesses), me: json(meTuan) };
+    case 'incidents-proposer':
+      return { ...ok, meta: json(metaWithProcesses), me: json(meLinh) };
     case 'rules-auditor-no-log':
       // The auditor without the decision log: history and versions-only evidence (CKP-073).
       return { ...ok, me: json({ ...meHa, permissions: ['rules:read'] }) };
@@ -286,6 +308,8 @@ export function scenarioUser(scenario: Scenario): string {
   if (scenario === 'rules-auditor' || scenario === 'rules-auditor-no-log') return meHa.user.id;
   if (scenario === 'tasks-operator') return meAn.user.id;
   if (scenario === 'tasks-supervisor') return meSau.user.id;
+  if (scenario === 'incidents-operator') return meTuan.user.id;
+  if (scenario === 'incidents-proposer') return meLinh.user.id;
   return scenario === 'ready-approver' || scenario === 'rules-approver' || scenario === 'processes-approver' ? meMinh.user.id : meLan.user.id;
 }
 

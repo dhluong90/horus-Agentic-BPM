@@ -91,7 +91,7 @@ class RefusedStandardsIT {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(422);
         JsonNode body = JSON.readTree(response.body());
         assertThat(body.get("code").stringValue()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
-        assertThat(body.get("problems")).extracting(p -> p.get("element").stringValue() + ":" + p.get("stage").stringValue()
+        assertThat(body.get("unsupportedElements")).extracting(p -> p.get("element").stringValue() + ":" + p.get("stage").stringValue()
                 + ":" + p.get("line").intValue()).containsExactly("inclusiveGateway:S1:5", "sendTask:S2:6",
                 "adHocSubProcess:S3:7");
         assertThat(count("pre_definition")).isEqualTo(before);
@@ -111,7 +111,7 @@ class RefusedStandardsIT {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(422);
         JsonNode body = JSON.readTree(response.body());
         assertThat(body.get("code").stringValue()).isEqualTo("DMN_UNSUPPORTED_ELEMENT");
-        assertThat(body.get("elements")).extracting(e -> e.get("element").stringValue() + ":" + e.get("id").stringValue()
+        assertThat(body.get("unsupportedElements")).extracting(e -> e.get("element").stringValue() + ":" + e.get("elementId").stringValue()
                 + ":" + e.get("line").intValue() + ":" + e.get("stage").stringValue())
                 .containsExactly("businessKnowledgeModel:bkm-1:3:S2", "decisionService:ds-1:4:S2");
         assertThat(count("rle_version") + count("rle_rule_set")).isEqualTo(before);

@@ -1,4 +1,4 @@
-import type { ActivityEntry, InstanceActivities, InstanceTask, NodeActivity, ProcessInstance } from '../../../api/processes/schemas';
+import type { ActivityEntry, CompensationScope, InstanceActivities, InstanceTask, NodeActivity, ProcessInstance } from '../../../api/processes/schemas';
 import type { MessageKey } from '../../../i18n/en';
 
 /*
@@ -19,9 +19,10 @@ function isLive(status: string): status is LiveStatus {
 export type NodeMark =
   | { kind: 'incident'; code: string }
   | { kind: 'token'; status: LiveStatus; count: number }
+  | { kind: 'undone' }
   | { kind: 'done' };
 
-/** The marks of every step: an open incident first, then where tokens wait, then steps already completed. */
+/** The marks of every step: an open incident first, then where tokens wait, then undone steps, then completed ones. */
 export function nodeMarks(instance: ProcessInstance, activities: InstanceActivities | undefined): Map<string, NodeMark> {
   const marks = new Map<string, NodeMark>();
   for (const node of activities?.nodes ?? []) {
@@ -31,6 +32,11 @@ export function nodeMarks(instance: ProcessInstance, activities: InstanceActivit
     if (token.kind === 'SCOPE' || !isLive(token.status) || marks.get(token.nodeId)?.kind === 'incident') continue;
     const current = marks.get(token.nodeId);
     marks.set(token.nodeId, current?.kind === 'token' ? { ...current, count: current.count + 1 } : { kind: 'token', status: token.status, count: 1 });
+  }
+  for (const entry of activities?.entries ?? []) {
+    if (entry.type === 'COMPENSATION_STEP_COMPLETED' && entry.compensates !== undefined && !marks.has(entry.compensates)) {
+      marks.set(entry.compensates, { kind: 'undone' });
+    }
   }
   for (const node of activities?.nodes ?? []) {
     if (!marks.has(node.nodeId) && node.state === 'COMPLETED') marks.set(node.nodeId, { kind: 'done' });
@@ -94,7 +100,27 @@ export function isProblemEntry(entry: ActivityEntry): boolean {
   return entry.type === 'INCIDENT_RAISED' || entry.type === 'ASYNC_ATTEMPT_FAILED' || entry.type === 'ASYNC_RESULT_REFUSED';
 }
 
-const INCIDENT_CODES = ['AGENT_TIMEOUT', 'ADAPTER_TIMEOUT', 'AGENT_SCHEMA_INVALID', 'MAX_ATTEMPTS_REACHED', 'UNHANDLED_BUSINESS_ERROR', 'GUARDRAIL_EVALUATION_ERROR'] as const;
+const UNDO_ENTRY_TYPES = ['COMPENSATION_STARTED', 'COMPENSATION_STEP_SCHEDULED', 'COMPENSATION_STEP_COMPLETED', 'COMPENSATION_STEP_FAILED', 'COMPENSATION_STEP_MANUAL', 'COMPENSATED'] as const;
+export type UndoEntryType = (typeof UNDO_ENTRY_TYPES)[number];
+
+/** An entry of an undo, as the engine marks it with `kind`; a type this cockpit does not know falls back to its plain entry words. */
+export function undoEntryType(entry: ActivityEntry): UndoEntryType | undefined {
+  return entry.kind === 'COMPENSATION' ? UNDO_ENTRY_TYPES.find((type) => type === entry.type) : undefined;
+}
+
+/** An id or handler name in words: `closeAccount` and `loans.close-account` both read "Close account". Display only. */
+export function wordsOf(id: string): string {
+  const last = id.slice(id.lastIndexOf('.') + 1);
+  const words = last.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** The scope a state line speaks of: the engine's state, never worked out from the entries. */
+export function scopeState(scope: CompensationScope): 'UNDONE' | 'NOT_FULLY_UNDONE' | 'IN_PROGRESS' {
+  return scope.state === 'UNDONE' || scope.state === 'NOT_FULLY_UNDONE' ? scope.state : 'IN_PROGRESS';
+}
+
+const INCIDENT_CODES = ['AGENT_TIMEOUT', 'ADAPTER_TIMEOUT', 'AGENT_SCHEMA_INVALID', 'MAX_ATTEMPTS_REACHED', 'UNHANDLED_BUSINESS_ERROR', 'GUARDRAIL_EVALUATION_ERROR', 'COMPENSATION_FAILED'] as const;
 type IncidentCode = (typeof INCIDENT_CODES)[number];
 
 /** An incident's code in words; the code itself stays one click away, as for every error (styleguide 9). */

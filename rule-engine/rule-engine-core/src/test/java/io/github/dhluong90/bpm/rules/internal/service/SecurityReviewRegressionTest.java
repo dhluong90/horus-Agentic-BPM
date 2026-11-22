@@ -41,7 +41,7 @@ class SecurityReviewRegressionTest {
     /** PRICING masks nationalId, so the engine needs a key; without one it fails closed (RLE-012). */
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults().withRequireContentHash(false), MaskingPolicy.withKey(MaskingKey.of(new byte[32]))),
+                    stores, stores, EngineSettings.defaults(), MaskingPolicy.withKey(MaskingKey.of(new byte[32]))),
             stores, stores, stores);
 
     /** A table that multiplies a money input by a decimal input, the shape the review probed. */
@@ -64,7 +64,7 @@ class SecurityReviewRegressionTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml.getBytes(StandardCharsets.UTF_8)));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve(name, 1, reviewed(name, 1, null, 1L, null));
     }
 
     // Finding 1 (blocking): permissions are checked in the services, not only over REST.
@@ -75,7 +75,7 @@ class SecurityReviewRegressionTest {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "teller", EVALUATE_ONLY);
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)))
                 .isInstanceOf(PermissionDeniedException.class)
                 .extracting(e -> ((PermissionDeniedException) e).code()).isEqualTo("PERMISSION_DENIED");
         caller.become("bank-a", "bob");
@@ -153,7 +153,7 @@ class SecurityReviewRegressionTest {
         MaskingKey key = MaskingKey.of(new byte[32]);
         RuleEngines lenient = RuleEngines.create(new EngineContext(caller, caller,
                 Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC), stores, stores,
-                EngineSettings.defaults().withRequireContentHash(false).withRejectUndeclaredInputs(false), MaskingPolicy.withKey(key)),
+                EngineSettings.defaults().withRejectUndeclaredInputs(false), MaskingPolicy.withKey(key)),
                 stores, stores, stores);
         publish(PRICING, "pricing");
         caller.become("bank-a", "teller", EVALUATE_ONLY);
@@ -197,11 +197,11 @@ class SecurityReviewRegressionTest {
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "alice");
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThat(engines.versionService().find("card-fee", 1, false).orElseThrow().createdBy()).isEqualTo("alice");
         caller.become("bank-a", "carol");
-        assertThat(engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)).status())
+        assertThat(engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)).status())
                 .isEqualTo(VersionStatus.PUBLISHED);
     }
 
@@ -212,10 +212,10 @@ class SecurityReviewRegressionTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, new WriteOptions("k-approve", 1L, null));
+        engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, "k-approve", 1L, null));
 
         caller.become("bank-a", "alice");
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions("k-approve", 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, "k-approve", 1L, null)))
                 .isInstanceOf(IdempotencyKeyReuseException.class);
 
         caller.become("bank-a", "teller-1", EVALUATE_ONLY);
@@ -263,5 +263,12 @@ class SecurityReviewRegressionTest {
                 .isInstanceOf(ValidationFailedException.class);
         assertThat(stores.versions).isEmpty();
         assertThat(stores.outbox).isEmpty();
+    }
+
+    /** The options of an approval that names the content the approver reviewed, by its canonical hash (RLE-084, #411). */
+    private WriteOptions reviewed(String ruleSet, int version, String key, Long lock, String comment) {
+        String hash = engines.versionService().find(ruleSet, version, false)
+                .map(io.github.dhluong90.bpm.rules.api.RuleSetVersion::canonicalHash).orElse(null);
+        return new WriteOptions(key, lock, comment, null, hash, java.util.List.of());
     }
 }

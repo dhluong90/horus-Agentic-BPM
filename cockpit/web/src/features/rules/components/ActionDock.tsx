@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from 'react';
-import { readPendingWarnings, type AcknowledgedWarning, type RuleSetVersion } from '../../../api/rules/schemas';
+import { isUnclassified, readPendingWarnings, type AcknowledgedWarning, type DiscardedVersion, type RuleSetVersion } from '../../../api/rules/schemas';
+import { DiscardDraft } from './DiscardDraft';
 import { useI18n } from '../../../i18n/I18nProvider';
 import type { MessageKey } from '../../../i18n/en';
 import { useRulesSession } from '../api/rulesContext';
@@ -58,7 +59,7 @@ function EditButton({ version, onEdit }: { version: RuleSetVersion; onEdit: () =
  * Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen: where the
  * view has its own focal action (the Simulate view's Run), Request publish is drawn secondary.
  */
-export function HeaderActions({ version, onEdit, newDraft, requestPublish, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action; demoteRequest?: boolean }) {
+export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDiscarded, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action; onDiscarded: (discarded: DiscardedVersion) => void; demoteRequest?: boolean }) {
   const { t } = useI18n();
   const session = useRulesSession();
   // Every edit is of a stored draft: it needs rules:author, and the host may keep changes in its release pipeline.
@@ -68,6 +69,7 @@ export function HeaderActions({ version, onEdit, newDraft, requestPublish, demot
     const canRequest = version.allowedActions.includes('request-publish');
     return (
       <>
+        <DiscardDraft version={version} onDiscarded={onDiscarded} />
         {edit}
         {canRequest ? (
           <button type="button" className={demoteRequest ? 'btn' : 'btn btn--primary'} disabled={requestPublish.isPending} aria-busy={requestPublish.isPending} onClick={() => { requestPublish.start(); }}>
@@ -144,10 +146,11 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   // marks requiresAcknowledgement (RLE-053). The cockpit reads the engine's answer and never works it out itself.
   const refusal = refusedSet(approve.error);
   const refused = refusal !== undefined;
-  const toAccept: AcknowledgedWarning[] = refusal ?? version.warnings
+  const personalData = version.warnings.filter((w) => !isUnclassified(w));
+  const toAccept: AcknowledgedWarning[] = refusal ?? personalData
     .filter((w) => w.requiresAcknowledgement)
     .map(({ code, input }) => ({ code, input }));
-  const shown = refusal !== undefined && refusal.length > 0 ? refusal : version.warnings;
+  const shown = refusal !== undefined && refusal.length > 0 ? refusal : personalData;
   const accepted = tick.on && (!refused || tick.refusal === approve.error);
   const setAccepted = (on: boolean) => { setTick({ on, refusal: refused ? approve.error : undefined }); };
   const textId = useId();

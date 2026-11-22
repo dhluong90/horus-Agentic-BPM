@@ -38,7 +38,7 @@ describe('CKP-024 process approval with the graph diff', () => {
     expect(within(diagram).getByRole('img', { name: 'Approve high-risk customer, Person task, Changed' })).toBeInTheDocument();
 
     await waitFor(() => { expect(approve()).toBeEnabled(); });
-    expect(dock()).toHaveTextContent(`Approves content ${KYC_V3_HASH.slice(0, 12)}`);
+    expect(dock()).not.toHaveTextContent(KYC_V3_HASH.slice(0, 12));
     await userEvent.type(within(dock()).getByRole('textbox', { name: 'Comment' }), 'Reviewed with the KYC committee');
     await userEvent.click(approve());
 
@@ -70,10 +70,11 @@ describe('CKP-024 process approval with the graph diff', () => {
     resetProcessEngine({ truncatedDiff: true });
     setScenario('processes-approver');
     open('#/processes/kyc-onboarding/3');
-    expect(await screen.findByText('Too large to approve here')).toBeInTheDocument();
-    expect(screen.getByText('The change list stops at 1,000 values, so it is not the whole change.')).toBeInTheDocument();
+    expect(await screen.findByText('The change list stops at 1,000 values, so it is not the whole change.')).toBeInTheDocument();
     expect(approve()).toBeDisabled();
     expect(approve()).toHaveAccessibleDescription('Too large to approve here: the change list is cut off.');
+    // The reason is said once, beside Approve (#443); the list says only what it holds.
+    expect(screen.getAllByText(/Too large to approve here/)).toHaveLength(1);
     expect(dock()).not.toHaveTextContent('Approves content');
   });
 

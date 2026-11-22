@@ -212,4 +212,20 @@ class PendingApprovalsTest {
         assertThat(item.allowedActions()).containsExactly("reject");
         assertThat(item.deniedActions()).containsEntry("approve", "AUTHOR_UNKNOWN");
     }
+
+    @Test
+    void RLE_196_each_item_carries_the_requester_display_name_and_falls_back_to_the_id() {
+        // Given the host's directory names lan "Tran Thi Lan" and knows no name for ana
+        caller.names = java.util.Map.of("lan", "Tran Thi Lan");
+        caller.become("bank-a", "bob", APPROVER);
+
+        // When bob lists the queue
+        Page<PendingApproval> page = versions.pendingApprovals(PageRequest.first());
+
+        // Then lan's requests show her name, ana's shows the id, and requestedBy keeps the id for the checks
+        assertThat(page.items()).extracting(PendingApproval::requestedBy, PendingApproval::requestedByName)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("lan", "Tran Thi Lan"),
+                        org.assertj.core.groups.Tuple.tuple("ana", "ana"),
+                        org.assertj.core.groups.Tuple.tuple("lan", "Tran Thi Lan"));
+    }
 }

@@ -68,6 +68,35 @@ function errorKey(host: HostError): MessageKey {
 }
 
 /**
+ * An error alert (styleguide section 9): one plain sentence on the soft red ground with a 3 px left edge. When the
+ * engine answered, the error code and the reference, which support needs, sit behind Details, each with Copy.
+ */
+export function ErrorAlert({ text, error, action, className }: { text: string; error?: unknown; action?: ReactNode; className?: string | undefined }) {
+  const { t } = useI18n();
+  const host = error === undefined || error === null ? undefined : toHostError(error);
+  const code = host?.kind === 'problem' ? host.code : undefined;
+  const reference = host !== undefined && (host.kind === 'problem' || host.kind === 'unexpected-response') ? host.correlationId : undefined;
+  return (
+    <div className={className !== undefined ? `alert alert--error ${className}` : 'alert alert--error'} role="alert">
+      <span className="alert__icon" aria-hidden="true">✕</span>
+      <div className="alert__body">
+        <p>{text}</p>
+        {code !== undefined || reference !== undefined ? (
+          <details className="alert__details">
+            <summary>{t('area.error.details')} <span aria-hidden="true">▾</span></summary>
+            <dl>
+              {code !== undefined ? <div><dt>{t('error.code')}</dt><dd className="mono">{code} <CopyButton value={code} iconOnly label={t('error.copyCode')} /></dd></div> : null}
+              {reference !== undefined ? <div><dt>{t('error.correlationId')}</dt><dd className="mono">{reference} <CopyButton value={reference} iconOnly /></dd></div> : null}
+            </dl>
+          </details>
+        ) : null}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+/**
  * A failed engine call inside a card: one plain sentence and Try again. The error code and reference, which
  * support needs, sit behind Details with a Copy button.
  */
@@ -77,26 +106,11 @@ export function AreaError({ error, onRetry }: { error: unknown; onRetry: () => v
   const key = errorKey(host);
   // An engine older than this list is a state, not a failure: say so plainly; trying again cannot help.
   if (key === 'area.error.notOffered') return <EmptyState text={t(key)} />;
-  const code = host.kind === 'problem' ? host.code : undefined;
-  const reference = host.kind === 'problem' || host.kind === 'unexpected-response' ? host.correlationId : undefined;
   return (
-    <div className="alert alert--error" role="alert">
-      <span className="alert__icon" aria-hidden="true">✕</span>
-      <div className="alert__body">
-        <p>{t(key)}</p>
-        {code !== undefined || reference !== undefined ? (
-          <details className="alert__details">
-            <summary>{t('area.error.details')}</summary>
-            <dl>
-              {code !== undefined ? <div><dt>{t('error.code')}</dt><dd className="mono">{code}</dd></div> : null}
-              {reference !== undefined ? <div><dt>{t('error.correlationId')}</dt><dd className="mono">{reference} <CopyButton value={reference} /></dd></div> : null}
-            </dl>
-          </details>
-        ) : null}
-      </div>
+    <ErrorAlert text={t(key)} error={error} action={
       <button type="button" className="btn btn--quiet btn--small hit" onClick={host.kind === 'signed-out' ? () => { window.location.reload(); } : onRetry}>
         {host.kind === 'signed-out' ? t('action.signIn') : t('action.retry')}
       </button>
-    </div>
+    } />
   );
 }

@@ -88,6 +88,16 @@ In Java: `engine.evaluate(DecisionRequest.of("card-fee", input).withClock(at))`,
 
 At clock `2027-01-15T18:30:00Z`, it is 01:30 on 16 January in Ho Chi Minh City. A `same-day-cutoff` rule `txDate == today()` with `timeZone: Asia/Ho_Chi_Minh` matches `txDate = 2027-01-16`. The same rule without a time zone does not match, because in UTC it is still 15 January.
 
+## Change a rule table in a spreadsheet
+
+A pricing manager can change a table in Excel without seeing YAML. The engine writes and reads the file; the cockpit screen for it follows (#39).
+
+1. Export: `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=csv` saves `card-fee-v1.csv`. The first line is `Rule,tier,balance,fee,Description`; each following line is one rule, in table order.
+2. Edit the cells. Write a list as `GOLD, PLATINUM`, a comparison as `>= 50000000 VND`, a range as `18 to 65` or `[18..65)`, "not" as `!= VN`, and `-` for any value. Write an amount as the number, a space and the currency, without separators: `50000000 VND`. Write a date as `2026-11-20`. Leave the first row and the column names as they are: a file cannot add, remove, rename or reorder an input or output.
+3. Save as CSV UTF-8 (a semicolon separator is read as well) and import it as the next draft: `POST /api/bpm/rules/v1/rule-sets/card-fee/versions?base=1` with `Content-Type: text/csv` and an `Idempotency-Key`. A blank `Rule` cell gets the next free id.
+
+The rows are checked as an imported document is, so the draft then follows the normal request and approval path. A cell the engine cannot read is refused with its rule and column and nothing is saved, for example `422 VALIDATION_FAILED` with `ruleId: R4`, `column: balance`, `code: CSV_CELL_NO_CURRENCY`. The engine never reads a damaged cell as another value: `5E+07`, `50,000,000`, a date written `20/11/2026` and text in a number column are all refused, and no message repeats the cell, so a value of a masked input never appears in an error. A table with a grouped condition, a list column or a calculated cell has no spreadsheet form (`CSV_NO_TABLE_FORM`).
+
 ## Roll back
 
 History is never rewritten, so a rollback is a new version with old content.

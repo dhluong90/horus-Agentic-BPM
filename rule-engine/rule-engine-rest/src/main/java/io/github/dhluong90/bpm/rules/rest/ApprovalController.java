@@ -56,6 +56,8 @@ public class ApprovalController {
         node.put("lockVersion", a.lockVersion());
         node.put("requestedBy", a.requestedBy());
         node.put("requestedAt", a.requestedAt().toString());
+        // #442: the requester as the screen shows them; the id when the host knows no name
+        node.put("requestedByName", a.requestedByName());
         ArrayNode actions = node.putArray("allowedActions");
         a.allowedActions().forEach(actions::add);
         ObjectNode denied = node.putObject("deniedActions");

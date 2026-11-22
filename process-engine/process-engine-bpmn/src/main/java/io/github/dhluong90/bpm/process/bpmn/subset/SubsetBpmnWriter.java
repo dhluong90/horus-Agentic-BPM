@@ -11,7 +11,10 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
+import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
@@ -150,6 +153,13 @@ public final class SubsetBpmnWriter {
                                 : l.to() + "|" + l.after()).collect(java.util.stream.Collectors.joining(";"))))
                         .append(e.releaseClaim() ? "" : " horus:onClaimed=\"keep\""));
             }
+            case CallActivity c -> {
+                tag = "bpmn:callActivity";
+                attributes.append(optional("calledElement", c.calledElement()));
+                c.extensions().first(CalledVersion.class).ifPresent(v -> attributes.append(
+                        optional("horus:calledVersion", String.valueOf(v.version()))));
+                inputs = c.extensions().all(InputMapping.class);
+            }
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";
                 attributes.append(optional("default", g.defaultFlow()));
@@ -164,16 +174,21 @@ public final class SubsetBpmnWriter {
                 "horus:compensate", c.handler())));
         node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
                 f.action())));
-        if (inputs.isEmpty() && agent == null && node.incoming().isEmpty() && node.outgoing().isEmpty()) {
+        List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
+        if (inputs.isEmpty() && outputs.isEmpty() && agent == null && node.incoming().isEmpty()
+                && node.outgoing().isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;
         }
         xml.line(2, "<" + tag + attributes + ">");
-        if (!inputs.isEmpty() || agent != null) {
+        if (!inputs.isEmpty() || !outputs.isEmpty() || agent != null) {
             xml.line(3, "<bpmn:extensionElements>");
             for (InputMapping input : inputs) {
                 xml.line(4, "<horus:input name=" + attr(input.name()) + " value=" + attr(input.value())
                         + (input.mask() ? " mask=\"true\"" : "") + "/>");
+            }
+            for (OutputMapping output : outputs) {
+                xml.line(4, "<horus:output name=" + attr(output.name()) + " from=" + attr(output.from()) + "/>");
             }
             if (agent != null && agent.outputSchema() != null) {
                 xml.line(4, "<horus:outputSchema>" + text(agent.outputSchema()) + "</horus:outputSchema>");

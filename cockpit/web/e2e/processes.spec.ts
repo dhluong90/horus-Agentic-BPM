@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { meHoa, metaWithProcesses } from '../src/mocks/fixtures';
-import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from '../src/mocks/caseDemo';
+import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INSTANCE_ID, UNDONE_INSTANCE_ID } from '../src/mocks/caseDemo';
 import { INSTANCE_ID, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_TASK_ID } from '../src/mocks/processDemo';
 import { createFakeProcessEngine, type ProcessSeed } from '../src/mocks/processEngine';
 import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
@@ -82,6 +82,10 @@ const T = {
   notFound: { en: 'This service has no case with this reference.', vi: 'Dịch vụ này không có hồ sơ với mã tham chiếu này.' },
   blocked: { en: 'You cannot work on tasks.', vi: 'Bạn không thể xử lý công việc.' },
   noActivityAction: { en: 'Opens once step activity is reported.', vi: 'Mở được khi dịch vụ báo hoạt động.' },
+  undoFinished: { en: 'Undo finished', vi: 'Kết thúc hoàn tác' },
+  undoLast: { en: 'Undo of Credit decision: Release credit line', vi: 'Hoàn tác bước Quyết định tín dụng: Release credit line' },
+  undoFailed: { en: 'Undo failed: Release credit line', vi: 'Hoàn tác lỗi: Release credit line' },
+  openIncident: { en: 'Open the incident', vi: 'Mở sự cố' },
   pick: { en: 'Select a step to see what happened there.', vi: 'Chọn một bước để xem điều gì đã diễn ra.' },
 } as const;
 
@@ -178,6 +182,36 @@ const SCREENS: readonly Screen[] = [
     title: caseTitle('APP-1042'),
     prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
     focal: (page) => page.locator('.timeline tbody tr').first(),
+  },
+  {
+    name: 'instance-undone-timeline',
+    hash: `#/instances/${UNDONE_INSTANCE_ID}`,
+    title: caseTitle('APP-1047'),
+    prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
+    focal: (page, locale) => page.locator('.timeline tbody tr', { hasText: T.undoFinished[locale] }),
+  },
+  {
+    name: 'instance-undo-stuck-timeline',
+    hash: `#/instances/${STUCK_UNDO_INSTANCE_ID}`,
+    title: caseTitle('APP-1049'),
+    prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
+    focal: (page, locale) => page.getByRole('link', { name: T.openIncident[locale] }),
+  },
+  {
+    name: 'undo-opens-its-incident',
+    hash: `#/instances/${STUCK_UNDO_INSTANCE_ID}`,
+    title: caseTitle('APP-1049'),
+    prepare: async (page, locale) => {
+      await page.getByRole('tab', { name: T.timeline[locale] }).click();
+      await page.getByRole('link', { name: T.openIncident[locale] }).click();
+    },
+    focal: (page) => page.locator('.incidents__inspector'),
+  },
+  {
+    name: 'instance-undone-diagram',
+    hash: `#/instances/${UNDONE_INSTANCE_ID}`,
+    title: caseTitle('APP-1047'),
+    focal: (page, locale) => page.getByRole('button', { name: new RegExp(locale === 'en' ? 'Book loan.*Undone' : 'Ghi sổ khoản vay.*Đã hoàn tác') }),
   },
   {
     name: 'instance-incident',
@@ -292,7 +326,7 @@ for (const screen of SCREENS) {
           await expect(focal).toBeVisible();
           expect(await bottomOf(focal)).toBeLessThanOrEqual(viewport.height);
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-          if (screen.name.startsWith('instance-') && screen.name !== 'instance-not-found' && screen.name !== 'instance-timeline') await expectReadableCase(page);
+          if (screen.name.startsWith('instance-') && screen.name !== 'instance-not-found' && screen.name !== 'instance-timeline' && !screen.name.endsWith('-timeline')) await expectReadableCase(page);
           await page.screenshot({ path: `e2e/screenshots/${file}`, fullPage: false });
         });
       }

@@ -1,0 +1,44 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant U as Operator (processes:cancel)
+  end
+  box rgb(224,242,241) Host service
+    participant S as ProcessServices (parent step, child start, CALL_RESULT job, cancel)
+    participant J as Job poller (every replica)
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_instance, pre_token, pre_timer, pre_history
+  end
+  Note over S,DB: Parent P1 reaches callProcess step kyc
+  rect rgb(255,248,225)
+    Note over S,DB: TX 1, sync: the parent's step transaction (parent row locked)
+    S->>DB: token WAITING_CHILD under a new attempt id, save the parent's rows
+    S->>DB: look up kyc-check in the parent's tenant (pinned version, or effective now)
+    alt no version, or depth above calls.max-depth
+      S->>DB: incident NO_EFFECTIVE_VERSION or CALL_DEPTH_EXCEEDED, no child
+    else
+      S->>DB: insert child C1 (parent_token_id, call_attempt, call_depth), unique per token and attempt
+      S->>DB: CHILD_STARTED in the parent's history, run C1's Start as engine work, COMMIT
+    end
+  end
+  Note over S,DB: C1 ends in its own transaction, whenever it does
+  rect rgb(255,248,225)
+    Note over S,DB: TX 2, sync: the child's end transaction never locks the parent row
+    S->>DB: C1 COMPLETED, FAILED or CANCELLED, and one CALL_RESULT job for P1, DUE now, COMMIT
+  end
+  J->>DB: claim the job FOR UPDATE SKIP LOCKED
+  rect rgb(255,248,225)
+    Note over J,DB: TX 3, sync: lock the parent row, check the claim and that the token still waits on this child
+    J->>DB: read C1's declared outputs, deliver ChildEnded to the step
+    alt completed
+      J->>DB: set the mapped variables, push the undo entry, token moves on, CHILD_COMPLETED, COMMIT
+    else failed or cancelled
+      J->>DB: incident CHILD_FAILED or CHILD_CANCELLED (or compensation with onFailure compensate), COMMIT
+    end
+  end
+  U->>S: cancel P1
+  rect rgb(255,248,225)
+    Note over S,DB: TX 4, sync: lock order is parent, then child
+    S->>DB: lock and cancel P1, then lock and cancel each active child with the reason parent cancelled, COMMIT
+  end

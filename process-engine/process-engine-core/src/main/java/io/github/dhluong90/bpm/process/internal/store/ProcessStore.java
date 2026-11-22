@@ -262,6 +262,18 @@ public interface ProcessStore {
     Optional<StoredDefinition> definitionVersion(String tenant, String key, int version);
 
     /**
+     * The {@code ACTIVE} definition versions of every tenant, at most {@code limit}, by tenant, key and version, for the
+     * start-up summary of unclassified fields (PD-146, #438). Engine-internal, across tenants on purpose: read once at
+     * start-up outside any request, never exposed to a caller.
+     *
+     * @param limit the most versions read
+     * @return the versions
+     */
+    default List<StoredDefinition> activeDefinitions(int limit) {
+        return List.of();
+    }
+
+    /**
      * One row per key, ordered by key, after {@code afterKey} (exclusive) when it is not null.
      *
      * @param now the time that decides the effective version
@@ -334,6 +346,43 @@ public interface ProcessStore {
     Optional<InstanceRow> findInstance(String tenant, String id);
 
     Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey);
+
+    // ---- called child processes (#92, V42, V43) ------------------------------------------------------------------
+
+    /**
+     * The link of a called child to the parent token it was started for.
+     *
+     * @param parentInstanceId the parent instance
+     * @param parentTokenId the parent's token waiting on the call
+     * @param callAttempt 0 for the first child of the token, one more for each child a retry started
+     * @param callDepth 1 for a child of an instance nobody called, one more for each level below
+     */
+    record ParentLink(String parentInstanceId, String parentTokenId, int callAttempt, int callDepth) {
+    }
+
+    /** @return the link of the instance to its parent, empty when nobody called it */
+    default Optional<ParentLink> parentLink(String tenant, String instanceId) {
+        return Optional.empty();
+    }
+
+    /** @return how many children have been started for the parent token, which is the next call attempt */
+    default int callAttempts(String tenant, String parentTokenId) {
+        return 0;
+    }
+
+    /**
+     * Links a new child to the parent token it was started for. The unique index on the tenant, the token and the
+     * attempt refuses a second child for the same attempt, whichever replica starts it.
+     */
+    default void linkChild(String tenant, String childId, String parentInstanceId, String parentTokenId,
+            int callAttempt, int callDepth) {
+        throw new UnsupportedOperationException("called processes need a store that implements linkChild");
+    }
+
+    /** @return up to {@code limit} children of the parent that are still {@code RUNNING} or {@code COMPENSATING}, in id order */
+    default List<String> activeChildren(String tenant, String parentInstanceId, int limit) {
+        return List.of();
+    }
 
     /**
      * Instances newest first ({@code started_at DESC, id DESC}), strictly after the keyset position when

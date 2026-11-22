@@ -189,7 +189,7 @@ const STATES: readonly State[] = [
     scenario: 'rules-author',
     seed: draftSeed,
     hash: '#/rules/card-fee/2/history',
-    ready: async (page, locale) => { await expect(page.getByText(WORDS[locale]['details.hash']).first()).toBeVisible(); },
+    ready: async (page) => { await expect(page.locator('.rsh__hash').first()).toBeAttached(); },
   },
 ];
 

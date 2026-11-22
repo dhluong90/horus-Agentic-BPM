@@ -112,13 +112,14 @@ public class ProblemDetails {
             if (unsupported.namespace() != null) {
                 body.put("namespace", unsupported.namespace()).put("line", unsupported.line());
             } else {
-                ArrayNode elements = body.putArray("elements");
+                ArrayNode elements = body.putArray("unsupportedElements");
                 for (var item : unsupported.elements()) {
                     ObjectNode node = elements.addObject();
                     node.put("element", item.element());
-                    node.set("id", EngineValues.value(item.id()));
+                    node.set("elementId", EngineValues.value(item.id()));
                     node.put("line", item.line());
                     node.put("stage", item.stage());
+                    node.put("message", item.message());
                 }
                 if (unsupported.truncated()) {
                     body.put("violationsTruncated", true);

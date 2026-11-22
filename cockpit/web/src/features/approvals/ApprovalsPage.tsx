@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { usePersonName } from '../../app/people';
 import { formatRoute } from '../../app/route';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
+import { useKeepInView } from '../../components/useKeepInView';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { useRulesSession } from '../rules/api/rulesContext';
@@ -100,6 +101,7 @@ function QueueBody({ queue, engines, items, view, current, onSelect }: {
   const { t, locale } = useI18n();
   const personName = usePersonName();
   const { state } = queue;
+  const selectedRow = useKeepInView<HTMLLIElement>(current !== undefined ? itemKey(current) : undefined);
   if (state.status === 'loading') return <article className="card"><LoadingRows rows={3} /></article>;
   if (state.status === 'error') return <article className="card"><AreaError error={state.error} onRetry={queue.retry} /></article>;
   if (state.status === 'forbidden') {
@@ -124,7 +126,7 @@ function QueueBody({ queue, engines, items, view, current, onSelect }: {
           const selected = current !== undefined && itemKey(current) === itemKey(item);
           const who = item.mine ? t('approvals.yourRequest') : personName(item.requestedBy, item.requesterName);
           return (
-            <li key={itemKey(item)}>
+            <li key={itemKey(item)} ref={selected ? selectedRow : undefined}>
               <button type="button" className={selected ? 'queue-card is-selected' : 'queue-card'} aria-pressed={selected} onClick={() => { onSelect(item); }}>
                 <span className="queue-card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</span>
                 <span className="tag tag--kind">{item.engine === 'rules' ? t('approvals.kind.rules') : t('approvals.kind.processes')}</span>

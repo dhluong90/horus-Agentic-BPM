@@ -9,12 +9,15 @@ import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { DecisionPage } from '../features/decisions/DecisionPage';
 import { DecisionLogLocked, DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
+import { DisplayNamesProvider } from '../features/processes/api/displayNames';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
 import { TasksPage } from '../features/tasks/TasksPage';
+import { IncidentsPage } from '../features/incidents/IncidentsPage';
+import { resolveMode } from '../features/incidents/model/incidents';
 import { RulesProvider } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
@@ -50,22 +53,26 @@ export interface FrameProps {
   fetchImpl?: typeof fetch | undefined;
   /** The registry's `refresh.inboxSeconds`: how often the task queue is read again (30 by default). */
   inboxSeconds?: number | undefined;
+  /** The registry's `refresh.incidentsSeconds`: how often the incident queue is read again (60 by default). */
+  incidentsSeconds?: number | undefined;
 }
 
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
-export function AppFrame({ host, meta, me, fetchImpl, inboxSeconds = 30 }: FrameProps) {
+export function AppFrame({ host, meta, me, fetchImpl, inboxSeconds = 30, incidentsSeconds = 60 }: FrameProps) {
   return (
     <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
-          <Frame meta={meta} me={me} inboxSeconds={inboxSeconds} />
+          <DisplayNamesProvider>
+            <Frame meta={meta} me={me} refresh={{ inboxSeconds, incidentsSeconds }} />
+          </DisplayNamesProvider>
         </PeopleProvider>
       </ProcessesProvider>
     </RulesProvider>
   );
 }
 
-function Frame({ meta, me, inboxSeconds }: { meta: BpmMetaV1; me: BpmMeV1; inboxSeconds: number }) {
+function Frame({ meta, me, refresh }: { meta: BpmMetaV1; me: BpmMeV1; refresh: Refresh }) {
   const areas = availableAreas(meta, me);
   const [route] = useRoute(areaRoute(landingArea(meta, areas)));
   const area = areaOf(route);
@@ -82,13 +89,16 @@ function Frame({ meta, me, inboxSeconds }: { meta: BpmMetaV1; me: BpmMeV1; inbox
     <div className="frame">
       <NavRail areas={areas} current={area} reviewCount={review.count} reviewMore={review.more} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} inboxSeconds={inboxSeconds} /> : route.name === 'decision' ? <DecisionLogLocked titleId="decision-refused-title" message="dlog.link.noPermission" /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} refresh={refresh} /> : route.name === 'decision' ? <DecisionLogLocked titleId="decision-refused-title" message="dlog.link.noPermission" /> : <NotAvailable />}
       </main>
     </div>
   );
 }
 
-function AreaContent({ route, meta, me, areas, engines, inboxSeconds }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[]; inboxSeconds: number }) {
+/** How often the queues are read again, from the registry's `refresh` (cockpit DESIGN section 8). */
+interface Refresh { inboxSeconds: number; incidentsSeconds: number }
+
+function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[]; refresh: Refresh }) {
   const pageLimit = meta.limits.maxPageSize;
   switch (route.name) {
     case 'home':
@@ -109,9 +119,12 @@ function AreaContent({ route, meta, me, areas, engines, inboxSeconds }: { route:
     case 'instance':
       return <InstancePage instanceId={route.instanceId} />;
     case 'tasks':
-      return <TasksPage view={route.view} taskId={route.taskId} refreshSeconds={inboxSeconds} />;
+      return <TasksPage view={route.view} taskId={route.taskId} overdue={route.overdue === true} refreshSeconds={refresh.inboxSeconds} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
+    case 'incidents':
+      return <IncidentsPage view={route.view} incidentId={route.incidentId} refreshSeconds={refresh.incidentsSeconds}
+        mode={resolveMode(meta.modules.find((module) => module.module === 'processes')?.settings)} />;
   }
 }
 

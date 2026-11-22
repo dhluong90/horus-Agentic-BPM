@@ -17,6 +17,7 @@ public final class CoreBehaviors implements BehaviorModule {
                 .register(new ServiceTaskBehavior())
                 .register(new BusinessRuleTaskBehavior())
                 .register(new UserTaskBehavior())
+                .register(new CallActivityBehavior())
                 .register(new ExclusiveGatewayBehavior())
                 .register(new ParallelGatewayBehavior())
                 .compileStep(new ConditionCompileStep())

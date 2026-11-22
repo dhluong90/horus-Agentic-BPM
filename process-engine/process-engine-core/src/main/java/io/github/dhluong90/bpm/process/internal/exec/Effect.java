@@ -145,15 +145,30 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
     }
 
     /**
-     * Start a called process.
+     * Start a called process (#92): the child runs in the parent's tenant on the pinned version, or on the version
+     * effective when the shell applies this effect.
      *
      * @param calledElement definition key
      * @param tokenId call activity token
-     * @param variables input variables
+     * @param variables input variables, by the child's variable name; nothing else is passed
+     * @param version the pinned version ({@code horus:calledVersion}), or null for the effective one
+     * @param attemptId the token's call attempt, the id the child's end is matched to
      */
-    record StartChildInstance(String calledElement, String tokenId, Map<String, Object> variables) implements Effect {
+    record StartChildInstance(String calledElement, String tokenId, Map<String, Object> variables, Integer version,
+            String attemptId) implements Effect {
         public StartChildInstance {
             variables = variables == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+        }
+
+        /**
+         * A start on the effective version with no attempt id.
+         *
+         * @param calledElement definition key
+         * @param tokenId call activity token
+         * @param variables input variables
+         */
+        public StartChildInstance(String calledElement, String tokenId, Map<String, Object> variables) {
+            this(calledElement, tokenId, variables, null, null);
         }
     }
 
