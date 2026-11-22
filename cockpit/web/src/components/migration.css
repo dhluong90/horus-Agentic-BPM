@@ -1,0 +1,51 @@
+/*
+ * Migration screens (CKP-027, CKP-056 to CKP-058): the focal card with the engine's answer in words, the two diagrams
+ * side by side, the step list, the cases not moved and the docked next step. Colour marks state only: indigo for a step
+ * carried over, amber for one that needs a decision, and no red for a case that did not move.
+ */
+.card--outcome { display: flex; flex-direction: column; gap: 6px; padding: var(--space-4) var(--card-pad); }
+.outcome__lead { margin: 0; font: var(--type-h1); color: var(--ink); }
+.outcome__line, .outcome__meta { margin: 0; font: var(--type-body); color: var(--ink-2); }
+.outcome__meta { font: var(--type-caption); color: var(--muted); }
+.outcome__list { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0; padding: 0; list-style: none; font: var(--type-body); color: var(--ink-2); }
+.outcome__item > span[aria-hidden] { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 2px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--ink-2); font: 700 12px/1 var(--font-ui); }
+.outcome__item--warn > span[aria-hidden] { background: var(--warn-soft); color: var(--warn); }
+.outcome__bar { width: 100%; max-width: 560px; height: 8px; appearance: none; border: 0; border-radius: var(--radius-pill); overflow: hidden; background: var(--surface-3); }
+.outcome__bar::-webkit-progress-bar { background: var(--surface-3); border-radius: var(--radius-pill); }
+.outcome__bar::-webkit-progress-value { background: var(--primary-fill); border-radius: var(--radius-pill); }
+.outcome__bar::-moz-progress-bar { background: var(--primary-fill); border-radius: var(--radius-pill); }
+
+.mdiagrams { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.mdiagrams__pane { min-width: 0; }
+.mdiagrams__side { font: var(--type-label); font-weight: 600; color: var(--ink); }
+.mdiagrams__legend { margin: 0 0 8px; }
+.mdiagrams__none { margin: 0; padding: var(--space-4) 0; color: var(--ink-2); font: var(--type-body); }
+.mdiagrams .dg__toolbar { justify-content: space-between; }
+@media (max-width: 1180px) { .mdiagrams { grid-template-columns: minmax(0, 1fr); } }
+
+.msteps { display: flex; flex-direction: column; gap: var(--space-3); }
+.msteps__table { width: 100%; }
+.msteps__table tr.is-selected { background: var(--select); box-shadow: inset 3px 0 0 var(--accent); }
+.msteps__pick { padding: 0; border: 0; background: none; color: var(--accent); font: var(--type-body); font-weight: 600; text-align: left; cursor: pointer; }
+.msteps__pick:hover { text-decoration: underline; }
+.msteps__flag { color: var(--warn); font-weight: 600; }
+.msteps__flag > span[aria-hidden] { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 2px; border-radius: var(--radius-pill); background: var(--warn-soft); font: 700 12px/1 var(--font-ui); }
+.msteps__flag .muted { font-weight: 400; }
+.msteps__note { margin: 0; color: var(--muted); font: var(--type-caption); }
+.notmoved__mark { color: var(--warn); font-weight: 700; }
+
+.builder { display: flex; flex-direction: column; gap: var(--space-4); }
+.builder__from { display: flex; }
+.field--inline { flex-direction: row; align-items: center; gap: var(--space-2); }
+.builder__help { margin: 0 0 var(--space-3); color: var(--ink-2); font: var(--type-body); }
+.builder__table { width: 100%; }
+.builder__table td { min-width: 320px; }
+.builder__step { display: block; font-weight: 600; }
+.builder__type { font: var(--type-caption); }
+.builder__reason { margin-top: var(--space-2); }
+.builder__table select.field__input { width: 100%; max-width: 420px; }
+.builder__table select.field__input[aria-invalid="true"] { border-color: var(--warn-fill); }
+
+.mdock__hint { margin: 0; color: var(--muted); font: var(--type-label); }
+.mdock .field__hint { margin: 0; font: var(--type-caption); color: var(--muted); }
+.mdock .linkbtn { color: var(--accent); }

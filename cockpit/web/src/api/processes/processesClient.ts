@@ -8,6 +8,10 @@ import {
   pendingDefinitionApprovalPage,
   type PendingDefinitionApproval,
   graphDiff,
+  migrationDryRun,
+  migrationExecution,
+  migrationOutcomePage,
+  migrationPlan,
   incident,
   incidentPage,
   type Incident,
@@ -23,6 +27,12 @@ import {
   type GraphDiff,
   type InstanceActivities,
   type InstanceSummary,
+  type MigrationDryRun,
+  type MigrationExecution,
+  type MigrationOutcomePage,
+  type MigrationPlan,
+  type MigrationStepCancellation,
+  type MigrationStepMapping,
   type ProcessInstance,
   type Task,
   type TaskSummary,
@@ -70,6 +80,15 @@ export interface DefinitionApproval {
   comment: string;
 }
 
+/** What a migration plan is made of: two versions of one key and the instructions for steps whose id changed or went. */
+export interface MigrationPlanRequest {
+  definitionKey: string;
+  sourceVersion: number;
+  targetVersion: number;
+  mappings: readonly MigrationStepMapping[];
+  cancellations: readonly MigrationStepCancellation[];
+}
+
 /**
  * Typed client of the Process Engine REST API (process-engine/api/openapi.yaml). One method per operation; the
  * operation id is named on each. Task commands carry the caller's Idempotency-Key and the task's lockVersion as
@@ -110,6 +129,22 @@ export interface ProcessesClient {
   reassignTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
   /** delegateTask: a claimed task to another user, with a reason (processes:task:manage) */
   delegateTask(id: string, lockVersion: number, handOver: TaskHandOver, idempotencyKey: string): Promise<Task>;
+  /** createMigrationPlan: moves nothing; the plan is stored with its approval mode */
+  createMigrationPlan(plan: MigrationPlanRequest, idempotencyKey: string): Promise<MigrationPlan>;
+  /** getMigrationPlan */
+  getMigrationPlan(id: string, signal?: AbortSignal): Promise<MigrationPlan>;
+  /** validateMigrationPlan: the dry run; it only reads */
+  checkMigrationPlan(id: string, signal?: AbortSignal): Promise<MigrationDryRun>;
+  /** proposeMigrationExecution: asks a second person to approve moving the instances, with a reason */
+  proposeMigration(id: string, reason: string, idempotencyKey: string): Promise<MigrationExecution>;
+  /** approveMigrationExecution: as a second person; `lockVersion` is the proposal the approver was shown */
+  approveMigration(id: string, lockVersion: number, idempotencyKey: string): Promise<MigrationExecution>;
+  /** rejectMigrationExecution: back to the proposer with a reason */
+  rejectMigration(id: string, lockVersion: number, reason: string, idempotencyKey: string): Promise<MigrationExecution>;
+  /** getMigrationExecution: the proposal, the approval and the progress */
+  getMigrationExecution(id: string, signal?: AbortSignal): Promise<MigrationExecution>;
+  /** listMigrationInstances: what happened to each instance, one outcome kind at a time, a bounded page */
+  listMigrationInstances(request: { id: string; outcome: 'FAILED' | 'SKIPPED'; after?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<MigrationOutcomePage>;
   /** listIncidents: one page of the incidents of one status, newest first */
   listIncidents(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<Incident>>;
   /** getIncident: one incident with the actions this caller may take */
@@ -245,6 +280,36 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async completeTask(id, lockVersion, answer, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ result: answer.result, reason: answer.reason }) };
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:complete`, headers: command(lockVersion, idempotencyKey), body }, processInstance)).data;
+    },
+    async createMigrationPlan(plan, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify(plan) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations`, headers: { 'Idempotency-Key': idempotencyKey }, body }, migrationPlan)).data;
+    },
+    async getMigrationPlan(id, signal) {
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/migrations/${segment(id)}`, ...withSignal(signal) }, migrationPlan)).data;
+    },
+    async checkMigrationPlan(id, signal) {
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:validate`, ...withSignal(signal) }, migrationDryRun)).data;
+    },
+    async proposeMigration(id, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:execute`, headers: { 'Idempotency-Key': idempotencyKey }, body }, migrationExecution)).data;
+    },
+    async approveMigration(id, lockVersion, idempotencyKey) {
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:approve`, headers: command(lockVersion, idempotencyKey) }, migrationExecution)).data;
+    },
+    async rejectMigration(id, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:reject`, headers: command(lockVersion, idempotencyKey), body }, migrationExecution)).data;
+    },
+    async getMigrationExecution(id, signal) {
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/migrations/${segment(id)}/execution`, ...withSignal(signal) }, migrationExecution)).data;
+    },
+    async listMigrationInstances(request) {
+      const query = new URLSearchParams({ outcome: request.outcome });
+      if (request.after !== undefined) query.set('after', request.after);
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/migrations/${segment(request.id)}/instances?${query.toString()}`, ...withSignal(request.signal) }, migrationOutcomePage)).data;
     },
   };
 }

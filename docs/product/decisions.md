@@ -156,7 +156,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-132](#pd-132-masking-stays-not-masked-unless-declared) | Masking stays not masked unless declared | Decided (maintainer, 2026-11-21) |
 | [PD-133](#pd-133-issues-#44-and-#212-are-delivered-by-release-0.1.0) | Issues #44 and #212 are delivered by release 0.1.0 | Decided (maintainer, 2026-11-21) |
 | [PD-134](#pd-134-interim-0.x-tags-are-kept-before-1.0) | Interim 0.x tags are kept before 1.0 | Decided (maintainer, 2026-11-21) |
-| [PD-135](#pd-135-the-1.0-api-freeze-date-is-5-february-2027) | The 1.0 API freeze date is 5 February 2027 | Decided (maintainer, 2026-11-21) |
+| [PD-135](#pd-135-the-1.0-api-freeze-date-is-5-february-2027) | The 1.0 API freeze date is 5 February 2027 | Decided (maintainer, 2026-11-21); amended by PD-147 |
 | [PD-136](#pd-136-isc-licence-is-allowed-for-the-diagram-library-dependencies) | ISC licence is allowed for the diagram library dependencies | Decided (maintainer, 2026-11-21) |
 | [PD-137](#pd-137-tag-0.2.0-for-the-process-engine-and-cockpit-0.2-release) | Tag 0.2.0 for the Process Engine and Cockpit 0.2 release | Decided (maintainer, 2026-11-21) |
 | [PD-138](#pd-138-a-built-in-shadow-mode-for-agent-steps-is-planned-for-11-the-documented-pattern-covers-10) | A built-in shadow mode for agent steps is planned for 1.1; the documented pattern covers 1.0 | Decided (product manager, delegated, PD-073); revisits PD-015 |
@@ -168,6 +168,8 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-144](#pd-144-seven-items-move-to-11-calling-a-child-process-stays-in-10) | Seven items move to 1.1; calling a child process stays in 1.0 | Decided (product manager, delegated, PD-073) |
 | [PD-145](#pd-145-recommendation-strict-masking-by-default-outside-dev-before-the-freeze) | Recommendation: strict masking by default outside `dev`, before the freeze | Not adopted (product owner, PD-146) |
 | [PD-146](#pd-146-masking-stays-opt-in-the-engine-warns-about-unclassified-fields) | Masking stays opt-in; the engine warns about unclassified fields | Decided (product owner, 2026-11-22); supersedes PD-145, confirms PD-132 |
+| [PD-147](#pd-147-the-10-api-freeze-no-longer-gates-the-10-release) | The 1.0 API freeze no longer gates the 1.0 release | Decided (product owner, 2026-11-22); amends PD-135 |
+| [PD-148](#pd-148-release-only-after-a-final-demo-and-acceptance-test) | Release only after a final demo and acceptance test | Decided (product owner, 2026-11-22) |
 
 ---
 
@@ -3817,7 +3819,9 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 | Date | 2026-11-21 |
 | Question | Issue #115 needs a date for the 1.0 API freeze and deprecation policy. |
 | Raised by | Product manager |
-| Decision | Decided (maintainer, 2026-11-21) |
+| Decision | Decided (maintainer, 2026-11-21); amended by PD-147 |
+
+**Amended by PD-147.** The date no longer gates 1.0, and when the freeze happens is left to the product owner.
 
 **Decision.** The API freeze date is 5 February 2027, signed by the architect. After it, changes to the frozen APIs follow the deprecation policy.
 
@@ -4088,3 +4092,35 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 - Configurable: yes, the warning property per deployment; the warnings are on by default.
 
 **Follow-ups.** Architect: the warning property name and the response field. Documentation: the configuration page explains classification and the warnings.
+
+### PD-147 The 1.0 API freeze no longer gates the 1.0 release
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-22 |
+| Question | Does the 1.0 API freeze (#115) have to happen before release 1.0 (#117)? |
+| Raised by | Product manager |
+| Decision | Product owner decision (2026-11-22). Amends PD-135. |
+
+**Decision.** The product is still being developed, so the API freeze is not needed for 1.0. Issue #115 stays open and is closed only when the product owner says so. The date in PD-135 (5 February 2027) no longer gates 1.0; when the freeze happens is left to the product owner.
+
+**Consequences.**
+- #115 leaves the 1.0 track and is no longer a prerequisite of #117 (Release 1.0).
+- PD-140 still defines what a freeze promises when it happens.
+- Nothing is closed by this decision.
+
+### PD-148 Release only after a final demo and acceptance test
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-22 |
+| Question | Should the team prepare the 1.0 release now? |
+| Raised by | Product owner |
+| Decision | Product owner decision (2026-11-22). |
+
+**Decision.** No 1.0 release work starts yet. When all the work is done, including the security audit, the team runs a final demo and acceptance test with the product owner. The product owner decides how and when to release at least one day after that demo.
+
+**Consequences.**
+- #117 (Release 1.0) stays open.
+- The final demo and acceptance test come first; release steps follow only after the product owner decides.
+- Nothing is closed by this decision.

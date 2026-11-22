@@ -14,7 +14,7 @@ export function Breadcrumb() {
   const override = useCrumbLabel();
   const pageTrail = useCrumbTrail();
   // A case and its task know their parents (process, case) only once loaded; the page sets that trail.
-  const crumbs = (route.name === 'instance' || route.name === 'task') && pageTrail !== undefined
+  const crumbs = (route.name === 'instance' || route.name === 'task' || route.name === 'migrate' || route.name === 'migration') && pageTrail !== undefined
     ? [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, ...pageTrail]
     : trail(route, t);
   const last = crumbs.at(-1);
@@ -53,6 +53,9 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
         { label: route.key },
         { label: t('rules.version', { version: String(route.version) }) },
       ];
+    case 'migrate':
+    case 'migration':
+      return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, { label: t('migration.crumb') }];
     // Until the page sets its trail, a task leads back to Tasks and a case to Processes (the title names it).
     case 'task':
       return [{ label: t('menu.tasks'), href: formatRoute({ name: 'tasks' }) }];
