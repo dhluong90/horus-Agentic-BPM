@@ -11,7 +11,7 @@ import { useProcessesSession } from './processesContext';
  * can never show (cockpit DESIGN section 12). Task commands never change the screen before the engine answers.
  */
 
-function useKeys() {
+export function useKeys() {
   const { hostId, tenant } = useProcessesSession();
   const base = [hostId, tenant, 'processes'] as const;
   return {
@@ -25,6 +25,8 @@ function useKeys() {
     instance: (id: string) => [...base, 'instance', id] as const,
     activities: (id: string) => [...base, 'instance', id, 'activities'] as const,
     instances: (key: string) => [...base, 'instances', key] as const,
+    migration: (id: string) => [...base, 'migration', id] as const,
+    migrationOutcomes: (id: string) => [...base, 'migration', id, 'outcomes'] as const,
   };
 }
 
@@ -163,7 +165,7 @@ export function useInstanceActivities(id: string, enabled: boolean) {
  * One Idempotency-Key per user action: the same key while the same request is retried, a new one when the request
  * changes (cockpit DESIGN section 12).
  */
-function useActionKey() {
+export function useActionKey() {
   const last = useRef<{ request: string; key: string } | undefined>(undefined);
   return (request: string) => {
     if (last.current?.request !== request) last.current = { request, key: crypto.randomUUID() };

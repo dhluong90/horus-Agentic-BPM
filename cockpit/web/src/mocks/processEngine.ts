@@ -1,10 +1,12 @@
 import { DEMO_NAMES } from './displayNames';
 import {
   DEMO_DEFINITIONS, FORM_TASK_ID, FORM_TASK_NAME, INSTANCE_ID, kycDiff, MASKED_TASK_ID, RECOMMENDATIONS, REVIEW_CONTEXT, REVIEW_TASK_ID, REVIEW_TASK_NAME,
-  VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
+  localiseDemo, VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
 } from './processDemo';
 import { demoCases } from './caseDemo';
 import { DIRECTORY, QUEUE_NOW, QUEUE_SEED } from './taskQueueDemo';
+import { MIGRATION_DEFINITIONS } from './migrationDemo';
+import { createMigrationApi, type MigrationSeed } from './migrationEngine';
 import { demoIncidents, type StoredIncident } from './incidentDemo';
 
 /*
@@ -101,6 +103,8 @@ export interface ProcessSeed {
   activities?: 'ok' | 'missing' | 'failing';
   /** The loan origination task queue beside the review tasks; on by default. */
   queue?: boolean;
+  /** The onboarding migration demo: version 3 in effect, 52 cases on version 2, and the plan in the given state. */
+  migration?: MigrationSeed;
   /** The demo incidents (CKP-008); on by default. */
   incidents?: boolean;
   /** The host's `incidents.resolve-approval` (PD-126): `four-eyes` by default, `single` on the dev profile only. */
@@ -129,8 +133,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const locale = seed.locale ?? 'en';
   // Stored versions, changed in place by approve and reject.
   const definitions: (DemoDefinition & { lockVersion: number; approvedBy: string | null; approvedAt: string | null; decisionComment: string | null })[] =
-    (seed.definitions ?? (locale === 'vi' ? VI_DEMO_DEFINITIONS : DEMO_DEFINITIONS)).map((d) => ({ ...d, lockVersion: 2, approvedBy: d.status === 'ACTIVE' ? 'minh' : null, approvedAt: null, decisionComment: null }));
+    (seed.definitions ?? (seed.migration !== undefined ? localiseDemo(MIGRATION_DEFINITIONS, locale) : locale === 'vi' ? VI_DEMO_DEFINITIONS : DEMO_DEFINITIONS)).map((d) => ({ ...d, lockVersion: 2, approvedBy: d.status === 'ACTIVE' ? 'minh' : null, approvedAt: null, decisionComment: null }));
   const decisions: RecordedDecision[] = [];
+  const migrations = createMigrationApi(() => definitions, seed.migration === undefined ? undefined : { ...seed.migration, locale });
   const startedBy = seed.startedBy ?? 'lan';
   const review = { ...(locale === 'vi' ? VI_REVIEW_CONTEXT : REVIEW_CONTEXT), ...(seed.reportedBy !== undefined ? { reportedBy: seed.reportedBy } : {}) };
   const recommendations: readonly string[] = RECOMMENDATIONS[locale];
@@ -475,6 +480,10 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return json(200, { data, nextCursor: null, hasNext: false });
     }
     if (request.method === 'GET' && path === `${BASE}/approvals`) return pendingApprovals(url, request);
+    if (seed.migration !== undefined) {
+      const migration = migrations.handle(request, path, url);
+      if (migration !== undefined) return migration;
+    }
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
     const version = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/export)?$/.exec(path);
@@ -499,6 +508,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (request.method === 'GET' && instanceMatch) {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
       const id = instanceMatch[1] ?? '';
+      const touched = seed.migration !== undefined ? migrations.instance(id) : undefined;
+      if (touched !== undefined && instanceMatch[2] === undefined) return json(200, touched, { ETag: '"3"' });
       const found = id === INSTANCE_ID ? { instance: instance(), activities: cases.find((item) => item.instance.id === id)?.activities } : cases.find((item) => item.instance.id === id);
       if (!found) return problem(404, 'INSTANCE_NOT_FOUND');
       if (instanceMatch[2] === undefined) return json(200, found.instance, { ETag: `"${String(found.instance['lockVersion'])}"` });
@@ -592,5 +603,5 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (item) item.lockVersion += 1;
   };
 
-  return { handle, overrides, requests, decisions, handOvers, claimAs, incidentCommands, touchIncident };
+  return { handle, overrides, requests, decisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
 }

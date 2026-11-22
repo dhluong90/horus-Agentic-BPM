@@ -7,6 +7,7 @@ import './components/base.css';
 import './components/shell.css';
 import './components/rules.css';
 import './components/processes.css';
+import './components/migration.css';
 
 applyTheme(initialTheme());
 

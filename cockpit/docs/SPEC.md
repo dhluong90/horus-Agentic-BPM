@@ -330,6 +330,33 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `legacy-review -> manual-review, 50 instances`.
 - **Test ID:** `CKP_027_migration_plan_side_by_side_diagrams`
 
+### CKP-056 A dry run reads in plain words and changes nothing
+- **Traces to:** `TR-MIG-03`
+- **Milestone:** M3
+- **Given:** A plan from `kyc-onboarding` v2 to v3 covering 52 running cases, 2 of which stay on v2 because a call is in flight at a step the plan cancels.
+- **When:** The operator chooses Check plan.
+- **Then:** The cockpit reads the engine's dry run and shows "50 cases can move. 2 cannot." with one sentence per kind of instruction that touches cases (renamed step, removed step, call in flight, step not covered), the time of the check and how long it holds; no case, plan or version changes; no engine code or id shows.
+- **Example:** `50 cases can move. 2 cannot.`
+- **Test ID:** `CKP_056_dry_run_counts_the_cases_in_words_and_changes_nothing`
+
+### CKP-057 A move is proposed with a reason and approved by a second person, then its progress is shown
+- **Traces to:** `TR-MIG-03`, `TR-SEC-04`
+- **Milestone:** M3
+- **Given:** A plan with a current, valid check; PD-114 (a fresh dry run and a reason) and PD-131 (a second holder of `processes:migration:manage` approves).
+- **When:** Sau enters "Moving to new KYC review" and chooses Ask approval to move 50 cases; then a second person opens the plan.
+- **Then:** One propose with an `Idempotency-Key` and the reason is sent, and only after a check that has not expired and still names this plan; the proposer sees Approve disabled with one line, "You proposed this move, so a second person approves it.", and no Send back; the second person sees who proposed it and why, the cockpit checks the plan again for them, and Approve sends the `lockVersion` of the proposal they were shown as `If-Match` (a proposal that moved on is refused and never approved blind); a reader without the permission sees the plan and one line saying it cannot be run; while the run goes the screen reads "40 of 52 moved" from the engine, calmly, with no alert.
+- **Example:** `Approve moving 50 cases, If-Match "1"`
+- **Test ID:** `CKP_057_the_move_needs_a_fresh_check_and_a_reason_then_waits_for_a_second_person`
+
+### CKP-058 Cases not moved are listed with their reason, and masked values stay masked
+- **Traces to:** `TR-MIG-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Given:** A finished run in which 49 cases moved, 1 was busy and 2 had a call in flight; the reference of one case is masked for this reader.
+- **When:** The run ends.
+- **Then:** The screen reads "49 moved. 3 not moved." and opens the Not moved list: each case by its reference with its reason in words and a link to the case; a masked reference shows as "Masked", never as stars or any part of the value; no engine code or id shows; nothing is announced as an alert.
+- **Example:** `49 moved. 3 not moved.`
+- **Test ID:** `CKP_058_cases_left_behind_are_listed_with_their_reason_and_masked_values_stay_masked`
+
 ---
 
 ## Load and Bundle
