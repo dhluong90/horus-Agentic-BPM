@@ -615,7 +615,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new InputInvalidException("Source format " + request.format() + " is not supported");
         }
         // Parse, validate and hash before any transaction opens (DESIGN section 4).
-        Process process = reader.apply(bytes);
+        List<DefinitionProblem> warnings = List.of();
+        Process process;
+        if (reader instanceof DefinitionReader withWarnings) {
+            DefinitionReader.Result read = withWarnings.readWithWarnings(bytes);
+            process = read.process();
+            warnings = read.warnings();
+        } else {
+            process = reader.apply(bytes);
+        }
+        final List<DefinitionProblem> importWarnings = warnings;
         compiler.compile("validation", process);
         checkBindings(process);
         checkGuardrailContracts(tenant, process);
@@ -629,7 +638,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
                     StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
                     if (latest != null && latest.definitionHash().equals(hash)) {
-                        return view(latest);
+                        return view(latest).withWarnings(importWarnings);
                     }
                     Instant now = clock.instant();
                     boolean active = settings.definitionsAutoApprove();
@@ -662,7 +671,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 stored.version());
                         retireSuperseded(versions, stored, now);
                     }
-                    return view(stored);
+                    return view(stored).withWarnings(importWarnings);
                 }, Views::definitionToJson, Views::definitionFromJson));
     }
 

@@ -42,7 +42,7 @@ class RuleLifecycleAcceptanceTest {
     final TestCaller caller = new TestCaller("bank-a", "alice");
     final RuleEngines engines = RuleEngines.create(
             new EngineContext(caller, caller, Clock.fixed(Instant.parse("2026-12-15T02:00:00Z"), ZoneOffset.UTC),
-                    stores, stores, EngineSettings.defaults().withRequireContentHash(false)),
+                    stores, stores, EngineSettings.defaults()),
             stores, stores, stores);
 
     void publish(byte[] yaml, String name) {
@@ -50,7 +50,7 @@ class RuleLifecycleAcceptanceTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(yaml));
         engines.versionService().requestPublish(name, 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve(name, 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve(name, 1, reviewed(name, 1, null, 1L, null));
         caller.become("bank-a", "teller-01");
     }
 
@@ -156,10 +156,10 @@ class RuleLifecycleAcceptanceTest {
         int events = stores.outbox.size();
 
         // When alice approves, with and without the right lock version
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1,
-                new WriteOptions(null, pending.lockVersion(), "looks fine")))
+                reviewed("card-fee", 1, null, pending.lockVersion(), "looks fine")))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
 
         // Then
@@ -184,10 +184,10 @@ class RuleLifecycleAcceptanceTest {
         caller.become("bank-a", "bob");
 
         // Then he is refused, and a third person publishes
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)))
                 .isInstanceOf(io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException.class);
         caller.become("bank-a", "carol");
-        RuleSetVersion published = engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        RuleSetVersion published = engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null));
         assertThat(published.status()).isEqualTo(VersionStatus.PUBLISHED);
         assertThat(published.requestedBy()).isEqualTo("alice");
         assertThat(published.createdBy()).isEqualTo("bob");
@@ -199,16 +199,16 @@ class RuleLifecycleAcceptanceTest {
         engines.versionService().importRuleSet(ImportRequest.yaml(CardFee.yaml()));
         caller.become("bank-a", "bob");
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)))
                 .isInstanceOf(InvalidStateException.class);
 
         caller.become("bank-a", "alice");
         engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
         caller.become("bank-a", "bob");
-        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null));
         caller.become("bank-a", "carol");
 
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, reviewed("card-fee", 1, null, 1L, null)))
                 .isInstanceOf(InvalidStateException.class);
         assertThat(engines.versionService().find("card-fee", 1, false).orElseThrow().approvedBy()).isEqualTo("bob");
     }
@@ -245,9 +245,11 @@ class RuleLifecycleAcceptanceTest {
         assertThatThrownBy(() -> engines.versionService().requestPublish("card-fee", 1, WriteOptions.none()))
                 .isInstanceOf(RuleSetNotFoundException.class);
         caller.become("bank-a", "alice");
-        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        String reviewedHash = engines.versionService().requestPublish("card-fee", 1, WriteOptions.none()).canonicalHash();
         caller.become("tenant-b", "dave");
-        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null)))
+        // dave names the hash alice's tenant shows, and still cannot see the version: it is not found for him
+        assertThatThrownBy(() -> engines.versionService().approve("card-fee", 1,
+                new WriteOptions(null, 1L, null, null, reviewedHash, java.util.List.of())))
                 .isInstanceOf(RuleSetNotFoundException.class);
 
         caller.become("bank-a", "alice");
@@ -325,5 +327,12 @@ class RuleLifecycleAcceptanceTest {
         assertThat(stores.decisions).hasSize(1);
         assertThat(replay.outputs()).isEqualTo(first.outputs());
         assertThat(replay).isEqualTo(first);
+    }
+
+    /** The options of an approval that names the content the approver reviewed, by its canonical hash (RLE-084, #411). */
+    private WriteOptions reviewed(String ruleSet, int version, String key, Long lock, String comment) {
+        String hash = engines.versionService().find(ruleSet, version, false)
+                .map(io.github.dhluong90.bpm.rules.api.RuleSetVersion::canonicalHash).orElse(null);
+        return new WriteOptions(key, lock, comment, null, hash, java.util.List.of());
     }
 }

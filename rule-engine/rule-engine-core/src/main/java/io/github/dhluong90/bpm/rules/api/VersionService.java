@@ -184,6 +184,24 @@ public interface VersionService {
     RuleReadings.SimulationReadings readSimulation(SimulationResult result, List<String> labels);
 
     /**
+     * Imports a spreadsheet file (CSV) as the next draft version of a rule set (PD-107, PD-142, RLE-192). The file's
+     * columns must be exactly the inputs and outputs of {@code base}, in its order, with an optional
+     * {@code Description}; the hit policy, the masks and everything else outside the rows are the base version's.
+     * The rows are then checked as the same table imported as a document would be, so the same problems are listed.
+     * No problem quotes a cell. Needs {@code rules:author}.
+     *
+     * @param ruleSet the rule set name
+     * @param base the version whose inputs, outputs, hit policy and masks the rows use
+     * @param request the file bytes with {@link SourceFormat#CSV} and an optional idempotency key
+     * @return the new draft
+     * @throws ValidationFailedException listing each cell or column problem with its rule and column
+     * @throws VersionNotFoundException when {@code base} does not exist
+     */
+    default RuleSetVersion importCsv(String ruleSet, int base, ImportRequest request) {
+        throw new UnsupportedOperationException("importCsv is not supported by " + getClass().getName());
+    }
+
+    /**
      * Moves a draft to {@code PENDING_APPROVAL} and records the caller as requester.
      *
      * @param ruleSet the rule set name

@@ -144,7 +144,9 @@ public class ProcessController {
      */
     private tools.jackson.databind.node.ObjectNode withWarnings(tools.jackson.databind.node.ObjectNode body,
             DefinitionVersion v) {
-        tools.jackson.databind.node.ArrayNode warnings = body.putArray("warnings");
+        // Keeps the import warnings of the version (FOREIGN_EXTENSION_IGNORED, PD-141) and appends the reminders
+        tools.jackson.databind.node.ArrayNode warnings = body.get("warnings") instanceof
+                tools.jackson.databind.node.ArrayNode existing ? existing : body.putArray("warnings");
         for (io.github.dhluong90.bpm.process.api.UnclassifiedField field
                 : definitions.unclassifiedFields(DefinitionRef.of(v.key(), v.version()))) {
             warnings.addObject().put("code", io.github.dhluong90.bpm.process.api.UnclassifiedField.CODE)

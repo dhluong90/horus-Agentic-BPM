@@ -581,6 +581,59 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `card-fee-v3.yaml -> 201 v3 DRAFT; replay k-401 -> same 201; kyc-risk.yaml on card-fee -> 400; R4 without currency -> 422 at R4/balance`.
 - **Test ID:** `RLE_033_import_as_new_version_creates_next_draft_or_refuses_whole`
 
+### RLE-191 A version exports as a spreadsheet file that Excel opens, with the shorthand cells
+- **Traces to:** `TR-STD-03`, `TR-UI-02`, PD-107, PD-142, #39
+- **Milestone:** M1
+- **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED` with hit policy `first`, inputs `tier` (string), `balance` (money) and `opened` (date), outputs `fee` (money) and `waived` (boolean), and rules `R1` (`tier in ['GOLD', 'PLATINUM'] -> fee 0 VND, waived true`, description "Gold and Platinum are free"), `R2` (`tier == 'SILVER'`, `balance >= 50000000 VND -> fee 50000 VND`), `R3` (`opened` between 2025-01-01 and 2025-12-31 -> fee 20000 VND) and `R4` (`{} -> fee 100000 VND`); caller `dan` holds `rules:read`.
+- **When:** `dan` calls `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=csv`.
+- **Then:**
+  - The file is UTF-8 with a byte order mark, comma separated, CRLF line ends and RFC 4180 quoting. The header is `Rule,tier,balance,opened,fee,waived,Description`: input and output names, never translated labels, so one file serves both languages.
+  - One line per rule in table order: `R1,"GOLD, PLATINUM",-,-,0 VND,true,Gold and Platinum are free`, `R2,SILVER,>= 50000000 VND,-,50000 VND,false,`, `R3,-,-,2025-01-01 to 2025-12-31,20000 VND,false,`, `R4,-,-,-,100000 VND,false,`. Amounts have no thousands separators, dates are ISO dates, `-` is any. A text that looks like shorthand (`-`, `null`, `<5`, one with a comma, a leading `=`) is written in double quotes and reads back as the same text; a description that starts with `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed with `'`, which import removes.
+  - The response is `200 text/csv;charset=UTF-8` with `Content-Disposition: attachment; filename="card-fee-v1.csv"`. Export writes nothing and needs `rules:read` in the caller's tenant; another tenant's rule set is `404 RULE_SET_NOT_FOUND`.
+  - A version that uses an `any` or `all` group (R4 grouped), a list input or output, or a calculated output cell has no table form: `422 VALIDATION_FAILED` with one violation, code `CSV_NO_TABLE_FORM`, its `ruleId` (or `column`) naming where. Nothing is returned.
+- **Example:** `export card-fee v1 as CSV -> header Rule,tier,balance,opened,fee,waived,Description; R1 "GOLD, PLATINUM"; R4 grouped -> 422 CSV_NO_TABLE_FORM`.
+- **Test ID:** `RLE_191_a_version_exports_as_utf8_csv_with_a_byte_order_mark_crlf_and_the_shorthand`, `RLE_191_a_version_with_a_grouped_condition_has_no_spreadsheet_form_and_names_the_rule`, `RLE_191_exporting_needs_the_read_permission_and_stays_in_the_callers_tenant`, `RLE_191_export_csv_answers_a_utf8_file_named_after_the_version`, `RLE_191_a_text_that_looks_like_shorthand_is_written_quoted_and_reads_back_the_same`
+
+### RLE-192 A spreadsheet file imports as the next draft against a base version, with the checks of a document
+- **Traces to:** `TR-STD-01`, `TR-IDEM-01`, `TR-TEN-01`, `TR-UI-02`, PD-107, PD-142, #39
+- **Milestone:** M1
+- **Given:** The file of `RLE-191` in which R2's fee reads `30000 VND` instead of `50000 VND`; caller `lan` holds `rules:author` in `bank-a`.
+- **When:** `lan` posts it to `POST /api/bpm/rules/v1/rule-sets/card-fee/versions?base=1` with `Content-Type: text/csv` and `Idempotency-Key: k-39-1`, then repeats it.
+- **Then:**
+  - `201`: `card-fee` v2 as `DRAFT`, created by `lan`. Its hit policy, inputs, outputs, masks and every other part of the document outside the rows are v1's; its rows are the file's, each cell turned into the engine's normal form (`GOLD, PLATINUM` is `in ['GOLD', 'PLATINUM']`, `18 to 65` is `between 18 and 65`, `[18..65)` is `age >= 18 and age < 65`, `!= VN, SG` is `not in ['VN', 'SG']`). A rule's `explain` texts are carried over by rule id, and its description when the file has no `Description` column. The source stored with the draft is the JSON document the rows make, in source format `JSON`.
+  - The file is read as it comes: comma or semicolon separated (taken from the header line), a byte order mark optional, a blank row ignored, at most 1,048,576 bytes (`413 PAYLOAD_TOO_LARGE`). A blank `Rule` cell gets `R` plus the first number from its row position upward that no other rule in the file uses; a duplicate id is refused (`RLE-194`).
+  - The rows pass the checks of a document (`RLE-041`, the step budget, `evaluation.max-rows` and the mask rules of `RLE-050`), so a type mismatch in a cell is listed as in `:validate`, with its `ruleId` and `column`; the character position of such a problem is dropped, since it would count in text the author did not write.
+  - The repeat with `k-39-1` returns the same `201` and creates no v3; the same key with another file is `409 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+  - An export of v1 imported against v1 without an edit has the same canonical hash as v1.
+  - Needs `rules:author` (`403` before the body is read); `base` is read in the caller's tenant only (`404 RULE_SET_NOT_FOUND`, `404 VERSION_NOT_FOUND`). A CSV body without `base`, a `base` that is not a version number of 1 or more, or `base` with another content type is `400 INPUT_INVALID`. A failure writes nothing.
+- **Example:** `card-fee-v1.csv with R2 at 30000 VND, ?base=1 -> 201 v2 DRAFT, R2 fee 30000 VND; unedited export -> same canonical hash`.
+- **Test ID:** `RLE_192_a_file_that_changes_one_fee_becomes_the_next_draft_with_the_same_columns_and_hit_policy`, `RLE_192_an_unedited_export_imports_back_with_the_same_canonical_hash`, `RLE_192_a_repeated_key_returns_the_original_draft_and_a_new_key_makes_the_next_one`, `RLE_192_a_semicolon_file_without_a_byte_order_mark_is_read_and_a_blank_rule_gets_the_next_free_id`, `RLE_192_the_file_needs_the_author_permission_a_base_in_the_callers_tenant_and_an_existing_base`, `RLE_192_a_csv_body_with_a_base_answers_201_and_reaches_the_engine_with_its_key`, `RLE_192_a_csv_body_needs_a_base_and_a_base_needs_a_csv_body`, `RLE_192_a_reader_is_refused_before_the_file_is_read`, `RLE_192_shorthand_cells_become_the_normal_forms_of_the_engine`, `RLE_192_a_quoted_text_keeps_its_commas_and_a_half_open_range_uses_brackets`
+
+### RLE-193 A damaged or refused cell is named by rule and column and never quoted
+- **Traces to:** `TR-STD-01`, `TR-SEC-04`, `TR-DET-02`, PD-107, PD-142, #39
+- **Milestone:** M1
+- **Given:** The file of `RLE-191` with one cell changed at a time: R2's `balance` reads `>= 50000000`; `>= 5E+07 VND`; `">= 50,000,000 VND"`; `>= 50.000.000 VND`; R3's `opened` reads `20/11/2026`; R2's `balance` reads `>= about fifty million VND`; R2's `fee` is empty. A second version of `card-fee` has a masked input `nationalId` (integer) and a cell `CCCD 079123456789` in that column.
+- **When:** Each file is imported with `?base=1`.
+- **Then:**
+  - Each is `422 VALIDATION_FAILED` with one violation naming the `ruleId` and the `column` and a stable `code`: `CSV_CELL_NO_CURRENCY`, `CSV_CELL_SCIENTIFIC`, `CSV_CELL_SEPARATORS` (twice), `CSV_CELL_DATE`, `CSV_CELL_NOT_A_NUMBER`, `CSV_CELL_EMPTY`. The catalogue gives each code a plain message in every language it ships (`en`, `vi`), for example "The amount has no valid currency. Write it after the number, for example 50000000 VND."
+  - No damaged value is read as another value: `5E+07` is never 50,000,000, `50,000,000` is never the list 50, 0, 0, `50.000.000` is never 50, and a date that is not `year-month-day` is never guessed.
+  - A problem lists every bad cell of the file in file order, at most 100, with `violationsTruncated: true` beyond that. Nothing is stored.
+  - No message, code or position quotes a cell. The `nationalId` cell problem names `R1` and `nationalId` and holds no digit of the cell; a problem the checks of a document find in a masked column has the plain message "The cell is not accepted".
+- **Example:** `R2 balance ">= 50000000" -> 422 CSV_CELL_NO_CURRENCY at R2, balance; "5E+07 VND" -> CSV_CELL_SCIENTIFIC`.
+- **Test ID:** `RLE_193_an_amount_without_a_currency_is_refused_with_its_rule_and_column_and_nothing_is_saved`, `RLE_193_excel_damage_is_refused_and_never_read_as_another_value`, `RLE_193_no_problem_quotes_a_cell_so_a_masked_value_never_leaves_in_an_error`, `RLE_193_a_refused_cell_is_422_validation_failed_with_its_rule_column_and_code`
+
+### RLE-194 A file cannot add, remove, rename or reorder a column, and its rows must be well formed
+- **Traces to:** `TR-STD-01`, `TR-STD-03`, PD-107, PD-142, #39
+- **Milestone:** M1
+- **Given:** The file of `RLE-191` with, one at a time: `balance` renamed `segment`; the `waived` column removed; `tier` and `balance` swapped; R2's id changed to `R1`; R4 cut to three cells; a file saved as Windows-1252; an empty file.
+- **When:** Each is imported with `?base=1`.
+- **Then:**
+  - The header must list exactly the base version's inputs and outputs, by name, in order, then optionally `Description` last. An added column is `CSV_COLUMN_UNKNOWN` (`column: segment`); a missing one `CSV_COLUMN_MISSING` (`column: balance`, and `waived`); a repeated one `CSV_COLUMN_DUPLICATE`; one out of order `CSV_COLUMN_ORDER`. Inputs and outputs cannot change through a file.
+  - A duplicate rule id is `CSV_RULE_DUPLICATE` on the later row; an id that does not start with a letter or uses other characters than letters, digits, `-` and `_` (at most 64) is `CSV_RULE_ID_INVALID`; a row with a different number of cells than the header is `CSV_ROW_SHAPE`; a file that is not UTF-8 is `CSV_ENCODING`; no rows is `CSV_EMPTY`; an unclosed quote is `CSV_FILE_INVALID`.
+  - Each is `422 VALIDATION_FAILED`; nothing is stored. A cell that reads, and then fails the checks of a document, is refused with the document's codes (a fee that is a boolean: `TYPE_MISMATCH` at `R1`, `fee`), without position.
+- **Example:** `balance renamed segment -> 422 CSV_COLUMN_UNKNOWN segment + CSV_COLUMN_MISSING balance`.
+- **Test ID:** `RLE_194_a_file_cannot_add_remove_rename_or_reorder_a_column`, `RLE_194_a_duplicate_rule_id_a_short_row_a_bad_encoding_and_an_empty_file_are_refused`, `RLE_194_a_change_the_engine_checks_on_import_is_refused_by_the_same_checks_as_a_document`
+
 ### RLE-047 The author replaces their draft in place, with the import checks and without a new version
 - **Traces to:** `TR-STD-01`, `TR-STD-03`, `TR-IDEM-01`, `TR-SEC-04`, `TR-UI-02`, PD-094
 - **Milestone:** M1
@@ -1047,12 +1100,12 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Given:** `fees.dmn` contains a decision table `fee-table` (supported), a second `decision` `risk-adj` with an `informationRequirement` that names a required decision on line 40 (`S1`), a `businessKnowledgeModel` `bkm-1` on line 55 (`S2`), a `decisionService` `ds-1` on line 70 (`S2`), and a `context` boxed expression on line 81 (`S2`).
 - **When:** It is imported as a rule set version.
 - **Then:**
-  - The answer is `422 DMN_UNSUPPORTED_ELEMENT` with 4 entries `{ element, id, line, stage }` in `elements`, in document order. An element with no `id` of its own is named by the `id` of the decision that holds it. Nothing is written.
+  - The answer is `422 DMN_UNSUPPORTED_ELEMENT` with 4 entries `{ element, elementId, line, stage, message }` in `unsupportedElements`, in document order (PD-141: the field and the item shape are the Process Engine's, `PRE-108`; `message` is plain English that may change, the element and the stage are the contract). An element with no `id` of its own is named by the `id` of the decision that holds it. Nothing is written.
   - A wire to input data (`requiredInput`), documentation, vendor extensions and elements in other namespaces are not refused.
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that; ids lose control characters and are cut at 200 characters.
-  - An unknown `expressionLanguage` or `typeLanguage` is `422 EXPRESSION_LANGUAGE_UNSUPPORTED` with the element, its line and its stage (`not planned`).
+  - An unknown `expressionLanguage` or `typeLanguage` is `422 EXPRESSION_LANGUAGE_UNSUPPORTED` with the element, its line and its stage (`not planned`) in `unsupportedElements`.
 - **Example:** `fees.dmn with BKM and decision service -> 422 DMN_UNSUPPORTED_ELEMENT, 4 entries`.
-- **Test ID:** `RLE_061_dmn_elements_outside_the_stage_are_listed_with_id_line_and_stage_in_document_order`, `RLE_061_a_wire_to_input_data_is_not_a_refusal`, `RLE_061_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `RLE_061_ids_lose_control_characters_and_are_cut_at_200_characters`, `RLE_061_an_unknown_expression_language_is_refused_with_its_line_and_stage`, `RLE_061_each_entry_carries_element_id_line_and_stage`, `RLE_061_a_list_over_100_entries_is_cut_and_says_so`, `RLE_061_dmn_elements_outside_the_stage_are_listed_and_nothing_is_stored`
+- **Test ID:** `RLE_061_dmn_elements_outside_the_stage_are_listed_with_id_line_and_stage_in_document_order`, `RLE_061_a_wire_to_input_data_is_not_a_refusal`, `RLE_061_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `RLE_061_ids_lose_control_characters_and_are_cut_at_200_characters`, `RLE_061_an_unknown_expression_language_is_refused_with_its_line_and_stage`, `RLE_061_each_entry_carries_element_id_line_stage_and_message_in_unsupported_elements`, `RLE_061_a_list_over_100_entries_is_cut_and_says_so`, `RLE_061_dmn_elements_outside_the_stage_are_listed_and_nothing_is_stored`
 
 ## Host-Registered Functions (RE-F-27, PD-119)
 

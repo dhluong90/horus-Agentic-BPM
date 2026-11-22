@@ -117,9 +117,10 @@ paths:
         intermediate timer catch event with `timeDuration` or `timeDate`) from a UTF-8
         document. DTDs and entities are refused (`BPMN_UNSAFE_XML`), a CMMN root element is
         `422 CMMN_UNSUPPORTED` before any other check (`PRE-107`), every element or behaviour attribute outside
-        the subset is named with its id, line and stage in `BPMN_UNSUPPORTED_ELEMENT` (`PRE-108`), and a condition
-        in another expression language has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`. Vendor
-        attributes and extensions are kept in the stored source and listed as `warnings`. The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
+        the subset is named with its id, line and stage in `unsupportedElements` of `BPMN_UNSUPPORTED_ELEMENT`
+        (`PRE-108`, PD-141: the same field and item shape as the Rule Engine), and a condition in another
+        expression language is listed there too. Vendor attributes and extensions are kept in the stored source and
+        listed as `warnings`, in a refusal and in the `201` answer (`PRE-200`). The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
         document identical to the latest version of its key returns that version, also with `201`. A draft is never
         the effective version: instances keep starting on the active one until the draft is approved. An `agentTask`
         whose guardrail rule set breaks the guardrail contract (missing in the tenant or without a version in effect,
@@ -2719,8 +2720,14 @@ components:
             one `UNCLASSIFIED_FIELD` per agent step input or output schema property that declares neither
             `mask` true nor false. A reminder only: it never blocks the request or the approval. Empty when every
             field is classified or while `horus.bpm.processes.classification.warn-unclassified` is `false`. The engine
-            never infers sensitivity from a name or a value.
-          items: { $ref: '#/components/schemas/UnclassifiedFieldWarning' }
+            never infers sensitivity from a name or a value. In the answer to an import, when the file has vendor
+            attributes or extension elements, each is also listed as `FOREIGN_EXTENSION_IGNORED` with the namespace in
+            `message` and the line: they were kept in the stored source and not read, the same items as `warnings` of
+            a refusal (PD-141).
+          items:
+            anyOf:
+              - { $ref: '#/components/schemas/UnclassifiedFieldWarning' }
+              - { $ref: '#/components/schemas/DefinitionProblemItem' }
     UnclassifiedFieldWarning:
       type: object
       required: [code, step, field, direction, message]
@@ -2992,6 +2999,26 @@ components:
         data: { type: array, items: { $ref: '#/components/schemas/AgentReplayCase' } }
         nextCursor: { type: [string, 'null'] }
         hasNext: { type: boolean }
+    UnsupportedElement:
+      type: object
+      required: [element, elementId, line, stage, message]
+      description: >-
+        One element of an imported file that the engine refuses by name. The same schema is in the Rule Engine
+        OpenAPI file (PD-141)
+      properties:
+        element: { type: string, description: 'The element name, for example `boundaryEvent`' }
+        elementId:
+          type: [string, 'null']
+          maxLength: 200
+          description: The element's `id`; control characters are removed and it is cut at 200 characters
+        line: { type: integer, minimum: 1 }
+        stage:
+          type: string
+          enum: [S0, S1, S2, S3, not planned]
+          description: >-
+            The stage of the coverage table that adds the element, or `not planned`. For an intermediate throw
+            event it comes from its event definition: a signal or message throw is `S2`, an escalation throw `S1`
+        message: { type: string, description: 'Plain English; the wording may change, the element and the stage are the contract' }
     DefinitionProblemItem:
       type: object
       required: [code, message]
@@ -3304,11 +3331,17 @@ components:
         correlationId: { type: string }
         problems:
           type: array
-          description: Present on `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID` and `BPMN_UNSUPPORTED_ELEMENT`, at most 100 entries
+          description: Present on `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`, at most 100 entries
           items: { $ref: '#/components/schemas/DefinitionProblemItem' }
+        unsupportedElements:
+          type: array
+          description: >-
+            Present on `BPMN_UNSUPPORTED_ELEMENT`, in document order, at most 100 entries. The same field and item
+            shape as the Rule Engine's refusals of a standard (PD-141)
+          items: { $ref: '#/components/schemas/UnsupportedElement' }
         violationsTruncated:
           type: boolean
-          description: Present, and true, on `BPMN_UNSUPPORTED_ELEMENT` when more than 100 problems were found
+          description: Present, and true, on `BPMN_UNSUPPORTED_ELEMENT` when more than 100 elements were found
         warnings:
           type: array
           description: >-

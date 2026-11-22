@@ -94,7 +94,7 @@ public class ProcessProblemDetails {
                 .put("correlationId", correlationId(request));
         switch (e) {
             case BpmnUnsupportedElementException u -> {
-                body.set("problems", Views.problems(u.problems()));
+                body.set("unsupportedElements", Views.unsupportedElements(u.problems()));
                 if (u.truncated()) {
                     body.put("violationsTruncated", true);
                 }

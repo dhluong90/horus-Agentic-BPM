@@ -134,8 +134,9 @@ paths:
         A file in another standard, or with an element outside the current stage, is refused by name and
         nothing is stored. A CMMN root element is `422 CMMN_UNSUPPORTED` (`RLE-060`), decided at the root
         before anything else is read. DMN elements the engine does not execute are `422
-        DMN_UNSUPPORTED_ELEMENT`, listing every one with its `element`, `id`, `line` and `stage` (`S1`, `S2`,
-        `S3` or `not planned`) in `elements` (`RLE-061`). An expression language other than FEEL is `422
+        DMN_UNSUPPORTED_ELEMENT`, listing every one with its `element`, `elementId`, `line`, `stage` (`S1`, `S2`,
+        `S3` or `not planned`) and `message` in `unsupportedElements` (`RLE-061`, PD-141: the same field and
+        item shape as the Process Engine). An expression language other than FEEL is `422
         EXPRESSION_LANGUAGE_UNSUPPORTED` with its line and stage.
 
         Personal data (PD-099): every input that declares no `mask` and whose name matches the
@@ -367,8 +368,30 @@ paths:
         `authoring.cockpit-drafts` says (PD-121). `v` is read in the caller's tenant only. A
         `copyOf` that is not a version number of 1 or more, or a body sent with it, is
         `400 INPUT_INVALID`; an unknown `v` is `404 VERSION_NOT_FOUND`. A failure writes nothing.
+
+        With `Content-Type: text/csv` and `base={v}` the body is a spreadsheet file (`RLE-192`, PD-107,
+        PD-142; issue #39): one header line, then one line per rule. The columns are `Rule`, each input by
+        name, each output by name, then an optional `Description`, exactly the inputs and outputs of version
+        `v` in its order; the hit policy, masks and everything else outside the rows are `v`'s. The file is
+        UTF-8 (a byte order mark is optional), comma or semicolon separated as its header line shows, at
+        most 1,048,576 bytes. Cells use the shorthand `GOLD, PLATINUM`, `>= 50000000 VND`, `18 to 65`,
+        `[18..65)`, `!= VN`, `null` and `-` for any. A blank `Rule` cell gets the next free id; a duplicate
+        id is refused. The rows are then checked as a document is (`RLE-041`), so the same problems are
+        listed. Scientific notation (`5E+07`), thousands separators, dates that are not ISO dates and text in
+        a number column are refused, never read as another value. A refusal is `422 VALIDATION_FAILED` with
+        one violation per problem, its `ruleId` and `column` naming the cell and a `CSV_*` `code`; no problem
+        quotes a cell, so a value of a masked input never leaves in an error (`RLE-193`, `RLE-194`).
+        `base` with another content type, or a CSV body without `base`, is `400 INPUT_INVALID`.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
+        - name: base
+          in: query
+          required: false
+          description: >-
+            With `Content-Type: text/csv`, the version whose inputs, outputs, hit policy and masks the rows use
+          schema:
+            type: integer
+            minimum: 1
         - name: copyOf
           in: query
           required: false
@@ -385,6 +408,9 @@ paths:
             schema:
               type: string
           application/xml:
+            schema:
+              type: string
+          text/csv:
             schema:
               type: string
       responses:
@@ -785,7 +811,13 @@ paths:
       summary: Export a version as a file that imports back with the same canonical hash
       description: |
         `format=json` is the RFC 8785 canonical document; `format=dmn` is a DMN 1.5 document with
-        one decision table. The file carries no tenant, status, lock version, requester, approver or
+        one decision table; `format=csv` is the spreadsheet file (`RLE-191`, PD-107): UTF-8 with a byte
+        order mark, comma separated, CRLF line ends, RFC 4180 quoting, a header line of `Rule`, the inputs,
+        the outputs and `Description`, one line per rule in table order, amounts without thousands separators
+        (`50000000 VND`), ISO dates and `-` for any. A version that uses `any` or `all` groups, a list input or
+        output, or a calculated cell has no table form and is `422 VALIDATION_FAILED` with the code
+        `CSV_NO_TABLE_FORM`, naming the rule. Imported back against the same version with no edit, it gives the
+        same canonical hash. The file carries no tenant, status, lock version, requester, approver or
         decision data. A version that uses `any` or `all` groups, output defaults, collect
         aggregates or calculated cells has no decision table form and is `422 VALIDATION_FAILED`
         naming the rule and the cell. YAML export is not available yet. Writes nothing. Permission
@@ -798,15 +830,18 @@ paths:
           required: true
           schema:
             type: string
-            enum: [json, dmn]
+            enum: [json, dmn, csv]
       responses:
         '200':
-          description: The file, with `Content-Disposition` `attachment; filename="<name>-v<version>.<json|dmn>"`
+          description: The file, with `Content-Disposition` `attachment; filename="<name>-v<version>.<json|dmn|csv>"`
           content:
             application/json:
               schema:
                 type: object
             application/xml:
+              schema:
+                type: string
+            text/csv:
               schema:
                 type: string
         '400': { $ref: '#/components/responses/Problem' }
@@ -3189,10 +3224,14 @@ components:
         in force when the diff is read decides.
     UnsupportedElement:
       type: object
-      required: [element, id, line, stage]
+      required: [element, elementId, line, stage, message]
+      description: >-
+        One element of an imported file that the engine refuses by name. The same schema is in the Process Engine
+        OpenAPI file (PD-141)
       properties:
         element: { type: string, description: 'The element name, for example `businessKnowledgeModel`' }
-        id:
+        message: { type: string, description: 'Plain English; the wording may change, the element and the stage are the contract' }
+        elementId:
           type: [string, 'null']
           maxLength: 200
           description: The element's `id`; control characters are removed and it is cut at 200 characters
@@ -3231,6 +3270,12 @@ components:
             `mask: true`), `TEMPLATE_TOO_LONG` (over 500 characters) and `INPUT_INVALID` (a language tag that is not
             BCP 47, or more than 10 languages). A table whose worst case is over the step budget:
             `EVALUATION_BUDGET_EXCEEDED`, on the first rule from which it is over, with a null `column`.
+            Spreadsheet files (`text/csv` with `base`, and the CSV export), none of which quotes a cell:
+            `CSV_NO_TABLE_FORM`, `CSV_EMPTY`, `CSV_ENCODING`, `CSV_FILE_INVALID`, `CSV_COLUMN_UNKNOWN`,
+            `CSV_COLUMN_MISSING`, `CSV_COLUMN_DUPLICATE`, `CSV_COLUMN_ORDER` (these name the file's column in
+            `column`), `CSV_RULE_ID_INVALID`, `CSV_RULE_DUPLICATE`, `CSV_ROW_SHAPE`, `CSV_CELL_INVALID`,
+            `CSV_CELL_EMPTY`, `CSV_CELL_SCIENTIFIC`, `CSV_CELL_SEPARATORS`, `CSV_CELL_DATE`,
+            `CSV_CELL_NOT_A_NUMBER` and `CSV_CELL_NO_CURRENCY`.
             Null for a problem of the document as a whole. New codes may be added.
           examples: [TYPE_MISMATCH]
         position:
@@ -3995,11 +4040,12 @@ components:
         line:
           type: integer
           description: Present on `CMMN_UNSUPPORTED`, the line of the root element
-        elements:
+        unsupportedElements:
           type: array
           description: >-
             Present on `DMN_UNSUPPORTED_ELEMENT` and `EXPRESSION_LANGUAGE_UNSUPPORTED`, in document order, at most
-            100 (`violationsTruncated` is true when there were more)
+            100 (`violationsTruncated` is true when there were more). The same field and item shape as the Process
+            Engine's refusals of a standard (PD-141)
           items: { $ref: '#/components/schemas/UnsupportedElement' }
         violations:
           type: array
