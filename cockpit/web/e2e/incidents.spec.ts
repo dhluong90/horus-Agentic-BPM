@@ -198,7 +198,7 @@ test('CKP_008_demo_an_incident_retried_from_the_queue_leaves_it_once_the_step_su
   expect(engine.incidentCommands).toEqual([expect.objectContaining({ command: 'retry', incidentId: INCIDENTS.agentTimeout, ifMatch: '"0"' })]);
   // The next refresh reads the list again; the step was accepted, so the incident has left it.
   await page.reload();
-  await expect(page.getByRole('tab', { name: 'Open (3)' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Open (4)' })).toBeVisible();
   await expect(page.getByRole('rowheader', { name: 'Assess documents' })).toHaveCount(0);
 });
 

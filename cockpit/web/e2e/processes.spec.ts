@@ -198,7 +198,7 @@ const SCREENS: readonly Screen[] = [
     focal: (page, locale) => page.getByRole('link', { name: T.openIncident[locale] }),
   },
   {
-    name: 'instance-undo-incident-open',
+    name: 'undo-opens-its-incident',
     hash: `#/instances/${STUCK_UNDO_INSTANCE_ID}`,
     title: caseTitle('APP-1049'),
     prepare: async (page, locale) => {
