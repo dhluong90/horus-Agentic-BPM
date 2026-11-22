@@ -1,9 +1,10 @@
-import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from './caseDemo';
+import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INCIDENT_ID, STUCK_UNDO_INSTANCE_ID } from './caseDemo';
 import { INSTANCE_ID } from './processDemo';
 
 /*
  * Demo incidents of tenant bank-a (CKP-008, PRE-077, PRE-078): an agent step that timed out, a limit check refused on
- * a business rule, a core banking call that timed out three times, an undo that must be done by hand, and a result
+ * a business rule, a core banking call that timed out three times, an undo that must be done by hand, an undo that
+ * failed three times (the stuck undo of the instance timeline, CKP-049), and a result
  * Linh proposed that waits for a second person (PD-126). Cause summaries are built from codes and numbers only, as the
  * engine builds them.
  */
@@ -14,6 +15,7 @@ export const INCIDENTS = {
   coreTimeout: '01JD6N3C0RET1ME0UT000000N3',
   manualUndo: '01JD6N4MANUA1UND0000000N04',
   proposed: '01JD6N5PR0P0SED0000000N005',
+  undoFailed: STUCK_UNDO_INCIDENT_ID,
 } as const;
 
 export interface StoredIncident {
@@ -44,6 +46,7 @@ export function demoIncidents(locale: 'en' | 'vi'): StoredIncident[] {
     { ...base, id: INCIDENTS.limitRefused, instanceId: INSTANCE_ID, nodeId: 'credit-decision', errorCode: 'UNHANDLED_BUSINESS_ERROR', causeSummary: 'UNHANDLED_BUSINESS_ERROR LIMIT_EXCEEDED', retryCount: 0, status: 'OPEN', createdAt: '2026-11-21T01:12:00Z', requires: ['approvedLimit'] },
     { ...base, id: INCIDENTS.coreTimeout, instanceId: KYC_INSTANCE_ID, nodeId: 'screen-sanctions', errorCode: 'ADAPTER_TIMEOUT', causeSummary: 'ADAPTER_TIMEOUT after 3 attempts, timeout PT10S', retryCount: 3, status: 'OPEN', createdAt: '2026-11-21T02:05:00Z', requires: ['screened'] },
     { ...base, id: INCIDENTS.manualUndo, instanceId: BOOKED_INSTANCE_ID, nodeId: 'book-loan', errorCode: 'COMPENSATION_MANUAL_REQUIRED', causeSummary: 'COMPENSATION_MANUAL_REQUIRED compensate=manual', retryCount: 0, status: 'OPEN', createdAt: '2026-11-21T00:40:00Z', requires: ['reversalReference'] },
+    { ...base, id: INCIDENTS.undoFailed, instanceId: STUCK_UNDO_INSTANCE_ID, nodeId: 'credit-decision', errorCode: 'COMPENSATION_FAILED', causeSummary: 'COMPENSATION_FAILED ADAPTER_TIMEOUT after 3 attempts', retryCount: 0, status: 'OPEN', createdAt: '2026-11-19T10:05:00Z', requires: [] },
     {
       ...base, id: INCIDENTS.proposed, instanceId: KYC_INSTANCE_ID, nodeId: 'verify-docs', errorCode: 'SERVICE_ERROR', causeSummary: 'SERVICE_ERROR status 503', retryCount: 1, status: 'RESOLUTION_PENDING', lockVersion: 1, createdAt: '2026-11-20T23:30:00Z', requires: ['documentsVerified'],
       pendingResolution: {

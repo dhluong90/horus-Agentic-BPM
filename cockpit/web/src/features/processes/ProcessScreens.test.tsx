@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import { currentProcessEngine, resetProcessEngine } from '../../mocks/handlers';
 import { setScenario } from '../../mocks/node';
-import { INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INSTANCE_ID, UNDONE_INSTANCE_ID } from '../../mocks/caseDemo';
+import { INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INCIDENT_ID, STUCK_UNDO_INSTANCE_ID, UNDONE_INSTANCE_ID } from '../../mocks/caseDemo';
 import { FORM_TASK_ID, INSTANCE_ID, MASKED_TASK_ID, REVIEW_TASK_ID } from '../../mocks/processDemo';
 
 function open(hash: string) {
@@ -241,10 +241,12 @@ describe('CKP-033 and CKP-049 undo steps in the timeline', () => {
     expect(table.querySelector('.timeline__row--undo-stuck')).not.toBeNull();
     expect(table.querySelector('.timeline__row--undo .timeline__what--bad')).toBeNull();
 
-    await userEvent.click(within(scopes).getByRole('button', { name: 'Open the incident' }));
-    const inspector = await screen.findByRole('complementary', { name: 'Selected step' });
-    expect(within(inspector).getByText('An undo step failed and needs an operator.')).toBeInTheDocument();
-    expect(within(inspector).getByRole('heading', { name: 'Credit decision' })).toBeInTheDocument();
+    // The one way forward opens the incident the undo raised, selected in the incident queue (CKP-008).
+    const link = within(scopes).getByRole('link', { name: 'Open the incident' });
+    expect(link).toHaveAttribute('href', `#/incidents?view=open&incident=${STUCK_UNDO_INCIDENT_ID}`);
+    await userEvent.click(link);
+    await waitFor(() => { expect(window.location.hash).toBe(`#/incidents?view=open&incident=${STUCK_UNDO_INCIDENT_ID}`); });
+    expect(await screen.findByRole('tab', { name: /^Open \(\d+\)$/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('CKP_033_the_undo_reads_in_vietnamese', async () => {

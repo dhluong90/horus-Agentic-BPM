@@ -195,7 +195,7 @@ const SCREENS: readonly Screen[] = [
     hash: `#/instances/${STUCK_UNDO_INSTANCE_ID}`,
     title: caseTitle('APP-1049'),
     prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
-    focal: (page, locale) => page.getByRole('button', { name: T.openIncident[locale] }),
+    focal: (page, locale) => page.getByRole('link', { name: T.openIncident[locale] }),
   },
   {
     name: 'instance-undo-incident-open',
@@ -203,9 +203,9 @@ const SCREENS: readonly Screen[] = [
     title: caseTitle('APP-1049'),
     prepare: async (page, locale) => {
       await page.getByRole('tab', { name: T.timeline[locale] }).click();
-      await page.getByRole('button', { name: T.openIncident[locale] }).click();
+      await page.getByRole('link', { name: T.openIncident[locale] }).click();
     },
-    focal: (page) => page.locator('.inspector__incident'),
+    focal: (page) => page.locator('.incidents__inspector'),
   },
   {
     name: 'instance-undone-diagram',

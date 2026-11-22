@@ -268,7 +268,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M2
 - **Given:** Instance `I9` where `releaseFunds`, the undo of `reserve-funds`, fails on every attempt and the engine opens an incident; `compensations[]` reads `NOT_FULLY_UNDONE`, `blockedStep` `reserve-funds`, with an `incidentId`.
 - **When:** An operator with `processes:read` opens `I9` and its Timeline.
-- **Then:** The timeline shows "Undo failed: Release funds" with "Failed after 3 attempts", in plain words with the symbol `!` and no red; above it the scope reads "Disburse: not fully undone" with "Open the incident", which shows the blocked step and its incident on the diagram. Nothing on the page says the case was put right. At 1440x900 the failure and the undo entries are visible without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, with axe-core.
+- **Then:** The timeline shows "Undo failed: Release funds" with "Failed after 3 attempts", in plain words with the symbol `!` and no red; above it the scope reads "Disburse: not fully undone" with "Open the incident", a link that opens that incident selected in the incident queue (`CKP-008`, `#/incidents?view=open&incident={incidentId}`). Nothing on the page says the case was put right. At 1440x900 the failure and the undo entries are visible without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, with axe-core.
 - **Example:** `releaseFunds fails 3 times -> "Undo failed: Release funds, Failed after 3 attempts"; scope "Disburse: not fully undone"`.
 - **Test ID:** `CKP_049_a_failed_undo_reads_calmly_and_never_says_the_case_was_put_right`
 

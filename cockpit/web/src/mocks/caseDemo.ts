@@ -12,6 +12,8 @@ export const BOOKED_INSTANCE_ID = '01JD4I3B00KED000000000BK03';
 export const KYC_INSTANCE_ID = '01JD4I7KYC0000000000000KY7';
 export const UNDONE_INSTANCE_ID = '01JD4U9NDONE00000000000U09';
 export const STUCK_UNDO_INSTANCE_ID = '01JD4S7UCKUNDO000000000S10';
+/** The incident the stuck undo raised; the incident queue lists it (CKP-008) and the timeline links to it (CKP-049). */
+export const STUCK_UNDO_INCIDENT_ID = '01JD4N0INCIDENT000000UND10';
 
 export interface DemoCase {
   instance: Record<string, unknown> & { id: string; definitionKey: string; startedAt: string; status: string };
@@ -254,7 +256,7 @@ function loanUndoStuck(): DemoCase {
         entry('INCIDENT_RAISED', '2026-11-19T10:05:00Z', 'credit-decision', 'engine:loans-7f9c'),
       ],
       compensations: [
-        { scopeTokenId: 'DISBURSE-SCOPE', scope: 'disburse', state: 'NOT_FULLY_UNDONE', startedAt: '2026-11-19T10:03:01Z', endedAt: null, cause: 'MAX_ATTEMPTS_REACHED', failingStep: 'send-offer', stepsUndone: 1, blockedStep: 'credit-decision', incidentId: '01JD4N0INCIDENT000000UND10', incidentCode: 'COMPENSATION_FAILED' },
+        { scopeTokenId: 'DISBURSE-SCOPE', scope: 'disburse', state: 'NOT_FULLY_UNDONE', startedAt: '2026-11-19T10:03:01Z', endedAt: null, cause: 'MAX_ATTEMPTS_REACHED', failingStep: 'send-offer', stepsUndone: 1, blockedStep: 'credit-decision', incidentId: STUCK_UNDO_INCIDENT_ID, incidentCode: 'COMPENSATION_FAILED' },
       ],
     },
   };

@@ -113,7 +113,7 @@ function InstanceLoaded({ instance }: { instance: ProcessInstance }) {
               <InstanceDiagram instance={instance} graph={graph.data} activities={activities.data} picked={picked} onPick={setPicked} label={t('instance.diagramLabel', { name: title })}
                 load={{ pending: activities.isPending, error: activities.isError ? activities.error : undefined, retry: () => { void activities.refetch(); } }} />
             ) : (
-              activities.isPending ? <LoadingRows rows={6} /> : activities.isError ? <ActivitiesError error={activities.error} onRetry={() => { void activities.refetch(); }} /> : <Timeline graph={graph.data} activities={activities.data} onShowStep={(nodeId) => { setPicked(nodeId); setLens('diagram'); }} />
+              activities.isPending ? <LoadingRows rows={6} /> : activities.isError ? <ActivitiesError error={activities.error} onRetry={() => { void activities.refetch(); }} /> : <Timeline graph={graph.data} activities={activities.data} />
             )}
           </Tabs>
         )}
@@ -330,7 +330,7 @@ function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolea
 }
 
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
-function Timeline({ graph, activities, onShowStep }: { graph: DiagramGraph; activities: InstanceActivities; onShowStep: (nodeId: string) => void }) {
+function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
   const actorText = useActorText();
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
@@ -341,7 +341,7 @@ function Timeline({ graph, activities, onShowStep }: { graph: DiagramGraph; acti
     <>
       {scopes.length > 0 ? (
         <section className="undo-scopes" aria-label={t('instance.timeline.undoLabel')}>
-          {scopes.map((scope) => <UndoScope key={scope.scopeTokenId} scope={scope} stepName={stepName} onShowStep={onShowStep} />)}
+          {scopes.map((scope) => <UndoScope key={scope.scopeTokenId} scope={scope} stepName={stepName} />)}
         </section>
       ) : null}
       <div className="timeline" tabIndex={0} role="region" aria-label={t('instance.timeline.label')}>
@@ -380,9 +380,9 @@ function Timeline({ graph, activities, onShowStep }: { graph: DiagramGraph; acti
 
 /**
  * Where the undo of one saga scope stands, in words, as the engine states it. An undo that did not finish is a calm
- * warning with the one way forward; nothing here says the case was put right unless the engine says the scope is undone.
+ * warning with the one way forward, a link to its incident in the incident queue; nothing here says the case was put right unless the engine says the scope is undone.
  */
-function UndoScope({ scope, stepName, onShowStep }: { scope: CompensationScope; stepName: (id: string) => string; onShowStep: (nodeId: string) => void }) {
+function UndoScope({ scope, stepName }: { scope: CompensationScope; stepName: (id: string) => string }) {
   const { t } = useI18n();
   const state = scopeState(scope);
   const title = t(`instance.undo.scope.${state}`, { scope: scope.scope !== null ? stepName(scope.scope) : t('instance.timeline.otherStep') });
@@ -398,7 +398,7 @@ function UndoScope({ scope, stepName, onShowStep }: { scope: CompensationScope; 
       <span className="undo-scope__icon" aria-hidden="true">{state === 'UNDONE' ? '✓' : state === 'NOT_FULLY_UNDONE' ? '!' : '↺'}</span>
       <p className="undo-scope__text"><strong>{title}</strong> <span>{detail}</span></p>
       {state === 'NOT_FULLY_UNDONE' && blocked !== null && scope.incidentId !== null ? (
-        <button type="button" className="btn btn--small" onClick={() => { onShowStep(blocked); }}>{t('instance.undo.openIncident')}</button>
+        <a className="btn btn--small" href={formatRoute({ name: 'incidents', view: 'open', incidentId: scope.incidentId })}>{t('instance.undo.openIncident')}</a>
       ) : null}
     </div>
   );

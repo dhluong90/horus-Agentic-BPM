@@ -189,7 +189,7 @@ test('CKP_008_demo_an_incident_retried_from_the_queue_leaves_it_once_the_step_su
   await page.setViewportSize({ width: 1440, height: 900 });
   const engine = await mockEngines(page, meTuan, 'en');
   await page.goto(`./#/incidents?incident=${INCIDENTS.agentTimeout}`);
-  await expect(page.getByRole('tab', { name: 'Open (4)' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Open (5)' })).toBeVisible();
   await inspector(page).getByRole('button', { name: 'Retry', exact: true }).click();
   await dialog(page).getByLabel('Reason', { exact: true }).fill('Agent service back after maintenance');
   await dialog(page).getByRole('button', { name: 'Retry', exact: true }).click();

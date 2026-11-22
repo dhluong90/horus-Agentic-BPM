@@ -20,12 +20,12 @@ describe('CKP-008 incident queue with retry and resolve', () => {
   it('CKP_008_incident_queue_retries_and_updates_status', async () => {
     open(`#/incidents?incident=${INCIDENTS.agentTimeout}`, 'incidents-operator');
 
-    expect(await screen.findByRole('tab', { name: 'Open (4)' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('tab', { name: 'Open (5)' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Waiting for approval (1)' })).toBeInTheDocument();
     // Newest first; each step by its name in the process, the cause in words, the retry count as a number; no code.
     await waitFor(() => {
       const names = within(screen.getByRole('table')).getAllByRole('rowheader').map((cell) => cell.textContent);
-      expect(names).toEqual(['Screen sanctions lists', 'Credit decision', 'Book loan', 'Assess documents']);
+      expect(names).toEqual(['Screen sanctions lists', 'Credit decision', 'Book loan', 'Assess documents', 'Credit decision']);
     });
     const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
     const agent = rows[3] as HTMLElement;
