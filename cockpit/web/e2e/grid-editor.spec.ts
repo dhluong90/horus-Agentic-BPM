@@ -6,6 +6,7 @@ import { en } from '../src/i18n/en';
 import { vi } from '../src/i18n/vi';
 import type { Scenario } from '../src/mocks/fixtures';
 import { demoSeed, draftSeed, type StoredVersion } from '../src/mocks/ruleEngine';
+import { labelOf } from '../src/mocks/ruleLabels';
 import { cspViolations, mockHost, mockRuleEngine, rememberLocale } from './mockHost';
 
 const VIEWPORTS = [
@@ -21,10 +22,11 @@ const SHOTS = process.env['GRID_SCREENSHOTS'] ?? 'e2e/screenshots';
 type Engine = Awaited<ReturnType<typeof mockRuleEngine>>;
 
 /** A cell's spoken name, as the grid gives it ("Row R2, Balance"). */
-const cell = (locale: Locale, row: string, column: string) => WORDS[locale]['editor.cellLabel'].replace('{row}', row).replace('{column}', column);
+// The column is shown by its author label in the reader's language (#392), so `fee` is Phí in Vietnamese.
+const cell = (locale: Locale, row: string, column: 'tier' | 'balance' | 'fee') => WORDS[locale]['editor.cellLabel'].replace('{row}', row).replace('{column}', labelOf(column)[locale]);
 
 async function editFee(page: Page, locale: Locale) {
-  const fee = page.getByLabel(cell(locale, 'R3', 'Fee'), { exact: true });
+  const fee = page.getByLabel(cell(locale, 'R3', 'fee'), { exact: true });
   await fee.fill('40000');
   await page.keyboard.press('Enter');
   await expect(page.locator('.edit-dock__dot')).toBeVisible();
@@ -111,9 +113,9 @@ const STATES: readonly State[] = [
       await page.getByRole('button', { name: WORDS[locale]['editor.rowActions'].replace('{id}', 'R2') }).click();
       await page.getByRole('menuitem', { name: WORDS[locale]['editor.copy'].replace('{id}', 'R2') }).click();
       // A wildcard says what its dash means for the column on hover and on focus.
-      const wildcard = page.getByRole('button', { name: WORDS[locale]['editor.anyCell'].replace('{cell}', cell(locale, 'R1', 'Balance')) });
+      const wildcard = page.getByRole('button', { name: WORDS[locale]['editor.anyCell'].replace('{cell}', cell(locale, 'R1', 'balance')) });
       await wildcard.hover();
-      await expect(wildcard.locator('.cell-any-edit__hint')).toHaveText(WORDS[locale]['editor.anyOf'].replace('{column}', 'Balance'));
+      await expect(wildcard.locator('.cell-any-edit__hint')).toHaveText(WORDS[locale]['editor.anyOf'].replace('{column}', labelOf('balance')[locale]));
     },
     ready: async (page) => { await expect(page.locator('.draft-changes__line')).toHaveCount(2); },
   },
@@ -124,7 +126,7 @@ const STATES: readonly State[] = [
     hash: '#/rules/card-fee/2/edit',
     primary: 'editor.save',
     prepare: async (page, locale) => {
-      await page.getByLabel(cell(locale, 'R2', 'Balance'), { exact: true }).fill('');
+      await page.getByLabel(cell(locale, 'R2', 'balance'), { exact: true }).fill('');
       await page.keyboard.press('Enter');
     },
     ready: async (page, locale) => {
@@ -156,7 +158,7 @@ const STATES: readonly State[] = [
       expect(await gridTop(page)).toBe(before);
     },
     ready: async (page, locale) => {
-      await expect(page.locator('.edit-dock__conflict')).toContainText(WORDS[locale]['editor.conflict.cells'].replace('{cells}', 'R5 Fee'));
+      await expect(page.locator('.edit-dock__conflict')).toContainText(WORDS[locale]['editor.conflict.cells'].replace('{cells}', `R5 ${labelOf('fee')[locale]}`));
       await expect(page.getByRole('button', { name: WORDS[locale]['editor.conflict.load'] })).toBeEnabled();
     },
   },
@@ -191,7 +193,7 @@ const STATES: readonly State[] = [
     hash: '#/rules/card-fee/2/edit',
     primary: 'editor.save',
     prepare: async (page, locale) => {
-      await page.getByRole('button', { name: new RegExp(`^${cell(locale, 'R1', 'Tier')}`) }).click();
+      await page.getByRole('button', { name: new RegExp(`^${cell(locale, 'R1', 'tier')}`) }).click();
       await page.getByRole('checkbox', { name: WORDS[locale]['editor.notThese'] }).check();
     },
     ready: async (page, locale) => {
@@ -218,7 +220,7 @@ const STATES: readonly State[] = [
     primary: 'editor.save',
     prepare: async (page, locale) => {
       await page.route('**/*:validate', (route) => route.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Unavailable', status: 503, code: 'UNAVAILABLE' }) }));
-      await page.getByLabel(cell(locale, 'R3', 'Fee'), { exact: true }).fill('40000');
+      await page.getByLabel(cell(locale, 'R3', 'fee'), { exact: true }).fill('40000');
       await page.keyboard.press('Enter');
     },
     ready: async (page, locale) => { await expect(page.getByText(WORDS[locale]['editor.readingUnavailable']).first()).toBeVisible(); },
