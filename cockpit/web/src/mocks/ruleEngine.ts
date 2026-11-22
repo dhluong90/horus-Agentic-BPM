@@ -4,12 +4,13 @@
  * cockpit uses: paged lists of rule sets and versions with a cursor, allowedActions computed for the caller,
  * history, the row-level diff of two versions, reject with a reason, and the problems the screens must show: 422 VALIDATION_FAILED with
  * violations, 403 SELF_APPROVAL_FORBIDDEN, 409 VERSION_CONFLICT, 400 QUERY_INVALID, 413 PAYLOAD_TOO_LARGE.
- * Export answers the canonical JSON document (keys sorted, no white space) or a small DMN 1.5 table, with
+ * Export answers the canonical JSON document (keys sorted, no white space), a small DMN 1.5 table or a spreadsheet file (csvTable.ts), with
  * Content-Disposition; a POST repeated with the same Idempotency-Key replays the first answer.
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
 
 import { createAuditRoutes, type AuditOptions } from './auditEngine';
+import { fromCsv, toCsv } from './csvTable';
 import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from './ruleReadings';
 
 /** The most rows or samples one readings request covers, as the engine's limit. */
@@ -437,7 +438,13 @@ function exportOf(v: StoredVersion, format: string | null): FakeResponse {
   if (format === 'dmn') {
     return { status: 200, headers: { 'Content-Type': 'application/xml', 'Content-Disposition': `attachment; filename="${fileName}.dmn"` }, body: toDmn(v.definition) };
   }
-  return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn');
+  if (format === 'csv') {
+    // A group of conditions, a list or a calculated cell has no table form (RLE-191); the fake reads a `{` or `any(` as one.
+    const grouped = v.definition.rules.find((r) => Object.values(r.when).some((c) => /\b(any|all)\b|\(/.test(c)));
+    if (grouped) return problem(422, 'VALIDATION_FAILED', `Rule ${grouped.id} has no spreadsheet form`, [{ ruleId: grouped.id, column: null, message: 'The rule uses a grouped condition, which a table cannot show.', code: 'CSV_NO_TABLE_FORM' }]);
+    return { status: 200, headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${fileName}.csv"` }, body: toCsv(v.definition) };
+  }
+  return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn, csv');
 }
 
 export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}, auditOptions: AuditOptions = {}) {
@@ -468,6 +475,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (name !== undefined && copyOf !== null) return copyVersion(name, copyOf, request);
     // The import limit as #145 answers it (an engine before #145 says 422 "Document larger than ...").
     if (request.body.length > IMPORT_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The document is larger than ${String(IMPORT_LIMIT)} bytes`);
+    if ((request.headers['content-type'] ?? '').includes('text/csv')) return name === undefined ? problem(400, 'INPUT_INVALID', 'A spreadsheet builds on an existing version') : spreadsheet(name, request);
     // As the engine of this release: the media type names the source format, and only YAML is imported.
     if ((request.headers['content-type'] ?? '').includes('json')) return problem(400, 'INPUT_INVALID', 'Only YAML import is available in this release');
     const parsed = parseDocument(request.body);
@@ -490,6 +498,27 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     store.push(stored);
     const answer = view(stored, request, marks);
     return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${stored.ruleSet}/versions/${String(stored.version)}` } };
+  }
+
+  /** A spreadsheet as the next draft, on the columns, hit policy and masks of version `base` (RLE-192); a refusal stores nothing. */
+  function spreadsheet(name: string, request: FakeRequest): FakeResponse {
+    if (!request.permissions.includes('rules:author')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    const baseNumber = Number(new URL(request.path, 'http://host').searchParams.get('base'));
+    if (!Number.isInteger(baseNumber) || baseNumber < 1) return problem(400, 'INPUT_INVALID', 'A spreadsheet needs base, a version number of 1 or more');
+    if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+    const from = find(name, baseNumber);
+    if (!from) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(baseNumber)} of rule set ${name} not found`);
+    const read = fromCsv(request.body, from.definition);
+    if ('problems' in read) return problem(422, 'VALIDATION_FAILED', `${String(read.problems.length)} problems in the file`, read.problems);
+    const definition: Definition = { ...structuredClone(from.definition), rules: read.rules };
+    const stored: StoredVersion = {
+      ruleSet: name, version: versionsOf(name).length + 1, status: 'DRAFT', lockVersion: 0, createdBy: request.user, createdAt: now(),
+      requestedBy: null, requestedAt: null, approvedBy: null, approvedAt: null, effectiveFrom: null, source: JSON.stringify(definition, null, 2), definition,
+      history: [{ action: 'CREATED', fromStatus: null, toStatus: 'DRAFT', actor: request.user, reason: null, lockVersion: 0, occurredAt: now() }],
+    };
+    store.push(stored);
+    const answer = view(stored, request, marks);
+    return { ...answer, status: 201, headers: { ...answer.headers, Location: `/api/bpm/rules/v1/rule-sets/${name}/versions/${String(stored.version)}` } };
   }
 
   /** The next draft as a byte-for-byte copy of version `copyOf` (RLE-062); a body sent with it is refused. */

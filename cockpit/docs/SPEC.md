@@ -442,6 +442,33 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `nationalId MASKED -> NOT_MASKED_BY_DEFAULT -> "National ID: mask removed (masked → not masked by default)"; Approve disabled -> tick -> approve {acknowledgedWarnings: [{UNMASKED_PERSONAL_DATA, nationalId}, {UNMASKED_PERSONAL_DATA, email}]}`.
 - **Test ID:** `CKP_037_the_warning_the_acceptance_and_approve_are_all_on_screen_at_1440x900`
 
+### CKP-038 A version exports as a spreadsheet file the engine writes
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, PD-107, PD-142, `RLE-191`
+- **Milestone:** M1
+- **Given:** Rule set `card-fee` v1 `PUBLISHED` with inputs `tier`, `balance` (money) and `txCount`, outputs `fee` and `waived`, five rows, and a user holding `rules:read`; in the second case a version whose row R2 uses a grouped condition.
+- **When:** The user opens Export and chooses "As spreadsheet (CSV)".
+- **Then:** One `GET .../versions/1/export?format=csv` is sent and `card-fee-v1.csv` is saved with the response bytes, unchanged: UTF-8 with a byte order mark, header `Rule,tier,balance,txCount,fee,waived,Description`, one line per rule, cells in shorthand. For the grouped version no file is saved and the screen says "This version cannot be a spreadsheet." with the row and the reason.
+- **Example:** `export card-fee v1 as CSV -> card-fee-v1.csv; R2 grouped -> "This version cannot be a spreadsheet." Row R2`.
+- **Test ID:** `CKP_038_a_version_exports_as_a_csv_file_the_engine_wrote`, `CKP_038_a_version_with_no_table_form_saves_nothing_and_names_the_rule`
+
+### CKP-039 A spreadsheet is imported as the next draft only after the user confirms, and a refusal stores nothing
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-UI-04`, PD-107, PD-142, `RLE-192`, `RLE-193`, `RLE-194`
+- **Milestone:** M1
+- **Given:** A user holding `rules:author` on `card-fee` v1; files that change R3's fee, that write R2's balance without a currency, and (a reader, `rules:read` only) no import.
+- **When:** The user picks a `.csv` file with Import new version.
+- **Then:** A dialog says "Based on version 1", names the file and says it creates a new draft; nothing is sent before "Import as draft". One `POST .../versions?base=1` with `Content-Type: text/csv` and one `Idempotency-Key` follows, however often the button is pressed; after the `201` the screen says "Draft version 3 created" and opens the draft. A `422` stores nothing and lists one line per problem, "row R2, column Balance" and a plain reason in the user's language, never the cell's value. A `409` keeps the file and the dialog and offers "Try again", which sends a new key. A reader is offered Export and not Import.
+- **Example:** `R3 fee 32000 VND, base 1 -> confirm -> 201, "Draft version 3 created"; R2 ">= 51234567" -> "row R2, column Balance: the amount has no currency"`.
+- **Test ID:** `CKP_039_a_valid_file_is_sent_once_after_confirming_and_opens_the_new_draft`, `CKP_039_a_refused_cell_is_listed_by_row_and_column_without_its_value_and_nothing_is_saved`, `CKP_039_a_refusal_is_said_in_vietnamese_on_a_vietnamese_screen`, `CKP_039_a_conflict_keeps_the_file_and_the_dialog_and_a_retry_sends_a_new_key`, `CKP_039_cancelling_sends_nothing`, `CKP_039_a_reader_is_offered_export_and_not_import`, `CKP_039_keyboard_path_confirm_with_the_keyboard_and_escape_sends_nothing`, `CKP_039_visual_confirm_1440x900_dark_en`
+
+### CKP-040 Columns cannot change through a file, and damage from Excel is refused cell by cell
+- **Traces to:** `TR-DET-02`, `TR-UI-04`, PD-107, `RLE-192`, `RLE-193`
+- **Milestone:** M1
+- **Given:** A file with an added column `segment` and no `waived`; a file with `5E+07 VND` and `50,000,000 VND` in balance cells; a semicolon-separated file without a byte order mark.
+- **When:** Each is imported.
+- **Then:** The first is refused with "column segment" and "column waived" named and a reason that inputs and outputs cannot change through a file; the second with one line per damaged cell; nothing is saved. The semicolon file is accepted. No damaged value is read as another value.
+- **Example:** `header with segment -> "column segment: this column is not in the base version"`.
+- **Test ID:** `CKP_040_an_added_or_missing_column_is_refused_by_name`, `CKP_040_excel_damage_is_refused_cell_by_cell_and_a_semicolon_file_is_read`
+
 ---
 
 ## Definition Diagram, First Slice (Cockpit 0.2)
