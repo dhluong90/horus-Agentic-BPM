@@ -36,6 +36,7 @@ type Reject = ReturnType<typeof useRejectDefinition>;
 export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { definitionKey: string; version: number; lens?: ProcessLens | undefined; pageLimit: number }) {
   const { t } = useI18n();
   const personName = usePersonName();
+  const { can } = useProcessesSession();
   const details = useDefinitionVersion(definitionKey, version);
   const graph = useDefinitionGraph(definitionKey, version);
   const reviewable = hasChanges(details.data);
@@ -68,7 +69,14 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
   return (
     <section className={docked ? 'workspace workspace--docked' : 'workspace'} aria-labelledby="definition-title">
       <PageHead id="definition-title" title={title} subtitle={subtitle}
-        action={details.data ? <DefinitionStatusPill status={details.data.status} /> : undefined} />
+        action={details.data ? (
+          <>
+            {details.data.status === 'ACTIVE' && version > 1 && can('processes:migration:manage') ? (
+              <a className="btn btn--secondary" href={formatRoute({ name: 'migrate', key: definitionKey, version })}>{t('migration.start')}</a>
+            ) : null}
+            <DefinitionStatusPill status={details.data.status} />
+          </>
+        ) : undefined} />
       <article className="card card--diagram">
         <Tabs label={t('definition.lenses')} selected={shown} onSelect={select} items={items}>
           {shown === 'cases' ? <CaseList definitionKey={definitionKey} pageLimit={pageLimit} /> : graph.isPending ? <LoadingRows rows={6} /> : graph.isError ? (

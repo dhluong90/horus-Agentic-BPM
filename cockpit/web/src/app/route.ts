@@ -37,6 +37,8 @@ export type Route =
   | { name: 'decision'; decisionId: string }
   | { name: 'processes' }
   | { name: 'process'; key: string; version: number; lens?: ProcessLens | undefined }
+  | { name: 'migrate'; key: string; version: number; from?: number | undefined }
+  | { name: 'migration'; migrationId: string }
   | { name: 'instance'; instanceId: string }
   | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined }
   | { name: 'task'; taskId: string };
@@ -59,6 +61,8 @@ export function areaOf(route: Route): Area {
     case 'rule-set':
       return 'rules';
     case 'process':
+    case 'migrate':
+    case 'migration':
     case 'instance':
       return 'processes';
     case 'task':
@@ -105,8 +109,14 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
   if (area === 'processes' && ruleSet !== undefined) {
     // #/processes/<key>/<version>[/<lens>]: one version, or the cases of its key. A key without a version number opens the list.
     if (version === undefined || !/^[1-9]\d*$/.test(version)) return { name: 'processes' };
+    // #/processes/<key>/<target version>/move[?from=<version>]: plan moving the running cases of an older version here.
+    if (lens === 'move') {
+      const from = new URLSearchParams(search).get('from') ?? '';
+      return /^[1-9]\d*$/.test(from) ? { name: 'migrate', key: ruleSet, version: Number(version), from: Number(from) } : { name: 'migrate', key: ruleSet, version: Number(version) };
+    }
     return isProcessLens(lens) ? { name: 'process', key: ruleSet, version: Number(version), lens } : { name: 'process', key: ruleSet, version: Number(version) };
   }
+  if (area === 'migrations' && ruleSet !== undefined) return { name: 'migration', migrationId: ruleSet };
   if (area === 'instances' && ruleSet !== undefined) return { name: 'instance', instanceId: ruleSet };
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'tasks') return queueRoute(new URLSearchParams(search));
@@ -158,6 +168,10 @@ export function formatRoute(route: Route): string {
     }
     case 'process':
       return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}${route.lens !== undefined ? `/${route.lens}` : ''}`;
+    case 'migrate':
+      return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}/move${route.from !== undefined ? `?from=${String(route.from)}` : ''}`;
+    case 'migration':
+      return `#/migrations/${encodeURIComponent(route.migrationId)}`;
     case 'instance':
       return `#/instances/${encodeURIComponent(route.instanceId)}`;
     case 'task':

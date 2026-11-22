@@ -263,3 +263,110 @@ export const instanceActivities = z
   })
   .loose();
 export type InstanceActivities = z.infer<typeof instanceActivities>;
+
+/*
+ * Migration plans (PRE-195, PRE-200, PD-114, PD-131): written from process-engine/api/openapi.yaml. A plan is made
+ * once and never edited; the dry run, the proposal and the progress are read apart from it.
+ */
+
+export const MIGRATION_STATUSES = ['PLANNED', 'PROPOSED', 'REJECTED', 'APPROVED', 'RUNNING', 'COMPLETED', 'COMPLETED_WITH_FAILURES'] as const;
+export type MigrationStatus = (typeof MIGRATION_STATUSES)[number];
+
+export const migrationStepMapping = z.object({ from: z.string(), to: z.string() }).loose();
+export type MigrationStepMapping = z.infer<typeof migrationStepMapping>;
+
+export const migrationStepCancellation = z.object({ step: z.string(), moveTo: z.string(), reason: z.string() }).loose();
+export type MigrationStepCancellation = z.infer<typeof migrationStepCancellation>;
+
+export const migrationApproval = z.object({ mode: z.enum(['four-eyes', 'single']), secondPersonRequired: z.boolean() }).loose();
+
+export const migrationPlan = z
+  .object({
+    id: z.string(),
+    definitionKey: z.string(),
+    sourceVersion: z.number().int().min(1),
+    targetVersion: z.number().int().min(1),
+    status: z.enum(MIGRATION_STATUSES),
+    planHash: z.string(),
+    approval: migrationApproval,
+    createdBy: z.string(),
+    createdAt: z.string(),
+    mappings: z.array(migrationStepMapping),
+    cancellations: z.array(migrationStepCancellation),
+  })
+  .loose();
+export type MigrationPlan = z.infer<typeof migrationPlan>;
+
+const instanceSample = z.object({ count: z.number().int().min(0), instanceIds: z.array(z.string()), truncated: z.boolean() }).loose();
+
+export const MAPPING_KINDS = ['SAME_ID', 'MAPPED', 'CANCELLED', 'STEP_NOT_IN_TARGET', 'STEP_TYPE_CHANGED'] as const;
+export type MappingKind = (typeof MAPPING_KINDS)[number];
+export const CONFLICT_CODES = ['STEP_NOT_IN_TARGET', 'STEP_TYPE_CHANGED', 'TARGET_NOT_ACTIVE', 'STEP_IN_FLIGHT'] as const;
+export type ConflictCode = (typeof CONFLICT_CODES)[number];
+
+export const migrationDryRun = z
+  .object({
+    migrationId: z.string(),
+    planHash: z.string(),
+    definitionKey: z.string(),
+    sourceVersion: z.number().int().min(1),
+    targetVersion: z.number().int().min(1),
+    valid: z.boolean(),
+    checkedAt: z.string(),
+    validUntil: z.string(),
+    approval: migrationApproval,
+    instances: z.object({ running: z.number().int(), movable: z.number().int(), blocked: z.number().int() }).loose(),
+    nodes: z.array(
+      z
+        .object({
+          nodeId: z.string(),
+          name: nullableString,
+          type: nullableString,
+          liveTokens: z.number().int(),
+          mapping: z.enum(MAPPING_KINDS),
+          targetNodeId: nullableString,
+          targetType: nullableString,
+        })
+        .loose(),
+    ),
+    conflicts: z.array(z.object({ code: z.enum(CONFLICT_CODES), nodeId: nullableString, name: nullableString, instances: instanceSample }).loose()),
+    movable: instanceSample,
+    impact: z.object({ mapped: z.number().int(), cancelled: z.number().int(), inFlight: z.number().int(), unmapped: z.number().int() }).loose(),
+  })
+  .loose();
+export type MigrationDryRun = z.infer<typeof migrationDryRun>;
+
+export const migrationExecution = z
+  .object({
+    migrationId: z.string(),
+    status: z.enum(MIGRATION_STATUSES),
+    approval: migrationApproval,
+    lockVersion: z.number().int(),
+    proposedBy: nullableString,
+    proposedAt: nullableString,
+    reason: nullableString,
+    approvedBy: nullableString,
+    approvedAt: nullableString,
+    rejectedBy: nullableString,
+    rejectedAt: nullableString,
+    rejectionReason: nullableString,
+    progress: z.object({ total: z.number().int(), migrated: z.number().int(), failed: z.number().int(), skipped: z.number().int() }).loose(),
+    startedAt: nullableString,
+    finishedAt: nullableString,
+  })
+  .loose();
+export type MigrationExecution = z.infer<typeof migrationExecution>;
+
+export const migrationOutcome = z
+  .object({
+    instanceId: z.string(),
+    outcome: z.enum(['MIGRATED', 'FAILED', 'SKIPPED']),
+    code: z.string(),
+    detail: z.string(),
+    occurredAt: z.string(),
+    incidentId: nullableString,
+  })
+  .loose();
+export type MigrationOutcome = z.infer<typeof migrationOutcome>;
+export const migrationOutcomePage = z.object({ items: z.array(migrationOutcome), nextAfter: z.string().nullable().optional() }).loose();
+export type MigrationOutcomePage = z.infer<typeof migrationOutcomePage>;

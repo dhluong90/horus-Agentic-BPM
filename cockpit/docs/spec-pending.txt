@@ -23,7 +23,6 @@ CKP-022 M2
 CKP-023 M2
 CKP-025 M3
 CKP-026 M3
-CKP-027 M3
 CKP-028 M2
 # CKP-029: node types and the generic node ship as CKP-070; stays listed until a second host and the stage in the host details.
 CKP-029 M2

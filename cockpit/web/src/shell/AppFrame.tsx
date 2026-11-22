@@ -11,6 +11,8 @@ import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
+import { MigrationBuilder } from '../features/processes/migration/MigrationBuilder';
+import { MigrationPage } from '../features/processes/migration/MigrationPage';
 import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
@@ -106,6 +108,10 @@ function AreaContent({ route, meta, me, areas, engines, inboxSeconds }: { route:
       return <ProcessesPage pageLimit={pageLimit} />;
     case 'process':
       return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} pageLimit={pageLimit} />;
+    case 'migrate':
+      return <MigrationBuilder definitionKey={route.key} target={route.version} from={route.from} />;
+    case 'migration':
+      return <MigrationPage migrationId={route.migrationId} pageLimit={pageLimit} />;
     case 'instance':
       return <InstancePage instanceId={route.instanceId} />;
     case 'tasks':

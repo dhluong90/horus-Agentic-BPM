@@ -39,7 +39,7 @@ const PAN_STEP = 80;
 
 /** A status badge on one step of an instance (CKP-017): its tone, icon and words, all decided by the caller. */
 export interface StepBadge {
-  tone: 'token' | 'incident' | 'done';
+  tone: 'token' | 'incident' | 'done' | 'warn';
   icon: string;
   /** Drawn on the badge; empty for a done mark, which is an icon only. */
   text: string;
@@ -236,7 +236,7 @@ function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked }: 
   const known = isKnownNodeType(node.type);
   // A selectable step's name starts with the words drawn on it, in order, so speech input can name it (WCAG 2.5.3).
   const label = interaction.onSelect !== undefined
-    ? `${node.name ?? node.id} ${typeLabel}${badge !== undefined ? `, ${badge.label}` : ''}`
+    ? `${node.name ?? node.id} ${typeLabel}${[badge?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
     : `${node.name ?? node.id}, ${typeLabel}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
   if (node.shape === 'task' || !known) {
     // A type this cockpit does not draw is laid out and drawn as a dashed box, named in words.

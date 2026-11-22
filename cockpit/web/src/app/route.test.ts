@@ -57,4 +57,18 @@ describe('routes', () => {
     expect(parseRoute(formatRoute(cases))).toEqual(cases);
     expect(parseRoute('#/processes/loan-origination/3/other')).toEqual({ name: 'process', key: 'loan-origination', version: 3 });
   });
+
+  it('CKP_027_a_migration_plan_and_the_screen_that_makes_one_round_trip_through_the_url', () => {
+    const plan: Route = { name: 'migration', migrationId: '01JD4M1GRAT10N00000000PLAN' };
+    expect(formatRoute(plan)).toBe('#/migrations/01JD4M1GRAT10N00000000PLAN');
+    expect(parseRoute(formatRoute(plan))).toEqual(plan);
+    expect(areaOf(plan)).toBe('processes');
+    const make: Route = { name: 'migrate', key: 'kyc-onboarding', version: 3, from: 2 };
+    expect(formatRoute(make)).toBe('#/processes/kyc-onboarding/3/move?from=2');
+    expect(parseRoute(formatRoute(make))).toEqual(make);
+    expect(areaOf(make)).toBe('processes');
+    // A source that is not a version number is dropped, never requested.
+    expect(parseRoute('#/processes/kyc-onboarding/3/move?from=x')).toEqual({ name: 'migrate', key: 'kyc-onboarding', version: 3 });
+    expect(formatRoute({ name: 'migrate', key: 'kyc-onboarding', version: 3 })).toBe('#/processes/kyc-onboarding/3/move');
+  });
 });

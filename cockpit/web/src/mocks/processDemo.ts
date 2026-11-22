@@ -195,6 +195,7 @@ const VI_NAMES: Readonly<Record<string, string>> = {
   'Open account': 'Mở tài khoản',
   'Customer onboarded': 'Đã mở khách hàng',
   'Check for fraud': 'Kiểm tra gian lận',
+  'Senior credit approval': 'Duyệt tín dụng cấp cao',
   High: 'Cao',
   Standard: 'Thường',
   'Card dispute': 'Khiếu nại thẻ',
@@ -209,6 +210,10 @@ const viName = (name: string): string => VI_NAMES[name] ?? name;
 function viBpmn(bpmn: string): string {
   return bpmn.replace(/ name="([^"]+)"/g, (whole, name: string) => (whole.includes('horus:') ? whole : ` name="${viName(name)}"`));
 }
+
+/** Any demo definitions as a tenant of the given language authors them. */
+export const localiseDemo = (definitions: readonly DemoDefinition[], locale: 'en' | 'vi'): readonly DemoDefinition[] =>
+  locale === 'vi' ? definitions.map((d) => ({ ...d, name: viName(d.name), bpmn: viBpmn(d.bpmn) })) : definitions;
 
 export const VI_DEMO_DEFINITIONS: readonly DemoDefinition[] = DEMO_DEFINITIONS.map((d) => ({ ...d, name: viName(d.name), bpmn: viBpmn(d.bpmn) }));
 

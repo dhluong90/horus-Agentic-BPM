@@ -223,6 +223,8 @@
 .dg-badge text { font: var(--type-caption); font-weight: 600; }
 .dg-badge--token rect { fill: var(--token); }
 .dg-badge--token text { fill: var(--on-accent-fill); }
+.dg-badge--warn rect { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1; }
+.dg-badge--warn text { fill: var(--warn); }
 .dg-badge--incident rect { fill: var(--bad-soft); stroke: var(--bad-fill); stroke-width: 1; }
 .dg-badge--incident text { fill: var(--bad); }
 .dg-badge--done circle { fill: var(--ok-soft); stroke: var(--ok-fill); stroke-width: 1; }
