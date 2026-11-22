@@ -263,6 +263,15 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `T2 OPEN -> :reassign {hoa, Covering leave}; T4 CLAIMED -> :delegate {hoa, Covering leave}; T5 -> 409 ASSIGNEE_NOT_ALLOWED -> plain sentence`.
 - **Test ID:** `CKP_048_reassign_sends_reassign_for_an_open_task_and_delegate_for_a_claimed_one_with_the_reason`, `CKP_048_a_target_the_engine_refuses_reads_as_a_plain_sentence_and_the_task_stays`, `CKP_048_without_the_manage_permission_all_tasks_and_reassign_are_not_shown`, `CKP_048_masked_values_of_a_task_stay_masked_and_are_never_shown`, `CKP_048_tasks_show_only_with_a_task_permission_and_all_tasks_only_with_manage`, `CKP_048_an_open_task_is_reassigned_and_a_claimed_one_delegated_when_the_engine_allows`, `CKP_048_refusals_map_from_the_problem_code`, `CKP_048_reassign_is_done_by_keyboard_and_escape_closes_the_dialog_without_a_request`
 
+### CKP-049 An undo step that fails reads calmly, names the step and the attempts, and never says the case was put right
+- **Traces to:** `TR-COMP-02`, `TR-UI-03`, `PRE-203`, #80
+- **Milestone:** M2
+- **Given:** Instance `I9` where `releaseFunds`, the undo of `reserve-funds`, fails on every attempt and the engine opens an incident; `compensations[]` reads `NOT_FULLY_UNDONE`, `blockedStep` `reserve-funds`, with an `incidentId`.
+- **When:** An operator with `processes:read` opens `I9` and its Timeline.
+- **Then:** The timeline shows "Undo failed: Release funds" with "Failed after 3 attempts", in plain words with the symbol `!` and no red; above it the scope reads "Disburse: not fully undone" with "Open the incident", which shows the blocked step and its incident on the diagram. Nothing on the page says the case was put right. At 1440x900 the failure and the undo entries are visible without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, with axe-core.
+- **Example:** `releaseFunds fails 3 times -> "Undo failed: Release funds, Failed after 3 attempts"; scope "Disburse: not fully undone"`.
+- **Test ID:** `CKP_049_a_failed_undo_reads_calmly_and_never_says_the_case_was_put_right`
+
 ### CKP-022 The tenant switcher offers only allowed tenants and shows a refusal
 - **Traces to:** `TR-SEC-03`, `TR-TEN-01`
 - **Milestone:** M2
@@ -389,12 +398,12 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `CKP_032_minimal_draft_editing_shows_errors_on_cells`
 
 ### CKP-033 Compensation runs appear in the instance timeline
-- **Traces to:** `TR-COMP-01`, `TR-OBS-01`
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-OBS-01`, `PRE-203`, #80
 - **Milestone:** M2
-- **Given:** Instance `I7` of `loan-booking` where `notify-partner` failed inside the `saga` `disburse` and the handlers `closeAccount` and `releaseFunds` ran, the second after one retry (`PRE-044`).
-- **When:** An operator with `processes:read` opens `I7`.
-- **Then:** The timeline lists, in time order and in text, the failure of `notify-partner`, then `closeAccount` and `releaseFunds` as compensation entries with their attempt ids, the retry of `releaseFunds`, and the scope `disburse` marked compensated; the diagram marks the compensated steps with an icon and a text label, not colour alone.
-- **Example:** `I7 timeline -> notify-partner FAILED, closeAccount COMPENSATED, releaseFunds retry 1 then COMPENSATED`.
+- **Given:** Instance `I7` of `loan-booking` where `reserve-funds` then `open-account` completed inside the saga `disburse` and `notify-partner` failed; the undo steps `closeAccount` and `releaseFunds` ran, the second after one retry (`PRE-044`). The engine reports the scope `disburse` as `UNDONE` with two steps undone.
+- **When:** An operator with `processes:read` opens `I7` and its Timeline.
+- **Then:** The timeline lists, in time order and in text, the failure of "Notify partner", then "Undo of Open account: Close account", then "Undo of Reserve funds: Release funds" with its retry, and the scope "Disburse: undone". Each undo entry carries the symbol ↺ and the word "Undo" besides the warning-hue left edge, so colour is never the only mark. The state of the scope is the engine's `compensations[].state`; the page never works it out from the entries. The diagram marks each undone step with ↺ and the label "Undone". No variable or input value appears; no code or id is shown in the page body.
+- **Example:** `I7 timeline -> Notify partner failed, Undo of Open account: Close account, Undo of Reserve funds: Release funds (attempt 2), Disburse: undone`.
 - **Test ID:** `CKP_033_compensation_runs_in_instance_timeline`
 
 ### CKP-034 SLA breaches are a filter of the task queue, measured against each task's own deadline
