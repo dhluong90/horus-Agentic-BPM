@@ -49,6 +49,26 @@ public final class GraphDiffs {
      */
     public static GraphDiff diff(String definitionKey, GraphDiff.Side base, Process baseModel, GraphDiff.Side target,
             Process targetModel) {
+        return compute(definitionKey, base, baseModel, target, targetModel, GraphDiff.MAX_CHANGES);
+    }
+
+    /**
+     * The complete change set, never cut off (PRE-199, #426): the same lists as {@link #diff}, with every changed
+     * value. It is bounded by the size of the two definitions (at most 500 steps and 1 MB each), and it is the input of
+     * the paged read and of the change-set hash.
+     *
+     * @param definitionKey the definition key
+     * @param base the base version and its model
+     * @param target the target version and its model
+     * @return the diff from base to target, with {@code truncated} false
+     */
+    public static GraphDiff complete(String definitionKey, GraphDiff.Side base, Process baseModel,
+            GraphDiff.Side target, Process targetModel) {
+        return compute(definitionKey, base, baseModel, target, targetModel, Integer.MAX_VALUE);
+    }
+
+    private static GraphDiff compute(String definitionKey, GraphDiff.Side base, Process baseModel,
+            GraphDiff.Side target, Process targetModel, int maxChanges) {
         Objects.requireNonNull(baseModel, "baseModel");
         Objects.requireNonNull(targetModel, "targetModel");
         Graph from = Graph.of(baseModel);
@@ -57,7 +77,7 @@ public final class GraphDiffs {
         List<GraphDiff.Node> added = new ArrayList<>();
         List<GraphDiff.Node> removed = new ArrayList<>();
         List<GraphDiff.NodeChange> changed = new ArrayList<>();
-        Changes changes = new Changes(changed);
+        Changes changes = new Changes(changed, maxChanges);
         TreeSet<String> ids = new TreeSet<>(from.steps.keySet());
         ids.addAll(to.steps.keySet());
         for (String id : ids) {
@@ -102,10 +122,12 @@ public final class GraphDiffs {
     /** The changed values of matched steps, at most {@link GraphDiff#MAX_CHANGES}. */
     private static final class Changes {
         private final List<GraphDiff.NodeChange> out;
+        private final int max;
         private boolean truncated;
 
-        Changes(List<GraphDiff.NodeChange> out) {
+        Changes(List<GraphDiff.NodeChange> out, int max) {
             this.out = out;
+            this.max = max;
         }
 
         void compare(String id, String name, String type, String path, JsonNode before, JsonNode after) {
@@ -122,7 +144,7 @@ public final class GraphDiffs {
                             i < after.size() ? after.get(i) : null);
                 }
             } else if (!Objects.equals(before, after)) {
-                if (out.size() >= GraphDiff.MAX_CHANGES) {
+                if (out.size() >= max) {
                     truncated = true;
                     return;
                 }

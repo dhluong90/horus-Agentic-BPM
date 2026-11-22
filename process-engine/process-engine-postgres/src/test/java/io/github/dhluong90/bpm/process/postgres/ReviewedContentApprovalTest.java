@@ -10,12 +10,15 @@ import io.github.dhluong90.bpm.process.api.DefinitionNotFoundException;
 import io.github.dhluong90.bpm.process.api.DefinitionRef;
 import io.github.dhluong90.bpm.process.api.DefinitionVersion;
 import io.github.dhluong90.bpm.process.api.GraphDiff;
+import io.github.dhluong90.bpm.process.api.GraphDiffPage;
+import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.spi.ProcessEventPublisher;
 import io.github.dhluong90.bpm.process.test.TestClock;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -252,5 +255,157 @@ class ReviewedContentApprovalTest {
                 .extracting(e -> ((io.github.dhluong90.bpm.process.api.ProcessException) e).code())
                 .isEqualTo("IDEMPOTENCY_KEY_REUSE_MISMATCH");
         assertThat(approvedEvents()).isEqualTo(1);
+    }
+
+    /** v1 of 400 steps active, v2 with all 1,200 values changed pending: a change set no unpaged diff lists in full. */
+    private DefinitionVersion oversizeV2() {
+        DefinitionVersion v1 = pendingDocument(longKyc("Review", "KYC_OFFICER"));
+        engine.identity.as("bank-a", "bob", APPROVER);
+        engine.services.approve(v1.ref(), v1.lockVersion(), v1.definitionHash(), null, "ap-base");
+        return pendingDocument(longKyc("Check", "RISK_OFFICER"));
+    }
+
+    /** Reads every page of the diff against the effective version and returns the last one. */
+    private GraphDiffPage readAllPages(DefinitionVersion v2, int limit) {
+        engine.identity.as("bank-a", "bob", APPROVER);
+        GraphDiffPage page = engine.services.diffPageFromEffective(v2.ref(), limit, null);
+        while (!page.last()) {
+            page = engine.services.diffPageFromEffective(v2.ref(), limit, page.nextCursor());
+        }
+        return page;
+    }
+
+    @Test
+    void PRE_201_the_whole_change_set_is_read_page_by_page_and_the_hashes_come_with_the_last_page() {
+        // Given v2 differs from the effective v1 in 1,200 values
+        DefinitionVersion v2 = oversizeV2();
+        engine.identity.as("bank-a", "bob", APPROVER);
+
+        // When bob reads the diff 500 changes at a time
+        GraphDiffPage first = engine.services.diffPageFromEffective(v2.ref(), 500, null);
+        GraphDiffPage second = engine.services.diffPageFromEffective(v2.ref(), 500, first.nextCursor());
+        GraphDiffPage third = engine.services.diffPageFromEffective(v2.ref(), 500, second.nextCursor());
+
+        // Then three pages hold 500, 500 and 200 changes, none truncated, in sort order without a gap
+        assertThat(first.total()).isEqualTo(1200);
+        assertThat(first.slice().nodesChanged()).hasSize(500);
+        assertThat(second.slice().nodesChanged()).hasSize(500);
+        assertThat(third.slice().nodesChanged()).hasSize(200);
+        List<String> keys = java.util.stream.Stream.of(first, second, third)
+                .flatMap(p -> p.slice().nodesChanged().stream()).map(c -> c.id() + " " + c.path()).toList();
+        assertThat(keys).hasSize(1200).doesNotHaveDuplicates().isSorted();
+        assertThat(first.slice().truncated()).isFalse();
+        // And the hashes are on the last page only
+        assertThat(first.approvableHash()).isNull();
+        assertThat(first.changeSetHash()).isNull();
+        assertThat(second.changeSetHash()).isNull();
+        assertThat(third.approvableHash()).isEqualTo(v2.definitionHash());
+        assertThat(third.changeSetHash()).matches("[0-9a-f]{64}");
+        // And the whole-set hash does not depend on the page size
+        assertThat(readAllPages(v2, 77).changeSetHash()).isEqualTo(third.changeSetHash());
+    }
+
+    @Test
+    void PRE_201_a_cursor_this_change_set_did_not_issue_and_a_page_size_out_of_range_are_refused() {
+        DefinitionVersion v2 = oversizeV2();
+        engine.identity.as("bank-a", "bob", APPROVER);
+        GraphDiffPage first = engine.services.diffPageFromEffective(v2.ref(), 500, null);
+
+        assertThatThrownBy(() -> engine.services.diffPageFromEffective(v2.ref(), 500, "not-a-cursor"))
+                .isInstanceOf(QueryInvalidException.class);
+        // A cursor that names another offset than the digest was issued for is refused: pages cannot be skipped
+        String forged = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
+                ("1000:" + new String(java.util.Base64.getUrlDecoder().decode(first.nextCursor()),
+                        StandardCharsets.UTF_8).split(":")[1]).getBytes(StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> engine.services.diffPageFromEffective(v2.ref(), 500, forged))
+                .isInstanceOf(QueryInvalidException.class);
+        assertThatThrownBy(() -> engine.services.diffPageFromEffective(v2.ref(), 501, null))
+                .isInstanceOf(QueryInvalidException.class);
+        assertThatThrownBy(() -> engine.services.diffPageFromEffective(v2.ref(), 0, null))
+                .isInstanceOf(QueryInvalidException.class);
+    }
+
+    @Test
+    void PRE_202_a_change_set_over_the_limit_is_approved_with_the_hash_of_the_whole_set_and_records_it() {
+        // Given v2 with 1,200 changes, and bob has read every page
+        DefinitionVersion v2 = oversizeV2();
+        GraphDiffPage last = readAllPages(v2, 500);
+
+        // When bob approves naming v2's hash and the whole-set hash
+        engine.identity.as("bank-a", "bob", APPROVER);
+        DefinitionVersion active = engine.services.approve(v2.ref(), v2.lockVersion(), last.approvableHash(),
+                last.changeSetHash(), "read all three pages", "ap-set-1");
+
+        // Then it is active outside dev, and the history row and the event name the whole set reviewed
+        assertThat(active.status()).isEqualTo("ACTIVE");
+        assertThat(TestEngine.jdbc().sql("SELECT h.details->>'reviewedChangeSetHash' FROM pre_definition_history h "
+                + "JOIN pre_definition d ON d.tenant_id = h.tenant_id AND d.id = h.definition_id "
+                + "WHERE h.action = 'APPROVED' AND d.version_num = 2").query(String.class).single())
+                .isEqualTo(last.changeSetHash());
+        assertThat(engine.events).filteredOn(e -> e.type().equals("processes.definition.approved.v1")).last()
+                .satisfies(e -> assertThat(e.payload()).containsEntry("reviewedChangeSetHash", last.changeSetHash()));
+    }
+
+    @Test
+    void PRE_202_a_change_set_hash_that_is_not_the_whole_set_now_is_refused_and_writes_nothing() {
+        // Given v2 with 1,200 changes, read in full
+        DefinitionVersion v2 = oversizeV2();
+        GraphDiffPage last = readAllPages(v2, 500);
+        Map<String, Object> before = footprint();
+        long events = approvedEvents();
+
+        // When bob approves with a hash of some other change set, then with the right one but at a stale lock version
+        engine.identity.as("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> engine.services.approve(v2.ref(), v2.lockVersion(), last.approvableHash(),
+                "0".repeat(64), null, "ap-set-2"))
+                // Then it is CONTENT_CHANGED naming the hash of the change set now, and nothing is written
+                .isInstanceOfSatisfying(ContentChangedException.class, e -> {
+                    assertThat(e.currentChangeSetHash()).isEqualTo(last.changeSetHash());
+                    assertThat(e.currentDefinitionHash()).isEqualTo(v2.definitionHash());
+                });
+        assertThat(footprint()).isEqualTo(before);
+        assertThat(approvedEvents()).isEqualTo(events);
+        assertThat(stored(2).status()).isEqualTo("PENDING_APPROVAL");
+        // And not 64 hexadecimal characters is refused as input
+        engine.identity.as("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> engine.services.approve(v2.ref(), v2.lockVersion(), last.approvableHash(), "ABC",
+                null, null)).isInstanceOf(InputInvalidException.class);
+    }
+
+    @Test
+    void PRE_202_an_unpaged_read_and_an_approval_without_the_set_hash_keep_refusing_a_truncated_set() {
+        // Given v2 with 1,200 changes
+        DefinitionVersion v2 = oversizeV2();
+
+        // When bob approves naming only v2's hash (what the unpaged diff could never give him)
+        engine.identity.as("bank-a", "bob", APPROVER);
+        assertThatThrownBy(() -> engine.services.approve(v2.ref(), v2.lockVersion(), v2.definitionHash(), null,
+                "ap-set-3")).isInstanceOf(ChangeSetTruncatedException.class);
+
+        // Then the unpaged diff is still cut off at 1,000 values with no approvable hash
+        GraphDiff diff = engine.services.diffFromEffective(v2.ref());
+        assertThat(diff.truncated()).isTrue();
+        assertThat(diff.approvableHash()).isNull();
+    }
+
+    @Test
+    void PRE_202_a_change_set_within_the_limit_needs_no_set_hash_and_checks_one_when_sent() {
+        // Given v1 active and v2 with one renamed step, pending
+        DefinitionVersion v1 = pending("Review identity documents");
+        engine.identity.as("bank-a", "bob", APPROVER);
+        engine.services.approve(v1.ref(), v1.lockVersion(), v1.definitionHash(), null, "ap-small-1");
+        DefinitionVersion v2 = pending("Review identity documents and proof of address");
+        engine.identity.as("bank-a", "bob", APPROVER);
+        GraphDiffPage page = engine.services.diffPageFromEffective(v2.ref(), null, null);
+        assertThat(page.last()).isTrue();
+
+        // When bob names a wrong set hash, then none
+        assertThatThrownBy(() -> engine.services.approve(v2.ref(), v2.lockVersion(), v2.definitionHash(),
+                "f".repeat(64), null, "ap-small-2")).isInstanceOf(ContentChangedException.class);
+        DefinitionVersion active = engine.services.approve(v2.ref(), v2.lockVersion(), v2.definitionHash(), null,
+                "ap-small-3");
+
+        // Then the version is approved on its definition hash alone
+        assertThat(active.status()).isEqualTo("ACTIVE");
     }
 }

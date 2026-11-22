@@ -76,6 +76,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
@@ -221,6 +222,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    private volatile io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue =
+            io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
     private volatile io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory =
             io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
@@ -679,7 +682,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             requireLock(current, expectedLockVersion);
             // PRE-016: the guardrail rule set may have changed since import; checked again before anything is written.
             Process stored = storedProcess(current);
-            checkServiceRegistrations(stored);
+            checkServiceRegistrations(tenant, stored);
             checkGuardrailContracts(tenant, stored);
             Instant now = clock.instant();
             if (effectiveFrom != null && effectiveFrom.isBefore(now)) {
@@ -699,7 +702,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     @Override
     public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
-            String comment, String idempotencyKey) {
+            String expectedChangeSetHash, String comment, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_APPROVE);
         // PRE-177 (PD-139): an approval names the content it reviewed, refused before anything is read when missing.
@@ -710,13 +713,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new InputInvalidException("expectedDefinitionHash must be 64 lower-case hexadecimal characters, the"
                     + " definitionHash of the version reviewed");
         }
+        if (expectedChangeSetHash != null && !CONTENT_HASH.matcher(expectedChangeSetHash).matches()) {
+            throw new InputInvalidException("expectedChangeSetHash must be 64 lower-case hexadecimal characters, the"
+                    + " changeSetHash on the last page of the diff");
+        }
         String note = boundedComment(comment, false);
-        // The hash joins the request hash only when named, so a request stored before the field existed still replays.
+        // The hashes join the request hash only when named, so a request stored before the fields existed still replays.
         String requestHash = expectedDefinitionHash == null
                 ? Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
                         Long.toString(expectedLockVersion), note)
-                : Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
-                        Long.toString(expectedLockVersion), note, expectedDefinitionHash);
+                : expectedChangeSetHash == null
+                        ? Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                                Long.toString(expectedLockVersion), note, expectedDefinitionHash)
+                        : Hashes.sha256Parts("approve", caller, ref.key(), Integer.toString(ref.version()),
+                                Long.toString(expectedLockVersion), note, expectedDefinitionHash,
+                                expectedChangeSetHash);
         return transactions.inTransaction(() -> idempotent(tenant, "approve", idempotencyKey, requestHash, () -> {
             LockedKey locked = lockVersion(tenant, ref);
             StoredDefinition current = locked.version();
@@ -741,15 +752,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + expectedDefinitionHash + " but it is " + current.definitionHash() + ", at lock version "
                         + current.lockVersion(), current.definitionHash(), current.lockVersion());
             }
-            // PRE-177 (PD-139): an approval may not rest on a change list cut off at its limit. Pure computation on
-            // rows already read in this transaction; no call leaves the process.
-            if (expectedDefinitionHash != null) {
-                requireCompleteChangeSet(tenant, current);
+            // PRE-177, PRE-199 (PD-139): an approval may not rest on a change list cut off at its limit, unless it
+            // names the hash of the whole set read page by page. Pure computation on rows already read in this
+            // transaction; no call leaves the process.
+            if (expectedDefinitionHash != null || expectedChangeSetHash != null) {
+                requireReviewedChangeSet(tenant, current, expectedChangeSetHash);
             }
             // PRE-016: and again at approval, against the rule set version in effect now; PRE-072: and the host's
             // handlers and adapters, which may have been removed since the request.
             Process stored = storedProcess(current);
-            checkServiceRegistrations(stored);
+            checkServiceRegistrations(tenant, stored);
             checkGuardrailContracts(tenant, stored);
             // An older version never overtakes a newer active one (PRE-021).
             for (StoredDefinition other : locked.all()) {
@@ -774,6 +786,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             if (expectedDefinitionHash != null) {
                 approvedDetails.put("reviewedDefinitionHash", expectedDefinitionHash);
             }
+            if (expectedChangeSetHash != null) {
+                approvedDetails.put("reviewedChangeSetHash", expectedChangeSetHash);
+            }
             lifecycleHistory(updated, "APPROVED", current.status(), caller, note, approvedDetails, now);
             Map<String, Object> payload = definitionPayload(updated);
             payload.put("requestedBy", updated.requestedBy());
@@ -785,6 +800,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             payload.put("readerVersion", READER_VERSION);
             if (expectedDefinitionHash != null) {
                 payload.put("reviewedDefinitionHash", expectedDefinitionHash);
+            }
+            if (expectedChangeSetHash != null) {
+                payload.put("reviewedChangeSetHash", expectedChangeSetHash);
             }
             publishDefinition(updated, "processes.definition.approved.v1", payload, now);
             if (!effective.isAfter(now)) {
@@ -1121,24 +1139,72 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
-     * Refuses an approval whose change set against the effective version is truncated (PRE-177, PD-139): no reviewer
-     * can have read it complete, so the diff exposes no approvable hash and the approval is refused before anything is
-     * written. A first version, or one approved while no version is effective, has no change list to cut off.
+     * The change set an approval rests on (PRE-177, PRE-199, PD-139): the complete one against the effective version.
+     * Within {@link GraphDiff#MAX_CHANGES} changed values the definition hash alone suffices, and a change-set hash,
+     * when named, must match. Beyond it a reviewer can only have read the set page by page, so the hash of the whole set
+     * is required: missing is {@code CHANGE_SET_TRUNCATED}, different is {@code CONTENT_CHANGED}. Nothing is written
+     * before this check. A first version, or one approved while no version is effective, has no change set.
      */
-    private void requireCompleteChangeSet(String tenant, StoredDefinition current) {
+    private void requireReviewedChangeSet(String tenant, StoredDefinition current, String expectedChangeSetHash) {
         java.util.Optional<StoredDefinition> effective = store.effectiveDefinition(tenant, current.key(),
                 clock.instant());
         if (effective.isEmpty() || effective.get().version() == current.version()) {
+            if (expectedChangeSetHash != null) {
+                throw new io.github.dhluong90.bpm.process.api.ContentChangedException("There is no change set against "
+                        + "an effective version of " + current.key() + " to approve with a change-set hash",
+                        current.definitionHash(), current.lockVersion());
+            }
             return;
         }
         StoredDefinition from = effective.get();
-        if (GraphDiffs.diff(current.key(), side(from), storedProcess(from), side(current), storedProcess(current))
-                .truncated()) {
+        io.github.dhluong90.bpm.process.api.GraphDiff all = GraphDiffs.complete(current.key(), side(from),
+                storedProcess(from), side(current), storedProcess(current));
+        boolean oversize = all.nodesChanged().size() > io.github.dhluong90.bpm.process.api.GraphDiff.MAX_CHANGES;
+        if (oversize && expectedChangeSetHash == null) {
             throw new io.github.dhluong90.bpm.process.api.ChangeSetTruncatedException("The change list from "
                     + current.key() + " v" + from.version() + " to v" + current.version() + " has more than "
                     + io.github.dhluong90.bpm.process.api.GraphDiff.MAX_CHANGES + " changed values and is cut off; "
-                    + "no approval can rest on it");
+                    + "read it page by page and approve with expectedChangeSetHash");
         }
+        if (expectedChangeSetHash != null) {
+            String now = GraphDiffPaging.changeSetHash(all);
+            if (!expectedChangeSetHash.equals(now)) {
+                throw new io.github.dhluong90.bpm.process.api.ContentChangedException("The change set of "
+                        + current.key() + " v" + current.version() + " against v" + from.version()
+                        + " is not the one reviewed: expected change-set hash " + expectedChangeSetHash
+                        + " but it is " + now, current.definitionHash(), current.lockVersion(), now);
+            }
+        }
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPage(DefinitionRef base, DefinitionRef target,
+            Integer limit, String cursor) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(base, "base must not be null");
+        Objects.requireNonNull(target, "target must not be null");
+        if (!base.key().equals(target.key())) {
+            throw new InputInvalidException("A diff compares two versions of one definition key");
+        }
+        StoredDefinition from = storedVersion(tenant, base);
+        StoredDefinition to = storedVersion(tenant, target);
+        return GraphDiffPaging.page(GraphDiffs.complete(to.key(), side(from), storedProcess(from), side(to),
+                storedProcess(to)), limit, cursor);
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPageFromEffective(DefinitionRef target,
+            Integer limit, String cursor) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        Objects.requireNonNull(target, "target must not be null");
+        StoredDefinition to = storedVersion(tenant, target);
+        StoredDefinition from = store.effectiveDefinition(tenant, target.key(), clock.instant())
+                .orElseThrow(() -> new NoEffectiveVersionException("Definition " + target.key()
+                        + " has no effective version to compare with; pass base"));
+        return GraphDiffPaging.page(GraphDiffs.complete(to.key(), side(from), storedProcess(from), side(to),
+                storedProcess(to)), limit, cursor);
     }
 
     private StoredDefinition storedVersion(String tenant, DefinitionRef ref) {
@@ -1420,11 +1486,38 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * PRE-072: every handler and adapter a service step names is registered in this host. Checked at request-approval
      * and approval, before anything is written; one problem per step, naming {@code step -> name}.
      */
-    private void checkServiceRegistrations(Process process) {
+    private void checkServiceRegistrations(String tenant, Process process) {
         List<DefinitionProblem> problems = serviceRegistrationProblems(process);
+        problems.addAll(escalationRoleProblems(tenant, process));
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
         }
+    }
+
+    /**
+     * PRE-180 (#449): every {@code role:} an escalation level hands an overdue task to is in the tenant's role list.
+     * One problem per step and role, naming {@code step -> role:NAME}.
+     */
+    private List<DefinitionProblem> escalationRoleProblems(String tenant, Process process) {
+        List<DefinitionProblem> problems = new ArrayList<>();
+        for (FlowElement element : process.allFlowElements()) {
+            if (!(element instanceof UserTask task)) {
+                continue;
+            }
+            java.util.Set<String> reported = new java.util.LinkedHashSet<>();
+            for (var spec : task.extensions().first(
+                    io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec.class).stream().toList()) {
+                for (var level : spec.levels()) {
+                    String to = level.to();
+                    if (to.startsWith("role:") && reported.add(to) && !roleCatalogue.exists(tenant,
+                            to.substring("role:".length()))) {
+                        problems.add(DefinitionProblem.of("ESCALATION_ROLE_UNKNOWN", task.id() + " -> " + safe(to)
+                                + ": the escalation names a role that is not in this tenant's role list", task.id()));
+                    }
+                }
+            }
+        }
+        return problems;
     }
 
     private List<DefinitionProblem> serviceRegistrationProblems(Process process) {
@@ -3438,6 +3531,17 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!holds) {
             throw new AssigneeNotAllowedException(assignee + " does not hold the " + kind + " the task is assigned to");
         }
+    }
+
+    /**
+     * Installs the host's role list, which approval asks about the target role of every escalation level (PRE-180).
+     * Called once while the engine is wired; without it no role is checked.
+     *
+     * @param catalogue the catalogue, or null for the default that accepts every role
+     */
+    public void useRoleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue catalogue) {
+        this.roleCatalogue = catalogue == null ? io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL
+                : catalogue;
     }
 
     /**

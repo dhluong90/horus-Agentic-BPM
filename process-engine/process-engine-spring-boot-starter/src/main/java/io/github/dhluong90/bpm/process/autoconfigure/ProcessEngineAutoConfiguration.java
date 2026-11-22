@@ -31,6 +31,7 @@ import io.github.dhluong90.bpm.process.internal.service.JsonSchemaSubsetValidato
 import io.github.dhluong90.bpm.process.internal.service.ServiceStepRunner;
 import io.github.dhluong90.bpm.process.spi.AgentAdapter;
 import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
+import io.github.dhluong90.bpm.process.spi.RoleCatalogue;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
@@ -333,7 +334,7 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
             OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
-            ObjectProvider<AssigneeDirectory> directory) {
+            ObjectProvider<AssigneeDirectory> directory, ObjectProvider<RoleCatalogue> roles) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -360,6 +361,11 @@ public class ProcessEngineAutoConfiguration {
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
         // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
         services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        // PRE-180: approval asks the host's role list whether an escalation target role exists. The default accepts
+        // every role; outside the dev profile that is worth a warning, because a misspelt role is then not caught.
+        RoleCatalogue catalogue = roles.getIfUnique(() -> RoleCatalogue.ACCEPT_ALL);
+        warnWhenRolesAreNotChecked(environment, catalogue);
+        services.useRoleCatalogue(catalogue);
         return services;
     }
 
@@ -403,6 +409,24 @@ public class ProcessEngineAutoConfiguration {
     @ConditionalOnMissingBean(BusinessCalendar.class)
     BusinessCalendar processEngineBusinessCalendar(Calendars calendars) {
         return calendars.businessCalendar();
+    }
+
+    /**
+     * Warns, outside the {@code dev} profile, that escalation target roles are not checked at approval because the host
+     * registered no {@link RoleCatalogue} (PRE-180).
+     *
+     * @param environment the environment
+     * @param catalogue the catalogue in use
+     * @return whether the warning was logged
+     */
+    static boolean warnWhenRolesAreNotChecked(Environment environment, RoleCatalogue catalogue) {
+        if (catalogue != RoleCatalogue.ACCEPT_ALL || environment.matchesProfiles(DEV_PROFILE)) {
+            return false;
+        }
+        LOG.warn("No RoleCatalogue bean is registered, so the roles that overdue tasks escalate to are not checked at "
+                + "approval; a misspelt or retired role would escalate to a queue nobody watches. Register a "
+                + "RoleCatalogue over your role list (PRE-180).");
+        return true;
     }
 
     /**
@@ -456,6 +480,14 @@ public class ProcessEngineAutoConfiguration {
             requireDevProfileOnly(environment, "horus.bpm.processes.incidents.resolve-approval=single");
             LOG.warn("Incidents are resolved by one person (horus.bpm.processes.incidents.resolve-approval=single, "
                     + "dev profile).");
+        }
+        if (properties.stats().rollupMinLag().compareTo(
+                io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings.DEFAULT_MIN_LAG) < 0) {
+            // #410: a shorter write-lag window than the default lets the rollup miss history rows that commit late.
+            requireDevProfileOnly(environment, "horus.bpm.processes.stats.rollup-min-lag below "
+                    + io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings.DEFAULT_MIN_LAG);
+            LOG.warn("The hourly statistics rollup trusts a write-lag window shorter than PT5M (horus.bpm.processes"
+                    + ".stats.rollup-min-lag, dev profile): a slow step transaction may be missed.");
         }
         if (!properties.makerChecker().enabled()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.maker-checker.enabled=false");

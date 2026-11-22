@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.examples.guardedagent;
 import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
 import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
+import io.github.dhluong90.bpm.process.spi.RoleCatalogue;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.commons.logging.Log;
@@ -102,5 +103,14 @@ class HostSecurity {
     AssigneeDirectory hostAssigneeDirectory(InMemoryUserDetailsManager hostUsers,
             @Value("${horus.bpm.tenancy.dev-tenant:}") String devTenant) {
         return new UserStoreAssigneeDirectory(hostUsers, devTenant);
+    }
+
+    /**
+     * The roles an escalation may name, checked at approval (PRE-180): those of the demo users, in the {@code dev}
+     * tenant. Without this bean the engine checks no role.
+     */
+    @Bean
+    RoleCatalogue hostRoleCatalogue(@Value("${horus.bpm.tenancy.dev-tenant:}") String devTenant) {
+        return new DemoRoleCatalogue(devTenant);
     }
 }

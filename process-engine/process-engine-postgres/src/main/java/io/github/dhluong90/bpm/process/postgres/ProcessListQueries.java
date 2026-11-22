@@ -410,8 +410,20 @@ final class ProcessListQueries {
      */
     static final ListQuery HISTORY_ENTRIES = new ListQuery("instance-history-entries",
             new Bound.Page("oldest first on idx_pre_history_instance (tenant_id, instance_id, occurred_at, id)"),
-            "SELECT id, event_type, node_id, actor_id, occurred_at FROM pre_history "
+            "SELECT id, event_type, node_id, actor_id, occurred_at, token_id, attempt_id, details FROM pre_history "
                     + "WHERE tenant_id = ? AND instance_id = ? AND occurred_at >= ? AND occurred_at <= ? "
+                    + "ORDER BY occurred_at, id LIMIT ?");
+
+    /**
+     * The undo of one instance (#80, PRE-203): the history types a compensation writes, on the same index and within the
+     * same lifetime bound as {@link #HISTORY_ENTRIES}, so the scopes of the timeline never depend on its entry limit.
+     * Parameters: tenant, instance, from, to, limit.
+     */
+    static final ListQuery COMPENSATION_ENTRIES = new ListQuery("instance-compensation-entries",
+            new Bound.Page("oldest first on idx_pre_history_instance (tenant_id, instance_id, occurred_at, id)"),
+            "SELECT id, event_type, node_id, actor_id, occurred_at, token_id, attempt_id, details FROM pre_history "
+                    + "WHERE tenant_id = ? AND instance_id = ? AND occurred_at >= ? AND occurred_at <= ? "
+                    + "AND (event_type LIKE 'COMPENSATION\\_%' OR event_type = 'COMPENSATED') "
                     + "ORDER BY occurred_at, id LIMIT ?");
 
     /** Due timers, for every tenant: the poll of each replica. */
@@ -429,7 +441,7 @@ final class ProcessListQueries {
         List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
                 OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
-                NODE_ACTIVITIES, HISTORY_ENTRIES,
+                NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
                 MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,

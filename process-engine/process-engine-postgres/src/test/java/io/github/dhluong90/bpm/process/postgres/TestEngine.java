@@ -173,6 +173,9 @@ final class TestEngine {
                         .collect(Collectors.toSet()), b.agents.stream()
                         .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
                 b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits, calendars.businessCalendar());
+        if (b.roleCatalogue != null) {
+            services.useRoleCatalogue(b.roleCatalogue);
+        }
         this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
                 new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
                         tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
@@ -317,6 +320,7 @@ final class TestEngine {
         private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
+        private io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -331,6 +335,12 @@ final class TestEngine {
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
             this.clock = clock;
+        }
+
+        /** The host's role list that approval asks about escalation targets (PRE-180); none by default. */
+        Builder roleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue value) {
+            this.roleCatalogue = value;
+            return this;
         }
 
         Builder lease(Duration value) {

@@ -102,8 +102,35 @@ public interface DefinitionService {
      * @throws InvalidStateException when the version is not pending approval
      * @throws InputInvalidException when the hash is not 64 lower-case hexadecimal characters
      */
+    default DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
+            String comment, String idempotencyKey) {
+        return approve(ref, expectedLockVersion, expectedDefinitionHash, null, comment, idempotencyKey);
+    }
+
+    /**
+     * Approves a pending version, bound to the content reviewed and, when the change set against the effective version
+     * has more than {@link GraphDiff#MAX_CHANGES} changed values, to the whole change set the approver read page by
+     * page (PRE-199, #426, PD-139). Everything of {@link #approve(DefinitionRef, long, String, String, String)} holds.
+     * In addition, when the change set is larger than the limit, {@code expectedChangeSetHash} is required: without it
+     * the approval is refused with {@code CHANGE_SET_TRUNCATED} as before, and with a hash that is not the hash of the
+     * change set now (the content or the effective version changed after the review) it is refused with
+     * {@code CONTENT_CHANGED}. Either way nothing is written. For a change set within the limit the hash is optional,
+     * and checked when given.
+     *
+     * @param ref the version
+     * @param expectedLockVersion its lock version
+     * @param expectedDefinitionHash the {@code definitionHash} the approver reviewed
+     * @param expectedChangeSetHash the {@code changeSetHash} of the last page of the paged diff, 64 lower-case
+     *     hexadecimal characters; null when the change set was read in one piece
+     * @param comment an optional comment, stored in the history
+     * @param idempotencyKey idempotency key, or null
+     * @return the version
+     * @throws ChangeSetTruncatedException when the change set exceeds the limit and no change-set hash is named
+     * @throws ContentChangedException when the stored content or the change set is not the one reviewed
+     * @throws InputInvalidException when a hash is not 64 lower-case hexadecimal characters
+     */
     DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
-            String comment, String idempotencyKey);
+            String expectedChangeSetHash, String comment, String idempotencyKey);
 
     /**
      * Sends a pending version back to {@code DRAFT} with a reason (PRE-021).
@@ -203,4 +230,29 @@ public interface DefinitionService {
      * @throws DefinitionNotFoundException when the tenant has no such version
      */
     GraphDiff diffFromEffective(DefinitionRef target);
+
+    /**
+     * Reads the complete change set between two versions one page at a time (PRE-199, #426): every change on exactly
+     * one page, in a fixed order. The last page carries the change-set hash and the approvable hash; each cursor
+     * carries a digest of everything before it. Needs {@code processes:read}; read-only.
+     *
+     * @param base the version compared from
+     * @param target the version compared to, of the same key
+     * @param limit changes per page, 1 to 500; null for 200
+     * @param cursor the previous page's {@code nextCursor}; null for the first page
+     * @return the page
+     * @throws QueryInvalidException when the limit or the cursor is not valid
+     */
+    GraphDiffPage diffPage(DefinitionRef base, DefinitionRef target, Integer limit, String cursor);
+
+    /**
+     * As {@link #diffPage(DefinitionRef, DefinitionRef, Integer, String)}, against the effective version of the key.
+     *
+     * @param target the version compared to
+     * @param limit changes per page, 1 to 500; null for 200
+     * @param cursor the previous page's {@code nextCursor}; null for the first page
+     * @return the page
+     * @throws NoEffectiveVersionException when the key has no effective version
+     */
+    GraphDiffPage diffPageFromEffective(DefinitionRef target, Integer limit, String cursor);
 }

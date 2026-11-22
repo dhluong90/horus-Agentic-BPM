@@ -15,15 +15,69 @@ import java.util.Objects;
  * @param nodes one entry per step the instance entered, in the order it first entered them
  * @param entries the history entries in time order, at most the requested limit
  * @param hasMore whether the instance has more entries than {@code entries} holds
+ * @param compensations one entry per saga scope whose undo started (#80, PRE-203), in the order they started, each
+ *     with where its undo stands; empty when no compensation ran. Never cut by the entry limit
  */
 public record InstanceActivities(String instanceId, Instant startedAt, Instant endedAt, List<Node> nodes,
-        List<Entry> entries, boolean hasMore) {
+        List<Entry> entries, boolean hasMore, List<Compensation> compensations) {
 
     public InstanceActivities {
         Objects.requireNonNull(instanceId, "instanceId");
         Objects.requireNonNull(startedAt, "startedAt");
         nodes = List.copyOf(nodes);
         entries = List.copyOf(entries);
+        compensations = List.copyOf(compensations);
+    }
+
+    /**
+     * An instance with no compensation.
+     *
+     * @param instanceId the instance
+     * @param startedAt when it started
+     * @param endedAt when it ended, or null
+     * @param nodes one entry per step
+     * @param entries the history entries
+     * @param hasMore whether there are more entries
+     */
+    public InstanceActivities(String instanceId, Instant startedAt, Instant endedAt, List<Node> nodes,
+            List<Entry> entries, boolean hasMore) {
+        this(instanceId, startedAt, endedAt, nodes, entries, hasMore, List.of());
+    }
+
+    /** Where the undo of one saga scope stands. */
+    public enum CompensationState {
+        /** The undo steps are still running or waiting to run. */
+        IN_PROGRESS,
+        /** Every step was undone and the scope ended compensated. */
+        UNDONE,
+        /** An undo step failed for good or needs a person, and the walk is paused: the scope is not fully undone. */
+        NOT_FULLY_UNDONE
+    }
+
+    /**
+     * The undo of one saga scope.
+     *
+     * @param scopeTokenId the scope's token
+     * @param scope the BPMN id of the scope step, for example {@code disburse}
+     * @param state where the undo stands
+     * @param startedAt when the undo started
+     * @param endedAt when the scope ended compensated, or null
+     * @param cause the error code of the forward step that failed, or null
+     * @param failingStep the forward step whose failure started the undo, or null
+     * @param stepsUndone how many undo steps completed
+     * @param blockedStep the step whose undo failed or waits for a person, or null unless NOT_FULLY_UNDONE
+     * @param incidentId the open incident of that step, or null
+     * @param incidentCode its error code, or null
+     */
+    public record Compensation(String scopeTokenId, String scope, CompensationState state, Instant startedAt,
+            Instant endedAt, String cause, String failingStep, int stepsUndone, String blockedStep, String incidentId,
+            String incidentCode) {
+
+        public Compensation {
+            Objects.requireNonNull(scopeTokenId, "scopeTokenId");
+            Objects.requireNonNull(state, "state");
+            Objects.requireNonNull(startedAt, "startedAt");
+        }
     }
 
     /** Where a step stands: entered and not yet left, left, or holding an open incident. */
@@ -58,21 +112,63 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
         }
     }
 
+    /** What kind of entry this is: a forward step, or part of an undo. */
+    public static final String KIND_STEP = "STEP";
+    /** An entry of a compensation: its start, one undo step, or its end. */
+    public static final String KIND_COMPENSATION = "COMPENSATION";
+
     /**
      * One history entry.
      *
      * @param id the entry id
-     * @param type for example {@code NODE_ENTERED}, {@code NODE_COMPLETED}, {@code TASK_COMPLETED}
+     * @param type for example {@code NODE_ENTERED}, {@code NODE_COMPLETED}, {@code TASK_COMPLETED},
+     *     {@code COMPENSATION_STEP_COMPLETED}
      * @param nodeId the step, or null for an instance entry
      * @param actor the identity that caused it, or null for engine steps
      * @param occurredAt when
+     * @param kind {@link #KIND_STEP}, or {@link #KIND_COMPENSATION} for an entry of an undo (#80)
+     * @param compensates for an undo step, the step it undoes (the same as {@code nodeId}); null otherwise
+     * @param attemptId the attempt the entry belongs to, or null; for an undo step, the forward attempt it undoes
+     * @param scopeTokenId for an entry of an undo, the token of the saga scope; null otherwise
+     * @param scope for an entry of an undo, the BPMN id of the saga scope; null otherwise
+     * @param attempt for an undo step that ran, the attempt number of its job; null otherwise
+     * @param errorCode for an undo step that failed, its error code; null otherwise
+     * @param handler for an undo step, the undo handler's name; null otherwise
+     * @param cause for the start of an undo, the error code that caused it; null otherwise
      */
-    public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
+    public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
+            String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
+            String handler, String cause) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(type, "type");
             Objects.requireNonNull(occurredAt, "occurredAt");
+            Objects.requireNonNull(kind, "kind");
+        }
+
+        /**
+         * An entry that is not part of an undo.
+         *
+         * @param id the entry id
+         * @param type the history type
+         * @param nodeId the step, or null
+         * @param actor the identity, or null
+         * @param occurredAt when
+         */
+        public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null);
+        }
+
+        /** @return the same entry in the scope named, for an entry of an undo */
+        public Entry inScope(String scopeNodeId) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
+                    scopeNodeId, attempt, errorCode, handler, cause);
+        }
+
+        /** @return true for the history types the undo of a saga writes */
+        public static boolean isCompensationType(String type) {
+            return type.startsWith("COMPENSATION_") || "COMPENSATED".equals(type);
         }
     }
 }

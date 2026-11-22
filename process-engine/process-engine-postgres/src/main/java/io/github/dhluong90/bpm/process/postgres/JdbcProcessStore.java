@@ -76,8 +76,41 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public List<InstanceActivities.Entry> historyEntries(String tenant, String instanceId, Instant from, Instant to,
             int limit) {
         return ProcessListQueries.HISTORY_ENTRIES.list(jdbc, List.of(tenant, instanceId, ts(from), ts(to), limit),
-                (rs, row) -> new InstanceActivities.Entry(rs.getString("id"), rs.getString("event_type"),
-                        rs.getString("node_id"), rs.getString("actor_id"), instant(rs, "occurred_at")));
+                (rs, row) -> historyEntry(rs));
+    }
+
+    @Override
+    public List<InstanceActivities.Entry> compensationEntries(String tenant, String instanceId, Instant from,
+            Instant to, int limit) {
+        return ProcessListQueries.COMPENSATION_ENTRIES.list(jdbc,
+                List.of(tenant, instanceId, ts(from), ts(to), limit), (rs, row) -> historyEntry(rs));
+    }
+
+    /** An entry as the timeline shows it: the undo's own fields come from the history row's token, attempt and details. */
+    private static InstanceActivities.Entry historyEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
+        String type = rs.getString("event_type");
+        String id = rs.getString("id");
+        String node = rs.getString("node_id");
+        String actor = rs.getString("actor_id");
+        Instant at = instant(rs, "occurred_at");
+        if (!InstanceActivities.Entry.isCompensationType(type)) {
+            return new InstanceActivities.Entry(id, type, node, actor, at);
+        }
+        Map<String, Object> details = Values.readMap(rs.getString("details"));
+        boolean step = type.startsWith("COMPENSATION_STEP_");
+        Object attempt = details.get("attempt");
+        Object error = details.get("errorCode");
+        Object handler = details.get("handler");
+        Object cause = details.get("cause");
+        Object scope = details.get("scope");
+        // The start of an undo is recorded on the failing token; its details name the scope the undo walks.
+        Object scopeToken = details.get("scopeTokenId");
+        return new InstanceActivities.Entry(id, type, node, actor, at, InstanceActivities.KIND_COMPENSATION,
+                step ? node : null, rs.getString("attempt_id"),
+                scopeToken == null ? rs.getString("token_id") : scopeToken.toString(),
+                scope == null ? ("COMPENSATED".equals(type) ? node : null) : scope.toString(),
+                attempt instanceof Number n ? n.intValue() : null, error == null ? null : error.toString(),
+                handler == null ? null : handler.toString(), cause == null ? null : cause.toString());
     }
 
     // ---- definitions --------------------------------------------------------------------------------------

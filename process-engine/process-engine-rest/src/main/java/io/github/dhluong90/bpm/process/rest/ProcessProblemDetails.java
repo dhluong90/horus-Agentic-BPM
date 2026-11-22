@@ -108,9 +108,13 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException g ->
                     body.set("problems", Views.problems(g.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
-            case io.github.dhluong90.bpm.process.api.ContentChangedException c -> body
-                    .put("currentDefinitionHash", c.currentDefinitionHash())
-                    .put("currentLockVersion", c.currentLockVersion());
+            case io.github.dhluong90.bpm.process.api.ContentChangedException c -> {
+                body.put("currentDefinitionHash", c.currentDefinitionHash())
+                        .put("currentLockVersion", c.currentLockVersion());
+                if (c.currentChangeSetHash() != null) {
+                    body.put("currentChangeSetHash", c.currentChangeSetHash());
+                }
+            }
             case io.github.dhluong90.bpm.process.api.OutputInvalidException o -> {
                 tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
                 o.paths().forEach(paths::add);
