@@ -349,7 +349,7 @@ public class ProcessEngineAutoConfiguration {
                 Limits.DEFAULTS.maxDepth(), Limits.DEFAULTS.maxElements(), Limits.DEFAULTS.maxForeignFragmentBytes(),
                 Limits.DEFAULTS.maxTextChars(), Limits.DEFAULTS.maxAttributeChars()));
         ProcessServices services = new ProcessServices(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
-                transactions, store, Map.of(SourceFormat.BPMN_XML, reader::read),
+                transactions, store, Map.of(SourceFormat.BPMN_XML, reader),
                 Map.of(SourceFormat.BPMN_XML, new SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(byName, decisions(beans), properties.handlers().slowCallWarning()), publisher,
                 properties.toSettings(EngineSettings.ApproverRule.valueOf(ApproverMustDifferFrom.from(environment).name()),

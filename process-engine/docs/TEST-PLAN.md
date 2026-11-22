@@ -132,6 +132,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-197 | `PRE_197_a_crashed_runner_is_taken_over_after_its_lease_and_continues_after_the_last_committed_instance` (`MigrationExecutionPostgresIT`) | Testcontainers, the runner stopped by a hook after its 40th instance, TestClock moved past the lease | M2 | `TR-MIG-02`, `TR-OPS-01` | Done (#90) |
 | PRE-198 | `PRE_198_*` in `MigrationExecutionPostgresIT` | Testcontainers, a runner that loses its lease inside its own batch, two runners polling the same plan | M2 | `TR-MIG-02`, `TR-TEN-01` | Done (#90) |
 | PRE-199 | `PRE_199_*` in `LayoutPostgresIT` | Testcontainers with two tenants, schema and step checks, idempotency | M3 | `TR-DEF-02`, `TR-TEN-01` | Done (#102) |
+| PRE-200 | `PRE_200_*` in `ImportWarningsPostgresIT`; `PRE_108_a_successful_read_*` in `SubsetBpmnRefusalTest` | Testcontainers (the warning in the `201` answer, its replay by key, absent on a later read), unit | M3 | `TR-STD-04`, `TR-STD-26` | Implemented (#380, PD-141) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

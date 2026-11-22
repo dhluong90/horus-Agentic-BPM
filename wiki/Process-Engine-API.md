@@ -107,7 +107,7 @@ Every endpoint answers errors as RFC 9457 problem details with a `code`:
 
 A request the framework refuses before the engine runs (an unreadable body, an unsupported media type) keeps its 4xx status with code `INPUT_INVALID`. `403 TENANT_NOT_ALLOWED` and `401 UNAUTHENTICATED` from the host contract carry the host's correlation id and, on a `401`, the `WWW-Authenticate` challenge. No body ever carries a stack trace, a class name or SQL.
 
-`BPMN_UNSUPPORTED_ELEMENT` and `VALIDATION_FAILED` carry a `problems` list, each with element, id and line. `STEP_FAILED` carries `nodeId` and `reason` (for example `DECISION_NO_MATCH`, `STEP_LIMIT`); handler texts stay in the log. A handler's business error is not a `STEP_FAILED`: the call succeeds, and the step waits with an incident `UNHANDLED_BUSINESS_ERROR` (#55).
+`VALIDATION_FAILED` carries a `problems` list, each with element, id and line. `BPMN_UNSUPPORTED_ELEMENT` carries `unsupportedElements` instead, with `element`, `elementId`, `line`, `stage` and `message`, the same shape as the Rule Engine's `DMN_UNSUPPORTED_ELEMENT`. `STEP_FAILED` carries `nodeId` and `reason` (for example `DECISION_NO_MATCH`, `STEP_LIMIT`); handler texts stay in the log. A handler's business error is not a `STEP_FAILED`: the call succeeds, and the step waits with an incident `UNHANDLED_BUSINESS_ERROR` (#55).
 
 ## Definition lifecycle (0.2.0)
 

@@ -30,6 +30,7 @@ import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.Violation;
 import io.github.dhluong90.bpm.rules.api.ContentChangedException;
 import io.github.dhluong90.bpm.rules.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.rules.api.VersionConflictException;
@@ -51,6 +52,7 @@ import io.github.dhluong90.bpm.rules.internal.store.EventOutbox;
 import io.github.dhluong90.bpm.rules.internal.store.HistoryRow;
 import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
 import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
+import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.CsvTable;
 import io.github.dhluong90.bpm.rules.internal.dmn.ruleset.DmnWriter;
 import tools.jackson.databind.node.ObjectNode;
 import java.nio.charset.CharacterCodingException;
@@ -159,6 +161,10 @@ public final class DefaultVersionService implements VersionService {
         if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
             throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
+        return checkedParsed(format, source);
+    }
+
+    private ParsedRuleSet checkedParsed(SourceFormat format, byte[] source) {
         ParsedRuleSet parsed = RuleSetReader.read(format, source);
         // The import model equals the parsed canonical form (checked by the reader, ADR-0026 decision 4); it is compiled
         // here so violations follow the order cells are written in (RLE-041). Evaluation compiles only from the stored form.
@@ -215,13 +221,72 @@ public final class DefaultVersionService implements VersionService {
         return view(copy, false);
     }
 
+    @Override
+    public RuleSetVersion importCsv(String ruleSet, int base, ImportRequest request) {
+        Objects.requireNonNull(ruleSet, "ruleSet must not be null");
+        Objects.requireNonNull(request, "request must not be null");
+        if (request.size() > RuleSetReader.MAX_SOURCE_BYTES) {
+            throw new PayloadTooLargeException(RuleSetReader.MAX_SOURCE_BYTES);
+        }
+        if (base < 1) {
+            throw new InputInvalidException("base must be a version number, 1 or more, was " + base);
+        }
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_AUTHOR);
+        requireRuleSetName(ruleSet);
+        String correlationId = EventEnvelope.requireValidCorrelationId(request.correlationId());
+        byte[] source = request.source();
+        String requestHash = Hashes.sha256Parts("import-csv", actor, ruleSet, Integer.toString(base),
+                Hashes.sha256(source));
+        return context.idempotent(tenant, "import-csv", request.idempotencyKey(), requestHash, 201, () -> {
+            // The base is read in the caller's tenant only: another tenant's version is not found (TR-TEN-01).
+            StoredVersion from = existing(tenant, ruleSet, base);
+            byte[] document;
+            try {
+                document = CsvTable.read(from.canonicalJson(), source).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                // the same checks as an imported document; a problem on a masked column never quotes its cell
+                return doImportChecked(tenant, actor, ruleSet, SourceFormat.JSON, document, correlationId);
+            } catch (ValidationFailedException refused) {
+                throw unquoted(tenant, from.canonicalJson(), refused);
+            }
+        }, version -> EngineValues.write(EngineValues.version(version)), EngineValues::versionFromJson);
+    }
+
+    /**
+     * A refusal of a spreadsheet import without positions in a text the author did not write, and without the text of
+     * any cell of a masked input (PD-107): a masked column's message is the plain "not accepted".
+     */
+    private ValidationFailedException unquoted(String tenant, String canonicalJson, ValidationFailedException refused) {
+        java.util.Set<String> masked = new java.util.HashSet<>();
+        boolean byDefault = context.masking().maskByDefault(tenant);
+        for (var input : EngineValues.read(canonicalJson).get("inputs")) {
+            boolean declared = input.has("mask");
+            if (declared ? input.get("mask").booleanValue() : byDefault) {
+                masked.add(input.get("name").stringValue());
+            }
+        }
+        List<Violation> cleaned = refused.violations().stream()
+                .map(v -> new Violation(v.ruleId(), v.column(),
+                        v.column() != null && masked.contains(v.column()) && v.code() != null
+                                && !v.code().startsWith("CSV_") ? "The cell is not accepted" : v.message(),
+                        v.code()))
+                .toList();
+        return new ValidationFailedException(cleaned, refused.truncated());
+    }
+
     private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source,
             String correlationId) {
         if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
             throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
+        return doImportChecked(tenant, actor, targetRuleSet, format, source, correlationId);
+    }
+
+    /** The import of a document that is already known to be one the engine itself wrote, such as a spreadsheet's rows. */
+    private RuleSetVersion doImportChecked(String tenant, String actor, String targetRuleSet, SourceFormat format,
+            byte[] source, String correlationId) {
         String sourceText = utf8(source);
-        ParsedRuleSet parsed = checkedDocument(format, source);
+        ParsedRuleSet parsed = checkedParsed(format, source);
         requireMaskDeclarations(tenant, parsed.canonicalJson());
         String name = parsed.model().name();
         Instant now = context.clock().instant();
@@ -1055,7 +1120,8 @@ public final class DefaultVersionService implements VersionService {
         return switch (format) {
             case JSON -> stored.canonicalJson();
             case DMN_XML -> DmnWriter.write(stored.canonicalJson());
-            case YAML -> throw new InputInvalidException("YAML export is not available in this release; use json or dmn");
+            case CSV -> CsvTable.write(stored.canonicalJson());
+            case YAML -> throw new InputInvalidException("YAML export is not available in this release; use json, dmn or csv");
         };
     }
 

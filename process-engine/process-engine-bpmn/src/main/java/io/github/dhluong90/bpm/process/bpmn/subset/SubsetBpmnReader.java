@@ -30,6 +30,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
+import io.github.dhluong90.bpm.process.internal.service.DefinitionReader;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
@@ -93,7 +94,7 @@ import javax.xml.stream.XMLStreamReader;
  * <p>Owned by the walking skeleton. Replaced by {@code BpmnXmlReader} when the BPMN XML stream lands; the subset
  * tests stay and run against that reader.
  */
-public final class SubsetBpmnReader {
+public final class SubsetBpmnReader implements DefinitionReader {
 
     private static final String BPMN = BpmnNamespaces.BPMN;
     private static final String HORUS = BpmnNamespaces.HORUS;
@@ -158,6 +159,15 @@ public final class SubsetBpmnReader {
      * @return the executable process of the document
      */
     public Process read(byte[] source) {
+        return readWithWarnings(source).process();
+    }
+
+    /**
+     * @param source the XML bytes
+     * @return the executable process and the vendor extensions that were kept but not read
+     */
+    @Override
+    public Result readWithWarnings(byte[] source) {
         if (source.length > limits.maxBytes()) {
             throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
                     + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
@@ -168,7 +178,9 @@ public final class SubsetBpmnReader {
             XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));
             try {
                 XmlHardening.requireUtf8Declaration(xml);
-                return new Pass(xml).document();
+                Pass pass = new Pass(xml);
+                Process process = pass.document();
+                return new Result(process, pass.warnings);
             } finally {
                 xml.close();
             }
