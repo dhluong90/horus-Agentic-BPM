@@ -185,6 +185,56 @@ const STATES: readonly State[] = [
     },
   },
   {
+    name: 'choice-list',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/2/edit',
+    primary: 'editor.save',
+    prepare: async (page, locale) => {
+      await page.getByRole('button', { name: new RegExp(`^${cell(locale, 'R1', 'Tier')}`) }).click();
+      await page.getByRole('checkbox', { name: WORDS[locale]['editor.notThese'] }).check();
+    },
+    ready: async (page, locale) => {
+      await expect(page.getByRole('checkbox', { name: WORDS[locale]['editor.notThese'] })).toBeChecked();
+      await expect(page.locator('.picker__list')).toBeVisible();
+    },
+  },
+  {
+    name: 'row-reading',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/2/edit',
+    primary: 'editor.save',
+    prepare: async (page, locale) => { await editFee(page, locale); },
+    ready: async (page, locale) => {
+      await expect(page.getByLabel(WORDS[locale]['editor.readingOf'].replace('{id}', 'R3'))).toContainText(/40[.,]000/);
+    },
+  },
+  {
+    name: 'reading-unavailable',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/2/edit',
+    primary: 'editor.save',
+    prepare: async (page, locale) => {
+      await page.route('**/*:validate', (route) => route.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Unavailable', status: 503, code: 'UNAVAILABLE' }) }));
+      await page.getByLabel(cell(locale, 'R3', 'Fee'), { exact: true }).fill('40000');
+      await page.keyboard.press('Enter');
+    },
+    ready: async (page, locale) => { await expect(page.getByText(WORDS[locale]['editor.readingUnavailable']).first()).toBeVisible(); },
+  },
+  {
+    name: 'delete-confirm',
+    scenario: 'rules-author',
+    seed: draftSeed,
+    hash: '#/rules/card-fee/2/edit',
+    prepare: async (page, locale) => {
+      await page.getByRole('button', { name: WORDS[locale]['editor.rowActions'].replace('{id}', 'R3') }).click();
+      await page.getByRole('menuitem', { name: WORDS[locale]['editor.delete'].replace('{id}', 'R3') }).click();
+    },
+    ready: async (page, locale) => { await expect(page.getByRole('dialog', { name: WORDS[locale]['editor.deleteTitle'].replace('{id}', 'R3') })).toBeVisible(); },
+  },
+  {
     name: 'history',
     scenario: 'rules-author',
     seed: draftSeed,

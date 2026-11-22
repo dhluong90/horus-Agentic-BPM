@@ -626,3 +626,10 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .unclassified__icon { display: inline-block; width: calc(var(--note-indent) - 0.3em); color: var(--muted); }
 .unclassified__list { margin: 0; padding: 0 0 0 var(--note-indent); list-style: none; display: flex; flex-wrap: wrap; column-gap: 14px; color: var(--muted); }
 .workspace > .unclassified { margin-bottom: 12px; }
+
+/* Row reading under an edited row (CKP-054): the engine's sentence, quiet, one line. */
+.dt--edit .dt__reading-row td { border-top: 0; padding-top: 0; padding-bottom: 10px; }
+.dt--edit .dt__reading { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.reading-line { display: block; max-width: 96ch; }
+.picker__not { white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 4px; }
+.picker__option--not { border-top: 1px solid var(--line); }

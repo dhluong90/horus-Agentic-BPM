@@ -80,11 +80,22 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
 
   const current = useMemo(() => documentOf(version, draft.rows), [version, draft.rows]);
   const committed = useMemo(() => documentOf(version, draft.committed), [version, draft.committed]);
-  // The stored draft passed the engine's checks when it was saved, so only a changed table is checked.
+  // The stored draft passed the engine's checks when it was saved, so only a changed table shows problems; the
+  // check also reads every row aloud, so it runs for the committed table either way. It stores nothing.
   const changed = committed.text !== loaded.text;
-  const check = useDraftCheck(version.ruleSet, version.version, changed ? committed : undefined);
+  const check = useDraftCheck(version.ruleSet, version.version, committed);
   const answer = changed ? check.data : undefined;
   const fresh = answer !== undefined && !check.isPlaceholderData;
+
+  const readings = useMemo(() => {
+    if (check.isError) return undefined;
+    const rows = new Map<string, string>();
+    for (const reading of check.data?.readings ?? []) {
+      const text = reading.text[locale];
+      if (text !== undefined) rows.set(reading.ruleId, text);
+    }
+    return rows;
+  }, [check.isError, check.data, locale]);
 
   const newer = latest.lockVersion !== version.lockVersion;
   const conflict = isConflict(save.error) || newer;
@@ -133,7 +144,7 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
     <>
       <div className="workbench workbench--editing">
         <div className="card workbench__main">
-          {check.isError ? <ProblemNotice error={check.error} /> : null}
+          
           {save.error && !conflict ? <ProblemNotice error={save.error} showDetail={locale !== 'en' || !located} /> : null}
           {tableErrors.length > 0 && checkErrors.length > 0 ? (
             <ul className="notice notice--bad table-problems" aria-label={t('editor.tableProblems')}>
@@ -141,7 +152,7 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
             </ul>
           ) : null}
           {answer?.problemsTruncated === true ? <p className="dock__note">{t('editor.truncated', { count: String(answer.problems.length) })}</p> : null}
-          <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} errors={errors} />
+          <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} errors={errors} readings={readings} />
         </div>
         <aside className="workbench__side">
           <DraftChanges definition={version.definition} base={version.definition.rules} next={shown.rules} refused={shown.refused} />
