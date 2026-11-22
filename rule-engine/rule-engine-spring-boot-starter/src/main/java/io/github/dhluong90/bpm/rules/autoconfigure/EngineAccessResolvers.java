@@ -29,7 +29,27 @@ final class EngineAccessResolvers {
     }
 
     static CallerResolver callers(Supplier<@Nullable EngineAccess> access) {
+        return callers(access, () -> null);
+    }
+
+    /**
+     * @param names the host's display names (#442), or a supplier of null when there are none
+     */
+    static CallerResolver callers(Supplier<@Nullable EngineAccess> access,
+            Supplier<io.github.dhluong90.bpm.host.spi.DisplayNames> names) {
         return new CallerResolver() {
+            /** #442: the host's {@code DisplayNames}, in the caller's tenant and the request's language. */
+            @Override
+            public java.util.Optional<String> displayNameOf(String userId) {
+                io.github.dhluong90.bpm.host.spi.DisplayNames directory = names.get();
+                EngineCaller caller = caller(access);
+                if (directory == null || caller == null || userId == null) {
+                    return java.util.Optional.empty();
+                }
+                return directory.user(caller.tenant(), userId,
+                        org.springframework.context.i18n.LocaleContextHolder.getLocale());
+            }
+
             @Override
             public String currentCallerId() {
                 EngineCaller caller = caller(access);

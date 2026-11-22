@@ -307,4 +307,42 @@ class TaskHandOverTest {
         assertThat(snapshot(check.id())).isEqualTo(before);
         assertThat(count("SELECT count(*) FROM pre_idempotency WHERE tenant_id = 'bank-b'")).isZero();
     }
+
+    @Test
+    void PRE_206_each_assignee_refusal_names_its_reason_and_the_role_the_target_lacks() {
+        // Given carol holds the four-eyes approval of bob's case, which alice worked on before
+        ProcessInstance.Task approval = task(submittedByBob(), "approve-credit");
+        asOfficer("carol");
+        long claimed = engine.services.claim(approval.id(), approval.lockVersion(), "carol-claim").lockVersion();
+        asSupervisor();
+
+        // When the supervisor hands it to carol, to bob, to alice and to an engine identity
+        java.util.Map<String, String> reasons = new java.util.LinkedHashMap<>();
+        for (String target : new String[] {"carol", "bob", "alice", "system:timer"}) {
+            try {
+                engine.services.delegate(approval.id(), target, "Cover for Carol", claimed, "why-" + target);
+            } catch (AssigneeNotAllowedException refused) {
+                reasons.put(target, refused.reason());
+                assertThat(refused.required()).isNull();
+            }
+        }
+
+        // Then each refusal says which rule refused it
+        assertThat(reasons).containsExactly(
+                java.util.Map.entry("carol", AssigneeNotAllowedException.ALREADY_ASSIGNED),
+                java.util.Map.entry("bob", AssigneeNotAllowedException.FOUR_EYES_PARTICIPANT),
+                java.util.Map.entry("alice", AssigneeNotAllowedException.FOUR_EYES_PARTICIPANT),
+                java.util.Map.entry("system:timer", AssigneeNotAllowedException.RESERVED_IDENTITY));
+    }
+
+    @Test
+    void PRE_206_a_target_without_the_role_of_an_open_task_is_refused_naming_that_role() {
+        ProcessInstance.Task check = task(submittedByBob(), "check-documents");
+        asSupervisor();
+        assertThatThrownBy(() -> engine.services.reassign(check.id(), "lan", "Cover the queue", 0, "to-lan"))
+                .isInstanceOfSatisfying(AssigneeNotAllowedException.class, refused -> {
+                    assertThat(refused.reason()).isEqualTo(AssigneeNotAllowedException.MISSING_ROLE);
+                    assertThat(refused.required()).isEqualTo(check.assignee()).startsWith("role:");
+                });
+    }
 }

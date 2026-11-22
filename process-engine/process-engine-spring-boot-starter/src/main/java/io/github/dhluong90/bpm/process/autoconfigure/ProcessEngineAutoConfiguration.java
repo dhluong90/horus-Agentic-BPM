@@ -716,8 +716,10 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     ProcessEngineInitializer processEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
-            ProcessEngineProperties properties, ResourceLoader resources) {
-        return new ProcessEngineInitializer(migrator, services, properties, resources);
+            ProcessEngineProperties properties, ResourceLoader resources, Environment environment) {
+        // PD-146: the one start-up summary of unclassified agent step fields is logged outside the dev profile only
+        return new ProcessEngineInitializer(migrator, services, properties, resources,
+                !environment.matchesProfiles("dev"));
     }
 
     @Bean
@@ -741,8 +743,9 @@ public class ProcessEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean
-    CallerResolver processEngineCallerResolver(ObjectProvider<EngineAccess> access) {
-        return EngineAccessResolvers.callers(access::getIfAvailable);
+    CallerResolver processEngineCallerResolver(ObjectProvider<EngineAccess> access,
+            ObjectProvider<io.github.dhluong90.bpm.host.spi.DisplayNames> names) {
+        return EngineAccessResolvers.callers(access::getIfAvailable, names::getIfAvailable);
     }
 
     @Bean

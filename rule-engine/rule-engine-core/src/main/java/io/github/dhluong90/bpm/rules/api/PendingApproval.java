@@ -20,9 +20,12 @@ import java.util.Objects;
  *     {@code withdraw}
  * @param deniedActions for {@code approve} and {@code reject}, when the caller may not send it, the reason as a code:
  *     {@code PERMISSION_REQUIRED}, {@code SELF_APPROVAL_FORBIDDEN} or {@code AUTHOR_UNKNOWN}
+ * @param requestedByName the requester's readable name in the caller's language (#442), or the id when the host knows
+ *     none
  */
 public record PendingApproval(String ruleSet, int version, String canonicalHash, long lockVersion,
-        String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions) {
+        String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions,
+        String requestedByName) {
 
     public PendingApproval {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -30,5 +33,26 @@ public record PendingApproval(String ruleSet, int version, String canonicalHash,
         Objects.requireNonNull(requestedAt, "requestedAt must not be null");
         allowedActions = List.copyOf(allowedActions);
         deniedActions = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(deniedActions));
+        if (requestedByName == null || requestedByName.isBlank()) {
+            requestedByName = requestedBy;
+        }
+    }
+
+    /**
+     * An item whose requester is shown by id, as before #442.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param canonicalHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param allowedActions see the record
+     * @param deniedActions see the record
+     */
+    public PendingApproval(String ruleSet, int version, String canonicalHash, long lockVersion, String requestedBy,
+            Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions) {
+        this(ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions,
+                null);
     }
 }

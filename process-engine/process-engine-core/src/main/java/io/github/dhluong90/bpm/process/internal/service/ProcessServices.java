@@ -1082,6 +1082,67 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public List<io.github.dhluong90.bpm.process.api.UnclassifiedField> unclassifiedFields(DefinitionRef ref) {
+        String tenant = tenant();
+        // Whoever may read the version or request its approval sees the reminder
+        callerWithAny(PERMISSION_READ, PERMISSION_AUTHOR, PERMISSION_DEPLOY);
+        if (!isKey(ref.key()) || ref.version() < 1) {
+            throw new DefinitionNotFoundException("No definition " + safe(ref.key()) + " v" + ref.version());
+        }
+        StoredDefinition stored = transactions.inTransaction(() -> store.definitionVersion(tenant, ref.key(),
+                ref.version()).orElseThrow(() -> new DefinitionNotFoundException("No definition " + ref.key() + " v"
+                + ref.version())));
+        return settings.warnUnclassified() ? UnclassifiedFields.of(storedProcess(stored)) : List.of();
+    }
+
+    /** Most active versions the start-up summary of unclassified fields reads. */
+    static final int UNCLASSIFIED_SUMMARY_VERSIONS = 1_000;
+
+    /** Most active versions the start-up summary names; the rest are counted. */
+    static final int UNCLASSIFIED_SUMMARY_NAMED = 50;
+
+    /**
+     * The one start-up summary of PD-146 (#438): how many agent step fields of each active version declare no
+     * {@code mask}. Names the tenant, key, version and count, never a field value. Runs outside any request.
+     *
+     * @return the WARN text, or empty when every field is classified or {@code classification.warn-unclassified} is off
+     */
+    public java.util.Optional<String> unclassifiedSummary() {
+        if (!settings.warnUnclassified()) {
+            return java.util.Optional.empty();
+        }
+        List<String> named = new ArrayList<>();
+        int versions = 0;
+        int total = 0;
+        for (StoredDefinition definition : store.activeDefinitions(UNCLASSIFIED_SUMMARY_VERSIONS)) {
+            int count;
+            try {
+                count = UnclassifiedFields.of(storedProcess(definition)).size();
+            } catch (RuntimeException e) {
+                // A version whose source no longer reads is reported where it is used, not by this reminder
+                continue;
+            }
+            if (count == 0) {
+                continue;
+            }
+            versions++;
+            total += count;
+            if (named.size() < UNCLASSIFIED_SUMMARY_NAMED) {
+                named.add(definition.tenantId() + "/" + definition.key() + " v" + definition.version() + ": " + count);
+            }
+        }
+        if (versions == 0) {
+            return java.util.Optional.empty();
+        }
+        String more = versions > named.size() ? " and " + (versions - named.size()) + " more versions" : "";
+        return java.util.Optional.of("Process Engine: " + total + " agent step fields of " + versions + " active "
+                + "definition versions are not classified (they declare neither mask true nor mask false): "
+                + String.join(", ", named) + more + ". Masking stays opt-in, so these fields are kept in plain text. "
+                + "Declare each one, or set horus.bpm.processes.classification.warn-unclassified=false to silence this "
+                + "reminder (PD-146).");
+    }
+
+    @Override
     public DefinitionVersion version(String key, int version) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -1262,7 +1323,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             }
         }
         return new io.github.dhluong90.bpm.process.api.PendingApproval(row.key(), row.name(), row.version(),
-                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied);
+                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied,
+                displayName(row.requestedBy()));
+    }
+
+    /** A user's readable name from the host (#442); a lookup that fails leaves the id to show. */
+    private String displayName(String userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            return callers.displayNameOf(userId).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#instances(InstanceQuery)}. */
@@ -3417,15 +3491,17 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void requireAssigneeAllowed(String tenant, Locked locked, String assignee) {
         TaskRow task = locked.task();
         if (assignee.startsWith(SYSTEM_PREFIX)) {
-            throw new AssigneeNotAllowedException("Identities starting with " + SYSTEM_PREFIX + " are reserved for the"
-                    + " engine");
+            throw new AssigneeNotAllowedException(AssigneeNotAllowedException.RESERVED_IDENTITY, null,
+                    "Identities starting with " + SYSTEM_PREFIX + " are reserved for the engine");
         }
         if (assignee.equals(task.claimedBy())) {
-            throw new AssigneeNotAllowedException(assignee + " already holds task " + task.id());
+            throw new AssigneeNotAllowedException(AssigneeNotAllowedException.ALREADY_ASSIGNED, null,
+                    assignee + " already holds task " + task.id());
         }
         if (task.fourEyes() && participants(tenant, locked.instance()).contains(assignee)) {
-            throw new AssigneeNotAllowedException(assignee + " started this instance or completed an earlier task of"
-                    + " it, so cannot work its four-eyes task");
+            throw new AssigneeNotAllowedException(AssigneeNotAllowedException.FOUR_EYES_PARTICIPANT, null,
+                    assignee + " started this instance or completed an earlier task of it, so cannot work its"
+                    + " four-eyes task");
         }
         int colon = task.assignee().indexOf(':');
         String kind = task.assignee().substring(0, colon);
@@ -3436,7 +3512,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             default -> true;
         };
         if (!holds) {
-            throw new AssigneeNotAllowedException(assignee + " does not hold the " + kind + " the task is assigned to");
+            throw new AssigneeNotAllowedException("group".equals(kind) ? AssigneeNotAllowedException.MISSING_GROUP
+                    : AssigneeNotAllowedException.MISSING_ROLE, task.assignee(),
+                    assignee + " does not hold the " + kind + " the task is assigned to");
         }
     }
 

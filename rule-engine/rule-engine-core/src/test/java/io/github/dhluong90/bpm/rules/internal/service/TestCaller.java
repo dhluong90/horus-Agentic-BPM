@@ -28,6 +28,14 @@ final class TestCaller implements TenantResolver, CallerResolver {
         this.permissions = Set.copyOf(permissions);
     }
 
+    /** The host directory's names of users, as a host's {@code DisplayNames} would give them (#442). */
+    java.util.Map<String, String> names = java.util.Map.of();
+
+    @Override
+    public java.util.Optional<String> displayNameOf(String userId) {
+        return java.util.Optional.ofNullable(names.get(userId));
+    }
+
     @Override
     public String currentTenantId() {
         return tenant;

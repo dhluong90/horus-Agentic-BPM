@@ -199,9 +199,10 @@ class RuleEngineServicesConfiguration {
     @Bean
     @ConditionalOnMissingBean
     RuleEngineMaskingCheck ruleEngineMaskingCheck(RuleEngineInternals internals, MaskingPolicy masking,
-            ObjectProvider<Clock> clock) {
+            ObjectProvider<Clock> clock, org.springframework.core.env.Environment environment) {
+        // PD-146: the one start-up summary of unclassified inputs is logged outside the dev profile only
         return RuleEngineMaskingCheck.of(internals.engines().maskingCheck(), masking,
-                RuleEngineAutoConfiguration.engineClock(clock));
+                RuleEngineAutoConfiguration.engineClock(clock), !environment.matchesProfiles("dev"));
     }
 
     /**
@@ -341,8 +342,9 @@ class RuleEngineServicesConfiguration {
 
         @Bean
         @ConditionalOnMissingBean
-        CallerResolver ruleEngineCallerResolver(ObjectProvider<EngineAccess> access) {
-            return EngineAccessResolvers.callers(access::getIfAvailable);
+        CallerResolver ruleEngineCallerResolver(ObjectProvider<EngineAccess> access,
+                ObjectProvider<io.github.dhluong90.bpm.host.spi.DisplayNames> names) {
+            return EngineAccessResolvers.callers(access::getIfAvailable, names::getIfAvailable);
         }
     }
 

@@ -25,11 +25,13 @@ import java.util.Objects;
  *     approver reviewed (PD-139, PRE-177); {@code false} is accepted on the {@code dev} profile only
  * @param resolveApproval {@code incidents.resolve-approval}: whether resolving an incident with an operator's output
  *     needs a second person (PD-126, PRE-078); {@code SINGLE} is accepted on the {@code dev} profile only
+ * @param warnUnclassified {@code classification.warn-unclassified}: list the agent step fields that declare no
+ *     {@code mask} (PD-146, #438); a reminder that never blocks. Default {@code true}
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
         Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength, boolean makerChecker,
         ApproverRule approverRule, RetireLastVersionRule retireLastVersion, boolean requireContentHash,
-        ResolveApproval resolveApproval) {
+        ResolveApproval resolveApproval, boolean warnUnclassified) {
 
     /** Who resolves an incident with an operator's output (PD-126, {@code incidents.resolve-approval}). */
     public enum ResolveApproval {
@@ -107,6 +109,32 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
     }
 
     /**
+     * Settings that warn about unclassified fields, the default of PD-146.
+     *
+     * @param definitionsAutoApprove see the record
+     * @param maxNodes see the record
+     * @param maxBytes see the record
+     * @param idempotencyRetention see the record
+     * @param slowCallWarning see the record
+     * @param maxPageSize see the record
+     * @param maxRange see the record
+     * @param reasonMaxLength see the record
+     * @param makerChecker see the record
+     * @param approverRule see the record
+     * @param retireLastVersion see the record
+     * @param requireContentHash see the record
+     * @param resolveApproval see the record
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength, boolean makerChecker,
+            ApproverRule approverRule, RetireLastVersionRule retireLastVersion, boolean requireContentHash,
+            ResolveApproval resolveApproval) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, maxPageSize, maxRange,
+                reasonMaxLength, makerChecker, approverRule, retireLastVersion, requireContentHash, resolveApproval,
+                true);
+    }
+
+    /**
      * Settings with the strict defaults of PD-126 and PD-139: approvals name the reviewed hash, and resolving an
      * incident needs a second person.
      *
@@ -136,7 +164,17 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
     public EngineSettings withRequireContentHash(boolean require) {
         return new EngineSettings(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning,
                 maxPageSize, maxRange, reasonMaxLength, makerChecker, approverRule, retireLastVersion, require,
-                resolveApproval);
+                resolveApproval, warnUnclassified);
+    }
+
+    /**
+     * @param warn see {@link #warnUnclassified()}
+     * @return a copy with the unclassified-field reminder on or off
+     */
+    public EngineSettings withWarnUnclassified(boolean warn) {
+        return new EngineSettings(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning,
+                maxPageSize, maxRange, reasonMaxLength, makerChecker, approverRule, retireLastVersion,
+                requireContentHash, resolveApproval, warn);
     }
 
     /**
@@ -146,7 +184,7 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
     public EngineSettings withResolveApproval(ResolveApproval approval) {
         return new EngineSettings(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning,
                 maxPageSize, maxRange, reasonMaxLength, makerChecker, approverRule, retireLastVersion,
-                requireContentHash, approval);
+                requireContentHash, approval, warnUnclassified);
     }
 
     /**

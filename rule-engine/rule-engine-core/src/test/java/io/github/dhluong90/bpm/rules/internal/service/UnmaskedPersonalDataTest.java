@@ -121,6 +121,13 @@ class UnmaskedPersonalDataTest {
         final Set<String> strict = new HashSet<>();
         final Set<String> maskByDefault = new HashSet<>();
         final Map<String, PersonalDataNames> names = new HashMap<>();
+        /** Off here so these tests see the PD-099 warnings only; UnclassifiedFieldsTest covers the PD-146 reminder. */
+        boolean warnUnclassified = false;
+
+        @Override
+        public boolean warnUnclassified(String tenantId) {
+            return warnUnclassified;
+        }
 
         @Override
         public Optional<MaskingKey> hmacKey(String tenantId) {

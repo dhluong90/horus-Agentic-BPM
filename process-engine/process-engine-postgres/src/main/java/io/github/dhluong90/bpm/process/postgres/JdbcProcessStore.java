@@ -169,6 +169,12 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public List<StoredDefinition> activeDefinitions(int limit) {
+        // Engine-internal, across tenants on purpose: the start-up summary of unclassified fields (PD-146).
+        return ProcessListQueries.ACTIVE_DEFINITIONS.list(jdbc, List.of(limit), JdbcProcessStore::definition);
+    }
+
+    @Override
     public int updateDefinition(StoredDefinition d) {
         return jdbc.sql("UPDATE pre_definition SET status = ?, effective_from = ?, approved_by = ?, approved_at = ?, "
                         + "requested_by = ?, requested_at = ?, decision_comment = ?, retired_by = ?, retired_at = ?, "

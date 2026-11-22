@@ -47,6 +47,15 @@ final class ProcessListQueries {
             "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND key_name = ? "
                     + "ORDER BY version_num FOR UPDATE");
 
+    /**
+     * The active versions of every tenant, read once at start-up for the unclassified-field summary (PD-146), through
+     * the partial index {@code idx_pre_definition_active} (V45).
+     */
+    static final ListQuery ACTIVE_DEFINITIONS = new ListQuery("active-definition-versions",
+            new Bound.EngineSweep(null, "at most 1,000 active versions, over idx_pre_definition_active (V45)"),
+            "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE status = 'ACTIVE' "
+                    + "ORDER BY tenant_id, key_name, version_num LIMIT ?");
+
     /** The lifecycle actions of one definition version. */
     static final ListQuery DEFINITION_HISTORY = new ListQuery("definition-history",
             new Bound.ParentKey("definition_id", "the lifecycle actions of one definition version"),
@@ -426,7 +435,7 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
                 OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 NODE_ACTIVITIES, HISTORY_ENTRIES,
