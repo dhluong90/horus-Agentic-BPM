@@ -34,10 +34,10 @@ class ActiveDefinitionsIndexMigrationTest {
 
     @Test
     void TR_OPS_01_V45_builds_a_valid_partial_index_on_existing_definitions_concurrently() {
-        // Given a database at V35 with an active, a retired and a draft version written by the last release
+        // Given a database at V44 with an active, a retired and a draft version written by the last release
         DataSource ds = TestEngine.emptySchema("mig_v45_fresh");
         JdbcClient jdbc = JdbcClient.create(ds);
-        flyway(ds, "35").migrate();
+        flyway(ds, "44").migrate();
         definition(jdbc, "bank-b", "DEF00000000000000000000003", "loan-disbursement", 1, "ACTIVE");
         definition(jdbc, "bank-a", "DEF00000000000000000000001", "loan-disbursement", 1, "RETIRED");
         definition(jdbc, "bank-a", "DEF00000000000000000000002", "loan-disbursement", 2, "ACTIVE");
