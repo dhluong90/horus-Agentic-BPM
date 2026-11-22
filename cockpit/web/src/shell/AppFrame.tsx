@@ -18,6 +18,9 @@ import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
 import { ReviewTaskPage } from '../features/processes/review/ReviewTaskPage';
 import { TasksPage } from '../features/tasks/TasksPage';
+import { useFederation } from '../app/federation/federation';
+import { MergedIncidentsPage } from '../features/federation/MergedIncidentsPage';
+import { MergedInboxPage } from '../features/federation/MergedInboxPage';
 import { IncidentsPage } from '../features/incidents/IncidentsPage';
 import { resolveMode } from '../features/incidents/model/incidents';
 import { RulesProvider } from '../features/rules/api/rulesContext';
@@ -102,6 +105,7 @@ interface Refresh { inboxSeconds: number; incidentsSeconds: number }
 
 function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Route; meta: BpmMetaV1; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[]; refresh: Refresh }) {
   const pageLimit = meta.limits.maxPageSize;
+  const merged = useFederation() !== undefined && (route.name === 'tasks' || route.name === 'incidents') && route.scope === 'all';
   switch (route.name) {
     case 'home':
       return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} />;
@@ -125,10 +129,12 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
     case 'instance':
       return <InstancePage instanceId={route.instanceId} />;
     case 'tasks':
+      if (merged) return <MergedInboxPage taskId={route.taskId} on={route.on} refreshSeconds={refresh.inboxSeconds} />;
       return <TasksPage view={route.view} taskId={route.taskId} overdue={route.overdue === true} refreshSeconds={refresh.inboxSeconds} />;
     case 'task':
       return <ReviewTaskPage taskId={route.taskId} />;
     case 'incidents':
+      if (merged) return <MergedIncidentsPage view={route.view} incidentId={route.incidentId} on={route.on} refreshSeconds={refresh.incidentsSeconds} />;
       return <IncidentsPage view={route.view} incidentId={route.incidentId} refreshSeconds={refresh.incidentsSeconds}
         mode={resolveMode(meta.modules.find((module) => module.module === 'processes')?.settings)} />;
   }

@@ -6,6 +6,7 @@ import { useKeepInView } from '../../components/useKeepInView';
 import type { MessageKey } from '../../i18n/en';
 import { useI18n } from '../../i18n/I18nProvider';
 import { formatDateTime } from '../rules/model/dates';
+import { ScopeSwitch } from '../federation/parts';
 import { Tabs } from '../rules/components/Tabs';
 import { Toast } from '../rules/components/Toast';
 import { INCIDENT_LIMIT, useIncidentList, useStepNames } from './api/useIncidents';
@@ -48,7 +49,7 @@ export function IncidentsPage({ view, incidentId, refreshSeconds, mode }: { view
 
   return (
     <section className="workspace tasks incidents" aria-labelledby="incidents-title">
-      <PageHead id="incidents-title" title={t('incidents.title')} subtitle={t('incidents.subtitle')} />
+      <PageHead id="incidents-title" title={t('incidents.title')} subtitle={t('incidents.subtitle')} action={<ScopeSwitch area="incidents" merged={false} />} />
       <Tabs label={t('incidents.tabs')} items={TABS.map((tab) => ({ id: tab, label: tabLabel(tab) }))} selected={active} className="tasks__tabs"
         onSelect={(next) => { setNotice(undefined); navigate({ name: 'incidents', view: next }); }}>
         {notice !== undefined ? (
@@ -117,7 +118,7 @@ function IncidentTable({ items, hasMore, tab, selectedId, nameOf, onSelect }: {
                 <td>{t(causeKey(item.errorCode))}</td>
                 <td className="num tnum">{item.retryCount}</td>
                 <td className="tnum">{formatDateTime(item.createdAt, locale)}</td>
-                <td><IncidentState incident={item} /></td>
+                <td><IncidentState incident={item} compact /></td>
               </tr>
             );
           })}

@@ -4,7 +4,8 @@ import type { BpmMeV1 } from '../api/generated/bpm-me.v1';
 import { browserDependencies, type OidcDependencies, type TokenSession } from '../app/auth/oidc';
 import { enabledHosts } from '../app/auth/standalone';
 import { hostLabel, loadRegistry, type HostRegistry, type RegistryHost } from '../app/config/registry';
-import { splitHost, withHost } from '../app/route';
+import { splitHost, useRoute, withHost } from '../app/route';
+import { FederationProvider, useFederatedHosts } from '../app/federation/federation';
 import { registryQueryKey, useHostSession, type SessionDependencies } from '../app/session/useHostSession';
 import { useHostInAddress, useHostProbe, useSignIn } from '../app/session/useStandaloneSession';
 import { HostPicker } from '../components/HostPicker';
@@ -138,6 +139,13 @@ function SignedIn(props: SignedInProps) {
       : { ...current, [hostId]: tenant }));
   }, [queryClient]);
   const currentHostId = choice.kind === 'host' ? choice.host.id : undefined;
+  // Merged lists (CK-F-28, CK-F-29) read every enabled host; they are probed only while one is open.
+  const [route] = useRoute();
+  const mergedOpen = (route.name === 'tasks' || route.name === 'incidents') && route.scope === 'all';
+  const federatedHosts = useFederatedHosts(registry, props.session, props.baseFetch, selected, mergedOpen);
+  const federation = currentHostId !== undefined && enabledHosts(registry).length > 1
+    ? { currentId: currentHostId, hosts: mergedOpen ? federatedHosts : [], timeoutMs: (registry.refresh?.hostTimeoutSeconds ?? 5) * 1000 }
+    : undefined;
   const onRefused = useCallback((found: TenantRefusal) => {
     // A refused tenant returns the user to their own tenant and says why (CKP-022).
     setRefusal(found);
@@ -156,10 +164,10 @@ function SignedIn(props: SignedInProps) {
   const tenant = selected[hostId];
   // A new host or tenant is a new subtree: nothing of the previous screens or drafts survives the switch.
   return (
-    <>
+    <FederationProvider value={federation}>
       <HostScreens key={`${hostId}|${tenant ?? ''}`} host={choice.host} tenant={tenant} onSelectTenant={(next) => { setRefusal(undefined); selectTenant(hostId, next); }} onRefused={onRefused} {...props} />
       {refusal !== undefined ? <TenantRefusedNotice correlationId={refusal.correlationId} onDismiss={() => { setRefusal(undefined); }} /> : null}
-    </>
+    </FederationProvider>
   );
 }
 

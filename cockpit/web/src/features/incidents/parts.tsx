@@ -9,11 +9,12 @@ export function stepName(incident: Pick<Incident, 'nodeId'>, known?: string): st
 }
 
 /** Where the incident stands, as a word and an icon. */
-export function IncidentState({ incident }: { incident: Incident }) {
+/** `compact` is for table cells: the proposer is named in the inspector beside the list. */
+export function IncidentState({ incident, compact = false }: { incident: Incident; compact?: boolean }) {
   const { t } = useI18n();
   const personName = usePersonName();
   if (incident.status === 'RESOLUTION_PENDING') {
-    return <span className="badge badge--accent"><span aria-hidden="true">◷</span> {t('incidents.state.pending', { who: personName(incident.pendingResolution?.proposedBy ?? '') })}</span>;
+    return <span className="badge badge--accent"><span aria-hidden="true">◷</span> {compact ? t('incidents.state.pendingShort') : t('incidents.state.pending', { who: personName(incident.pendingResolution?.proposedBy ?? '') })}</span>;
   }
   if (incident.retrying) return <span className="badge badge--accent"><span aria-hidden="true">↻</span> {t('incidents.state.retrying')}</span>;
   if (incident.status === 'RESOLVED') return <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('incidents.state.resolved')}</span>;

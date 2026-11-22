@@ -40,9 +40,30 @@ export type Route =
   | { name: 'migrate'; key: string; version: number; from?: number | undefined }
   | { name: 'migration'; migrationId: string }
   | { name: 'instance'; instanceId: string }
-  | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined; overdue?: boolean | undefined }
+  | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined; overdue?: boolean | undefined; scope?: Scope | undefined; on?: string | undefined }
   | { name: 'task'; taskId: string }
-  | { name: 'incidents'; view?: IncidentTab | undefined; incidentId?: string | undefined };
+  | { name: 'incidents'; view?: IncidentTab | undefined; incidentId?: string | undefined; scope?: Scope | undefined; on?: string | undefined };
+
+/**
+ * `all` is the merged list across the hosts the user can reach (CK-F-28, CK-F-29); absent is the host on screen.
+ * In a merged list `on` names the host of the selected row, since an id alone does not say where it lives.
+ */
+export type Scope = 'all';
+
+/** A host id as the registry writes it; anything else in a link is ignored. */
+const HOST_ID = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+
+function scopeOf(params: URLSearchParams): { scope?: Scope; on?: string } {
+  if (params.get('scope') !== 'all') return {};
+  const on = params.get('on') ?? undefined;
+  return { scope: 'all', ...(on !== undefined && HOST_ID.test(on) && on.length <= 40 ? { on } : {}) };
+}
+
+function scopeParams(params: URLSearchParams, route: { scope?: Scope | undefined; on?: string | undefined }): void {
+  if (route.scope !== 'all') return;
+  params.set('scope', 'all');
+  if (route.on !== undefined) params.set('on', route.on);
+}
 
 /** The tabs of the incident queue (CKP-008): incidents to fix, and resolutions waiting for a second person (PD-126). */
 export const INCIDENT_TABS = ['open', 'pending'] as const;
@@ -142,6 +163,7 @@ function queueRoute(params: URLSearchParams): Route {
     ...(task !== undefined && TASK_ID.test(task) ? { taskId: task } : {}),
     // The overdue filter (CKP-050) is kept in the link, so a shared link opens the same view.
     ...(params.get('overdue') === '1' ? { overdue: true } : {}),
+    ...scopeOf(params),
   };
 }
 
@@ -153,6 +175,7 @@ function incidentRoute(params: URLSearchParams): Route {
     name: 'incidents',
     ...(view !== undefined && (INCIDENT_TABS as readonly string[]).includes(view) ? { view: view as IncidentTab } : {}),
     ...(incident !== undefined && TASK_ID.test(incident) ? { incidentId: incident } : {}),
+    ...scopeOf(params),
   };
 }
 
@@ -200,6 +223,7 @@ export function formatRoute(route: Route): string {
       if (route.view !== undefined) params.set('view', route.view);
       if (route.overdue === true) params.set('overdue', '1');
       if (route.taskId !== undefined) params.set('task', route.taskId);
+      scopeParams(params, route);
       const text = params.toString();
       return text === '' ? '#/tasks' : `#/tasks?${text}`;
     }
@@ -207,6 +231,7 @@ export function formatRoute(route: Route): string {
       const params = new URLSearchParams();
       if (route.view !== undefined) params.set('view', route.view);
       if (route.incidentId !== undefined) params.set('incident', route.incidentId);
+      scopeParams(params, route);
       const text = params.toString();
       return text === '' ? '#/incidents' : `#/incidents?${text}`;
     }

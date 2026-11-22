@@ -1,7 +1,8 @@
 import { useId, useState } from 'react';
 import { toHostError, type HostError } from '../../api/hostError';
 import type { Incident } from '../../api/processes/schemas';
-import { formatRoute, type IncidentTab } from '../../app/route';
+import type { IncidentTab } from '../../app/route';
+import { useHostLink } from '../federation/HostScope';
 import { CopyButton } from '../../components/CopyButton';
 import { AreaError, LoadingRows } from '../../components/PageParts';
 import type { Translate } from '../../i18n/I18nProvider';
@@ -59,6 +60,7 @@ function Detail({ incident, step, mode, onNotice, onDone }: {
 }) {
   const { t, locale, label } = useI18n();
   const { can, userId } = useProcessesSession();
+  const hostLink = useHostLink();
   const command = useIncidentCommand(incident);
   const caseOf = useIncidentCase(incident.instanceId);
   const [dialog, setDialog] = useState<Dialog | undefined>(undefined);
@@ -91,7 +93,7 @@ function Detail({ incident, step, mode, onNotice, onDone }: {
       <div className="tasks__state"><IncidentState incident={incident} /></div>
       <dl className="facts-list tasks__facts">
         {caseOf.data?.businessKey ? (
-          <div><dt>{t('incidents.fact.case')}</dt><dd><a href={formatRoute({ name: 'instance', instanceId: incident.instanceId })}>{caseOf.data.businessKey}</a></dd></div>
+          <div><dt>{t('incidents.fact.case')}</dt><dd><a href={hostLink({ name: 'instance', instanceId: incident.instanceId })}>{caseOf.data.businessKey}</a></dd></div>
         ) : null}
         {caseOf.data ? <div><dt>{t('incidents.fact.process')}</dt><dd><ProcessName definitionKey={caseOf.data.definitionKey} version={caseOf.data.definitionVersion} /></dd></div> : null}
         <div><dt>{t('incidents.fact.cause')}</dt><dd>{t(causeKey(incident.errorCode))}</dd></div>

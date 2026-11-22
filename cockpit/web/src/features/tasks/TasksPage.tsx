@@ -9,6 +9,7 @@ import { useWantNames, wantedOf } from '../processes/api/displayNames';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { Tabs } from '../rules/components/Tabs';
 import { Toast } from '../rules/components/Toast';
+import { ScopeSwitch } from '../federation/parts';
 import { useQueue } from './api/useTasks';
 import { MANAGE, slaOf, viewsFor, type QueueView } from './model/queue';
 import { AssigneeText, DueText, SlaMark, StatusMark, taskTitle } from './parts';
@@ -75,7 +76,7 @@ export function TasksPage({ view, taskId, overdue: overdueOnly = false, refreshS
 
   return (
     <section className="workspace tasks" aria-labelledby="tasks-title">
-      <PageHead id="tasks-title" title={t('tasks.title')} subtitle={can(MANAGE) ? t('tasks.subtitleManage') : t('tasks.subtitle')} />
+      <PageHead id="tasks-title" title={t('tasks.title')} subtitle={can(MANAGE) ? t('tasks.subtitleManage') : t('tasks.subtitle')} action={<ScopeSwitch area="tasks" merged={false} />} />
       <Tabs
         label={t('tasks.tabs')}
         items={views.map((item) => ({ id: item, label: tabLabel(item) }))}
