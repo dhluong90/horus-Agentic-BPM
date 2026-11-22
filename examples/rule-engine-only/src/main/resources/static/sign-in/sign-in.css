@@ -11,6 +11,7 @@
   /* Primary button: white on #0369A1 is 5.93:1 (ux-design section 6.3). */
   --primary-fill: #0369A1; --on-primary: #FFFFFF;
   --warn: #92400E; --warn-fill: #D97706; --warn-soft: #FDF3DC;
+  --env-tag: #F1F4F8; --env-tag-ink: #334155; --env-tag-line: #B8C1CD;
   --bad: #B91C1C; --bad-fill: #DC2626; --bad-soft: #FCEBEB;
   --ok: #047857; --ok-fill: #059669; --ok-soft: #E3F6EC;
   --focus: #2563EB;
@@ -26,6 +27,7 @@
   --accent: #38BDF8; --accent-fill: #0C9AD9; --accent-soft: rgba(14, 165, 233, .14);
   --primary-fill: #0C9AD9; --on-primary: #04131D;
   --warn: #FBBF24; --warn-fill: #E89B0C; --warn-soft: rgba(245, 158, 11, .14);
+  --env-tag: rgba(148, 163, 184, .12); --env-tag-ink: #C5CCD9; --env-tag-line: rgba(148, 163, 184, .34);
   --bad: #F87171; --bad-fill: #EF4444; --bad-soft: rgba(239, 68, 68, .15);
   --ok: #34D399; --ok-fill: #0E9F6E; --ok-soft: rgba(16, 185, 129, .14);
   --focus: #93C5FD;
@@ -41,6 +43,7 @@
     --accent: #38BDF8; --accent-fill: #0C9AD9; --accent-soft: rgba(14, 165, 233, .14);
     --primary-fill: #0C9AD9; --on-primary: #04131D;
     --warn: #FBBF24; --warn-fill: #E89B0C; --warn-soft: rgba(245, 158, 11, .14);
+    --env-tag: rgba(148, 163, 184, .12); --env-tag-ink: #C5CCD9; --env-tag-line: rgba(148, 163, 184, .34);
     --bad: #F87171; --bad-fill: #EF4444; --bad-soft: rgba(239, 68, 68, .15);
     --ok: #34D399; --ok-fill: #0E9F6E; --ok-soft: rgba(16, 185, 129, .14);
     --focus: #93C5FD;
@@ -105,10 +108,11 @@ button, input { font: inherit; color: inherit; }
 h1 { text-wrap: balance; font-size: 26px; font-weight: 700; letter-spacing: -.015em; line-height: 1.35; }
 .sub { color: var(--muted); margin-top: -10px; }
 
-.alert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 1px solid; border-left-width: 3px; color: var(--ink); }
-.alert--error { background: var(--bad-soft); border-color: var(--bad-fill); }
+/* The calm alert shape of the cockpit: soft fill and a 3 px edge, no frame. */
+.alert { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; border: 0; border-left: 3px solid; color: var(--ink); }
+.alert--error { background: var(--bad-soft); border-left-color: var(--bad-fill); }
 .alert--error .alert__icon { color: var(--bad); }
-.alert--info { background: var(--ok-soft); border-color: var(--ok-fill); }
+.alert--info { background: var(--ok-soft); border-left-color: var(--ok-fill); }
 .alert--info .alert__icon { color: var(--ok); }
 .alert__icon { font-weight: 800; flex: none; line-height: 1.5; }
 
@@ -127,13 +131,19 @@ h1 { text-wrap: balance; font-size: 26px; font-weight: 700; letter-spacing: -.01
 .demo { margin-top: 8px; padding: 14px 16px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 .demo__head { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 13px; }
 .tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.tag--demo, .tag--env { background: var(--warn-soft); color: var(--warn); }
-.tag--env { margin-left: 4px; text-transform: capitalize; }
-.demo__users { display: flex; flex-direction: column; }
-.demo__user { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: var(--target-min); padding: 0 12px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; }
-.demo__user:hover, .demo__user.is-picked { background: var(--surface); box-shadow: 0 1px 2px rgba(15, 23, 42, .08); }
+/* Amber is the Demo tag only; any other environment (Production, UAT) is neutral. */
+.tag--demo { background: var(--warn-soft); color: var(--warn); }
+.tag--env { margin-left: 4px; text-transform: capitalize; background: var(--env-tag); color: var(--env-tag-ink); box-shadow: inset 0 0 0 1px var(--env-tag-line); }
+.demo__users { display: flex; flex-direction: column; gap: 4px; }
+/* Each row is a button that fills the username: it reads as one, with a hover, a focus ring and an arrow. */
+.demo__user { display: flex; align-items: center; gap: 12px; width: 100%; min-height: var(--target-min); padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; text-align: left; font: inherit; color: inherit; transition: background-color .12s, border-color .12s; }
+.demo__user::after { content: "→" / ""; margin-left: 4px; color: var(--muted); }
+.demo__user:hover { background: var(--accent-soft); border-color: var(--accent-fill); }
+.demo__user:hover::after, .demo__user:focus-visible::after { color: var(--accent); }
+.demo__user:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-color: var(--accent-fill); }
+.demo__user.is-picked { background: var(--accent-soft); border-color: var(--accent-fill); }
 .demo__name { font-weight: 600; color: var(--ink); }
-.demo__role { color: var(--muted); font-size: 13px; }
+.demo__role { margin-left: auto; color: var(--muted); font-size: 13px; }
 
 @media (max-width: 960px) {
   .page { grid-template-columns: minmax(0, 1fr); padding: 0; gap: 0; }

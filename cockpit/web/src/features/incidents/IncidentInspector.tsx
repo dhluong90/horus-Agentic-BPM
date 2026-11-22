@@ -57,7 +57,7 @@ function Detail({ incident, step, mode, onNotice, onDone }: {
   onNotice: (notice: IncidentNotice | undefined) => void;
   onDone: (text: string, next?: { view: IncidentTab; incidentId?: string | undefined }) => void;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale, label } = useI18n();
   const { can, userId } = useProcessesSession();
   const command = useIncidentCommand(incident);
   const caseOf = useIncidentCase(incident.instanceId);
@@ -105,7 +105,7 @@ function Detail({ incident, step, mode, onNotice, onDone }: {
           {pending.reason ? <q className="history__reason">{pending.reason}</q> : null}
           <dl className="facts-list tasks__facts incidents__output">
             {Object.entries(pending.output).map(([name, value]) => (
-              <div key={name}><dt>{fieldLabel(name)}</dt><dd><ReviewValue value={value} /></dd></div>
+              <div key={name}><dt>{label(`label.field.${name}`) ?? fieldLabel(name)}</dt><dd><ReviewValue value={value} /></dd></div>
             ))}
           </dl>
         </section>

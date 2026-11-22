@@ -22,6 +22,8 @@
   --bad: #B91C1C; --bad-fill: #DC2626; --bad-soft: #FCEBEB;
   --indigo: #4338CA; --indigo-soft: #E9ECFC;
   --violet: #6D28D9; --violet-soft: #F1ECFD;
+  /* Environment tag other than Demo (Production, UAT): neutral, so amber keeps its one meaning */
+  --env-tag: #F1F4F8; --env-tag-ink: #334155; --env-tag-line: #B8C1CD;
   --focus: #2563EB;
   --sh-1: 0 1px 2px rgba(15, 23, 42, .06), 0 0 0 1px rgba(15, 23, 42, .02);
   --sh-2: 0 6px 18px -8px rgba(15, 23, 42, .16), 0 1px 3px rgba(15, 23, 42, .06);
@@ -78,6 +80,7 @@
   --bad: #F87171; --bad-fill: #EF4444; --bad-soft: rgba(239, 68, 68, .15);
   --indigo: #A5B4FC; --indigo-soft: rgba(99, 102, 241, .16);
   --violet: #C4B5FD; --violet-soft: rgba(139, 92, 246, .16);
+  --env-tag: rgba(148, 163, 184, .12); --env-tag-ink: #C5CCD9; --env-tag-line: rgba(148, 163, 184, .34);
   --focus: #93C5FD;
   --sh-1: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 1px 2px rgba(0, 0, 0, .45);
   --sh-2: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 12px 28px -12px rgba(0, 0, 0, .75);
@@ -118,6 +121,7 @@
     --bad: #F87171; --bad-fill: #EF4444; --bad-soft: rgba(239, 68, 68, .15);
     --indigo: #A5B4FC; --indigo-soft: rgba(99, 102, 241, .16);
     --violet: #C4B5FD; --violet-soft: rgba(139, 92, 246, .16);
+    --env-tag: rgba(148, 163, 184, .12); --env-tag-ink: #C5CCD9; --env-tag-line: rgba(148, 163, 184, .34);
     --focus: #93C5FD;
     --sh-1: 0 1px 0 rgba(255, 255, 255, .05) inset, 0 1px 2px rgba(0, 0, 0, .45);
     --sh-2: 0 1px 0 rgba(255, 255, 255, .06) inset, 0 12px 28px -12px rgba(0, 0, 0, .75);

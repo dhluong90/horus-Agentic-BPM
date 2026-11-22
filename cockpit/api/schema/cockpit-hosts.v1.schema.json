@@ -29,7 +29,7 @@
           "enum": ["per-host", "shared"],
           "default": "per-host"
         },
-        "redirectPath": { "description": "Path of the sign-in callback, relative to the cockpit.", "type": "string", "default": "auth/callback", "pattern": "^[A-Za-z0-9._~/-]+$" },
+        "redirectPath": { "description": "Path of the sign-in callback, relative to the cockpit. The cockpit adds a trailing slash, so the redirect URI registered at the identity provider is <cockpit>/auth/callback/ by default.", "type": "string", "default": "auth/callback", "pattern": "^[A-Za-z0-9._~/-]+$" },
         "postLogoutRedirectPath": { "type": "string", "default": "", "pattern": "^[A-Za-z0-9._~/-]*$" }
       },
       "if": { "properties": { "mode": { "const": "oidc" } } },

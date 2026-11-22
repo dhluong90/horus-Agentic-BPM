@@ -16,6 +16,8 @@ interface I18nValue {
   chosen: boolean;
   setLocale: (locale: Locale, options?: { remember: boolean }) => void;
   t: Translate;
+  /** A label the engine does not carry, from the cockpit's own table: undefined when this language has none. */
+  label: (key: string) => string | undefined;
 }
 
 const I18nContext = createContext<I18nValue | undefined>(undefined);
@@ -52,6 +54,7 @@ export function I18nProvider({ children, initialLocale }: { children: ReactNode;
       chosen: state.chosen,
       setLocale,
       t: (key, params) => format(dictionary[key], params),
+      label: (key) => (Object.hasOwn(dictionary, key) ? (dictionary as Record<string, string>)[key] : undefined),
     };
   }, [state, setLocale]);
 

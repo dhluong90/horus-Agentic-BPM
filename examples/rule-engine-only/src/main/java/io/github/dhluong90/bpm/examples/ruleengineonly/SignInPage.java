@@ -170,7 +170,7 @@ final class SignInPage {
             String role = capitalise(roles(user, messages));
             String pick = messages.getString("demoPick").replace("{user}", user.username()).replace("{role}", role);
             return "<li><button type=\"button\" class=\"demo__user\" data-username=\"" + escape(user.username()) + "\" aria-label=\""
-                    + escape(pick) + "\"><span class=\"demo__name\">" + escape(user.username()) + "</span><span class=\"demo__role\">"
+                    + escape(pick) + "\"><span class=\"demo__name\">" + escape(user.username()) + "</span> <span class=\"demo__role\">"
                     + escape(role) + "</span></button></li>";
         }).collect(Collectors.joining());
         return "<aside class=\"demo\" aria-labelledby=\"demo-body\"><p class=\"demo__head\"><span class=\"tag tag--demo\">"

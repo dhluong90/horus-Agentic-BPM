@@ -93,7 +93,7 @@ function isLens(value: string | undefined): value is Lens {
  * never a blank screen.
  */
 export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Route {
-  const [path = '', search = ''] = hash.replace(/^#\/?/, '').split('?');
+  const [path = '', search = ''] = splitHost(hash).rest.replace(/^#\/?/, '').split('?');
   const parts = path.split('/').filter(Boolean).map(safeDecode);
   const [area, ruleSet, version, lens] = parts;
   if (area === undefined) return fallback;
@@ -212,6 +212,36 @@ export function formatRoute(route: Route): string {
   }
 }
 
+const HOST_PREFIX = /^#\/hosts\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?=\/|\?|$)\/?/;
+
+/**
+ * Standalone mode names the host first: `#/hosts/loans/rules` (cockpit DESIGN section 4). The rest is the route
+ * within that host, so every screen parses and links as in embedded mode.
+ */
+export function splitHost(hash: string): { hostId: string | undefined; rest: string } {
+  const match = HOST_PREFIX.exec(hash);
+  if (!match) return { hostId: undefined, rest: hash === '' ? '' : hash };
+  return { hostId: match[1], rest: `#/${hash.slice(match[0].length)}` };
+}
+
+/** The hash of `rest` within host `hostId`; without a host, `rest` unchanged. */
+export function withHost(rest: string, hostId: string | undefined): string {
+  if (hostId === undefined) return rest;
+  const route = rest.replace(/^#\/?/, '');
+  return `#/hosts/${hostId}${route === '' ? '' : `/${route}`}`;
+}
+
+/**
+ * The host a link from a host screen names with `?host=` (PD-108: `#/decisions/{id}?host=loans`). Only a
+ * well-formed id is read; nothing else in the link is.
+ */
+export function linkedHost(hash: string): string | undefined {
+  const search = hash.split('?')[1];
+  if (search === undefined) return undefined;
+  const host = new URLSearchParams(search).get('host');
+  return host !== null && /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(host) && host.length <= 40 ? host : undefined;
+}
+
 function subscribe(onChange: () => void): () => void {
   window.addEventListener('hashchange', onChange);
   return () => {
@@ -222,7 +252,7 @@ function subscribe(onChange: () => void): () => void {
 export function useRoute(fallback?: Route): [Route, (route: Route) => void] {
   const hash = useSyncExternalStore(subscribe, () => window.location.hash, () => '');
   const navigate = useCallback((route: Route) => {
-    window.location.hash = formatRoute(route);
+    window.location.hash = withHost(formatRoute(route), splitHost(window.location.hash).hostId);
   }, []);
   return [parseRoute(hash, fallback), navigate];
 }

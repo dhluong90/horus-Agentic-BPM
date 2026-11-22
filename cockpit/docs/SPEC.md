@@ -268,7 +268,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M2
 - **Given:** `/me` returns `tenant.current: bank-a`, `tenant.allowed: [bank-a, bank-a-fin]`; a test proxy rewrites one request to `X-Tenant-Id: bank-b`.
 - **When:** The operator switches to `bank-a-fin`, then the rewritten request is sent.
-- **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "Tenant bank-b is not allowed for your account" with the `correlationId`. No screen shows rows from two tenants.
+- **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "The service did not accept that tenant for your account" with the `correlationId` behind Details. The sentence names no tenant, because the problem does not say which tenant was refused and the proxy changed the one the cockpit sent. The switcher is hidden when `/meta` reports `tenancy.switching: false` or `/me` allows one tenant. No screen shows rows from two tenants.
 - **Example:** `switch to bank-a-fin -> lists reload; forged bank-b -> 403 TENANT_NOT_ALLOWED`.
 - **Test ID:** `CKP_022_tenant_switcher_allowed_tenants_only`
 
@@ -469,6 +469,24 @@ These two statements are the part of `CKP-016` and `CKP-029` that ships before s
 ## Decision Explorer, Version History and Evidence Export (PD-027, PD-108, PD-116)
 
 The engine decides and the cockpit shows: the explanation sentence, the masked values, the history and the evidence file with its SHA-256 all come from the Rule Engine (`GET /decisions`, `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /rule-sets/{name}/history`, `POST /rule-sets/{name}/evidence`). The cockpit computes none of them.
+
+### CKP-041 A link from a host screen opens one decision after sign-in
+- **Traces to:** `TR-SEC-05`, `TR-QA-01`, PD-108
+- **Milestone:** M1
+- **Given:** Decision `01JD2X…` logged on host `loans` for tenant `bank-a`, with `nationalId` masked and rule R2 matched. Thu holds `rules:log:read` and is not signed in. Second case: the registry lists `loans` and `cards`.
+- **When:** Thu opens `<cockpit>/#/decisions/01JD2X…`; in the second case `#/decisions/01JD2X…?host=loans`, then the same link without `host`.
+- **Then:** After sign-in the cockpit sends `GET /api/bpm/rules/v1/decisions/01JD2X…` once and shows the decision page with R2 highlighted, its reading and `nationalId` masked; signed in already, the page opens with no sign-in step. With `host=loans` the decision is read from `loans` only and the address becomes `#/hosts/loans/decisions/01JD2X…`. Without `host` the page asks "Which service logged this decision?" with both hosts and requests nothing until one is chosen. Nothing else in the link is read.
+- **Example:** `#/decisions/01JD2X…?host=loans -> sign-in -> #/hosts/loans/decisions/01JD2X…, one decision request to loans`.
+- **Test ID:** `CKP_041_link_lands_on_the_decision_after_sign_in`
+
+### CKP-042 A decision link refuses what the user may not see and what is not a decision id
+- **Traces to:** `TR-SEC-05`, `TR-QA-01`, PD-108
+- **Milestone:** M1
+- **Given:** Eve holds `rules:read` but not `rules:log:read`. `01JD9Z…` does not exist and `01JD7K…` belongs to tenant `bank-b`. A third link's id is longer than 26 characters or holds markup.
+- **When:** Eve opens a decision link; Thu opens the missing and the other tenant's link; anyone opens the third link.
+- **Then:** Eve reads "You do not have permission to open decisions." and no decision request is sent; a forced request gets `403`. Both of Thu's links read "Decision not found for tenant bank-a." with the same wording. The third link reads "This link is not valid.", sends no request and renders nothing of the link as markup. No personal data is read from or written to the address.
+- **Example:** `#/decisions/<img…> -> "This link is not valid.", 0 requests`.
+- **Test ID:** `CKP_042_decision_link_refusals`
 
 ### CKP-071 An auditor finds a rule set's or a case's decisions in a month and opens one
 - **Traces to:** `TR-OBS-05`, `TR-UI-02`, `TR-UI-04`, `RLE-029`, PD-108

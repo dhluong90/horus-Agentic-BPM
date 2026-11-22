@@ -14,6 +14,11 @@ final class OAuth2Claims implements Function<Authentication, Map<String, Object>
 
     static final String CLAIM_ACCESSOR = "org.springframework.security.oauth2.core.ClaimAccessor";
 
+    /** True for a principal that carries token claims: a JWT, an OIDC user or an introspected token. */
+    static boolean isToken(Object principal) {
+        return principal instanceof ClaimAccessor || principal instanceof OAuth2AuthenticatedPrincipal;
+    }
+
     @Override
     public Map<String, Object> apply(Authentication authentication) {
         Object principal = authentication.getPrincipal();

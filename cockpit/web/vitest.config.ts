@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
+  define: { __COCKPIT_VERSION__: JSON.stringify('0.3.0-SNAPSHOT') },
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
