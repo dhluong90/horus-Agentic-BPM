@@ -169,6 +169,7 @@ class ListQueryPlanCheckTest {
         Timestamp from = Timestamp.from(NOW.minusSeconds(31L * 24 * 3600));
         Map<String, List<Object>> samples = new LinkedHashMap<>();
         samples.put("live-token-counts", List.of("bank-a", DEFINITION));
+        samples.put("active-definition-versions", List.of(1000));
         samples.put("lock-definition-versions", List.of("bank-a", "loan-origination"));
         samples.put("definition-history", List.of("bank-a", DEFINITION));
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));

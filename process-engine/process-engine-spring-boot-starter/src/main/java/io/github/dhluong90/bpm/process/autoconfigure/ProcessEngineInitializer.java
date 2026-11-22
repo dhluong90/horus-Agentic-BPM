@@ -27,13 +27,24 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
     private final ProcessServices services;
     private final ProcessEngineProperties properties;
     private final ResourceLoader resources;
+    private final boolean summariseUnclassified;
 
     ProcessEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
             ProcessEngineProperties properties, ResourceLoader resources) {
+        this(migrator, services, properties, resources, false);
+    }
+
+    /**
+     * @param summariseUnclassified whether to log the one start-up WARN of PD-146 that counts the unclassified agent
+     *     step fields of active versions: outside the {@code dev} profile
+     */
+    ProcessEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
+            ProcessEngineProperties properties, ResourceLoader resources, boolean summariseUnclassified) {
         this.migrator = migrator;
         this.services = services;
         this.properties = properties;
         this.resources = resources;
+        this.summariseUnclassified = summariseUnclassified;
     }
 
     @Override
@@ -52,6 +63,9 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
                 LOG.info("Process definition " + version.key() + " v" + version.version() + " " + version.status()
                         + " for tenant " + tenant + " from " + location + " (hash " + version.definitionHash() + ")");
             }
+        }
+        if (summariseUnclassified) {
+            services.unclassifiedSummary().ifPresent(LOG::warn);
         }
     }
 

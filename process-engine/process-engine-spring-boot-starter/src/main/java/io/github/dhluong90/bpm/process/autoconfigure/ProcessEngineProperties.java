@@ -37,6 +37,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param migration migration plans of running instances (#74)
  * @param approval what a definition approval must name (PD-139)
  * @param incidents how incidents are resolved (PD-126)
+ * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -59,7 +60,21 @@ public record ProcessEngineProperties(
         @DefaultValue Calendar calendar,
         @DefaultValue Migration migration,
         @DefaultValue Approval approval,
-        @DefaultValue Incidents incidents) {
+        @DefaultValue Incidents incidents,
+        @DefaultValue Classification classification) {
+
+    /**
+     * The reminder about agent step fields with no classification (PD-146, #438). Masking stays opt-in: an agent
+     * step's {@code horus:input} is masked only with {@code mask="true"}, an output property only with
+     * {@code "mask": true}. With the reminder on, every such field that declares neither true nor false is listed in
+     * the {@code warnings} of the version on {@code GET .../versions/{v}} and {@code :request-approval}, and outside
+     * {@code dev} one start-up WARN counts them per active version. It never blocks and never looks at names or values.
+     *
+     * @param warnUnclassified whether to warn; default {@code true}. Set {@code false} for a deployment that classifies
+     *     fields elsewhere
+     */
+    public record Classification(@DefaultValue("true") boolean warnUnclassified) {
+    }
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -584,6 +599,7 @@ public record ProcessEngineProperties(
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
                 idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
                 lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion,
-                approval.requireContentHash(), incidents.toSetting());
+                approval.requireContentHash(), incidents.toSetting(),
+                classification == null || classification.warnUnclassified());
     }
 }

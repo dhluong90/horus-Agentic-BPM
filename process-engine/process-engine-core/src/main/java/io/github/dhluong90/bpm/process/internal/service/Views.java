@@ -304,6 +304,8 @@ public final class Views {
         putNullable(o, "name", a.name());
         o.put("version", a.version()).put("definitionHash", a.definitionHash()).put("lockVersion", a.lockVersion())
                 .put("requestedBy", a.requestedBy()).put("requestedAt", a.requestedAt().toString());
+        // #442: the requester as the screen shows them; the id when the host knows no name
+        putNullable(o, "requestedByName", a.requestedByName());
         ArrayNode actions = o.putArray("allowedActions");
         a.allowedActions().forEach(actions::add);
         ObjectNode denied = o.putObject("deniedActions");

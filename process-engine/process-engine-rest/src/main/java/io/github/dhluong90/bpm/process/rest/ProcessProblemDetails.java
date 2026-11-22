@@ -108,6 +108,15 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException g ->
                     body.set("problems", Views.problems(g.problems()));
             case StepFailedException s -> body.put("nodeId", s.nodeId()).put("reason", s.reason());
+            case io.github.dhluong90.bpm.process.api.AssigneeNotAllowedException a -> {
+                // #442: which rule refused, and the role or group the target lacks, for the client to name it
+                if (a.reason() != null) {
+                    body.put("reason", a.reason());
+                }
+                if (a.required() != null) {
+                    body.put("required", a.required());
+                }
+            }
             case io.github.dhluong90.bpm.process.api.ContentChangedException c -> body
                     .put("currentDefinitionHash", c.currentDefinitionHash())
                     .put("currentLockVersion", c.currentLockVersion());

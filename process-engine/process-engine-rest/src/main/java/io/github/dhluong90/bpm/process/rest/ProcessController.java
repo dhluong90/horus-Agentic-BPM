@@ -133,7 +133,25 @@ public class ProcessController {
                 throw new InputInvalidException("effectiveFrom must be an RFC 3339 date-time with an offset");
             }
         }
-        return version(definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom, idempotencyKey));
+        DefinitionVersion requested = definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom,
+                idempotencyKey);
+        return json(HttpStatus.OK, withWarnings(Views.definition(requested), requested), requested.lockVersion(), null);
+    }
+
+    /**
+     * Adds {@code warnings} to a version body (PD-146, #438): one {@code UNCLASSIFIED_FIELD} entry per agent step field
+     * that declares no {@code mask}. A reminder only; empty when every field is classified or the reminder is off.
+     */
+    private tools.jackson.databind.node.ObjectNode withWarnings(tools.jackson.databind.node.ObjectNode body,
+            DefinitionVersion v) {
+        tools.jackson.databind.node.ArrayNode warnings = body.putArray("warnings");
+        for (io.github.dhluong90.bpm.process.api.UnclassifiedField field
+                : definitions.unclassifiedFields(DefinitionRef.of(v.key(), v.version()))) {
+            warnings.addObject().put("code", io.github.dhluong90.bpm.process.api.UnclassifiedField.CODE)
+                    .put("step", field.step()).put("field", field.field()).put("direction", field.direction())
+                    .put("message", field.message());
+        }
+        return body;
     }
 
     /**
@@ -239,7 +257,7 @@ public class ProcessController {
         DefinitionVersion found = definitions.version(key, number);
         return ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON)
                 .header(HttpHeaders.ETAG, "\"" + found.definitionHash() + "\"")
-                .body(bytes(Views.definition(found)));
+                .body(bytes(withWarnings(Views.definition(found), found)));
     }
 
     /**

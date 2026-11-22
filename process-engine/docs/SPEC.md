@@ -519,8 +519,9 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Given:** `tenancy.switching.enabled=true`; `minh`'s token has `tenant_id: bank-a` and `allowed_tenants: [bank-a, bank-a-fin]`; tenant `bank-b` has instance `I9`.
 - **When:** `minh` calls `GET /tasks` with no header, with `X-Tenant-Id: bank-a-fin`, and with `X-Tenant-Id: bank-b`; then `GET /instances/I9` with `X-Tenant-Id: bank-a-fin`.
 - **Then:** The first call returns `bank-a` tasks; the second returns `bank-a-fin` tasks; the third returns `403 TENANT_NOT_ALLOWED`, returns no data and writes a security log entry with user, requested tenant and `correlationId`; the fourth returns `404 INSTANCE_NOT_FOUND`.
+- **Then (audit, #451):** every accepted switch hands one record to the host's `TenantSwitchAudit` (actor, original tenant, new tenant, time, correlation id) before the call reaches engine data; the default writes one `tenant.switch.accepted` line on the `io.github.dhluong90.bpm.audit` logger, and the security log line stays. A refused switch (unlisted, malformed or repeated header) writes no audit record; a sink that throws fails the call. After `lan` (`tenant_id: bank-a`, `allowed_tenants: [bank-a, bank-b]`) switches to `bank-b`, `GET /instances/P1` of `bank-a`'s case `P1` is `404 INSTANCE_NOT_FOUND` and nothing is written for either tenant.
 - **Example:** `X-Tenant-Id: bank-b not in allowed_tenants -> 403 TENANT_NOT_ALLOWED, logged`.
-- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`
+- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`, `PRE_038_after_a_switch_to_bank_b_the_bank_a_instance_is_404_and_nothing_is_written`
 
 ---
 
@@ -1230,6 +1231,24 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 - **Then:** The first five are `409 ASSIGNEE_NOT_ALLOWED` (started the instance, completed an earlier task, lacks the role, already holds the task, reserved identity); the history, the events, the idempotency records and `T2`'s `lockVersion` are unchanged after each. `dan` succeeds. A task assigned to one user can go to `lan`. With no directory bean, a role or group task cannot be given to a named user: `409 ASSIGNEE_NOT_ALLOWED`.
 - **Example:** `delegate(T2, "alice") -> 409 ASSIGNEE_NOT_ALLOWED (started this instance); delegate(T2, "dan") -> 200`.
 - **Test ID:** `PRE_184_the_starter_and_an_earlier_completer_cannot_be_given_a_four_eyes_task`, `PRE_184_a_user_without_the_role_or_group_is_refused_and_a_user_task_goes_to_anyone`, `PRE_184_without_a_directory_a_role_task_cannot_be_given_to_a_named_user`
+
+### PRE-205 Agent step fields that declare no `mask` are listed as reminders and never block
+- **Traces to:** `TR-SEC-05`, PD-146, #438
+- **Milestone:** M2
+- **Given:** `loan-agent-assessment`, whose agent step `assess-documents` reads `applicationId` (`mask="false"`) and `requestedAmount` (no `mask`), and whose output schema marks `summary` `"mask": true` and leaves `riskScore` and `recommendation` undeclared; `horus.bpm.processes.classification.warn-unclassified` at its default `true`.
+- **When:** The pipeline imports it as a draft, reads the version, requests approval; the engine starts outside `dev` with the version active; then the same with the setting `false`.
+- **Then:** `GET .../versions/1` and `:request-approval` answer with `warnings` listing `{code: UNCLASSIFIED_FIELD, step: assess-documents, field, direction, message}` for `requestedAmount` (`INPUT`), `recommendation` and `riskScore` (`OUTPUT`, in the stored schema's order); the request succeeds (`PENDING_APPROVAL`). Start-up logs one WARN counting the fields per active version (`<tenant>/loan-agent-assessment v1: 3`) that names the setting and no field or value. With the setting `false` nothing is listed or logged. Only the declaration counts; names and values are never read. The V45 partial index `idx_pre_definition_active` serves the start-up read.
+- **Example:** `request-approval -> 200 PENDING_APPROVAL, warnings [UNCLASSIFIED_FIELD requestedAmount INPUT, ...]`.
+- **Test ID:** `PRE_205_unclassified_agent_fields_are_listed_and_the_approval_request_still_succeeds`, `PRE_205_a_silenced_deployment_lists_nothing_and_logs_no_summary`, `PRE_205_the_start_up_summary_counts_fields_per_active_version_without_names_or_values`, `PRE_205_the_reader_records_whether_an_input_declares_mask_and_the_hash_ignores_it`, `TR_OPS_01_V45_builds_a_valid_partial_index_on_existing_definitions_concurrently`
+
+### PRE-206 A refused hand-over says why, and screens show people and roles by name
+- **Traces to:** `TR-UI-08`, PD-110, #442
+- **Milestone:** M2
+- **Given:** `T2` and the targets of `PRE-184`; the open `check-documents` task of a second case, assigned to `role:LOAN_OFFICER`; the host's `DisplayNames` (default: `horus.bpm.display-names.roles|groups|users.<id>.<language>`) knows `alice` as "Nguyen Thi Alice"; `alice` requested approval of three definition versions.
+- **When:** `hoa` delegates `T2` to `carol`, `bob`, `alice` and `system:timer`, and reassigns `check-documents` to `lan`; `bob` lists `GET /approvals`; a screen asks `GET /api/bpm/display-names?roles=CARD_OFFICER&users=lan` with `Accept-Language: vi`.
+- **Then:** Each `409 ASSIGNEE_NOT_ALLOWED` carries `reason`: `ALREADY_ASSIGNED` (carol), `FOUR_EYES_PARTICIPANT` (bob, alice), `RESERVED_IDENTITY` (system:timer), `MISSING_ROLE` with `required: role:LOAN_OFFICER` (lan); `MISSING_GROUP` names `group:<id>`. Each approval item carries `requestedByName` "Nguyen Thi Alice", the id when the host knows no name; `requestedBy` keeps the id. `/display-names` returns known names in the caller's language with the default language as fallback, leaves unknown identifiers out, refuses more than 100 identifiers of a kind or a malformed one with `400 INPUT_INVALID`, and an anonymous call with `401`.
+- **Example:** `reassign(check-documents, lan) -> 409 {code: ASSIGNEE_NOT_ALLOWED, reason: MISSING_ROLE, required: role:LOAN_OFFICER}`.
+- **Test ID:** `PRE_206_each_assignee_refusal_names_its_reason_and_the_role_the_target_lacks`, `PRE_206_a_target_without_the_role_of_an_open_task_is_refused_naming_that_role`, `PRE_206_assignee_not_allowed_carries_the_reason_code_and_the_role_the_target_lacks`, `PRE_206_each_item_carries_the_requester_display_name_and_falls_back_to_the_id`, `PRE_206_names_come_back_in_the_callers_language_with_the_default_language_as_fallback`, `PRE_206_too_many_or_malformed_identifiers_are_400_and_an_anonymous_caller_is_401`, `PRE_206_a_default_language_outside_two_or_three_letters_stops_start_up`
 
 ### PRE-187 Moving a task needs the manage permission, a reason, If-Match and an Idempotency-Key, and never crosses tenants
 - **Traces to:** `TR-SEC-04`, `TR-TEN-01`, `TR-IDEM-03`, #263

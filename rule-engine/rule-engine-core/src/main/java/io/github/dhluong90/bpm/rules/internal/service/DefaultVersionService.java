@@ -337,13 +337,13 @@ public final class DefaultVersionService implements VersionService {
                 if (!table.readable()) {
                     // a legal draft of up to RULES_MAX rows is valid whatever its size: only its readings are left out
                     return new DraftValidation(ruleSet, version, true, List.of(), false, List.of(), true,
-                            DraftValidation.TABLE_TOO_LARGE);
+                            DraftValidation.TABLE_TOO_LARGE, unclassified(tenant, parsed.canonicalJson()));
                 }
                 return new DraftValidation(ruleSet, version, true, List.of(), false, table.rows().stream()
                         .map(row -> new DraftValidation.Reading(row.ruleId(), row.readings().entrySet().stream()
                                 .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey,
                                         e -> e.getValue().full()))))
-                        .toList());
+                        .toList(), false, null, unclassified(tenant, parsed.canonicalJson()));
             } catch (ValidationFailedException refused) {
                 return new DraftValidation(ruleSet, version, false,
                         refused.violations().stream().map(catalogue::problem).toList(), refused.truncated(),
@@ -906,7 +906,8 @@ public final class DefaultVersionService implements VersionService {
                         v.requestedBy(), caller, permissions);
                 return new PendingApproval(v.ruleSet(), v.version(), v.canonicalHash(), v.lockVersion(),
                         v.requestedBy(), v.requestedAt(), allowed,
-                        VersionActions.pendingDenials(v.createdBy(), v.requestedBy(), caller, permissions));
+                        VersionActions.pendingDenials(v.createdBy(), v.requestedBy(), caller, permissions),
+                        displayName(v.requestedBy()));
             }).toList();
             if (rows.size() <= limit) {
                 return new Page<>(items, null);
@@ -1129,12 +1130,38 @@ public final class DefaultVersionService implements VersionService {
                 .sorted()
                 .toList();
         List<String> listed = context.settings().acknowledgeWarnings();
-        List<VersionWarning> warnings = MaskDeclarations.warnings(version.canonicalJson(),
+        List<VersionWarning> warnings = new java.util.ArrayList<>(MaskDeclarations.warnings(version.canonicalJson(),
                         context.masking().personalDataNames(tenant), maskByDefault).stream()
                 .map(w -> w.withRequiresAcknowledgement(listed.contains(w.code())
                         && !maskedByDefault.contains(w.input())))
-                .toList();
-        return new Acknowledgements(warnings, maskedByDefault);
+                .toList());
+        // An input already named by an UNMASKED_PERSONAL_DATA warning, which says it declares no mask, is not listed
+        // twice
+        java.util.Set<String> named = warnings.stream().map(VersionWarning::input)
+                .collect(java.util.stream.Collectors.toSet());
+        unclassified(tenant, version.canonicalJson()).stream().filter(w -> !named.contains(w.input()))
+                .forEach(warnings::add);
+        return new Acknowledgements(List.copyOf(warnings), maskedByDefault);
+    }
+
+    /**
+     * The inputs that declare no {@code mask} (PD-146, #438), unless the tenant's policy silences the reminder. Never
+     * needs an acknowledgement and never blocks.
+     */
+    private List<VersionWarning> unclassified(String tenant, String canonicalJson) {
+        return context.masking().warnUnclassified(tenant) ? MaskDeclarations.unclassified(canonicalJson) : List.of();
+    }
+
+    /** The requester's readable name from the host (#442); a lookup that fails leaves the id to show. */
+    private String displayName(String userId) {
+        if (userId == null) {
+            return null;
+        }
+        try {
+            return context.callers().displayNameOf(userId).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /** Most pairs an approval may acknowledge. */

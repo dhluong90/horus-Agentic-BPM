@@ -1260,7 +1260,7 @@ public final class SubsetBpmnReader {
                         invalid.add(new DefinitionProblem("INPUT_DUPLICATE", "Duplicate horus:input " + inputName,
                                 element, safe(id), line()));
                     } else {
-                        horus.add(new InputMapping(inputName, value, "true".equals(mask)));
+                        horus.add(new InputMapping(inputName, value, "true".equals(mask), mask != null));
                     }
                     skip();
                 } else if (HORUS.equals(ns)) {

@@ -42,6 +42,39 @@ final class MaskDeclarations {
     }
 
     /**
+     * Lists every input that declares no {@code mask} (PD-146, #438), in input order. Only the declaration counts:
+     * {@code mask: false} is classified, and the name and values are never looked at.
+     *
+     * @param canonicalJson the canonical document
+     * @return one {@link VersionWarning#UNCLASSIFIED_INPUT} warning per undeclared input
+     */
+    static List<VersionWarning> unclassified(String canonicalJson) {
+        List<VersionWarning> warnings = new ArrayList<>();
+        for (JsonNode input : inputs(canonicalJson)) {
+            if (!declared(input)) {
+                warnings.add(VersionWarning.unclassified(name(input)));
+            }
+        }
+        return warnings;
+    }
+
+    /**
+     * Counts the inputs of a stored {@code inputs} array that declare no {@code mask}.
+     *
+     * @param inputsJson the {@code inputs} array of a stored version
+     * @return the number of unclassified inputs
+     */
+    static int unclassifiedCount(String inputsJson) {
+        int count = 0;
+        for (JsonNode input : EngineValues.read(inputsJson)) {
+            if (!declared(input)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
      * Refuses a document with an input that declares no {@code mask}, under strict mode (RLE-050).
      *
      * @param canonicalJson the canonical document

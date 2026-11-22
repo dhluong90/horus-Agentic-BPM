@@ -5,6 +5,7 @@ import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
 import io.github.dhluong90.bpm.host.spi.TenantResolver;
+import io.github.dhluong90.bpm.host.spi.TenantSwitchAudit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -170,14 +171,34 @@ public class EngineAccessAutoConfiguration {
             return new PrincipalTenantResolver(tenancy.claim(), tenancy.devTenant());
         }
 
+        /**
+         * The audit record of an accepted tenant switch (#451), unless the host declares its own sink: one line on
+         * the {@code io.github.dhluong90.bpm.audit} logger.
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        TenantSwitchAudit horusBpmTenantSwitchAudit() {
+            return new LoggingTenantSwitchAudit();
+        }
+
         /** The one caller and permission check of the engine endpoints and {@code /api/bpm/me}. */
         @Bean
         @ConditionalOnMissingBean
         EngineAccess horusBpmEngineAccess(ObjectProvider<ModuleDescriptor> modules, HostMetadataProperties properties,
-                TenantResolver tenantResolver) {
+                TenantResolver tenantResolver, TenantSwitchAudit tenantSwitchAudit) {
             return new DefaultEngineAccess(tenantResolver, properties.tenancy(),
                     claims(EngineAccessAutoConfiguration.class.getClassLoader()), properties.security(),
-                    modules(modules));
+                    modules(modules), tenantSwitchAudit, java.time.Clock.systemUTC());
+        }
+
+        /**
+         * Readable names of roles, groups and users (#442), unless the host declares its own: the
+         * {@code horus.bpm.display-names} settings.
+         */
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.host.spi.DisplayNames horusBpmDisplayNames(HostMetadataProperties properties) {
+            return new PropertyDisplayNames(properties.displayNames());
         }
 
         /** For the host's security chain; the challenge is {@code horus.bpm.security.challenge}. */
@@ -199,11 +220,19 @@ public class EngineAccessAutoConfiguration {
      * Audience validation of bearer tokens (TR-SEC-12): when {@code horus.bpm.security.audiences} is set, a token
      * whose {@code aud} claim names none of them is rejected with {@code 401}. Spring Boot's JWT decoder applies
      * this validator beside its issuer check. A host that builds its own {@code JwtDecoder} adds it from the
-     * {@code OAuth2TokenValidator<Jwt>} beans itself.
+     * {@code OAuth2TokenValidator<Jwt>} beans itself; outside {@code dev}, with an audience configured, every
+     * {@code JwtDecoder} the host defines itself is named in one start-up WARN that says the starter applies no
+     * audience check to it (#451, {@link HostJwtDecoderAudienceWarning}).
      */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.security.oauth2.jwt.Jwt")
     static class AudienceConfiguration {
+
+        @Bean
+        @ConditionalOnClass(name = "org.springframework.security.oauth2.jwt.JwtDecoder")
+        static HostJwtDecoderAudienceWarning horusBpmHostJwtDecoderAudienceWarning(Environment environment) {
+            return new HostJwtDecoderAudienceWarning(environment);
+        }
 
         @Bean
         @Conditional(StarterAudiencesCondition.class)

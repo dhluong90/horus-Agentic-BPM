@@ -22,9 +22,12 @@ import java.util.Objects;
  * @param allowedActions what the caller may send now, in the order {@code approve}, {@code reject}
  * @param deniedActions for {@code approve} and {@code reject}, when the caller may not send it, the reason as a code:
  *     {@code PERMISSION_REQUIRED} or {@code SELF_APPROVAL_FORBIDDEN}
+ * @param requestedByName the requester's readable name in the caller's language (#442), or the id when the host knows
+ *     none
  */
 public record PendingApproval(String key, String name, int version, String definitionHash, long lockVersion,
-        String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions) {
+        String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions,
+        String requestedByName) {
 
     /** {@code approve} and {@code reject}: the actions of the queue. */
     public static final String APPROVE = "approve";
@@ -41,5 +44,27 @@ public record PendingApproval(String key, String name, int version, String defin
         Objects.requireNonNull(requestedAt, "requestedAt must not be null");
         allowedActions = List.copyOf(allowedActions);
         deniedActions = Collections.unmodifiableMap(new LinkedHashMap<>(deniedActions));
+        if (requestedByName == null || requestedByName.isBlank()) {
+            requestedByName = requestedBy;
+        }
+    }
+
+    /**
+     * An item whose requester is shown by id, as before #442.
+     *
+     * @param key see the record
+     * @param name see the record
+     * @param version see the record
+     * @param definitionHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param allowedActions see the record
+     * @param deniedActions see the record
+     */
+    public PendingApproval(String key, String name, int version, String definitionHash, long lockVersion,
+            String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions) {
+        this(key, name, version, definitionHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions,
+                null);
     }
 }

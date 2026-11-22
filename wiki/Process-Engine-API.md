@@ -132,6 +132,10 @@ An approval names the content the approver reviewed (0.3.0, PD-139): send `expec
 
 Outside the `dev` profile the starter refuses `definitions.auto-approve: true`, `maker-checker.enabled: false` and `approval.require-content-hash: false`, and on every profile it refuses the removed key `definitions-auto-approve`.
 
+**Unclassified agent fields (PD-146, #438).** `GET /definitions/{key}/versions/{v}` and `:request-approval` answer with `warnings`: one `{code: UNCLASSIFIED_FIELD, step, field, direction, message}` per agent step `horus:input` without `mask`, and per output schema property without `"mask"`. `mask="false"` counts as classified. They never block the request or the approval; show them calmly, for example as "not classified". Outside `dev` the engine logs one WARN at start-up counting them per active version, never a value. `horus.bpm.processes.classification.warn-unclassified: false` silences both.
+
+**Why a hand-over was refused (#442).** `409 ASSIGNEE_NOT_ALLOWED` carries `reason`: `ALREADY_ASSIGNED`, `FOUR_EYES_PARTICIPANT`, `RESERVED_IDENTITY`, `MISSING_ROLE` or `MISSING_GROUP`, and for the last two `required` (`role:<id>` or `group:<id>`); `GET /api/bpm/display-names` gives that role's readable name. `GET /approvals` items carry `requestedByName`.
+
 ## Incidents (0.3.0)
 
 A step that fails for good opens an incident and the token waits on the step. An operator with `processes:incident:manage` fixes it through the API:

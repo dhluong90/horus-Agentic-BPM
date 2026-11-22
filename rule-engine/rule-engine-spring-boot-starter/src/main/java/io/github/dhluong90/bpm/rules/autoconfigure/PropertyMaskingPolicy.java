@@ -50,7 +50,7 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
      * @param tenants every tenant named under {@code masking.tenants}
      */
     private record Guards(boolean hostStrict, Map<String, Boolean> tenantStrict, PersonalDataNames hostNames,
-            Map<String, PersonalDataNames> tenantNames, Set<String> tenants) {
+            Map<String, PersonalDataNames> tenantNames, Set<String> tenants, boolean warnUnclassified) {
         Guards {
             tenantStrict = Map.copyOf(tenantStrict);
             tenantNames = Map.copyOf(tenantNames);
@@ -163,7 +163,8 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
             }
         });
         return new Guards(Boolean.TRUE.equals(log.requireExplicitMask()), tenantStrict, hostNames, tenantNames,
-                properties.masking().tenants().keySet());
+                properties.masking().tenants().keySet(),
+                properties.classification() == null || properties.classification().warnUnclassified());
     }
 
     private static PersonalDataNames names(PersonalDataNames inherited, List<String> replace, List<String> add,
@@ -179,6 +180,12 @@ final class PropertyMaskingPolicy implements MaskingPolicy {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(prefix + "additional-personal-data-names: " + e.getMessage(), e);
         }
+    }
+
+    /** {@code horus.bpm.rules.classification.warn-unclassified}, one value for the deployment (PD-146). */
+    @Override
+    public boolean warnUnclassified(String tenantId) {
+        return guards.warnUnclassified();
     }
 
     @Override

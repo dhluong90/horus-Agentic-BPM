@@ -257,8 +257,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Given:** `tenancy.switching.enabled = true`; `lan`'s token has `tenant_id: bank-a` and `allowed_tenants: [bank-a, bank-a-fin]`; rule set `card-fee` exists in `bank-a-fin` and `bank-b`. Second case: switching disabled.
 - **When:** `lan` calls `GET /api/bpm/rules/v1/rule-sets/card-fee` with `X-Tenant-Id: bank-a-fin`, then with `X-Tenant-Id: bank-b`; in the second case with `X-Tenant-Id: bank-a-fin`.
 - **Then:** The first call returns `bank-a-fin`'s rule set; the second returns `403 TENANT_NOT_ALLOWED` with no rule set data and a security log entry naming user, requested tenant and `correlationId`; with switching disabled, a header that differs from the token tenant also returns `403 TENANT_NOT_ALLOWED`.
+- **Then (audit, #451):** every accepted switch hands one record to the host's `TenantSwitchAudit` (actor, original tenant, new tenant, time, correlation id) before the call reaches engine data; the default writes it as one `tenant.switch.accepted` line on the `io.github.dhluong90.bpm.audit` logger, and the security log line stays. A refused switch writes no audit record. After `lan` (`tenant_id: bank-a`, `allowed_tenants: [bank-a, bank-b]`) switches to `bank-b`, `GET /rule-sets/card-fee` of `bank-a`'s rule set is `404` and nothing is written for either tenant.
 - **Example:** `X-Tenant-Id: bank-b -> 403 TENANT_NOT_ALLOWED, logged; bank-a-fin -> 200`.
-- **Test ID:** `RLE_018_tenant_header_accepted_only_within_allowed_tenants`
+- **Test ID:** `RLE_018_tenant_header_accepted_only_within_allowed_tenants`, `RLE_018_after_a_switch_to_bank_b_the_bank_a_rule_set_is_404_and_nothing_is_written`
 
 ### RLE-019 `/api/bpm/meta` and `/api/bpm/me` describe the host and the caller
 - **Traces to:** `TR-UI-08`, `TR-SEC-08`
@@ -690,9 +691,10 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - On `prod`, on no profile and on `dev, prod`, start-up fails with a message naming `horus.bpm.rules.decision-log.retention`, saying it is required from 1.0, offering `keep-forever` or whole months of at least 12 such as `P12M`, and pointing to the upgrade note in the wiki page Rule Engine Decision Log and Audit.
   - On `dev` alone (optionally with `test`) the host starts, keeps every decision and logs the WARN of PD-130.
   - With `keep-forever` or `P12M` the host starts on any profile; no partition is dropped for `keep-forever`.
-  - Before 1.0, unset starts on every profile and logs the WARN, which now says that 1.0 will refuse to start without the setting. The engine reads its version from the `Implementation-Version` of the starter jar; a build with no version (a class directory) behaves as before 1.0.
-- **Example:** `1.0.0, profile prod, retention unset -> start-up fails naming horus.bpm.rules.decision-log.retention; keep-forever -> starts; 0.3.0 -> WARN and starts`.
-- **Test ID:** `RLE_100_from_1_0_an_unset_retention_refuses_start_up_outside_dev_and_until_then_it_warns`
+  - Before 1.0, unset starts on every profile and logs the WARN, which now says that 1.0 will refuse to start without the setting.
+  - The engine reads its version from `rule-engine.properties`, which the build writes next to the starter's classes (#450), never from the jar manifest. A 1.0 engine repackaged into a shaded jar whose manifest has no `Implementation-Version`, or run from a class directory, is refused the same way. A missing resource or a version whose major number cannot be read fails closed: start-up is refused outside `dev`, never the 0.x fallback. A 0.3.0 engine in a shaded jar warns and starts.
+- **Example:** `1.0.0, profile prod, retention unset -> start-up fails naming horus.bpm.rules.decision-log.retention; keep-forever -> starts; 0.3.0 -> WARN and starts; 1.0.0 shaded without a manifest version -> start-up fails`.
+- **Test ID:** `RLE_100_from_1_0_an_unset_retention_refuses_start_up_outside_dev_and_until_then_it_warns`, `RLE_100_the_required_from_version_is_read_as_a_major_number`, `RLE_100_a_1_0_engine_in_a_shaded_jar_without_a_manifest_version_refuses_start_up_on_prod`, `RLE_100_a_1_0_engine_run_from_a_class_directory_refuses_start_up_on_prod`, `RLE_100_a_0_3_engine_in_a_shaded_jar_still_warns_and_starts`, `RLE_100_an_unparseable_build_version_fails_closed`, `RLE_100_the_starter_ships_its_build_version_as_a_resource_beside_the_check`
 
 ### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
@@ -864,6 +866,28 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - The statement is the registered list query `pending-approvals` (and `pending-approvals-after`) of `RLE-085`: its plan reads `idx_rle_version_pending` in `(requested_at, id)` order with a `Limit` and no sort, and V30 builds that index CONCURRENTLY, repairs an interrupted build and may run twice.
 - **Example:** `GET /approvals?limit=1 as bob -> card-fee v1, requestedBy lan, canonicalHash H1, allowedActions [approve, reject]`; `as lan -> allowedActions [withdraw], deniedActions {approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN}`.
 - **Test ID:** `RLE_190_lists_every_pending_version_oldest_request_first_including_one_that_is_not_the_latest`, `RLE_190_the_proposer_gets_no_approve_and_no_reject_and_the_reason_as_a_code`, `RLE_190_a_reader_without_approve_sees_the_queue_with_permission_required`, `RLE_190_an_author_who_is_not_the_requester_may_reject_but_not_approve`, `RLE_190_a_pending_version_with_no_recorded_author_cannot_be_approved_by_anyone_and_says_so`, `RLE_190_pages_by_signed_cursor_and_a_decided_version_leaves_the_queue`, `RLE_190_another_tenant_sees_none_and_its_cursor_is_not_ours`, `RLE_190_a_forged_or_cross_list_cursor_a_bad_limit_and_a_missing_permission_are_refused`, `RLE_190_answers_the_page_with_the_hash_the_reviewer_sends_back_and_the_callers_actions`, `RLE_190_a_caller_without_read_is_refused_and_a_bad_limit_or_cursor_is_query_invalid`, `RLE_190_lists_the_callers_tenant_oldest_first_across_pages_with_its_hashes`, `RLE_190_requests_made_in_the_same_instant_page_by_id_without_gap_or_repeat`, `RLE_190_the_pending_approvals_pages_read_the_partial_index_in_order_without_a_sort`, `TR_OPS_02_V30_builds_a_valid_partial_index_and_a_rerun_after_an_interrupted_build_replaces_it`
+
+### RLE-195 Inputs that declare no `mask` are listed as reminders and never block
+- **Traces to:** `TR-SEC-05`, PD-146, PD-132, #438
+- **Milestone:** M2
+- **Given:** `card-fee` with inputs `tier` (no `mask`), `channel` (`mask: false`) and `cardNumber` (`mask: true`); `horus.bpm.rules.classification.warn-unclassified` at its default `true`. `lan` authors, `bob` approves.
+- **When:** `lan` imports it, validates an edit that also drops `channel`'s `mask`, and requests publication; `bob` reads the version and approves it; the engine starts outside `dev`; then the same with the setting `false`.
+- **Then:**
+  - The import, the publication request and `bob`'s read each list one warning `{code: UNCLASSIFIED_INPUT, input: tier, matchedName: null, requiresAcknowledgement: false}`; `:validate` stays `valid: true` and lists `tier` and `channel` in `warnings`, in input order. `mask: false` counts as classified. An input that already carries an `UNMASKED_PERSONAL_DATA` warning (`RLE-049`), which says it declares no `mask`, is not listed a second time on the version; the start-up summary counts it.
+  - The approval succeeds without acknowledging anything; `UNCLASSIFIED_INPUT` may not be listed in `lifecycle.acknowledge-warnings`.
+  - Outside `dev`, start-up logs one WARN that counts the unclassified inputs per published version (`bank-a/card-fee v1: 1`), names the setting and never an input name or value; drafts are not counted.
+  - With the setting `false` nothing is listed or logged. Sensitivity is never inferred from a name or a value: an input named `nationalId` with `mask: false` is not listed.
+- **Example:** `inputs [tier, channel mask:false, cardNumber mask:true] -> warnings [UNCLASSIFIED_INPUT tier]; approve -> PUBLISHED`.
+- **Test ID:** `RLE_195_an_unclassified_input_is_listed_at_import_request_and_review_and_approval_still_works`, `RLE_195_validate_lists_unclassified_inputs_and_the_document_stays_valid`, `RLE_195_a_silenced_deployment_lists_nothing`, `RLE_195_classification_is_never_inferred_from_a_name`, `RLE_195_an_input_already_warned_as_personal_data_is_not_listed_twice`, `RLE_195_the_start_up_summary_counts_unclassified_inputs_per_approved_version_without_values`
+
+### RLE-196 Readable names of roles, groups and users
+- **Traces to:** `TR-UI-08`, PD-110, #442
+- **Milestone:** M2
+- **Given:** The host's `DisplayNames` (default: `horus.bpm.display-names.roles|groups|users.<id>.<language>`) knows `lan` as "Tran Thi Lan" and no name for `ana`. `lan` requested `card-fee` v1 and v2, `ana` requested `fx-margin` v1.
+- **When:** `bob` lists `GET /approvals`; a screen asks `GET /api/bpm/display-names?roles=...&groups=...&users=...` with `Accept-Language: vi`.
+- **Then:** Each approval item carries `requestedByName`: "Tran Thi Lan" for `lan`'s versions and `ana` for `ana`'s, while `requestedBy` keeps the id for the four-eyes checks. `/display-names` returns the names it knows in the caller's language, falling back to `display-names.default-language` (`en`), and leaves out identifiers it does not know; a host bean of type `DisplayNames` replaces the default and receives the caller's tenant and language. More than 100 identifiers of one kind, or a malformed one, is `400 INPUT_INVALID`; an anonymous call is `401`. Names grant nothing.
+- **Example:** `GET /approvals -> {requestedBy: lan, requestedByName: Tran Thi Lan}`; `display-names?roles=CARD_OFFICER (vi) -> {roles: {CARD_OFFICER: Cán bộ thẻ}}`.
+- **Test ID:** `RLE_196_each_item_carries_the_requester_display_name_and_falls_back_to_the_id`, `RLE_196_a_host_directory_replaces_the_default_and_receives_the_callers_tenant_and_language`
 
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 

@@ -203,4 +203,18 @@ public interface DefinitionService {
      * @throws DefinitionNotFoundException when the tenant has no such version
      */
     GraphDiff diffFromEffective(DefinitionRef target);
+
+    /**
+     * The fields of a version that declare no classification (PD-146, #438), in step order: inputs of agent steps
+     * without {@code mask}, then the output schema properties without {@code mask}. Empty when every field is
+     * classified, or when {@code horus.bpm.processes.classification.warn-unclassified} is {@code false}. Permission
+     * {@code processes:read}; another tenant's version is not found.
+     *
+     * @param ref the version
+     * @return the unclassified fields; a reminder only, never a reason to refuse
+     * @throws DefinitionNotFoundException when the version does not exist for the caller's tenant
+     */
+    default List<UnclassifiedField> unclassifiedFields(DefinitionRef ref) {
+        return List.of();
+    }
 }

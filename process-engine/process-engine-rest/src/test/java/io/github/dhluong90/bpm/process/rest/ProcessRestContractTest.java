@@ -282,6 +282,22 @@ class ProcessRestContractTest {
                 .content("{\"assignee\":\"alice\",\"reason\":\"Cover the queue\"}"), 409, "ASSIGNEE_NOT_ALLOWED");
     }
 
+    @Test
+    void PRE_206_assignee_not_allowed_carries_the_reason_code_and_the_role_the_target_lacks() throws Exception {
+        String url = BASE + "/tasks/" + FakeEngine.TASK;
+        MvcResult fourEyes = assertProblem(post(url + ":delegate").contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "\"0\"").header("Idempotency-Key", "d-6")
+                .content("{\"assignee\":\"alice\",\"reason\":\"Cover the queue\"}"), 409, "ASSIGNEE_NOT_ALLOWED");
+        MvcResult missingRole = assertProblem(post(url + ":delegate").contentType(MediaType.APPLICATION_JSON)
+                .header("If-Match", "\"0\"").header("Idempotency-Key", "d-7")
+                .content("{\"assignee\":\"lan\",\"reason\":\"Cover the queue\"}"), 409, "ASSIGNEE_NOT_ALLOWED");
+
+        assertThat(fourEyes.getResponse().getContentAsString()).contains("\"reason\":\"FOUR_EYES_PARTICIPANT\"")
+                .doesNotContain("\"required\"");
+        assertThat(missingRole.getResponse().getContentAsString()).contains("\"reason\":\"MISSING_ROLE\"")
+                .contains("\"required\":\"role:FEE_REVIEWER\"");
+    }
+
     private MvcResult assertProblem(RequestBuilder request, int status, String code) throws Exception {
         MvcResult result = exchange(request);
         assertThat(result.getResponse().getStatus()).isEqualTo(status);
@@ -555,7 +571,12 @@ class ProcessRestContractTest {
         private static TaskView handOver(String assignee, String reason, long expectedLockVersion,
                 Set<String> actions) {
             if ("alice".equals(assignee)) {
-                throw new AssigneeNotAllowedException("alice started this instance, so cannot work its four-eyes task");
+                throw new AssigneeNotAllowedException(AssigneeNotAllowedException.FOUR_EYES_PARTICIPANT, null,
+                        "alice started this instance, so cannot work its four-eyes task");
+            }
+            if ("lan".equals(assignee)) {
+                throw new AssigneeNotAllowedException(AssigneeNotAllowedException.MISSING_ROLE, "role:FEE_REVIEWER",
+                        "lan does not hold the role the task is assigned to");
             }
             if (expectedLockVersion != 0) {
                 throw new VersionConflictException("Task " + TASK + " is at lock version 0");

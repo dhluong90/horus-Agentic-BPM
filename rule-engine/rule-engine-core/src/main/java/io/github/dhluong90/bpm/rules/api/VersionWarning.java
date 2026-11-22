@@ -7,9 +7,11 @@ import java.util.Objects;
  * engine computes warnings from the version's definition and the tenant's settings each time it returns the version,
  * so the approver sees the same warning the author saw at import.
  *
- * @param code what kind of warning; clients branch on it. {@value #UNMASKED_PERSONAL_DATA} only, in this release
+ * @param code what kind of warning; clients branch on it: {@value #UNMASKED_PERSONAL_DATA} or
+ *     {@value #UNCLASSIFIED_INPUT}
  * @param input the input the warning is about
- * @param matchedName the configured personal-data name the input matched, for example {@code national id}
+ * @param matchedName the configured personal-data name the input matched, for example {@code national id}; null for
+ *     {@value #UNCLASSIFIED_INPUT}, which never looks at the name
  * @param message the warning in English
  * @param requiresAcknowledgement whether an approval must acknowledge this {@code {code, input}} pair (RLE-053,
  *     PD-104): its code is listed in {@code lifecycle.acknowledge-warnings} and its input is not masked only by the
@@ -22,7 +24,18 @@ public record VersionWarning(String code, String input, String matchedName, Stri
     /** An input that declares no {@code mask} has a name that looks like personal data (PD-099). */
     public static final String UNMASKED_PERSONAL_DATA = "UNMASKED_PERSONAL_DATA";
 
-    /** Every warning code this release raises; {@code lifecycle.acknowledge-warnings} may list only these. */
+    /**
+     * An input declares neither {@code mask: true} nor {@code mask: false} (PD-146, #438). A reminder only: it never
+     * blocks submission or approval, never needs an acknowledgement, and is silenced by
+     * {@code horus.bpm.rules.classification.warn-unclassified: false}. The engine never infers sensitivity from the
+     * input's name or values.
+     */
+    public static final String UNCLASSIFIED_INPUT = "UNCLASSIFIED_INPUT";
+
+    /**
+     * The warning codes {@code lifecycle.acknowledge-warnings} may list. {@value #UNCLASSIFIED_INPUT} is not one: it
+     * never needs an acknowledgement.
+     */
     public static final java.util.Set<String> CODES = java.util.Set.of(UNMASKED_PERSONAL_DATA);
 
     public VersionWarning {
@@ -69,5 +82,17 @@ public record VersionWarning(String code, String input, String matchedName, Stri
         return new VersionWarning(UNMASKED_PERSONAL_DATA, input, matchedName, "Input " + input
                 + " looks like personal data (it matches \"" + matchedName + "\") but declares no mask. " + logged
                 + " Declare mask: true, or mask: false if it holds no personal data.");
+    }
+
+    /**
+     * Returns the reminder for an input with no classification (PD-146).
+     *
+     * @param input the input name
+     * @return the warning; it needs no acknowledgement
+     */
+    public static VersionWarning unclassified(String input) {
+        return new VersionWarning(UNCLASSIFIED_INPUT, input, null, "Input " + input + " is not classified: it "
+                + "declares neither mask: true nor mask: false. Declare mask: true if it can hold personal data, or "
+                + "mask: false if it cannot. This does not block approval.");
     }
 }

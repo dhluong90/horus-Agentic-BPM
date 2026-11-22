@@ -220,8 +220,9 @@ class SubsetBpmnReaderAgentTaskTest {
         Process unmasked = reader.read(agentStep("horus:agent=\"documents.assess\"",
                 spec.replace(" mask=\"true\"", "")));
 
+        // applicationId declares no mask (#438: maskDeclared false), nationalId declares mask="true"
         assertThat(step(masked).extensions().all(InputMapping.class)).containsExactly(
-                new InputMapping("applicationId", "${instance.applicationId}", false),
+                new InputMapping("applicationId", "${instance.applicationId}"),
                 new InputMapping("nationalId", "${instance.nationalId}", true));
         String canonical = CanonicalProcessWriter.canonicalText(masked);
         assertThat(canonical).contains("\"maskedInputs\":[\"nationalId\"]");
@@ -312,5 +313,22 @@ class SubsetBpmnReaderAgentTaskTest {
 
         assertThatThrownBy(() -> reader.read(document))
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.BpmnUnsupportedElementException.class);
+    }
+
+    @Test
+    void PRE_205_the_reader_records_whether_an_input_declares_mask_and_the_hash_ignores_it() {
+        String declared = "<horus:input name=\"applicationId\" value=\"${instance.applicationId}\" mask=\"false\"/>"
+                + "<horus:outputSchema>" + SCHEMA + "</horus:outputSchema>" + GUARDRAIL;
+        Process withFalse = reader.read(agentStep("horus:agent=\"documents.assess\"", declared));
+        Process undeclared = reader.read(agentStep("horus:agent=\"documents.assess\"",
+                declared.replace(" mask=\"false\"", "")));
+
+        assertThat(step(withFalse).extensions().all(InputMapping.class)).singleElement()
+                .satisfies(input -> assertThat(input.maskDeclared()).isTrue());
+        assertThat(step(undeclared).extensions().all(InputMapping.class)).singleElement()
+                .satisfies(input -> assertThat(input.maskDeclared()).isFalse());
+        // Declaring mask="false" is a reminder matter only: the definition hash stays what it was
+        assertThat(CanonicalProcessWriter.canonicalText(withFalse))
+                .isEqualTo(CanonicalProcessWriter.canonicalText(undeclared));
     }
 }

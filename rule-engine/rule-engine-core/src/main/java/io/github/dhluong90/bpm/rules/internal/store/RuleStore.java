@@ -321,6 +321,14 @@ public interface RuleStore {
     List<VersionInputs> liveVersionInputs();
 
     /**
+     * The {@code inputs} of every published version of every tenant, for the start-up summary of unclassified inputs
+     * (PD-146, #438). Read once at start-up outside any request; never exposed to a caller.
+     *
+     * @return the inputs, by tenant, rule set and version
+     */
+    List<VersionInputs> publishedVersionInputs();
+
+    /**
      * Lists the declared inputs of every version of one rule set of a tenant, in any status, newest version first, at
      * most 1,000 versions. Read by the plain-input search to learn whether an input is declared, of which type and
      * whether it is masked (RLE-071); a rule set the tenant does not have gives an empty list.
