@@ -147,6 +147,30 @@ export function useSaveDraft(name: string, onDone: (version: RuleSetVersion) => 
   );
 }
 
+/** A spreadsheet file the user picked: its exact bytes, a fingerprint of them, and the name it had. */
+export interface PickedSheet {
+  bytes: ArrayBuffer;
+  fileName: string;
+  /** SHA-256 of the bytes: one Idempotency-Key per file and base, so a repeat of the same file creates one draft. */
+  fingerprint: string;
+}
+
+/**
+ * Imports a spreadsheet as the next draft on the columns of version `base` (RLE-192). One request per intent; the
+ * same file and `attempt` reuse their Idempotency-Key, and a deliberate retry (a higher `attempt`) sends a new one.
+ */
+export function useImportSpreadsheet(name: string, onDone: (version: RuleSetVersion) => void) {
+  const { client } = useRulesSession();
+  const refresh = useRefreshVersions();
+  return useSingleFlight(
+    (args: { base: number; sheet: PickedSheet; attempt: number }, key) => client.importSpreadsheet(name, args.base, args.sheet.bytes, key),
+    async (version) => {
+      await refresh();
+      onDone(version);
+    },
+  );
+}
+
 /**
  * Creates the next draft as a copy of `copyOf` (RLE-062), so the grid always edits a stored draft and never the
  * version it starts from.

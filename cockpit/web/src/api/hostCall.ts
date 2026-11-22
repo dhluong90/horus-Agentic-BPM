@@ -8,7 +8,7 @@ export interface HostRequest {
   path: string;
   /** Extra headers, for example Idempotency-Key or If-Match. */
   headers?: Readonly<Record<string, string>>;
-  body?: { contentType: string; text: string };
+  body?: { contentType: string; text: string; /** The exact bytes of a file; sent instead of `text`, so a file is never decoded and re-encoded. */ bytes?: ArrayBuffer };
   signal?: AbortSignal;
 }
 
@@ -69,7 +69,7 @@ async function send(fetchImpl: Fetch, baseUrl: string, request: HostRequest, acc
       credentials: 'same-origin',
       redirect: 'manual',
       headers,
-      ...(request.body ? { body: request.body.text } : {}),
+      ...(request.body ? { body: request.body.bytes ?? request.body.text } : {}),
       ...(request.signal ? { signal: request.signal } : {}),
     });
   } catch (cause) {

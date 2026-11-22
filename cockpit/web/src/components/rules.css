@@ -608,3 +608,9 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .simrun__inputs { display: block; margin-top: 2px; color: var(--muted); font: var(--type-caption); overflow-wrap: anywhere; }
 .simrun__verdict { display: inline-flex; margin: 8px 0 0; }
 .simrun .cell-error { max-width: none; }
+
+/* Spreadsheet import (CKP-039): the confirm dialog, with room for one line per refused cell. */
+.dialog--wide { width: min(640px, calc(100vw - 32px)); }
+.dialog--wide .notice__located { max-height: 36vh; overflow-y: auto; }
+.dialog__file { color: var(--ink-2); }
+.dialog__file-label { margin-inline-end: 4px; }
