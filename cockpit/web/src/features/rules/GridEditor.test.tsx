@@ -100,7 +100,7 @@ describe('grid editor', () => {
   it('CKP_006_problems_read_in_the_language_of_the_screen', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/2/edit', 'rules-author', 'vi');
-    const cell = await screen.findByLabelText('Dòng R2, Balance', { exact: true });
+    const cell = await screen.findByLabelText('Dòng R2, Số dư', { exact: true });
     await user.clear(cell);
     await user.keyboard('{Enter}');
     await waitFor(() => { expect(cell).toHaveAccessibleDescription('Nhập số tiền, ví dụ 50.000.000 VND. Ô này không phải là biểu thức hợp lệ.'); });

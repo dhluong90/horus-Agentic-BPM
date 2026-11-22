@@ -52,7 +52,7 @@ const SCREENS: readonly Screen[] = [
       await page.getByRole('button', { name: locale === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
       await page.getByRole('button', { name: locale === 'en' ? 'Actions for row R2' : 'Thao tác cho dòng R2' }).click();
       await page.getByRole('menuitem', { name: locale === 'en' ? 'Duplicate row R2' : 'Nhân bản dòng R2' }).click();
-      await page.getByLabel(locale === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance', { exact: true }).fill('');
+      await page.getByLabel(locale === 'en' ? 'Row R6, Balance' : 'Dòng R6, Số dư', { exact: true }).fill('');
       await page.keyboard.press('Enter');
     },
     ready: async (page) => { await expect(page.locator('.cell-edit--bad')).toBeVisible(); },

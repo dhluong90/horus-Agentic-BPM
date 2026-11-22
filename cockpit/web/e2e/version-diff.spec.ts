@@ -72,10 +72,7 @@ test('CKP_002_keyboard_reaches_the_diff_region_then_the_decision', async ({ page
   const region = page.getByRole('region', { name: TEXT.en.table });
   await region.focus();
   await expect(region).toBeFocused();
-  // Tab passes the two Details disclosures of the version heads, then moves on to the comment; Reject stays disabled until a reason is written.
-  await page.keyboard.press('Tab');
-  await expect(region.getByText('Details').first()).toBeFocused();
-  await page.keyboard.press('Tab');
+  // The version heads hold no disclosure now: Tab moves from the region to the comment; Reject stays disabled until a reason is written.
   await page.keyboard.press('Tab');
   await expect(page.getByLabel('Comment')).toBeFocused();
   await page.keyboard.type('Matches the 2027 tariff');
@@ -174,8 +171,8 @@ async function check(page: Page) {
 // The two review screens of the design sign-off: light English and dark Vietnamese at 1440x900.
 const REVIEW_SHOTS = [{ theme: 'light', locale: 'en' }, { theme: 'dark', locale: 'vi' }] as const;
 const REVIEW_TEXT = {
-  en: { long: 'Version 1 and version 2 of domestic-transfer-fee, side by side', structure: 'Version 1 and version 2 of card-cashback, side by side', policy: 'Hit policy: first matching row wins → exactly one row matches', column: 'Result column added: Cap', lookalike: 'Look-alike character: Cyrillic О (U+041E)', count: '1 changed cell contains a look-alike character', scheduled: 'Takes effect 01 Jan 2027 00:00 once approved.' },
-  vi: { long: 'Phiên bản 1 và phiên bản 2 của domestic-transfer-fee, đặt cạnh nhau', structure: 'Phiên bản 1 và phiên bản 2 của card-cashback, đặt cạnh nhau', policy: 'Cách chọn dòng: dòng khớp đầu tiên được áp dụng → chỉ đúng một dòng khớp', column: 'Thêm cột kết quả: Cap', lookalike: 'Ký tự dễ nhầm: Chữ Kirin О (U+041E)', count: '1 ô đã sửa có ký tự dễ nhầm', scheduled: 'Có hiệu lực 01/01/2027 00:00 sau khi được phê duyệt.' },
+  en: { long: 'Version 1 and version 2 of domestic-transfer-fee, side by side', structure: 'Version 1 and version 2 of card-cashback, side by side', policy: 'Hit policy: first match → one match only', column: 'Result column added: Cap', lookalike: "Looks like a Latin letter but isn't", count: '1 changed cell contains a look-alike character', scheduled: 'Takes effect 01 Jan 2027 00:00 once approved.' },
+  vi: { long: 'Phiên bản 1 và phiên bản 2 của domestic-transfer-fee, đặt cạnh nhau', structure: 'Phiên bản 1 và phiên bản 2 của card-cashback, đặt cạnh nhau', policy: 'Cách chọn dòng: khớp đầu tiên → chỉ một dòng khớp', column: 'Thêm cột kết quả: Mức trần', lookalike: 'Trông giống chữ Latin nhưng không phải', count: '1 ô đã sửa có ký tự dễ nhầm', scheduled: 'Có hiệu lực 01/01/2027 00:00 sau khi được phê duyệt.' },
 } as const;
 
 for (const { theme, locale } of REVIEW_SHOTS) {

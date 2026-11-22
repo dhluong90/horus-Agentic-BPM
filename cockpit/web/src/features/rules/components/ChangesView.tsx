@@ -22,7 +22,13 @@ function NonAsciiMark({ raw }: { raw: string }) {
   const characters = nonAsciiCharacters(raw, locale);
   return (
     <span className="nonascii-mark">
-      <span aria-hidden="true">▲</span> {characters.length > 0 ? t('changes.nonAscii', { chars: characters.join(', ') }) : t('changes.hiddenCharacter')}
+      <span aria-hidden="true">▲</span> {characters.length > 0 ? t('changes.nonAscii') : t('changes.hiddenCharacter')}
+      {characters.length > 0 ? (
+        <details className="nonascii-mark__details">
+          <summary>{t('inspector.details')}</summary>
+          <span>{characters.join(', ')}</span>
+        </details>
+      ) : null}
     </span>
   );
 }
@@ -39,10 +45,7 @@ function SideHead({ version, effectiveFrom, hash, span, side }: { version: RuleS
     <th scope="colgroup" colSpan={span} className={`sbs__side sbs__side--${side} sbs__start--${side}`}>
       <span className="sbs__title">{t('changes.sideTitle', { version: String(version.version) })}</span>
       <span className="sbs__meta">{meta}</span>
-      <details className="sbs__details">
-        <summary>{t('inspector.details')}</summary>
-        <span className="sbs__hash">{t('details.hash')} <span className="mono" title={hash}>{hash.slice(0, 12)}</span></span>
-      </details>
+      <span className="sbs__hash sr-only">{t('details.hash')} <span className="mono">{hash.slice(0, 12)}</span></span>
     </th>
   );
 }
@@ -150,7 +153,7 @@ type Translate = ReturnType<typeof useI18n>['t'];
 function noteText(t: Translate, note: ChangeNote, base: RuleSetDefinition, next: RuleSetDefinition, locale: Locale): string {
   const policy = (value: string) => {
     const upper = value.toUpperCase();
-    return t(upper === 'UNIQUE' ? 'policy.UNIQUE' : upper === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST');
+    return t(upper === 'UNIQUE' ? 'changes.policy.UNIQUE' : upper === 'COLLECT' ? 'changes.policy.COLLECT' : 'changes.policy.FIRST');
   };
   switch (note.kind) {
     case 'hitPolicy':

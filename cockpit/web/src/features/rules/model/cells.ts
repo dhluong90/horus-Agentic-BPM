@@ -124,7 +124,7 @@ export function columnCurrency(definition: RuleSetDefinition, part: 'when' | 'th
  * abbreviation, such as a country (VN, SG), and stays as written. Other text stays as it is.
  */
 export function valueLabel(value: string): string {
-  if (!/^[A-Z][A-Z0-9_]*$/.test(value) || value.length <= 2) return value;
+  if (!/^\p{Lu}[\p{Lu}0-9_]*$/u.test(value) || value.length <= 2) return value;
   const words = value.toLowerCase().replaceAll('_', ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
 }

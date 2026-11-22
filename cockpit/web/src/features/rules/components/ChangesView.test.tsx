@@ -110,7 +110,7 @@ describe('side-by-side version diff', () => {
     }, { ...proposed, outputs: [...proposed.outputs, { name: 'waived', type: 'boolean' }] });
     const notes = screen.getByRole('list', { name: 'Changes outside the rows' });
     expect(within(notes).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
-      'Hit policy: first matching row wins → exactly one row matches',
+      'Hit policy: first match → one match only',
       'Condition columns are in a new order',
       'Result column added: Waived',
     ]);
@@ -122,15 +122,15 @@ describe('side-by-side version diff', () => {
     // R1's GOLD now carries a Cyrillic capital O (U+041E): it reads like GOLD and never matches it.
     const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike);
-    expect(within(row('R1')).getByText('Look-alike character: Cyrillic О (U+041E)')).toBeInTheDocument();
-    expect(screen.getAllByText(/Look-alike character:/)).toHaveLength(1);
+    expect(within(row('R1')).getByText('Cyrillic О (U+041E)')).toBeInTheDocument();
+    expect(screen.getAllByText("Looks like a Latin letter but isn't")).toHaveLength(1);
     expect(screen.getByText('1 changed cell contains a look-alike character')).toBeInTheDocument();
   });
 
   it('ADR_0026_vietnamese_names_look_alike_and_hidden_characters_in_plain_words', () => {
     const lookalike: RuleSetDefinition = { ...proposed, rules: proposed.rules.map((r) => (r.id === 'R1' ? { ...r, when: { tier: "== 'GОLD'" } } : r)) };
     show({ ...diff, rows: [{ ruleId: 'R1', change: 'CHANGED', position: 1, basePosition: 1, moved: false, fields: [{ path: '/when/tier', from: "== 'GOLD'", to: "== 'GОLD'", nonAscii: true }] }, ...diff.rows] }, lookalike, 'vi');
-    expect(within(row('R1')).getByText('Ký tự dễ nhầm: Chữ Kirin О (U+041E)')).toBeInTheDocument();
+    expect(within(row('R1')).getByText('Chữ Kirin О (U+041E)')).toBeInTheDocument();
     expect(screen.getByText('1 ô đã sửa có ký tự dễ nhầm')).toBeInTheDocument();
     expect(screen.queryByText(/ASCII/)).not.toBeInTheDocument();
   });
