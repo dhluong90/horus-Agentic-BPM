@@ -11,6 +11,7 @@ import { ISSUER, mockStandalone, type HostAnswer } from './standaloneHosts';
 
 const DIR = process.env['SCREENSHOT_DIR'] ?? 'e2e/screenshots';
 const DECISION = '01KF2Q8Z0RQ6V2Y8M1C4N5P7T9';
+const TENANTS = { allowed: ['bank-a', 'bank-a-fin'], ruleSets: { 'bank-a': 'card-fee', 'bank-a-fin': 'kyc-risk' } };
 
 interface State {
   name: string;
@@ -55,6 +56,28 @@ const STATES: readonly State[] = [
     kyc: { meProblem: { status: 403, code: 'PERMISSION_DENIED', correlationId: '01JD3A7Q2M5N8P1R4S6T9V0W2X' } },
     ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); },
     after: async (page) => { await page.locator('.panel__details summary').click(); await expect(page.getByTestId('error-code')).toBeVisible(); },
+  },
+  // Tenant switcher (CKP-022): closed, open, after a switch, and a refused tenant.
+  { name: 'tenant-switcher', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS }, ready: async (page) => { await expect(page.getByTestId('tenant-switcher')).toBeVisible(); } },
+  {
+    name: 'tenant-menu-open', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
+    after: async (page) => { await page.getByTestId('tenant-switcher').click(); await expect(page.locator('.tenant-switcher .host-picker__menu')).toBeVisible(); },
+  },
+  {
+    name: 'tenant-switched', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
+    after: async (page) => { await page.getByTestId('tenant-switcher').click(); await page.locator('.tenant-switcher__item').nth(1).click(); await expect(page.getByRole('link', { name: 'kyc-risk' })).toBeVisible(); },
+  },
+  {
+    name: 'tenant-refused', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS, forgeTenant: 'bank-b' },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
+    after: async (page) => {
+      await page.getByTestId('tenant-switcher').click();
+      await page.locator('.tenant-switcher__item').nth(1).click();
+      await expect(page.getByTestId('tenant-refused')).toBeVisible();
+      await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+    },
   },
   { name: 'decision-choose-host', hash: `#/decisions/${DECISION}`, ready: async (page) => { await expect(page.locator('.host-choice')).toBeVisible(); } },
   { name: 'decision-from-link', hash: `#/decisions/${DECISION}?host=loans`, loans: { me: meHa }, ready: async (page) => { await expect(page.locator('.dlog-detail')).toBeVisible(); } },

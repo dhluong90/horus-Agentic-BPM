@@ -272,7 +272,7 @@ for (const viewport of VIEWPORTS) {
         await page.goto('./login');
         const submit = page.getByRole('button', { name: T.signIn[locale], exact: true });
         await expectAboveFold(submit, viewport.height);
-        await page.getByRole('button', { name: /^(Sign in as|Đăng nhập với) an/ }).click();
+        await page.getByRole('button', { name: /^an, / }).click();
         await page.getByLabel(locale === 'vi' ? 'Mật khẩu' : 'Password').fill('demo-password');
         await page.screenshot({ path: `${SHOTS}/tasks-journey-1-sign-in-${size}-${theme}-${locale}.png`, fullPage: false });
         await submit.click();

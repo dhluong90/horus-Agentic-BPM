@@ -138,6 +138,8 @@ A sample `cockpit-hosts.json`:
 | Address | The service comes first in the address: `#/hosts/loans/rules`. Choosing another service in the top bar opens the same area there and shows only that service's data |
 | Versions | A cockpit release supports its own engine minor and the one before; Cockpit 0.3 works with engines 0.2 and 0.3. A service outside that range shows its engine version and the supported versions, and no screens |
 | Errors | A service that refuses `/api/bpm/me` shows the error code and the reference for that service; the other services stay usable |
+| Token renewal | A renewal the identity provider answers with a server error or `429` keeps the session: that service reads as unreachable and the next request tries again. Only a refused refresh token ends the session |
+| Tenant | With `horus.bpm.tenancy.switching.enabled: true` on the service and more than one tenant in the token's `allowed_tenants` claim, a tenant switcher sits beside the service in the top bar and lists only those tenants. Choosing one reloads that service's screens for it. A tenant the service refuses (`403 TENANT_NOT_ALLOWED`) brings you back to your own tenant with one sentence and the reference. With switching off, or one tenant, there is no switcher |
 
 Each host answers two endpoints the cockpit reads after sign-in:
 

@@ -178,3 +178,84 @@ test.describe('link to one decision (CKP-041)', () => {
     await expect(page).toHaveURL(new RegExp(`#/hosts/kyc/decisions/${DECISION}$`));
   });
 });
+
+test.describe('tenant switcher (CKP-022)', () => {
+  const tenants = { allowed: ['bank-a', 'bank-a-fin'], ruleSets: { 'bank-a': 'card-fee', 'bank-a-fin': 'kyc-risk' } };
+
+  test('CKP_022_tenant_switcher_allowed_tenants_only', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const record = await mockStandalone(page, { loans: { tenants } });
+    await page.goto('./#/hosts/loans/rules');
+    await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+    // The switcher offers exactly the token's allowed tenants, with the current one marked.
+    const switcher = page.getByTestId('tenant-switcher');
+    await expectInsideViewport(page, switcher);
+    await switcher.click();
+    const items = page.locator('.tenant-switcher__item');
+    await expect(items).toHaveText(['bank-a', 'bank-a-fin']);
+    await expect(items.first()).toHaveAttribute('aria-current', 'true');
+
+    await page.getByRole('button', { name: 'bank-a-fin' }).click();
+    // The list reloads for the new tenant only: its own rule set, nothing of bank-a's.
+    await expect(page.getByRole('link', { name: 'kyc-risk' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'card-fee' })).toHaveCount(0);
+    await expect(switcher).toContainText('bank-a-fin');
+    const switched = record.paths.loans.map((path, index) => [path, record.tenantsSent.loans[index]]).filter(([path]) => path?.endsWith('/rule-sets'));
+    expect(switched.at(-1)).toEqual(['/api/bpm/rules/v1/rule-sets', 'bank-a-fin']);
+    // Never two tenants on one screen: the header names one, the list shows one.
+    await expect(page.getByTestId('tenant-refused')).toHaveCount(0);
+  });
+
+  test('CKP_022_a_forged_tenant_is_refused_and_the_cockpit_returns_to_the_users_own_tenant', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const record = await mockStandalone(page, { loans: { tenants, forgeTenant: 'bank-b' } });
+    await page.goto('./#/hosts/loans/rules');
+    await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+    await page.getByTestId('tenant-switcher').click();
+    await page.getByRole('button', { name: 'bank-a-fin' }).click();
+
+    // The proxy sent bank-b: the host refused it, and the cockpit is back on bank-a with the reason in words.
+    const notice = page.getByTestId('tenant-refused');
+    await expect(notice).toContainText('The service did not accept that tenant for your account.');
+    expect(record.tenantsSent.loans).toContain('bank-b');
+    await expect(page.getByTestId('tenant-switcher')).toContainText('bank-a');
+    await expect(page.getByTestId('tenant-switcher')).not.toContainText('bank-a-fin');
+    await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'kyc-risk' })).toHaveCount(0);
+    await notice.locator('summary').click();
+    await expect(page.getByTestId('tenant-refused-reference')).toHaveText('01JD5T3N4NT0000000000000AB');
+    const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
+    expect(axe.violations.map((violation) => violation.id)).toEqual([]);
+    await notice.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(notice).toHaveCount(0);
+  });
+
+  test('CKP_022_with_switching_off_or_one_allowed_tenant_there_is_no_switcher', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Switching on, one tenant in the token: nothing to switch to.
+    const record = await mockStandalone(page, { loans: { tenants: { allowed: ['bank-a'], ruleSets: { 'bank-a': 'card-fee' } } }, kyc: {} });
+    await page.goto('./#/hosts/loans/rules');
+    await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+    await expect(page.getByTestId('tenant-switcher')).toHaveCount(0);
+    await expect(page.getByTestId('header-tenant')).toHaveText('bank-a');
+    // Switching off on kyc: hidden, and no X-Tenant-Id ever leaves.
+    await page.goto('./#/hosts/kyc/rules');
+    await expect(page.getByRole('link', { name: 'kyc-risk' })).toBeVisible();
+    await expect(page.getByTestId('tenant-switcher')).toHaveCount(0);
+    expect([...record.tenantsSent.loans, ...record.tenantsSent.kyc].every((sent) => sent === '')).toBe(true);
+  });
+
+  test('CKP_022_the_switcher_works_from_the_keyboard', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await rememberLocale(page, 'vi');
+    await mockStandalone(page, { loans: { tenants } });
+    await page.goto('./#/hosts/loans/rules');
+    await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+    await page.getByTestId('tenant-switcher').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.tenant-switcher .host-picker__menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.tenant-switcher .host-picker__menu')).toBeHidden();
+    await expect(page.getByTestId('tenant-switcher')).toBeFocused();
+  });
+});

@@ -224,6 +224,7 @@ Both endpoints are served once per host by a small shared module that both engin
 | No trusted-header mode | The engines ship no resolver that trusts a header set by a gateway (PD-079 option 2, rejected): a misconfigured gateway would expose one tenant's data to another tenant's operator. A host that writes such a resolver owns that risk; the documentation says so |
 | Development | In the `dev` profile only, `tenancy.dev-tenant` fixes the tenant for local work without an identity provider, for session principals only. The `test` profile is accepted beside `dev` (`dev,test`) so automated tests can use it; any other profile beside `dev` (`prod,dev`), or no `dev` at all, refuses start-up (`TR-EXT-05`) |
 | One tenant per screen | The cockpit keeps one selected tenant per host; changing it reloads every open list. No screen and no API call combines tenants; merged lists merge hosts, never tenants |
+| Switcher | Standalone mode only (a token caller). The top bar shows a tenant switcher beside the service pill when `/meta` reports `tenancy.switching: true` and `/me` lists more than one tenant in `tenant.allowed`; otherwise it is hidden and no `X-Tenant-Id` is sent. Choosing a tenant drops that host's cached answers and remounts its screens, so nothing read for one tenant shows under another. A `403 TENANT_NOT_ALLOWED` returns the host to the token's own tenant and shows one sentence, with the reference behind Details (`CKP-022`) |
 
 ![Tenant switch accepted and refused](images/tenant-switch.svg)
 

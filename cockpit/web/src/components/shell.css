@@ -205,3 +205,12 @@ body { background: var(--bg); background-image: none; }
   animation: spin .9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Tenant switcher (CKP-022): the tenant as its own pill beside the service; the menu reuses the host picker's. */
+.tenant-switcher__button { gap: 6px; padding: 0 10px 0 12px; }
+.tenant-switcher__button .service-pill__tenant { color: var(--ink-2); }
+.tenant-switcher__item { width: 100%; border: 0; background: transparent; cursor: pointer; text-align: left; }
+/* A refused tenant: a level-4 notice at the bottom right, above the page, until dismissed. */
+.tenant-refusal { position: fixed; right: 24px; bottom: 24px; z-index: 60; max-width: 440px; box-shadow: var(--sh-pop); background: var(--surface); }
+.tenant-refusal.alert--error { background: var(--bad-soft); border: 0; border-left: 3px solid var(--bad-fill); }
+.tenant-refusal__back { color: var(--ink-2); font: var(--type-label); }

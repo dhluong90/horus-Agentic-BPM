@@ -27,7 +27,7 @@ for (const { name, scenario } of STATES) {
           await rememberLocale(page, locale);
           await mockHost(page, scenario);
           await page.goto('./#/service');
-          await expect(name === 'ready' ? page.getByTestId('header-user') : page.getByRole('alert')).toBeVisible();
+          await expect(name === 'ready' ? page.getByTestId('header-user') : name === 'session-ended' ? page.getByTestId('signed-out') : page.getByRole('alert')).toBeVisible();
           await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
           await expect(page.locator('html')).toHaveAttribute('lang', locale);
           const header = await page.getByTestId('session-header').boundingBox();

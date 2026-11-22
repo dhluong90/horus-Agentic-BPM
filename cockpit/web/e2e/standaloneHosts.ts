@@ -26,7 +26,7 @@ export const standaloneRegistry = {
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, accept, content-type, x-requested-with, idempotency-key, if-match, x-correlation-id',
+  'Access-Control-Allow-Headers': 'authorization, accept, content-type, x-requested-with, idempotency-key, if-match, x-correlation-id, x-tenant-id',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
   'Access-Control-Expose-Headers': 'etag, x-correlation-id, content-disposition',
 };
@@ -44,6 +44,13 @@ export interface HostAnswer {
   me?: BpmMeV1;
   /** A problem answer to /me instead. */
   meProblem?: { status: number; code: string; correlationId: string };
+  /**
+   * Tenant switching on this host (CKP-022): /meta reports it, /me lists `allowed` (the token's claim), and an
+   * `X-Tenant-Id` outside it is 403 TENANT_NOT_ALLOWED. Each tenant has its own rule sets.
+   */
+  tenants?: { allowed: string[]; ruleSets: Record<string, string> };
+  /** A test proxy: after a switch, rewrites the X-Tenant-Id of the rule set list to this tenant. */
+  forgeTenant?: string;
 }
 
 export interface StandaloneRecord {
@@ -55,6 +62,8 @@ export interface StandaloneRecord {
   tokensSeen: Record<'loans' | 'kyc', string[]>;
   /** Paths requested per host. */
   paths: Record<'loans' | 'kyc', string[]>;
+  /** Per host: the X-Tenant-Id of each request, '' when none was sent. */
+  tenantsSent: Record<'loans' | 'kyc', string[]>;
 }
 
 const meta = (hostId: string, extra: Partial<BpmMetaV1> = {}): BpmMetaV1 => ({
@@ -68,7 +77,7 @@ const meta = (hostId: string, extra: Partial<BpmMetaV1> = {}): BpmMetaV1 => ({
 
 /** Serves the registry, the identity provider and the two hosts; returns what was asked for. */
 export async function mockStandalone(page: Page, options: { registry?: unknown; loans?: HostAnswer; kyc?: HostAnswer } = {}): Promise<StandaloneRecord> {
-  const record: StandaloneRecord = { authorizations: [], grants: [], tokensSeen: { loans: [], kyc: [] }, paths: { loans: [], kyc: [] } };
+  const record: StandaloneRecord = { authorizations: [], grants: [], tokensSeen: { loans: [], kyc: [] }, paths: { loans: [], kyc: [] }, tenantsSent: { loans: [], kyc: [] } };
   const connect = ["connect-src 'self'", LOANS, KYC, 'https://idp.bank.example'].join(' ');
   const policy = CONTENT_SECURITY_POLICY.replace("connect-src 'self'", connect);
 
@@ -126,21 +135,37 @@ export async function mockStandalone(page: Page, options: { registry?: unknown; 
   for (const id of ['loans', 'kyc'] as const) {
     const answer = options[id] ?? {};
     const engine = createFakeEngine(seeds[id]);
-    const me = answer.me ?? meLan;
+    const tenantEngines = new Map(Object.entries(answer.tenants?.ruleSets ?? {}).map(([tenant, ruleSet]) => [tenant, createFakeEngine(demoSeed().filter((version) => version.ruleSet === ruleSet))]));
+    const baseMe = answer.me ?? meLan;
+    const hostMeta = answer.tenants ? { ...answer.meta, tenancy: { switching: true } } : answer.meta;
     await page.route(`${id === 'loans' ? LOANS : KYC}/**`, async (route: Route) => {
       const request = route.request();
       if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
       const url = new URL(request.url());
+      let asked = request.headers()['x-tenant-id'];
+      // The proxy of CKP-022: a switched request for the rule set list leaves with another tenant.
+      if (answer.forgeTenant !== undefined && asked !== undefined && url.pathname.endsWith('/rule-sets')) asked = answer.forgeTenant;
       record.paths[id].push(url.pathname);
       record.tokensSeen[id].push(request.headers()['authorization'] ?? '');
-      if (url.pathname === '/api/bpm/meta') return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(meta(id, answer.meta)) });
+      record.tenantsSent[id].push(asked ?? '');
+      const allowed = answer.tenants?.allowed ?? [baseMe.tenant.current];
+      if (asked !== undefined && !allowed.includes(asked)) {
+        return route.fulfill({ status: 403, contentType: 'application/problem+json', headers: CORS, body: JSON.stringify({
+          title: 'Tenant not allowed', status: 403, code: 'TENANT_NOT_ALLOWED', correlationId: '01JD5T3N4NT0000000000000AB',
+          detail: 'The request names a tenant the caller is not signed in for.',
+        }) });
+      }
+      const tenant = asked ?? baseMe.tenant.current;
+      const me: BpmMeV1 = { ...baseMe, tenant: { current: tenant, allowed: answer.tenants ? allowed : baseMe.tenant.allowed } };
+      if (url.pathname === '/api/bpm/meta') return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(meta(id, hostMeta)) });
       if (url.pathname === '/api/bpm/me') {
         if (answer.meProblem) {
           return route.fulfill({ status: answer.meProblem.status, contentType: 'application/problem+json', headers: CORS, body: JSON.stringify({ title: 'Refused', ...answer.meProblem }) });
         }
         return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(me) });
       }
-      const result = engine.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user: me.user.id, permissions: [...me.permissions] });
+      const handler = tenantEngines.get(tenant) ?? engine;
+      const result = handler.handle({ method: request.method(), path: request.url(), headers: request.headers(), body: request.postData() ?? '', user: me.user.id, permissions: [...me.permissions] });
       return route.fulfill({ status: result.status, headers: { ...CORS, ...result.headers }, body: result.body });
     });
   }

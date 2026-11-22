@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { BpmMeV1 } from '../api/generated/bpm-me.v1';
 import { browserDependencies, type OidcDependencies, type TokenSession } from '../app/auth/oidc';
 import { enabledHosts } from '../app/auth/standalone';
@@ -8,6 +8,8 @@ import { splitHost, withHost } from '../app/route';
 import { registryQueryKey, useHostSession, type SessionDependencies } from '../app/session/useHostSession';
 import { useHostInAddress, useHostProbe, useSignIn } from '../app/session/useStandaloneSession';
 import { HostPicker } from '../components/HostPicker';
+import { TenantRefusedNotice, TenantSwitcher } from '../components/TenantSwitcher';
+import { switchableTenants, type TenantRefusal } from '../app/tenant/tenantFetch';
 import { capabilities, SessionHeader, type SessionSummary } from '../components/SessionHeader';
 import { ConfigErrorPanel, HostChooserPanel, HostErrorPanel, LoadingPanel, SignInFailedPanel, SigningInPanel, UnsupportedVersionPanel } from '../components/StatePanels';
 import { useI18n } from '../i18n/I18nProvider';
@@ -124,6 +126,23 @@ function SignedIn(props: SignedInProps) {
   const { registry } = props;
   const choice = useHostInAddress(registry);
   const { locale } = useI18n();
+  const queryClient = useQueryClient();
+  // One selected tenant per host (cockpit DESIGN section 7); none means the token's own tenant.
+  const [selected, setSelected] = useState<Readonly<Record<string, string>>>({});
+  const [refusal, setRefusal] = useState<TenantRefusal | undefined>(undefined);
+  const selectTenant = useCallback((hostId: string, tenant: string | undefined) => {
+    // Nothing read for the previous tenant may show under the next one: drop the host's cached answers.
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] === hostId });
+    setSelected((current) => (tenant === undefined
+      ? Object.fromEntries(Object.entries(current).filter(([id]) => id !== hostId))
+      : { ...current, [hostId]: tenant }));
+  }, [queryClient]);
+  const currentHostId = choice.kind === 'host' ? choice.host.id : undefined;
+  const onRefused = useCallback((found: TenantRefusal) => {
+    // A refused tenant returns the user to their own tenant and says why (CKP-022).
+    setRefusal(found);
+    if (currentHostId !== undefined) selectTenant(currentHostId, undefined);
+  }, [currentHostId, selectTenant]);
   if (choice.kind === 'choose') {
     const rest = splitHost(window.location.hash).rest;
     const hosts = enabledHosts(registry).map((host) => ({ id: host.id, label: hostLabel(host.label, locale) || host.id, href: withHost(rest, host.id) }));
@@ -133,17 +152,38 @@ function SignedIn(props: SignedInProps) {
       </Page>
     );
   }
-  // A new host is a new subtree: nothing of the previous host's screens or drafts survives the switch.
-  return <HostScreens key={choice.host.id} host={choice.host} {...props} />;
+  const hostId = choice.host.id;
+  const tenant = selected[hostId];
+  // A new host or tenant is a new subtree: nothing of the previous screens or drafts survives the switch.
+  return (
+    <>
+      <HostScreens key={`${hostId}|${tenant ?? ''}`} host={choice.host} tenant={tenant} onSelectTenant={(next) => { setRefusal(undefined); selectTenant(hostId, next); }} onRefused={onRefused} {...props} />
+      {refusal !== undefined ? <TenantRefusedNotice correlationId={refusal.correlationId} onDismiss={() => { setRefusal(undefined); }} /> : null}
+    </>
+  );
 }
 
-function HostScreens({ registry, host, session, baseFetch, signOut }: SignedInProps & { host: RegistryHost }) {
-  const state = useHostProbe(registry, host, session, baseFetch);
+interface TenantProps {
+  tenant: string | undefined;
+  onSelectTenant: (tenant: string) => void;
+  onRefused: (refusal: TenantRefusal) => void;
+}
+
+function HostScreens({ registry, host, session, baseFetch, signOut, tenant, onSelectTenant, onRefused }: SignedInProps & TenantProps & { host: RegistryHost }) {
+  const state = useHostProbe(registry, host, session, baseFetch, tenant, onRefused);
   const { locale } = useI18n();
   const banner = registry.ui?.environmentBanner;
   const label = hostLabel(host.label, locale) || host.id;
   const ready = state.status === 'ready';
-  const picker = <HostPicker hosts={enabledHosts(registry)} current={host} tenant={ready ? state.me.tenant.current : undefined} ready={ready} />;
+  // Switching is offered only when the host has it on and the token allows more than one tenant; else hidden.
+  const tenants = ready ? switchableTenants(state.meta, state.me) : [];
+  const switcher = ready && tenants.length > 0 ? <TenantSwitcher tenants={tenants} current={state.me.tenant.current} onSelect={onSelectTenant} /> : null;
+  const picker = (
+    <>
+      <HostPicker hosts={enabledHosts(registry)} current={host} tenant={ready && switcher === null ? state.me.tenant.current : undefined} ready={ready} />
+      {switcher}
+    </>
+  );
   if (state.status !== 'ready') {
     return (
       <Page header={<SessionHeader session={undefined} banner={banner} service={picker} />}>

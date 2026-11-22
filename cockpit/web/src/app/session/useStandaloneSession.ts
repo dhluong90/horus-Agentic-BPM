@@ -5,6 +5,7 @@ import type { BpmMetaV1 } from '../../api/generated/bpm-meta.v1';
 import { createHostClient } from '../../api/hostClient';
 import { toHostError, type HostError } from '../../api/hostError';
 import { authorizedFetch } from '../auth/authorizedFetch';
+import { tenantFetch, type TenantRefusal } from '../tenant/tenantFetch';
 import { createOidcClient, SignInError, type OidcClient, type OidcDependencies, type SignInProblem, type TokenSession } from '../auth/oidc';
 import { enabledHosts, isCallbackPath, oidcSettings, tokenScope } from '../auth/standalone';
 import { cockpitBase, type HostRegistry, type RegistryHost } from '../config/registry';
@@ -116,9 +117,12 @@ export function useHostInAddress(registry: HostRegistry): HostChoice {
  * Reads one host for the signed-in user: its token, then /meta and /me with it, then the version check.
  * Query keys start with the host id, so another host's answer never shows here.
  */
-export function useHostProbe(registry: HostRegistry, host: RegistryHost, session: TokenSession, baseFetch: typeof fetch): HostState {
+export function useHostProbe(registry: HostRegistry, host: RegistryHost, session: TokenSession, baseFetch: typeof fetch, tenant?: string, onRefused?: (refusal: TenantRefusal) => void): HostState {
   const scope = tokenScope(registry, host);
-  const fetchImpl = useMemo(() => authorizedFetch(baseFetch, () => session.accessToken(scope)), [baseFetch, session, scope]);
+  const fetchImpl = useMemo(
+    () => tenantFetch(authorizedFetch(baseFetch, () => session.accessToken(scope)), tenant, (refusal) => { onRefused?.(refusal); }),
+    [baseFetch, session, scope, tenant, onRefused],
+  );
   const client = useMemo(() => createHostClient(host.baseUrl, fetchImpl), [host.baseUrl, fetchImpl]);
   const [metaQuery, meQuery] = useQueries({
     queries: [

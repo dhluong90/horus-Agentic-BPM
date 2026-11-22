@@ -259,7 +259,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Milestone:** M2
 - **Given:** `/me` returns `tenant.current: bank-a`, `tenant.allowed: [bank-a, bank-a-fin]`; a test proxy rewrites one request to `X-Tenant-Id: bank-b`.
 - **When:** The operator switches to `bank-a-fin`, then the rewritten request is sent.
-- **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "Tenant bank-b is not allowed for your account" with the `correlationId`. No screen shows rows from two tenants.
+- **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "The service did not accept that tenant for your account" with the `correlationId` behind Details. The sentence names no tenant, because the problem does not say which tenant was refused and the proxy changed the one the cockpit sent. The switcher is hidden when `/meta` reports `tenancy.switching: false` or `/me` allows one tenant. No screen shows rows from two tenants.
 - **Example:** `switch to bank-a-fin -> lists reload; forged bank-b -> 403 TENANT_NOT_ALLOWED`.
 - **Test ID:** `CKP_022_tenant_switcher_allowed_tenants_only`
 
