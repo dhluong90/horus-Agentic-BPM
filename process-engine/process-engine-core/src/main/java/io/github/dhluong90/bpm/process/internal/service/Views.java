@@ -251,6 +251,25 @@ public final class Views {
         return o;
     }
 
+    /**
+     * @param f a resolved task form
+     * @return JSON tree of {@code task-form.v1.schema.json}: {@code schemaVersion}, {@code taskId},
+     *     {@code lockVersion}, then {@code form} (schema, hints, data) or {@code link}
+     */
+    public static ObjectNode taskForm(io.github.dhluong90.bpm.process.api.TaskForm f) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("schemaVersion", 1).put("taskId", f.taskId()).put("lockVersion", f.lockVersion());
+        if (f.isLink()) {
+            o.put("link", f.link());
+        } else {
+            ObjectNode form = o.putObject("form");
+            form.set("schema", Values.toJson(f.schema()));
+            form.set("hints", Values.toJson(f.hints()));
+            form.set("data", Values.toJson(f.data()));
+        }
+        return o;
+    }
+
     /** The stored answer of a claim or unclaim: the task without the caller's actions. */
     static String taskToJson(TaskView t) {
         ObjectNode o = task(t);

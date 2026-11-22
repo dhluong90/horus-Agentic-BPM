@@ -29,6 +29,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.nio.charset.StandardCharsets;
@@ -148,6 +149,11 @@ public final class SubsetBpmnWriter {
                 t.extensions().first(SlaSpec.class).ifPresent(sla -> attributes
                         .append(optional("horus:sla", sla.duration().toString()))
                         .append(optional("horus:calendar", sla.calendar())));
+                t.extensions().first(FormSpec.class).ifPresent(f -> attributes
+                        .append(optional("horus:form", f.formKey()))
+                        .append(optional("horus:formSchema", f.schema()))
+                        .append(optional("horus:formHints", f.hints()))
+                        .append(optional("horus:formLink", f.link())));
                 t.extensions().first(EscalationSpec.class).ifPresent(e -> attributes
                         .append(optional("horus:escalation", e.levels().stream().map(l -> l.after().isZero() ? l.to()
                                 : l.to() + "|" + l.after()).collect(java.util.stream.Collectors.joining(";"))))

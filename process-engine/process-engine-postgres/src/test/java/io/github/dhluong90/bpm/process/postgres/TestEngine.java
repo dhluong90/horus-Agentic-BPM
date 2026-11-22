@@ -183,6 +183,9 @@ final class TestEngine {
         if (b.roleCatalogue != null) {
             services.useRoleCatalogue(b.roleCatalogue);
         }
+        if (b.forms != null) {
+            services.useFormRegistry(b.forms, b.formLinkOrigins);
+        }
         if (b.importedLayouts) {
             // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
             this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
@@ -334,6 +337,8 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
         private io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue;
+        private io.github.dhluong90.bpm.process.spi.FormRegistry forms;
+        private List<String> formLinkOrigins = List.of();
         private boolean importedLayouts;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
@@ -354,6 +359,13 @@ final class TestEngine {
         /** The host's role list that approval asks about escalation targets (PRE-180); none by default. */
         Builder roleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue value) {
             this.roleCatalogue = value;
+            return this;
+        }
+
+        /** The host's task forms and the origins a form link may point to besides relative links (PRE-031). */
+        Builder forms(io.github.dhluong90.bpm.process.spi.FormRegistry registry, String... linkOrigins) {
+            this.forms = registry;
+            this.formLinkOrigins = List.of(linkOrigins);
             return this;
         }
 

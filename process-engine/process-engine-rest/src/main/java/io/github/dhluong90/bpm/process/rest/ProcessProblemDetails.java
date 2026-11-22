@@ -55,6 +55,7 @@ public class ProcessProblemDetails {
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("ASYNC_STEP_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("FORM_NOT_DECLARED", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("MIGRATION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("LAYOUT_NOT_FOUND", HttpStatus.NOT_FOUND),
@@ -142,6 +143,13 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.FormValidationException f -> {
                 tools.jackson.databind.node.ArrayNode violations = body.putArray("violations");
                 f.violations().forEach(violations::add);
+                tools.jackson.databind.node.ArrayNode errors = body.putArray("errors");
+                for (int i = 0; i < f.violations().size(); i++) {
+                    String violation = f.violations().get(i);
+                    int colon = violation.indexOf(": ");
+                    errors.addObject().put("pointer", f.pointers().get(i))
+                            .put("rule", colon < 0 ? violation : violation.substring(colon + 2));
+                }
             }
             case io.github.dhluong90.bpm.process.api.LastVersionInEffectException l -> {
                 body.put("definitionKey", l.definitionKey()).put("version", l.version()).put("setting", l.setting());
