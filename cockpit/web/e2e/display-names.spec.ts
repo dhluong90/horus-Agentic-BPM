@@ -125,7 +125,8 @@ for (const shot of SHOTS_LIST) {
       if (!box) throw new Error('no box');
       expect(box.y + Math.min(box.height, 80)).toBeLessThanOrEqual(height);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await expect(page.locator('body')).not.toContainText(shot.never);
+      // Visible text only: a code kept behind a closed Details (styleguide section 9) is not on screen.
+      expect(await page.locator('body').innerText()).not.toMatch(shot.never);
       if (shot.name.endsWith('not-classified')) {
         await expect(page.getByRole('group', { name: shot.locale === 'vi' ? 'Chưa phân loại' : 'Not classified' })).toBeVisible();
       }
