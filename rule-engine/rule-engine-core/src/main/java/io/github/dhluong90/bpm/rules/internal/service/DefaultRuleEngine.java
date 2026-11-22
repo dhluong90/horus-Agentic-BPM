@@ -432,6 +432,18 @@ public final class DefaultRuleEngine implements RuleEngine {
         return context.withoutDooming(() -> doSimulateHistory(tenant, ruleSet, version, request, limit));
     }
 
+    /**
+     * The replay a simulation report stores (RLE-199): the same run as {@link #simulateHistory}, for a caller who holds
+     * {@code rules:simulate} only. The caller never receives the items; the report keeps readings of the changed ones,
+     * and the decision ids behind them are given only to a holder of {@code rules:log:read}.
+     */
+    HistorySimulationResult replayForReport(String ruleSet, int version, HistorySimulation request) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_SIMULATE);
+        int limit = historyLimit(request);
+        return context.withoutDooming(() -> doSimulateHistory(tenant, ruleSet, version, request, limit));
+    }
+
     /** The period and the limit of a history simulation, checked before any read (RLE-015). */
     private int historyLimit(HistorySimulation request) {
         if (request == null || request.from() == null || request.to() == null) {

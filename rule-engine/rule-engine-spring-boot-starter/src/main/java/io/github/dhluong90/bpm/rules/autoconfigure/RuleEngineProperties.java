@@ -33,6 +33,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param simulation limits of {@code :simulate}
  * @param explain the plain-language explanation of logged decisions
  * @param classification the reminder about inputs that declare no {@code mask} (PD-146)
+ * @param templates the rule set templates the host offers new rule sets (PD-112)
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -50,7 +51,26 @@ public record RuleEngineProperties(
         @DefaultValue DecisionLog decisionLog,
         @DefaultValue Simulation simulation,
         @DefaultValue Explain explain,
-        @DefaultValue Classification classification) {
+        @DefaultValue Classification classification,
+        @DefaultValue Templates templates) {
+
+    /**
+     * The rule set templates an author starts a new rule set from (PD-112, RLE-197). The engine ships four: fee by tier,
+     * eligibility with reason codes, limit by segment and blank.
+     *
+     * @param location a folder of {@code .json} template files the host adds, listed after the built-in ones in file name
+     *     order; unset or a folder that does not exist adds none. Each file is checked at start-up and a file that is not
+     *     valid stops the start, naming it
+     * @param hidden the ids of built-in templates this host does not offer ({@code fee-by-tier},
+     *     {@code eligibility-with-reason}, {@code limit-by-segment}, {@code blank}); an unknown id stops the start
+     */
+    public record Templates(String location, List<String> hidden) {
+
+        /** An unset list is empty. */
+        public Templates {
+            hidden = hidden == null ? List.of() : List.copyOf(hidden);
+        }
+    }
 
     /**
      * The reminder about inputs with no classification (PD-146, #438). Masking stays opt-in: an input is masked only
@@ -458,9 +478,12 @@ public record RuleEngineProperties(
      *     published, else 409 WARNINGS_NOT_ACKNOWLEDGED; default [UNMASKED_PERSONAL_DATA]. A list without
      *     UNMASKED_PERSONAL_DATA relaxes a control: it is accepted, logged at WARN at start-up and shown in
      *     /api/bpm/meta. A code this release never raises stops start-up
+     * @param requireSimulationReport names of the rule sets whose publication request must carry a simulation report
+     *     (PD-115, RLE-201), else 409 SIMULATION_REPORT_REQUIRED; default empty, so no rule set needs one. Shown in
+     *     /api/bpm/meta as lifecycle.require-simulation-report, comma-separated
      */
     public record Lifecycle(Integer reasonMaxLength, Duration sweepInterval, String systemActor,
-            List<String> acknowledgeWarnings) {
+            List<String> acknowledgeWarnings, List<String> requireSimulationReport) {
 
         /** Shortest accepted {@code sweep-interval}. */
         static final Duration SWEEP_MIN = Duration.ofSeconds(1);
@@ -544,7 +567,9 @@ public record RuleEngineProperties(
                 .withSimulationMaxHistoryDecisions(simulation.maxHistoryDecisions() == null
                         ? EngineDefaults.SIMULATION_MAX_HISTORY_DECISIONS : simulation.maxHistoryDecisions())
                 .withAcknowledgeWarnings(lifecycle.acknowledgeWarnings() == null
-                        ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings());
+                        ? EngineDefaults.ACKNOWLEDGE_WARNINGS : lifecycle.acknowledgeWarnings())
+                .withRequireSimulationReport(lifecycle.requireSimulationReport() == null
+                        ? EngineDefaults.REQUIRE_SIMULATION_REPORT : lifecycle.requireSimulationReport());
     }
 
     /**

@@ -1,0 +1,38 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Author and approver
+    participant L as Lan, rules:author and rules:simulate
+    participant M as Minh, rules:approve
+  end
+  box rgb(224,242,241) Rule Engine, in process
+    participant R as SimulationReportService
+    participant V as VersionService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as rle_simulation_report, rle_simulation_report_attachment
+  end
+  rect rgb(255,248,225)
+    Note over L,DB: One transaction, tenant from the resolver
+    L->>R: POST versions/2/simulation-reports (SAMPLES or REPLAY), optional Idempotency-Key
+    R->>R: simulate or replay, read the changed items, count, keep at most 50 rows
+    R->>DB: INSERT report bound to the canonicalHash of v2, no input value
+    R-->>L: 201 report, decision ids only for rules:log:read
+  end
+  rect rgb(232,245,233)
+    Note over L,DB: One transaction
+    L->>V: request-publish v2 with simulationReportId
+    alt the host lists the rule set and no report is sent
+      V-->>L: 409 SIMULATION_REPORT_REQUIRED
+    end
+    alt not a report of v2 in this tenant
+      V-->>L: 404 SIMULATION_REPORT_NOT_FOUND
+    end
+    alt canonicalHash of v2 changed after the report
+      V-->>L: 409 SIMULATION_REPORT_OUT_OF_DATE
+    end
+    V->>DB: UPDATE v2 to PENDING_APPROVAL, INSERT attachment, INSERT event with simulationReportId
+    V-->>L: 200 version
+  end
+  M->>R: GET versions/2/simulation-reports/{id}, rules:read
+  R->>DB: SELECT by tenant, rule set, version and id
+  R-->>M: counts, scope, status CURRENT, attached, up to 50 rows as readings

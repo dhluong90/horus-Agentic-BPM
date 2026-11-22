@@ -258,6 +258,19 @@ final class RuleListQueries {
                     ORDER BY function_name
                     """);
 
+    /** The simulation reports of one version, newest first (RLE-200). Parameters: tenant, ruleSet, version, limit. */
+    static final ListQuery SIMULATION_REPORTS = new ListQuery("simulation-reports",
+            new Bound.Page("newest first on idx_rle_simulation_report_version (tenant_id, rule_set_name, version_num, id DESC)"),
+            """
+                    SELECT id, rule_set_name, version_num, canonical_hash, created_by, created_at, source, period_from,
+                      period_to, period_limit, truncated, total_count, changed_count, unchanged_count, failed_count,
+                      not_replayable_count, languages, report_rows::text AS report_rows, rows_truncated
+                    FROM rle_simulation_report
+                    WHERE tenant_id = :tenant AND rule_set_name = :ruleSet AND version_num = :version
+                    ORDER BY id DESC
+                    LIMIT :limit
+                    """);
+
     /** The host functions every published version calls, for the start-up function check (RLE-058). */
     static final ListQuery PUBLISHED_FUNCTION_USES = new ListQuery("published-function-uses",
             new Bound.Sweep("the functions of the versions in service of every tenant, read once at start-up"),
@@ -324,7 +337,7 @@ final class RuleListQueries {
     static List<ListQuery> all() {
         return List.of(CACHE_EPOCHS, RULE_SETS, VERSIONS, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, VERSION_HISTORY, HISTORY_VERSIONS, VERSIONS_BY_NUMBER,
                 HISTORY_OF_VERSIONS, RULE_SET_EVENTS, DECLARED_INPUTS, MASKED_BY_DEFAULT, RETIRE_SUPERSEDED,
-                MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, PUBLISHED_VERSION_INPUTS, VERSION_FUNCTIONS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
+                MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, PUBLISHED_VERSION_INPUTS, VERSION_FUNCTIONS, SIMULATION_REPORTS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
                 DECISIONS_BY_LOGGED_INPUT, DECISION_COUNT, byCorrelation(false, false), byCorrelation(true, true),
                 byInput(false), byInput(true));
     }

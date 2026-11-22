@@ -3366,6 +3366,8 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Follow-ups.** Architect: the rule engine SPEC, OpenAPI and template file schema. Maintainers (engineering): #83.
 
+**Applied, 2026-11-22.** The engine side is built: `RLE-197` and `RLE-198` in the Rule Engine SPEC, `GET /rule-set-templates` in its OpenAPI, the template file format in its DESIGN section 4.13, and the settings `horus.bpm.rules.templates.location` and `templates.hidden`. The cockpit screen of #83 is not built yet.
+
 ### PD-113 Grid readings and cell checks come from a non-storing validate call
 
 | Field | Value |
@@ -3427,6 +3429,8 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.** Contract change in the rule engine: `POST` and `GET .../versions/{v}/simulation-reports`, `simulationReportId` on `:request-publish`, `409 SIMULATION_REPORT_REQUIRED`, setting `rules.lifecycle.require-simulation-report` (list of rule set names, default empty, shown in `/api/bpm/meta`). A report whose hash no longer matches the draft is marked out of date and cannot be attached. Configurable: the list of rule sets.
 
 **Follow-ups.** Architect: the rule engine SPEC and OpenAPI change. Maintainers (engineering): #95 and #109.
+
+**Applied, 2026-11-22.** The engine side is built: `RLE-199` to `RLE-201` in the Rule Engine SPEC, the report endpoints and `simulationReportId` in its OpenAPI, DESIGN section 4.13, migrations `V37` and `V38`, and the setting `lifecycle.require-simulation-report` shown in `/api/bpm/meta` (it replaces the earlier draft name `publication.require-simulation-report`). Reports are immutable, bound to the canonical hash and never store a masked value. The cockpit screen of #109 is not built yet.
 
 ### PD-116 Evidence exports are produced by the engine, hashed and recorded
 

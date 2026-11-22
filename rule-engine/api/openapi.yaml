@@ -10,7 +10,9 @@ info:
     chosen clock, or pinned to a version), batch evaluation of up to 1,000 items, replay of a logged decision,
     decision-log reads (one decision, one rule set's decisions in a period, the decisions of one case reference, and
     the searches by a plain or a masked input's value), the plain-language explanation of a decision, a rule set's
-    history across its versions, the pending approvals queue, and the evidence export of versions and decisions.
+    history across its versions, the pending approvals queue, and the evidence export of versions and decisions, the
+    rule set templates a new rule set starts from, simulation reports stored for an approver, and the plain-language
+    reading of a replay.
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
@@ -79,6 +81,47 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
         '503': { $ref: '#/components/responses/Problem' }
+  /rule-set-templates:
+    get:
+      tags: [rule-sets]
+      operationId: listRuleSetTemplates
+      summary: List the templates a new rule set can start from
+      description: |
+        Permission `rules:author` (`RLE-197`, PD-112). The templates belong to the host, not to a tenant. The four the
+        engine ships come first (`fee-by-tier`, `eligibility-with-reason`, `limit-by-segment`, `blank`), less any the
+        host hides with `horus.bpm.rules.templates.hidden`; then the `.json` files of the host's folder
+        `horus.bpm.rules.templates.location`, in file name order. Every template is read and checked once at
+        start-up as an imported document is, so a template that is listed always composes into a rule set `POST
+        /rule-sets` accepts once the author names it. Each carries a label and a description in English and
+        Vietnamese, the hit policy, the inputs with their types and the values an author picks from, the outputs, and
+        the first rows in the cell syntax of a rule set document. Writes nothing; the answer is the same for every
+        caller who may author. The cockpit fills its grid from a template and saves with `POST /rule-sets`.
+      responses:
+        '200':
+          description: The templates, in listing order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleSetTemplates'
+              example:
+                templates:
+                  - id: fee-by-tier
+                    labels: { en: Fee by tier, vi: Phí theo hạng }
+                    descriptions:
+                      en: A monthly fee that depends on the customer's tier. The first row that matches wins.
+                      vi: Phí hằng tháng phụ thuộc vào hạng của khách hàng. Dòng khớp đầu tiên được áp dụng.
+                    source: BUILT_IN
+                    hitPolicy: first
+                    inputs:
+                      - { name: tier, type: string, allowed: [GOLD, PLATINUM, CLASSIC] }
+                    outputs:
+                      - { name: fee, type: money }
+                    rows:
+                      - { id: R1, when: { tier: "== 'GOLD'" }, then: { fee: 0 VND } }
+                      - { id: R4, when: {}, then: { fee: 50000 VND } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /rule-sets:
     get:
       tags: [rule-sets]
@@ -1069,12 +1112,30 @@ paths:
         `position`, and the version stays a draft (`RLE-004`). The check uses the host's configured
         limits, the ones evaluation applies, and refuses a table whose worst-case step count is over
         the step budget (`EVALUATION_BUDGET_EXCEEDED`).
+
+        The optional body `{"simulationReportId": "..."}` attaches a simulation report of this version
+        (`RLE-201`, PD-115). The report must be one of this version, in the caller's tenant (`404
+        SIMULATION_REPORT_NOT_FOUND` otherwise) and run on the content the version has now (`409
+        SIMULATION_REPORT_OUT_OF_DATE` after the draft changed). When the host lists the rule set in
+        `rules.lifecycle.require-simulation-report`, shown in `/api/bpm/meta` as
+        `lifecycle.require-simulation-report`, a request without a report is `409 SIMULATION_REPORT_REQUIRED` and the
+        draft stays a draft; a rule set not listed needs none. The attachment is recorded with the request and the
+        `simulationReportId` is a member of the `rules.version.publish-requested.v1` event. A body without the member,
+        or no body, changes nothing for a client written before reports existed.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestPublishRequest'
+            example:
+              simulationReportId: 01KB2R6Q3C0000000000000001
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -1536,6 +1597,235 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}:simulate-history-readings:
+    post:
+      tags: [rule-sets]
+      operationId: simulateHistoryReadings
+      summary: Replay logged decisions of a period through a version and read each one in plain language
+      description: |
+        Permissions `rules:simulate`, `rules:log:read` and `rules:read`, all checked before the body is read
+        (`RLE-202`, PD-027). The body and the run are those of `:simulate-history`; the answer reads each decision in
+        plain language, as `:simulate-readings` does for samples: what the version that decided it decided again,
+        read in that version, and what this version decides, read in this version, each with a `full` sentence and a
+        `short` form in every language of the catalogue. Without a `limit` the run is the most one request reads
+        (500); a `limit` above 500 is `422 READINGS_TOO_LARGE`, answered before anything is read. A decision that
+        could not be replayed fails closed: a masked input that had a value, or a logged version that cannot be
+        evaluated again, gives `code: REPLAY_NOT_POSSIBLE`, the names of the masked inputs, `simulated: null`,
+        `logged: null` and no sentence. No logged input, masked or not, is part of the answer. Writes nothing (no
+        decision row, idempotency record or event), so it takes no `Idempotency-Key`; members other than `from`, `to`
+        and `limit` are ignored, including `tenantId`.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HistorySimulationRequest'
+            example:
+              from: '2026-11-01T00:00:00Z'
+              to: '2026-12-01T00:00:00Z'
+              limit: 100
+      responses:
+        '200':
+          description: One reading per logged decision, newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryReadings'
+              example:
+                ruleSet: card-fee
+                version: 2
+                status: DRAFT
+                from: '2026-11-01T00:00:00Z'
+                to: '2026-12-01T00:00:00Z'
+                decisionCount: 2
+                replayedCount: 1
+                changedCount: 1
+                notReplayableCount: 1
+                truncated: false
+                languages: [en, vi]
+                results:
+                  - decisionId: 01KB2R6Q3C0000000000000001
+                    loggedVersion: 1
+                    evalClock: '2026-11-29T22:00:00Z'
+                    changed: true
+                    code: null
+                    maskedInputs: []
+                    simulated:
+                      kind: MATCHED
+                      ruleIds: [R2]
+                      readings:
+                        en: { full: 'Rule R2 always applies; it has no condition. Result: fee is 30,000 VND.', short: 'R2: fee 30,000 VND', source: GENERATED }
+                    logged:
+                      kind: MATCHED
+                      ruleIds: [R2]
+                      readings:
+                        en: { full: 'Rule R2 always applies; it has no condition. Result: fee is 50,000 VND.', short: 'R2: fee 50,000 VND', source: GENERATED }
+                  - decisionId: 01KB2R6Q3C0000000000000000
+                    loggedVersion: 1
+                    evalClock: '2026-11-29T15:00:00Z'
+                    changed: false
+                    code: REPLAY_NOT_POSSIBLE
+                    maskedInputs: [nationalId]
+                    simulated: null
+                    logged: null
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/simulation-reports:
+    post:
+      tags: [rule-sets]
+      operationId: createSimulationReport
+      summary: Run a simulation and store the report, bound to the version's content
+      description: |
+        Permission `rules:simulate`, checked before the body is read (`RLE-199`, PD-115). The engine runs the
+        simulation over `SAMPLES` (the run of `:simulate`) or over a `REPLAY` period of logged decisions (the run of
+        `:simulate-history`, with its period and limit bounds), reads the changed items in plain language and stores
+        the report once, bound to the version's `canonicalHash`. A caller holding `rules:simulate` but not
+        `rules:log:read` can run a replay: the report holds readings, never inputs, and the decision ids behind the
+        rows are given only to a holder of `rules:log:read`.
+
+        Each item falls in exactly one count: not replayable (a masked input had a value the log holds only as a
+        fingerprint), else failed (the version failed on it), else changed, else unchanged; the four sum to `total`.
+        `rows` holds the changed and failed items in order, at most 50; `rowsTruncated` says more existed. The
+        report stores no input value, masked or not, no sample `label` (a body member of that name is ignored) and no
+        masked fingerprint. It is immutable: no endpoint changes or deletes it, and the database refuses an UPDATE or a
+        DELETE. A version of another tenant is `404 VERSION_NOT_FOUND` and nothing is evaluated.
+
+        Takes an optional `Idempotency-Key`; a repeat returns the first report and runs nothing. Creating a report is
+        recorded by the report row itself (who, when, what over); the attachment to a request is audited by the
+        `rules.version.publish-requested.v1` event.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimulationReportRequest'
+            examples:
+              replay:
+                summary: The last 100 decisions of November
+                value:
+                  source: REPLAY
+                  from: '2026-11-01T00:00:00Z'
+                  to: '2026-12-01T00:00:00Z'
+                  limit: 100
+              samples:
+                summary: Two sample customers
+                value:
+                  source: SAMPLES
+                  samples:
+                    - inputs: { tier: GOLD, txCount: 5 }
+                    - inputs: { tier: STANDARD, txCount: 1 }
+      responses:
+        '201':
+          description: The stored report with its rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationReport'
+              example:
+                id: 01KB2R6Q3C0000000000000001
+                ruleSet: card-fee
+                version: 2
+                canonicalHash: 6f1ed002ab5595859014ebf0951522d9a1b1e5a0a4e1b1c6b0f2a8d2d7c1e9a4
+                status: CURRENT
+                attached: false
+                createdBy: lan
+                createdAt: '2026-12-15T02:00:00Z'
+                scope: { source: REPLAY, from: '2026-11-01T00:00:00Z', to: '2026-12-01T00:00:00Z', limit: 100, truncated: false }
+                counts: { total: 100, changed: 18, unchanged: 80, failed: 0, notReplayable: 2 }
+                languages: [en, vi]
+                rows:
+                  - reference: null
+                    decisionId: null
+                    category: CHANGED
+                    before:
+                      kind: MATCHED
+                      ruleIds: [R2]
+                      readings:
+                        en: { full: 'Rule R2 always applies; it has no condition. Result: fee is 50,000 VND.', short: 'R2: fee 50,000 VND', source: GENERATED }
+                    after:
+                      kind: MATCHED
+                      ruleIds: [R2]
+                      readings:
+                        en: { full: 'Rule R2 always applies; it has no condition. Result: fee is 30,000 VND.', short: 'R2: fee 30,000 VND', source: GENERATED }
+                rowsTruncated: false
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [rule-sets]
+      operationId: listSimulationReports
+      summary: List the simulation reports of a version, newest first
+      description: |
+        Permission `rules:read` (`RLE-200`). At most 50 reports, newest first, each without its `rows` (read one to
+        see them). `attached` is true for the report the version's latest publication request carries; `status` is
+        `OUT_OF_DATE` once the draft changed after the report was run.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+      responses:
+        '200':
+          description: The reports, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reports]
+                properties:
+                  reports:
+                    type: array
+                    maxItems: 50
+                    items: { $ref: '#/components/schemas/SimulationReport' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /rule-sets/{name}/versions/{version}/simulation-reports/{reportId}:
+    get:
+      tags: [rule-sets]
+      operationId: getSimulationReport
+      summary: Read one simulation report
+      description: |
+        Permission `rules:read` (`RLE-200`). The counts, the scope and up to 50 changed or failed rows, each with the
+        matched rule and the outcome before and after as readings. Inputs are never part of it. `decisionId` of a
+        replayed row is present only for a caller holding `rules:log:read`. A report of another tenant, another rule set
+        or another version is `404 SIMULATION_REPORT_NOT_FOUND`, the same answer whether or not it exists. `status` is
+        `OUT_OF_DATE` once the version's `canonicalHash` is no longer the one the report was run on; the report itself
+        never changes.
+      parameters:
+        - $ref: '#/components/parameters/RuleSetName'
+        - $ref: '#/components/parameters/VersionNumber'
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        '200':
+          description: The report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimulationReport'
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /rule-sets/{name}/versions/{version}:retire:
     post:
@@ -3555,6 +3845,247 @@ components:
           oneOf:
             - $ref: '#/components/schemas/SimulatedOutcome'
             - type: 'null'
+    RuleSetTemplates:
+      type: object
+      required: [templates]
+      properties:
+        templates:
+          type: array
+          maxItems: 100
+          items: { $ref: '#/components/schemas/RuleSetTemplate' }
+    RuleSetTemplate:
+      type: object
+      required: [id, labels, descriptions, source, hitPolicy, inputs, outputs, rows]
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+          maxLength: 64
+        labels:
+          type: object
+          description: The name by language code; always holds `en` and `vi`
+          additionalProperties: { type: string, maxLength: 400 }
+          required: [en, vi]
+        descriptions:
+          type: object
+          description: The description by language code; always holds `en` and `vi`
+          additionalProperties: { type: string, maxLength: 400 }
+          required: [en, vi]
+        source:
+          type: string
+          enum: [BUILT_IN, HOST]
+          description: '`BUILT_IN` for a template the engine ships, `HOST` for one in the host''s folder'
+        hitPolicy:
+          type: string
+          enum: [first, unique, collect]
+        inputs:
+          type: array
+          items:
+            type: object
+            required: [name, type, allowed]
+            properties:
+              name: { type: string }
+              type: { type: string, description: 'The value type, such as `string`, `integer`, `decimal`, `money`, `boolean` or `date`' }
+              allowed:
+                type: array
+                items: { type: string }
+                description: The values an author picks from; empty when any value of the type is allowed
+        outputs:
+          type: array
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name: { type: string }
+              type: { type: string }
+        rows:
+          type: array
+          description: The first rows, in table order, in the cell syntax of a rule set document
+          items:
+            type: object
+            required: [id, when, then]
+            properties:
+              id: { type: string }
+              when:
+                type: object
+                description: The condition cell of each input the row tests; empty for a default row
+                additionalProperties: { type: string }
+              then:
+                type: object
+                description: The value cell of each output, a text expression or a boolean
+                additionalProperties:
+                  oneOf:
+                    - type: string
+                    - type: boolean
+                    - type: number
+    RequestPublishRequest:
+      type: object
+      properties:
+        simulationReportId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            A simulation report of this version to attach to the request (`RLE-201`). It must have been run on the
+            content the version has now; required when the host lists the rule set in
+            `rules.lifecycle.require-simulation-report`.
+    SimulationReportRequest:
+      type: object
+      required: [source]
+      properties:
+        source:
+          type: string
+          enum: [SAMPLES, REPLAY]
+        samples:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: For `SAMPLES`, 1 to `simulation.max-inputs` input sets. A member `label` is ignored
+          items:
+            type: object
+            required: [inputs]
+            properties:
+              inputs: { type: object }
+        from:
+          type: string
+          format: date-time
+          description: For `REPLAY`, the first instant of the period, inclusive
+        to:
+          type: string
+          format: date-time
+          description: For `REPLAY`, the end of the period, exclusive; at most `query.max-range` (31 days) after `from`
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: For `REPLAY`, the most decisions to replay, newest first; default `simulation.max-inputs`
+    SimulationReport:
+      type: object
+      required: [id, ruleSet, version, canonicalHash, status, attached, createdBy, createdAt, scope, counts, languages,
+        rows, rowsTruncated]
+      properties:
+        id: { type: string, description: The report id, a ULID }
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        canonicalHash:
+          type: string
+          description: The `canonicalHash` of the version when the report was run; the report describes that content only
+        status:
+          type: string
+          enum: [CURRENT, OUT_OF_DATE]
+          description: '`OUT_OF_DATE` once the version no longer has the hash the report was run on; it cannot be attached'
+        attached:
+          type: boolean
+          description: True for the report the version's latest publication request carries
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        scope:
+          type: object
+          required: [source, from, to, limit, truncated]
+          properties:
+            source: { type: string, enum: [SAMPLES, REPLAY] }
+            from: { type: [string, 'null'], format: date-time }
+            to: { type: [string, 'null'], format: date-time }
+            limit: { type: [integer, 'null'] }
+            truncated:
+              type: boolean
+              description: For a replay, true when the period held more decisions than were replayed
+        counts:
+          type: object
+          required: [total, changed, unchanged, failed, notReplayable]
+          description: Each item is in exactly one count; the four add up to `total`
+          properties:
+            total: { type: integer }
+            changed: { type: integer }
+            unchanged: { type: integer }
+            failed:
+              type: integer
+              description: Items the version failed on
+            notReplayable:
+              type: integer
+              description: Replayed decisions with a masked input that had a value, which the log holds only as a fingerprint
+        languages:
+          type: array
+          items: { type: string }
+        rows:
+          type: array
+          maxItems: 50
+          description: The changed and failed items in order; empty in a list
+          items:
+            type: object
+            required: [reference, decisionId, category, before, after]
+            properties:
+              reference:
+                type: [string, 'null']
+                description: '`S1`, `S2` for a sample; null for a replayed decision'
+              decisionId:
+                type: [string, 'null']
+                description: For a replayed decision, its id; null for a sample and for a caller without `rules:log:read`
+              category: { type: string, enum: [CHANGED, FAILED] }
+              before:
+                description: What was decided before, the version in effect for a sample or the logged decision for a replay
+                oneOf:
+                  - $ref: '#/components/schemas/OutcomeReading'
+                  - type: 'null'
+              after:
+                description: What this version decides
+                oneOf:
+                  - $ref: '#/components/schemas/OutcomeReading'
+                  - type: 'null'
+        rowsTruncated:
+          type: boolean
+          description: True when more than 50 items changed or failed
+    HistoryReadings:
+      type: object
+      required: [ruleSet, version, status, from, to, decisionCount, replayedCount, changedCount, notReplayableCount,
+        truncated, languages, results]
+      properties:
+        ruleSet: { type: string }
+        version: { type: integer, minimum: 1 }
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED]
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        decisionCount: { type: integer }
+        replayedCount: { type: integer }
+        changedCount: { type: integer }
+        notReplayableCount: { type: integer }
+        truncated: { type: boolean }
+        languages:
+          type: array
+          items: { type: string }
+        results:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            required: [decisionId, loggedVersion, evalClock, changed, code, maskedInputs, simulated, logged]
+            properties:
+              decisionId: { type: string }
+              loggedVersion: { type: integer }
+              evalClock: { type: string, format: date-time }
+              changed:
+                type: boolean
+                description: False when not replayable
+              code:
+                type: [string, 'null']
+                enum: [REPLAY_NOT_POSSIBLE, null]
+                description: '`REPLAY_NOT_POSSIBLE` when the decision was not replayed; the reading fails closed'
+              maskedInputs:
+                type: array
+                items: { type: string }
+                description: Masked inputs that had a value, by name only
+              simulated:
+                description: What this version decides, read in this version; null when not replayable
+                oneOf:
+                  - $ref: '#/components/schemas/OutcomeReading'
+                  - type: 'null'
+              logged:
+                description: What the logged version decides again, read in that version; null when not replayable
+                oneOf:
+                  - $ref: '#/components/schemas/OutcomeReading'
+                  - type: 'null'
     SimulatedOutcome:
       type: object
       required: [outcome, matchedRuleIds, outputs]
@@ -4014,7 +4545,8 @@ components:
             PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
-            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE, READINGS_TOO_LARGE]
+            EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE, READINGS_TOO_LARGE,
+            SIMULATION_REPORT_REQUIRED, SIMULATION_REPORT_OUT_OF_DATE, SIMULATION_REPORT_NOT_FOUND]
         detail: { type: string }
         correlationId: { type: string }
         currentCanonicalHash:
