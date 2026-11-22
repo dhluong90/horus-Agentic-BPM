@@ -121,7 +121,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `409`. The action does not fit the current state, for example `:approve` on a `DRAFT`. Follow the lifecycle order.
 
 ### ASSIGNEE_NOT_ALLOWED
-`409`. `:reassign` or `:delegate` named a user who may not work the task: they lack the task's role or group, they started the instance or completed an earlier task of it and the task is four-eyes, they already hold the task, or the name is reserved for the engine. Nothing is written. Pick another colleague. If every role or group task is refused, the host has not supplied an `AssigneeDirectory`.
+`409`. `:reassign` or `:delegate` named a user who may not work the task: they lack the task's role or group, they started the instance or completed an earlier task of it and the task is four-eyes, they already hold the task, or the name is reserved for the engine. Nothing is written. Pick another colleague. If every role or group task is refused, the host has not supplied an `AssigneeDirectory`. The body says which rule refused in `reason` (#442): `ALREADY_ASSIGNED`, `FOUR_EYES_PARTICIPANT`, `RESERVED_IDENTITY`, `MISSING_ROLE` or `MISSING_GROUP`; for the last two, `required` names the role or group the target lacks (`role:CARD_OFFICER`), whose readable name `GET /api/bpm/display-names` returns.
 
 ### RATE_LIMITED
 `429` with `Retry-After`. The Rule Engine returns it for the masked-input search past `masking.search.max-per-minute` searches per caller per minute (default 30); the refusal is audited. Otherwise it is returned only when the host configures a rate limiter. Wait the given seconds and retry.

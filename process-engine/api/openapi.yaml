@@ -95,6 +95,7 @@ paths:
                     definitionHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b
                     lockVersion: 1
                     requestedBy: alice
+                    requestedByName: Nguyễn Thị Alice
                     requestedAt: '2027-04-05T03:30:00Z'
                     allowedActions: []
                     deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
@@ -245,7 +246,8 @@ paths:
         handler and adapter a service step names must be registered in this host: otherwise `422
         VALIDATION_FAILED` with one problem per step naming `step -> name` (`HANDLER_NOT_REGISTERED`,
         `ADAPTER_NOT_REGISTERED`), and the version stays `DRAFT` (`PRE-072`). Permission `processes:author` or
-        `processes:deploy`.
+        `processes:deploy`. The answer lists in `warnings` each agent step field that declares no `mask`
+        (`UNCLASSIFIED_FIELD`, PD-146, `PRE-205`); the warnings never block the request.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -1130,7 +1132,8 @@ paths:
         body carries the `assignee` (a user id) and a required `reason` of 1 to 500 characters. The target must hold
         the task's role or belong to its group, as the host's user directory answers; a task assigned to one user can
         go to anyone. On a four-eyes task the identity that started the instance or completed an earlier task of it
-        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED` and
+        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED`, with
+        `reason` and, for a missing role or group, `required` (`PRE-206`), and
         writes nothing. A task in another state, a completed one included, is `409 INVALID_STATE`; a stale `If-Match`
         is `409 VERSION_CONFLICT`; another tenant's task is `404 TASK_NOT_FOUND`. Writes a `TASK_REASSIGNED`
         history entry with the actor, the previous and new holder and the reason, and hands
@@ -1168,7 +1171,8 @@ paths:
         body carries the `assignee` (a user id) and a required `reason` of 1 to 500 characters. The target must hold
         the task's role or belong to its group, as the host's user directory answers; a task assigned to one user can
         go to anyone. On a four-eyes task the identity that started the instance or completed an earlier task of it
-        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED` and
+        is refused, and so is the user who already holds the task. Each refusal is `409 ASSIGNEE_NOT_ALLOWED`, with
+        `reason` and, for a missing role or group, `required` (`PRE-206`), and
         writes nothing. A task in another state, a completed one included, is `409 INVALID_STATE`; a stale `If-Match`
         is `409 VERSION_CONFLICT`; another tenant's task is `404 TASK_NOT_FOUND`. Writes a `TASK_DELEGATED`
         history entry with the actor, the previous and new holder and the reason, and hands
@@ -2559,7 +2563,7 @@ components:
         lastChangedAt: { type: string, format: date-time }
     PendingApproval:
       type: object
-      required: [key, version, definitionHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions]
+      required: [key, version, definitionHash, lockVersion, requestedBy, requestedByName, requestedAt, allowedActions, deniedActions]
       properties:
         key: { type: string }
         name: { type: [string, 'null'] }
@@ -2569,7 +2573,12 @@ components:
           pattern: '^[0-9a-f]{64}$'
           description: The value the reviewer sends back as `expectedDefinitionHash` (`PRE-177`, PD-139)
         lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
-        requestedBy: { type: string }
+        requestedBy: { type: string, description: The requester's user id, which the four-eyes checks compare }
+        requestedByName:
+          type: string
+          description: |
+            The requester as a screen shows them, from the host's `DisplayNames` in the caller's language (#442,
+            `PRE-206`); the user id when the host knows no name. A label only.
         requestedAt: { type: string, format: date-time }
         allowedActions:
           type: array
@@ -2661,6 +2670,33 @@ components:
           description: '`system:effective-date` when a newer version took effect'
         retiredAt: { type: [string, 'null'], format: date-time }
         supersededBy: { type: [integer, 'null'], description: The version that superseded this one }
+        warnings:
+          type: array
+          description: |
+            Present on `GET /definitions/{key}/versions/{version}` and `:request-approval` (PD-146, #438, `PRE-205`):
+            one `UNCLASSIFIED_FIELD` per agent step input or output schema property that declares neither
+            `mask` true nor false. A reminder only: it never blocks the request or the approval. Empty when every
+            field is classified or while `horus.bpm.processes.classification.warn-unclassified` is `false`. The engine
+            never infers sensitivity from a name or a value.
+          items: { $ref: '#/components/schemas/UnclassifiedFieldWarning' }
+    UnclassifiedFieldWarning:
+      type: object
+      required: [code, step, field, direction, message]
+      additionalProperties: false
+      properties:
+        code: { type: string, enum: [UNCLASSIFIED_FIELD] }
+        step: { type: string, description: The id of the agent step }
+        field:
+          type: string
+          description: The input name, or the output property path such as `summary` or `applicant.name`
+        direction: { type: string, enum: [INPUT, OUTPUT] }
+        message: { type: string, description: The reminder in English, naming the step and the field, never a value }
+      example:
+        code: UNCLASSIFIED_FIELD
+        step: assess-documents
+        field: requestedAmount
+        direction: INPUT
+        message: 'Input requestedAmount of step assess-documents is not classified: it declares neither mask true nor mask false. This does not block approval.'
     DefinitionHistoryEntry:
       type: object
       required: [action, toStatus, actor, occurredAt]
@@ -3223,4 +3259,11 @@ components:
             Present on `STEP_FAILED`, for example `DECISION_NO_MATCH`, `STEP_LIMIT`,
             `NO_PATH` (an exclusive gateway with no true condition and no default flow) or `CONDITION_ERROR`
             (a condition that compares values of different types or currencies). A handler's business error is
-            not a `STEP_FAILED`: the step waits with an incident `UNHANDLED_BUSINESS_ERROR`
+            not a `STEP_FAILED`: the step waits with an incident `UNHANDLED_BUSINESS_ERROR`. On
+            `ASSIGNEE_NOT_ALLOWED` (#442, `PRE-206`), which rule refused the target: `ALREADY_ASSIGNED`,
+            `FOUR_EYES_PARTICIPANT`, `RESERVED_IDENTITY`, `MISSING_ROLE` or `MISSING_GROUP`; new reasons may be added
+        required:
+          type: string
+          description: >-
+            Present on `ASSIGNEE_NOT_ALLOWED` with `MISSING_ROLE` or `MISSING_GROUP`: the role or group the target
+            lacks, as `role:<id>` or `group:<id>`; `GET /api/bpm/display-names` gives its readable name
