@@ -24,7 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
 @RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class,
         MigrationController.class, MigrationExecutionController.class, LayoutController.class,
-        IncidentController.class, CalendarController.class})
+        IncidentController.class, CalendarController.class, StepCatalogueController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());
@@ -35,6 +35,7 @@ public class ProcessProblemDetails {
     static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
+            Map.entry("ROLE_FAN_OUT_EXCEEDED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_HASH_REQUIRED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
             Map.entry("CHANGE_SET_TRUNCATED", HttpStatus.CONFLICT),
@@ -137,6 +138,8 @@ public class ProcessProblemDetails {
                 tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
                 m.problems().forEach(paths::add);
             }
+            case io.github.dhluong90.bpm.process.api.RoleFanOutExceededException r ->
+                    body.put("cap", r.cap()).put("provided", r.provided());
             case io.github.dhluong90.bpm.process.api.ReplayTooLargeException r ->
                     body.put("cases", r.cases()).put("limit", r.limit());
             case io.github.dhluong90.bpm.process.api.FormValidationException f -> {

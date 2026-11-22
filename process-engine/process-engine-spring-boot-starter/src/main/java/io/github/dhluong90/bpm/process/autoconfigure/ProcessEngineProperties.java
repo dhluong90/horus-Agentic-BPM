@@ -402,9 +402,16 @@ public record ProcessEngineProperties(
     /**
      * @param maxPageSize most items per list page; may be lowered, never raised
      * @param maxRange longest start-time range of a list query; may be lowered, never raised
+     * @param maxRoles most role and group queues one task list reads; a caller with more gets
+     *     {@code 400 ROLE_FAN_OUT_EXCEEDED} unless the request names one {@code role} or {@code group} (#408)
      */
-    public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange) {
+    public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange,
+            @DefaultValue("100") int maxRoles) {
         public Query {
+            if (maxRoles < 1 || maxRoles > EngineDefaults.MAX_ROLES_LIMIT) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.max-roles must be 1 to "
+                        + EngineDefaults.MAX_ROLES_LIMIT);
+            }
             if (maxPageSize < 1 || maxPageSize > EngineDefaults.MAX_PAGE_SIZE) {
                 throw new IllegalArgumentException("horus.bpm.processes.query.max-page-size must be 1 to "
                         + EngineDefaults.MAX_PAGE_SIZE + " (it may be lowered, never raised)");
@@ -635,6 +642,6 @@ public record ProcessEngineProperties(
                 idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
                 lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion,
                 approval.requireContentHash(), incidents.toSetting(),
-                classification == null || classification.warnUnclassified());
+                classification == null || classification.warnUnclassified(), query.maxRoles());
     }
 }

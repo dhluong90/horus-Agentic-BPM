@@ -770,7 +770,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             RetryPolicy retry = parts.retry(id);
             List<MemoryEntry> memory = parts.memory(id);
             List<HorusExtension> ext = new ArrayList<>();
-            ext.add(new AgentTaskSpec(agent, schema, timeout));
+            ext.add(new AgentTaskSpec(agent, schema, timeout, parts.fieldTitles(id, line)));
             if (guardrail != null) {
                 ext.add(guardrail);
             }
@@ -791,9 +791,47 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private final class AgentParts {
             private String schemaText;
             private int schemaCount;
+            private String titlesText;
+            private int titlesCount;
             private Map<String, String> guardrail;
             private int guardrailCount;
             private int guardrailLine;
+
+            void fieldTitlesText(String text) {
+                titlesCount++;
+                titlesText = text;
+            }
+
+            /**
+             * @return the field titles as canonical JSON text ({@code <horus:fieldTitles>}, #386), or null when the
+             *     step has none or they are invalid; the problem never echoes a title
+             */
+            String fieldTitles(String id, int line) {
+                if (titlesCount == 0) {
+                    return null;
+                }
+                if (titlesCount > 1) {
+                    titlesProblem("An agentTask has one <horus:fieldTitles>", id, line);
+                    return null;
+                }
+                tools.jackson.databind.JsonNode node;
+                try {
+                    node = EngineJson.JSON.readTree(titlesText == null ? "" : titlesText.strip());
+                } catch (RuntimeException e) {
+                    titlesProblem("horus:fieldTitles is not valid JSON", id, line);
+                    return null;
+                }
+                String problem = FieldTitles.check(node);
+                if (problem != null) {
+                    titlesProblem(problem, id, line);
+                    return null;
+                }
+                return CanonicalJson.write(node);
+            }
+
+            private void titlesProblem(String message, String id, int at) {
+                invalid.add(new DefinitionProblem("FIELD_TITLES_INVALID", message, "serviceTask", safe(id), at));
+            }
 
             void schemaText(String text) {
                 schemaCount++;
@@ -1283,6 +1321,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 String ns = xml.getNamespaceURI();
                 if (agent != null && HORUS.equals(ns) && "outputSchema".equals(xml.getLocalName())) {
                     agent.schemaText(text());
+                    continue;
+                }
+                if (agent != null && HORUS.equals(ns) && "fieldTitles".equals(xml.getLocalName())) {
+                    agent.fieldTitlesText(text());
                     continue;
                 }
                 if (agent != null && HORUS.equals(ns) && "guardrail".equals(xml.getLocalName())) {

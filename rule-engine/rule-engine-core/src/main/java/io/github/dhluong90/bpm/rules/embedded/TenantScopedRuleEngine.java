@@ -122,4 +122,18 @@ public interface TenantScopedRuleEngine {
             java.util.List<TimedInput> cases) {
         throw new UnsupportedOperationException("simulate is not supported by " + getClass().getName());
     }
+
+    /**
+     * Lists the rule sets of a tenant that have a version in effect at an instant, by name, ascending. Reads only. The
+     * calling engine uses it for the step catalogue a modeller reads (PRE-032).
+     *
+     * @param tenantId the tenant, resolved by the calling engine from the authenticated context; not blank
+     * @param at the instant that selects the version in force
+     * @param limit the most names to return, at least 1
+     * @return the names; an implementation written before this method existed lists none
+     * @throws IllegalArgumentException when the tenant is blank, the instant is null or the limit is below 1
+     */
+    default java.util.List<String> publishedRuleSets(String tenantId, java.time.Instant at, int limit) {
+        return java.util.List.of();
+    }
 }

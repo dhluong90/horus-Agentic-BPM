@@ -33,6 +33,11 @@ public final class EngineDefaults {
     /** {@code query.max-page-size}; may be lowered, never raised. */
     public static final int MAX_PAGE_SIZE = 200;
 
+    /** Default and largest {@code query.max-roles}: the most role and group queues one task list reads (#408). */
+    public static final int MAX_ROLES = 100;
+    /** Largest value {@code query.max-roles} may be raised to. */
+    public static final int MAX_ROLES_LIMIT = 1_000;
+
     /** Page size of a list when the request names none (the maximum when that is lower). */
     public static final int DEFAULT_PAGE_SIZE = 50;
 
