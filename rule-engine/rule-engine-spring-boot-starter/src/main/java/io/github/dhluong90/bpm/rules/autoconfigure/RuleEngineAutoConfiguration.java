@@ -86,8 +86,7 @@ public class RuleEngineAutoConfiguration {
             org.springframework.core.env.Environment environment) {
         return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
                 properties.decisionLog().partitionsAheadOrDefault(), EngineDefaults.PARTITION_MAINTENANCE_INTERVAL,
-                DecisionLogRetention.resolve(properties.decisionLog(), environment,
-                        DecisionLogRetention.class.getPackage().getImplementationVersion()));
+                DecisionLogRetention.resolve(properties.decisionLog(), environment));
     }
 
     @Bean

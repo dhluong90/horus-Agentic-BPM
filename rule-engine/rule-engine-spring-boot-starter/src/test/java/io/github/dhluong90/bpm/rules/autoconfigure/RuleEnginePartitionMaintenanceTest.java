@@ -142,10 +142,12 @@ class RuleEnginePartitionMaintenanceTest {
         assertThat(DecisionLogRetention.resolve(unset, dev, "1.0.0")).isNull();
         assertThat(output).contains("retention is unset");
 
-        // and before 1.0, or when the version is unknown, nothing refuses start-up on any profile
+        // and before 1.0 nothing refuses start-up on any profile
         assertThat(DecisionLogRetention.resolve(unset, prod, "0.3.0-SNAPSHOT")).isNull();
         assertThat(DecisionLogRetention.resolve(unset, prod, "0.9.9")).isNull();
-        assertThat(DecisionLogRetention.resolve(unset, prod, null)).isNull();
+        // but an unknown version fails closed (#450): it never falls back to the 0.x behaviour
+        assertThatThrownBy(() -> DecisionLogRetention.resolve(unset, prod, null))
+                .isInstanceOf(IllegalStateException.class);
 
         // and from 1.0 a bank that chose either answer starts normally
         RuleEngineProperties.DecisionLog forever = new RuleEngineProperties.DecisionLog(
@@ -163,9 +165,11 @@ class RuleEnginePartitionMaintenanceTest {
         assertThat(DecisionLogRetention.required("12.3.4")).isTrue();
         assertThat(DecisionLogRetention.required("0.3.0-SNAPSHOT")).isFalse();
         assertThat(DecisionLogRetention.required("0.99.0")).isFalse();
-        assertThat(DecisionLogRetention.required("unknown")).isFalse();
-        assertThat(DecisionLogRetention.required("")).isFalse();
-        assertThat(DecisionLogRetention.required(null)).isFalse();
+        // a version that cannot be read fails closed (#450)
+        assertThat(DecisionLogRetention.required("unknown")).isTrue();
+        assertThat(DecisionLogRetention.required("")).isTrue();
+        assertThat(DecisionLogRetention.required("${project.version}")).isTrue();
+        assertThat(DecisionLogRetention.required(null)).isTrue();
     }
 
     @Test
