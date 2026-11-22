@@ -24,4 +24,16 @@ public interface RoleCatalogue {
      * @return whether the role is in that tenant's role list
      */
     boolean exists(String tenantId, String role);
+
+    /**
+     * Lists the roles of a tenant for the step catalogue (PRE-032), so a modeller picks only roles the host knows. The
+     * default lists none, which the catalogue shows as no roles offered; a host that wants them listed overrides it.
+     * It must answer for the given tenant only and must not throw.
+     *
+     * @param tenantId the tenant whose roles are listed
+     * @return the role names without a {@code ROLE_} prefix, at most a few hundred
+     */
+    default java.util.List<String> roles(String tenantId) {
+        return java.util.List.of();
+    }
 }

@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.process.api.QueryInvalidException;
+import io.github.dhluong90.bpm.process.api.RoleFanOutExceededException;
 import io.github.dhluong90.bpm.process.api.TaskQuery;
 import io.github.dhluong90.bpm.process.api.TaskSummary;
 import io.github.dhluong90.bpm.process.api.UnauthenticatedException;
@@ -61,9 +62,10 @@ final class TaskQueries {
     private final ProcessQueryStore store;
     private final Supplier<Cursors> cursors;
     private final int maxPageSize;
+    private final int maxRoles;
 
     TaskQueries(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
-            ProcessQueryStore store, Supplier<Cursors> cursors, int maxPageSize) {
+            ProcessQueryStore store, Supplier<Cursors> cursors, int maxPageSize, int maxRoles) {
         this.tenants = Objects.requireNonNull(tenants);
         this.callers = Objects.requireNonNull(callers);
         this.clock = Objects.requireNonNull(clock);
@@ -71,6 +73,7 @@ final class TaskQueries {
         this.store = Objects.requireNonNull(store);
         this.cursors = Objects.requireNonNull(cursors);
         this.maxPageSize = maxPageSize;
+        this.maxRoles = maxRoles;
     }
 
     /** One range to read: which index and its key. */
@@ -208,6 +211,11 @@ final class TaskQueries {
             }
         }
         if (assignment.contains("candidate") && open) {
+            // #408: each role and group of the caller is a queue read, so a very long list is refused, not served.
+            int queues = new TreeSet<>(callers.currentRoles()).size() + new TreeSet<>(callers.currentGroups()).size();
+            if (role == null && group == null && queues > maxRoles) {
+                throw new RoleFanOutExceededException(queues, maxRoles);
+            }
             for (String r : new TreeSet<>(callers.currentRoles())) {
                 if (NAME.matcher(r).matches() && (role == null ? group == null : role.equals(r))) {
                     ranges.add(new Range(TaskRange.ROLE, r));

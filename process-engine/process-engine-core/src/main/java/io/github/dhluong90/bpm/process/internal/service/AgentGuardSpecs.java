@@ -37,6 +37,10 @@ final class AgentGuardSpecs {
             }
         });
         guard.put("fourEyes", true);
+        if (agent != null && agent.fieldTitles() != null) {
+            // Labels for the review screen (#386); no check reads them.
+            guard.put("fieldTitles", Values.readMap(agent.fieldTitles()));
+        }
         return guard;
     }
 }

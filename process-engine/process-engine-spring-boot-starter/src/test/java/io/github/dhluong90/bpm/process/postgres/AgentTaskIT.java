@@ -586,6 +586,81 @@ class AgentTaskIT {
         assertThat(tokenOn(pod, loan)).isEqualTo("underwrite:WAITING_USER");
     }
 
+    private static final String FIELD_TITLES = "<horus:fieldTitles>{\"inputs\": {\"requestedAmount\": {\"en\": "
+            + "\"Requested amount\", \"vi\": \"Số tiền đề nghị\"}}, \"outputs\": {\"riskScore\": {\"en\": "
+            + "\"Risk score\", \"vi\": \"Điểm rủi ro\"}}}</horus:fieldTitles>\n        <horus:outputSchema>{";
+
+    @Test
+    void PRE_217_the_review_task_carries_the_english_and_vietnamese_titles_the_step_declares() {
+        // Given a step that declares titles for requestedAmount and riskScore, and an answer the guardrail refuses
+        TestEngine pod = replica("pod-1", assessor(answer(85, "APPROVE")));
+        publishGuardrails(pod);
+        deploy(pod, definition("<horus:outputSchema>{", FIELD_TITLES).getBytes(StandardCharsets.UTF_8));
+        String loan = apply(pod, "LOAN-2027-0907");
+        assertThat(pod.async.runNow(claimOne(pod))).contains(StepCompletion.Outcome.REFUSED);
+
+        // When the reviewer opens the review task
+        pod.identity.as(tenant, "thu", "processes:task:work", "processes:read");
+        pod.identity.roles = Set.of(REVIEWER_ROLE);
+        TaskView task = pod.services.task(reviewTaskId(loan));
+
+        // Then the review carries the titles in both languages per field, and the values are unchanged
+        assertThat(task.review()).containsEntry("fieldTitles", Map.of(
+                "inputs", Map.of("requestedAmount", Map.of("en", "Requested amount", "vi", "Số tiền đề nghị")),
+                "outputs", Map.of("riskScore", Map.of("en", "Risk score", "vi", "Điểm rủi ro"))));
+        assertThat(task.review()).containsEntry("outputFields", 3L);
+    }
+
+    @Test
+    void PRE_217_a_step_without_titles_has_no_fieldTitles_and_a_malformed_set_is_refused_at_import() {
+        // Given the plain step: the review has no fieldTitles
+        TestEngine pod = replica("pod-1", assessor(answer(85, "APPROVE")));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = apply(pod, "LOAN-2027-0908");
+        assertThat(pod.async.runNow(claimOne(pod))).contains(StepCompletion.Outcome.REFUSED);
+        pod.identity.as(tenant, "thu", "processes:task:work", "processes:read");
+        pod.identity.roles = Set.of(REVIEWER_ROLE);
+        assertThat(pod.services.task(reviewTaskId(loan)).review()).doesNotContainKey("fieldTitles");
+
+        // When a version declares a title that is not text
+        pod.identity.as(tenant, "pipeline", "processes:deploy", "processes:read");
+        byte[] broken = definition("<horus:outputSchema>{", "<horus:fieldTitles>{\"outputs\": {\"riskScore\": "
+                + "{\"en\": 5}}}</horus:fieldTitles>\n        <horus:outputSchema>{").getBytes(StandardCharsets.UTF_8);
+
+        // Then the import is refused with FIELD_TITLES_INVALID on the step, naming no title
+        assertThatThrownBy(() -> deploy(pod, broken)).isInstanceOfSatisfying(ValidationFailedException.class,
+                e -> assertThat(e.problems()).extracting(DefinitionProblem::code).contains("FIELD_TITLES_INVALID"));
+    }
+
+    @Test
+    void PRE_032_the_catalogue_lists_the_rule_sets_published_in_the_callers_tenant_only() {
+        // Given agent-output-guardrails published in this tenant's Rule Engine
+        TestEngine pod = replica("pod-1", assessor(answer(85, "APPROVE")));
+        publishGuardrails(pod);
+        io.github.dhluong90.bpm.process.internal.service.StepCatalogues catalogue =
+                new io.github.dhluong90.bpm.process.internal.service.StepCatalogues(() -> pod.identity.tenant,
+                        pod.identity, clock, new io.github.dhluong90.bpm.process.postgres.ProcessEngineTransactions(
+                                new org.springframework.jdbc.datasource.DataSourceTransactionManager(
+                                        TestEngine.dataSource())),
+                        new io.github.dhluong90.bpm.process.postgres.JdbcCalendarStore(TestEngine.dataSource()),
+                        List.of(), List.of(), List.of(), pod.decisions,
+                        io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL);
+
+        // When an author of that tenant reads the catalogue
+        pod.identity.as(tenant, "carol", "processes:author");
+        var view = catalogue.stepCatalogue();
+
+        // Then the rule set is a decision rule set and, meeting the guardrail contract, a guardrail rule set
+        assertThat(view.decisionRuleSets()).extracting(r -> r.name()).containsExactly("agent-output-guardrails");
+        assertThat(view.guardrailRuleSets()).extracting(r -> r.name()).containsExactly("agent-output-guardrails");
+        assertThat(view.decisionRuleSets().get(0).outputs()).containsEntry("allow", "boolean");
+
+        // And an author of another tenant sees none of it
+        pod.identity.as("bank-other", "carol", "processes:author");
+        assertThat(catalogue.stepCatalogue().decisionRuleSets()).isEmpty();
+    }
+
     // ---- PRE-009, PRE-017, PRE-041: the agent step on the async executor --------------------------------------
 
     @Test

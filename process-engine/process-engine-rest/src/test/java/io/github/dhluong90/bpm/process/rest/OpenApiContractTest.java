@@ -38,7 +38,7 @@ class OpenApiContractTest {
         Set<String> implemented = new TreeSet<>();
         for (Method method : java.util.stream.Stream.of(ProcessController.class, AgentReplayController.class,
                 MigrationController.class, MigrationExecutionController.class, LayoutController.class, IncidentController.class,
-                CalendarController.class)
+                CalendarController.class, StepCatalogueController.class)
                 .flatMap(type -> java.util.Arrays.stream(type.getDeclaredMethods())).toList()) {
             PostMapping post = method.getAnnotation(PostMapping.class);
             GetMapping get = method.getAnnotation(GetMapping.class);

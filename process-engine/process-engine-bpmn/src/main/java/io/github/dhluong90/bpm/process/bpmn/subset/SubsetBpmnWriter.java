@@ -193,6 +193,9 @@ public final class SubsetBpmnWriter {
             if (agent != null && agent.outputSchema() != null) {
                 xml.line(4, "<horus:outputSchema>" + text(agent.outputSchema()) + "</horus:outputSchema>");
             }
+            if (agent != null && agent.fieldTitles() != null) {
+                xml.line(4, "<horus:fieldTitles>" + text(agent.fieldTitles()) + "</horus:fieldTitles>");
+            }
             if (guardrail != null) {
                 xml.line(4, "<horus:guardrail" + optional("decision", guardrail.decision())
                         + optional("onViolation", guardrail.onViolation()) + optional("reviewer", guardrail.reviewer())

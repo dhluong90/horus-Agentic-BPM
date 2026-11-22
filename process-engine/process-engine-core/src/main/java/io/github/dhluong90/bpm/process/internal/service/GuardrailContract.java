@@ -59,7 +59,26 @@ public final class GuardrailContract {
         };
     }
 
+    /**
+     * Whether a rule set's own shape meets the guardrail contract (hit policy, {@code allow}, {@code reasons}), apart
+     * from any step's output schema. The step catalogue (PRE-032) lists such rule sets as guardrails.
+     *
+     * @param found what the decision engine says about the rule set's effective version
+     * @return true when a guardrail step could name it, once its inputs match the step's answer
+     */
+    public static boolean meetsOutputContract(DecisionSignature.Found found) {
+        List<String> failures = new ArrayList<>();
+        checkOutputs(found, failures);
+        return failures.isEmpty();
+    }
+
     private static void checkFound(DecisionSignature.Found found, Map<String, Object> schema, List<String> failures) {
+        String name = found.ruleSet() + " v" + found.version();
+        checkOutputs(found, failures);
+        checkInputs(found, name, schema, failures);
+    }
+
+    private static void checkOutputs(DecisionSignature.Found found, List<String> failures) {
         String name = found.ruleSet() + " v" + found.version();
         String hitPolicy = found.hitPolicy().toUpperCase(Locale.ROOT);
         if (!HIT_POLICIES.contains(hitPolicy)) {
@@ -78,6 +97,10 @@ public final class GuardrailContract {
             failures.add("guardrail rule set " + name + " declares reasons as " + reasons
                     + "; it must be string or list<string>");
         }
+    }
+
+    private static void checkInputs(DecisionSignature.Found found, String name, Map<String, Object> schema,
+            List<String> failures) {
         Map<String, Object> properties = properties(schema);
         for (Map.Entry<String, String> input : found.inputs().entrySet()) {
             Object field = properties.get(input.getKey());

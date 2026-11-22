@@ -550,6 +550,35 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     /**
+     * The names of the rule sets that have a version in effect at an instant; only {@link EngineScopedRuleEngine}
+     * calls it, for an embedded engine's step catalogue (PRE-032). Reads only.
+     *
+     * @param tenant the tenant
+     * @param at the instant that selects the version in force
+     * @param limit the most names
+     * @return the names, ascending
+     */
+    List<String> publishedRuleSetsAs(String tenant, Instant at, int limit) {
+        return context.withoutDooming(() -> {
+            List<String> names = new java.util.ArrayList<>();
+            String after = null;
+            while (names.size() < limit) {
+                List<io.github.dhluong90.bpm.rules.api.RuleSetSummary> page = store.listRuleSets(tenant, after, 200, at);
+                for (io.github.dhluong90.bpm.rules.api.RuleSetSummary summary : page) {
+                    if (summary.publishedVersion() != null && names.size() < limit) {
+                        names.add(summary.ruleSet());
+                    }
+                }
+                if (page.size() < 200) {
+                    break;
+                }
+                after = page.get(page.size() - 1).ruleSet();
+            }
+            return List.copyOf(names);
+        });
+    }
+
+    /**
      * The signature of a stored version by number, in any status; only {@link EngineScopedRuleEngine} calls it, for an
      * embedded engine checking a candidate guardrail before a replay. Reads only.
      *

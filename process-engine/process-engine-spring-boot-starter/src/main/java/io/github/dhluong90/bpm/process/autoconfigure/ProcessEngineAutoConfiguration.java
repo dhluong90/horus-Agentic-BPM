@@ -402,6 +402,21 @@ public class ProcessEngineAutoConfiguration {
                 properties.query().maxPageSize());
     }
 
+    /** The step catalogue: what the host registered, for the modeller (#103, PRE-032). */
+    @Bean
+    @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.StepCatalogue.class)
+    io.github.dhluong90.bpm.process.api.StepCatalogue processEngineStepCatalogue(
+            ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
+            ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcCalendarStore store,
+            ObjectProvider<ServiceTaskHandler> handlers, ObjectProvider<ServiceAdapter> adapters,
+            ObjectProvider<AgentAdapter> agents, ProcessServices services, ObjectProvider<RoleCatalogue> roles) {
+        return new io.github.dhluong90.bpm.process.internal.service.StepCatalogues(
+                tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
+                transactions, store, handlers.orderedStream().toList(), adapters.orderedStream().toList(),
+                agents.orderedStream().toList(), services.decisionPort(),
+                roles.getIfUnique(() -> RoleCatalogue.ACCEPT_ALL));
+    }
+
     @Bean
     @ConditionalOnMissingBean(CalendarService.class)
     CalendarService processCalendarService(Calendars calendars) {
@@ -850,6 +865,13 @@ public class ProcessEngineAutoConfiguration {
         io.github.dhluong90.bpm.process.rest.CalendarController processEngineCalendarController(
                 CalendarService calendars) {
             return new io.github.dhluong90.bpm.process.rest.CalendarController(calendars);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.StepCatalogueController processEngineStepCatalogueController(
+                io.github.dhluong90.bpm.process.api.StepCatalogue catalogue) {
+            return new io.github.dhluong90.bpm.process.rest.StepCatalogueController(catalogue);
         }
 
         @Bean

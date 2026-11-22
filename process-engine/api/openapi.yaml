@@ -55,6 +55,8 @@ tags:
     description: List incidents, retry a failed step, and resolve one with a second person's approval
   - name: calendars
     description: Read the tenant's business calendars, propose a change, and approve or reject it as a second person
+  - name: step-catalogue
+    description: List the steps, rule sets, calendars and roles the host registered, for the modeller
 paths:
   /approvals:
     get:
@@ -1043,6 +1045,11 @@ paths:
         Every range is read through its own index and stops after one page, so a long queue never slows the list.
         Items carry no variables and no review context; read one task for those, masked. Permission
         `processes:task:work`.
+
+        Each role and group of the caller is a queue the list reads. A caller whose roles and groups together exceed
+        `query.max-roles` (100 by default, at most 1,000) and who names no `role` or `group` gets
+        `400 ROLE_FAN_OUT_EXCEEDED`, which gives the cap and the number of queues (#408, `PRE-216`); naming one `role`
+        or `group` narrows the list to one queue.
       parameters:
         - name: assignment
           in: query
@@ -1924,6 +1931,64 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /step-catalogue:
+    get:
+      tags: [step-catalogue]
+      operationId: getStepCatalogue
+      summary: List what the host registered for the modeller
+      description: |
+        PRE-032 (#103). The service handlers (local and remote, with input schema and whether they are compensable),
+        the agent adapters, the rule sets with a version in effect (and, among them, those that meet the guardrail
+        contract), the calendars of the caller's tenant and the roles the host lists, and nothing else: a step the host
+        did not register is not offered and cannot be imported. Names and schemas only, never a configuration value, an
+        endpoint or a credential. The tenant comes from the authenticated context. The `ETag` is a hash of the body;
+        send it as `If-None-Match` for `304`. Permission `processes:author`.
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: The catalogue of the caller's tenant
+          headers:
+            ETag:
+              description: A hash of the body, quoted
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StepCatalogue' }
+              example:
+                handlers:
+                  - name: cardProfiles.load
+                    mode: local
+                    inputSchema: {}
+                    compensable: false
+                  - name: kyc.verifyDocuments
+                    mode: remote
+                    inputSchema: { type: object, required: [customerId], properties: { customerId: { type: string } } }
+                    compensable: true
+                agents:
+                  - name: doc-assessor
+                    inputSchema: {}
+                ruleSets:
+                  decision:
+                    - name: card-fee
+                      version: 3
+                      hitPolicy: FIRST
+                      inputs: { tier: string }
+                      outputs: { fee: integer }
+                  guardrail: []
+                calendars: [vn-banking-hours]
+                roles: [card-officer, credit-officer]
+        '304':
+          description: The catalogue has not changed since the `ETag` sent
+          headers:
+            ETag:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /calendars:
     get:
       tags: [calendars]
@@ -2290,7 +2355,8 @@ components:
     Problem:
       description: >-
         RFC 9457 problem; see the wiki pages Common Error Codes and Process Engine API. `400` is `INPUT_INVALID`,
-        `QUERY_INVALID` (a list limit, cursor or range) or `CONTENT_HASH_REQUIRED` (an approval that names no reviewed
+        `QUERY_INVALID` (a list limit, cursor or range), `ROLE_FAN_OUT_EXCEEDED` (a task list over more role and group
+        queues than `query.max-roles`; `PRE-216`) or `CONTENT_HASH_REQUIRED` (an approval that names no reviewed
         content). `404` is `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`,
         `INCIDENT_NOT_FOUND`, `ASYNC_STEP_NOT_FOUND`, `CALENDAR_NOT_FOUND` or `MIGRATION_NOT_FOUND`; another tenant's resource is always not found. `401 UNAUTHENTICATED`
         carries a `WWW-Authenticate` challenge. `403` is `PERMISSION_DENIED` (missing engine permission),
@@ -2610,6 +2676,70 @@ components:
         outputFields: { type: integer, description: Number of top-level fields in the answer }
         attemptId: { type: string, description: The refused attempt }
         reportedBy: { type: string, description: 'Who reported the refused answer: the engine replica, or the caller of the completion API. Never the reviewer (four eyes)' }
+        fieldTitles:
+          type: object
+          description: >-
+            Titles the definition declares for the step's fields, so a screen shows `Risk score` or `Điểm rủi ro`
+            instead of the API name (#386, `PRE-217`). Per side, a field name maps to a language tag and its title;
+            the language list is open. A field with no title is shown by its name in words. Labels only: nothing
+            reads them. Absent when the step declares none.
+          properties:
+            inputs: { $ref: '#/components/schemas/FieldTitleMap' }
+            outputs: { $ref: '#/components/schemas/FieldTitleMap' }
+          additionalProperties: false
+    FieldTitleMap:
+      type: object
+      maxProperties: 100
+      additionalProperties:
+        type: object
+        maxProperties: 10
+        additionalProperties: { type: string, minLength: 1, maxLength: 120 }
+        example: { en: Risk score, vi: Điểm rủi ro }
+    StepCatalogue:
+      type: object
+      required: [handlers, agents, ruleSets, calendars, roles]
+      properties:
+        handlers:
+          type: array
+          items:
+            type: object
+            required: [name, mode, inputSchema, compensable]
+            properties:
+              name: { type: string, description: 'The name a step uses in `horus:handler`' }
+              mode: { type: string, enum: [local, remote] }
+              inputSchema: { type: object, additionalProperties: true, description: 'JSON Schema of the input; empty when the host declared none' }
+              compensable: { type: boolean }
+        agents:
+          type: array
+          items:
+            type: object
+            required: [name, inputSchema]
+            properties:
+              name: { type: string, description: 'The name a step uses in `horus:agent`' }
+              inputSchema: { type: object, additionalProperties: true }
+        ruleSets:
+          type: object
+          required: [decision, guardrail]
+          properties:
+            decision:
+              type: array
+              description: Rule sets with a version in effect, usable as decision steps
+              items: { $ref: '#/components/schemas/CatalogueRuleSet' }
+            guardrail:
+              type: array
+              description: The decision rule sets that also meet the guardrail contract (hit policy first or unique, output allow boolean)
+              items: { $ref: '#/components/schemas/CatalogueRuleSet' }
+        calendars: { type: array, items: { type: string } }
+        roles: { type: array, items: { type: string }, description: 'Empty when the host lists no roles' }
+    CatalogueRuleSet:
+      type: object
+      required: [name, version, hitPolicy, inputs, outputs]
+      properties:
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+        hitPolicy: { type: string, description: "FIRST, UNIQUE or COLLECT" }
+        inputs: { type: object, additionalProperties: { type: string }, description: Each declared input and its type }
+        outputs: { type: object, additionalProperties: { type: string }, description: Each declared output and its type }
     DefinitionSummary:
       type: object
       required: [key, latestVersion, latestStatus, lastChangedAt]
@@ -3366,7 +3496,7 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INPUT_INVALID, QUERY_INVALID, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
+          enum: [INPUT_INVALID, QUERY_INVALID, ROLE_FAN_OUT_EXCEEDED, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
@@ -3401,6 +3531,8 @@ components:
         nodeId: { type: string, description: Present on `STEP_FAILED` }
         cases: { type: integer, description: 'Present on `REPLAY_TOO_LARGE`, the recorded answers in the period' }
         limit: { type: integer, description: 'Present on `REPLAY_TOO_LARGE`, `replay.max-cases`' }
+        cap: { type: integer, description: 'Present on `ROLE_FAN_OUT_EXCEEDED`, `query.max-roles`' }
+        provided: { type: integer, description: 'Present on `ROLE_FAN_OUT_EXCEEDED`, the role and group queues the list would read' }
         violations:
           type: array
           description: >-

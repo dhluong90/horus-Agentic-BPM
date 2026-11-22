@@ -40,6 +40,18 @@
   },
   "$defs": {
     "identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "maxLength": 64 },
+    "fieldTitleMap": {
+      "type": "object",
+      "maxProperties": 100,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_.-]{0,99}$" },
+      "additionalProperties": {
+        "type": "object",
+        "minProperties": 1,
+        "maxProperties": 10,
+        "propertyNames": { "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$" },
+        "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 120 }
+      }
+    },
     "kebabId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 100 },
     "nodeId": {
       "description": "Step id. Any BPMN-style id (an XML ID without a colon: a letter or underscore, then letters, digits, underscore, dot or hyphen), so ids of imported BPMN models are kept as they are (ADR-0017). Kebab-case is the recommended style for hand-written definitions.",
@@ -245,6 +257,15 @@
           "type": "array",
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/identifier" }
+        },
+        "fieldTitles": {
+          "description": "Localised titles of the step's input and output fields for the review screen: inputs and outputs, each a map of field name to a map of language tag to title (up to 100 fields, 120 characters a title). Labels only; no check reads them. The review task returns them as fieldTitles.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inputs": { "$ref": "#/$defs/fieldTitleMap" },
+            "outputs": { "$ref": "#/$defs/fieldTitleMap" }
+          }
         },
         "outputSchema": { "description": "The JSON Schema the agent output must satisfy, inline, so the definition hash and its approval cover it. The engine default supports a subset (type, properties, required, additionalProperties true or false, enum, const, the numeric bounds, minLength, maxLength, items, minItems, maxItems, and the annotations title, description, default, examples and mask); any other keyword is refused at import.", "type": "object" },
         "guardrails": {

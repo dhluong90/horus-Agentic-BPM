@@ -38,4 +38,22 @@ public interface ServiceAdapter {
      *     the completion API with the attempt id and the completion token
      */
     AdapterResult execute(AdapterCall call);
+
+    /**
+     * Describes the input this step takes, for the step catalogue a modeller reads (PRE-032, {@code GET /step-catalogue}):
+     * a JSON Schema object. Never put a configuration value, a credential or an endpoint in it.
+     *
+     * @return the input schema, or an empty map when the step declares none (the default)
+     */
+    default java.util.Map<String, Object> inputSchema() {
+        return java.util.Map.of();
+    }
+
+    /**
+     * @return whether the host can undo this step through a compensation handler, shown in the step catalogue
+     *     (PRE-032); false by default
+     */
+    default boolean compensable() {
+        return false;
+    }
 }

@@ -62,6 +62,16 @@ final class EngineScopedRuleEngine implements TenantScopedRuleEngine {
     }
 
     @Override
+    public java.util.List<String> publishedRuleSets(String tenantId, Instant at, int limit) {
+        requireTenant(tenantId);
+        Objects.requireNonNull(at, "at must not be null");
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1");
+        }
+        return engine.publishedRuleSetsAs(tenantId, at, limit);
+    }
+
+    @Override
     public java.util.List<DecisionResult.Outcome> simulate(String tenantId, String ruleSet, int version,
             java.util.List<io.github.dhluong90.bpm.rules.embedded.TimedInput> cases) {
         requireTenant(tenantId);

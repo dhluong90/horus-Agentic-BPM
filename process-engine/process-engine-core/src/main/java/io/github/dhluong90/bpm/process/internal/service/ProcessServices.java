@@ -1509,7 +1509,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * key (PRE-030).
      */
     TaskQueries taskQueries(io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore queryStore) {
-        return new TaskQueries(tenants, callers, clock, transactions, queryStore, this::cursors, settings.maxPageSize());
+        return new TaskQueries(tenants, callers, clock, transactions, queryStore, this::cursors, settings.maxPageSize(),
+                settings.maxRoles());
     }
 
     private Cursors cursors() {
@@ -3176,6 +3177,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         context.put("inputs", auditInputs(job));
         context.put("output", refusal.get("output"));
         context.put("outputFields", refusal.get("outputFields"));
+        // #386: the step's English and Vietnamese (or any) titles per input and output field, as declared.
+        Object guard = Values.readMap(job.payloadJson()).get("guard");
+        if (guard instanceof Map<?, ?> g && g.get("fieldTitles") instanceof Map<?, ?> titles && !titles.isEmpty()) {
+            context.put("fieldTitles", titles);
+        }
         return context;
     }
 
