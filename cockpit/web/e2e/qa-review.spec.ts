@@ -27,7 +27,7 @@ const SCREENS: { name: string; scenario: Scenario; hash: string; prepare?: (p: P
     await p.getByRole('button', { name: l === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
     await p.getByRole('button', { name: l === 'en' ? 'Actions for row R2' : 'Thao tác cho dòng R2' }).click();
     await p.getByRole('menuitem', { name: l === 'en' ? 'Duplicate row R2' : 'Nhân bản dòng R2' }).click();
-    await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Balance', { exact: true }).fill('');
+    await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Số dư', { exact: true }).fill('');
     await p.keyboard.press('Enter');
     await expect(p.locator('.cell-edit--bad').first()).toBeVisible();
   } },

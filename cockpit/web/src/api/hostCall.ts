@@ -76,6 +76,8 @@ async function send(fetchImpl: Fetch, baseUrl: string, request: HostRequest, acc
     if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
     throw new HostCallError({ kind: 'unreachable' });
   }
+  // A 304 is an answer, not a redirect, when the request asked "only if changed".
+  if (response.status === 304 && request.headers?.['If-None-Match'] !== undefined) return response;
   if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
     throw new HostCallError({ kind: 'signed-out' });
   }
@@ -99,6 +101,29 @@ export async function callHost<T>(fetchImpl: Fetch, baseUrl: string, request: Ho
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
   return { status: response.status, etag: response.headers.get('ETag') ?? undefined, data: parsed.data };
+}
+
+/** What a conditional read answers: the page is unchanged (304), or it is new, with the ETag the host gave it, if any. */
+export type Conditional<T> = { changed: false; etag: string | undefined } | { changed: true; etag: string | undefined; data: T };
+
+/**
+ * A read that sends `If-None-Match` when the caller holds an ETag. A 304 is `changed: false`; a host that sends no
+ * ETag is read in full each time (cockpit DESIGN section 8, CKP-019).
+ */
+export async function callHostIfChanged<T>(fetchImpl: Fetch, baseUrl: string, request: HostRequest, schema: z.ZodType<T>, etag: string | undefined): Promise<Conditional<T>> {
+  const conditional = etag === undefined ? request : { ...request, headers: { ...request.headers, 'If-None-Match': etag } };
+  const response = await send(fetchImpl, baseUrl, conditional, 'application/json');
+  if (response.status === 304) return { changed: false, etag: response.headers.get('ETag') ?? etag };
+  const correlationId = response.headers.get('X-Correlation-Id') ?? undefined;
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
+  }
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) throw new HostCallError({ kind: 'unexpected-response', status: response.status, correlationId });
+  return { changed: true, etag: response.headers.get('ETag') ?? undefined, data: parsed.data };
 }
 
 /** A call whose answer is a file: the bytes are kept exactly as the host sent them, never parsed or re-encoded. */

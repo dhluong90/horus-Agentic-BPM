@@ -86,6 +86,9 @@ public final class CanonicalProcessWriter {
                     AgentTaskSpec agent = t.extensions().first(AgentTaskSpec.class).orElseThrow();
                     step.put("type", "agentTask");
                     step.put("agent", agent.agent());
+                    if (agent.fieldTitles() != null) {
+                        step.set("fieldTitles", EngineJson.JSON.readTree(agent.fieldTitles()));
+                    }
                     if (agent.outputSchema() != null) {
                         step.set("outputSchema", EngineJson.JSON.readTree(agent.outputSchema()));
                     }

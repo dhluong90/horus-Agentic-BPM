@@ -18,3 +18,11 @@ export function formatDateTime(iso: string | null | undefined, locale: Locale, t
   const time = `${part('hour')}:${part('minute')}`;
   return locale === 'vi' ? `${part('day')}/${part('month')}/${part('year')} ${time}` : `${part('day')} ${part('month')} ${part('year')} ${time}`;
 }
+
+/** How long ago, in the reader's language ("2 minutes ago"); under a minute it is undefined so the caller words it. */
+export function agoText(elapsedMs: number, locale: Locale): string | undefined {
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 1) return undefined;
+  const format = new Intl.RelativeTimeFormat(locale === 'vi' ? 'vi-VN' : 'en-GB', { numeric: 'auto' });
+  return minutes < 60 ? format.format(-minutes, 'minute') : format.format(-Math.floor(minutes / 60), 'hour');
+}

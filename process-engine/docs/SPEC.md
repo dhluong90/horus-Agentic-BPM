@@ -506,8 +506,9 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Given:** The host registers service handler `kyc.verifyDocuments` (remote, compensable), agent adapter `doc-assessor`, calendar `vn-banking-hours`; rule sets `card-fee` (outputs `fee`) and `agent-output-guardrails` (outputs `allow`, `reasons`, hit policy `first`).
 - **When:** `carol` with `processes:author` calls `GET /api/bpm/processes/v1/step-catalogue`; `erin` with only `processes:read` calls it too.
 - **Then:** `carol` gets the handler with its input schema and `compensable: true`, the agent adapter, `card-fee` under decision rule sets, `agent-output-guardrails` under both decision and guardrail rule sets, and the calendar; no configuration value appears. `erin` gets `403 FORBIDDEN`. An import that names an unregistered handler fails with `422 VALIDATION_FAILED`.
+- **Then (shape, #103):** The answer is `{handlers, agents, ruleSets: {decision, guardrail}, calendars, roles}`. A handler is `{name, mode: local | remote, inputSchema, compensable}`; the host states the schema and `compensable` through the default methods `inputSchema()` and `compensable()` of `ServiceTaskHandler` and `ServiceAdapter`, and a host that states nothing shows an empty schema and `false`. A rule set is `{name, version, hitPolicy, inputs, outputs}` for the version in effect on the engine clock; it is also a guardrail rule set when its hit policy is `first` or `unique` and it declares `allow: boolean` (and `reasons` as `string` or `list<string>` when it declares them), the same output checks as `PRE-016`. Roles come from the default method `RoleCatalogue.roles(tenant)`, which lists none unless the host overrides it. The tenant is the resolver's: a `bank-b` author sees `bank-b`'s calendars, rule sets and roles and none of `bank-a`'s, and the read writes nothing. Each list is cut at 500 entries. The `ETag` is a hash of the body and `If-None-Match` with it answers `304`.
 - **Example:** `catalogue -> 1 handler, 1 agent, 2 decision rule sets, 1 guardrail rule set, 1 calendar`.
-- **Test ID:** `PRE_032_step_catalogue_lists_registered_steps_only`
+- **Test ID:** `PRE_032_step_catalogue_lists_registered_steps_only` (`StepCatalogueIT`), `PRE_032_the_catalogue_lists_the_rule_sets_published_in_the_callers_tenant_only` (`AgentTaskIT`, over the real Rule Engine), `PRE_032_catalogue_body_matches_the_contract_and_carries_an_etag`, `PRE_032_a_caller_without_processes_author_is_403_PERMISSION_DENIED` (`StepCatalogueRestContractTest`)
 
 ---
 
@@ -521,7 +522,8 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Then:** The first call returns `bank-a` tasks; the second returns `bank-a-fin` tasks; the third returns `403 TENANT_NOT_ALLOWED`, returns no data and writes a security log entry with user, requested tenant and `correlationId`; the fourth returns `404 INSTANCE_NOT_FOUND`.
 - **Then (audit, #451):** every accepted switch hands one record to the host's `TenantSwitchAudit` (actor, original tenant, new tenant, time, correlation id) before the call reaches engine data; the default writes one `tenant.switch.accepted` line on the `io.github.dhluong90.bpm.audit` logger, and the security log line stays. A refused switch (unlisted, malformed or repeated header) writes no audit record; a sink that throws fails the call. After `lan` (`tenant_id: bank-a`, `allowed_tenants: [bank-a, bank-b]`) switches to `bank-b`, `GET /instances/P1` of `bank-a`'s case `P1` is `404 INSTANCE_NOT_FOUND` and nothing is written for either tenant.
 - **Example:** `X-Tenant-Id: bank-b not in allowed_tenants -> 403 TENANT_NOT_ALLOWED, logged`.
-- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`, `PRE_038_after_a_switch_to_bank_b_the_bank_a_instance_is_404_and_nothing_is_written`
+- **Then (engine, #85):** the engine reads the tenant only from its resolver, so once the host's filter has switched `lan` to `bank-b`, `bank-a`'s case `P1` is `404 INSTANCE_NOT_FOUND`, its task `404 TASK_NOT_FOUND` and its cancellation `404 INSTANCE_NOT_FOUND`, with no row written for either tenant; back in `bank-a` the case is unchanged.
+- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`, `PRE_038_after_a_switch_to_bank_b_the_bank_a_instance_is_404_and_nothing_is_written` (host over HTTP), `PRE_038_engine_answers_404_for_the_original_tenants_instance_after_a_switch` (`TenantSwitchPostgresIT`)
 
 ---
 
@@ -1592,3 +1594,30 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - Each import has its own revision 1. A saved change is revision 2 of that version, needs no approval and writes no `REQUESTED` or `APPROVED` row. A version stored before layouts reads without a layout (`204`).
 - **Example:** `import with diagram -> layout revision 1, source BPMN; re-import with other content -> its own revision 1`.
 - **Test ID:** `PRE_215_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition`, `PRE_215_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval`, `PRE_215_a_definition_stored_before_layouts_existed_still_reads_without_a_layout` (`ImportedLayoutPostgresIT`), `PRE_215_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else` (`CallActivityBpmnTest`)
+
+### PRE-216 A task list over more role and group queues than the cap is refused
+- **Traces to:** `TR-PERF-07`, `TR-SEC-01`, `PRE-030`, #408
+- **Milestone:** M3
+- **Given:** `query.max-roles` of 100 (the default; the setting may be raised to 1,000 or lowered); `minh` holds the group `branch-hcm-01` and, in the first case, 99 roles; in the second, 100 roles.
+- **When:** `minh` lists `assignment=candidate` with no `role` or `group`; then with `role=ops`; then `assignment=mine`.
+- **Then:** The first list is served, because 99 roles and one group are 100 queues. With 100 roles it is `400 ROLE_FAN_OUT_EXCEEDED` with `cap: 100` and `provided: 101`, and no task is read. `role=ops` narrows the list to one queue and is served; `mine` reads no role queue and is served. The cap counts the caller's roles and groups together, as the host's resolver gives them, and a caller with `assignment=any` reads the tenant, not role queues.
+- **Example:** `101 role and group queues, max-roles 100 -> 400 ROLE_FAN_OUT_EXCEEDED (cap 100, provided 101)`.
+- **Test ID:** `PRE_216_a_task_list_over_more_role_queues_than_the_cap_is_400_ROLE_FAN_OUT_EXCEEDED` (`TaskQueryPostgresIT`), `PRE_216_role_fan_out_problem_is_400_with_the_cap_and_the_number_of_queues` (`StepCatalogueRestContractTest`)
+
+### PRE-217 The review task carries the titles the definition declares for its fields
+- **Traces to:** `TR-UI-04`, `PRE-010`, `PRE-012`, #386
+- **Milestone:** M3
+- **Given:** An agent step whose `<horus:fieldTitles>` is `{"inputs": {"requestedAmount": {"en": "Requested amount", "vi": "Số tiền đề nghị"}}, "outputs": {"riskScore": {"en": "Risk score", "vi": "Điểm rủi ro"}}}`; a second version of it whose `riskScore` title is the number `5`; a third step with no titles.
+- **When:** The agent's answer is refused and the reviewer reads the review task; the second version is imported.
+- **Then:** The task's `review` object carries `fieldTitles` with the inputs and outputs as declared, every language the step names, and the review's other fields are unchanged. The step with no titles has no `fieldTitles`, and the screen shows the field's name in words. The second version is refused at import with `FIELD_TITLES_INVALID` on the step, a message that names the rule and no title. Titles are labels: no check, guardrail or decision reads them, and they are part of the definition, so its hash covers them. The set is at most 100 fields a side, 10 languages a field and 120 characters a title; a language is a tag such as `en` or `vi`, and the list is open.
+- **Example:** `riskScore -> {en: Risk score, vi: Điểm rủi ro}`.
+- **Test ID:** `PRE_217_the_review_task_carries_the_english_and_vietnamese_titles_the_step_declares`, `PRE_217_a_step_without_titles_has_no_fieldTitles_and_a_malformed_set_is_refused_at_import` (`AgentTaskIT`)
+
+### PRE-218 The task and incident lists answer a matching If-None-Match with 304
+- **Traces to:** `TR-PERF-07`, `TR-TEN-01`, `PRE-030`, `PRE-080`
+- **Milestone:** M3
+- **Given:** `minh` of `bank-a` lists `GET /tasks` and `lan` lists `GET /incidents`; each answer carries an `ETag`, a hash of the body.
+- **When:** The same list is read with `If-None-Match` set to that tag; then a task is claimed, or the next page is asked for, or an incident changes, or the caller loses `processes:incident:manage`, or a caller of `bank-b` sends `bank-a`'s tag; and finally a caller without the permission sends the tag.
+- **Then:** The same list is `304` with the `ETag` and no body. Every change in an item, in the page or cursor, or in the caller's own view (`allowedActions`) gives another tag, so the old tag gets `200` and the new body. The tag is computed from the body the caller's own tenant and permissions produced, after the tenant and permission checks: a `bank-b` caller's list differs, so `bank-a`'s tag never matches it, a refused caller gets `403` and never `304`, and the tag says nothing about another tenant's tasks or incidents. `*` and weak (`W/`) tags match as for the instance activities read.
+- **Example:** `GET /tasks -> ETag "9f2c..."; again with If-None-Match "9f2c..." -> 304; after a claim -> 200 with a new tag`.
+- **Test ID:** `PRE_218_the_task_list_has_an_etag_that_follows_its_page_and_content_and_never_crosses_callers` (`ProcessRestErrorMatrixTest`), `PRE_218_the_incident_list_has_an_etag_that_follows_its_content_and_the_callers_actions` (`IncidentRestContractTest`)

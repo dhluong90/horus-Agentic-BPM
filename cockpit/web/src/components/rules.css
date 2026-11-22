@@ -212,6 +212,9 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .changes__hash { color: var(--muted); font-size: 12.5px; }
 .nonascii-mark { display: inline-flex; gap: 4px; margin-top: 4px; padding: 0 6px; border-radius: var(--radius-s); background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .diff-td--mod .nonascii-mark { display: flex; width: max-content; }
+.nonascii-mark { flex-wrap: wrap; white-space: normal; align-items: center; }
+.nonascii-mark__details { font-weight: 400; }
+.nonascii-mark__details > summary { cursor: pointer; display: inline; text-decoration: underline; }
 .try__outcome { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
 .try__outcome .badge { margin-top: 0; }
 
@@ -494,7 +497,13 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .diff-row--added td.sbs__absent { color: var(--ok); font-weight: 600; }
 .diff-td--old { background: var(--diff-mod); color: var(--ink-2); }
 .diff-td--old .cell-values, .diff-td--old .cell-output { text-decoration: line-through; }
-.changes__notes { margin: 0; padding: 0 20px 14px 38px; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.changes__notes { margin: 0; padding: 0 20px 14px; list-style: none; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+/* A long diff scrolls inside its own region, so the docked decision stays in view and the version row stays on top. */
+.dt-scroll--sbs { overflow: auto; max-height: max(300px, calc(100vh - 480px)); }
+.dt--sbs .sbs__versions th { position: sticky; top: 0; z-index: 3; background: var(--surface-2); }
+.dt--sbs thead td.dt__rowhead { background: var(--surface-2); border-bottom: 0; padding: 0; }
+.since-mark { display: block; margin-top: 2px; color: var(--ink-2); font-size: 12px; font-weight: 500; }
+.since-mark::before { content: '↺ ' / ''; }
 
 /* The four-eyes decision, docked: title, comment and actions on one band at the bottom of the viewport. */
 .decision__body, .decision__actions { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -626,3 +635,10 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .unclassified__icon { display: inline-block; width: calc(var(--note-indent) - 0.3em); color: var(--muted); }
 .unclassified__list { margin: 0; padding: 0 0 0 var(--note-indent); list-style: none; display: flex; flex-wrap: wrap; column-gap: 14px; color: var(--muted); }
 .workspace > .unclassified { margin-bottom: 12px; }
+
+/* Row reading under an edited row (CKP-054): the engine's sentence, quiet, one line. */
+.dt--edit .dt__reading-row td { border-top: 0; padding-top: 0; padding-bottom: 10px; }
+.dt--edit .dt__reading { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.reading-line { display: block; max-width: 96ch; }
+.picker__not { white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 4px; }
+.picker__option--not { border-top: 1px solid var(--line); }

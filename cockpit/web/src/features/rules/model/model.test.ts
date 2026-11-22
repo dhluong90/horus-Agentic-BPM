@@ -133,9 +133,9 @@ describe('version diff', () => {
 
 describe('non-ASCII literals', () => {
   it('ADR_0026_look_alike_characters_are_named_by_code_point', () => {
-    expect(nonAsciiCharacters("== 'GОLD'")).toEqual(['О U+041E']);
+    expect(nonAsciiCharacters("== 'GОLD'")).toEqual(['Cyrillic О (U+041E)']);
     expect(nonAsciiCharacters("== 'GOLD'")).toEqual([]);
-    expect(nonAsciiCharacters("'Phí thường niên'")).toEqual(['í U+00ED', 'ư U+01B0', 'ờ U+1EDD', 'ê U+00EA']);
+    expect(nonAsciiCharacters("'Phí thường niên'")).toEqual(['Latin í (U+00ED)', 'Latin ư (U+01B0)', 'Latin ờ (U+1EDD)', 'Latin ê (U+00EA)']);
   });
 });
 
@@ -175,5 +175,15 @@ describe('column labels and cell hints', () => {
     // A filled amount, or any other cell, shows the engine's sentence alone.
     expect(emptyAmountHint({ ...compare, amount: '5' }, '50,000,000 VND', 'VND')).toBeUndefined();
     expect(emptyAmountHint({ kind: 'choice' }, undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe('CKP_053 choice cells that exclude values', () => {
+  it('reads and writes not-in and not-equal as Not these', async () => {
+    const { readConditionCell, writeConditionCell } = await import('./cells');
+    expect(readConditionCell("not in ['GOLD', 'PLATINUM']", 'choice')).toEqual({ kind: 'choice', values: ['GOLD', 'PLATINUM'], negate: true });
+    expect(readConditionCell("!= 'GOLD'", 'choice')).toEqual({ kind: 'choice', values: ['GOLD'], negate: true });
+    expect(writeConditionCell({ kind: 'choice', values: ['GOLD', 'PLATINUM'], negate: true })).toBe("not in ['GOLD', 'PLATINUM']");
+    expect(writeConditionCell({ kind: 'choice', values: ['GOLD'], negate: true })).toBe("!= 'GOLD'");
   });
 });

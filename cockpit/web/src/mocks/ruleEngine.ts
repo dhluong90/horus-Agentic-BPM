@@ -9,6 +9,7 @@
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
 
+import { labelOf, type ClauseLabel } from './ruleLabels';
 import { DEMO_NAMES } from './displayNames';
 import { createAuditRoutes, type AuditOptions } from './auditEngine';
 import { fromCsv, toCsv } from './csvTable';
@@ -19,7 +20,7 @@ const READINGS_MAX = 500;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json>; explain?: Partial<Record<'en' | 'vi', string>> }
-interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
+interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string; label?: ClauseLabel }[]; outputs: { name: string; type: string; label?: ClauseLabel }[]; rules: Rule[]; description?: string }
 
 export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN' | 'DISCARDED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
@@ -858,8 +859,8 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
 
 const CARD_FEE_V1: Definition = {
   schemaVersion: 1, ruleSet: 'card-fee', description: 'Annual card fee by tier and balance', hitPolicy: 'first',
-  inputs: [{ name: 'tier', type: 'string', allowed: ['CLASSIC', 'GOLD', 'PLATINUM'] }, { name: 'balance', type: 'money' }, { name: 'txCount', type: 'integer' }],
-  outputs: [{ name: 'fee', type: 'money' }, { name: 'waived', type: 'boolean' }],
+  inputs: [{ name: 'tier', label: labelOf('tier'), type: 'string', allowed: ['CLASSIC', 'GOLD', 'PLATINUM'] }, { name: 'balance', label: labelOf('balance'), type: 'money' }, { name: 'txCount', label: labelOf('txCount'), type: 'integer' }],
+  outputs: [{ name: 'fee', label: labelOf('fee'), type: 'money' }, { name: 'waived', label: labelOf('waived'), type: 'boolean' }],
   rules: [
     { id: 'R1', when: { tier: "== 'PLATINUM'" }, then: { fee: '0 VND', waived: true } },
     {
@@ -890,8 +891,8 @@ const CARD_FEE_V2: Definition = {
 
 const KYC_RISK_V1: Definition = {
   schemaVersion: 1, ruleSet: 'kyc-risk', hitPolicy: 'first',
-  inputs: [{ name: 'country', type: 'string' }, { name: 'monthlyIncome', type: 'money' }, { name: 'pep', type: 'boolean', description: 'PEP' }],
-  outputs: [{ name: 'risk', type: 'string' }],
+  inputs: [{ name: 'country', label: labelOf('country'), type: 'string' }, { name: 'monthlyIncome', label: labelOf('monthlyIncome'), type: 'money' }, { name: 'pep', type: 'boolean', description: 'PEP' }],
+  outputs: [{ name: 'risk', label: labelOf('risk'), type: 'string' }],
   rules: [
     { id: 'K1', when: { pep: '== true' }, then: { risk: "'HIGH'" } },
     { id: 'K2', when: { country: "in ['VN', 'SG']", monthlyIncome: '>= 200000000 VND' }, then: { risk: "'MEDIUM'" } },
@@ -966,8 +967,8 @@ export function draftSeed(): StoredVersion[] {
 /** KYC routing with a masked national id, for the masked readings (RLE-091). */
 const KYC_ROUTING_V1: Definition = {
   schemaVersion: 1, ruleSet: 'kyc-routing', hitPolicy: 'first',
-  inputs: [{ name: 'nationalId', type: 'string', mask: true, description: 'National ID' }, { name: 'segment', type: 'string', allowed: ['MASS', 'VIP'] }],
-  outputs: [{ name: 'route', type: 'string' }],
+  inputs: [{ name: 'nationalId', label: labelOf('nationalId'), type: 'string', mask: true, description: 'National ID' }, { name: 'segment', label: labelOf('segment'), type: 'string', allowed: ['MASS', 'VIP'] }],
+  outputs: [{ name: 'route', label: labelOf('route'), type: 'string' }],
   rules: [
     { id: 'K1', when: { nationalId: "== 'SEG-4471'" }, then: { route: "'MANUAL'" } },
     { id: 'K2', when: { segment: "== 'VIP'" }, then: { route: "'PRIORITY'" } },
@@ -978,13 +979,13 @@ const KYC_ROUTING_V1: Definition = {
 /** A fee table of 501 rows: more than one readings request covers, so the engine answers 422 READINGS_TOO_LARGE. */
 function bigTable(): Definition {
   const rules: Rule[] = Array.from({ length: 501 }, (_, index) => ({ id: `B${String(index + 1)}`, when: { txCount: `>= ${String(500 - index)}` }, then: { fee: `${String(1000 + index * 100)} VND` } }));
-  return { schemaVersion: 1, ruleSet: 'branch-fees', hitPolicy: 'first', inputs: [{ name: 'txCount', type: 'integer' }], outputs: [{ name: 'fee', type: 'money' }], rules };
+  return { schemaVersion: 1, ruleSet: 'branch-fees', hitPolicy: 'first', inputs: [{ name: 'txCount', label: labelOf('txCount'), type: 'integer' }], outputs: [{ name: 'fee', label: labelOf('fee'), type: 'money' }], rules };
 }
 
 /** The demo data plus the rule sets the readings states need: masked inputs, a table too large to read, no rows. */
 export function readingsSeed(): StoredVersion[] {
   const published = (definition: Definition): StoredVersion => ({ ruleSet: definition.ruleSet, version: 1, status: 'PUBLISHED', createdBy: 'lan', createdAt: '2026-10-20T01:00:00Z', requestedBy: 'lan', approvedBy: 'minh', source: JSON.stringify(definition, null, 2), definition, ...base });
-  const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [] };
+  const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', label: labelOf('tier'), type: 'string' }], outputs: [{ name: 'fee', label: labelOf('fee'), type: 'money' }], rules: [] };
   return [...demoSeed(), published(KYC_ROUTING_V1), published(bigTable()), { ...published(empty), status: 'DRAFT', approvedBy: null, approvedAt: null, effectiveFrom: null, requestedBy: null, requestedAt: null, lockVersion: 0 }];
 }
 
@@ -1000,6 +1001,6 @@ export function simulationSeed(): StoredVersion[] {
   });
   const [cardFee, , kyc] = demoSeed();
   const routing = readingsSeed().find((v) => v.ruleSet === 'kyc-routing') as StoredVersion;
-  const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }], rules: [] };
+  const empty: Definition = { schemaVersion: 1, ruleSet: 'new-fees', hitPolicy: 'first', inputs: [{ name: 'tier', label: labelOf('tier'), type: 'string' }], outputs: [{ name: 'fee', label: labelOf('fee'), type: 'money' }], rules: [] };
   return [cardFee as StoredVersion, draft(CARD_FEE_V2, 2), kyc as StoredVersion, routing, draft(KYC_ROUTING_V1, 2), draft(empty, 1)];
 }

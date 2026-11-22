@@ -209,6 +209,7 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `CALL_INPUT_ALL_REFUSED` | Remove `horus:in`; a call passes only the values named by `horus:input` |
 | `OUTPUT_INVALID`, `OUTPUT_DUPLICATE` | Give each `horus:output` of a call a unique `name` (the parent's variable) and a `from` (the child's variable) |
 | `COMPENSATION_REQUIRED` | Add `horus:compensate` (a registered handler, or `manual`) to the `callActivity` inside the `saga` |
+| `FIELD_TITLES_INVALID` | Give the agent step at most one `<horus:fieldTitles>`, a JSON object with `inputs` and `outputs`, each mapping a field name to a map of language tag to a title of 1 to 120 characters of plain text, at most 100 fields a side and 10 languages a field. The message names the rule and never a title |
 | `RETRY_INVALID` | Give the agent step at most one `<horus:retry>`, with `max` from 0 to 20 (the retries after the first attempt) and, optionally, `backoff` as a positive ISO-8601 duration such as `PT1S` |
 
 ### A handler or adapter the host does not register

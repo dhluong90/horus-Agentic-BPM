@@ -1,8 +1,8 @@
-import { useRef, type Dispatch, type FocusEvent, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type Dispatch, type FocusEvent, type KeyboardEvent } from 'react';
 import type { InputClause, OutputClause, RuleSetDefinition } from '../../../api/rules/schemas';
 import { useI18n, type Translate } from '../../../i18n/I18nProvider';
 import { emptyAmountHint } from '../model/cellMessages';
-import { columnCurrency, inputKind, outputKind, readConditionCell, readOutputCell, type CellModel } from '../model/cells';
+import { columnCurrency, inputKind, outputKind, readConditionCell, readOutputCell, valueLabel, type CellModel } from '../model/cells';
 import type { DraftAction, DraftState } from '../model/draft';
 import type { ErrorPlace } from '../model/engineErrors';
 import { clauseLabel, readCondition, readOutput, type CellReading } from '../model/reading';
@@ -47,7 +47,10 @@ function ConditionCell({ row, input, definition, error: engine, dispatch }: { ro
   const text = row.when[input.name] ?? '';
   const model = readConditionCell(text, kind);
   const currency = kind === 'money' ? columnCurrency(definition, 'when', input.name) : undefined;
-  const { error, detail } = cellProblem(engine, model, exampleOf(readCondition(row.original?.when[input.name], locale)), currency, t);
+  const allowed = (input.allowed ?? []).map(String);
+  const outside = kind === 'choice' && model.kind === 'choice' && model.values.some((v) => !allowed.includes(v));
+  const choose = outside ? t('editor.chooseFrom', { values: new Intl.ListFormat(locale, { type: 'disjunction' }).format(allowed.map(valueLabel)) }) : undefined;
+  const { error, detail } = choose !== undefined ? { error: choose, detail: undefined } : cellProblem(engine, model, exampleOf(readCondition(row.original?.when[input.name], locale)), currency, t);
   const onText = (next: string) => { dispatch({ type: 'edit-cell', key: row.key, part: 'when', column: input.name, text: next }); };
   const common = { label, error, detail, errorId, column };
   if (model.kind === 'raw' || kind === 'raw' || kind === 'text') return <TextEditor {...common} text={text} mono onText={onText} />;
@@ -74,7 +77,7 @@ function OutputCell({ row, output, definition, error: engine, dispatch }: { row:
   return <TextEditor {...common} text={text} mono onText={onText} />;
 }
 
-function RowMenu({ row, index, count, dispatch }: { row: EditableRow; index: number; count: number; dispatch: Dispatch<DraftAction> }) {
+function RowMenu({ row, index, count, dispatch, onDelete }: { row: EditableRow; index: number; count: number; dispatch: Dispatch<DraftAction>; onDelete: () => void }) {
   const { t } = useI18n();
   return (
     <MenuButton
@@ -86,7 +89,7 @@ function RowMenu({ row, index, count, dispatch }: { row: EditableRow; index: num
         { label: t('editor.moveUp', { id: row.id }), onSelect: () => { dispatch({ type: 'move', key: row.key, by: -1 }); }, disabled: index === 0 },
         { label: t('editor.moveDown', { id: row.id }), onSelect: () => { dispatch({ type: 'move', key: row.key, by: 1 }); }, disabled: index === count - 1 },
         { label: t('editor.copy', { id: row.id }), onSelect: () => { dispatch({ type: 'copy', key: row.key }); } },
-        { label: t('editor.delete', { id: row.id }), onSelect: () => { dispatch({ type: 'delete', key: row.key }); }, disabled: count === 1, danger: true },
+        { label: t('editor.delete', { id: row.id }), onSelect: onDelete, disabled: count === 1, danger: true },
       ]}
     />
   );
@@ -100,13 +103,17 @@ interface Held { key: string; part: 'when' | 'then'; column: string; text: strin
  * Arrow keys move between cells, Enter commits a cell and Escape puts back the value it had. A commit (Enter,
  * leaving a cell, a row action) is what the engine checks; nothing is stored before Save draft.
  */
-export function DraftEditor({ definition, draft, dispatch, errors }: {
+export function DraftEditor({ definition, draft, dispatch, errors, readings }: {
   definition: RuleSetDefinition;
   draft: DraftState;
   dispatch: Dispatch<DraftAction>;
   errors: readonly ErrorPlace[];
+  /** The engine's sentence of each row by row id, from the last non-storing check; undefined when that call failed. */
+  readings: ReadonlyMap<string, string> | undefined;
 }) {
   const { t } = useI18n();
+  const [deleting, setDeleting] = useState<EditableRow | undefined>(undefined);
+  const columns = definition.inputs.length + definition.outputs.length + 2;
   const held = useRef<Held | undefined>(undefined);
   const cellOf = (target: EventTarget | null) => (target instanceof HTMLElement ? target.closest<HTMLTableCellElement>('td[data-cell]') : null);
   const rowText = (key: string, part: 'when' | 'then', column: string) => draft.rows.find((r) => r.key === key)?.[part][column] ?? '';
@@ -154,8 +161,11 @@ export function DraftEditor({ definition, draft, dispatch, errors }: {
         <tbody>
           {draft.rows.map((row, index) => {
             const rowError = first(messagesFor(errors, row, undefined));
+            const sentence = readings?.get(row.id);
+            const bad = rowError !== undefined || errors.some((e) => e.kind === 'cell' && e.ruleId === row.id);
             return (
-              <tr key={row.key} className={[row.original === undefined ? 'dt__row--new' : '', rowError !== undefined ? 'dt__row--bad' : ''].join(' ').trim() || undefined}>
+              <Fragment key={row.key}>
+              <tr className={[row.original === undefined ? 'dt__row--new' : '', rowError !== undefined ? 'dt__row--bad' : ''].join(' ').trim() || undefined}>
                 <th scope="row" className="dt__rowhead">
                   <span className="row-id">{row.id}</span>
                   {row.original === undefined ? <span className="change-mark change-mark--added"><span aria-hidden="true">+</span> {t('editor.newRow')}</span> : null}
@@ -182,19 +192,56 @@ export function DraftEditor({ definition, draft, dispatch, errors }: {
                   </td>
                 ))}
                 <td className="dt__actions">
-                  <RowMenu row={row} index={index} count={draft.rows.length} dispatch={dispatch} />
+                  <RowMenu row={row} index={index} count={draft.rows.length} dispatch={dispatch} onDelete={() => { setDeleting(row); }} />
                 </td>
               </tr>
+              {!bad && sentence !== undefined ? (
+                <tr className="dt__reading-row">
+                  <td colSpan={columns} className="dt__reading">
+                    <span className="reading-line" aria-label={t('editor.readingOf', { id: row.id })}>{sentence}</span>
+                  </td>
+                </tr>
+              ) : null}
+              </Fragment>
             );
           })}
         </tbody>
       </table>
+      {deleting !== undefined ? (
+        <DeleteRowDialog row={deleting} onCancel={() => { setDeleting(undefined); }}
+          onConfirm={() => { dispatch({ type: 'delete', key: deleting.key }); setDeleting(undefined); }} />
+      ) : null}
       <div className="editor-foot">
         <button type="button" className="btn" onClick={() => { dispatch({ type: 'add' }); }}>
           <span aria-hidden="true">＋</span> {t('editor.addRow')}
         </button>
         <p id="grid-keys" className="editor-foot__keys">{t('editor.keys')}</p>
+        {readings === undefined ? <p className="editor-foot__keys" role="status">{t('editor.readingUnavailable')}</p> : null}
       </div>
     </div>
+  );
+}
+
+/** "Delete row R3?" before a row goes; the draft is only changed on Delete, and nothing is stored before Save draft. */
+function DeleteRowDialog({ row, onCancel, onConfirm }: { row: EditableRow; onCancel: () => void; onConfirm: () => void }) {
+  const { t } = useI18n();
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element || element.open) return;
+    if (typeof element.showModal === 'function') element.showModal();
+    else element.setAttribute('open', '');
+  }, []);
+  return (
+    <dialog ref={dialog} className="dialog" aria-labelledby="delete-row-title" onClose={onCancel}>
+      <form method="dialog" className="dialog__body" onSubmit={(event) => { event.preventDefault(); onConfirm(); }}>
+        <h2 id="delete-row-title" className="dialog__title">{t('editor.deleteTitle', { id: row.id })}</h2>
+        <p className="dialog__text">{t('editor.deleteText')}</p>
+        <div className="dialog__actions">
+          <button type="button" className="btn btn--quiet" onClick={onCancel}>{t('action.cancel')}</button>
+          <button type="submit" className="btn btn--danger">{t('editor.deleteConfirm')}</button>
+        </div>
+      </form>
+    </dialog>
   );
 }

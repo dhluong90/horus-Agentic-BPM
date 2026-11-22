@@ -297,7 +297,8 @@ public class ProcessController {
             @RequestParam(value = "dueBefore", required = false) String dueBefore,
             @RequestParam(value = "slaBreached", required = false) String slaBreached,
             @RequestParam(value = "limit", required = false) String limit,
-            @RequestParam(value = "cursor", required = false) String cursor) {
+            @RequestParam(value = "cursor", required = false) String cursor,
+            @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         boolean breached;
         if (slaBreached == null || slaBreached.strip().equals("false")) {
             breached = false;
@@ -308,7 +309,7 @@ public class ProcessController {
         }
         TaskQuery query = new TaskQuery(csv(assignment), csv(status), role, group, instantOf("dueBefore", dueBefore),
                 breached, new PageRequest(limitOf(limit), cursor));
-        return json(HttpStatus.OK, Views.page(queries.tasks(query), Views::taskSummary), null, null);
+        return conditional(Views.page(queries.tasks(query), Views::taskSummary), ifNoneMatch);
     }
 
     private static Set<String> csv(String value) {
@@ -646,6 +647,20 @@ public class ProcessController {
         } else {
             node.put(name, time.toString());
         }
+    }
+
+    /**
+     * Answers a list body with an {@code ETag} that is a hash of the body, or {@code 304} when {@code If-None-Match}
+     * names it. The body is what the caller's own tenant, permissions and page produced, so the tag changes with the
+     * content, the page and the caller's view, and says nothing about any other tenant.
+     */
+    static ResponseEntity<byte[]> conditional(JsonNode body, String ifNoneMatch) {
+        byte[] bytes = bytes(body);
+        String etag = "\"" + contentHash(bytes) + "\"";
+        if (ifNoneMatch != null && matches(ifNoneMatch, etag)) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).header(HttpHeaders.ETAG, etag).build();
+        }
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.ETAG, etag).body(bytes);
     }
 
     private static String contentHash(byte[] bytes) {

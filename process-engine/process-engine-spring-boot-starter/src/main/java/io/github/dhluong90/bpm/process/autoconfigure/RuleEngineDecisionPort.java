@@ -123,6 +123,21 @@ final class RuleEngineDecisionPort implements DecisionPort {
         }
     }
 
+    /** PRE-032: the rule sets with a version in effect, for the step catalogue, through the tenant-scoped entry point. */
+    @Override
+    public java.util.List<String> ruleSets(String tenantId, Instant at) {
+        Objects.requireNonNull(tenantId, "tenantId must not be null");
+        Objects.requireNonNull(at, "at must not be null");
+        if (engineWork.isEmpty()) {
+            return java.util.List.of();
+        }
+        try {
+            return engineWork.get().publishedRuleSets(tenantId, at, 500);
+        } catch (HorusBpmException e) {
+            return java.util.List.of();
+        }
+    }
+
     /**
      * PRE-094: the signature of a candidate guardrail version by number, in any status, through the tenant-scoped entry
      * point in the caller's tenant. Reads only.

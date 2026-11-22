@@ -92,4 +92,16 @@ public interface DecisionPort {
             java.util.Objects.requireNonNull(evaluationTime, "evaluationTime must not be null");
         }
     }
+
+    /**
+     * Lists the rule sets of a tenant that have a version in effect at an instant, for the step catalogue (PRE-032).
+     * Reads only. The default lists none, so a catalogue over a port that cannot list shows no rule sets.
+     *
+     * @param tenantId the tenant resolved from the authenticated context; never from a request body
+     * @param at the engine clock
+     * @return the rule set names, ascending, at most a bounded number
+     */
+    default java.util.List<String> ruleSets(String tenantId, Instant at) {
+        return java.util.List.of();
+    }
 }

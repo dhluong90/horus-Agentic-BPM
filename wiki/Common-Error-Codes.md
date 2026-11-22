@@ -22,6 +22,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 |---|---|---|---|
 | 400 | [INPUT_INVALID](#input_invalid) | both | M1 |
 | 400 | [QUERY_INVALID](#query_invalid) | both | M1 |
+| 400 | [ROLE_FAN_OUT_EXCEEDED](#role_fan_out_exceeded) | processes | 0.3.0 |
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | rules | 0.3.0 |
 | 401 | [UNAUTHENTICATED](#unauthenticated) | both | M1 |
 | 403 | [PERMISSION_DENIED](#permission_denied) | both | M1 |
@@ -90,6 +91,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### QUERY_INVALID
 `400`. A list query breaks a read limit (ADR-0015): `limit` below 1 or above `query.max-page-size` (200 by default), a `cursor` the list did not issue to this tenant (cursors are signed, so an edited, forged or replayed cursor is refused), a time range longer than 31 days (`GET /instances` with `startedFrom` and `startedTo`), a `status` that is not an instance status, a cursor sent with other filters than the page it came from, `GET /decisions` without `ruleSet`, `from` and `to`, or a `:simulate-history` request whose period is missing, reversed, longer than `query.max-range` or not ISO 8601 instants, or whose `limit` is outside 1 to `simulation.max-inputs`. Narrow the query and page with the cursor, passing `nextCursor` back unchanged.
+
+### ROLE_FAN_OUT_EXCEEDED
+`400`, Process Engine. `GET /tasks` would read more role and group queues than `query.max-roles` allows (100 by default): each role and group of the caller is a queue the list reads, so a very long role list is refused instead of fanning one request out. The problem carries `cap` and `provided`. Name one `role` or `group` to narrow the list to one queue, ask for `assignment=mine`, or have the host trim the caller's role list; an operator may raise the cap to at most 1,000.
 
 ### UNAUTHENTICATED
 `401`. No principal, a token whose audience is another host, or a principal with no tenant the `TenantResolver` can read (for example no `tenant_id` attribute). Sign in again, request a token for this host, or give the user a tenant in your identity provider. Every `401` carries `WWW-Authenticate`; when the challenge says `error="invalid_token"`, the account has no tenant on this host, so sign in again at most once. The host returns this body from its security chain when the chain uses `BpmProblemAuthenticationEntryPoint` ([[Host Metadata and Permissions]]).

@@ -40,4 +40,14 @@ public interface AgentAdapter {
      *     answer is reported later through the completion API
      */
     AdapterResult execute(AgentInvocation invocation);
+
+    /**
+     * Describes the input this agent takes, for the step catalogue a modeller reads (PRE-032, {@code GET /step-catalogue}):
+     * a JSON Schema object. Never put a configuration value, a credential or an endpoint in it.
+     *
+     * @return the input schema, or an empty map when the step declares none (the default)
+     */
+    default java.util.Map<String, Object> inputSchema() {
+        return java.util.Map.of();
+    }
 }

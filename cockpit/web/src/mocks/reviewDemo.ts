@@ -1,3 +1,4 @@
+import { labelOf } from './ruleLabels';
 import { demoSeed, type StoredVersion } from './ruleEngine';
 
 /*
@@ -27,8 +28,8 @@ function transferV1(): Definition {
   rules.push({ id: 'R20', when: {}, then: { fee: '11000 VND' } });
   return {
     schemaVersion: 1, ruleSet: 'domestic-transfer-fee', description: 'Domestic transfer fee by channel and amount', hitPolicy: 'first',
-    inputs: [{ name: 'channel', type: 'string', allowed: [...CHANNELS] }, { name: 'amount', type: 'money' }],
-    outputs: [{ name: 'fee', type: 'money' }],
+    inputs: [{ name: 'channel', label: labelOf('channel'), type: 'string', allowed: [...CHANNELS] }, { name: 'amount', label: labelOf('amount'), type: 'money' }],
+    outputs: [{ name: 'fee', label: labelOf('fee'), type: 'money' }],
     rules,
   };
 }
@@ -44,8 +45,8 @@ function transferV2(v1: Definition): Definition {
 
 const CASHBACK_V1: Definition = {
   schemaVersion: 1, ruleSet: 'card-cashback', description: 'Monthly card cashback rate by tier and spend', hitPolicy: 'first',
-  inputs: [{ name: 'tier', type: 'string', allowed: ['CLASSIC', 'GOLD', 'PLATINUM'] }, { name: 'monthlySpend', type: 'money' }],
-  outputs: [{ name: 'rate', type: 'decimal' }],
+  inputs: [{ name: 'tier', label: labelOf('tier'), type: 'string', allowed: ['CLASSIC', 'GOLD', 'PLATINUM'] }, { name: 'monthlySpend', label: labelOf('monthlySpend'), type: 'money' }],
+  outputs: [{ name: 'rate', label: labelOf('rate'), type: 'decimal' }],
   rules: [
     { id: 'R1', when: { tier: "== 'PLATINUM'", monthlySpend: '>= 20000000 VND' }, then: { rate: '2' } },
     { id: 'R2', when: { tier: "== 'GOLD'", monthlySpend: '>= 10000000 VND' }, then: { rate: '1.5' } },
@@ -57,7 +58,7 @@ const CASHBACK_V1: Definition = {
 const CASHBACK_V2: Definition = {
   ...CASHBACK_V1,
   hitPolicy: 'unique',
-  outputs: [{ name: 'rate', type: 'decimal' }, { name: 'cap', type: 'money' }],
+  outputs: [{ name: 'rate', label: labelOf('rate'), type: 'decimal' }, { name: 'cap', label: labelOf('cap'), type: 'money' }],
   rules: [
     { id: 'R1', when: { tier: "== 'PLATINUM'", monthlySpend: '>= 20000000 VND' }, then: { rate: '2', cap: '1000000 VND' } },
     // "GОLD" below holds U+041E CYRILLIC CAPITAL LETTER O.

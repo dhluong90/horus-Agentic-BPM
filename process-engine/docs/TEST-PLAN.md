@@ -48,7 +48,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-029 | `PRE_029_rollup_bounded_lag_and_no_step_tx_writes`, `PRE_029_a_step_transition_writes_no_statistics_row`, `PRE_029_a_slice_whose_transaction_rolls_back_is_counted_once_on_the_next_run`, `PRE_029_the_window_read_is_tenant_scoped_and_permission_checked_and_writes_nothing` | Two-replica Testcontainers, SQL capture | M3 | `TR-PERF-10` | Done |
 | PRE-030 | `PRE_030_task_query_filters_bounded_by_index`, `PRE_030_*` (`TaskQueryPostgresIT`); `PRE_030_card_officers_list_their_candidate_tasks_by_page_and_a_limit_above_200_is_refused` (`TaskLifecycleIT`) | Testcontainers with 30,000 seeded tasks in two tenants, plan capture of every range; host over HTTP | M2 | `TR-PERF-07`, `TR-TEN-01` | Done (#70) |
 | PRE-031 | `PRE_031_task_form_resolved_and_completion_validated` | Service, WebMvc | M2 | `TR-UI-02`, `TR-SEC-05` | Planned |
-| PRE-032 | `PRE_032_step_catalogue_lists_registered_steps_only` | WebMvc | M3 | `TR-SEC-01` | Planned |
+| PRE-032 | `PRE_032_*` in `StepCatalogueIT`, `AgentTaskIT` and `StepCatalogueRestContractTest` | Testcontainers, two tenants, the real Rule Engine; WebMvc against the OpenAPI contract | M3 | `TR-SEC-01` | Done (#103) |
 | PRE-033 | `PRE_033_bpmn_subset_import_rejects_unsupported_by_name` | Unit, adversarial XML | M3 | `TR-DEF-01` | Planned |
 | PRE-034 | `PRE_034_bpmn_export_round_trip_preserves_hash` | Unit round trip over every importable example and fixture, BPMN 2.0 XSD validation (OMG schema files as test resources, no network), service tenant isolation, Testcontainers REST export then import | M3 (cut candidate) | `TR-DEF-01` | Implemented for the subset |
 | PRE-035 | `PRE_035_definition_size_limits_enforced` | WebMvc | M2 | `TR-DEF-05` | Planned |
@@ -58,7 +58,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-085 | `PRE_085_every_state_change_hands_one_enveloped_event_to_the_host_inside_its_transaction`, `PRE_085_event_schemas_change_only_additively` | Testcontainers, JSON Schema | M2 | `TR-OBS-04`, `TR-OBS-06` | Done |
 | PRE-086 | `PRE_086_event_payloads_carry_ids_and_codes_never_variables_or_masked_values` | Testcontainers | M2 | `TR-SEC-05` | Done |
 | PRE-087 | `PRE_087_throughput_report_is_written_and_never_gates` | Testcontainers load test, CI job `throughput-report` | M2 | `TR-PERF-04` | Done |
-| PRE-038 | `PRE_038_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Built for the header check (`TenantSwitchingTest` in `bpm-host-metadata`); the `404 INSTANCE_NOT_FOUND` case for another tenant's instance stays planned |
+| PRE-038 | `PRE_038_tenant_header_accepted_only_within_allowed_tenants` | WebMvc, log capture | M2 | `TR-SEC-03`, `TR-TEN-01` | Done: the header check (`TenantSwitchingTest` in `bpm-host-metadata`), the host over HTTP (`TenantSwitchIsolationIT`) and the engine (`TenantSwitchPostgresIT`, #85) |
 | PRE-039 | `PRE_039_import_keeps_source_document_and_fixed_hash` | Integration, WebMvc | M2 | `TR-STD-01`, `TR-STD-03` | Planned |
 | PRE-040 | `PRE_040_business_error_result_opens_incident` in `AsyncWaitStateTest`; `PRE_040_*` in `CoreKernelScenarioTest` | Testcontainers, local handler returning a business error; kernel scenario | M2 | `TR-OPS-03`, `TR-IDEM-04` | Done (#55) |
 | PRE-041 | `PRE_041_cancel_during_adapter_call_discards_late_result`, `PRE_041_a_hundred_late_callbacks_on_a_cancelled_step_write_one_history_row` | Testcontainers, cancel committed during the adapter call, TestClock, 100 repeated callbacks | M2 | `TR-ASY-01`, `TR-ASY-02`, `TR-STD-12` | Done (`AsyncWaitStateTest`); agent case `PRE_041_cancel_during_agent_call_discards_late_result` in `AgentTaskIT` (#52) |
@@ -148,6 +148,9 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-213 | `PRE_213_*` in `CallActivityPostgresIT` | Testcontainers, an operator cancels the child, then the parent; an incident retry; event capture | M2 | `TR-CAN-01`, `TR-INC-01` | Done (#92) |
 | PRE-214 | `PRE_214_*` in `CallActivityPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a saga with an undo handler, two tenants; the import check | M2 | `TR-COMP-02`, `TR-TEN-01` | Done (#92) |
 | PRE-215 | `PRE_215_*` in `ImportedLayoutPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a file with a diagram, two imports, a version stored without a layout | M3 | `TR-DEF-02`, `PRE-024` | Done (#445) |
+| PRE-216 | `PRE_216_*` in `TaskQueryPostgresIT` and `StepCatalogueRestContractTest` | Testcontainers with 100 and 101 role queues; problem body against the contract | M3 | `TR-PERF-07`, `TR-SEC-01` | Done (#408) |
+| PRE-217 | `PRE_217_*` in `AgentTaskIT` | Testcontainers, the real Rule Engine; import of a malformed set | M3 | `TR-UI-04` | Done (#386) |
+| PRE-218 | `PRE_218_*` in `ProcessRestErrorMatrixTest` and `IncidentRestContractTest` | WebMvc against the OpenAPI contract: tag, 304, changed content, page and view, refused caller | M3 | `TR-PERF-07`, `TR-TEN-01` | Done |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

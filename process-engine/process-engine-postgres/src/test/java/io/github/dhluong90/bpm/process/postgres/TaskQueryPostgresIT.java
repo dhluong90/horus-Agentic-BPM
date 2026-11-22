@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.process.api.QueryInvalidException;
+import io.github.dhluong90.bpm.process.api.RoleFanOutExceededException;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskQuery;
 import io.github.dhluong90.bpm.process.api.TaskSummary;
@@ -280,6 +281,39 @@ class TaskQueryPostgresIT {
         // And her overdue view is the 3 overdue tasks of bank-a only
         assertThat(list("any", 200, null, true).items()).hasSize(3);
         assertThat(Duration.between(any.items().get(0).dueAt(), NOW)).isEqualTo(Duration.ofHours(3));
+    }
+
+    @Test
+    void PRE_216_a_task_list_over_more_role_queues_than_the_cap_is_400_ROLE_FAN_OUT_EXCEEDED() {
+        // Given minh holds 99 roles and the group branch-hcm-01, which is 100 queues: the cap, so the list is served
+        engine.identity.roles = rolesNamed(99);
+        assertThat(list("candidate", 10, null, false).items()).hasSize(10);
+
+        // When he gains one more role, 101 queues over query.max-roles of 100
+        engine.identity.roles = rolesNamed(100);
+
+        // Then the list is refused naming the cap and the number of queues, and reads no task
+        assertThatThrownBy(() -> list("candidate", 10, null, false))
+                .isInstanceOfSatisfying(RoleFanOutExceededException.class, e -> {
+                    assertThat(e.code()).isEqualTo("ROLE_FAN_OUT_EXCEEDED");
+                    assertThat(e.provided()).isEqualTo(101);
+                    assertThat(e.cap()).isEqualTo(100);
+                    assertThat(e.getMessage()).contains("101").contains("query.max-roles is 100");
+                });
+
+        // And one named role narrows the list to one queue, so it is served; his own tasks never fan out
+        assertThat(engine.queries.tasks(new TaskQuery(Set.of("candidate"), Set.of(), "ops", null, null, false,
+                new PageRequest(5, null))).items()).hasSize(5);
+        assertThat(list("mine", null, null, false).items()).hasSize(12);
+    }
+
+    /** Role names {@code ops} and {@code role-001} onward, {@code count} of them in all. */
+    private static Set<String> rolesNamed(int count) {
+        Set<String> roles = new java.util.LinkedHashSet<>(Set.of("ops"));
+        for (int i = 1; roles.size() < count; i++) {
+            roles.add("role-%03d".formatted(i));
+        }
+        return roles;
     }
 
     private static int count(String sql) {

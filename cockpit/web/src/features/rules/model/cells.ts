@@ -14,7 +14,7 @@ const FROM_ENGINE: Record<string, Operator> = { '==': '=', '>=': '≥', '>': '>'
 
 export type CellModel =
   | { kind: 'any' }
-  | { kind: 'choice'; values: string[] }
+  | { kind: 'choice'; values: string[]; negate?: true }
   | { kind: 'compare'; op: Operator; amount: string; currency: string | undefined }
   | { kind: 'bool'; value: boolean }
   | { kind: 'money'; amount: string; currency: string }
@@ -49,13 +49,13 @@ export function readConditionCell(text: string | undefined, kind: ColumnKind): C
   const value = (text ?? '').trim();
   if (value === '') return { kind: 'any' };
   if (kind === 'choice') {
-    const one = /^==\s*(.+)$/.exec(value);
-    const single = one ? unquote(one[1] ?? '') : undefined;
-    if (single !== undefined) return { kind: 'choice', values: [single] };
-    const list = /^in\s*\[(.*)\]$/.exec(value);
+    const one = /^(==|!=)\s*(.+)$/.exec(value);
+    const single = one ? unquote(one[2] ?? '') : undefined;
+    if (single !== undefined) return one?.[1] === '!=' ? { kind: 'choice', values: [single], negate: true } : { kind: 'choice', values: [single] };
+    const list = /^(not\s+in|in)\s*\[(.*)\]$/.exec(value);
     if (list) {
-      const items = (list[1] ?? '').split(',').map((item) => unquote(item));
-      if (items.every((item): item is string => item !== undefined)) return { kind: 'choice', values: items };
+      const items = (list[2] ?? '').split(',').map((item) => unquote(item));
+      if (items.every((item): item is string => item !== undefined)) return list[1] === 'in' ? { kind: 'choice', values: items } : { kind: 'choice', values: items, negate: true };
     }
   }
   if (kind === 'number' || kind === 'money') {
@@ -74,6 +74,7 @@ export function writeConditionCell(model: CellModel): string {
       return '';
     case 'choice':
       if (model.values.length === 0) return '';
+      if (model.negate === true) return model.values.length === 1 ? `!= ${quote(model.values[0] ?? '')}` : `not in [${model.values.map(quote).join(', ')}]`;
       return model.values.length === 1 ? `== ${quote(model.values[0] ?? '')}` : `in [${model.values.map(quote).join(', ')}]`;
     case 'compare':
       return `${TO_ENGINE[model.op]} ${model.amount}${model.currency !== undefined && model.amount !== '' ? ` ${model.currency}` : ''}`.trim();
@@ -124,7 +125,7 @@ export function columnCurrency(definition: RuleSetDefinition, part: 'when' | 'th
  * abbreviation, such as a country (VN, SG), and stays as written. Other text stays as it is.
  */
 export function valueLabel(value: string): string {
-  if (!/^[A-Z][A-Z0-9_]*$/.test(value) || value.length <= 2) return value;
+  if (!/^\p{Lu}[\p{Lu}0-9_]*$/u.test(value) || value.length <= 2) return value;
   const words = value.toLowerCase().replaceAll('_', ' ');
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
