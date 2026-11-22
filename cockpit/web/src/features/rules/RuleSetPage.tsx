@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { setCrumbLabel } from '../../app/crumbs';
-import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
+import { isUnclassified, type RuleSetVersion, type VersionSummary } from '../../api/rules/schemas';
+import { UnclassifiedNote } from '../../components/UnclassifiedNote';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useNames, useWantNames } from '../processes/api/displayNames';
 import { useRulesSession } from './api/rulesContext';
 import { useApprove, useCopyVersion, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { saveFile } from '../../app/saveFile';
@@ -48,11 +50,13 @@ function policyKey(policy: string): 'policy.FIRST' | 'policy.UNIQUE' | 'policy.C
 /** One line under the name: the version and what state it is in, in words. */
 function Subtitle({ version, editing }: { version: RuleSetVersion; editing: boolean }) {
   const { t, locale } = useI18n();
+  const { user } = useNames();
+  useWantNames({ users: version.requestedBy ? [version.requestedBy] : [] });
   const n = String(version.version);
   let text: string;
   if (editing) text = t('editor.editing', { version: n });
   else if (version.status === 'PUBLISHED') text = t('head.inEffect', { version: n, policy: t(policyKey(version.hitPolicy)) });
-  else if (version.status === 'PENDING_APPROVAL') text = t('head.pending', { version: n, who: version.requestedBy ?? '', when: formatDateTime(version.requestedAt, locale) ?? '' });
+  else if (version.status === 'PENDING_APPROVAL') text = t('head.pending', { version: n, who: version.requestedBy ? user(version.requestedBy) : '', when: formatDateTime(version.requestedAt, locale) ?? '' });
   else if (version.status === 'DRAFT') text = t('head.draft', { version: n });
   else text = t('head.retired', { version: n });
   return <p className="rs-head__sub">{text}</p>;
@@ -191,6 +195,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
     const column = [...version.definition.inputs, ...version.definition.outputs].find((c) => c.name === name);
     return columnLabel(name, column?.description);
   };
+  // Reminders about unclassified inputs are a calm note, apart from the personal-data warnings an approver accepts.
+  const unclassified = [...new Set(version.warnings.filter(isUnclassified).map((warning) => label(warning.input)))];
+  const personalData = version.warnings.filter((warning) => !isUnclassified(warning));
   const base = baseOf(versions, version.version);
   const go = (next: Partial<{ version: number; lens: Lens }>) => {
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: next.version ?? version.version, lens: next.lens ?? (next.version !== undefined ? undefined : lens) });
@@ -295,15 +302,16 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
           }}
           onDiscard={() => { go({ lens: 'table' }); }} />
       ) : null}
+      {!editing && unclassified.length > 0 && (version.status === 'DRAFT' || version.status === 'PENDING_APPROVAL') ? <UnclassifiedNote fields={unclassified} /> : null}
       {editing ? null : <div className={wide ? 'workbench workbench--wide' : 'workbench'}>
         {main}
         {wide ? null : <aside className="workbench__side">
           {version.status === 'PENDING_APPROVAL' ? decision(false) : null}
-          {version.status === 'DRAFT' && version.warnings.length > 0 ? (
+          {version.status === 'DRAFT' && personalData.length > 0 ? (
             // The author sees what the approver will see, before requesting publication.
             <section aria-labelledby="draft-pii-title">
               <h2 id="draft-pii-title" className="sr-only">{t('pii.title')}</h2>
-              <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
+              <PersonalDataWarnings warnings={personalData} definition={version.definition} />
             </section>
           ) : null}
           {lens === 'history' ? <EvidenceExport ruleSet={version.ruleSet} versions={versions} /> : null}

@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import { callHost, downloadFromHost, type HostRequest } from '../hostCall';
+import { chunksOf, displayNames, DISPLAY_NAMES_PATH, mergeNames, namesQuery, NO_NAMES, type DisplayNames, type WantedNames } from '../displayNames';
 import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
@@ -65,6 +66,8 @@ export interface DefinitionApproval {
  * If-Match.
  */
 export interface ProcessesClient {
+  /** getDisplayNames (host contract): readable names of roles, groups and users in `language`; only the known ones */
+  getDisplayNames(wanted: WantedNames, language: string, signal?: AbortSignal): Promise<DisplayNames>;
   /** listDefinitions: one page of keys, ordered by key */
   listDefinitions(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<DefinitionSummary>>;
   /** listPendingApprovals: one page of definition versions waiting for a second person, oldest request first (PRE-190) */
@@ -110,6 +113,12 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
   const withSignal = (signal: AbortSignal | undefined) => (signal ? { signal } : {});
 
   return {
+    async getDisplayNames(wanted, language, signal) {
+      const answers = await Promise.all(chunksOf(wanted).map(async (chunk) => (
+        await call({ method: 'GET', path: `${DISPLAY_NAMES_PATH}?${namesQuery(chunk)}`, headers: { 'Accept-Language': language }, ...withSignal(signal) }, displayNames)
+      ).data));
+      return answers.length === 0 ? NO_NAMES : mergeNames(answers);
+    },
     async listDefinitions(request = {}) {
       const query = new URLSearchParams();
       if (request.limit !== undefined) query.set('limit', String(request.limit));

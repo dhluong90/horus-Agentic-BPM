@@ -4,6 +4,7 @@ import { formatRoute, useRoute } from '../../app/route';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
 import type { MessageKey } from '../../i18n/en';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useWantNames, wantedOf } from '../processes/api/displayNames';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { Tabs } from '../rules/components/Tabs';
 import { Toast } from '../rules/components/Toast';
@@ -57,6 +58,7 @@ export function TasksPage({ view, taskId, refreshSeconds }: { view: QueueView | 
 
   const list = queues[active];
   const items = list.data?.data ?? [];
+  useWantNames(wantedOf(items.map((item) => item.assignee), items.map((item) => item.claimedBy)));
   const selected = items.find((item) => item.id === taskId) ?? items[0];
   const select = (id: string) => { navigate({ name: 'tasks', view: active, taskId: id }); };
 

@@ -608,3 +608,12 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .simrun__inputs { display: block; margin-top: 2px; color: var(--muted); font: var(--type-caption); overflow-wrap: anywhere; }
 .simrun__verdict { display: inline-flex; margin: 8px 0 0; }
 .simrun .cell-error { max-width: none; }
+
+/* Fields not classified (PD-146): neutral and quiet, one short band on the card ground; amber is kept for what needs
+ * attention. The sentence and the field names share a line where the width allows, and wrap under the title where not. */
+.unclassified { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--radius-m); background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); font-size: 13px; line-height: 1.45; --note-indent: 1.35em; }
+.unclassified__head { margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; }
+.unclassified__title { font-weight: 650; color: var(--ink); }
+.unclassified__icon { display: inline-block; width: calc(var(--note-indent) - 0.3em); color: var(--muted); }
+.unclassified__list { margin: 0; padding: 0 0 0 var(--note-indent); list-style: none; display: flex; flex-wrap: wrap; column-gap: 14px; color: var(--muted); }
+.workspace > .unclassified { margin-bottom: 12px; }

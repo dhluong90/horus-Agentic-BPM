@@ -1,16 +1,17 @@
 import { useId, useState } from 'react';
 import type { Task, TaskSummary } from '../../api/processes/schemas';
 import { toHostError } from '../../api/hostError';
-import { usePersonName } from '../../app/people';
 import { formatRoute } from '../../app/route';
 import { AreaError, LoadingRows } from '../../components/PageParts';
 import { useI18n, type Translate } from '../../i18n/I18nProvider';
+import { useNames, useWantNames, wantedOf, type Names } from '../processes/api/displayNames';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { containsMasked } from '../processes/model/review';
 import { formatDateTime } from '../rules/model/dates';
+import type { ProcessesClient } from '../../api/processes/processesClient';
 import { useQueueCommand, useQueueTask, type QueueCommand } from './api/useTasks';
-import { handOverCommand, refusalOf, slaOf } from './model/queue';
-import { AssigneeText, DueText, SlaMark, StatusMark, taskTitle, useAssigneeLabel } from './parts';
+import { assigneeRefusalOf, handOverCommand, refusalOf, slaOf, type AssigneeRefusal } from './model/queue';
+import { AssigneeText, DueText, SlaMark, StatusMark, taskTitle } from './parts';
 import { ReassignDialog } from './ReassignDialog';
 
 /** A refusal shown above the list, so it stays when the task leaves the list. */
@@ -51,9 +52,11 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
   refetch: () => Promise<Task | undefined>;
 }) {
   const { t, locale } = useI18n();
-  const { userId } = useProcessesSession();
-  const personName = usePersonName();
-  const assigneeLabel = useAssigneeLabel();
+  const { userId, client } = useProcessesSession();
+  const names = useNames();
+  const personName = names.user;
+  const assigneeLabel = names.assignee;
+  useWantNames(wantedOf([task.assignee], [task.claimedBy]));
   const command = useQueueCommand(task);
   const [dialog, setDialog] = useState(false);
   const whyId = useId();
@@ -67,16 +70,17 @@ function Detail({ task, summary, overdue, onNotice, onDone, refetch }: {
     onNotice(undefined);
     try {
       await command.mutateAsync(next);
-      onDone(doneText(next, title, personName, t));
+      onDone(doneText(next, title, (await namesFor(next, undefined, undefined, names, client, locale)).user, t));
       return true;
     } catch (error) {
       const host = toHostError(error);
       // Read the task again, so a claim lost to a colleague names them.
       const lost = next.kind === 'claim' && (refusalOf(host) === 'claimed-first' || refusalOf(host) === 'changed');
       const fresh = lost ? await refetch() : undefined;
+      const known = await namesFor(next, host, fresh, names, client, locale);
       const text = fresh?.claimedBy && fresh.claimedBy !== userId
-        ? t('tasks.refused.claimedFirst', { who: personName(fresh.claimedBy) })
-        : refusalText(host, next, fresh, personName, t);
+        ? t('tasks.refused.claimedFirst', { who: known.user(fresh.claimedBy) })
+        : refusalText(host, next, fresh, known, t);
       if (next.kind === 'reassign' || next.kind === 'delegate') throw new RefusedHandOver(text);
       onNotice({ text });
       return false;
@@ -166,14 +170,51 @@ function doneText(command: QueueCommand, title: string, personName: (login: stri
   }
 }
 
-function refusalText(error: ReturnType<typeof toHostError>, command: QueueCommand, fresh: Task | undefined, personName: (login: string) => string, t: Translate): string {
+/**
+ * The names a sentence about this command needs, asked now: the colleague handed the task or who took it first, and
+ * the role or group a target lacks. A lookup that fails leaves the identifiers in words; the sentence is never held
+ * back.
+ */
+async function namesFor(command: QueueCommand, error: ReturnType<typeof toHostError> | undefined, fresh: Task | undefined, names: Names, client: ProcessesClient, locale: string): Promise<Names> {
+  const required = error === undefined ? undefined : assigneeRefusalOf(error).required;
+  const users = [...('handOver' in command ? [command.handOver.assignee] : []), ...(fresh?.claimedBy ? [fresh.claimedBy] : [])];
+  const wanted = { roles: required?.kind === 'role' ? [required.id] : [], groups: required?.kind === 'group' ? [required.id] : [], users };
+  if (users.length === 0 && required === undefined) return names;
+  try {
+    const found = await client.getDisplayNames(wanted, locale);
+    return {
+      ...names,
+      role: (id) => found.roles[id] ?? names.role(id),
+      group: (id) => found.groups[id] ?? names.group(id),
+      user: (id) => found.users[id] ?? names.user(id),
+    };
+  } catch {
+    return names;
+  }
+}
+
+/** The one plain sentence for a refused hand-over target, by the engine's reason code; general without one. */
+function assigneeSentence(refusal: AssigneeRefusal, who: string, names: Names, t: Translate): string {
+  const lacks = refusal.required === undefined ? undefined : refusal.required.kind === 'role' ? names.role(refusal.required.id) : names.group(refusal.required.id);
+  switch (refusal.reason) {
+    case 'ALREADY_ASSIGNED': return t('tasks.refused.assignee.already', { who });
+    case 'FOUR_EYES_PARTICIPANT': return t('tasks.refused.assignee.fourEyes', { who });
+    case 'RESERVED_IDENTITY': return t('tasks.refused.assignee.reserved', { who });
+    case 'MISSING_ROLE': return lacks === undefined ? t('tasks.refused.assignee', { who }) : t('tasks.refused.assignee.role', { who, name: lacks });
+    case 'MISSING_GROUP': return lacks === undefined ? t('tasks.refused.assignee', { who }) : t('tasks.refused.assignee.group', { who, name: lacks });
+    case undefined: return t('tasks.refused.assignee', { who });
+  }
+}
+
+function refusalText(error: ReturnType<typeof toHostError>, command: QueueCommand, fresh: Task | undefined, names: Names, t: Translate): string {
+  const personName = names.user;
   const refusal = refusalOf(error);
   switch (refusal) {
     case 'claimed-first':
       if (command.kind !== 'claim') return t('tasks.refused.changed');
       return fresh?.claimedBy ? t('tasks.refused.claimedFirst', { who: personName(fresh.claimedBy) }) : t('tasks.refused.claimedFirstUnknown');
     case 'assignee-not-allowed':
-      return t('tasks.refused.assignee', { who: 'handOver' in command ? personName(command.handOver.assignee) : '' });
+      return assigneeSentence(assigneeRefusalOf(error), 'handOver' in command ? personName(command.handOver.assignee) : '', names, t);
     case 'changed':
       return t('tasks.refused.changed');
     case 'not-assigned':

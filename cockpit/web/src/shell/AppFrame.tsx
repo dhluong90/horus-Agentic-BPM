@@ -9,6 +9,7 @@ import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { DecisionPage } from '../features/decisions/DecisionPage';
 import { DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
+import { DisplayNamesProvider } from '../features/processes/api/displayNames';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { InstancePage } from '../features/processes/InstancePage';
@@ -58,7 +59,9 @@ export function AppFrame({ host, meta, me, fetchImpl, inboxSeconds = 30 }: Frame
     <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
-          <Frame meta={meta} me={me} inboxSeconds={inboxSeconds} />
+          <DisplayNamesProvider>
+            <Frame meta={meta} me={me} inboxSeconds={inboxSeconds} />
+          </DisplayNamesProvider>
         </PeopleProvider>
       </ProcessesProvider>
     </RulesProvider>

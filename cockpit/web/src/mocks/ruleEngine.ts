@@ -9,6 +9,7 @@
  * It accepts JSON text only (JSON is YAML), which is what the cockpit's editor sends.
  */
 
+import { DEMO_NAMES } from './displayNames';
 import { createAuditRoutes, type AuditOptions } from './auditEngine';
 import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from './ruleReadings';
 
@@ -92,6 +93,11 @@ function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   return self ? [] : ['approve', 'reject'];
 }
 
+/** The requester as the host's `DisplayNames` gives them in the caller's language; the login when none is known (#442). */
+function namedUser(login: string, request: FakeRequest): string {
+  return DEMO_NAMES[(request.headers['accept-language'] ?? '').toLowerCase().startsWith('vi') ? 'vi' : 'en'].users[login] ?? login;
+}
+
 /**
  * GET /approvals for this caller (RLE-190): what they may send, in the engine's order, and why approve and reject are
  * not offered. An empty `createdBy` stands for a version with no recorded author (PD-105).
@@ -103,7 +109,7 @@ function pendingItem(v: StoredVersion, request: FakeRequest) {
   const withdraw = v.requestedBy === request.user && request.permissions.includes('rules:author');
   return {
     ruleSet: v.ruleSet, version: v.version, canonicalHash: hash(JSON.stringify(v.definition)), lockVersion: v.lockVersion,
-    requestedBy: v.requestedBy ?? '', requestedAt: v.requestedAt ?? v.createdAt,
+    requestedBy: v.requestedBy ?? '', requestedByName: namedUser(v.requestedBy ?? '', request), requestedAt: v.requestedAt ?? v.createdAt,
     allowedActions: [...(denial === undefined ? ['approve', 'reject'] : []), ...(withdraw ? ['withdraw'] : [])],
     deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
   };
@@ -129,13 +135,16 @@ export interface AcknowledgementSettings {
   acknowledgeWarnings?: readonly string[];
   maskDefault?: boolean;
   requiresAcknowledgement?: (warning: { code: string; input: string }) => boolean;
+  /** classification.warn-unclassified (PD-146): list UNCLASSIFIED_INPUT reminders; off here so older demos stay as they were. */
+  warnUnclassified?: boolean;
 }
 
 /** Whether an approval must accept a warning: one rule for the version view and the approve check, as the engine. */
-type Marker = (warning: { code: string; input: string }) => boolean;
+type Marker = ((warning: { code: string; input: string }) => boolean) & { warnUnclassified?: boolean };
 
-function markerOf({ acknowledgeWarnings = ACKNOWLEDGE_WARNINGS, maskDefault = false, requiresAcknowledgement }: AcknowledgementSettings): Marker {
-  return requiresAcknowledgement ?? ((warning) => acknowledgeWarnings.includes(warning.code) && !maskDefault);
+function markerOf({ acknowledgeWarnings = ACKNOWLEDGE_WARNINGS, maskDefault = false, requiresAcknowledgement, warnUnclassified = false }: AcknowledgementSettings): Marker {
+  const marks = requiresAcknowledgement ?? ((warning: { code: string; input: string }) => acknowledgeWarnings.includes(warning.code) && !maskDefault);
+  return Object.assign((warning: { code: string; input: string }) => marks(warning), { warnUnclassified });
 }
 
 /** A part of the engine's built-in personal-data names (RLE-049), as words. */
@@ -155,6 +164,16 @@ function personalDataName(input: string): string | undefined {
 
 /** UNMASKED_PERSONAL_DATA for every input that declares no mask and looks like personal data, marked by the engine. */
 function warningsOf(definition: Definition, marks: Marker) {
+  const reminders = marks.warnUnclassified === true
+    ? definition.inputs.filter((input) => input.mask === undefined).map((input) => ({
+      code: 'UNCLASSIFIED_INPUT', input: input.name, matchedName: null, requiresAcknowledgement: false,
+      message: `Input ${input.name} is not classified: it declares neither mask true nor mask false. This does not block approval.`,
+    }))
+    : [];
+  return [...personalDataWarnings(definition, marks), ...reminders];
+}
+
+function personalDataWarnings(definition: Definition, marks: Marker) {
   return definition.inputs.flatMap((input) => {
     const matched = input.mask === undefined ? personalDataName(input.name) : undefined;
     if (matched === undefined) return [];

@@ -1,5 +1,5 @@
 import { useId, useState, type ReactNode } from 'react';
-import { readPendingWarnings, type AcknowledgedWarning, type RuleSetVersion } from '../../../api/rules/schemas';
+import { isUnclassified, readPendingWarnings, type AcknowledgedWarning, type RuleSetVersion } from '../../../api/rules/schemas';
 import { useI18n } from '../../../i18n/I18nProvider';
 import type { MessageKey } from '../../../i18n/en';
 import { useRulesSession } from '../api/rulesContext';
@@ -144,10 +144,11 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   // marks requiresAcknowledgement (RLE-053). The cockpit reads the engine's answer and never works it out itself.
   const refusal = refusedSet(approve.error);
   const refused = refusal !== undefined;
-  const toAccept: AcknowledgedWarning[] = refusal ?? version.warnings
+  const personalData = version.warnings.filter((w) => !isUnclassified(w));
+  const toAccept: AcknowledgedWarning[] = refusal ?? personalData
     .filter((w) => w.requiresAcknowledgement)
     .map(({ code, input }) => ({ code, input }));
-  const shown = refusal !== undefined && refusal.length > 0 ? refusal : version.warnings;
+  const shown = refusal !== undefined && refusal.length > 0 ? refusal : personalData;
   const accepted = tick.on && (!refused || tick.refusal === approve.error);
   const setAccepted = (on: boolean) => { setTick({ on, refusal: refused ? approve.error : undefined }); };
   const textId = useId();
