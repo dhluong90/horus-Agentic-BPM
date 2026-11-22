@@ -10,7 +10,7 @@ import { formatDateTime } from '../rules/model/dates';
 import { useProcessesSession } from './api/processesContext';
 import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useInstances, useRejectDefinition } from './api/useProcesses';
 import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
-import { DOCK_RESERVE } from './approval/dock';
+import { useDockReserve } from './approval/dock';
 import { InstanceStatusPill } from './InstanceStatusPill';
 import { approvalBlock, reviewedHash, type DiffState } from './model/graphDiff';
 import { flowOrder, type DiagramGraph } from './model/bpmnGraph';
@@ -42,6 +42,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
   const diff = useDefinitionDiff(definitionKey, version, reviewable);
   const approve = useApproveDefinition(definitionKey);
   const reject = useRejectDefinition(definitionKey);
+  const dockReserve = useDockReserve();
   // The outcome is the engine's answer to this page's decision; nothing is shown as decided before it.
   const decided = approve.isSuccess ? 'approved' : reject.isSuccess ? 'rejected' : undefined;
   const pending = details.data?.status === 'PENDING_APPROVAL';
@@ -83,7 +84,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
             )
           ) : shown === 'diagram' ? (
             <Suspense fallback={<LoadingRows rows={6} />}>
-              <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: DOCK_RESERVE } : {})} />
+              <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: dockReserve } : {})} />
             </Suspense>
           ) : <StepList graph={graph.data} />}
         </Tabs>

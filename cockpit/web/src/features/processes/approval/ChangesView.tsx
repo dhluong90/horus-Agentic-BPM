@@ -11,7 +11,7 @@ import {
   changedSteps, diagramType, humanise, linkKind, marksFor, pathParts, sideOf, type Mark, type Side,
 } from '../model/graphDiff';
 import { nodeTypeLabel } from '../model/nodeLabels';
-import { DOCK_RESERVE } from './dock';
+import { useDockReserve } from './dock';
 
 const DefinitionDiagram = lazy(() => import('../diagram/DefinitionDiagram'));
 
@@ -87,10 +87,10 @@ function ChangeList({ diff, selected, onSelect }: { diff: GraphDiff; selected: s
     <section className="pdiff__list" aria-labelledby={titleId}>
       <h2 id={titleId} className="pdiff__title">{t('diff.listTitle')}</h2>
       {diff.truncated ? (
-        <div className="notice notice--info pdiff__truncated">
-          <p className="notice__title"><span className="notice__icon" aria-hidden="true">ⓘ</span><span>{t('diff.truncated.title')}</span></p>
-          <p className="pdiff__note">{t('diff.truncated.reason')}</p>
-        </div>
+        // The reason Approve is unavailable is said once, beside it in the dock; the list says only what it holds.
+        <p className="notice notice--info notice--line pdiff__truncated">
+          <span className="notice__title"><span className="notice__icon" aria-hidden="true">ⓘ</span><span>{t('diff.truncated.reason')}</span></span>
+        </p>
       ) : null}
       {steps.length === 0 && links.length === 0 ? <p className="pdiff__note">{t('diff.none')}</p> : null}
       {steps.length > 0 ? (
@@ -147,6 +147,7 @@ function SideDiagram({ definitionKey, diff, side, onSide, selected, title, targe
   definitionKey: string; diff: GraphDiff; side: Side; onSide: (side: Side) => void; selected: string | undefined; title: string; targetGraph: DiagramGraph;
 }) {
   const { t } = useI18n();
+  const reserve = useDockReserve();
   const base = useDefinitionGraph(definitionKey, diff.base.version);
   const marks = useMemo(() => marksFor(diff, side), [diff, side]);
   const graph = side === 'target' ? targetGraph : base.data;
@@ -170,7 +171,7 @@ function SideDiagram({ definitionKey, diff, side, onSide, selected, title, targe
   }
   return (
     <Suspense fallback={<LoadingRows rows={6} />}>
-      <DefinitionDiagram graph={graph} marks={marks} markLabel={markLabel} selected={selected} toolbar={toolbar} reserve={DOCK_RESERVE} fill
+      <DefinitionDiagram graph={graph} marks={marks} markLabel={markLabel} selected={selected} toolbar={toolbar} reserve={reserve} fill
         label={t('diff.diagramLabel', { name: title, version: String(shown), count: String(graph.nodes.length) })} />
     </Suspense>
   );
@@ -184,12 +185,13 @@ export default function ChangesView({ definitionKey, diff, title, targetGraph }:
   const { t } = useI18n();
   const [side, setSide] = useState<Side>('target');
   const [selected, setSelected] = useState<string | undefined>(undefined);
+  const reserve = useDockReserve();
   if (diff === null) {
     return (
       <div className="pdiff pdiff--first">
         <p className="pdiff__note">{t('diff.firstVersion')}</p>
         <Suspense fallback={<LoadingRows rows={6} />}>
-          <DefinitionDiagram graph={targetGraph} reserve={DOCK_RESERVE} label={t('definition.diagramLabel', { name: title, count: String(targetGraph.nodes.length) })} />
+          <DefinitionDiagram graph={targetGraph} reserve={reserve} label={t('definition.diagramLabel', { name: title, count: String(targetGraph.nodes.length) })} />
         </Suspense>
       </div>
     );

@@ -48,7 +48,7 @@ export function CockpitShell(dependencies: SessionDependencies) {
     <div className="app">
       <SessionHeader session={summary(state, locale)} banner={registry?.ui?.environmentBanner} breadcrumb={state.status === 'ready' ? <Breadcrumb /> : undefined} />
       {state.status === 'ready' ? (
-        <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={dependencies.fetchImpl} inboxSeconds={state.registry.refresh?.inboxSeconds} />
+        <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={dependencies.fetchImpl} inboxSeconds={state.registry.refresh?.inboxSeconds} incidentsSeconds={state.registry.refresh?.incidentsSeconds} />
       ) : (
         <main id="main" className="main" tabIndex={-1}>
           <StatePanel state={state} />

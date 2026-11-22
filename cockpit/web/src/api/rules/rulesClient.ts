@@ -3,6 +3,8 @@ import { callHost, downloadFromHost, type HostRequest } from '../hostCall';
 import { HostCallError } from '../hostError';
 import {
   decisionResult,
+  discardedVersion,
+  type DiscardedVersion,
   page,
   ruleSetSummary,
   ruleSetVersion,
@@ -103,6 +105,8 @@ export interface RulesClient {
   reject(name: string, version: number, lockVersion: number, reviewedHash: string, reason: string, idempotencyKey: string): Promise<RuleSetVersion>;
   /** withdraw: the requester takes their own request back to DRAFT, with an optional reason (RLE-046, PD-089) */
   withdraw(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** discardDraft: the author drops their own draft; it becomes DISCARDED and stays in the history (RLE-098) */
+  discardDraft(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<DiscardedVersion>;
   /** getVersion */
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
   /** diffVersions: the engine's row-level diff of `version` against `base`; writes nothing (RLE-028) */
@@ -199,6 +203,18 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
           body: { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) },
         },
         ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async discardDraft(name, version, lockVersion, reason, idempotencyKey) {
+      const answer = await call(
+        {
+          method: 'POST',
+          path: `${versionPath(name, version)}:discard`,
+          headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
+          body: { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) },
+        },
+        discardedVersion,
       );
       return answer.data;
     },

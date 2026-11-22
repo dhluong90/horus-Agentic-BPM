@@ -41,6 +41,12 @@ const PATHS: Record<Area, ReactElement> = {
       <path d="M6.5 8.2 8 9.7l2.6-2.7M6.5 13h7" />
     </>
   ),
+  incidents: (
+    <>
+      <path d="M10 3 17.5 16.5h-15z" />
+      <path d="M10 8.5v3.5M10 14.2v.1" />
+    </>
+  ),
 };
 
 export function AreaIcon({ area }: { area: Area }) {

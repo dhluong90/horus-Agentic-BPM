@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { historyEntry, VERSION_STATUSES } from './schemas';
+import { historyEntry, HISTORY_STATUSES } from './schemas';
 
 /*
  * Response shapes of the Rule Engine's audit reads (rule-engine/api/openapi.yaml): the decision log
@@ -102,7 +102,7 @@ export type RuleSetEvent = z.infer<typeof ruleSetEvent>;
 export const versionHistoryLine = z
   .object({
     version: z.number().int().min(1),
-    status: z.enum(VERSION_STATUSES),
+    status: z.enum(HISTORY_STATUSES),
     effectiveFrom: nullableString,
     effectiveTo: nullableString,
     canonicalHash: z.string(),

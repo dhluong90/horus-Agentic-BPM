@@ -98,6 +98,8 @@ const SCREENS: readonly Screen[] = [
     prepare: async () => { /* the route below answers an empty list */ },
     focal: (page) => page.locator('.tasks__empty .link-action'),
   },
+  { name: 'supervisor-overdue', user: meSau, hash: '#/tasks?view=all&overdue=1', focal: (page) => page.locator('.filter-toggle[aria-pressed="true"]') },
+  { name: 'operator-overdue-none', user: meAn, hash: '#/tasks?view=mine&overdue=1', focal: (page) => page.locator('.tasks__empty .link-action') },
   { name: 'supervisor-all', user: meSau, hash: '#/tasks?view=all', focal: (page, l) => inspector(page).getByRole('button', { name: T.reassign[l] }) },
   { name: 'supervisor-four-eyes', user: meSau, hash: `#/tasks?view=all&task=${QUEUE_TASKS.approveOwnCase}`, focal: (page) => inspector(page).locator('.tasks__why') },
   { name: 'supervisor-claimed-by-colleague', user: meSau, hash: `#/tasks?view=all&task=${QUEUE_TASKS.collateral}`, focal: (page, l) => inspector(page).getByRole('button', { name: T.reassign[l] }) },
@@ -163,7 +165,7 @@ for (const screen of SCREENS) {
         test(`TR_UI_03_visual_tasks_${screen.name}_${size}_${theme}_${locale}`, async ({ page }) => {
           await openScreen(page, screen, viewport, theme, locale);
           await expectAboveFold(screen.focal(page, locale), viewport.height);
-          if (screen.name !== 'operator-empty') await expectAboveFold(page.locator('.tasks__table tbody tr').first(), viewport.height);
+          if (!['operator-empty', 'operator-overdue-none'].includes(screen.name)) await expectAboveFold(page.locator('.tasks__table tbody tr').first(), viewport.height);
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
           await page.screenshot({ path: `${SHOTS}/tasks-${screen.name}-${size}-${theme}-${locale}.png`, fullPage: false });
         });
@@ -182,6 +184,24 @@ for (const screen of SCREENS) {
     });
   }
 }
+
+test('CKP_050_demo_the_queue_filtered_to_two_overdue_tasks_and_the_filter_kept_in_the_link', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const engine = await mockEngines(page, meSau, 'en');
+  await page.goto('./#/tasks?view=all');
+  const filter = page.getByRole('button', { name: 'Overdue 2' });
+  await expect(filter).toHaveAttribute('aria-pressed', 'false');
+  await filter.focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#\/tasks\?view=all&overdue=1$/);
+  await expect(page.locator('.tasks__table tbody tr')).toHaveCount(2);
+  await expect(page.getByText('2 overdue, oldest first')).toBeVisible();
+  expect(engine.requests.some((request) => request.path === '/api/bpm/processes/v1/tasks?assignment=any&slaBreached=true&limit=50')).toBe(true);
+  // A shared link opens the same view.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Overdue 2' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.tasks__table tbody tr')).toHaveCount(2);
+});
 
 test('CKP_046_claim_is_reached_and_sent_by_keyboard_alone_with_a_visible_focus', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

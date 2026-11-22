@@ -57,4 +57,19 @@ describe('routes', () => {
     expect(parseRoute(formatRoute(cases))).toEqual(cases);
     expect(parseRoute('#/processes/loan-origination/3/other')).toEqual({ name: 'process', key: 'loan-origination', version: 3 });
   });
+
+  it('CKP_050_the_overdue_filter_is_kept_in_the_link_and_anything_else_is_ignored', () => {
+    const late: Route = { name: 'tasks', view: 'all', overdue: true, taskId: '01JD5Q1CRED1TREV1EW0000T01' };
+    expect(formatRoute(late)).toBe('#/tasks?view=all&overdue=1&task=01JD5Q1CRED1TREV1EW0000T01');
+    expect(parseRoute(formatRoute(late))).toEqual(late);
+    expect(parseRoute('#/tasks?view=mine&overdue=yes')).toEqual({ name: 'tasks', view: 'mine' });
+  });
+
+  it('CKP_008_the_incident_tab_and_incident_round_trip_and_a_bad_id_is_never_requested', () => {
+    const pending: Route = { name: 'incidents', view: 'pending', incidentId: '01JD6N5PR0P0SED0000000N005' };
+    expect(formatRoute(pending)).toBe('#/incidents?view=pending&incident=01JD6N5PR0P0SED0000000N005');
+    expect(parseRoute(formatRoute(pending))).toEqual(pending);
+    expect(areaOf(pending)).toBe('incidents');
+    expect(parseRoute('#/incidents?view=closed&incident=../x')).toEqual({ name: 'incidents' });
+  });
 });

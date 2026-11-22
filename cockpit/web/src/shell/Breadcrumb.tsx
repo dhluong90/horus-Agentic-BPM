@@ -11,6 +11,7 @@ const AREA_TITLE: Record<Exclude<Route['name'], 'home' | 'rule-set' | 'process' 
   decisions: 'menu.decisions',
   processes: 'menu.processes',
   tasks: 'menu.tasks',
+  incidents: 'menu.incidents',
 };
 
 /** Where the user is, over the content: `Rules / card-fee / Version 2`. Nothing on Home. */

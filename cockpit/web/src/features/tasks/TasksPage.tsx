@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import type { TaskSummary } from '../../api/processes/schemas';
 import { formatRoute, useRoute } from '../../app/route';
-import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
+import { AreaError, EmptyState, ErrorAlert, LoadingRows, PageHead } from '../../components/PageParts';
 import type { MessageKey } from '../../i18n/en';
+import { useKeepInView } from '../../components/useKeepInView';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { Tabs } from '../rules/components/Tabs';
 import { Toast } from '../rules/components/Toast';
-import { useOverdue, useQueue } from './api/useTasks';
+import { useQueue } from './api/useTasks';
 import { MANAGE, slaOf, viewsFor, type QueueView } from './model/queue';
 import { AssigneeText, DueText, SlaMark, StatusMark, taskTitle } from './parts';
 import { TaskInspector, type Notice } from './TaskInspector';
@@ -31,7 +32,7 @@ const EMPTY: Record<QueueView, MessageKey> = {
   all: 'tasks.empty.all',
 };
 
-export function TasksPage({ view, taskId, refreshSeconds }: { view: QueueView | undefined; taskId: string | undefined; refreshSeconds: number }) {
+export function TasksPage({ view, taskId, overdue: overdueOnly = false, refreshSeconds }: { view: QueueView | undefined; taskId: string | undefined; overdue?: boolean; refreshSeconds: number }) {
   const { t } = useI18n();
   const { can } = useProcessesSession();
   const [, navigate] = useRoute();
@@ -42,23 +43,33 @@ export function TasksPage({ view, taskId, refreshSeconds }: { view: QueueView | 
     candidate: useQueue('candidate', views.includes('candidate'), refreshSeconds),
     all: useQueue('all', views.includes('all'), refreshSeconds),
   };
-  const overdue = useOverdue(views, refreshSeconds);
+  // The active tab's overdue tasks, from the engine (CKP-034, CKP-050): the filter's count, and the list when it is on.
+  const late = useQueue(active, views.length > 0, refreshSeconds, true);
+  const overdue = late.data !== undefined ? new Set(late.data.data.map((task) => task.id)) : undefined;
   const [notice, setNotice] = useState<Notice | undefined>(undefined);
   const [toast, setToast] = useState<string | undefined>(undefined);
   const closeToast = () => { setToast(undefined); };
 
+  const countText = (data: { data: readonly unknown[]; hasNext: boolean }) => (data.hasNext ? t('tasks.more', { count: String(data.data.length) }) : String(data.data.length));
   const tabLabel = (item: QueueView) => {
     const label = t(TAB_LABEL[item]);
     const data = queues[item].data;
     if (data === undefined) return label;
-    const count = data.hasNext ? t('tasks.more', { count: String(data.data.length) }) : String(data.data.length);
-    return t('tasks.tab.withCount', { label, count });
+    return t('tasks.tab.withCount', { label, count: countText(data) });
   };
 
-  const list = queues[active];
+  const list = overdueOnly ? late : queues[active];
   const items = list.data?.data ?? [];
   const selected = items.find((item) => item.id === taskId) ?? items[0];
-  const select = (id: string) => { navigate({ name: 'tasks', view: active, taskId: id }); };
+  const select = (id: string) => { navigate({ name: 'tasks', view: active, overdue: overdueOnly, taskId: id }); };
+  const filter = (
+    <button type="button" className="filter-toggle hit" aria-pressed={overdueOnly}
+      onClick={() => { setNotice(undefined); navigate({ name: 'tasks', view: active, overdue: !overdueOnly }); }}>
+      <span className="filter-toggle__icon" aria-hidden="true">▲</span>
+      {t('tasks.filter.overdue')}
+      {late.data !== undefined ? <>{' '}<span className="filter-toggle__count tnum">{countText(late.data)}</span></> : null}
+    </button>
+  );
 
   return (
     <section className="workspace tasks" aria-labelledby="tasks-title">
@@ -67,8 +78,9 @@ export function TasksPage({ view, taskId, refreshSeconds }: { view: QueueView | 
         label={t('tasks.tabs')}
         items={views.map((item) => ({ id: item, label: tabLabel(item) }))}
         selected={active}
-        onSelect={(next) => { setNotice(undefined); navigate({ name: 'tasks', view: next }); }}
+        onSelect={(next) => { setNotice(undefined); navigate({ name: 'tasks', view: next, overdue: overdueOnly }); }}
         className="tasks__tabs"
+        aside={filter}
       >
         {notice !== undefined ? <NoticeLine notice={notice} onClose={() => { setNotice(undefined); }} /> : null}
         {list.isPending ? (
@@ -77,14 +89,18 @@ export function TasksPage({ view, taskId, refreshSeconds }: { view: QueueView | 
           <article className="card"><AreaError error={list.error} onRetry={() => { void list.refetch(); }} /></article>
         ) : items.length === 0 ? (
           <article className="card tasks__empty">
-            <EmptyState icon="tasks" text={t(EMPTY[active])}
-              action={active === 'mine' && views.includes('candidate') ? { label: t('tasks.empty.mineAction'), href: formatRoute({ name: 'tasks', view: 'candidate' }) } : undefined} />
+            {overdueOnly ? (
+              <EmptyState icon="tasks" text={t('tasks.empty.overdue')} action={{ label: t('tasks.empty.overdueAction'), href: formatRoute({ name: 'tasks', view: active }) }} />
+            ) : (
+              <EmptyState icon="tasks" text={t(EMPTY[active])}
+                action={active === 'mine' && views.includes('candidate') ? { label: t('tasks.empty.mineAction'), href: formatRoute({ name: 'tasks', view: 'candidate' }) } : undefined} />
+            )}
           </article>
         ) : (
           <div className="tasks__grid">
-            <QueueTable items={items} hasMore={list.data.hasNext} overdue={overdue.data} selectedId={selected?.id} view={active} onSelect={select} />
+            <QueueTable items={items} hasMore={list.data.hasNext} overdue={overdue} overdueOnly={overdueOnly} selectedId={selected?.id} view={active} onSelect={select} />
             {selected !== undefined ? (
-              <TaskInspector key={selected.id} summary={selected} overdue={overdue.data} onNotice={setNotice} onDone={(text) => { setNotice(undefined); setToast(text); }} />
+              <TaskInspector key={selected.id} summary={selected} overdue={overdue} onNotice={setNotice} onDone={(text) => { setNotice(undefined); setToast(text); }} />
             ) : null}
           </div>
         )}
@@ -97,25 +113,25 @@ export function TasksPage({ view, taskId, refreshSeconds }: { view: QueueView | 
 function NoticeLine({ notice, onClose }: { notice: Notice; onClose: () => void }) {
   const { t } = useI18n();
   return (
-    <div className="alert alert--error tasks__notice" role="alert">
-      <span className="alert__icon" aria-hidden="true">✕</span>
-      <div className="alert__body"><p>{notice.text}</p></div>
-      <button type="button" className="btn btn--quiet btn--small hit" onClick={onClose}>{t('toast.close')}</button>
-    </div>
+    <ErrorAlert className="tasks__notice" text={notice.text} error={notice.error}
+      action={<button type="button" className="btn btn--quiet btn--small hit" onClick={onClose}>{t('toast.close')}</button>} />
   );
 }
 
-function QueueTable({ items, hasMore, overdue, selectedId, view, onSelect }: {
+function QueueTable({ items, hasMore, overdue, overdueOnly, selectedId, view, onSelect }: {
   items: readonly TaskSummary[];
   hasMore: boolean;
   overdue: ReadonlySet<string> | undefined;
+  overdueOnly: boolean;
   selectedId: string | undefined;
   view: QueueView;
   onSelect: (id: string) => void;
 }) {
   const { t } = useI18n();
-  const late = items.filter((item) => slaOf(item, overdue) === 'BREACHED').length;
-  const count = items.length === 1 && !hasMore ? t('tasks.summaryOne') : t('tasks.summary', { count: hasMore ? t('tasks.more', { count: String(items.length) }) : String(items.length) });
+  const selectedRow = useKeepInView<HTMLTableRowElement>(selectedId);
+  const late = overdueOnly ? 0 : items.filter((item) => slaOf(item, overdue) === 'BREACHED').length;
+  const shown = hasMore ? t('tasks.more', { count: String(items.length) }) : String(items.length);
+  const count = overdueOnly ? t('tasks.summaryOverdueOnly', { count: shown }) : items.length === 1 && !hasMore ? t('tasks.summaryOne') : t('tasks.summary', { count: shown });
   return (
     <article className="card card--table tasks__list" aria-labelledby="tasks-list-title">
       <div className="card__head card__head--padded">
@@ -137,9 +153,9 @@ function QueueTable({ items, hasMore, overdue, selectedId, view, onSelect }: {
           {items.map((item) => {
             const isSelected = item.id === selectedId;
             return (
-              <tr key={item.id} className={isSelected ? 'is-selected' : undefined}>
+              <tr key={item.id} className={isSelected ? 'is-selected' : undefined} ref={isSelected ? selectedRow : undefined}>
                 <th scope="row">
-                  <a className="qtable__link tasks__name" href={formatRoute({ name: 'tasks', view, taskId: item.id })} aria-current={isSelected ? 'true' : undefined}
+                  <a className="qtable__link tasks__name" href={formatRoute({ name: 'tasks', view, overdue: overdueOnly, taskId: item.id })} aria-current={isSelected ? 'true' : undefined}
                     onClick={(event) => { event.preventDefault(); onSelect(item.id); }}>
                     {taskTitle(item, t)}
                   </a>

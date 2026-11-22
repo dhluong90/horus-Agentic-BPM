@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, DraftValidation, RuleSetVersion, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, RuleSetVersion, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -213,6 +213,30 @@ export function useRequestPublish(onDone: (version: RuleSetVersion) => void) {
     async (version) => {
       await refresh();
       onDone(version);
+    },
+  );
+}
+
+/**
+ * Discards the author's own draft (RLE-098). Nothing is deleted: the version becomes DISCARDED and leaves every list,
+ * so after the engine answers the lists are read again and the screen moves on.
+ */
+export function useDiscardDraft(onDone: (version: DiscardedVersion) => void) {
+  const { client } = useRulesSession();
+  const queryClient = useQueryClient();
+  const keys = useKeys();
+  return useSingleFlight(
+    ({ version, reason }: { version: VersionSummary; reason: string | undefined }, key) => client.discardDraft(version.ruleSet, version.version, version.lockVersion, reason, key),
+    async (discarded) => {
+      // The version list first, so the screen opens the version now in front; the discarded one is never read again.
+      await queryClient.invalidateQueries({ queryKey: keys.versions(discarded.ruleSet) });
+      queryClient.removeQueries({ queryKey: keys.version(discarded.ruleSet, discarded.version) });
+      onDone(discarded);
+      await queryClient.invalidateQueries({ queryKey: keys.all, predicate: (query) => {
+        // [host, tenant, 'rules', name, kind, version, ...]: nothing about the discarded version is read again.
+        const [, , , name, , number] = query.queryKey;
+        return !(name === discarded.ruleSet && number === discarded.version);
+      } });
     },
   );
 }

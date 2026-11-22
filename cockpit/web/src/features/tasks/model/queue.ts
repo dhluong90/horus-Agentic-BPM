@@ -35,11 +35,6 @@ export function queryOf(view: QueueView): Pick<TaskQuery, 'assignment' | 'status
   }
 }
 
-/** The assignment that covers every tab this user sees, for the one query that asks the engine which are overdue. */
-export function overdueAssignment(views: readonly QueueView[]): TaskQuery['assignment'] {
-  return views.includes('all') ? ['any'] : ['mine', 'candidate'];
-}
-
 export type Assignee =
   | { kind: 'user'; id: string }
   | { kind: 'role'; name: string }

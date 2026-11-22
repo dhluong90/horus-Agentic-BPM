@@ -56,11 +56,14 @@ export type RuleSetDefinition = z.infer<typeof ruleSetDefinition>;
 
 export const VERSION_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'RETIRED'] as const;
 export type VersionStatus = (typeof VERSION_STATUSES)[number];
+/** A version the history still shows after its author discarded it (RLE-098); no list or picker offers it. */
+export const HISTORY_STATUSES = [...VERSION_STATUSES, 'DISCARDED'] as const;
+export type HistoryStatus = (typeof HISTORY_STATUSES)[number];
 
 const nullableString = z.string().nullable().optional();
 
 /** Lifecycle actions the engine says the caller may take now. A hint for screens; the engine checks again. */
-export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject', 'withdraw'] as const;
+export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject', 'withdraw', 'discard'] as const;
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
 /** Unknown actions from a newer engine are dropped, never rejected. */
 const allowedActions = z.array(z.string()).transform((items) => items.filter((item): item is AllowedAction => (ALLOWED_ACTIONS as readonly string[]).includes(item)));
@@ -81,6 +84,13 @@ const lifecycle = {
   createdAt: z.string(),
   allowedActions: allowedActions.default([]),
 };
+
+/**
+ * The answer to `:discard` (RLE-098): the version is now DISCARDED, a status no screen lists, so only what the
+ * screen needs is read from it.
+ */
+export const discardedVersion = z.object({ ruleSet: z.string(), version: z.number().int().min(1), status: z.string(), lockVersion: z.number().int() }).loose();
+export type DiscardedVersion = z.infer<typeof discardedVersion>;
 
 /** An item of GET /rule-sets/{name}/versions: the lifecycle fields without the definition. */
 export const versionSummary = z.object(lifecycle).loose();
