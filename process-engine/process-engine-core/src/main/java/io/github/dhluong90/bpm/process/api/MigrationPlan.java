@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.process.api;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -18,11 +19,23 @@ import java.util.Objects;
  * @param approval the approval an execution of this plan needs
  * @param createdBy who created the plan
  * @param createdAt when
+ * @param mappings the renamed steps the plan maps (#106), empty for none
+ * @param cancellations the removed steps whose work the plan cancels (#106), empty for none
  */
 public record MigrationPlan(String id, String definitionKey, int sourceVersion, int targetVersion, String status,
-        String planHash, Approval approval, String createdBy, Instant createdAt) {
+        String planHash, Approval approval, String createdBy, Instant createdAt, List<MigrationStepMapping> mappings,
+        List<MigrationStepCancellation> cancellations) {
+
+    /** A plan with no step instructions. */
+    public MigrationPlan(String id, String definitionKey, int sourceVersion, int targetVersion, String status,
+            String planHash, Approval approval, String createdBy, Instant createdAt) {
+        this(id, definitionKey, sourceVersion, targetVersion, status, planHash, approval, createdBy, createdAt,
+                List.of(), List.of());
+    }
 
     public MigrationPlan {
+        mappings = mappings == null ? List.of() : List.copyOf(mappings);
+        cancellations = cancellations == null ? List.of() : List.copyOf(cancellations);
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(definitionKey, "definitionKey");
         Objects.requireNonNull(status, "status");

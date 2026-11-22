@@ -183,6 +183,11 @@ final class TestEngine {
         if (b.roleCatalogue != null) {
             services.useRoleCatalogue(b.roleCatalogue);
         }
+        if (b.importedLayouts) {
+            // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
+            this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
+                    new io.github.dhluong90.bpm.process.bpmn.subset.BpmnLayoutReader(Limits.DEFAULTS)::read));
+        }
         this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
                 new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
                         tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
@@ -329,6 +334,7 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
         private io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue;
+        private boolean importedLayouts;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -348,6 +354,12 @@ final class TestEngine {
         /** The host's role list that approval asks about escalation targets (PRE-180); none by default. */
         Builder roleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue value) {
             this.roleCatalogue = value;
+            return this;
+        }
+
+        /** Stores the diagram of an imported BPMN file as layout revision 1, as the starter does (#445). */
+        Builder importedLayouts() {
+            importedLayouts = true;
             return this;
         }
 

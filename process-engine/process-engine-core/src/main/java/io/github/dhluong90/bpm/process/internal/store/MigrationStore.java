@@ -102,6 +102,44 @@ public interface MigrationStore {
         }
     }
 
+    /**
+     * What a cancelled step had open at a token (#106): the task, if any, and the jobs that were still due.
+     *
+     * @param taskId the cancelled task, or null
+     * @param jobIds the cancelled jobs, in id order
+     */
+    record CancelledWork(String taskId, List<String> jobIds) {
+        public CancelledWork {
+            jobIds = List.copyOf(jobIds);
+        }
+    }
+
+    /**
+     * @return running instances of one definition version with a remote call in flight (a {@code CLAIMED} service or
+     *     agent job) at any of the steps (#106)
+     */
+    long inFlightInstances(String tenant, String definitionId, Collection<String> nodeIds);
+
+    /** @return up to {@code limit} such instance ids, in id order (#106) */
+    List<String> inFlightInstanceIds(String tenant, String definitionId, Collection<String> nodeIds, int limit);
+
+    /** @return true when the token has a remote call in flight: a {@code CLAIMED} service or agent job (#106) */
+    boolean callInFlight(String tenant, String instanceId, String tokenId);
+
+    /**
+     * Moves a token and everything that waits for it from a step to its renamed counterpart: the token, its open task
+     * (which keeps its id, claim, due time and four-eyes restriction), its pending jobs and its open incidents (#106).
+     */
+    void renameStep(String tenant, String instanceId, String tokenId, String fromNode, String toNode);
+
+    /**
+     * Cancels the open task and the due jobs of a token, as a removed step's work is cancelled (#106). Compensation
+     * stack entries are not touched.
+     *
+     * @return what was cancelled
+     */
+    CancelledWork cancelOpenWork(String tenant, String instanceId, String tokenId, Instant now);
+
     /** Locks the plan row for the proposal commands. */
     Optional<Execution> lockExecution(String tenant, String migrationId);
 

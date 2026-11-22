@@ -42,6 +42,9 @@ public final class EngineDefaults {
     /** {@code lifecycle.reason-max-length}: longest cancellation reason (PD-103); may be lowered, never raised. */
     public static final int MAX_REASON_LENGTH = 2_000;
 
+    /** {@code calls.max-depth}: most calls one above another (#92); may be lowered, never raised. */
+    public static final int MAX_CALL_DEPTH = 5;
+
     /** Longest business key. */
     public static final int MAX_BUSINESS_KEY_LENGTH = 200;
 

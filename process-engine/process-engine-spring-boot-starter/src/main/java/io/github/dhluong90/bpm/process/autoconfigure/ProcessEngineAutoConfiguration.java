@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.process.api.ProcessEngine;
 import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.TaskService;
+import io.github.dhluong90.bpm.process.bpmn.subset.BpmnLayoutReader;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnReader;
 import io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
@@ -334,7 +335,8 @@ public class ProcessEngineAutoConfiguration {
             ObjectProvider<AgentAdapter> agents, ObjectProvider<ServiceTaskHandler> handlers, BeanFactory beans,
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
             OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
-            ObjectProvider<AssigneeDirectory> directory, ObjectProvider<RoleCatalogue> roles) {
+            ObjectProvider<AssigneeDirectory> directory, ObjectProvider<RoleCatalogue> roles,
+            JdbcLayoutStore layoutStore) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -366,6 +368,11 @@ public class ProcessEngineAutoConfiguration {
         RoleCatalogue catalogue = roles.getIfUnique(() -> RoleCatalogue.ACCEPT_ALL);
         warnWhenRolesAreNotChecked(environment, catalogue);
         services.useRoleCatalogue(catalogue);
+        // #92: how deep one call may sit above another.
+        services.useCallDepth(properties.calls().maxDepth());
+        // #445: an imported BPMN file's own diagram is stored as layout revision 1 of the version.
+        BpmnLayoutReader layoutReader = new BpmnLayoutReader(reader.limits());
+        services.useImportedLayouts(layoutStore, Map.of(SourceFormat.BPMN_XML, layoutReader::read));
         return services;
     }
 
@@ -578,7 +585,8 @@ public class ProcessEngineAutoConfiguration {
             ProcessEventPublisher publisher, ProcessEngineProperties properties) {
         return new Migrations(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
                 clock.getIfUnique(Clock::systemUTC), transactions, store, migrations, services::storedModel, publisher,
-                properties.migration().toSettings(), properties.idempotencyRetention());
+                properties.migration().toSettings().withReasonMaxLength(properties.lifecycle().reasonMaxLength()),
+                properties.idempotencyRetention());
     }
 
     /**

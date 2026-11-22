@@ -191,13 +191,13 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date() {
-        byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/><bpmn:callActivity id=\"c\"/>"
+        byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
                 + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:scriptTask id=\"sc\"/><bpmn:choreographyTask id=\"ch\"/>"
                 + "<bpmn:eventBasedGateway id=\"eg\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {
             assertThat(e.problems()).extracting(DefinitionProblem::stage)
-                    .containsExactly("S0", "S0", "S1", "not planned", "S2");
+                    .containsExactly("S0", "S1", "not planned", "S2");
             assertThat(e.problems()).extracting(DefinitionProblem::message)
                     .allSatisfy(m -> assertThat(m).doesNotContainIgnoringCase("sprint").doesNotContain("next")
                             .doesNotContain("later").doesNotContainPattern("20\\d\\d"));

@@ -9,6 +9,9 @@ import io.github.dhluong90.bpm.process.api.InvalidStateException;
 import io.github.dhluong90.bpm.process.api.MigrationDryRun;
 import io.github.dhluong90.bpm.process.api.MigrationNotFoundException;
 import io.github.dhluong90.bpm.process.api.MigrationPlan;
+import io.github.dhluong90.bpm.process.api.MigrationPlanInvalidException;
+import io.github.dhluong90.bpm.process.api.MigrationStepCancellation;
+import io.github.dhluong90.bpm.process.api.MigrationStepMapping;
 import io.github.dhluong90.bpm.process.api.MigrationPlanRequest;
 import io.github.dhluong90.bpm.process.api.MigrationService;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
@@ -36,6 +39,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +68,9 @@ public final class Migrations implements MigrationService {
     private static final System.Logger LOG = System.getLogger(Migrations.class.getName());
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final Pattern ID = Pattern.compile("^[0-9A-Za-z]{1,26}$");
+    private static final Pattern STEP_ID = Pattern.compile("^[A-Za-z_][A-Za-z0-9_.-]{0,99}$");
+    /** Most mappings, and most cancellations, in one plan. */
+    static final int MAX_INSTRUCTIONS = 200;
     private static final Set<String> MIGRATABLE_SOURCE = Set.of("ACTIVE", "RETIRED");
 
     private final TenantResolver tenants;
@@ -119,8 +126,14 @@ public final class Migrations implements MigrationService {
         if (request.sourceVersion() == request.targetVersion()) {
             throw new InputInvalidException("sourceVersion and targetVersion must differ");
         }
-        String requestHash = Hashes.sha256Parts("migration-plan", caller, key,
-                Integer.toString(request.sourceVersion()), Integer.toString(request.targetVersion()));
+        String instructions = instructionsText(request.mappings(), request.cancellations());
+        // The instructions join the request hash only when there are some, so a plan stored before they existed still
+        // replays under its key.
+        String requestHash = instructions.isEmpty()
+                ? Hashes.sha256Parts("migration-plan", caller, key, Integer.toString(request.sourceVersion()),
+                        Integer.toString(request.targetVersion()))
+                : Hashes.sha256Parts("migration-plan", caller, key, Integer.toString(request.sourceVersion()),
+                        Integer.toString(request.targetVersion()), instructions);
         return transactions.inTransaction(() -> idempotent(tenant, request.idempotencyKey(), requestHash, () -> {
             StoredDefinition source = version(tenant, key, request.sourceVersion());
             StoredDefinition target = version(tenant, key, request.targetVersion());
@@ -133,18 +146,28 @@ public final class Migrations implements MigrationService {
                         + source.status() + " and has no running instances to move");
             }
             // Both models are read through the integrity check, so a plan is never made over a tampered source.
-            models.apply(source);
-            models.apply(target);
+            Map<String, Step> from = steps(models.apply(source));
+            Map<String, Step> to = steps(models.apply(target));
+            checkInstructions(request.mappings(), request.cancellations(), from, to);
             Instant now = clock.instant();
             String id = Ulid.next(now);
             MigrationPlan plan = new MigrationPlan(id, key, source.version(), target.version(), PLANNED,
-                    planHash(source, target), settings.approval(), caller, now);
+                    planHash(source, target, instructions), settings.approval(), caller, now, request.mappings(),
+                    request.cancellations());
             store.insertPlan(new StoredPlan(tenant, plan, source.id(), target.id()));
             Map<String, Object> details = new LinkedHashMap<>();
             details.put("sourceVersion", plan.sourceVersion());
             details.put("targetVersion", plan.targetVersion());
             details.put("planHash", plan.planHash());
             details.put("approval", plan.approval().value());
+            if (!plan.mappings().isEmpty()) {
+                details.put("mappings", plan.mappings().stream().map(m -> m.from() + " -> " + m.to()).toList());
+            }
+            if (!plan.cancellations().isEmpty()) {
+                // The reasons are in the plan row and in each instance's history; the plan's history names the steps.
+                details.put("cancellations", plan.cancellations().stream().map(c -> c.step() + " -> " + c.moveTo())
+                        .toList());
+            }
             store.insertHistory(tenant, Ids.child(id, 0), id, PLANNED, caller, details, now);
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("migrationId", id);
@@ -187,20 +210,37 @@ public final class Migrations implements MigrationService {
         Map<String, Step> from = steps(models.apply(source));
         Map<String, Step> to = steps(models.apply(target));
         int sample = settings.dryRunSampleSize();
+        Map<String, MigrationStepMapping> mapped = new HashMap<>();
+        plan.mappings().forEach(m -> mapped.put(m.from(), m));
+        Map<String, MigrationStepCancellation> cancelled = new HashMap<>();
+        plan.cancellations().forEach(c -> cancelled.put(c.step(), c));
 
         List<MigrationDryRun.NodeMapping> nodes = new ArrayList<>();
         List<MigrationDryRun.Conflict> conflicts = new ArrayList<>();
         List<String> blockedNodes = new ArrayList<>();
+        List<String> mappedNodes = new ArrayList<>();
+        List<String> cancelNodes = new ArrayList<>();
         new TreeMap<>(store.liveTokensByNode(tenant, source.id())).forEach((nodeId, tokens) -> {
             Step was = from.get(nodeId);
-            Step now = to.get(nodeId);
+            // The step the tokens go to: the plan's mapping or cancellation, otherwise the step with the same id.
+            MigrationStepMapping map = mapped.get(nodeId);
+            MigrationStepCancellation cancel = map == null ? cancelled.get(nodeId) : null;
+            String targetId = map != null ? map.to() : cancel != null ? cancel.moveTo() : nodeId;
+            Step now = to.get(targetId);
             String mapping = now == null ? MigrationDryRun.STEP_NOT_IN_TARGET
+                    : map != null ? (was != null && !Objects.equals(was.type(), now.type())
+                            ? MigrationDryRun.STEP_TYPE_CHANGED : MigrationDryRun.MAPPED)
+                    : cancel != null ? MigrationDryRun.CANCELLED
                     : was != null && !Objects.equals(was.type(), now.type()) ? MigrationDryRun.STEP_TYPE_CHANGED
                     : SAME_ID;
             nodes.add(new MigrationDryRun.NodeMapping(nodeId, was == null ? null : was.name(),
-                    was == null ? null : was.type(), tokens, mapping, now == null ? null : nodeId,
+                    was == null ? null : was.type(), tokens, mapping, now == null ? null : targetId,
                     now == null ? null : now.type()));
-            if (!SAME_ID.equals(mapping)) {
+            if (MigrationDryRun.MAPPED.equals(mapping)) {
+                mappedNodes.add(nodeId);
+            } else if (MigrationDryRun.CANCELLED.equals(mapping)) {
+                cancelNodes.add(nodeId);
+            } else if (!SAME_ID.equals(mapping)) {
                 blockedNodes.add(nodeId);
                 long count = store.instancesAt(tenant, source.id(), List.of(nodeId));
                 List<String> ids = store.instanceIdsAt(tenant, source.id(), nodeId, sample);
@@ -208,30 +248,55 @@ public final class Migrations implements MigrationService {
                         new MigrationDryRun.InstanceSample(count, ids, count > ids.size())));
             }
         });
+        // PRE-201: a removed step whose call is in flight is never cut off. It is reported, and its instance is left on
+        // the source version for a later run; it does not make the plan invalid.
+        long inFlight = 0;
+        java.util.Set<String> inFlightIds = new HashSet<>();
+        for (String nodeId : cancelNodes) {
+            long count = store.inFlightInstances(tenant, source.id(), List.of(nodeId));
+            if (count > 0) {
+                List<String> ids = store.inFlightInstanceIds(tenant, source.id(), List.of(nodeId), sample);
+                inFlight += count;
+                inFlightIds.addAll(ids);
+                Step was = from.get(nodeId);
+                conflicts.add(new MigrationDryRun.Conflict(MigrationDryRun.STEP_IN_FLIGHT, nodeId,
+                        was == null ? null : was.name(), new MigrationDryRun.InstanceSample(count, ids,
+                                count > ids.size())));
+            }
+        }
         long running = store.runningInstances(tenant, source.id());
         long blocked;
         MigrationDryRun.InstanceSample movable;
-        if (!"ACTIVE".equals(target.status())) {
+        long unmapped = 0;
+        boolean targetActive = "ACTIVE".equals(target.status());
+        if (!targetActive) {
             // A retired target takes no instance at all.
             conflicts.add(new MigrationDryRun.Conflict(MigrationDryRun.TARGET_NOT_ACTIVE, null, null,
                     new MigrationDryRun.InstanceSample(running, List.of(), running > 0)));
             blocked = running;
+            unmapped = running;
             movable = new MigrationDryRun.InstanceSample(0, List.of(), false);
         } else {
-            blocked = blockedNodes.isEmpty() ? 0 : Math.min(running, store.instancesAt(tenant, source.id(),
+            unmapped = blockedNodes.isEmpty() ? 0 : Math.min(running, store.instancesAt(tenant, source.id(),
                     blockedNodes));
+            blocked = Math.min(running, unmapped + inFlight);
             long movableCount = running - blocked;
             List<String> ids = movableCount == 0 ? List.of()
-                    : store.movableInstanceIds(tenant, source.id(), blockedNodes, sample);
+                    : store.movableInstanceIds(tenant, source.id(), blockedNodes, sample + inFlightIds.size()).stream()
+                            .filter(id -> !inFlightIds.contains(id)).limit(sample).toList();
             movable = new MigrationDryRun.InstanceSample(movableCount, ids, movableCount > ids.size());
         }
         conflicts.sort(Comparator.comparing(MigrationDryRun.Conflict::code)
                 .thenComparing(c -> c.nodeId() == null ? "" : c.nodeId()));
+        long mappedInstances = mappedNodes.isEmpty() ? 0 : store.instancesAt(tenant, source.id(), mappedNodes);
+        long cancelledInstances = cancelNodes.isEmpty() ? 0
+                : Math.max(0, store.instancesAt(tenant, source.id(), cancelNodes) - inFlight);
+        boolean valid = conflicts.stream().allMatch(c -> MigrationDryRun.STEP_IN_FLIGHT.equals(c.code()));
         Instant checkedAt = clock.instant();
         return new MigrationDryRun(plan.id(), plan.planHash(), plan.definitionKey(), plan.sourceVersion(),
-                plan.targetVersion(), conflicts.isEmpty(), checkedAt, checkedAt.plus(settings.dryRunValidity()),
+                plan.targetVersion(), valid, checkedAt, checkedAt.plus(settings.dryRunValidity()),
                 plan.approval(), new MigrationDryRun.Instances(running, running - blocked, blocked), nodes, conflicts,
-                movable);
+                movable, new MigrationDryRun.Impact(mappedInstances, cancelledInstances, inFlight, unmapped));
     }
 
     /** A step's readable name and canonical type. */
@@ -253,10 +318,95 @@ public final class Migrations implements MigrationService {
         return out;
     }
 
-    /** The key and both definition rows with their hashes: what an execution is bound to (PD-114). */
-    private static String planHash(StoredDefinition source, StoredDefinition target) {
-        return Hashes.sha256Parts("migration-plan.v1", source.key(), source.id(), source.definitionHash(), target.id(),
-                target.definitionHash());
+    /**
+     * The key, both definition rows with their hashes and, when the plan has any, its step instructions: what an
+     * execution is bound to (PD-114). A plan without instructions keeps the hash it had before #106.
+     */
+    private static String planHash(StoredDefinition source, StoredDefinition target, String instructions) {
+        return instructions.isEmpty()
+                ? Hashes.sha256Parts("migration-plan.v1", source.key(), source.id(), source.definitionHash(),
+                        target.id(), target.definitionHash())
+                : Hashes.sha256Parts("migration-plan.v2", source.key(), source.id(), source.definitionHash(),
+                        target.id(), target.definitionHash(), instructions);
+    }
+
+    /** The instructions as one text in a fixed order, empty for none: what the hashes are taken over. */
+    static String instructionsText(List<MigrationStepMapping> mappings, List<MigrationStepCancellation> cancellations) {
+        if (mappings.isEmpty() && cancellations.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        mappings.stream().sorted(Comparator.comparing(MigrationStepMapping::from))
+                .forEach(m -> out.append("map ").append(m.from()).append(' ').append(m.to()).append('\n'));
+        cancellations.stream().sorted(Comparator.comparing(MigrationStepCancellation::step))
+                .forEach(c -> out.append("cancel ").append(c.step()).append(' ').append(c.moveTo()).append(' ')
+                        .append(c.reason().length()).append(' ').append(c.reason()).append('\n'));
+        return out.toString();
+    }
+
+    /**
+     * Refuses instructions that cannot be carried out, before anything is written (PRE-200, PRE-202): a mapping or a
+     * cancellation of a step the source does not have, a mapping to a step of another type or one the target lacks, a
+     * cancellation of a step the target still has, a step handled twice, and a cancellation without a reason or a step
+     * to continue at.
+     */
+    private void checkInstructions(List<MigrationStepMapping> mappings, List<MigrationStepCancellation> cancellations,
+            Map<String, Step> from, Map<String, Step> to) {
+        if (mappings.size() > MAX_INSTRUCTIONS || cancellations.size() > MAX_INSTRUCTIONS) {
+            throw new InputInvalidException("A plan has at most " + MAX_INSTRUCTIONS + " mappings and "
+                    + MAX_INSTRUCTIONS + " cancellations");
+        }
+        List<String> problems = new ArrayList<>();
+        Set<String> handled = new HashSet<>();
+        for (MigrationStepMapping m : mappings) {
+            if (!STEP_ID.matcher(m.from()).matches() || !STEP_ID.matcher(m.to()).matches()) {
+                problems.add("a mapping names a step id that is not valid");
+                continue;
+            }
+            Step was = from.get(m.from());
+            Step now = to.get(m.to());
+            if (!handled.add(m.from())) {
+                problems.add("step " + m.from() + " is handled twice");
+            } else if (was == null) {
+                problems.add("mapping " + m.from() + " -> " + m.to() + ": " + m.from() + " is not a step of the source"
+                        + " version");
+            } else if (now == null) {
+                problems.add("mapping " + m.from() + " -> " + m.to() + ": " + m.to() + " is not a step of the target"
+                        + " version");
+            } else if (!Objects.equals(was.type(), now.type())) {
+                problems.add("mapping " + m.from() + " -> " + m.to() + ": a " + was.type() + " step cannot become a "
+                        + now.type() + " step");
+            }
+        }
+        for (MigrationStepCancellation c : cancellations) {
+            if (!STEP_ID.matcher(c.step()).matches() || c.moveTo().isBlank() || !STEP_ID.matcher(c.moveTo())
+                    .matches()) {
+                problems.add("cancellation of " + printable(c.step()) + " needs a step to continue at (moveTo)");
+                continue;
+            }
+            if (!handled.add(c.step())) {
+                problems.add("step " + c.step() + " is handled twice");
+            } else if (!from.containsKey(c.step())) {
+                problems.add("cancellation of " + c.step() + ": it is not a step of the source version");
+            } else if (to.containsKey(c.step())) {
+                problems.add("cancellation of " + c.step() + ": the target version still has it; map it or leave it");
+            }
+            if (!to.containsKey(c.moveTo())) {
+                problems.add("cancellation of " + c.step() + ": moveTo " + c.moveTo() + " is not a step of the target"
+                        + " version");
+            }
+            if (c.reason().isBlank() || c.reason().length() > settings.reasonMaxLength()) {
+                problems.add("cancellation of " + c.step() + " needs a reason of 1 to " + settings.reasonMaxLength()
+                        + " characters (lifecycle.reason-max-length)");
+            }
+        }
+        if (!problems.isEmpty()) {
+            throw new MigrationPlanInvalidException(problems.getFirst(), problems.stream().limit(20).toList());
+        }
+    }
+
+    private static String printable(String name) {
+        return name.length() > 64 ? name.substring(0, 64) : name;
     }
 
     private StoredDefinition version(String tenant, String key, int version) {
@@ -321,14 +471,34 @@ public final class Migrations implements MigrationService {
         m.put("approval", p.approval().value());
         m.put("createdBy", p.createdBy());
         m.put("createdAt", p.createdAt().toString());
+        m.put("mappings", p.mappings().stream().map(x -> {
+            Map<String, Object> o = new LinkedHashMap<>();
+            o.put("from", x.from());
+            o.put("to", x.to());
+            return o;
+        }).toList());
+        m.put("cancellations", p.cancellations().stream().map(x -> {
+            Map<String, Object> o = new LinkedHashMap<>();
+            o.put("step", x.step());
+            o.put("moveTo", x.moveTo());
+            o.put("reason", x.reason());
+            return o;
+        }).toList());
         return m;
     }
 
+    @SuppressWarnings("unchecked")
     private static MigrationPlan fromMap(Map<String, Object> m) {
+        List<Map<String, Object>> maps = (List<Map<String, Object>>) m.getOrDefault("mappings", List.of());
+        List<Map<String, Object>> cancels = (List<Map<String, Object>>) m.getOrDefault("cancellations", List.of());
         return new MigrationPlan((String) m.get("id"), (String) m.get("definitionKey"),
                 ((Number) m.get("sourceVersion")).intValue(), ((Number) m.get("targetVersion")).intValue(),
                 (String) m.get("status"), (String) m.get("planHash"), MigrationPlan.Approval.of((String) m.get(
-                        "approval")), (String) m.get("createdBy"), Instant.parse((String) m.get("createdAt")));
+                        "approval")), (String) m.get("createdBy"), Instant.parse((String) m.get("createdAt")),
+                maps.stream().map(x -> new MigrationStepMapping((String) x.get("from"), (String) x.get("to")))
+                        .toList(),
+                cancels.stream().map(x -> new MigrationStepCancellation((String) x.get("step"),
+                        (String) x.get("moveTo"), (String) x.get("reason"))).toList());
     }
 
     private String tenant() {

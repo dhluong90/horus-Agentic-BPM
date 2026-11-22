@@ -434,7 +434,7 @@ paths:
       operationId: getNodeStats
       summary: Live tokens or hourly figures per node of one definition version
       description: |
-        Counts the live tokens (`ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_EVENT`) at each
+        Counts the live tokens (`ACTIVE`, `WAITING_USER`, `WAITING_ASYNC`, `WAITING_TIMER`, `WAITING_EVENT`, `WAITING_CHILD`) at each
         node of the version, in the caller's tenant only, from the live token index and never from history
         (PRE-028). A node without live tokens is absent. Each replica caches an answer for `stats.live-cache-ttl`
         (5 seconds), or `stats.live-cache-ttl-large` (15 seconds) when the version had more than
@@ -1438,9 +1438,18 @@ paths:
       summary: Plan moving the running instances of one version to another
       description: |
         Creates a plan to move the running instances of `sourceVersion` to `targetVersion` of the same key in the
-        caller's tenant. Steps are mapped by identical id; explicit step mappings arrive with a later release, and a
-        body with any other field is `400 INPUT_INVALID`. Creating a plan moves nothing. It writes the plan, one
+        caller's tenant. Steps are matched by identical id, unless the plan says otherwise (PRE-200, PRE-201):
+        `mappings` move the tokens, open tasks and pending jobs of a renamed step to its new id, and `cancellations`
+        cancel the work of a removed step with a reason and continue the token at a named step of the target. A body
+        with any other field is `400 INPUT_INVALID`. Creating a plan moves nothing. It writes the plan, one
         history row and `processes.migration.planned.v1` in one transaction.
+
+        Instructions that cannot be carried out are `422 MIGRATION_PLAN_INVALID` with each problem in `paths`, and
+        nothing is written (PRE-202): a mapping to a step of another type or to a step the target lacks, a step
+        mapped or cancelled twice, a cancelled step the target still has, a cancellation without a `reason` (1 to
+        `lifecycle.reason-max-length` characters) or without a `moveTo` that the target has, and more than 200
+        mappings or 200 cancellations. A removed step that no instruction handles is not refused here: the dry run
+        lists it as a conflict.
 
         The plan records the approval its execution needs, fixed when it is created (PRE-174): `four-eyes`, so a
         second holder of `processes:migration:manage`, never the proposer, approves the execution. `single` is
@@ -1457,7 +1466,13 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/MigrationPlanRequest' }
-            example: { definitionKey: loan-review, sourceVersion: 1, targetVersion: 2 }
+            example:
+              definitionKey: loan-origination
+              sourceVersion: 1
+              targetVersion: 2
+              mappings: [{ from: credit-review, to: credit-assessment }]
+              cancellations:
+                - { step: legacy-manual-check, moveTo: credit-assessment, reason: Check merged into credit assessment }
       responses:
         '201':
           description: The plan
@@ -1503,11 +1518,14 @@ paths:
         Reports what would happen if the plan's running instances moved now (PRE-014). It only reads: no instance,
         token, history or plan row changes, so it needs no approval and takes no idempotency key.
 
-        Every step of the source version that holds live tokens is mapped onto the target by identical id:
-        `SAME_ID`, `STEP_NOT_IN_TARGET` (the target has no step with that id) or `STEP_TYPE_CHANGED` (it has one of
-        another type). Each step that is not `SAME_ID` is a conflict with the number of running instances waiting
-        there and their ids. A target that is no longer active is the conflict `TARGET_NOT_ACTIVE`. The plan is
-        `valid` only without conflicts. `movable` counts and lists the instances that would move. Each id list holds
+        Every step of the source version that holds live tokens is mapped onto the target: by the plan's `mappings`
+        (`MAPPED`), by its `cancellations` (`CANCELLED`), or by identical id: `SAME_ID`, `STEP_NOT_IN_TARGET` (the
+        target has no step with that id) or `STEP_TYPE_CHANGED` (it has one of another type). Each step that is not
+        handled is a conflict with the number of running instances waiting there and their ids. A target that is no
+        longer active is the conflict `TARGET_NOT_ACTIVE`. A cancelled step whose remote call is in flight is the
+        conflict `STEP_IN_FLIGHT`: it does not make the plan invalid, and the instance stays on the source version
+        until a later run (PRE-201). `impact` counts the instances each kind of instruction touches (PRE-200). The
+        plan is `valid` only without conflicts other than `STEP_IN_FLIGHT`. `movable` counts and lists the instances that would move. Each id list holds
         at most `migration.dry-run-sample-size` (100) ids in id order, with `truncated: true` when there are more.
 
         `planHash` and `validUntil` (`migration.dry-run-validity`, one hour, after `checkedAt`) bind a later
@@ -2403,7 +2421,7 @@ components:
         instanceId: { type: string }
         nodeId: { type: string }
         tokenId: { type: [string, 'null'] }
-        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`; an undo of a compensation walk that failed is `COMPENSATION_FAILED` and a manual undo `COMPENSATION_MANUAL_REQUIRED` (#67): their `nodeId` is the step being undone, their `tokenId` the scope token walked, and their resolution marks the undo done by hand' }
+        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`; a step that calls a process (#92) raises `CHILD_FAILED` or `CHILD_CANCELLED` when its child ended without completing, `NO_EFFECTIVE_VERSION` when the called definition has no effective or pinned version in the tenant, `CALL_DEPTH_EXCEEDED` when the call would sit deeper than `calls.max-depth`, and `OUTPUT_VARIABLE_MISSING` when the child did not set a declared output; an undo of a compensation walk that failed is `COMPENSATION_FAILED` and a manual undo `COMPENSATION_MANUAL_REQUIRED` (#67): their `nodeId` is the step being undone, their `tokenId` the scope token walked, and their resolution marks the undo done by hand' }
         causeSummary: { type: string, description: Built from codes and numbers only, never from a handler's detail }
         retryCount: { type: integer, minimum: 0 }
         status: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED] }
@@ -2778,8 +2796,8 @@ components:
               nodeId: { type: string }
               status:
                 type: string
-                enum: [ACTIVE, WAITING_USER, WAITING_ASYNC, WAITING_TIMER, WAITING_EVENT, WAITING_SCOPE, JOINED,
-                  COMPLETED, CANCELLED, COMPENSATED]
+                enum: [ACTIVE, WAITING_USER, WAITING_ASYNC, WAITING_TIMER, WAITING_EVENT, WAITING_SCOPE, WAITING_CHILD,
+                  JOINED, COMPLETED, CANCELLED, COMPENSATED]
         tasks:
           type: array
           items:
@@ -3112,6 +3130,23 @@ components:
         to: { type: string }
         toName: { type: [string, 'null'] }
         kind: { type: string, pattern: '^(next|default|fork|branch\[[0-9]+\])$' }
+    MigrationStepMapping:
+      type: object
+      description: A renamed step (PRE-200); both steps must be of the same type
+      required: [from, to]
+      additionalProperties: false
+      properties:
+        from: { type: string, maxLength: 100, description: The step id in the source version }
+        to: { type: string, maxLength: 100, description: The step id in the target version }
+    MigrationStepCancellation:
+      type: object
+      description: A removed step (PRE-201); its work is cancelled and the token continues at `moveTo`
+      required: [step, moveTo, reason]
+      additionalProperties: false
+      properties:
+        step: { type: string, maxLength: 100, description: The step id in the source version, which the target no longer has }
+        moveTo: { type: string, maxLength: 100, description: The step id in the target version where the token continues }
+        reason: { type: string, minLength: 1, maxLength: 2000, description: 'Why; at most `lifecycle.reason-max-length` characters; written to the append-only history' }
     MigrationPlanRequest:
       type: object
       required: [definitionKey, sourceVersion, targetVersion]
@@ -3120,6 +3155,8 @@ components:
         definitionKey: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
         sourceVersion: { type: integer, minimum: 1, description: The version the instances run on }
         targetVersion: { type: integer, minimum: 1, description: The active version they would move to }
+        mappings: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/MigrationStepMapping' } }
+        cancellations: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/MigrationStepCancellation' } }
     MigrationApproval:
       type: object
       required: [mode, secondPersonRequired]
@@ -3128,7 +3165,7 @@ components:
         secondPersonRequired: { type: boolean }
     MigrationPlan:
       type: object
-      required: [id, definitionKey, sourceVersion, targetVersion, status, planHash, approval, createdBy, createdAt]
+      required: [id, definitionKey, sourceVersion, targetVersion, status, planHash, approval, createdBy, createdAt, mappings, cancellations]
       properties:
         id: { type: string }
         definitionKey: { type: string }
@@ -3137,10 +3174,12 @@ components:
         status:
           type: string
           enum: [PLANNED, PROPOSED, REJECTED, APPROVED, RUNNING, COMPLETED, COMPLETED_WITH_FAILURES]
-        planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        planHash: { type: string, pattern: '^[0-9a-f]{64}$', description: The plan's hash, over both versions and the step instructions }
         approval: { $ref: '#/components/schemas/MigrationApproval' }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
+        mappings: { type: array, items: { $ref: '#/components/schemas/MigrationStepMapping' } }
+        cancellations: { type: array, items: { $ref: '#/components/schemas/MigrationStepCancellation' } }
     MigrationInstanceSample:
       type: object
       required: [count, instanceIds, truncated]
@@ -3150,7 +3189,7 @@ components:
         truncated: { type: boolean }
     MigrationDryRun:
       type: object
-      required: [migrationId, planHash, definitionKey, sourceVersion, targetVersion, valid, checkedAt, validUntil, approval, instances, nodes, conflicts, movable]
+      required: [migrationId, planHash, definitionKey, sourceVersion, targetVersion, valid, checkedAt, validUntil, approval, instances, nodes, conflicts, movable, impact]
       properties:
         migrationId: { type: string }
         planHash: { type: string, pattern: '^[0-9a-f]{64}$' }
@@ -3179,7 +3218,7 @@ components:
               name: { type: [string, 'null'] }
               type: { type: [string, 'null'] }
               liveTokens: { type: integer, minimum: 1 }
-              mapping: { type: string, enum: [SAME_ID, STEP_NOT_IN_TARGET, STEP_TYPE_CHANGED] }
+              mapping: { type: string, enum: [SAME_ID, MAPPED, CANCELLED, STEP_NOT_IN_TARGET, STEP_TYPE_CHANGED] }
               targetNodeId: { type: [string, 'null'] }
               targetType: { type: [string, 'null'] }
         conflicts:
@@ -3189,11 +3228,20 @@ components:
             type: object
             required: [code, nodeId, name, instances]
             properties:
-              code: { type: string, enum: [STEP_NOT_IN_TARGET, STEP_TYPE_CHANGED, TARGET_NOT_ACTIVE] }
+              code: { type: string, enum: [STEP_NOT_IN_TARGET, STEP_TYPE_CHANGED, TARGET_NOT_ACTIVE, STEP_IN_FLIGHT] }
               nodeId: { type: [string, 'null'] }
               name: { type: [string, 'null'] }
               instances: { $ref: '#/components/schemas/MigrationInstanceSample' }
         movable: { $ref: '#/components/schemas/MigrationInstanceSample' }
+        impact:
+          type: object
+          description: How many running instances each kind of step instruction touches (PRE-200, PRE-201)
+          required: [mapped, cancelled, inFlight, unmapped]
+          properties:
+            mapped: { type: integer, minimum: 0, description: Instances with a token at a mapped step }
+            cancelled: { type: integer, minimum: 0, description: Instances whose work at a cancelled step will be cancelled }
+            inFlight: { type: integer, minimum: 0, description: Instances left on the source version because a call is in flight }
+            unmapped: { type: integer, minimum: 0, description: Instances at a step no instruction handles; the plan is invalid while there are any }
     DefinitionLayout:
       type: object
       description: >-
@@ -3299,7 +3347,7 @@ components:
         outcome: { type: string, enum: [MIGRATED, FAILED, SKIPPED] }
         code:
           type: string
-          description: '`MOVED`; for a failure `STEP_NOT_IN_TARGET`, `STEP_TYPE_CHANGED` or `LOCK_CONFLICT`; for a skip `NOT_RUNNING`, `NOT_ON_SOURCE` or `INSTANCE_GONE`'
+          description: '`MOVED`; for a failure `STEP_NOT_IN_TARGET`, `STEP_TYPE_CHANGED` or `LOCK_CONFLICT`; for a skip `NOT_RUNNING`, `NOT_ON_SOURCE`, `INSTANCE_GONE` or `STEP_IN_FLIGHT`'
         detail: { type: string, maxLength: 500 }
         incidentId: { type: [string, 'null'] }
         occurredAt: { type: string, format: date-time }
@@ -3325,7 +3373,7 @@ components:
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
-            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND, ASSIGNEE_NOT_ALLOWED,
+            INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, MIGRATION_PLAN_INVALID, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND, ASSIGNEE_NOT_ALLOWED,
             OUTPUT_INVALID, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
@@ -3364,7 +3412,7 @@ components:
         currentChangeSetHash: { type: string, description: 'Present on `CONTENT_CHANGED` when the change set was not the one reviewed (PRE-202), the hash of the change set now' }
         paths:
           type: array
-          description: 'Present on `OUTPUT_INVALID` and `LAYOUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required` or `$.nodes.ghost-step names a step that is not in the definition`, never a value'
+          description: 'Present on `OUTPUT_INVALID`, `LAYOUT_INVALID` and `MIGRATION_PLAN_INVALID`: each failing path and rule, for example `$.approvedLimit: required` or `$.nodes.ghost-step names a step that is not in the definition`, never a value'
           items: { type: string }
         definitionKey: { type: string, description: Present on `LAST_VERSION_IN_EFFECT` }
         version: { type: integer, description: Present on `LAST_VERSION_IN_EFFECT` }

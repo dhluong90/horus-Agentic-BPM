@@ -46,6 +46,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
 | 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | 0.3.0 |
+| 422 | [MIGRATION_PLAN_INVALID](#migration_plan_invalid) | processes | 0.3.0 |
 | 409 | [DRY_RUN_REQUIRED](#dry_run_required) | processes | 0.3.0 |
 | 409 | [VERSION_CONFLICT](#version_conflict) | both | M1 |
 | 409 | [CONTENT_CHANGED](#content_changed) | rules | 0.3.0 |
@@ -270,6 +271,12 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 
 ### DRY_RUN_REQUIRED
 `409`. A migration is proposed or approved without a passing dry run. The engine runs the dry run itself: the plan has conflicts (the detail gives their number), or the dry run of the proposal is older than `migration.dry-run-validity` when the second person approves. Nothing is written. Resolve the conflicts, or propose the execution again, then approve.
+
+### MIGRATION_PLAN_INVALID
+`422`. The step instructions of a migration plan cannot be carried out: a mapping to a step of another type or to a step the target version lacks, a step mapped or cancelled twice, a cancelled step the target still has, a cancellation without a `reason` (1 to `lifecycle.reason-max-length` characters) or without a `moveTo` the target has, or more than 200 mappings or cancellations. `paths` lists each problem naming the step ids. Nothing is written. A removed step that no instruction handles is not this error: the dry run lists it as a conflict. Correct the plan and create it again.
+
+### Step failures of a process call
+A step that calls another process (0.3.0) raises an incident, not an HTTP error, when the call cannot run or the child does not complete: `NO_EFFECTIVE_VERSION` (the called definition has no effective version, or the pinned version is not active, in the tenant), `CALL_DEPTH_EXCEEDED` (the call would sit deeper than `calls.max-depth`, at most 5), `CHILD_FAILED`, `CHILD_CANCELLED` (the cause names the child's cancellation reason) and `OUTPUT_VARIABLE_MISSING` (the child did not set a declared output). Retry the incident to start a new child. A migration outcome `SKIPPED` with the code `STEP_IN_FLIGHT` means a call was in flight at a removed step; a later plan moves the instance.
 
 ### LAYOUT_NOT_FOUND
 `404`. The version has no such layout revision (`GET .../layout?revision=n`). A version with no layout at all answers `204`, not an error.

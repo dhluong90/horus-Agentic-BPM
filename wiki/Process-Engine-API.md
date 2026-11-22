@@ -33,7 +33,7 @@ Reference for the Process Engine's two surfaces: the in-process Java API and the
 | `GET /agent-replays/{id}`, `GET /agent-replays/{id}/cases` | `AgentReplayService.run(id)`, `.cases(id, page)` | `processes:agent:replay` | The run's status and summary, and its report: one line per recorded answer with the attempt id, the recorded and the candidate outcome, the change, the matched rule ids and the `OVERRIDDEN_BY_REVIEWER` flag, never an output value. M3 |
 | `GET /agent-replays/{id}/cases/{attemptId}/answer` | `AgentReplayService.recordedAnswer(id, attemptId)` | `processes:agent:replay` | One case's recorded answer as history keeps it: masked output fields as `***`, masked inputs as keyed hashes. M3 |
 | `GET /tasks` | `ProcessQueryService.tasks(TaskQuery)` | `processes:task:work`; `assignment=any` also needs `processes:task:manage` | `assignment`: one or more of `mine` (declared to you or claimed by you), `candidate` (open tasks of your roles and groups), `any` (the whole tenant); `mine,candidate` when absent. `status`: `OPEN`, `CLAIMED` or both (default). `role`, `group`: narrow `candidate` and `any` to one role or group (with `mine` alone, `400 QUERY_INVALID`). `dueBefore`, and `slaBreached=true` for tasks whose due time has passed. Ordered by `dueAt`, then `id`; tasks without a due time come last, by `id`. At most 200 per page (`limit` above 200 is `400 QUERY_INVALID`). Items carry no variables and no review context. See [Task lists](#task-lists). Since 0.3.0 |
-| `POST /migrations` | `MigrationService.plan(MigrationPlanRequest)` | `processes:migration:manage` | Plans moving the running instances of `sourceVersion` to the active `targetVersion` of one key. Body `{"definitionKey": "loan-review", "sourceVersion": 1, "targetVersion": 2}`; any other field is `400`. Answers `201` with `approval: {"mode": "four-eyes", "secondPersonRequired": true}`: executing the plan will need a second holder of the permission (`single` only on the `dev` profile). Moves nothing. `Idempotency-Key` returns the first plan. A retired target is `409 INVALID_STATE`. 0.3.0 |
+| `POST /migrations` | `MigrationService.plan(MigrationPlanRequest)` | `processes:migration:manage` | Plans moving the running instances of `sourceVersion` to the active `targetVersion` of one key. Body `{"definitionKey": "loan-origination", "sourceVersion": 1, "targetVersion": 2}`, plus optional `mappings` (`[{"from","to"}]`, a renamed step) and `cancellations` (`[{"step","moveTo","reason"}]`, a removed step); any other field is `400`. Instructions that cannot be carried out are `422 MIGRATION_PLAN_INVALID`. Answers `201` with `approval: {"mode": "four-eyes", "secondPersonRequired": true}`: executing the plan will need a second holder of the permission (`single` only on the `dev` profile). Moves nothing. `Idempotency-Key` returns the first plan. A retired target is `409 INVALID_STATE`. 0.3.0 |
 | `GET /migrations/{id}` | `MigrationService.find(id)` | `processes:migration:manage` or `processes:read` | The plan. Another tenant's plan is `404 MIGRATION_NOT_FOUND`. 0.3.0 |
 | `POST /migrations/{id}:validate` | `MigrationService.validate(id)` | `processes:migration:manage` | Dry run: which running instances would move and which steps have no counterpart in the target. Reads only, needs no approval and no idempotency key. See Migration dry run below. 0.3.0 |
 | `POST /migrations/{id}:execute` | `MigrationExecutionService.propose(id, reason, key)` | `processes:migration:manage` | Proposes moving the running instances, with a `reason`. The engine runs the dry run itself; a plan with a conflict is `409 DRY_RUN_REQUIRED`. Answers `202` with the proposal and its `ETag`; nothing moves until a second holder approves. `Idempotency-Key` returns the first answer. 0.3.0 |
@@ -296,11 +296,37 @@ POST /api/bpm/processes/v1/migrations/01J...:validate
      "checkedAt":"2027-03-01T02:00:00Z","validUntil":"2027-03-01T03:00:00Z", ...}
 ```
 
-Every step of the source version that holds live tokens maps by identical id: `SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another kind of step. A target that is no longer active is `TARGET_NOT_ACTIVE`. The dry run writes nothing, so running it again is always safe. Executing the plan is described under Migration execution below.
+Every step of the source version that holds live tokens maps by the plan's instructions, then by identical id: `MAPPED`, `CANCELLED`, `SAME_ID`, `STEP_NOT_IN_TARGET`, or `STEP_TYPE_CHANGED` when the id is kept for another kind of step. A target that is no longer active is `TARGET_NOT_ACTIVE`. The dry run writes nothing, so running it again is always safe. Executing the plan is described under Migration execution below.
+
+### Renamed and removed steps (0.3.0)
+
+A plan carries two kinds of instruction, so a process change that renames or removes a step does not strand its cases. Example: `loan-origination` v2 renames `credit-review` to `credit-assessment` and removes `legacy-manual-check`.
+
+```
+POST /api/bpm/processes/v1/migrations
+{"definitionKey":"loan-origination","sourceVersion":1,"targetVersion":2,
+ "mappings":[{"from":"credit-review","to":"credit-assessment"}],
+ "cancellations":[{"step":"legacy-manual-check","moveTo":"credit-assessment","reason":"Check merged into credit assessment"}]}
+201 {"id":"01J...","mappings":[...],"cancellations":[...], ...}
+
+POST /api/bpm/processes/v1/migrations/01J...:validate
+200 {"valid":true,"impact":{"mapped":40,"cancelled":12,"inFlight":0,"unmapped":0},
+     "nodes":[{"nodeId":"credit-review","mapping":"MAPPED","targetNodeId":"credit-assessment", ...},
+              {"nodeId":"legacy-manual-check","mapping":"CANCELLED","targetNodeId":"credit-assessment", ...}], "conflicts":[], ...}
+```
+
+- A **mapping** moves the tokens, open tasks and pending jobs of the renamed step to its new id. The two steps must be of the same type. A task keeps its id, claim, due time and four-eyes rule, and a claimed task completes on the new step. Each instance gets a `MIGRATED` history row naming `credit-review -> credit-assessment`.
+- A **cancellation** cancels the open task (`TASK_CANCELLED`) or the due job (`JOB_CANCELLED`) of a removed step, with the plan's reason in the history, and the token continues at `moveTo`, which runs as on arrival: a task opens, a job parks. The step must not exist in the target, and the reason is required.
+- A call **in flight** at a removed step is never cut off. The dry run reports the conflict `STEP_IN_FLIGHT`, which does not make the plan invalid; the instance stays on the source version with the outcome `SKIPPED` and code `STEP_IN_FLIGHT`, and a later plan for the same versions and instructions moves it.
+- A removed step that no instruction handles is a conflict `STEP_NOT_IN_TARGET` with its instance count, as before.
+- Four-eyes for the execution is unchanged. Cancellations need no second approval of their own: `horus.bpm.processes.migration.cancel-approval` is `single`, and `four-eyes` is refused at start-up until it is built.
+- The cockpit migration screens read exactly these endpoints; they are not part of this release of the engine.
 
 | Setting | Default | Meaning |
 |---|---|---|
 | `horus.bpm.processes.migration.approval` | `four-eyes` | The approval a new plan records for its execution. `single` is accepted only when the `dev` profile is active on its own; start-up is refused otherwise |
+| `horus.bpm.processes.migration.cancel-approval` | `single` | Reserved. Cancelling a removed step's work needs the same single permission as the plan; `four-eyes` is refused at start-up until it is built |
+| `horus.bpm.processes.calls.max-depth` | `5` | How many process calls may sit above one another (a step that calls a process that calls a process). The call that would go deeper raises the incident `CALL_DEPTH_EXCEEDED`; 1 to 5, may be lowered only |
 | `horus.bpm.processes.migration.dry-run-sample-size` | `100` | Most instance ids listed per conflict and for the instances that would move, 1 to 500; may be lowered only |
 | `horus.bpm.processes.migration.dry-run-validity` | `PT1H` | How long an execution may rely on a dry run; at most one hour, may be lowered only |
 

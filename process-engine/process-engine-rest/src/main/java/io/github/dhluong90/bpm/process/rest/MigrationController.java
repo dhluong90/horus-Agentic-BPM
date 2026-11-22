@@ -4,6 +4,8 @@ import io.github.dhluong90.bpm.process.api.InputInvalidException;
 import io.github.dhluong90.bpm.process.api.MigrationDryRun;
 import io.github.dhluong90.bpm.process.api.MigrationPlan;
 import io.github.dhluong90.bpm.process.api.MigrationPlanRequest;
+import io.github.dhluong90.bpm.process.api.MigrationStepCancellation;
+import io.github.dhluong90.bpm.process.api.MigrationStepMapping;
 import io.github.dhluong90.bpm.process.api.MigrationService;
 import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
 import io.github.dhluong90.bpm.process.internal.json.EngineJson;
@@ -36,7 +38,8 @@ import tools.jackson.databind.node.ObjectNode;
 @RequestMapping(ProcessController.BASE)
 public class MigrationController {
 
-    private static final Set<String> PLAN_FIELDS = Set.of("definitionKey", "sourceVersion", "targetVersion");
+    private static final Set<String> PLAN_FIELDS = Set.of("definitionKey", "sourceVersion", "targetVersion", "mappings",
+            "cancellations");
 
     private final MigrationService migrations;
 
@@ -53,8 +56,7 @@ public class MigrationController {
         for (String name : body.propertyNames()) {
             if (!PLAN_FIELDS.contains(name)) {
                 throw new InputInvalidException("Unknown field " + (name.length() > 64 ? name.substring(0, 64) : name)
-                        + "; a plan takes definitionKey, sourceVersion and targetVersion (step mappings are not "
-                        + "supported in this release)");
+                        + "; a plan takes definitionKey, sourceVersion, targetVersion, mappings and cancellations");
             }
         }
         JsonNode key = body.get("definitionKey");
@@ -62,7 +64,8 @@ public class MigrationController {
             throw new InputInvalidException("definitionKey is required");
         }
         MigrationPlan plan = migrations.plan(new MigrationPlanRequest(key.asString(), version(body, "sourceVersion"),
-                version(body, "targetVersion"), idempotencyKey));
+                version(body, "targetVersion"), idempotencyKey, mappings(body.get("mappings")),
+                cancellations(body.get("cancellations"))));
         return ResponseEntity.status(HttpStatus.CREATED).contentType(MediaType.APPLICATION_JSON)
                 .header("Location", ProcessController.BASE + "/migrations/" + plan.id()).body(bytes(plan(plan)));
     }
@@ -79,6 +82,61 @@ public class MigrationController {
         return ok(dryRun(migrations.validate(id)));
     }
 
+    /** The {@code mappings} of a plan body: objects with {@code from} and {@code to}, nothing else. */
+    private static List<MigrationStepMapping> mappings(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray() || node.size() > 200) {
+            throw new InputInvalidException("mappings must be a list of at most 200 { from, to } objects");
+        }
+        List<MigrationStepMapping> out = new java.util.ArrayList<>();
+        for (JsonNode item : node) {
+            out.add(new MigrationStepMapping(text(item, "from", Set.of("from", "to"), "a mapping"),
+                    text(item, "to", Set.of("from", "to"), "a mapping")));
+        }
+        return out;
+    }
+
+    /** The {@code cancellations} of a plan body: objects with {@code step}, {@code moveTo} and {@code reason}. */
+    private static List<MigrationStepCancellation> cancellations(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray() || node.size() > 200) {
+            throw new InputInvalidException("cancellations must be a list of at most 200 { step, moveTo, reason } "
+                    + "objects");
+        }
+        Set<String> fields = Set.of("step", "moveTo", "reason");
+        List<MigrationStepCancellation> out = new java.util.ArrayList<>();
+        for (JsonNode item : node) {
+            out.add(new MigrationStepCancellation(text(item, "step", fields, "a cancellation"),
+                    text(item, "moveTo", fields, "a cancellation"), text(item, "reason", fields, "a cancellation")));
+        }
+        return out;
+    }
+
+    /** A string field of an instruction; a missing one is the empty string, which the service refuses by name. */
+    private static String text(JsonNode item, String name, Set<String> allowed, String what) {
+        if (!item.isObject()) {
+            throw new InputInvalidException(what + " must be an object");
+        }
+        for (String field : item.propertyNames()) {
+            if (!allowed.contains(field)) {
+                throw new InputInvalidException("Unknown field " + (field.length() > 64 ? field.substring(0, 64)
+                        : field) + " in " + what);
+            }
+        }
+        JsonNode value = item.get(name);
+        if (value == null || value.isNull()) {
+            return "";
+        }
+        if (!value.isString()) {
+            throw new InputInvalidException(name + " of " + what + " must be a string");
+        }
+        return value.asString();
+    }
+
     static ObjectNode plan(MigrationPlan p) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("id", p.id());
@@ -90,6 +148,11 @@ public class MigrationController {
         approval(node.putObject("approval"), p.approval());
         node.put("createdBy", p.createdBy());
         node.put("createdAt", p.createdAt().toString());
+        ArrayNode maps = node.putArray("mappings");
+        p.mappings().forEach(m -> maps.addObject().put("from", m.from()).put("to", m.to()));
+        ArrayNode cancels = node.putArray("cancellations");
+        p.cancellations().forEach(c -> cancels.addObject().put("step", c.step()).put("moveTo", c.moveTo())
+                .put("reason", c.reason()));
         return node;
     }
 
@@ -128,6 +191,11 @@ public class MigrationController {
             sample(n.putObject("instances"), c.affected());
         }
         sample(node.putObject("movable"), r.movable());
+        ObjectNode impact = node.putObject("impact");
+        impact.put("mapped", r.impact().mapped());
+        impact.put("cancelled", r.impact().cancelled());
+        impact.put("inFlight", r.impact().inFlight());
+        impact.put("unmapped", r.impact().unmapped());
         return node;
     }
 
