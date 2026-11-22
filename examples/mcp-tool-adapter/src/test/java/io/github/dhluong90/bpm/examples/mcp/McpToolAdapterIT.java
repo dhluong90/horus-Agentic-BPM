@@ -101,6 +101,12 @@ class McpToolAdapterIT {
             return caller;
         }
 
+        /** Both engines' resolvers default to no display name; one class implementing both picks it once. */
+        @Override
+        public java.util.Optional<String> displayNameOf(String userId) {
+            return java.util.Optional.empty();
+        }
+
         @Override
         public Set<String> currentPermissions() {
             return Set.of("processes:deploy", "processes:start", "processes:read", "processes:task:work",
