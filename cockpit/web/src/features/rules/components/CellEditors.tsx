@@ -75,6 +75,7 @@ export function ChoiceEditor({ label, error, detail, errorId, model, options, on
   const box = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const values = model.kind === 'choice' ? model.values : [];
+  const negate = model.kind === 'choice' && model.negate === true;
   useEffect(() => {
     if (!open) return;
     box.current?.querySelector<HTMLInputElement>('input')?.focus();
@@ -84,28 +85,42 @@ export function ChoiceEditor({ label, error, detail, errorId, model, options, on
   }, [open]);
   const toggle = (value: string) => {
     const next = values.includes(value) ? values.filter((v) => v !== value) : options.filter((o) => o === value || values.includes(o));
-    onText(writeConditionCell({ kind: 'choice', values: next }));
+    onText(writeConditionCell({ kind: 'choice', values: next, ...(negate ? { negate: true as const } : {}) }));
   };
+  const flip = () => { onText(writeConditionCell({ kind: 'choice', values, ...(negate ? {} : { negate: true as const }) })); };
   const describedBy = error !== undefined ? errorId : undefined;
   return (
     <Frame error={error} detail={detail} errorId={errorId}>
       <span className="picker">
         <button ref={trigger} type="button" className={values.length === 0 ? 'picker__trigger picker__trigger--any' : 'picker__trigger'}
-          aria-label={values.length === 0 ? label : `${label}: ${values.map(valueLabel).join(', ')}`}
+          aria-label={values.length === 0 ? label : `${label}: ${negate ? `${t('editor.notThese')} ${values.map(valueLabel).join(' ')}` : values.map(valueLabel).join(', ')}`}
           aria-haspopup="true" aria-expanded={open} aria-invalid={error !== undefined} {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})}
           onClick={() => { setOpen((v) => !v); }}>
-          {values.length === 0 ? <span aria-hidden="true">—</span> : values.map((v) => <span key={v} className="value-pill">{valueLabel(v)}</span>)}
+          {values.length === 0 ? <span aria-hidden="true">—</span> : negate ? <><span className="picker__not">{t('editor.notThese')}</span>{' '}</> : null}
+          {values.map((v) => <span key={v} className="value-pill">{valueLabel(v)}</span>)}
           <span aria-hidden="true" className="picker__chevron">⌄</span>
         </button>
         {open ? (
           <div ref={box} className="picker__list" role="group" aria-label={label}
-            onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); setOpen(false); trigger.current?.focus(); } }}>
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') { event.preventDefault(); setOpen(false); trigger.current?.focus(); }
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                const stops = Array.from(box.current?.querySelectorAll<HTMLElement>('input:not([disabled]), button') ?? []);
+                const at = stops.indexOf(document.activeElement as HTMLElement);
+                stops[(at + (event.key === 'ArrowDown' ? 1 : stops.length - 1)) % Math.max(stops.length, 1)]?.focus();
+              }
+            }}>
             {options.map((option) => (
               <label key={option} className="picker__option">
                 <input type="checkbox" checked={values.includes(option)} onChange={() => { toggle(option); }} />
                 {valueLabel(option)}
               </label>
             ))}
+            <label className="picker__option picker__option--not">
+              <input type="checkbox" checked={negate} disabled={values.length === 0} onChange={flip} />
+              {t('editor.notThese')}
+            </label>
             <button type="button" className="picker__clear" onClick={() => { onText(''); setOpen(false); trigger.current?.focus(); }}>{t('editor.anyValue')}</button>
           </div>
         ) : null}

@@ -51,7 +51,7 @@ async function rowAction(user: ReturnType<typeof userEvent.setup>, row: string, 
   await user.click(screen.getByRole('menuitem', { name: item }));
 }
 
-const writes = () => calls.filter((c) => c.method === 'POST');
+const writes = () => calls.filter((c) => c.method === 'POST' && !c.path.endsWith(':validate'));
 
 describe('rule set list and version view', () => {
   it('CKP_030_list_shows_each_rule_set_with_latest_status_and_published_version', async () => {

@@ -130,6 +130,57 @@ describe('grid editor', () => {
     expect(screen.queryByText('Draft version 2 saved')).not.toBeInTheDocument();
   });
 
+  it('CKP_043_delete_row_asks_first_and_stores_nothing_before_save', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/2/edit');
+    await screen.findByLabelText('Row R3, Fee');
+    await user.click(screen.getByRole('button', { name: 'Actions for row R3' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete row R3' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Delete row R3?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByLabelText('Row R3, Fee')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Actions for row R3' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete row R3' }));
+    await user.click(within(await screen.findByRole('dialog', { name: 'Delete row R3?' })).getByRole('button', { name: 'Delete' }));
+    expect(screen.queryByLabelText('Row R3, Fee')).not.toBeInTheDocument();
+    expect(saves()).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Draft version 2 saved')).toBeInTheDocument();
+    expect(saves().map((c) => [c.path, c.ifMatch])).toEqual([['/rule-sets/card-fee/versions/2', '"0"']]);
+    expect(engine.store.find((v) => v.ruleSet === 'card-fee' && v.version === 2)?.definition.rules.map((r) => r.id)).not.toContain('R3');
+  });
+
+  it('CKP_054_the_row_reading_follows_the_edit_and_only_the_validate_call_runs', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/2/edit');
+    const fee = await screen.findByLabelText('Row R3, Fee');
+    const before = await screen.findByLabelText('Reading of row R3');
+    expect(before).toHaveTextContent(/35,000 VND/);
+    await user.clear(fee);
+    await user.type(fee, '40000');
+    await user.keyboard('{Enter}');
+    await waitFor(() => { expect(screen.getByLabelText('Reading of row R3')).toHaveTextContent(/40,000 VND/); });
+    expect(saves()).toEqual([]);
+    expect(calls.filter((c) => c.method === 'POST' && !c.path.endsWith(':validate'))).toEqual([]);
+    expect(engine.store.find((v) => v.ruleSet === 'card-fee' && v.version === 2)?.history).toHaveLength(1);
+  });
+
+  it('CKP_053_a_choice_cell_offers_the_allowed_values_and_not_these', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/2/edit');
+    const tier = await screen.findByRole('button', { name: /^Row R1, Tier/ });
+    await user.click(tier);
+    const list = await screen.findByRole('group', { name: /^Row R1, Tier/ });
+    const options = within(list).getAllByRole('checkbox').map((box) => box.parentElement?.textContent);
+    expect(options).toEqual([...options.slice(0, -1), 'Not these']);
+    expect(options.length).toBeGreaterThan(2);
+    await user.click(within(list).getByRole('checkbox', { name: options[0] ?? '' }));
+    await user.click(within(list).getByRole('checkbox', { name: 'Not these' }));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: /^Row R1, Tier: Not these / })).toBeInTheDocument();
+    expect(engine.store.find((v) => v.ruleSet === 'card-fee' && v.version === 2)?.lockVersion).toBe(0);
+  });
+
   it('CKP_006_a_saved_message_stays_until_it_is_closed', () => {
     vi.useFakeTimers();
     try {
@@ -214,10 +265,10 @@ describe('grid editor', () => {
     open('#/rules/kyc-risk/2');
     const edit = await screen.findByRole('button', { name: /Edit draft/ });
     expect(edit).toBeDisabled();
-    expect(edit).toHaveAccessibleDescription('Only hoa can change this draft.');
+    expect(edit).toHaveAccessibleDescription('Only hoa can edit this draft. Start your own from the published version.');
     window.location.hash = '#/rules/kyc-risk/2/edit';
     // The reason is said once, beside the disabled Edit draft.
-    await waitFor(() => { expect(screen.getAllByText('Only hoa can change this draft.')).toHaveLength(1); });
+    await waitFor(() => { expect(screen.getAllByText('Only hoa can edit this draft. Start your own from the published version.')).toHaveLength(1); });
     expect(screen.getByRole('button', { name: /Edit draft/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
     expect(saves()).toEqual([]);

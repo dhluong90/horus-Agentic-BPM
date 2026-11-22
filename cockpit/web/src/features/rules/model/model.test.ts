@@ -177,3 +177,13 @@ describe('column labels and cell hints', () => {
     expect(emptyAmountHint({ kind: 'choice' }, undefined, undefined)).toBeUndefined();
   });
 });
+
+describe('CKP_053 choice cells that exclude values', () => {
+  it('reads and writes not-in and not-equal as Not these', async () => {
+    const { readConditionCell, writeConditionCell } = await import('./cells');
+    expect(readConditionCell("not in ['GOLD', 'PLATINUM']", 'choice')).toEqual({ kind: 'choice', values: ['GOLD', 'PLATINUM'], negate: true });
+    expect(readConditionCell("!= 'GOLD'", 'choice')).toEqual({ kind: 'choice', values: ['GOLD'], negate: true });
+    expect(writeConditionCell({ kind: 'choice', values: ['GOLD', 'PLATINUM'], negate: true })).toBe("not in ['GOLD', 'PLATINUM']");
+    expect(writeConditionCell({ kind: 'choice', values: ['GOLD'], negate: true })).toBe("!= 'GOLD'");
+  });
+});
