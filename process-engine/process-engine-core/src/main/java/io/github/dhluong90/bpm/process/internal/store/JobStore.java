@@ -179,6 +179,24 @@ public interface JobStore {
     boolean markDone(String tenant, String id, String replicaId, int attempt, Instant now);
 
     /**
+     * Gives back a claimed job this build cannot run, for example a kind a newer release wrote during a rolling
+     * upgrade (PRE-218): the job is {@code DUE} again at {@code retryAt}, and the attempt this claim counted is
+     * given back, so a job no replica of this release can run is never failed and never runs out of attempts. A
+     * replica of the newer release claims it as soon as it polls. The default only releases it, counting the attempt.
+     *
+     * @param tenant the tenant
+     * @param id the job
+     * @param replicaId the claiming replica
+     * @param attempt the attempt the claim counted
+     * @param retryAt when the job is due again
+     * @param now the engine clock
+     * @return true when this replica still held the claim
+     */
+    default boolean defer(String tenant, String id, String replicaId, int attempt, Instant retryAt, Instant now) {
+        return release(tenant, id, replicaId, attempt, retryAt, false, now);
+    }
+
+    /**
      * Gives a held claim back after a failed firing: {@code DUE} again at {@code retryAt}, or {@code FAILED} when
      * {@code failed} is set.
      *

@@ -8,6 +8,7 @@ import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.MigrationInfoService;
+import org.flywaydb.core.api.MigrationState;
 import org.flywaydb.core.api.output.MigrateResult;
 
 /**
@@ -17,6 +18,11 @@ import org.flywaydb.core.api.output.MigrateResult;
  * ({@value RuleEngineSchema#HISTORY_TABLE}) and its own classpath location, so the host's
  * {@code flyway_schema_history} and {@code db/migration} are never read or written (TR-EMB-06).
  * The engine opens no connection pool of its own (TR-EMB-04).
+ *
+ * <p>Rolling upgrade (RLE-197, {@code TR-OPS-02}): migrations recorded in the history but not in this build are
+ * ignored ({@code ignoreMigrationPatterns("*:future")}), so a replica of an older release can start against a schema a
+ * replica of the next release has already migrated. That is safe because a release's migrations only expand (DESIGN
+ * section 7).
  *
  * <p>The baseline version is {@code 0}: on a schema that already holds host tables, Flyway records a
  * baseline below {@code V1} and still applies every engine migration.
@@ -75,6 +81,20 @@ public final class RuleEngineSchemaMigrator {
         return new SchemaStatus(version, info.pending().length);
     }
 
+    /**
+     * @return how many migrations the history records that this build does not contain: the schema is ahead of this
+     *     release because a newer replica migrated it. Zero for a schema at or below this build
+     */
+    public int aheadMigrations() {
+        int ahead = 0;
+        for (MigrationInfo info : flyway().info().all()) {
+            if (info.getState() == MigrationState.FUTURE_SUCCESS || info.getState() == MigrationState.FUTURE_FAILED) {
+                ahead++;
+            }
+        }
+        return ahead;
+    }
+
     private static Optional<String> currentVersionOf(Flyway flyway) {
         MigrationInfo current = flyway.info().current();
         if (current == null || current.getVersion() == null) {
@@ -97,6 +117,7 @@ public final class RuleEngineSchemaMigrator {
                 .dataSource(dataSource)
                 .table(RuleEngineSchema.HISTORY_TABLE)
                 .locations(MIGRATION_LOCATION)
+                .ignoreMigrationPatterns("*:future")
                 .baselineOnMigrate(true)
                 .baselineVersion("0")
                 .baselineDescription("Rule Engine baseline")

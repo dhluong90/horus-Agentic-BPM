@@ -93,16 +93,30 @@ public final class JobExecutor {
         JobHandler handler = handlers.get(job.jobKind());
         try {
             return transactions.inTransaction(() -> {
-                if (handler == null || job.attempt() > job.maxAttempts()) {
-                    // A kind this host cannot run, or a job whose firings keep dying with their replica: never fire it
-                    // again; it stays visible as FAILED.
+                if (handler == null) {
+                    // A kind this release cannot run was written by a newer replica during a rolling upgrade
+                    // (PRE-218): hand it back untouched, attempt included, for a replica that knows it.
+                    if (jobs.lockClaim(job.tenantId(), job.id(), settings.replicaId(), job.attempt(), clock.instant())
+                            .isPresent()) {
+                        Instant now = clock.instant();
+                        jobs.defer(job.tenantId(), job.id(), settings.replicaId(), job.attempt(),
+                                now.plus(settings.retryBackoff()), now);
+                        LOG.log(System.Logger.Level.WARNING, "process.job.deferred tenant={0} job={1} kind={2}"
+                                + " reason=kind unknown to this release (rolling upgrade)", job.tenantId(), job.id(),
+                                job.jobKind());
+                    }
+                    return false;
+                }
+                if (job.attempt() > job.maxAttempts()) {
+                    // A job whose firings keep dying with their replica: never fire it again; it stays visible as
+                    // FAILED.
                     if (jobs.lockClaim(job.tenantId(), job.id(), settings.replicaId(), job.attempt(), clock.instant())
                             .isPresent()) {
                         jobs.release(job.tenantId(), job.id(), settings.replicaId(), job.attempt(), job.nextFireAt(),
                                 true, clock.instant());
                         LOG.log(System.Logger.Level.WARNING, "process.job.failed tenant={0} job={1} kind={2} attempt={3}"
-                                + " reason={4}", job.tenantId(), job.id(), job.jobKind(), job.attempt(),
-                                handler == null ? "no handler for the kind" : "max attempts reached");
+                                + " reason=max attempts reached", job.tenantId(), job.id(), job.jobKind(),
+                                job.attempt());
                     }
                     return false;
                 }
