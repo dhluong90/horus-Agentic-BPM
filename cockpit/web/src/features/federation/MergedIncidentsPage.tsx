@@ -139,7 +139,7 @@ function IncidentTable({ rows, tab, hasMore, loadingMore, onMore, labelOf, selec
                 <td>{t(causeKey(item.errorCode))}</td>
                 <td className="num tnum">{item.retryCount}</td>
                 <td className="tnum">{formatDateTime(item.createdAt, locale)}</td>
-                <td><IncidentState incident={item} /></td>
+                <td><IncidentState incident={item} compact /></td>
               </tr>
             );
           })}

@@ -1005,6 +1005,7 @@ export const vi: Record<MessageKey, string> = {
   'incidents.state.retrying': 'Đang chạy lại',
   'incidents.state.resolved': 'Đã xử lý',
   'incidents.state.pending': 'Chờ duyệt, do {who} đề xuất',
+  'incidents.state.pendingShort': 'Chờ duyệt',
   'incidents.cause.ADAPTER_TIMEOUT': 'Hệ thống kết nối không trả lời kịp',
   'incidents.cause.AGENT_TIMEOUT': 'Tác tử AI không trả lời kịp',
   'incidents.cause.UNHANDLED_BUSINESS_ERROR': 'Bước từ chối hồ sơ theo một quy tắc nghiệp vụ',

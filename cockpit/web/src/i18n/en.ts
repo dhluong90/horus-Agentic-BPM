@@ -1003,6 +1003,7 @@ export const en = {
   'incidents.state.retrying': 'Retrying',
   'incidents.state.resolved': 'Resolved',
   'incidents.state.pending': 'Proposed by {who}',
+  'incidents.state.pendingShort': 'Waiting for approval',
   'incidents.cause.ADAPTER_TIMEOUT': 'The connected system did not answer in time',
   'incidents.cause.AGENT_TIMEOUT': 'The AI agent did not answer in time',
   'incidents.cause.UNHANDLED_BUSINESS_ERROR': 'The step refused the case on a business rule',

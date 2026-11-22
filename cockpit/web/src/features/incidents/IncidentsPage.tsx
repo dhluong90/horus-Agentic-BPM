@@ -118,7 +118,7 @@ function IncidentTable({ items, hasMore, tab, selectedId, nameOf, onSelect }: {
                 <td>{t(causeKey(item.errorCode))}</td>
                 <td className="num tnum">{item.retryCount}</td>
                 <td className="tnum">{formatDateTime(item.createdAt, locale)}</td>
-                <td><IncidentState incident={item} /></td>
+                <td><IncidentState incident={item} compact /></td>
               </tr>
             );
           })}
