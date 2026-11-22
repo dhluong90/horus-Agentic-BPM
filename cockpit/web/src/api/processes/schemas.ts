@@ -247,10 +247,46 @@ export const nodeActivity = z
   .loose();
 export type NodeActivity = z.infer<typeof nodeActivity>;
 
+/** One history entry. The undo fields (#80, PRE-203) are present on the entries of an undo only. */
 export const activityEntry = z
-  .object({ id: z.string(), type: z.string(), nodeId: z.string().nullable(), actor: z.string().nullable(), occurredAt: z.string() })
+  .object({
+    id: z.string(),
+    type: z.string(),
+    nodeId: z.string().nullable(),
+    actor: z.string().nullable(),
+    occurredAt: z.string(),
+    kind: z.string().optional(),
+    compensates: z.string().optional(),
+    attemptId: z.string().optional(),
+    scopeTokenId: z.string().optional(),
+    scope: z.string().optional(),
+    attempt: z.number().int().min(1).optional(),
+    errorCode: z.string().optional(),
+    handler: z.string().optional(),
+    cause: z.string().optional(),
+  })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;
+
+export const COMPENSATION_STATES = ['IN_PROGRESS', 'UNDONE', 'NOT_FULLY_UNDONE'] as const;
+
+/** Where the undo of one saga scope stands, as the engine states it; the cockpit never infers it (PRE-203). */
+export const compensationScope = z
+  .object({
+    scopeTokenId: z.string(),
+    scope: z.string().nullable(),
+    state: z.string(),
+    startedAt: z.string(),
+    endedAt: z.string().nullable(),
+    cause: z.string().nullable(),
+    failingStep: z.string().nullable(),
+    stepsUndone: z.number().int().min(0),
+    blockedStep: z.string().nullable(),
+    incidentId: z.string().nullable(),
+    incidentCode: z.string().nullable(),
+  })
+  .loose();
+export type CompensationScope = z.infer<typeof compensationScope>;
 
 export const instanceActivities = z
   .object({
@@ -259,6 +295,8 @@ export const instanceActivities = z
     endedAt: z.string().nullable(),
     nodes: z.array(nodeActivity),
     entries: z.array(activityEntry),
+    /** Absent from an engine older than PRE-203. */
+    compensations: z.array(compensationScope).optional(),
     hasMore: z.boolean(),
   })
   .loose();

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import { currentProcessEngine, resetProcessEngine } from '../../mocks/handlers';
 import { setScenario } from '../../mocks/node';
-import { INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID } from '../../mocks/caseDemo';
+import { INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INSTANCE_ID, UNDONE_INSTANCE_ID } from '../../mocks/caseDemo';
 import { FORM_TASK_ID, INSTANCE_ID, MASKED_TASK_ID, REVIEW_TASK_ID } from '../../mocks/processDemo';
 
 function open(hash: string) {
@@ -185,6 +185,77 @@ describe('CKP-017 instance on its diagram', () => {
 
     expect(await screen.findByText('This service has no case with this reference.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Back to processes/ })).toHaveAttribute('href', '#/processes');
+  });
+});
+
+async function openTimeline(instanceId: string) {
+  setScenario('processes-reviewer');
+  open(`#/instances/${instanceId}`);
+  await userEvent.click(await screen.findByRole('tab', { name: 'Timeline' }));
+  return screen.findByRole('table', { name: 'History of the case in time order' });
+}
+
+const rowTexts = (table: HTMLElement) => within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
+
+describe('CKP-033 and CKP-049 undo steps in the timeline', () => {
+  it('CKP_033_compensation_runs_in_instance_timeline', async () => {
+    const table = await openTimeline(UNDONE_INSTANCE_ID);
+    const rows = rowTexts(table);
+    const at = (text: string) => rows.findIndex((row) => row.includes(text));
+
+    // The failure, then the undo steps newest forward step first, the second after a retry, in time order.
+    expect(at('Attempt failed')).toBeGreaterThan(-1);
+    expect(at('Attempt failed')).toBeLessThan(at('Undo started'));
+    expect(at('Undo of Book loan: Reverse booking')).toBeLessThan(at('Undo of Credit decision: Release credit line'));
+    expect(within(table).getAllByText('Attempt 2')).toHaveLength(1);
+    expect(within(table).getAllByText('Done')).toHaveLength(2);
+    expect(at('Undo finished')).toBeGreaterThan(at('Undo of Credit decision: Release credit line'));
+    // Each undo entry is marked by the symbol and the word, and the engine's state of the scope is shown as given.
+    expect(within(table).getAllByText('↺').length).toBeGreaterThanOrEqual(7);
+    const scopes = screen.getByRole('region', { name: 'Undo of failed steps' });
+    expect(within(scopes).getByText('Disburse: undone')).toBeInTheDocument();
+    expect(within(scopes).getByText('After Send offer failed: 2 steps undone.')).toBeInTheDocument();
+    // No error code, id or saga token reaches the page body; the read carries no variable or input value.
+    const page = document.body.textContent;
+    for (const hidden of ['ADAPTER_TIMEOUT', 'MAX_ATTEMPTS_REACHED', 'DISBURSE-SCOPE', 'reverseBooking', 'releaseCreditLine']) expect(page).not.toContain(hidden);
+    expect(currentProcessEngine().requests.some((request) => request.path.endsWith(`/instances/${UNDONE_INSTANCE_ID}/activities`))).toBe(true);
+  });
+
+  it('CKP_033_the_diagram_marks_each_undone_step_with_a_label', async () => {
+    setScenario('processes-reviewer');
+    open(`#/instances/${UNDONE_INSTANCE_ID}`);
+    const diagram = await screen.findByRole('group', { name: 'Diagram of Case APP-1047' });
+    expect(await within(diagram).findByRole('button', { name: 'Book loan Service task, Undone' })).toBeInTheDocument();
+    expect(within(diagram).getByRole('button', { name: /^Credit decision .*Undone$/ })).toBeInTheDocument();
+  });
+
+  it('CKP_049_a_failed_undo_reads_calmly_and_never_says_the_case_was_put_right', async () => {
+    const table = await openTimeline(STUCK_UNDO_INSTANCE_ID);
+    expect(within(table).getAllByText('Undo failed: Release credit line')).toHaveLength(3);
+    expect(within(table).getByText('Failed after 3 attempts')).toBeInTheDocument();
+    const scopes = screen.getByRole('region', { name: 'Undo of failed steps' });
+    expect(within(scopes).getByText('Disburse: not fully undone')).toBeInTheDocument();
+    expect(within(scopes).getByText('Undo of Credit decision did not finish and needs an operator.')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Disburse: undone|put right|ADAPTER_TIMEOUT|COMPENSATION_FAILED/);
+    // The failure is words and a symbol, not the error hue.
+    expect(table.querySelector('.timeline__row--undo-stuck')).not.toBeNull();
+    expect(table.querySelector('.timeline__row--undo .timeline__what--bad')).toBeNull();
+
+    await userEvent.click(within(scopes).getByRole('button', { name: 'Open the incident' }));
+    const inspector = await screen.findByRole('complementary', { name: 'Selected step' });
+    expect(within(inspector).getByText('An undo step failed and needs an operator.')).toBeInTheDocument();
+    expect(within(inspector).getByRole('heading', { name: 'Credit decision' })).toBeInTheDocument();
+  });
+
+  it('CKP_033_the_undo_reads_in_vietnamese', async () => {
+    setScenario('processes-reviewer');
+    window.localStorage.setItem('horus.cockpit.locale', 'vi');
+    resetProcessEngine({ locale: 'vi' });
+    open(`#/instances/${STUCK_UNDO_INSTANCE_ID}`);
+    await userEvent.click(await screen.findByRole('tab', { name: 'Dòng thời gian' }));
+    expect(await screen.findByText('Disburse: chưa hoàn tác hết')).toBeInTheDocument();
+    expect(screen.getAllByText('Hoàn tác lỗi: Release credit line')).toHaveLength(3);
+    expect(screen.getByText('Lỗi sau 3 lần thử')).toBeInTheDocument();
   });
 });
 

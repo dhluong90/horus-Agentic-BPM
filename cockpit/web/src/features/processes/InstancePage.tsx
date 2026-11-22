@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { InstanceActivities, ProcessInstance } from '../../api/processes/schemas';
+import type { ActivityEntry, CompensationScope, InstanceActivities, ProcessInstance } from '../../api/processes/schemas';
 import { toHostError } from '../../api/hostError';
 import { setCrumbTrail } from '../../app/crumbs';
 import { usePersonName } from '../../app/people';
@@ -25,6 +25,10 @@ import {
   incidentKey,
   isProblemEntry,
   nodeMarks,
+  scopeState,
+  undoEntryType,
+  wordsOf,
+  type UndoEntryType,
   openTaskAt,
   TOKEN_ICON,
   TOKEN_KEY,
@@ -86,6 +90,7 @@ function InstanceLoaded({ instance }: { instance: ProcessInstance }) {
   const graph = useDefinitionGraph(instance.definitionKey, instance.definitionVersion);
   const activities = useInstanceActivities(instance.id, true);
   const [lens, setLens] = useState<Lens>('diagram');
+  const [picked, setPicked] = useState<string | undefined>(undefined);
   const processName = details.data?.name ?? undefined;
   const title = instance.businessKey ? t('instance.title', { key: instance.businessKey }) : t('instance.crumb');
   useEffect(() => {
@@ -105,10 +110,10 @@ function InstanceLoaded({ instance }: { instance: ProcessInstance }) {
           <Tabs label={t('instance.lenses')} selected={lens} onSelect={setLens}
             items={[{ id: 'diagram', label: t('instance.lens.diagram') }, { id: 'timeline', label: t('instance.lens.timeline') }]}>
             {lens === 'diagram' ? (
-              <InstanceDiagram instance={instance} graph={graph.data} activities={activities.data} label={t('instance.diagramLabel', { name: title })}
+              <InstanceDiagram instance={instance} graph={graph.data} activities={activities.data} picked={picked} onPick={setPicked} label={t('instance.diagramLabel', { name: title })}
                 load={{ pending: activities.isPending, error: activities.isError ? activities.error : undefined, retry: () => { void activities.refetch(); } }} />
             ) : (
-              activities.isPending ? <LoadingRows rows={6} /> : activities.isError ? <ActivitiesError error={activities.error} onRetry={() => { void activities.refetch(); }} /> : <Timeline graph={graph.data} activities={activities.data} />
+              activities.isPending ? <LoadingRows rows={6} /> : activities.isError ? <ActivitiesError error={activities.error} onRetry={() => { void activities.refetch(); }} /> : <Timeline graph={graph.data} activities={activities.data} onShowStep={(nodeId) => { setPicked(nodeId); setLens('diagram'); }} />
             )}
           </Tabs>
         )}
@@ -135,6 +140,8 @@ function badgeOf(mark: NodeMark, t: T): StepBadge {
       const text = mark.count > 1 ? t('instance.badge.tokens', { what: words, count: String(mark.count) }) : words;
       return { tone: 'token', icon: TOKEN_ICON[mark.status], text, label: text };
     }
+    case 'undone':
+      return { tone: 'undone', icon: '↺', text: t('instance.badge.undone'), label: t('instance.badge.undone') };
     case 'done':
       return { tone: 'done', icon: '✓', text: '', label: t('instance.state.completed') };
   }
@@ -147,20 +154,21 @@ interface ActivitiesLoad {
   retry: () => void;
 }
 
-function InstanceDiagram({ instance, graph, activities, load, label }: {
+function InstanceDiagram({ instance, graph, activities, load, label, picked, onPick }: {
   instance: ProcessInstance;
   graph: DiagramGraph;
   activities: InstanceActivities | undefined;
   load: ActivitiesLoad;
   label: string;
+  picked: string | undefined;
+  onPick: (nodeId: string) => void;
 }) {
   const { t } = useI18n();
   const marks = useMemo(() => nodeMarks(instance, activities), [instance, activities]);
   const order = useMemo(() => flowOrder(graph).map((node) => node.id), [graph]);
-  const [picked, setPicked] = useState<string | undefined>(undefined);
   const selected = picked ?? firstStep(marks, order);
   const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t)])), [marks, t]);
-  const overlay: DiagramOverlay = { badges, selected, onSelect: setPicked };
+  const overlay: DiagramOverlay = { badges, selected, onSelect: onPick };
   const node = graph.nodes.find((item) => item.id === selected);
   return (
     <div className="instance-grid">
@@ -275,6 +283,7 @@ function StateLine({ mark, activity }: { mark: NodeMark | undefined; activity: b
   const { t } = useI18n();
   if (mark?.kind === 'incident') return <p className="inspector__state"><span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('instance.state.incident')}</span></p>;
   if (mark?.kind === 'token') return <p className="inspector__state"><span className="badge badge--accent"><span aria-hidden="true">{TOKEN_ICON[mark.status]}</span> {t(TOKEN_KEY[mark.status])}</span></p>;
+  if (mark?.kind === 'undone') return <p className="inspector__state"><span className="badge badge--warn"><span aria-hidden="true">↺</span> {t('instance.state.undone')}</span></p>;
   if (mark?.kind === 'done') return <p className="inspector__state"><span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('instance.state.completed')}</span></p>;
   if (activity) return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">•</span> {t('instance.state.passed')}</span></p>;
   return <p className="inspector__state"><span className="badge badge--muted"><span aria-hidden="true">○</span> {t('instance.state.notReached')}</span></p>;
@@ -321,36 +330,114 @@ function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolea
 }
 
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
-function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
+function Timeline({ graph, activities, onShowStep }: { graph: DiagramGraph; activities: InstanceActivities; onShowStep: (nodeId: string) => void }) {
   const { t, locale } = useI18n();
   const actorText = useActorText();
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
+  const stepName = (id: string) => names.get(id) ?? wordsOf(id);
+  const scopes = activities.compensations ?? [];
   if (activities.entries.length === 0) return <div className="card__pad"><EmptyState icon="processes" text={t('instance.timeline.empty')} /></div>;
   return (
-    <div className="timeline" tabIndex={0} role="region" aria-label={t('instance.timeline.label')}>
-      <table className="qtable" aria-label={t('instance.timeline.label')}>
-        <thead>
-          <tr>
-            <th scope="col">{t('instance.timeline.when')}</th>
-            <th scope="col">{t('instance.timeline.what')}</th>
-            <th scope="col">{t('instance.timeline.step')}</th>
-            <th scope="col">{t('instance.timeline.who')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {activities.entries.map((entry) => (
-            <tr key={entry.id}>
-              <td className="tnum muted">{formatDateTime(entry.occurredAt, locale)}</td>
-              <td className={isProblemEntry(entry) ? 'timeline__what timeline__what--bad' : 'timeline__what'}>
-                {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type))}
-              </td>
-              <td>{entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
-              <td>{actorText(entry.actor)}</td>
+    <>
+      {scopes.length > 0 ? (
+        <section className="undo-scopes" aria-label={t('instance.timeline.undoLabel')}>
+          {scopes.map((scope) => <UndoScope key={scope.scopeTokenId} scope={scope} stepName={stepName} onShowStep={onShowStep} />)}
+        </section>
+      ) : null}
+      <div className="timeline" tabIndex={0} role="region" aria-label={t('instance.timeline.label')}>
+        <table className="qtable" aria-label={t('instance.timeline.label')}>
+          <thead>
+            <tr>
+              <th scope="col">{t('instance.timeline.when')}</th>
+              <th scope="col">{t('instance.timeline.what')}</th>
+              <th scope="col">{t('instance.timeline.step')}</th>
+              <th scope="col">{t('instance.timeline.who')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      {activities.hasMore ? <p className="muted timeline__more">{t('instance.timeline.more', { count: String(activities.entries.length) })}</p> : null}
+          </thead>
+          <tbody>
+            {activities.entries.map((entry) => {
+              const undo = undoEntryType(entry);
+              return undo !== undefined ? (
+                <UndoRow key={entry.id} entry={entry} type={undo} stepName={stepName} actorText={actorText} />
+              ) : (
+                <tr key={entry.id}>
+                  <td className="tnum muted">{formatDateTime(entry.occurredAt, locale)}</td>
+                  <td className={isProblemEntry(entry) ? 'timeline__what timeline__what--bad' : 'timeline__what'}>
+                    {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type))}
+                  </td>
+                  <td>{entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
+                  <td>{actorText(entry.actor)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {activities.hasMore ? <p className="muted timeline__more">{t('instance.timeline.more', { count: String(activities.entries.length) })}</p> : null}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Where the undo of one saga scope stands, in words, as the engine states it. An undo that did not finish is a calm
+ * warning with the one way forward; nothing here says the case was put right unless the engine says the scope is undone.
+ */
+function UndoScope({ scope, stepName, onShowStep }: { scope: CompensationScope; stepName: (id: string) => string; onShowStep: (nodeId: string) => void }) {
+  const { t } = useI18n();
+  const state = scopeState(scope);
+  const title = t(`instance.undo.scope.${state}`, { scope: scope.scope !== null ? stepName(scope.scope) : t('instance.timeline.otherStep') });
+  const steps = t(scope.stepsUndone === 1 ? 'instance.undo.steps.one' : 'instance.undo.steps.many', { count: String(scope.stepsUndone) });
+  const detail = state === 'NOT_FULLY_UNDONE' && scope.blockedStep !== null
+    ? t('instance.undo.blocked', { step: stepName(scope.blockedStep) })
+    : state === 'UNDONE'
+      ? scope.failingStep !== null ? t('instance.undo.after', { step: stepName(scope.failingStep), steps }) : steps
+      : t('instance.undo.running');
+  const blocked = scope.blockedStep;
+  return (
+    <div className={`undo-scope undo-scope--${state === 'UNDONE' ? 'done' : state === 'NOT_FULLY_UNDONE' ? 'blocked' : 'running'}`}>
+      <span className="undo-scope__icon" aria-hidden="true">{state === 'UNDONE' ? '✓' : state === 'NOT_FULLY_UNDONE' ? '!' : '↺'}</span>
+      <p className="undo-scope__text"><strong>{title}</strong> <span>{detail}</span></p>
+      {state === 'NOT_FULLY_UNDONE' && blocked !== null && scope.incidentId !== null ? (
+        <button type="button" className="btn btn--small" onClick={() => { onShowStep(blocked); }}>{t('instance.undo.openIncident')}</button>
+      ) : null}
     </div>
+  );
+}
+
+/** One entry of an undo: marked ↺ and by the word "Undo", with a left edge in the warning hue; the failure is plain words, not red. */
+function UndoRow({ entry, type, stepName, actorText }: { entry: ActivityEntry; type: UndoEntryType; stepName: (id: string) => string; actorText: (actor: string | null) => string }) {
+  const { t, locale } = useI18n();
+  const handler = entry.handler !== undefined ? wordsOf(entry.handler) : '';
+  const step = entry.compensates !== undefined ? stepName(entry.compensates) : '';
+  const scope = entry.scope !== undefined ? stepName(entry.scope) : undefined;
+  const failed = type === 'COMPENSATION_STEP_FAILED' || type === 'COMPENSATION_STEP_MANUAL';
+  const label = (() => {
+    switch (type) {
+      case 'COMPENSATION_STARTED': return t('instance.undo.started');
+      case 'COMPENSATED': return t('instance.undo.finished');
+      case 'COMPENSATION_STEP_FAILED': return t('instance.undo.stepFailed', { handler });
+      case 'COMPENSATION_STEP_MANUAL': return t('instance.undo.stepManual', { handler });
+      default: return t('instance.undo.step', { step, handler });
+    }
+  })();
+  const note = (() => {
+    const count = String(entry.attempt ?? 1);
+    switch (type) {
+      case 'COMPENSATION_STEP_SCHEDULED': return entry.attempt !== undefined && entry.attempt > 1 ? t('instance.undo.attempt', { count }) : t('instance.undo.state.sent');
+      case 'COMPENSATION_STEP_COMPLETED': return t('instance.undo.state.done');
+      case 'COMPENSATION_STEP_FAILED': return t(entry.attempt === 1 ? 'instance.undo.failedAfter.one' : 'instance.undo.failedAfter.many', { count });
+      case 'COMPENSATION_STEP_MANUAL': return t('instance.undo.state.person');
+      default: return undefined;
+    }
+  })();
+  return (
+    <tr className={failed ? 'timeline__row--undo timeline__row--undo-stuck' : 'timeline__row--undo'}>
+      <td className="tnum muted">{formatDateTime(entry.occurredAt, locale)}</td>
+      <td className="timeline__what">
+        <span className="timeline__undo"><span className="timeline__glyph" aria-hidden="true">{failed ? '!' : '↺'}</span><span>{label}</span>{note !== undefined ? <span className="timeline__note">{note}</span> : null}</span>
+      </td>
+      <td>{scope ?? <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
+      <td>{actorText(entry.actor)}</td>
+    </tr>
   );
 }
