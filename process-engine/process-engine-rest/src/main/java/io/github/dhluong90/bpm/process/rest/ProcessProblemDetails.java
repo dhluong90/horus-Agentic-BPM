@@ -60,6 +60,7 @@ public class ProcessProblemDetails {
             Map.entry("LAYOUT_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("DRY_RUN_REQUIRED", HttpStatus.CONFLICT),
             Map.entry("LAYOUT_INVALID", UNPROCESSABLE),
+            Map.entry("MIGRATION_PLAN_INVALID", UNPROCESSABLE),
             Map.entry("RULE_SET_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_TOO_LARGE", UNPROCESSABLE),
             Map.entry("VERSION_SUPERSEDED", HttpStatus.CONFLICT),
@@ -118,6 +119,10 @@ public class ProcessProblemDetails {
             case io.github.dhluong90.bpm.process.api.LayoutInvalidException l -> {
                 tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
                 l.problems().forEach(paths::add);
+            }
+            case io.github.dhluong90.bpm.process.api.MigrationPlanInvalidException m -> {
+                tools.jackson.databind.node.ArrayNode paths = body.putArray("paths");
+                m.problems().forEach(paths::add);
             }
             case io.github.dhluong90.bpm.process.api.ReplayTooLargeException r ->
                     body.put("cases", r.cases()).put("limit", r.limit());

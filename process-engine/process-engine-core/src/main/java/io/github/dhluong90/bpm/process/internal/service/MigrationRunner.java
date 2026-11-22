@@ -3,6 +3,8 @@ package io.github.dhluong90.bpm.process.internal.service;
 import io.github.dhluong90.bpm.process.api.EventListenerFailedException;
 import io.github.dhluong90.bpm.process.api.MigrationDryRun;
 import io.github.dhluong90.bpm.process.api.MigrationOutcome;
+import io.github.dhluong90.bpm.process.api.MigrationStepCancellation;
+import io.github.dhluong90.bpm.process.api.MigrationStepMapping;
 import io.github.dhluong90.bpm.process.internal.exec.HistoryEntry;
 import io.github.dhluong90.bpm.process.internal.exec.Ids;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
@@ -171,7 +173,8 @@ public final class MigrationRunner {
 
     /** The versions of a plan and the steps of each, read once per claim. */
     private record Plan(StoredPlan stored, StoredDefinition source, StoredDefinition target, Map<String, Step> from,
-            Map<String, Step> to) {
+            Map<String, Step> to, Map<String, MigrationStepMapping> mapped,
+            Map<String, MigrationStepCancellation> cancelled) {
     }
 
     private Plan plan(String tenant, Execution run) {
@@ -179,8 +182,12 @@ public final class MigrationRunner {
             StoredPlan stored = store.findPlan(tenant, run.migrationId()).orElseThrow();
             StoredDefinition source = definitions.definition(tenant, stored.sourceDefinitionId()).orElseThrow();
             StoredDefinition target = definitions.definition(tenant, stored.targetDefinitionId()).orElseThrow();
+            Map<String, MigrationStepMapping> mapped = new java.util.HashMap<>();
+            stored.view().mappings().forEach(m -> mapped.put(m.from(), m));
+            Map<String, MigrationStepCancellation> cancelled = new java.util.HashMap<>();
+            stored.view().cancellations().forEach(c -> cancelled.put(c.step(), c));
             return new Plan(stored, source, target, Migrations.steps(models.apply(source)),
-                    Migrations.steps(models.apply(target)));
+                    Migrations.steps(models.apply(target)), mapped, cancelled);
         });
     }
 
@@ -225,6 +232,9 @@ public final class MigrationRunner {
             return fail(tenant, run, plan, instanceId, e.code, e.nodeId, e.tokenId);
         } catch (InstanceBusyException e) {
             return fail(tenant, run, plan, instanceId, "LOCK_CONFLICT", null, null);
+        } catch (io.github.dhluong90.bpm.process.api.ProcessException e) {
+            // A step that cannot be entered on arrival (#106): this instance rolls back alone and stays on the source.
+            return fail(tenant, run, plan, instanceId, e.code(), null, null);
         }
     }
 
@@ -251,18 +261,76 @@ public final class MigrationRunner {
                     lease);
             return;
         }
+        List<LiveToken> mappedTokens = new java.util.ArrayList<>();
+        List<LiveToken> cancelledTokens = new java.util.ArrayList<>();
+        boolean inFlight = false;
         for (LiveToken token : store.liveTokens(tenant, instanceId)) {
+            MigrationStepMapping map = plan.mapped.get(token.nodeId());
+            MigrationStepCancellation cancel = map == null ? plan.cancelled.get(token.nodeId()) : null;
             Step was = plan.from.get(token.nodeId());
-            Step now2 = plan.to.get(token.nodeId());
+            Step now2 = plan.to.get(map != null ? map.to() : cancel != null ? cancel.moveTo() : token.nodeId());
             if (now2 == null) {
                 throw new CannotMove(MigrationDryRun.STEP_NOT_IN_TARGET, token.nodeId(), token.id());
             }
-            if (was != null && !Objects.equals(was.type(), now2.type())) {
+            if (cancel == null && was != null && !Objects.equals(was.type(), now2.type())) {
                 throw new CannotMove(MigrationDryRun.STEP_TYPE_CHANGED, token.nodeId(), token.id());
             }
+            if (map != null) {
+                mappedTokens.add(token);
+            } else if (cancel != null) {
+                cancelledTokens.add(token);
+                // PRE-201: a call in flight is never cut off; the instance is left on the source version.
+                inFlight |= store.callInFlight(tenant, instanceId, token.id());
+            }
+        }
+        if (inFlight) {
+            skip(tenant, run, instanceId, MigrationDryRun.STEP_IN_FLIGHT, "A call is in flight at a removed step; the "
+                    + "instance stays on v" + plan.source.version() + " for a later run", now, lease);
+            return;
         }
         store.moveInstance(tenant, instanceId, plan.target.id(), plan.target.version());
-        String detail = "v" + plan.source.version() + " -> v" + plan.target.version();
+        List<String> applied = new java.util.ArrayList<>();
+        List<HistoryEntry> entries = new java.util.ArrayList<>();
+        for (LiveToken token : mappedTokens) {
+            MigrationStepMapping map = plan.mapped.get(token.nodeId());
+            store.renameStep(tenant, instanceId, token.id(), token.nodeId(), map.to());
+            applied.add(token.nodeId() + " -> " + map.to());
+        }
+        for (LiveToken token : cancelledTokens) {
+            MigrationStepCancellation cancel = plan.cancelled.get(token.nodeId());
+            MigrationStore.CancelledWork work = store.cancelOpenWork(tenant, instanceId, token.id(), now);
+            Map<String, Object> cancelDetails = new LinkedHashMap<>();
+            cancelDetails.put("migrationId", run.migrationId());
+            cancelDetails.put("step", cancel.step());
+            cancelDetails.put("moveTo", cancel.moveTo());
+            // The reason is the plan's; the cancelled task's context is never copied here.
+            cancelDetails.put("reason", cancel.reason());
+            if (work.taskId() != null) {
+                cancelDetails.put("taskId", work.taskId());
+                entries.add(new HistoryEntry("TASK_CANCELLED", cancel.step(), token.id(), work.taskId(),
+                        run.approvedBy(), now, cancelDetails));
+            }
+            for (String jobId : work.jobIds()) {
+                Map<String, Object> jobDetails = new LinkedHashMap<>(cancelDetails);
+                jobDetails.put("jobId", jobId);
+                entries.add(new HistoryEntry("JOB_CANCELLED", cancel.step(), token.id(), jobId, run.approvedBy(), now,
+                        jobDetails));
+            }
+            applied.add(cancel.step() + " -> " + cancel.moveTo() + " (cancelled)");
+        }
+        if (!entries.isEmpty()) {
+            definitions.appendHistory(tenant, instanceId, plan.target.id(), entries);
+        }
+        for (LiveToken token : cancelledTokens) {
+            // The token enters the named step as on arrival: a task opens, a job parks, a local step runs.
+            services.enterStepAfterMigration(tenant, instanceId, token.id(), plan.cancelled.get(token.nodeId()).moveTo(),
+                    ENGINE_ACTOR);
+        }
+        String detail = "v" + plan.source.version() + " -> v" + plan.target.version()
+                + (applied.isEmpty() ? "" : "; " + String.join("; ", applied));
+        if (detail.length() > 500) {
+            detail = detail.substring(0, 500);
+        }
         store.insertOutcome(tenant, run.migrationId(), new MigrationOutcome(instanceId, "MIGRATED", MOVED, detail, null,
                 now));
         Map<String, Object> details = new LinkedHashMap<>();
@@ -273,6 +341,9 @@ public final class MigrationRunner {
         details.put("proposedBy", run.proposedBy());
         details.put("approvedBy", run.approvedBy());
         details.put("reason", run.reason());
+        if (!applied.isEmpty()) {
+            details.put("steps", applied);
+        }
         definitions.appendHistory(tenant, instanceId, plan.target.id(), List.of(new HistoryEntry("MIGRATED", null, null,
                 null, run.approvedBy(), now, details)));
         advance(tenant, run, instanceId, now, lease, 1, 0, 0);

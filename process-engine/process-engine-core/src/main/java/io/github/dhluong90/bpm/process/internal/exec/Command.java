@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * Inputs of the kernel. Each is applied under the instance row lock by the shell.
  */
-public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.RetryStep, Command.Compensate, Command.EndCompensation {
+public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.ChildEnded, Command.MoveToken, Command.RetryStep, Command.Compensate, Command.EndCompensation {
 
     /**
      * Starts the instance at its none start event.
@@ -160,6 +160,53 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
         public ChildCompleted {
             output = output == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(output));
         }
+    }
+
+    /**
+     * A migration moves a token to a step of the version the instance now runs on (#106, PRE-201): the work the token
+     * waited for has already been cancelled by the shell, and the token enters the step as on arrival, so a task opens
+     * or a job parks.
+     *
+     * @param tokenId the waiting token
+     * @param nodeId the step of the instance's version to enter
+     */
+    record MoveToken(String tokenId, String nodeId) implements Command {
+        public MoveToken {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
+            Objects.requireNonNull(nodeId, "nodeId must not be null");
+        }
+    }
+
+    /**
+     * A called child instance ended without completing, or completed: the parent's {@code callProcess} step hears of it
+     * (#92, PRE-204, PRE-206). Delivered by the shell when the {@code CALL_RESULT} job fires, in its own transaction.
+     *
+     * @param tokenId the waiting token
+     * @param attemptId the token's call attempt, which the child was started under
+     * @param childInstanceId the child
+     * @param outcome how the child ended
+     * @param output the child's declared outputs, already read from the ended child; empty unless it completed
+     * @param reason the cancellation reason or the failure code of the child, or null
+     */
+    record ChildEnded(String tokenId, String attemptId, String childInstanceId, ChildOutcome outcome,
+            Map<String, Object> output, String reason) implements Command {
+        public ChildEnded {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
+            Objects.requireNonNull(attemptId, "attemptId must not be null");
+            Objects.requireNonNull(childInstanceId, "childInstanceId must not be null");
+            Objects.requireNonNull(outcome, "outcome must not be null");
+            output = output == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(output));
+        }
+    }
+
+    /** How a called child instance ended. */
+    enum ChildOutcome {
+        /** The child completed. */
+        COMPLETED,
+        /** The child failed. */
+        FAILED,
+        /** The child was cancelled. */
+        CANCELLED
     }
 
     /**

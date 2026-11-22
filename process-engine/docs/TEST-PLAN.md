@@ -132,6 +132,15 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-197 | `PRE_197_a_crashed_runner_is_taken_over_after_its_lease_and_continues_after_the_last_committed_instance` (`MigrationExecutionPostgresIT`) | Testcontainers, the runner stopped by a hook after its 40th instance, TestClock moved past the lease | M2 | `TR-MIG-02`, `TR-OPS-01` | Done (#90) |
 | PRE-198 | `PRE_198_*` in `MigrationExecutionPostgresIT` | Testcontainers, a runner that loses its lease inside its own batch, two runners polling the same plan | M2 | `TR-MIG-02`, `TR-TEN-01` | Done (#90) |
 | PRE-199 | `PRE_199_*` in `LayoutPostgresIT` | Testcontainers with two tenants, schema and step checks, idempotency | M3 | `TR-DEF-02`, `TR-TEN-01` | Done (#102) |
+| PRE-200 | `PRE_200_*` in `StepMappingMigrationPostgresIT` and `MigrationRestContractTest` | Testcontainers, 40 loans with 15 claims, a timer as the wrong kind of target; WebMvc against `openapi.yaml` | M3 | `TR-MIG-03`, `TR-MIG-01` | Done (#106) |
+| PRE-201 | `PRE_201_*` in `StepMappingMigrationPostgresIT` | Testcontainers, 12 tasks and 3 remote jobs (one claimed), a later plan, TestClock | M3 | `TR-MIG-03`, `TR-MIG-02` | Done (#106) |
+| PRE-202 | `PRE_202_*` in `StepMappingMigrationPostgresIT` | Testcontainers, five refused plans, row counts before and after | M3 | `TR-MIG-03` | Done (#106) |
+| PRE-203 | `PRE_203_*` in `StepMappingMigrationPostgresIT` and `MigrationApprovalSettingsTest` | Testcontainers with two tenants and three callers; start-up refusal of `cancel-approval=four-eyes` | M3 | `TR-IDEM-01`, `TR-TEN-01`, `TR-SEC-04` | Done (#106) |
+| PRE-204 | `PRE_204_*` in `CallActivityPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a parent and a child, the call job fired by hand; reader, writer and hash round trip | M2 | `TR-STD-28`, `PRE-043` | Done (#92) |
+| PRE-205 | `PRE_205_*` in `CallActivityPostgresIT` and `CallsSettingsTest` | Testcontainers, a unique index violation, a self-calling process, a missing definition | M2 | `TR-IDEM-01`, `TR-RES-01` | Done (#92) |
+| PRE-206 | `PRE_206_*` in `CallActivityPostgresIT` | Testcontainers, an operator cancels the child, then the parent; an incident retry; event capture | M2 | `TR-CAN-01`, `TR-INC-01` | Done (#92) |
+| PRE-207 | `PRE_207_*` in `CallActivityPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a saga with an undo handler, two tenants; the import check | M2 | `TR-COMP-02`, `TR-TEN-01` | Done (#92) |
+| PRE-208 | `PRE_208_*` in `ImportedLayoutPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a file with a diagram, two imports, a version stored without a layout | M3 | `TR-DEF-02`, `PRE-024` | Done (#445) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

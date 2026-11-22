@@ -37,6 +37,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param migration migration plans of running instances (#74)
  * @param approval what a definition approval must name (PD-139)
  * @param incidents how incidents are resolved (PD-126)
+ * @param calls limits of a process that calls another (#92)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -59,7 +60,8 @@ public record ProcessEngineProperties(
         @DefaultValue Calendar calendar,
         @DefaultValue Migration migration,
         @DefaultValue Approval approval,
-        @DefaultValue Incidents incidents) {
+        @DefaultValue Incidents incidents,
+        @DefaultValue Calls calls) {
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -503,6 +505,22 @@ public record ProcessEngineProperties(
     }
 
     /**
+     * A step that calls a child process (#92, PRE-205).
+     *
+     * @param maxDepth most calls one above another: a child started at a deeper level raises the incident
+     *     {@code CALL_DEPTH_EXCEEDED} and no child starts; 1 to 5, may be lowered, never raised
+     */
+    public record Calls(@DefaultValue("5") int maxDepth) {
+
+        public Calls {
+            if (maxDepth < 1 || maxDepth > EngineDefaults.MAX_CALL_DEPTH) {
+                throw new IllegalArgumentException("horus.bpm.processes.calls.max-depth must be 1 to "
+                        + EngineDefaults.MAX_CALL_DEPTH + ", was " + maxDepth);
+            }
+        }
+    }
+
+    /**
      * Migration plans of running instances (#74, PD-114, PD-131).
      *
      * @param approval the approval a new plan records for its execution: {@code four-eyes} (the default), or
@@ -516,6 +534,10 @@ public record ProcessEngineProperties(
      *     runner's plan is taken over after this time
      * @param lockWait how long the runner waits for an instance row another transaction holds when it opens the incident
      *     of a failed instance, {@code PT1S} to {@code PT30S}
+     * @param cancelApproval who approves the cancellation of a removed step's work (#106, PRE-203): {@code single} (the
+     *     default): the holder of {@code processes:migration:manage} who proposes the plan is the only one needed for the
+     *     cancellations, as the single-approver retirement of PD-102; {@code four-eyes} is reserved and refused at start-up
+     *     until it is built
      */
     public record Migration(
             @DefaultValue("four-eyes") String approval,
@@ -523,9 +545,14 @@ public record ProcessEngineProperties(
             @DefaultValue("PT1H") Duration dryRunValidity,
             @DefaultValue("100") int batchSize,
             @DefaultValue("PT2M") Duration lease,
-            @DefaultValue("PT5S") Duration lockWait) {
+            @DefaultValue("PT5S") Duration lockWait,
+            @DefaultValue("single") String cancelApproval) {
 
         public Migration {
+            if (!"single".equals(cancelApproval)) {
+                throw new IllegalArgumentException("horus.bpm.processes.migration.cancel-approval must be single, was "
+                        + cancelApproval + "; four-eyes cancellation is reserved and not built yet");
+            }
             try {
                 toSettings(approval, dryRunSampleSize, dryRunValidity, batchSize, lease, lockWait);
             } catch (IllegalArgumentException e) {

@@ -123,10 +123,13 @@ class MigrationQueryPlanPostgresIT {
         assertThat(plan).as(name + " plan " + plan).anyMatch(n -> INDEXES.get(name).stream().anyMatch(n::endsWith));
     }
 
-    /** The queries of the execution runner (#90), whose plans ListQueryPlanCheckTest checks. */
+    /**
+     * The queries of the execution runner (#90), and the in-flight read of the step instructions (#106, on
+     * {@code pre_timer}, which this seed does not fill), whose plans ListQueryPlanCheckTest checks.
+     */
     private static final java.util.Set<String> EXECUTION_QUERIES = java.util.Set.of("migration-batch",
             "migration-instance-tokens", "migration-outcomes", "migration-outcomes-of",
-            "migration-failures-without-incident");
+            "migration-failures-without-incident", "migration-in-flight-instances");
 
     @Test
     void PRE_014_every_registered_dry_run_query_is_answered_by_an_index_on_a_seeded_database() {

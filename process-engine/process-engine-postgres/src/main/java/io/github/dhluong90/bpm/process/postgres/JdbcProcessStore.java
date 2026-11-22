@@ -202,6 +202,35 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     private static final String INSTANCE_COLUMNS = ProcessListQueries.INSTANCE_COLUMNS;
 
     @Override
+    public Optional<ParentLink> parentLink(String tenant, String instanceId) {
+        return jdbc.sql("SELECT parent_instance_id, parent_token_id, call_attempt, call_depth FROM pre_instance "
+                        + "WHERE tenant_id = ? AND id = ? AND parent_instance_id IS NOT NULL")
+                .params(tenant, instanceId)
+                .query((rs, n) -> new ParentLink(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getInt(4)))
+                .optional();
+    }
+
+    @Override
+    public int callAttempts(String tenant, String parentTokenId) {
+        return jdbc.sql("SELECT count(*) FROM pre_instance WHERE tenant_id = ? AND parent_token_id = ?")
+                .params(tenant, parentTokenId).query(Integer.class).single();
+    }
+
+    @Override
+    public void linkChild(String tenant, String childId, String parentInstanceId, String parentTokenId,
+            int callAttempt, int callDepth) {
+        jdbc.sql("UPDATE pre_instance SET parent_instance_id = ?, parent_token_id = ?, call_attempt = ?, "
+                        + "call_depth = ? WHERE tenant_id = ? AND id = ?")
+                .params(parentInstanceId, parentTokenId, callAttempt, callDepth, tenant, childId).update();
+    }
+
+    @Override
+    public List<String> activeChildren(String tenant, String parentInstanceId, int limit) {
+        return ProcessListQueries.INSTANCE_CHILDREN.list(jdbc, List.of(tenant, parentInstanceId, limit),
+                (rs, n) -> rs.getString(1));
+    }
+
+    @Override
     public boolean insertInstance(InstanceRow r) {
         // A concurrent start with the same business key blocks on the unique index, then inserts nothing.
         return jdbc.sql("INSERT INTO pre_instance (tenant_id, id, definition_id, definition_key, definition_ver, business_key, "

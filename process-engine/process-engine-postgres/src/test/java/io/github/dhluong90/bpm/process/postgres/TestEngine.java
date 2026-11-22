@@ -173,6 +173,11 @@ final class TestEngine {
                         .collect(Collectors.toSet()), b.agents.stream()
                         .map(io.github.dhluong90.bpm.process.spi.AgentAdapter::name).collect(Collectors.toSet()),
                 b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits, calendars.businessCalendar());
+        if (b.importedLayouts) {
+            // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
+            this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
+                    new io.github.dhluong90.bpm.process.bpmn.subset.BpmnLayoutReader(Limits.DEFAULTS)::read));
+        }
         this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
                 new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
                         tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
@@ -317,6 +322,7 @@ final class TestEngine {
         private io.github.dhluong90.bpm.process.internal.service.AsyncSettings asyncSettings =
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
+        private boolean importedLayouts;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -331,6 +337,12 @@ final class TestEngine {
         private Builder(String replicaId, TestClock clock) {
             this.replicaId = replicaId;
             this.clock = clock;
+        }
+
+        /** Stores the diagram of an imported BPMN file as layout revision 1, as the starter does (#445). */
+        Builder importedLayouts() {
+            importedLayouts = true;
+            return this;
         }
 
         Builder lease(Duration value) {

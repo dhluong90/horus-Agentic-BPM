@@ -1,6 +1,9 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
+import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
+import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
@@ -203,6 +206,17 @@ public final class CanonicalProcessWriter {
                     if (out.size() > 1) {
                         ArrayNode next = step.putArray("next");
                         out.forEach(f -> next.add(f.targetRef()));
+                    }
+                }
+                case CallActivity c -> {
+                    // #92: the called definition key, the pinned version when there is one, and the outputs brought back.
+                    step.put("type", "callProcess");
+                    step.put("process", c.calledElement());
+                    c.extensions().first(CalledVersion.class).ifPresent(v -> step.put("version", v.version()));
+                    List<OutputMapping> outputs = c.extensions().all(OutputMapping.class);
+                    if (!outputs.isEmpty()) {
+                        ObjectNode out2 = step.putObject("outputs");
+                        outputs.forEach(o -> out2.put(o.name(), o.from()));
                     }
                 }
                 case Transaction saga -> {

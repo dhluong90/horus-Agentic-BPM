@@ -1388,3 +1388,113 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `propose(k-1) twice -> one change; approve(a-1) twice -> version 4 once, one event`.
 - **Test ID:** `PRE_182_a_proposal_repeated_with_the_same_key_returns_the_first_answer_and_writes_nothing_more`, `PRE_182_an_approval_repeated_with_the_same_key_applies_once_and_emits_one_event`, `PRE_182_two_concurrent_proposals_with_one_key_create_one_change_and_a_key_is_per_tenant`, `PRE_182_a_proposal_without_the_permission_is_refused_before_any_key_is_claimed` (`CalendarChangeIdempotencyPostgresIT`), `PRE_182_*` in `CalendarRestContractTest`
 
+
+## Step Mapping, Child Processes and Imported Layout (#106, #92, #445)
+
+### PRE-200 A renamed step is mapped and its tasks keep their claim, deadline and four-eyes rule
+- **Traces to:** `TR-MIG-03`, `TR-MIG-01`, PD-023, #106
+- **Milestone:** M3
+- **Given:** 40 `loan-origination` v1 loans wait on user task `credit-review` (four-eyes, `horus:sla` `PT8H`), 15 of the tasks claimed; v2 renames the step `credit-assessment` with the same task kind; the plan is `v1 -> v2` with `mappings: [{ from: credit-review, to: credit-assessment }]`.
+- **When:** The plan is validated, then proposed, approved and executed; separately, a mapping names a step of another type (a user task to a timer) or a step that v2 does not have.
+- **Then:**
+  - The dry run reports `impact.mapped` 40, `impact.unmapped` 0 and no conflict, lists `credit-review` as `MAPPED` to `credit-assessment`, and changes nothing.
+  - Execution moves each token, open task and pending job to `credit-assessment`. Task ids, claims (15), `due_at` and the four-eyes flag are kept; a claimed task completes on the new step. Each instance gets one `MIGRATED` history row whose `steps` name `credit-review -> credit-assessment`.
+  - A mapping to a step of another type, or to a step the target lacks, is `422 MIGRATION_PLAN_INVALID` naming the pair, and no plan row is written.
+- **Example:** `40 loans on credit-review -> credit-assessment, 15 claims kept; user task -> timer -> 422 naming credit-review -> cooling-off`.
+- **Test ID:** `PRE_200_a_renamed_step_is_mapped_and_its_tasks_keep_their_claim_deadline_and_four_eyes`, `PRE_200_a_mapping_to_another_kind_of_step_or_to_a_missing_step_is_refused_naming_the_pair` (`StepMappingMigrationPostgresIT`), `PRE_200_*` in `MigrationRestContractTest`
+
+### PRE-201 A removed step's work is cancelled with a reason, the token continues where the plan says, and a call in flight is never cut off
+- **Traces to:** `TR-MIG-03`, `TR-MIG-02`, #106
+- **Milestone:** M3
+- **Given:** 12 loans wait on user task `legacy-manual-check` and 3 on remote step `legacy-score` (2 jobs `DUE`, 1 `CLAIMED` with a call in flight); v2 removes both steps; the plan has `cancellations: [{ step: legacy-manual-check, moveTo: credit-assessment, reason: "Check merged into credit assessment" }, { step: legacy-score, moveTo: bureau-score, reason: "Replaced by bureau score" }]`.
+- **When:** The plan is validated and executed; then, once the call has ended, a later plan for the same versions and instructions is executed.
+- **Then:**
+  - The dry run reports `impact.cancelled` 14, `impact.inFlight` 1, one conflict `STEP_IN_FLIGHT` at `legacy-score` listing the instance, and the plan stays valid (an in-flight call is not a reason to refuse it).
+  - Execution, per instance in one transaction: cancels the open task (`TASK_CANCELLED`, the plan's reason) or the `DUE` job (`JOB_CANCELLED`), moves the token to `moveTo`, whose step runs as on arrival (a task opens, a job parks), and writes `MIGRATED`. A cancelled task's context is not copied to history.
+  - The in-flight instance stays on v1 and its outcome is `SKIPPED` with code `STEP_IN_FLIGHT`. A later plan for the same versions and instructions moves it once its job is no longer `CLAIMED`. Compensation stack entries of cancelled steps are kept unchanged.
+- **Example:** `12 tasks cancelled, 2 jobs cancelled, 1 STEP_IN_FLIGHT left on v1, moved by the later plan`.
+- **Test ID:** `PRE_201_a_removed_steps_work_is_cancelled_with_a_reason_and_the_token_continues_where_the_plan_says` (`StepMappingMigrationPostgresIT`)
+
+### PRE-202 A plan that leaves a removed step unhandled is listed, and one that names a step twice or cancels without a reason is refused
+- **Traces to:** `TR-MIG-03`, `PRE-014`, #106
+- **Milestone:** M3
+- **Given:** v2 removes `legacy-manual-check`, where 5 loans wait; one plan neither maps nor cancels it; a second maps and cancels it; a third cancels it without a `reason`, a fourth without `moveTo`, a fifth with a `moveTo` that v2 lacks.
+- **When:** Each plan is created or validated.
+- **Then:**
+  - The first plan is created and its dry run is invalid, listing `STEP_NOT_IN_TARGET` at `legacy-manual-check` with 5 instances.
+  - The others are `422 MIGRATION_PLAN_INVALID` with `problems` naming the step. A reason is required and at most `lifecycle.reason-max-length` characters. A cancelled step must be absent from the target. At most 200 mappings and 200 cancellations.
+  - No instance and no plan row is changed by the refused ones.
+- **Example:** `legacy-manual-check mapped and cancelled -> 422 "legacy-manual-check is handled twice"`.
+- **Test ID:** `PRE_202_a_plan_that_names_a_step_twice_or_cancels_without_a_reason_is_refused_and_an_unhandled_step_is_listed` (`StepMappingMigrationPostgresIT`)
+
+### PRE-203 Migration commands with step instructions are permissioned, idempotent, locked and tenant-bound
+- **Traces to:** `TR-IDEM-01`, `TR-TEN-01`, `TR-SEC-04`, PD-102, PD-114, PD-131, #106
+- **Milestone:** M3
+- **Given:** Plan `M1` of `bank-a` with a mapping, proposed by `thu`.
+- **When:** The plan is created again with the same `Idempotency-Key`; a holder of `processes:read` only plans; a `bank-b` holder of `processes:migration:manage` reads and approves `M1`; `lan` approves with a stale lock version.
+- **Then:**
+  - The repeat returns the first plan with its mappings and writes no second plan; the plan's history row names the steps and who planned.
+  - The caller without the permission is `403 PERMISSION_DENIED`; `bank-b` gets `404 MIGRATION_NOT_FOUND` and nothing is written; the stale approval is `409 VERSION_CONFLICT`.
+  - Four-eyes for the execution is unchanged (PD-131). Cancellations need the same single permission as the rest of the plan: `migration.cancel-approval` is `single`, and `four-eyes` is refused at start-up until it is built.
+- **Example:** `bank-b approves M1 -> 404 MIGRATION_NOT_FOUND, 0 instances touched`.
+- **Test ID:** `PRE_203_migration_commands_with_instructions_are_permissioned_idempotent_locked_and_tenant_bound` (`StepMappingMigrationPostgresIT`), `PRE_203_*` in `MigrationApprovalSettingsTest`
+
+### PRE-204 A parent waits for its child and continues with the child's declared outputs only
+- **Traces to:** `TR-STD-28`, `PRE-043`, PD-127, PD-144, #92
+- **Milestone:** M2
+- **Given:** `account-opening` has a `callActivity` `kyc` with `calledElement: kyc-check`, inputs `customerId` and `segment`, and output `kycLevel`; `kyc-check` v1 is effective; `P1` has business key `AO-2026-1201`, customer `C-778` and segment `RETAIL`.
+- **When:** `P1` reaches `kyc`; the child sets `kycLevel: 2` and `reviewNote: "ok"` and ends; and, in a second case, `horus:calledVersion="1"` pins a version that a later one has retired.
+- **Then:**
+  - In `P1`'s step transaction its token is `WAITING_CHILD` and child `C1` starts on `kyc-check` v1 with `parentInstanceId`, `parentTokenId`, business key `AO-2026-1201/kyc` and only `customerId` and `segment` passed in. History of `P1` records `CHILD_STARTED`.
+  - `C1`'s end transaction writes a `CALL_RESULT` job for `P1` and does not touch its row. The job fires in a transaction of its own: `P1.kycLevel` is 2, `reviewNote` is not copied, the token moves on, and history records `CHILD_COMPLETED`.
+  - A pinned version that is not `ACTIVE` raises the incident `NO_EFFECTIVE_VERSION` on the step and starts no child.
+  - The import reads `callActivity` (`calledElement`, `horus:calledVersion`, `<horus:input>`, `<horus:output>`) as a `callProcess` step, exports it, and reads the export back to the same definition hash; `horus:in="all"` is `CALL_INPUT_ALL_REFUSED` and a missing or malformed `calledElement` is `CALLED_ELEMENT_INVALID`.
+- **Example:** `P1 at kyc -> C1 on kyc-check v1 -> kycLevel 2 back to P1, reviewNote not copied`.
+- **Test ID:** `PRE_204_a_parent_waits_for_its_child_and_continues_with_the_childs_declared_outputs_only`, `PRE_204_a_pinned_version_is_used_even_when_a_later_one_is_effective_and_a_retired_one_raises_an_incident` (`CallActivityPostgresIT`), `PRE_204_a_call_activity_is_read_with_its_called_key_version_inputs_and_outputs`, `PRE_204_the_export_of_a_call_activity_reads_back_to_the_same_definition_hash`, `PRE_204_a_call_activity_without_a_called_key_or_passing_all_variables_is_refused_by_name` (`CallActivityBpmnTest`)
+
+### PRE-205 A child start is never duplicated, and depth is bounded
+- **Traces to:** `TR-IDEM-01`, `TR-RES-01`, PD-144, #92
+- **Milestone:** M2
+- **Given:** A child `C1` started for `P1`'s `kyc` token; separately, `ping`, whose first step calls `ping`; separately, `account-opening` deployed before `kyc-check` exists.
+- **When:** A second child is written for the same token and attempt; `ping` is started with `calls.max-depth` at its default 5; `P1` reaches `kyc`.
+- **Then:**
+  - The unique index on `(tenant, parent_token_id, call_attempt)` refuses the second child: the token has exactly one.
+  - The chain stops at depth 5: the root and five calls exist, and the step that would start depth 6 raises the incident `CALL_DEPTH_EXCEEDED` and starts no child. `calls.max-depth` is 1 to 5 and may be lowered only.
+  - A `calledElement` with no effective version raises `NO_EFFECTIVE_VERSION` when the step runs; at approval it is never a refusal, because the child may be approved later.
+- **Example:** `second child for the same token -> unique violation; ping -> 6 instances, depth 5 incident`.
+- **Test ID:** `PRE_205_a_second_child_for_the_same_token_and_attempt_is_refused_by_the_database`, `PRE_205_the_chain_of_calls_stops_at_the_depth_limit_with_an_incident_and_no_child`, `PRE_205_a_called_element_with_no_effective_version_raises_an_incident_at_run_time` (`CallActivityPostgresIT`), `PRE_205_*` in `CallsSettingsTest`
+
+### PRE-206 A child's failure or cancellation reaches the parent, and a parent's cancel ends its children
+- **Traces to:** `TR-CAN-01`, `TR-INC-01`, PD-103, #92
+- **Milestone:** M2
+- **Given:** (a) `C1` ended `FAILED`; (b) `C1` is cancelled by an operator with the reason `duplicate case`; (c) `P1` is cancelled by `ops.lan` while `C1` waits on a task.
+- **When:** Each case runs and its call result fires; in (b) an operator retries the incident.
+- **Then:**
+  - (a) The parent step has an `OPEN` incident `CHILD_FAILED` on `kyc`. (b) Same, `CHILD_CANCELLED`, with the reason in the cause summary. The retry of (b) starts a new child for attempt 1 (`AO-2026-1205/kyc#1`) and the old child's result can no longer move the parent. A step with `horus:onFailure="compensate"` starts the parent's compensation instead of the incident.
+  - (c) The cancel transaction locks `P1`, then `C1`, cancels both, with `C1`'s open task `CANCELLED`, and publishes `processes.instance.cancelled.v1` for each; `cancelledBy` is `ops.lan` and `C1`'s reason is `parent cancelled`.
+- **Example:** `P1 cancelled -> C1 cancelled in the same transaction, reason "parent cancelled"`.
+- **Test ID:** `PRE_206_a_cancelled_child_fails_the_parent_step_and_a_retry_starts_a_new_child_keyed_by_the_retry_count`, `PRE_206_a_child_that_ended_failed_fails_the_parent_step_with_child_failed`, `PRE_206_a_cancel_of_the_parent_cancels_its_child_in_the_same_transaction_with_the_parent_cancelled_reason` (`CallActivityPostgresIT`)
+
+### PRE-207 A completed child is undone only by its call step's handler, inside the parent's tenant
+- **Traces to:** `TR-COMP-02`, `TR-TEN-01`, PD-127, #92
+- **Milestone:** M2
+- **Given:** (a) `kyc` sits in the saga `onboard` with `horus:compensate="reverse-kyc"`, has completed with child `C1`, and a later step fails with `onFailure: compensate`; (b) a definition in `bank-a` names `calledElement: kyc-check` while `kyc-check` exists only in `bank-b`; (c) a saga whose call step declares no undo.
+- **When:** The walk reaches `kyc`; in (b) the step runs; in (c) the definition is imported.
+- **Then:**
+  - (a) `reverse-kyc` runs once with `forwardAttemptId` and the child's id (`childInstanceId`) in its inputs, and `C1`'s own stack is not walked: it is still `COMPLETED`, with no compensation row.
+  - (b) The step raises `NO_EFFECTIVE_VERSION`; a child is always looked up and started in the parent's tenant, no definition can name a tenant, and no instance exists in `bank-b`.
+  - (c) The import is `422 VALIDATION_FAILED` with `COMPENSATION_REQUIRED` naming the step; `horus:compensate="manual"` is accepted and raises `COMPENSATION_MANUAL_REQUIRED` when reached.
+- **Example:** `compensate past kyc -> reverse-kyc once; C1 stack untouched; kyc-check only in bank-b -> NO_EFFECTIVE_VERSION`.
+- **Test ID:** `PRE_207_a_completed_child_is_undone_only_by_the_call_steps_own_handler`, `PRE_207_a_child_is_looked_up_only_in_the_parents_tenant` (`CallActivityPostgresIT`), `PRE_207_a_call_inside_a_saga_must_declare_its_undo_or_declare_it_manual` (`CallActivityBpmnTest`)
+
+### PRE-208 A BPMN import stores the file's diagram as layout revision 1, apart from the definition
+- **Traces to:** `TR-DEF-02`, `PRE-024`, `PRE-026`, #445, #102
+- **Milestone:** M3
+- **Given:** A BPMN file with a `BPMNDI` diagram of three steps, one flow with two waypoints and a shape of an element the process lacks; the same process imported again with other content and another diagram; a version imported before layouts were stored.
+- **When:** Each import completes and the layouts are read; the first version's layout is then changed in the cockpit.
+- **Then:**
+  - Layout revision 1 of each imported version holds the steps and flows that the diagram draws, with `source` `BPMN`, the importer as author and the hash of the definition it was drawn for. The unknown element, a coordinate outside the layout schema and a waypoint list longer than 50 points are dropped, never repaired. A file with no diagram stores none.
+  - The definition hash does not depend on the diagram: the same file with and without it has one hash, and the version carries no diagram.
+  - Each import has its own revision 1. A saved change is revision 2 of that version, needs no approval and writes no `REQUESTED` or `APPROVED` row. A version stored before layouts reads without a layout (`204`).
+- **Example:** `import with diagram -> layout revision 1, source BPMN; re-import with other content -> its own revision 1`.
+- **Test ID:** `PRE_208_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition`, `PRE_208_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval`, `PRE_208_a_definition_stored_before_layouts_existed_still_reads_without_a_layout` (`ImportedLayoutPostgresIT`), `PRE_208_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else` (`CallActivityBpmnTest`)

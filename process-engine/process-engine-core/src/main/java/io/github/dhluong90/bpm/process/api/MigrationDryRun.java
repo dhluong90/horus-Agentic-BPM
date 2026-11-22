@@ -23,10 +23,43 @@ import java.util.Objects;
  * @param nodes one entry per step of the source version that holds live tokens, sorted by id
  * @param conflicts what blocks the plan, sorted by code and step id; empty when {@code valid}
  * @param movable a sample of the instances that would move
+ * @param impact how many instances each kind of step instruction touches (#106)
  */
 public record MigrationDryRun(String migrationId, String planHash, String definitionKey, int sourceVersion,
         int targetVersion, boolean valid, Instant checkedAt, Instant validUntil, MigrationPlan.Approval approval,
-        Instances instances, List<NodeMapping> nodes, List<Conflict> conflicts, InstanceSample movable) {
+        Instances instances, List<NodeMapping> nodes, List<Conflict> conflicts, InstanceSample movable,
+        Impact impact) {
+
+    /** A step the plan maps to a renamed step of the target (#106). */
+    public static final String MAPPED = "MAPPED";
+    /** A step the plan cancels, continuing at another step of the target (#106). */
+    public static final String CANCELLED = "CANCELLED";
+    /**
+     * A removed step whose remote call is in flight: the instance is left on the source version and moves on a later
+     * run. It does not make the plan invalid (#106, PRE-201).
+     */
+    public static final String STEP_IN_FLIGHT = "STEP_IN_FLIGHT";
+
+    /** A report with no step instructions: nothing mapped, cancelled or in flight. */
+    public MigrationDryRun(String migrationId, String planHash, String definitionKey, int sourceVersion,
+            int targetVersion, boolean valid, Instant checkedAt, Instant validUntil, MigrationPlan.Approval approval,
+            Instances instances, List<NodeMapping> nodes, List<Conflict> conflicts, InstanceSample movable) {
+        this(migrationId, planHash, definitionKey, sourceVersion, targetVersion, valid, checkedAt, validUntil,
+                approval, instances, nodes, conflicts, movable, Impact.NONE);
+    }
+
+    /**
+     * What the plan does to the running instances.
+     *
+     * @param mapped instances with a token at a mapped step; each moves with its task, claim and due time
+     * @param cancelled instances with work at a cancelled step that will be cancelled and continue at the named step
+     * @param inFlight instances left on the source version because a call is in flight; a later run moves them
+     * @param unmapped instances with a token at a step the plan does not handle; the plan is invalid while there are any
+     */
+    public record Impact(long mapped, long cancelled, long inFlight, long unmapped) {
+        /** No instruction touches any instance. */
+        public static final Impact NONE = new Impact(0, 0, 0, 0);
+    }
 
     /** A step whose id the target does not have. */
     public static final String STEP_NOT_IN_TARGET = "STEP_NOT_IN_TARGET";
@@ -56,7 +89,8 @@ public record MigrationDryRun(String migrationId, String planHash, String defini
      * @param name its readable name, or null
      * @param type its step type
      * @param liveTokens live tokens waiting or active at the step
-     * @param mapping {@code SAME_ID}, {@code STEP_NOT_IN_TARGET} or {@code STEP_TYPE_CHANGED}
+     * @param mapping {@code SAME_ID}, {@code MAPPED}, {@code CANCELLED}, {@code STEP_NOT_IN_TARGET} or
+     *     {@code STEP_TYPE_CHANGED}
      * @param targetNodeId the step the tokens would move to, or null when there is none
      * @param targetType the type of that step, or null
      */

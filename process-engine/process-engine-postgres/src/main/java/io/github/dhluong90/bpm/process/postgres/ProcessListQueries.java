@@ -20,7 +20,8 @@ final class ProcessListQueries {
      * {@code idx_pre_token_live_node_instance} (V24), so the planner can answer the count with an index-only scan of
      * a partial index and never touches {@code pre_history}.
      */
-    static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT')";
+    static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT',"
+            + "'WAITING_CHILD')";
 
     static final String DEFINITION_COLUMNS = "tenant_id, id, key_name, version_num, status, name, "
             + "definition_json::text AS definition_json, definition_hash, source_format, source_document, source_hash, "
@@ -163,6 +164,26 @@ final class ProcessListQueries {
                     + "AND NOT EXISTS (SELECT 1 FROM pre_token t WHERE t.tenant_id = i.tenant_id "
                     + "AND t.instance_id = i.id AND t.status IN " + LIVE_STATUSES + " "
                     + "AND t.current_node_id = ANY (?::text[])) ORDER BY i.id LIMIT ?");
+
+    /**
+     * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent} (V43).
+     * A cancel of the parent reads them to cancel them (#92, PRE-206). Parameters: tenant, parent instance, limit.
+     */
+    static final ListQuery INSTANCE_CHILDREN = new ListQuery("instance-children",
+            new Bound.ParentKey("parent_instance_id", "the calls of one instance, bounded by its definition's steps "
+                    + "and the retries of each; read a page at a time"),
+            "SELECT id FROM pre_instance WHERE tenant_id = ? AND parent_instance_id = ? "
+                    + "AND status IN ('RUNNING','COMPENSATING') ORDER BY id LIMIT ?");
+
+    /**
+     * The instances with a remote call in flight at any of the given steps of a definition version, in id order, on
+     * {@code idx_pre_timer_inflight} (V41). Parameters: tenant, definition id, the steps as a text array, limit (#106).
+     */
+    static final ListQuery MIGRATION_IN_FLIGHT_INSTANCES = new ListQuery("migration-in-flight-instances",
+            new Bound.Page("instance id order of idx_pre_timer_inflight (V41), claimed jobs only"),
+            "SELECT DISTINCT instance_id FROM pre_timer WHERE tenant_id = ? AND definition_id = ? "
+                    + "AND node_id = ANY (?::text[]) AND status = 'CLAIMED' "
+                    + "AND job_kind IN ('ASYNC_SERVICE','ASYNC_AGENT') ORDER BY instance_id LIMIT ?");
 
     /**
      * The next running instances of the source version of an approved migration, after the plan's cursor, in id order,
@@ -431,7 +452,8 @@ final class ProcessListQueries {
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 NODE_ACTIVITIES, HISTORY_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
-                CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES,
+                CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES, MIGRATION_IN_FLIGHT_INSTANCES,
+                INSTANCE_CHILDREN,
                 MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,
