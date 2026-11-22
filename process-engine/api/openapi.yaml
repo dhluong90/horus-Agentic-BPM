@@ -1043,6 +1043,11 @@ paths:
         Every range is read through its own index and stops after one page, so a long queue never slows the list.
         Items carry no variables and no review context; read one task for those, masked. Permission
         `processes:task:work`.
+
+        Conditional read (`PRE-218`): the `ETag` is a hash of the body, so it changes whenever an item, the page, the
+        cursor or the caller's own view (`allowedActions`, permissions, tenant) changes; a matching `If-None-Match`
+        gets `304` with no body, after the permission and tenant checks, so a refused caller never gets `304` and a
+        tag from one tenant never matches another tenant's list.
       parameters:
         - name: assignment
           in: query
@@ -1070,9 +1075,17 @@ paths:
           schema: { type: boolean }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
       responses:
         '200':
           description: One page of tasks
+          headers:
+            ETag:
+              description: A hash of the body, quoted; send it as `If-None-Match`
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TaskSummaryPage' }
@@ -1092,6 +1105,11 @@ paths:
                     dueAt: '2027-01-04T03:00:00Z'
                 nextCursor: eyJhZnRlciI6Ii4uLiJ9
                 hasNext: true
+        '304':
+          description: Unchanged since the `ETag` sent in `If-None-Match`; no body
+          headers:
+            ETag:
+              schema: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
@@ -1730,6 +1748,11 @@ paths:
         signed cursor bound to the tenant and the status; at most `query.max-page-size` (200) per page. Each item has
         the error code, a cause built from codes only, the retry count, the step, the instance and `allowedActions`
         computed for the caller (empty without `processes:incident:manage`). Read only. Permission `processes:read`.
+
+        Conditional read (`PRE-218`): the `ETag` is a hash of the body, so it changes whenever an item, the page, the
+        cursor or the caller's own view (`allowedActions`, permissions, tenant) changes; a matching `If-None-Match`
+        gets `304` with no body, after the permission and tenant checks, so a refused caller never gets `304` and a
+        tag from one tenant never matches another tenant's list.
       parameters:
         - name: status
           in: query
@@ -1738,12 +1761,25 @@ paths:
           schema: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED], default: OPEN }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema: { type: string }
       responses:
         '200':
           description: One page of incidents
+          headers:
+            ETag:
+              description: A hash of the body, quoted; send it as `If-None-Match`
+              schema: { type: string }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/IncidentPage' }
+        '304':
+          description: Unchanged since the `ETag` sent in `If-None-Match`; no body
+          headers:
+            ETag:
+              schema: { type: string }
         '400': { $ref: '#/components/responses/Problem' }
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }

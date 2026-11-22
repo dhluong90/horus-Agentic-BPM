@@ -44,6 +44,30 @@ class IncidentRestContractTest {
             .setControllerAdvice(new ProcessProblemDetails()).build();
 
     @Test
+    void PRE_218_the_incident_list_has_an_etag_that_follows_its_content_and_the_callers_actions() throws Exception {
+        // When the list is read, it carries an ETag
+        MvcResult first = exchange(get(BASE + "/incidents"));
+        String etag = first.getResponse().getHeader("ETag");
+        assertThat(etag).matches("\"[0-9a-f]{32}\"");
+
+        // Then the same tag is 304 with no body, and the same list reads the same tag
+        MvcResult unchanged = exchange(get(BASE + "/incidents").header("If-None-Match", etag));
+        assertThat(unchanged.getResponse().getStatus()).isEqualTo(304);
+        assertThat(unchanged.getResponse().getContentAsString()).isEmpty();
+
+        // And when an incident changes, or the caller's own actions change, the tag changes and the body is sent
+        incidents.listLock = 1;
+        MvcResult changed = exchange(get(BASE + "/incidents").header("If-None-Match", etag));
+        assertThat(changed.getResponse().getStatus()).isEqualTo(200);
+        assertThat(changed.getResponse().getHeader("ETag")).isNotEqualTo(etag);
+        incidents.listLock = 0;
+        incidents.listActions = List.of();
+        MvcResult otherView = exchange(get(BASE + "/incidents").header("If-None-Match", etag));
+        assertThat(otherView.getResponse().getStatus()).isEqualTo(200);
+        assertThat(otherView.getResponse().getHeader("ETag")).isNotEqualTo(etag);
+    }
+
+    @Test
     void PRE_080_the_list_and_one_incident_match_the_contract_with_the_callers_actions() throws Exception {
         MvcResult list = exchange(get(BASE + "/incidents").param("status", "OPEN").param("limit", "50"));
 
@@ -197,10 +221,13 @@ class IncidentRestContractTest {
             return List.of(open(0, 0, false, List.of("retry", "resolve")));
         }
 
+        volatile long listLock = 0;
+        volatile List<String> listActions = List.of("retry", "resolve");
+
         @Override
         public Page<Incident> incidents(IncidentQuery query) {
             queries.add(query);
-            return new Page<>(List.of(open(0, 0, false, List.of("retry", "resolve"))), null);
+            return new Page<>(List.of(open(listLock, 0, false, listActions)), null);
         }
 
         @Override

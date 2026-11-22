@@ -1592,3 +1592,12 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - Each import has its own revision 1. A saved change is revision 2 of that version, needs no approval and writes no `REQUESTED` or `APPROVED` row. A version stored before layouts reads without a layout (`204`).
 - **Example:** `import with diagram -> layout revision 1, source BPMN; re-import with other content -> its own revision 1`.
 - **Test ID:** `PRE_215_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition`, `PRE_215_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval`, `PRE_215_a_definition_stored_before_layouts_existed_still_reads_without_a_layout` (`ImportedLayoutPostgresIT`), `PRE_215_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else` (`CallActivityBpmnTest`)
+
+### PRE-218 The task and incident lists answer a matching If-None-Match with 304
+- **Traces to:** `TR-PERF-07`, `TR-TEN-01`, `PRE-030`, `PRE-080`
+- **Milestone:** M3
+- **Given:** `minh` of `bank-a` lists `GET /tasks` and `lan` lists `GET /incidents`; each answer carries an `ETag`, a hash of the body.
+- **When:** The same list is read with `If-None-Match` set to that tag; then a task is claimed, or the next page is asked for, or an incident changes, or the caller loses `processes:incident:manage`, or a caller of `bank-b` sends `bank-a`'s tag; and finally a caller without the permission sends the tag.
+- **Then:** The same list is `304` with the `ETag` and no body. Every change in an item, in the page or cursor, or in the caller's own view (`allowedActions`) gives another tag, so the old tag gets `200` and the new body. The tag is computed from the body the caller's own tenant and permissions produced, after the tenant and permission checks: a `bank-b` caller's list differs, so `bank-a`'s tag never matches it, a refused caller gets `403` and never `304`, and the tag says nothing about another tenant's tasks or incidents. `*` and weak (`W/`) tags match as for the instance activities read.
+- **Example:** `GET /tasks -> ETag "9f2c..."; again with If-None-Match "9f2c..." -> 304; after a claim -> 200 with a new tag`.
+- **Test ID:** `PRE_218_the_task_list_has_an_etag_that_follows_its_page_and_content_and_never_crosses_callers` (`ProcessRestErrorMatrixTest`), `PRE_218_the_incident_list_has_an_etag_that_follows_its_content_and_the_callers_actions` (`IncidentRestContractTest`)

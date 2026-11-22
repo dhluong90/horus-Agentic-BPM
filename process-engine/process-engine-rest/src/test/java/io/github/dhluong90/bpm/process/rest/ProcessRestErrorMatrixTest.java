@@ -200,6 +200,38 @@ class ProcessRestErrorMatrixTest {
     }
 
     @Test
+    void PRE_218_the_task_list_has_an_etag_that_follows_its_page_and_content_and_never_crosses_callers() throws Exception {
+        // When the list is read, it carries an ETag
+        MockHttpServletResponse first = perform(get(BASE + "/tasks"));
+        String etag = first.getHeader("ETag");
+        assertThat(first.getStatus()).isEqualTo(200);
+        assertThat(etag).matches("\"[0-9a-f]{32}\"");
+
+        // Then the same tag is 304 with no body
+        MockHttpServletResponse unchanged = perform(get(BASE + "/tasks").header("If-None-Match", etag));
+        assertThat(unchanged.getStatus()).isEqualTo(304);
+        assertThat(unchanged.getContentAsByteArray()).isEmpty();
+
+        // And a changed task, another page or another tenant's view gives another tag, so the old tag gets the body
+        fake.taskStatus = "CLAIMED";
+        MockHttpServletResponse changed = perform(get(BASE + "/tasks").header("If-None-Match", etag));
+        assertThat(changed.getStatus()).isEqualTo(200);
+        assertThat(changed.getHeader("ETag")).isNotEqualTo(etag);
+        fake.taskStatus = "OPEN";
+        fake.taskNext = "c2";
+        assertThat(perform(get(BASE + "/tasks").header("If-None-Match", etag)).getStatus()).isEqualTo(200);
+        fake.taskNext = null;
+        fake.taskTenant = "bank-b-task";
+        assertThat(perform(get(BASE + "/tasks").header("If-None-Match", etag)).getStatus()).isEqualTo(200);
+
+        // And a refused caller never gets 304, whatever tag it sends
+        fake.taskTenant = "T1";
+        fake.failure = () -> new io.github.dhluong90.bpm.process.api.PermissionDeniedException("Needs processes:task:work");
+        MockHttpServletResponse refused = perform(get(BASE + "/tasks").header("If-None-Match", etag));
+        assertThat(refused.getStatus()).isEqualTo(403);
+    }
+
+    @Test
     void list_parameters_that_are_not_numbers_or_times_are_400_QUERY_INVALID() throws Exception {
         for (String query : List.of("limit=fifty", "startedFrom=yesterday", "startedTo=2027-02-01")) {
             String[] parameter = query.split("=");
@@ -455,6 +487,19 @@ class ProcessRestErrorMatrixTest {
                 String idempotencyKey) {
             maybeFail();
             return instance(expectedLockVersion + 1, "COMPLETED");
+        }
+
+        volatile String taskStatus = "OPEN";
+        volatile String taskNext;
+        volatile String taskTenant = "T1";
+
+        @Override
+        public Page<io.github.dhluong90.bpm.process.api.TaskSummary> tasks(
+                io.github.dhluong90.bpm.process.api.TaskQuery query) {
+            maybeFail();
+            return new Page<>(List.of(new io.github.dhluong90.bpm.process.api.TaskSummary(taskTenant, INSTANCE,
+                    "card-fee-review", 1, "APP-1001", "officer-review", "Officer reviews", "role:CARD_OFFICER",
+                    taskStatus, 0, null, STARTED, null)), taskNext);
         }
 
         @Override
