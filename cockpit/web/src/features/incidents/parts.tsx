@@ -16,7 +16,7 @@ export function IncidentState({ incident, compact = false }: { incident: Inciden
   if (incident.status === 'RESOLUTION_PENDING') {
     return <span className="badge badge--accent"><span aria-hidden="true">◷</span> {compact ? t('incidents.state.pendingShort') : t('incidents.state.pending', { who: personName(incident.pendingResolution?.proposedBy ?? '') })}</span>;
   }
-  if (incident.retrying) return <span className="badge badge--accent"><span aria-hidden="true">↻</span> {t('incidents.state.retrying')}</span>;
+  if (incident.retrying) return <span className="badge badge--accent"><span aria-hidden="true">↻</span> {compact ? t('incidents.state.retryingShort') : t('incidents.state.retrying')}</span>;
   if (incident.status === 'RESOLVED') return <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('incidents.state.resolved')}</span>;
   return <span className="badge badge--neutral"><span aria-hidden="true">○</span> {t('incidents.state.open')}</span>;
 }
