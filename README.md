@@ -2,7 +2,7 @@
 
 Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockpit, in which humans, services and AI agents take steps in the same governed process.
 
-**Documentation: the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)).
+**Documentation: the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)). A searchable site is built from it with `cd site && npm ci && npm run build` ([`site/README.md`](site/README.md)). First run in 30 minutes: [Getting Started](../../wiki/Getting-Started).
 
 ![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
@@ -53,7 +53,7 @@ r.matchedRuleIds();                   // ["R3"]
 r.output("eligible", Boolean.class);  // true
 ```
 
-The decision, its inputs and the matched row are written to the decision log in your transaction. A second person must approve every rule change before it takes effect. The full walkthrough is in [Getting Started](../../wiki/Getting-Started).
+The decision, its inputs and the matched row are written to the decision log in your transaction. A second person must approve every rule change before it takes effect. The 30-minute walkthrough, from clone to a decision in the cockpit, is in [Getting Started](../../wiki/Getting-Started).
 
 ## Modules
 
