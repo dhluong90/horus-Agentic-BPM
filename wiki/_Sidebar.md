@@ -40,6 +40,7 @@
 **Reference**
 - [[Common error codes|Common-Error-Codes]]
 - [[Technical requirements|Technical-Requirements]]
+- [[Upgrading without downtime|Upgrading-Without-Downtime]]
 
 **Project status**
 - [[Feature status|Feature-Status]]

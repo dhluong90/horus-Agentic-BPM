@@ -47,7 +47,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-028 | `PRE_028_live_node_counts_from_token_index` | Testcontainers, SQL capture | M2 | `TR-PERF-09` | Planned |
 | PRE-029 | `PRE_029_rollup_bounded_lag_and_no_step_tx_writes`, `PRE_029_a_step_transition_writes_no_statistics_row`, `PRE_029_a_slice_whose_transaction_rolls_back_is_counted_once_on_the_next_run`, `PRE_029_the_window_read_is_tenant_scoped_and_permission_checked_and_writes_nothing` | Two-replica Testcontainers, SQL capture | M3 | `TR-PERF-10` | Done |
 | PRE-030 | `PRE_030_task_query_filters_bounded_by_index`, `PRE_030_*` (`TaskQueryPostgresIT`); `PRE_030_card_officers_list_their_candidate_tasks_by_page_and_a_limit_above_200_is_refused` (`TaskLifecycleIT`) | Testcontainers with 30,000 seeded tasks in two tenants, plan capture of every range; host over HTTP | M2 | `TR-PERF-07`, `TR-TEN-01` | Done (#70) |
-| PRE-031 | `PRE_031_task_form_resolved_and_completion_validated` | Service, WebMvc | M2 | `TR-UI-02`, `TR-SEC-05` | Planned |
+| PRE-031 | `PRE_031_*` in `TaskFormTest`, `TaskFormsTest` and `ProcessRestContractTest` | Testcontainers (import, claim, form, completion), unit, WebMvc | M2 | `TR-UI-02`, `TR-SEC-05` | Implemented (#79, backend) |
 | PRE-032 | `PRE_032_step_catalogue_lists_registered_steps_only` | WebMvc | M3 | `TR-SEC-01` | Planned |
 | PRE-033 | `PRE_033_bpmn_subset_import_rejects_unsupported_by_name` | Unit, adversarial XML | M3 | `TR-DEF-01` | Planned |
 | PRE-034 | `PRE_034_bpmn_export_round_trip_preserves_hash` | Unit round trip over every importable example and fixture, BPMN 2.0 XSD validation (OMG schema files as test resources, no network), service tenant isolation, Testcontainers REST export then import | M3 (cut candidate) | `TR-DEF-01` | Implemented for the subset |
@@ -148,6 +148,9 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-213 | `PRE_213_*` in `CallActivityPostgresIT` | Testcontainers, an operator cancels the child, then the parent; an incident retry; event capture | M2 | `TR-CAN-01`, `TR-INC-01` | Done (#92) |
 | PRE-214 | `PRE_214_*` in `CallActivityPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a saga with an undo handler, two tenants; the import check | M2 | `TR-COMP-02`, `TR-TEN-01` | Done (#92) |
 | PRE-215 | `PRE_215_*` in `ImportedLayoutPostgresIT` and `CallActivityBpmnTest` | Testcontainers, a file with a diagram, two imports, a version stored without a layout | M3 | `TR-DEF-02`, `PRE-024` | Done (#445) |
+| PRE-216 | `PRE_216_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Implemented (#79, backend) |
+| PRE-217 | `PRE_217_*` in `TaskFormsTest`; `PRE_031_*` in `TaskFormTest` and `ProcessRestContractTest` | Unit, Testcontainers, WebMvC against `openapi.yaml` | M2 | `TR-SEC-05`, `TR-UI-02` | Implemented (#79, backend) |
+| PRE-218 | `PRE_218_*` in `MixedVersionSchemaTest`, `ExpandOnlyMigrationsTest` and `ResponseSchemasStayOpenTest` | Testcontainers (a schema the next release migrated, a job of an unknown kind), a migration lint, a contract walk | M3 | `TR-OPS-02`, `TR-OPS-01`, `TR-API-09` | Implemented (#113) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

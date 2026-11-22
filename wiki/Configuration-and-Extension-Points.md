@@ -46,7 +46,8 @@ Each is an interface with an engine default. Declare a bean of the same type and
 | `AssigneeDirectory` | processes | Nobody: a role or group task cannot be given to a named user, a task assigned to one user can go to anyone | `:reassign` and `:delegate` must check that the target holds the task's role or group in your user directory. Built: `io.github.dhluong90.bpm.process.spi.AssigneeDirectory`, one bean answering `holdsRole` and `inGroup` for a tenant |
 | `BusinessCalendar` | processes | The tenant's stored calendars, changed under four eyes; elapsed time for a task without `horus:calendar` | Your calendars live in another system, such as core banking. Your bean gets the tenant of the instance and must not depend on the JVM's time zone |
 | `RoleCatalogue` | processes | Every role exists: nothing is checked, and the starter warns at start-up outside `dev` | Approval must refuse an escalation to a role the tenant does not have (`exists(tenantId, role)`, one tenant's roles never satisfy another's) |
-| `StepRegistry`, `FormRegistry` | processes | Empty | You offer handlers and forms to authors |
+| `StepRegistry` | processes | Empty | You offer handlers to authors |
+| `FormRegistry` | processes | JSON documents on the classpath under `horus.bpm.processes.tasks.form-resource-root` (`forms/`) | Your forms live in a form service or a database. `find(tenantId, reference)` returns the schema and hints of a form key or schema path; the engine only evaluates the schema, it never runs host scripts |
 | `AgentAdapter`, `ServiceAdapter` | processes | None | Your definitions call models or services |
 | Event publisher | both | Spring application events | Events go to an outbox or a bus |
 | `Clock` | both | System UTC | Tests and replays |

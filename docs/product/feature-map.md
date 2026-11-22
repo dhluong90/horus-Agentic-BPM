@@ -133,7 +133,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-48 | Live counts of active tokens per node of a definition version, from an index, never from history | S2 | M2 | PE | | | spec gap | PE-F-01 | PD-038 |
 | PE-F-49 | Hourly rollup of counts, incidents and p50 and p95 durations per node, filled by the scheduler with a watermark, a few minutes behind | S2 | M3 | PE | PRE-029 | TR-PERF-10 | specified | PE-F-15, PE-F-48 | PD-038 |
 | PE-F-50 | Tasks are queried by assignee, role, group, due date and SLA breach; the caller resolver supplies roles and groups | S2 | M2 | PE 7.4 | PRE-030 | TR-TEN-01 | specified | PE-F-07 | PD-035 |
-| PE-F-51 | A `userTask` declares a form (JSON Schema with display hints) or a link to the host's own screen | S1, S2 | M2 | PE 7.4 | | | spec gap | PE-F-07 | PD-032 |
+| PE-F-51 | A `userTask` declares a form (JSON Schema with display hints) or a link to the host's own screen | S1, S2 | M2 | PE 7.4 | PRE-031, PRE-216, PRE-217 | | specified | PE-F-07 | PD-032 |
 | PE-F-52 | The host publishes a step catalogue: registered service and agent adapters with input schemas, rule sets that meet the guardrail contract, calendars and roles | S1, S3 | M3 | PE | | TR-SEC-01 | spec gap | PE-F-08, PE-F-24, PE-F-19 | PD-032 |
 | PE-F-53 | An architect exports a definition as a BPMN subset; elements outside the subset are named | S1 | M3 (cut candidate) | PE 8 | PRE-034 | TR-DEF-01 | spec gap | PE-F-41 | PD-034 |
 | PE-F-54 | An imported or deployed definition keeps the file as received (JSON, YAML, from M3 BPMN XML) with format and SHA-256 and names its expression language; its hash is fixed in the stored schema version and never recomputed | S1 | M2 | PE 7.2 Data | PRE-039 | TR-STD-01, TR-STD-03 | specified | PE-F-01 | PD-057 |
@@ -213,7 +213,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | X-F-07 | Every event carries the standard envelope, a versioned type, and is published in the transaction that changes state | Host developer | M1 | RE 7.2 Observability | | TR-OBS-06 | spec gap | | |
 | X-F-08 | The engines work behind a transaction-mode connection pooler | Host developer | M1 | RE 7.2 API | | TR-OPS-05 | specified | | PD-021 |
 | X-F-09 | Engine migrations are forward-only and every release notes the ones it adds | Host developer | M1 | V | | TR-OPS-01 | specified | | |
-| X-F-10 | Old and new module versions tolerate each other's schema for one minor release | Host developer | M3 | RE 8; PE 8 | | TR-OPS-02 | specified | X-F-09 | |
+| X-F-10 | Old and new module versions tolerate each other's schema for one minor release | Host developer | M3 | RE 8; PE 8 | PRE-218, RLE-197 | TR-OPS-02 | specified | X-F-09 | |
 | X-F-11 | Evaluations and steps emit OpenTelemetry spans when a tracer is present | Host developer | M3 | RE 8 | | TR-OBS-03 | spec gap | | |
 | X-F-12 | Every release ships an SBOM, blocks on high or critical vulnerabilities, ships only permissive third-party licences (named test and build tools that never ship are allowed) and carries the licence notice | Host developer, auditor | M0 | V | | TR-SEC-06, TR-LIC-01, TR-LIC-02 | specified | | PD-053 |
 | X-F-13 | Every SPEC statement has a test named by its id; public API changes update the wiki in the same pull request | Contributor | M0 | V | | TR-QA-01, TR-QA-02, TR-QA-03 | specified | | |

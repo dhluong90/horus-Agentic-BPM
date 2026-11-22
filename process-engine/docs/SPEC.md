@@ -498,7 +498,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **When:** `GET /tasks/T5/form`; then `:complete` with `{decision: REJECT}`; then with `{decision: REJECT, reason: "income not verified"}`; then the second definition is imported.
 - **Then:** The form response carries the schema, the hints and masked prefilled data; the first completion returns `422 FORM_VALIDATION_FAILED` with pointer `/reason`; the second returns `200`; the import returns `422 VALIDATION_FAILED` with problem `FORM_LINK_NOT_ALLOWED`.
 - **Example:** `complete {decision: REJECT} -> 422 FORM_VALIDATION_FAILED /reason`.
-- **Test ID:** `PRE_031_task_form_resolved_and_completion_validated`
+- **Test ID:** `PRE_031_task_form_resolved_and_completion_validated` (`TaskFormTest`), `PRE_031_a_foreign_link_is_refused_at_import_while_no_origin_is_listed` (`TaskFormTest`), `PRE_031_a_rejection_needs_a_reason_and_an_approval_does_not`, `PRE_031_a_missing_decision_and_a_value_outside_the_enum_are_named_by_field_never_by_value`, `PRE_031_violations_become_json_pointers`, `PRE_031_a_date_and_the_money_object_are_checked` (`TaskFormsTest`)
 
 ### PRE-032 The step catalogue lists only what the host registered
 - **Traces to:** `TR-SEC-01`
@@ -508,6 +508,24 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Then:** `carol` gets the handler with its input schema and `compensable: true`, the agent adapter, `card-fee` under decision rule sets, `agent-output-guardrails` under both decision and guardrail rule sets, and the calendar; no configuration value appears. `erin` gets `403 FORBIDDEN`. An import that names an unregistered handler fails with `422 VALIDATION_FAILED`.
 - **Example:** `catalogue -> 1 handler, 1 agent, 2 decision rule sets, 1 guardrail rule set, 1 calendar`.
 - **Test ID:** `PRE_032_step_catalogue_lists_registered_steps_only`
+
+### PRE-216 A declared form is checked at import and approval, and is part of the definition hash
+- **Traces to:** `TR-UI-02`, `TR-SEC-01`, `TR-STD-03`, #79
+- **Milestone:** M2
+- **Given:** `userTask` declarations `horus:form="credit-review"` (a key), `horus:formSchema="forms/approve.schema.json"` with `horus:formHints` (a path), and `horus:formLink="/loans/review/{taskId}"` (a link); the host's `FormRegistry` knows `forms/approve.schema.json` only; `tasks.form-link-origins` is empty.
+- **When:** Definitions are imported with an unregistered key; with a schema that uses `pattern`; with hints that order a field the schema does not declare; with two of the three declarations on one step; with a path `../../etc/passwd`; with the link `https://evil.example/t/{taskId}`; and then the correct one, whose link text is later changed in a second import.
+- **Then:** Each refusal is `422 VALIDATION_FAILED` with exactly one problem: `FORM_NOT_REGISTERED`, `FORM_SCHEMA_INVALID`, `FORM_HINTS_INVALID`, `FORM_INVALID`, `FORM_INVALID` and `FORM_LINK_NOT_ALLOWED`; nothing is written. The link is accepted once `tasks.form-link-origins` lists `https://evil.example`. A relative link is always accepted; `//host`, `javascript:`, a URL with user information, a placeholder other than `{taskId}` and `{instanceId}`, and a link above 2,000 characters never are. The form is printed in the canonical form only when declared, so a definition without one keeps its hash, and changing the link text gives a new version with a new `definition_hash`. Request-approval and approval check the registry again, so a form removed since the import blocks them with the same problem.
+- **Example:** `formLink https://evil.example/t/{taskId} -> 422 FORM_LINK_NOT_ALLOWED; with the origin listed -> 201`.
+- **Test ID:** `PRE_216_an_unregistered_form_a_bad_schema_and_bad_hints_are_each_refused_with_their_code`, `PRE_216_a_task_declares_at_most_one_form_and_a_reference_stays_inside_the_form_folder`, `PRE_216_the_same_link_is_accepted_once_its_origin_is_listed`, `PRE_216_the_form_is_part_of_the_definition_hash_so_changing_it_needs_a_new_approval`, `PRE_216_request_approval_checks_the_registry_again_so_a_form_removed_since_import_blocks_it` (`TaskFormTest`), `PRE_216_a_link_is_relative_or_on_a_listed_origin_and_nothing_else`, `PRE_216_a_schema_outside_the_task_form_subset_is_named_by_path_and_rule` (`TaskFormsTest`), `PRE_216_a_schema_path_is_read_as_the_schema_without_hints`, `PRE_216_a_form_key_is_read_from_its_envelope_with_the_hints`, `PRE_216_a_name_outside_the_folder_or_not_plain_is_not_registered`, `PRE_216_the_settings_accept_relative_origins_and_a_relative_folder_only` (`ClasspathFormRegistryTest`)
+
+### PRE-217 A task form's data keeps masked fields masked, and a link task is returned as its link
+- **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
+- **Milestone:** M2
+- **Given:** Task `T5` of instance `LN-2027-0042` whose form declares `idNumber` with `"mask": true` and `decision`; the instance variables `idNumber = 079012345678` and `decision = APPROVE`; task `T6` declared with the link `/loans/review/{taskId}`; task `T7` whose step declares no form.
+- **When:** `GET /tasks/T5/form`, `GET /tasks/T6/form`, `GET /tasks/T7/form`, and `GET /tasks/T5/form` by a caller of another tenant.
+- **Then:** `T5` answers `form.data` with `idNumber = "***"` and `decision = APPROVE`, never the national id number; the `ETag` is the task's `lockVersion`. `T6` answers `link: /loans/review/T6` and no `form`; a task declared with a link is completed by the host's screen through `:complete`, which checks no form. `T7` answers `404 FORM_NOT_DECLARED`, and so does a task whose registered form the host no longer provides. The other tenant's caller gets `404 TASK_NOT_FOUND`. A `422 FORM_VALIDATION_FAILED` carries `violations` and `errors` with one JSON Pointer per failing field (`/reason`), and never a submitted value.
+- **Example:** `GET /tasks/T5/form -> data { idNumber: "***", decision: APPROVE }`.
+- **Test ID:** `PRE_217_a_masked_field_is_a_placeholder_in_the_prefilled_data_and_never_its_value`, `PRE_217_a_link_has_its_placeholders_replaced` (`TaskFormsTest`), `PRE_031_a_link_task_returns_the_link_and_a_task_without_a_form_is_not_declared`, `PRE_031_another_tenant_cannot_read_the_form_of_a_task` (`TaskFormTest`), `PRE_031_the_task_form_body_matches_the_contract_and_carries_the_task_etag`, `PRE_031_a_task_without_a_form_is_404_and_a_result_that_breaks_the_form_is_422_with_pointers` (`ProcessRestContractTest`)
 
 ---
 
@@ -1592,3 +1610,17 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - Each import has its own revision 1. A saved change is revision 2 of that version, needs no approval and writes no `REQUESTED` or `APPROVED` row. A version stored before layouts reads without a layout (`204`).
 - **Example:** `import with diagram -> layout revision 1, source BPMN; re-import with other content -> its own revision 1`.
 - **Test ID:** `PRE_215_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition`, `PRE_215_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval`, `PRE_215_a_definition_stored_before_layouts_existed_still_reads_without_a_layout` (`ImportedLayoutPostgresIT`), `PRE_215_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else` (`CallActivityBpmnTest`)
+
+### PRE-218 A replica of one release runs on the schema of the next while an upgrade rolls
+- **Traces to:** `TR-OPS-02`, `TR-OPS-01`, `TR-API-09`, #113
+- **Milestone:** M3
+- **Given:** Replicas of release N running; a replica of release N+1 starts first and applies its migrations to the shared schema, which add a nullable column, a defaulted `NOT NULL` column, a new table and a new job kind to the check; loan `LN-2027-0042` started by an N replica before the upgrade; a job of the new kind written by an N+1 replica.
+- **When:** An N replica restarts against the migrated schema, claims jobs, completes the loan's first task, and a response schema of the API is checked for closed members.
+- **Then:**
+  - The migrator applies nothing, does not fail validation, and reports how many applied migrations its build does not contain (`aheadMigrations()`); a schema that is not ahead reports none. Flyway validation that does not ignore future migrations refuses the same schema, which is why the migrator sets `ignoreMigrationPatterns("*:future")`.
+  - The N replica reads the instance written before the upgrade and completes its task; rows it writes take the new columns' defaults, and it writes none of the new columns.
+  - It claims the job of the kind it does not know, hands it back `DUE` with its attempt given back and `next_fire_at` moved by `jobs.retry-backoff`, logs `process.job.deferred`, and never marks it `FAILED`, however often it polls; an N+1 replica claims it untouched.
+  - Every migration numbered above the previous release's head only expands: no dropped or renamed table or column, no retyped column, no `SET NOT NULL`, no `NOT NULL` column without a default, no truncate or delete; a constraint is replaced only by a wider one, listed with its reason. A new status or kind value is written only after one minor release that can read it.
+  - No response schema of `openapi.yaml` closes its members with `additionalProperties: false`, except the documents the engine itself versions (the layout, the migration step instructions), so a client of release N reads an N+1 response.
+- **Example:** `N+1 adds pre_task.next_release_note, N restarts -> 0 applied, 1 ahead, loan completes; job NEXT_RELEASE_KIND -> DUE, attempt 0`.
+- **Test ID:** `PRE_218_a_replica_of_this_release_starts_and_finishes_a_loan_on_a_schema_the_next_release_migrated`, `PRE_218_the_migrator_ignores_applied_migrations_its_build_does_not_contain_and_counts_them`, `PRE_218_a_schema_that_is_not_ahead_reports_none`, `PRE_218_a_job_of_a_kind_only_the_next_release_knows_is_handed_back_not_failed` (`MixedVersionSchemaTest`), `PRE_218_every_migration_after_the_previous_release_only_expands_the_schema`, `PRE_218_the_lint_names_each_kind_of_destructive_statement`, `PRE_218_the_lint_accepts_the_expansions_a_release_may_make` (`ExpandOnlyMigrationsTest`), `PRE_218_no_response_schema_closes_its_members` (`ResponseSchemasStayOpenTest`)

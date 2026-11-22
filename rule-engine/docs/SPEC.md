@@ -1203,3 +1203,16 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
   - An unknown value fails the run naming the setting. The report is written in every case.
 - **Example:** `fail-on none -> pass; unique -> kyc-route K1, K2; any -> card-fee R3; kyc-route K1, K2; most -> fails naming horus.rules.coverage.fail-on`.
 - **Test ID:** `RLE_065_uncovered_rows_fail_the_build_only_at_the_configured_threshold`, `RLE_065_a_run_that_covers_every_row_passes_whatever_the_threshold`
+
+### RLE-197 A replica of one release runs on the schema of the next while an upgrade rolls
+- **Traces to:** `TR-OPS-02`, `TR-API-09`, #113
+- **Milestone:** M3
+- **Given:** Replicas of release N running; a replica of release N+1 has applied migrations that add a nullable column to `rle_version`, a defaulted `NOT NULL` column to `rle_rule_set` and a new table; rule set `card-fee` imported by an N replica before the upgrade.
+- **When:** An N replica restarts against the migrated schema, reads `card-fee`, imports a second version and requests its publication, and a response schema of the API is checked for closed members.
+- **Then:**
+  - The migrator applies nothing, does not fail validation, counts the migrations its build does not contain (`aheadMigrations()`) and reports the schema as current (no pending migration), so the replica's health stays up.
+  - The N replica reads and writes rule sets as before; the new columns keep their defaults.
+  - Every migration numbered above the previous release's head only expands the schema (no dropped or renamed table or column, no retype, no `SET NOT NULL`, no `NOT NULL` column without a default); a constraint is replaced only by a wider one, listed with its reason, and a new status value is written only after one minor release that can read it.
+  - No response schema of `openapi.yaml` closes its members with `additionalProperties: false`, except the records an approver sealed, so a client of release N reads an N+1 response.
+- **Example:** `N+1 adds rle_version.next_release_note, N restarts -> 0 applied, 1 ahead, card-fee v2 imported and publication requested`.
+- **Test ID:** `RLE_197_a_replica_of_this_release_runs_on_a_schema_the_next_release_migrated`, `RLE_197_a_schema_that_is_not_ahead_reports_none` (`RuleEngineMixedVersionIT`), `RLE_197_every_migration_after_the_previous_release_only_expands_the_schema`, `RLE_197_the_lint_names_each_kind_of_destructive_statement`, `RLE_197_the_lint_accepts_the_expansions_a_release_may_make` (`ExpandOnlyMigrationsTest`), `RLE_197_no_response_schema_closes_its_members` (`ResponseSchemasStayOpenTest`)

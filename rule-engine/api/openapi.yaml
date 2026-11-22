@@ -14,6 +14,11 @@ info:
     The remaining endpoints of
     rule-engine/docs/DESIGN.md section 4.2 are added with the features that implement them.
 
+    Mixed versions (RLE-197, `TR-OPS-02`): during a rolling upgrade older and newer replicas and clients meet. Within
+    `v1` a release only adds: members of a response, optional members of a request, new problem codes and new
+    event members. A client ignores a response member it does not know and treats a `code` it does not know as its
+    status class says. A status or enum value is added to a response only after one minor release that can read it.
+
     The tenant is never part of a request: it comes from the host's authenticated context
     (`TenantResolver`). A `tenantId` in a body is ignored. Money is `{currency, amount}` with the
     amount in minor units. Errors are RFC 9457 `application/problem+json`; clients branch on `code`.
@@ -2719,7 +2724,6 @@ components:
           properties:
             approve: { $ref: '#/components/schemas/PendingDenial' }
             reject: { $ref: '#/components/schemas/PendingDenial' }
-          additionalProperties: false
     PendingDenial:
       type: string
       enum: [PERMISSION_REQUIRED, SELF_APPROVAL_FORBIDDEN, AUTHOR_UNKNOWN]

@@ -1064,6 +1064,10 @@ sequenceDiagram
 | Drop record | `rle_decision_log_drop` (V19), append-only: triggers refuse `UPDATE`, `DELETE` and `TRUNCATE` (SQLSTATE `55000`). One row per tenant that had decisions in the month, with its count, and one row with `tenant_id = '*'` holding the total, so an empty month is recorded too; each row carries the partition, its range, the retention and the cutoff in force and `dropped_at`. It holds counts only, never decision data, and no API returns it |
 | Lock impact | `ATTACH` takes `SHARE UPDATE EXCLUSIVE` on the parent and does not block inserts. `DROP TABLE` of a partition takes `ACCESS EXCLUSIVE` on the parent; inserts queue behind it for at most the 2 s `lock_timeout`, once a month |
 
+### 5.x Mixed versions during a rolling upgrade (#113, `RLE-197`, `TR-OPS-02`)
+
+Adjacent minor releases upgrade without downtime: replicas of release N and N+1 share one schema while the rollout runs. The migrator ignores applied migrations its build does not contain (`ignoreMigrationPatterns("*:future")`, pinned explicitly), reports them with `aheadMigrations()`, and `status()` counts only the migrations of its own build as pending, so an older replica's health stays up. A migration only expands: new tables, nullable or defaulted columns, new indexes, wider constraints; dropping, renaming, retyping, `SET NOT NULL`, a `NOT NULL` column without a default, truncate and delete belong to the contract step one minor release later. `ExpandOnlyMigrationsTest` lints every migration above the previous release's head (V17 for 0.3.0) and lists its one exception (V28 widens the status checks with `DISCARDED`). A status value is written only after one minor release that can read it. A response schema never closes its members (`ResponseSchemasStayOpenTest`), and a client ignores what it does not know. Known limit of 0.2.0 to 0.3.0: 0.2.0 replicas cannot read a `DISCARDED` version, so draft discard waits until every replica runs 0.3.0.
+
 ## 6. Runtime mechanics and capacity math
 
 ![Evaluate a decision in the host transaction](images/evaluate-decision.svg)
