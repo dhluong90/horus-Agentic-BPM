@@ -4,7 +4,6 @@
 
 # CKP-001: case A (embedded) has tests; stays listed until case B (standalone, #11) and the rule set list step.
 CKP-001 M1
-CKP-008 M2
 CKP-009 M1
 CKP-010 M1
 CKP-011 M3
@@ -30,6 +29,5 @@ CKP-029 M2
 CKP-031 M1
 CKP-032 M1
 CKP-033 M2
-CKP-034 M2
 CKP-035 M2
 CKP-036 M3
