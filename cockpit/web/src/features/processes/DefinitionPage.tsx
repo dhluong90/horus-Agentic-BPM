@@ -15,7 +15,7 @@ import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinit
 import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
 import { DOCK_RESERVE } from './approval/dock';
 import { InstanceStatusPill } from './InstanceStatusPill';
-import { approvalBlock, reviewedHash, type DiffState } from './model/graphDiff';
+import { approvalBlock, humanise, reviewedHash, type DiffState } from './model/graphDiff';
 import { flowOrder, type DiagramGraph } from './model/bpmnGraph';
 import { nodeTypeLabel } from './model/nodeLabels';
 import { DefinitionStatusPill } from './ProcessesPage';
@@ -66,7 +66,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
   // Fields whose masking nobody set (PD-146): a calm note, apart from the decision; it never blocks approval.
   const stepNames = new Map(graph.data?.nodes.map((node) => [node.id, node.name ?? undefined]));
   const unclassified = (details.data?.warnings ?? []).map((w) => t('unclassified.process', {
-    step: stepNames.get(w.step) ?? readableName(w.step), field: w.field, direction: t(w.direction === 'INPUT' ? 'unclassified.input' : 'unclassified.output'),
+    step: stepNames.get(w.step) ?? readableName(w.step), field: humanise(w.field), direction: t(w.direction === 'INPUT' ? 'unclassified.input' : 'unclassified.output'),
   }));
   const steps = graph.data?.nodes.length;
   const items = [
@@ -123,7 +123,7 @@ function Decision({ version, diff, approve, reject, onReload }: {
   if (seen === undefined && current !== undefined) setSeen(current);
   const block = approvalBlock({ version, state, userId, canApprove: can('processes:approve'), seenHash: seen });
   return (
-    <ApprovalDock version={version} block={block} hash={seen}
+    <ApprovalDock version={version} block={block}
       approve={{
         start: ({ comment }) => { if (seen !== undefined) approve.mutate({ version, args: { expectedDefinitionHash: seen, comment } }); },
         isPending: approve.isPending,

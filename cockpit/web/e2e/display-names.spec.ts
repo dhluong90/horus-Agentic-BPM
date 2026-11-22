@@ -62,7 +62,7 @@ const dialog = (page: Page) => page.getByRole('dialog');
 const SHOTS_LIST: readonly Shot[] = [
   {
     name: 'queue-names', scenario: 'tasks-supervisor', user: meSau, hash: '#/tasks?view=all', theme: 'light', locale: 'vi', heights: [900],
-    focal: (page) => page.locator('.tasks__inspector'), never: /credit-officer|loans-operations|role:|group:/,
+    focal: (page) => page.locator('.tasks__inspector'), never: /credit-officer|loans-operations|role:|group:|\b(hoa|an|lan|minh)\b đã nhận|Người nhận\s+(hoa|an)\b/,
   },
   {
     name: 'inspector-holder', scenario: 'tasks-supervisor', user: meSau, hash: `#/tasks?view=all&task=${QUEUE_TASKS.collateral}`, theme: 'dark', locale: 'en', heights: [900],
@@ -77,7 +77,15 @@ const SHOTS_LIST: readonly Shot[] = [
       await dialog(page).getByRole('button', { name: locale === 'vi' ? 'Giao lại' : 'Reassign' }).click();
       await expect(dialog(page).getByRole('alert')).toBeVisible();
     },
-    focal: (page) => dialog(page).getByRole('alert'), never: /MISSING_ROLE|ASSIGNEE_NOT_ALLOWED|credit-officer|role:/,
+    focal: (page) => dialog(page).getByRole('alert'), never: /MISSING_ROLE|ASSIGNEE_NOT_ALLOWED|credit-officer|role:|\bminh không/,
+  },
+  {
+    name: 'queue-names-en', scenario: 'tasks-supervisor', user: meSau, hash: '#/tasks?view=all', theme: 'dark', locale: 'en', heights: [900],
+    focal: (page) => page.locator('.tasks__inspector'), never: /credit-officer|loans-operations|role:|group:|\b(hoa|an|lan|minh) (claimed|has)\b/,
+  },
+  {
+    name: 'rules-review-requester', scenario: 'rules-approver', hash: '#/rules/customer-screening/2', theme: 'light', locale: 'vi', heights: [900],
+    focal: (page) => page.getByRole('heading', { level: 1 }), never: /\bhoa\b|Credit officer|Hoa Tran/,
   },
   {
     name: 'approvals-requester', scenario: 'processes-approver', hash: '#/approvals', theme: 'light', locale: 'en', heights: [900],
@@ -89,7 +97,7 @@ const SHOTS_LIST: readonly Shot[] = [
   },
   {
     name: 'process-review-not-classified', scenario: 'processes-approver', hash: '#/processes/kyc-onboarding/3/changes', theme: 'light', locale: 'vi', heights: [900, 1200],
-    focal: (page) => page.getByRole('region', { name: 'Quyết định của bạn' }), never: /UNCLASSIFIED/,
+    focal: (page) => page.getByRole('region', { name: 'Quyết định của bạn' }), never: /UNCLASSIFIED|CREDIT_OFFICER|documentType|\bsummary\b|[0-9a-f]{12}|Duyệt nội dung/,
   },
 ];
 

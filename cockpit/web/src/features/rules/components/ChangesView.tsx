@@ -34,7 +34,10 @@ function SideHead({ version, effectiveFrom, hash, span, side }: { version: RuleS
     <th scope="colgroup" colSpan={span} className={`sbs__side sbs__side--${side} sbs__start--${side}`}>
       <span className="sbs__title">{t('changes.sideTitle', { version: String(version.version) })}</span>
       <span className="sbs__meta">{meta}</span>
-      <span className="sbs__hash">{t('details.hash')} <span className="mono" title={hash}>{hash.slice(0, 12)}</span></span>
+      <details className="sbs__details">
+        <summary>{t('inspector.details')}</summary>
+        <span className="sbs__hash">{t('details.hash')} <span className="mono" title={hash}>{hash.slice(0, 12)}</span></span>
+      </details>
     </th>
   );
 }

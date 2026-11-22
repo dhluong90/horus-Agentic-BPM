@@ -217,7 +217,7 @@ test('CKP_048_reassign_is_done_by_keyboard_and_escape_closes_the_dialog_without_
   await page.keyboard.type('Covering leave');
   await dialog(page).getByRole('button', { name: 'Reassign' }).focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByText('Credit review is now with hoa.')).toBeVisible();
+  await expect(page.getByText('Credit review is now with Hoa Tran.')).toBeVisible();
   expect(engine.handOvers).toEqual([expect.objectContaining({ command: 'reassign', to: 'hoa', reason: 'Covering leave' })]);
 });
 

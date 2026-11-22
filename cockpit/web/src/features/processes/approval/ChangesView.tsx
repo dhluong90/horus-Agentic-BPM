@@ -11,6 +11,7 @@ import {
   changedSteps, diagramType, humanise, linkKind, marksFor, pathParts, sideOf, type Mark, type Side,
 } from '../model/graphDiff';
 import { nodeTypeLabel } from '../model/nodeLabels';
+import { useNames, useWantNames } from '../api/displayNames';
 import { DOCK_RESERVE } from './dock';
 
 const DefinitionDiagram = lazy(() => import('../diagram/DefinitionDiagram'));
@@ -54,6 +55,22 @@ function usePathLabel() {
   };
 }
 
+/** The kind of person or group a changed value names, by where it sits in the step: `/assignee/role` holds a role id. */
+function assigneeKind(pointer: string): 'role' | 'group' | 'user' | undefined {
+  const [, root, kind] = pointer.split('/');
+  return root === 'assignee' && (kind === 'role' || kind === 'group' || kind === 'user') ? kind : undefined;
+}
+
+/** A changed role, group or user is shown by the host's display name in the caller's language, never by its id. */
+function useAssigneeValue() {
+  const names = useNames();
+  return (pointer: string, value: unknown): unknown => {
+    const kind = assigneeKind(pointer);
+    if (kind === undefined || typeof value !== 'string') return value;
+    return names[kind](value);
+  };
+}
+
 function LinkText({ edge }: { edge: GraphDiffEdge }) {
   const { t } = useI18n();
   const kind = linkKind(edge.kind);
@@ -73,12 +90,22 @@ interface Selection { id: string; mark: Mark }
 function ChangeList({ diff, selected, onSelect }: { diff: GraphDiff; selected: string | undefined; onSelect: (selection: Selection) => void }) {
   const { t } = useI18n();
   const pathLabel = usePathLabel();
+  const assigneeValue = useAssigneeValue();
   const titleId = useId();
   const steps: { id: string; name: string; type: string; mark: Mark; values?: ReturnType<typeof changedSteps>[number]['values'] }[] = [
     ...diff.nodesAdded.map((node) => ({ id: node.id, name: node.name ?? node.id, type: node.type, mark: 'added' as const })),
     ...changedSteps(diff).map((step) => ({ id: step.id, name: step.name ?? step.id, type: step.type ?? '', mark: 'changed' as const, values: step.values })),
     ...diff.nodesRemoved.map((node) => ({ id: node.id, name: node.name ?? node.id, type: node.type, mark: 'removed' as const })),
   ];
+  const wanted = { roles: [] as string[], groups: [] as string[], users: [] as string[] };
+  for (const step of steps) {
+    for (const value of step.values ?? []) {
+      const kind = assigneeKind(value.path);
+      if (kind === undefined) continue;
+      for (const side of [value.from, value.to]) if (typeof side === 'string') wanted[`${kind}s`].push(side);
+    }
+  }
+  useWantNames(wanted);
   const links = [
     ...diff.edgesAdded.map((edge) => ({ edge, mark: 'added' as const })),
     ...diff.edgesRemoved.map((edge) => ({ edge, mark: 'removed' as const })),
@@ -111,10 +138,10 @@ function ChangeList({ diff, selected, onSelect }: { diff: GraphDiff; selected: s
                       <div key={value.path}>
                         <dt>{pathLabel(value.path)}</dt>
                         <dd>
-                          <span className="pdiff__from"><ReviewValue value={value.from} /></span>
+                          <span className="pdiff__from"><ReviewValue value={assigneeValue(value.path, value.from)} /></span>
                           <span aria-hidden="true"> → </span>
                           <span className="sr-only"> {t('diff.to')} </span>
-                          <span className="pdiff__to"><ReviewValue value={value.to} /></span>
+                          <span className="pdiff__to"><ReviewValue value={assigneeValue(value.path, value.to)} /></span>
                         </dd>
                       </div>
                     ))}

@@ -229,7 +229,7 @@ describe('evidence export', () => {
     expect(await screen.findByText('The file would be larger than 8 MB. Choose fewer decisions.')).toBeInTheDocument();
     // The choices stay, and the code sits behind Details.
     expect(screen.getByRole('checkbox', { name: 'Version 2 · Published' })).toBeChecked();
-    await user.click(screen.getByText('Details'));
+    await user.click(within(screen.getByText('The file would be larger than 8 MB. Choose fewer decisions.').closest('[role="alert"], .notice') as HTMLElement).getByText('Details'));
     expect(screen.getByText('EVIDENCE_TOO_LARGE')).toBeInTheDocument();
     expect(downloads).toEqual([]);
   });

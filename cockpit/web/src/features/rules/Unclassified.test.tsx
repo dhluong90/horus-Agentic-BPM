@@ -22,7 +22,7 @@ describe('#438 not classified in the review', () => {
     render(<App />);
 
     const note = await screen.findByRole('group', { name: 'Not classified' });
-    expect(note).toHaveTextContent('Masking is not set. Approval is not blocked.');
+    expect(note).toHaveTextContent('Masking is not set for these fields. This reminder never blocks approval.');
     expect(within(note).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['National ID', 'Email', 'Segment']);
     expect(note).not.toHaveTextContent(/UNCLASSIFIED_INPUT|undefined/);
     // Not a dialog, and not an alert: nothing interrupts the reviewer.
@@ -57,7 +57,7 @@ describe('#438 not classified in the review', () => {
 
     const note = await screen.findByRole('group', { name: 'Not classified' });
     expect(within(note).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
-      'Verify identity documents: documentType (input)', 'Verify identity documents: summary (output)',
+      'Verify identity documents: Document type (input)', 'Verify identity documents: Summary (output)',
     ]);
     expect(note).not.toHaveTextContent(/UNCLASSIFIED_FIELD/);
     const dock = screen.getByRole('region', { name: 'Your decision' });
