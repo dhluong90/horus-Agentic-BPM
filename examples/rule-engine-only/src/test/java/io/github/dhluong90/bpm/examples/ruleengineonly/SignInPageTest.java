@@ -67,9 +67,27 @@ class SignInPageTest {
         String withoutDemo = new SignInPage(TEMPLATE, "Loans", null, List.of()).render(view("en", false, false));
 
         assertThat(withDemo).contains("tag--demo", "data-username=\"lan\"", "<span class=\"demo__role\">Author</span>",
-                        "<span class=\"demo__role\">Author and approver</span>", "aria-label=\"Sign in as tuan, Teller\"")
+                        "<span class=\"demo__role\">Author and approver</span>", "aria-label=\"tuan, Teller, sign in\"")
                 .doesNotContainIgnoringCase("test-only-password").doesNotContain("HORUS_DEMO_PASSWORD");
         assertThat(withoutDemo).doesNotContain("tag--demo").doesNotContain("data-username");
+    }
+
+    @Test
+    void each_demo_user_button_is_named_starting_with_its_visible_text_in_both_languages() {
+        java.util.regex.Pattern button = java.util.regex.Pattern.compile(
+                "<button type=\"button\" class=\"demo__user\"[^>]*aria-label=\"([^\"]+)\"><span class=\"demo__name\">([^<]+)</span> "
+                        + "<span class=\"demo__role\">([^<]+)</span></button>");
+        for (String language : List.of("en", "vi")) {
+            String html = new SignInPage(TEMPLATE, "Loans", null, DEMO).render(view(language, false, false));
+            java.util.regex.Matcher matcher = button.matcher(html);
+            int buttons = 0;
+            while (matcher.find()) {
+                buttons++;
+                // Voice control: the user says what they see, "lan, Author", and the name starts with it (WCAG 2.5.3)
+                assertThat(matcher.group(1)).as(language).startsWith(matcher.group(2) + ", " + matcher.group(3) + ", ");
+            }
+            assertThat(buttons).as(language).isEqualTo(DEMO.size());
+        }
     }
 
     @Test

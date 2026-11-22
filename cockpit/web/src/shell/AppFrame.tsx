@@ -7,7 +7,7 @@ import { areaOf, areaRoute, formatRoute, useRoute, type Area, type Route } from 
 import { EmptyState, PageHead } from '../components/PageParts';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { DecisionPage } from '../features/decisions/DecisionPage';
-import { DecisionsPage } from '../features/decisions/DecisionsPage';
+import { DecisionLogLocked, DecisionsPage } from '../features/decisions/DecisionsPage';
 import { HomePage } from '../features/home/HomePage';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
@@ -82,7 +82,7 @@ function Frame({ meta, me, inboxSeconds }: { meta: BpmMetaV1; me: BpmMeV1; inbox
     <div className="frame">
       <NavRail areas={areas} current={area} reviewCount={review.count} reviewMore={review.more} />
       <main id="main" ref={main} className="main main--framed" tabIndex={-1}>
-        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} inboxSeconds={inboxSeconds} /> : <NotAvailable />}
+        {areas.includes(area) ? <AreaContent route={route} meta={meta} me={me} areas={areas} engines={engines} inboxSeconds={inboxSeconds} /> : route.name === 'decision' ? <DecisionLogLocked titleId="decision-refused-title" message="dlog.link.noPermission" /> : <NotAvailable />}
       </main>
     </div>
   );

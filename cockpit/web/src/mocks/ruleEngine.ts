@@ -16,7 +16,7 @@ import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from '.
 const READINGS_MAX = 500;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-interface Rule { id: string; when: Record<string, string>; then: Record<string, Json> }
+interface Rule { id: string; when: Record<string, string>; then: Record<string, Json>; explain?: Partial<Record<'en' | 'vi', string>> }
 interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string }[]; outputs: { name: string; type: string }[]; rules: Rule[]; description?: string }
 
 export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
@@ -797,7 +797,14 @@ const CARD_FEE_V1: Definition = {
   outputs: [{ name: 'fee', type: 'money' }, { name: 'waived', type: 'boolean' }],
   rules: [
     { id: 'R1', when: { tier: "== 'PLATINUM'" }, then: { fee: '0 VND', waived: true } },
-    { id: 'R2', when: { tier: "== 'GOLD'", balance: '>= 50000000 VND' }, then: { fee: '0 VND', waived: true } },
+    {
+      id: 'R2', when: { tier: "== 'GOLD'", balance: '>= 50000000 VND' }, then: { fee: '0 VND', waived: true },
+      // The author's sentence per language (the rule set's explain), which the engine fills with grouped values.
+      explain: {
+        en: 'The card fee is waived because a Gold customer keeps a balance of {input.balance}, at least 50,000,000 VND.',
+        vi: 'Phí thẻ được miễn vì khách hàng hạng Vàng duy trì số dư {input.balance}, từ 50.000.000 VND trở lên.',
+      },
+    },
     { id: 'R3', when: { tier: "== 'GOLD'" }, then: { fee: '30000 VND', waived: false } },
     { id: 'R4', when: { txCount: '>= 20' }, then: { fee: '15000 VND', waived: false } },
     { id: 'R5', when: {}, then: { fee: '50000 VND', waived: false } },

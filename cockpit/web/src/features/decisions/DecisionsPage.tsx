@@ -1,3 +1,4 @@
+import type { MessageKey } from '../../i18n/en';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { CASE_REFERENCE, DECISION_OUTCOMES, type LoggedDecision } from '../../api/rules/auditSchemas';
 import { formatRoute, type DecisionQuery } from '../../app/route';
@@ -28,14 +29,15 @@ function searchOf(query: DecisionQuery): DecisionSearchKey | undefined {
 }
 
 /** The page a user without the decision log permission sees: what is missing, in one line, and no request is sent. */
-export function DecisionLogLocked({ titleId }: { titleId: string }) {
+export function DecisionLogLocked({ titleId, message = 'dlog.locked' }: { titleId: string; message?: MessageKey }) {
   const { t } = useI18n();
   return (
     <section className="workspace" aria-labelledby={titleId}>
       <PageHead id={titleId} title={t('decisions.title')} subtitle={t('decisions.subtitle')} preview />
       <article className="card locked-state" role="note">
         <span className="locked-state__icon"><LockIcon /></span>
-        <p>{t('dlog.locked')}</p>
+        <p className="locked-state__text">{t(message)}</p>
+        <a className="btn btn--quiet locked-state__action" href={formatRoute({ name: 'home' })}>{t('dlog.locked.goHome')}</a>
       </article>
     </section>
   );

@@ -6,6 +6,7 @@ import { z } from 'zod';
  * - signed-out: the host redirected the call to its sign-in page, so the session really ended and a
  *   reload goes through the host's sign-in. A 401 problem is not this: the page was served, so the
  *   session works for the page and the API refused it for another reason; it stays a `problem`;
+ * - no-access: standalone mode only; the identity provider gives the user no token for this service;
  * - unreachable: no answer at all (network, timeout);
  * - unexpected-response: an answer that is neither the documented body nor a problem.
  */
@@ -23,6 +24,8 @@ export type HostError =
       members?: Readonly<Record<string, unknown>>;
     }
   | { kind: 'signed-out' }
+  /** Standalone mode: the identity provider refuses this service's scope to the user. */
+  | { kind: 'no-access' }
   | { kind: 'unreachable' }
   | { kind: 'unexpected-response'; status: number; correlationId: string | undefined };
 

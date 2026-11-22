@@ -35,8 +35,32 @@ body { background: var(--bg); background-image: none; }
 .service-pill__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok-fill); flex: none; }
 .service-pill__name { font: var(--type-label); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
 .service-pill__tenant { font: var(--type-label); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+/* Several hosts: the pill opens the list of services (CKP-015). */
+.service-pill__dot--idle { background: var(--line-strong); }
+.service-pill--button { cursor: pointer; font: inherit; color: inherit; height: 36px; }
+.service-pill--button:hover { background: var(--surface-2); border-color: var(--control); }
+.service-pill__caret { color: var(--muted); flex: none; margin-left: 2px; }
+.host-picker { position: relative; min-width: 0; flex: 0 1 auto; display: flex; }
+.host-picker__menu[hidden] { display: none; }
+.host-picker__menu {
+  position: absolute; right: 0; top: calc(100% + 8px); min-width: 280px; padding: 8px; z-index: 50;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); box-shadow: var(--sh-pop);
+}
+.host-picker__title { margin: 4px 8px 8px; font: var(--type-caption); color: var(--muted); }
+.host-picker__menu ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.host-picker__item {
+  display: flex; align-items: center; gap: 12px; min-height: var(--target-min); padding: 0 12px; border-radius: var(--radius-m);
+  color: var(--ink-2); text-decoration: none; font: var(--type-body);
+}
+.host-picker__item:hover { background: var(--surface-3); }
+.host-picker__item.is-selected { background: var(--select); color: var(--accent); font-weight: 600; }
+.host-picker__label { flex: 1; min-width: 0; }
+.host-picker__env { font: var(--type-caption); color: var(--muted); }
+.host-picker__check { display: inline-flex; color: var(--accent); }
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 600; letter-spacing: 0; vertical-align: middle; white-space: nowrap; }
-.tag--env { background: var(--warn-soft); color: var(--warn); text-transform: capitalize; }
+/* Amber is the Demo tag only; any other environment is neutral (styleguide section 2). */
+.tag--demo { background: var(--warn-soft); color: var(--warn); }
+.tag--env { background: var(--env-tag); color: var(--env-tag-ink); box-shadow: inset 0 0 0 1px var(--env-tag-line); }
 .tag--preview { border: 1px solid var(--line-strong); color: var(--muted); font-weight: 500; }
 
 .account { position: relative; flex: none; }
@@ -127,7 +151,21 @@ body { background: var(--bg); background-image: none; }
   display: flex; flex-direction: column; gap: 12px;
 }
 .panel--center { align-items: center; text-align: center; color: var(--muted); }
-.panel--error { border-color: var(--bad-fill); box-shadow: var(--sh-2), inset 4px 0 0 var(--bad-fill); }
+/* Error and warning panels use the calm alert shape (styleguide section 9): soft fill, a 3 px edge, no frame. */
+.panel--error, .panel--warn { border: 0; border-left: 3px solid; box-shadow: none; }
+.panel--error { background: var(--bad-soft); border-left-color: var(--bad-fill); }
+.panel--warn { background: var(--warn-soft); border-left-color: var(--warn-fill); }
+.panel--error .panel__body, .panel--warn .panel__body { color: var(--ink); }
+.panel--error .panel__hint, .panel--warn .panel__hint { color: var(--ink-2); }
+.panel__details summary { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--ink-2); font: var(--type-label); }
+.panel__details summary { list-style: none; }
+.panel__details summary::-webkit-details-marker { display: none; }
+.panel__details summary::before { content: "▸" / ""; color: var(--muted); font-size: 11px; }
+.panel__details[open] > summary::before { content: "▾" / ""; }
+.panel__details dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px 16px; margin-top: 8px; font: var(--type-label); }
+.panel__details dl > div { display: contents; }
+.panel__details dt { color: var(--ink-2); }
+.panel__details dd { color: var(--ink); overflow-wrap: anywhere; }
 .panel--calm .panel__title { font-weight: 600; }
 .panel__title { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 650; }
 .panel__body { color: var(--ink-2); }
@@ -137,7 +175,10 @@ body { background: var(--bg); background-image: none; }
   display: inline-grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: 50%;
   font-size: 13px; font-weight: 800; line-height: 1;
 }
-.status-icon--bad { background: var(--bad-soft); color: var(--bad); border: 1px solid var(--bad-fill); }
+.status-icon--bad { color: var(--bad); }
+.status-icon--warn { color: var(--warn); }
+.host-choice { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.host-choice__item { text-decoration: none; }
 
 .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 16px; padding: 12px 14px; border-radius: var(--radius-m); background: var(--surface-2); border: 1px solid var(--line); }
 .facts > div { display: contents; }
@@ -164,3 +205,12 @@ body { background: var(--bg); background-image: none; }
   animation: spin .9s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Tenant switcher (CKP-022): the tenant as its own pill beside the service; the menu reuses the host picker's. */
+.tenant-switcher__button { gap: 6px; padding: 0 10px 0 12px; }
+.tenant-switcher__button .service-pill__tenant { color: var(--ink-2); }
+.tenant-switcher__item { width: 100%; border: 0; background: transparent; cursor: pointer; text-align: left; }
+/* A refused tenant: a level-4 notice at the bottom right, above the page, until dismissed. */
+.tenant-refusal { position: fixed; right: 24px; bottom: 24px; z-index: 60; max-width: 440px; box-shadow: var(--sh-pop); background: var(--surface); }
+.tenant-refusal.alert--error { background: var(--bad-soft); border: 0; border-left: 3px solid var(--bad-fill); }
+.tenant-refusal__back { color: var(--ink-2); font: var(--type-label); }

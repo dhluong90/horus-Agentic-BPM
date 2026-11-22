@@ -51,7 +51,7 @@ Meaning of each hue (from UX design section 6.1, repeated here because the build
 |---|---|---|---|
 | Ocean blue | `--accent*`, `--primary-fill`, `--select` | Primary action, selected, link, focus, waiting for approval, matched row in Try it | A second blue for selection |
 | Green | `--ok*` | Published, approved, check passed, added row | Pending or review |
-| Amber | `--warn*` | Needs attention soon; the Demo tag | Plain information, a page frame |
+| Amber | `--warn*` | Needs attention soon; the Demo tag | Plain information, a page frame, any environment tag other than Demo |
 | Red | `--bad*` | Error, failed validation, reject, destructive action | A planned fee cut, an unmatched row |
 | Indigo | `--indigo*`, `--diff-mod` | A changed value in a diff | Selection |
 | Violet | `--violet*` | Agent steps and route-to-human only | Anything in the rule screens |
@@ -75,6 +75,9 @@ The shell's colour tokens in one table. `--primary-fill` and `--on-primary` alre
 | `--primary-active` | Primary button, pressed | `#0C4A6E` | `#0284C7` | 9.46 with `--on-primary` | 4.59 | |
 | `--rail` | Menu background | `#FFFFFF` | `#0E141F` | | | |
 | `--rail-line` | Menu edge | `var(--line)` | `var(--line)` | decorative | decorative | |
+| `--env-tag` | Environment tag other than Demo (Production, UAT), fill | `#F1F4F8` | `rgba(148,163,184,.12)` | | | |
+| `--env-tag-ink` | Its text | `#334155` | `#C5CCD9` | 9.39 | 8.94 on `--surface` | `--env-tag` |
+| `--env-tag-line` | Its 1 px inner edge | `#B8C1CD` | `rgba(148,163,184,.34)` | decorative | decorative | |
 
 Two changes to how existing tokens are used:
 
@@ -250,6 +253,7 @@ Height 24 px, padding 0 8 px, `--radius-pill`, `--type-caption` at 600, icon 12 
 | Published | `--ok-soft` | `--ok` | check |
 | Preview (page title only) | none, 1 px `--line-strong` | `--muted` | none |
 | Demo (top bar, sign-in) | `--warn-soft` | `--warn` | none |
+| Any other environment (top bar, sign-in), first letter upper case: `Production` | `--env-tag`, 1 px `--env-tag-line` | `--env-tag-ink` | none |
 
 A version has three states: Draft, Waiting for approval and Published. A rejected or withdrawn request sends the version back to Draft, so there is no Rejected or Withdrawn pill. Those words appear only in history rows and events, as text with an icon (`✕ Rejected by Trần Văn Minh`, `↩ Withdrawn by Nguyễn Thị Lan`), with no fill.
 
