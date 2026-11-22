@@ -121,6 +121,14 @@ public final class JdbcNodeStatsStore implements NodeStatsStore {
     }
 
     @Override
+    public int deleteBefore(Instant cutoff, int limit) {
+        // Bounded by the bucket_start BRIN index of V36 and by the limit; rows another purge holds are skipped.
+        return jdbc.sql("DELETE FROM pre_node_stats_hourly WHERE ctid IN (SELECT ctid FROM pre_node_stats_hourly "
+                        + "WHERE bucket_start < ? LIMIT ? FOR UPDATE SKIP LOCKED)")
+                .params(ts(cutoff), limit).update();
+    }
+
+    @Override
     public Optional<Instant> watermark(String job) {
         return jdbc.sql("SELECT watermark FROM pre_engine_watermark WHERE job_name = ?").param(job)
                 .query((rs, row) -> rs.getTimestamp("watermark").toInstant()).optional();

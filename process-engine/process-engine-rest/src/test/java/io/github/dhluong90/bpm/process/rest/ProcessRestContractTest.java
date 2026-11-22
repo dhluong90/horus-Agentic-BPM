@@ -147,6 +147,11 @@ class ProcessRestContractTest {
         assertThat(again.getResponse().getStatus()).isEqualTo(304);
         assertThat(again.getResponse().getContentAsByteArray()).isEmpty();
 
+        assertThat(first.getResponse().getContentAsString())
+                .contains("\"kind\":\"COMPENSATION\"").contains("\"compensates\":\"verify-docs\"")
+                .contains("\"scope\":\"kyc-saga\"").contains("\"errorCode\":\"ACCOUNT_FROZEN\"")
+                .contains("\"state\":\"NOT_FULLY_UNDONE\"").contains("\"blockedStep\":\"verify-docs\"")
+                .contains("\"incidentId\":\"01JD0000000000000000000101\"").contains("\"kind\":\"STEP\"");
         assertProblem(get(BASE + "/instances/01JD0000000000000000000077/activities"), 404, "INSTANCE_NOT_FOUND");
         assertProblem(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "0"), 400,
                 "QUERY_INVALID");
@@ -189,6 +194,37 @@ class ProcessRestContractTest {
         assertThat(again.getResponse().getContentAsByteArray()).isEmpty();
         assertThat(exchange(get(BASE + "/definitions/kyc-onboarding/versions/2/diff")).getResponse()
                 .getHeader("ETag")).as("base defaults to the effective version").isEqualTo(etag);
+    }
+
+    @Test
+    void PRE_201_a_paged_diff_gives_the_hashes_on_its_last_page_only_and_matches_the_contract() throws Exception {
+        // Given the six changes of kyc-onboarding v1 to v2, read four at a time
+        MvcResult first = exchange(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1")
+                .param("limit", "4"));
+        String body = first.getResponse().getContentAsString();
+
+        // Then the first page holds four changes, carries no hash and points to the next page
+        assertThat(first.getResponse().getStatus()).isEqualTo(200);
+        assertThat(body).contains("\"truncated\":false").contains("\"approvableHash\":null")
+                .contains("\"changeSetHash\":null").contains("\"offset\":0,\"total\":6")
+                .doesNotContain("definitionHash").doesNotContain("\"nextCursor\":null");
+        String cursor = body.replaceAll("(?s).*\"nextCursor\":\"([^\"]+)\".*", "$1");
+
+        // And the last page holds the rest with the definition hashes, the approvable hash and the change-set hash
+        MvcResult last = exchange(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1")
+                .param("limit", "4").param("cursor", cursor));
+        String lastBody = last.getResponse().getContentAsString();
+        assertThat(lastBody).contains("\"offset\":4,\"total\":6").contains("\"nextCursor\":null")
+                .contains("\"approvableHash\":\"" + "b".repeat(64) + "\"").contains("\"definitionHash\"")
+                .containsPattern("\"changeSetHash\":\"[0-9a-f]{64}\"");
+
+        // And a cursor this change set did not issue, and a page size over 500, are QUERY_INVALID
+        assertProblem(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1")
+                .param("cursor", "bad"), 400, "QUERY_INVALID");
+        assertProblem(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1")
+                .param("limit", "501"), 400, "QUERY_INVALID");
+        assertProblem(get(BASE + "/definitions/kyc-onboarding/versions/2/diff").param("base", "1")
+                .param("limit", "many"), 400, "QUERY_INVALID");
     }
 
     @Test
@@ -352,6 +388,20 @@ class ProcessRestContractTest {
             return kycDiff();
         }
 
+        /** The kyc-onboarding v2 change set, one page at a time. */
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPage(DefinitionRef base, DefinitionRef target,
+                Integer limit, String cursor) {
+            return io.github.dhluong90.bpm.process.internal.service.GraphDiffPaging.page(diff(base, target), limit,
+                    cursor);
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPageFromEffective(DefinitionRef target,
+                Integer limit, String cursor) {
+            return diffPage(DefinitionRef.of(target.key(), 1), target, limit, cursor);
+        }
+
         @Override
         public io.github.dhluong90.bpm.process.api.GraphDiff diffFromEffective(DefinitionRef target) {
             if ("no-effective".equals(target.key())) {
@@ -393,7 +443,7 @@ class ProcessRestContractTest {
 
         @Override
         public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
-                String comment, String idempotencyKey) {
+                String expectedChangeSetHash, String comment, String idempotencyKey) {
             throw new UnsupportedOperationException();
         }
 
@@ -469,8 +519,16 @@ class ProcessRestContractTest {
                     java.time.Duration.ofSeconds(190), 2, "svc-kyc", null, null);
             var entry = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry("01JD0000000000000000000099",
                     "NODE_ENTERED", "verify-docs", null, NOW);
+            var undoStep = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
+                    "01JD0000000000000000000100", "COMPENSATION_STEP_FAILED", "verify-docs", "system:compensation",
+                    NOW.plusSeconds(200), "COMPENSATION", "verify-docs", "01JD0000000000000000000098",
+                    "01JD0000000000000000000090", "kyc-saga", 3, "ACCOUNT_FROZEN", "undo-verify", null);
+            var scope = new io.github.dhluong90.bpm.process.api.InstanceActivities.Compensation(
+                    "01JD0000000000000000000090", "kyc-saga", io.github.dhluong90.bpm.process.api.InstanceActivities
+                            .CompensationState.NOT_FULLY_UNDONE, NOW.plusSeconds(195), null, "PARTNER_REFUSED",
+                    "notify-partner", 0, "verify-docs", "01JD0000000000000000000101", "COMPENSATION_FAILED");
             return new io.github.dhluong90.bpm.process.api.InstanceActivities(instanceId, NOW, null, List.of(verify),
-                    List.of(entry), false);
+                    List.of(entry, undoStep), false, List.of(scope));
         }
     }
 

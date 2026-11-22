@@ -425,6 +425,11 @@ public record ProcessEngineProperties(
      * @param rollupMaxSlice longest stretch of history one slice transaction reads
      * @param rollupMaxRun longest a run keeps taking slices before the next run continues from the watermark
      * @param rollupInitialBackfill how far back the first run starts on a database with no watermark
+     * @param rollupMinLag the write-lag window: the longest a step transaction may stay open before its history row
+     *     commits. No slice is rolled up within it and {@code rollup-lag} may not be shorter; a value below PT5M is
+     *     accepted on the {@code dev} profile only (#410)
+     * @param rollupRetention how long hourly statistics rows are kept, as an ISO-8601 period such as P13M or P90D, at
+     *     least P31D; older whole days are deleted by the rollup run (#410)
      */
     public record Stats(
             @DefaultValue("PT5S") Duration liveCacheTtl,
@@ -435,7 +440,9 @@ public record ProcessEngineProperties(
             @DefaultValue("PT5M") Duration rollupLag,
             @DefaultValue("PT1M") Duration rollupMaxSlice,
             @DefaultValue("PT60S") Duration rollupMaxRun,
-            @DefaultValue("PT1H") Duration rollupInitialBackfill) {
+            @DefaultValue("PT1H") Duration rollupInitialBackfill,
+            @DefaultValue("PT5M") Duration rollupMinLag,
+            @DefaultValue("P13M") java.time.Period rollupRetention) {
 
         public Stats {
             if (liveCacheTtl.isNegative() || liveCacheTtlLarge.isNegative()) {
@@ -447,16 +454,17 @@ public record ProcessEngineProperties(
             }
             try {
                 toRollupSettings(rollupEnabled, rollupInterval, rollupLag, rollupMaxSlice, rollupMaxRun,
-                        rollupInitialBackfill);
+                        rollupInitialBackfill, rollupMinLag, rollupRetention);
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
             }
         }
 
         private static io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings toRollupSettings(boolean enabled,
-                Duration interval, Duration lag, Duration maxSlice, Duration maxRun, Duration backfill) {
+                Duration interval, Duration lag, Duration maxSlice, Duration maxRun, Duration backfill,
+                Duration minLag, java.time.Period retention) {
             return new io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings(enabled, interval, lag,
-                    maxSlice, maxRun, backfill);
+                    maxSlice, maxRun, backfill, minLag, retention);
         }
 
         LiveStatsSettings toSettings() {
@@ -465,7 +473,7 @@ public record ProcessEngineProperties(
 
         io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings toRollup() {
             return toRollupSettings(rollupEnabled, rollupInterval, rollupLag, rollupMaxSlice, rollupMaxRun,
-                    rollupInitialBackfill);
+                    rollupInitialBackfill, rollupMinLag, rollupRetention);
         }
     }
 

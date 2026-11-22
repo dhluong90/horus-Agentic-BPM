@@ -1096,7 +1096,7 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
   - (d) `404 DEFINITION_NOT_FOUND`; nothing is written.
   - (e) The repeat replays the first answer; the other hash is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
   - The check runs under the key lock after the status, four-eyes and lock-version checks, through the Java API and REST alike.
-  - (f) The diff is `truncated` with `approvableHash: null` and no `definitionHash` on either side; the approval is `409 CHANGE_SET_TRUNCATED` and nothing is written, published or recorded. A change list cut off at its limit carries no hash that may be approved.
+  - (f) The diff is `truncated` with `approvableHash: null` and no `definitionHash` on either side; the approval is `409 CHANGE_SET_TRUNCATED` and nothing is written, published or recorded. A change list cut off at its limit carries no hash that may be approved. This holds for the unpaged read and for an approval that names no change-set hash; the paged read and the whole-set hash of `PRE-201` and `PRE-202` are the way a change set over the limit is approved outside `dev`.
 - **Example:** `bob approves with H after the content became H2 -> 409 CONTENT_CHANGED (current H2), 0 rows`.
 - **Test ID:** `PRE_177_an_approval_with_the_reviewed_hash_publishes_the_version_and_records_the_hash`, `PRE_177_an_approval_of_content_changed_after_review_is_refused_naming_the_current_hash_and_writes_nothing`, `PRE_177_an_approval_without_a_hash_is_refused_while_the_setting_is_on`, `PRE_177_with_the_dev_relaxation_an_approval_without_a_hash_is_accepted`, `PRE_177_another_tenants_version_is_refused_and_nothing_is_written`, `PRE_177_a_replay_with_another_hash_under_the_same_key_is_a_key_reuse`, `PRE_177_a_truncated_diff_exposes_no_approvable_hash_and_an_approval_against_it_is_refused`, `PRE_177_the_two_approval_refusals_match_the_contract_and_name_the_current_content`, `PRE_177_an_approval_without_the_reviewed_hash_is_accepted_only_on_the_dev_profile`
 
@@ -1385,9 +1385,14 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - A: the assignment is unchanged, the level is counted so the sweep does not try it again, history records `ESCALATION_REFUSED` with `ESCALATION_TARGET_FORBIDDEN`, and an incident with that code opens.
   - B: the cancelled instance's task is not escalated; only the other tenant's task moves, and its event carries that tenant. A task is only ever changed under the lock of its own instance row, in the tenant stored on it.
   - C: one replica applies the level and the other, after the first commits, finds it applied and writes nothing.
-  - Not in this release: a target role the host `RoleCatalogue` does not list is not checked at approval (the SPI follows with its slice).
+  - D: see Variant D below.
+- **Variant D (#449): a target role the tenant does not have is refused at approval.**
+  - **Given:** a host that registers a `RoleCatalogue` (SPI `io.github.dhluong90.bpm.process.spi.RoleCatalogue`, `exists(tenantId, role)`) listing `CREDIT_OFFICER` and `BRANCH_SUPERVISOR` for `bank-a`; a definition whose user task `review-application` escalates to `role:RISK_HEAD`; the same definition escalating to `role:BRANCH_SUPERVISOR`; a host with no catalogue; `bank-b`, whose list does not hold `RISK_HEAD`.
+  - **When:** the version is sent for approval, and again when a second person approves it (the list may have changed between); the same with `BRANCH_SUPERVISOR`; with no catalogue; `bank-b` sends the definition naming a role only `bank-a` holds.
+  - **Then:** the unknown role is `422 VALIDATION_FAILED` with one problem `ESCALATION_ROLE_UNKNOWN` naming the step `review-application` and the role `role:RISK_HEAD` (once per role and step), at request-approval and at approval alike, and nothing is written; the known role is accepted at both; with no catalogue the default `RoleCatalogue.ACCEPT_ALL` checks nothing and the starter logs a warning at start-up outside the `dev` profile; the catalogue is asked with the caller's tenant, so one tenant's roles never satisfy another's; a `user:` or `group:` target is not asked (the host directory answers for people at run time, `PRE-183`).
+  - **Example:** `review-application -> role:RISK_HEAD, catalogue lists CREDIT_OFFICER and BRANCH_SUPERVISOR -> 422 ESCALATION_ROLE_UNKNOWN (review-application, role:RISK_HEAD), 0 rows`.
 - **Example:** `target user minh is the maker -> no change, incident ESCALATION_TARGET_FORBIDDEN`.
-- **Test ID:** `PRE_180_a_level_that_targets_the_maker_is_recorded_with_an_incident_and_changes_nothing`, `PRE_180_a_cancelled_instance_is_not_escalated_and_another_tenants_task_is_never_touched` (`TaskEscalationPostgresIT`)
+- **Test ID:** `PRE_180_a_level_that_targets_the_maker_is_recorded_with_an_incident_and_changes_nothing`, `PRE_180_a_cancelled_instance_is_not_escalated_and_another_tenants_task_is_never_touched` (`TaskEscalationPostgresIT`), `PRE_180_an_escalation_to_a_role_the_host_does_not_list_is_refused_at_request_and_at_approval`, `PRE_180_an_escalation_to_a_listed_role_is_sent_for_approval_and_approved`, `PRE_180_a_host_without_a_role_catalogue_checks_no_role`, `PRE_180_one_tenants_roles_never_satisfy_another_tenant` (`EscalationRoleCatalogueTest`), `PRE_180_a_host_without_a_role_catalogue_is_warned_outside_dev_and_one_with_a_catalogue_is_not` (`StatsRetentionAndRoleCatalogueSettingsTest`)
 
 ### PRE-181 The calendars in force and the calendar changes are read over REST, in the caller's tenant
 - **Traces to:** `TR-CAL-01`, `TR-TEN-01`
@@ -1407,3 +1412,62 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `propose(k-1) twice -> one change; approve(a-1) twice -> version 4 once, one event`.
 - **Test ID:** `PRE_182_a_proposal_repeated_with_the_same_key_returns_the_first_answer_and_writes_nothing_more`, `PRE_182_an_approval_repeated_with_the_same_key_applies_once_and_emits_one_event`, `PRE_182_two_concurrent_proposals_with_one_key_create_one_change_and_a_key_is_per_tenant`, `PRE_182_a_proposal_without_the_permission_is_refused_before_any_key_is_claimed` (`CalendarChangeIdempotencyPostgresIT`), `PRE_182_*` in `CalendarRestContractTest`
 
+---
+
+## Paged Definition Diff, Step Statistics Retention, Compensation Timeline (Batch S9, slice A1)
+
+### PRE-200 Hourly step statistics are kept for a configured time, and no slice is rolled up within the write-lag window
+- **Traces to:** `TR-PERF-10`, `TR-OPS-01`, #410
+- **Milestone:** M3
+- **Given:** `pre_node_stats_hourly` holds hours of `bank-a` and `bank-b` from 15 July 2026, one from 22 August 2026 and today's (20 November 2026, 10:50); `horus.bpm.processes.stats.rollup-retention` is `P90D`; `stats.rollup-min-lag` and `stats.rollup-lag` are `PT10M`; completions at 10:30 and 10:45; more expired hours than one run deletes.
+- **When:** the rollup runs; it runs again at 10:56; defaults and bad values are bound; a profile other than `dev` sets `rollup-min-lag` below `PT5M`.
+- **Then:**
+  - The run deletes hours whose start is older than the retention, counted in whole days back from now in UTC (here before 22 August 00:00), in every tenant, in transactions of 5,000 rows, at most 20 per run, skipping rows another replica holds; the next run continues. Newer hours stay. Nothing is deleted by a run another replica holds the watermark of.
+  - No slice reaches past `now - max(rollup-lag)`: at 10:50 only the 10:30 completion is counted and the watermark stops at 10:40; at 10:56 the 10:45 one is counted too.
+  - Defaults: `rollup-retention` `P13M`, `rollup-min-lag` `PT5M`. A retention under `P31D` (the longest statistics window) is refused at bind time; so is a `rollup-lag` shorter than `rollup-min-lag`, naming both properties. A `rollup-min-lag` below `PT5M` is refused at start-up unless the `dev` profile is active on its own.
+  - Migration V36 adds `idx_pre_node_stats_hourly_bucket` so the purge reads by time and never the whole table.
+- **Example:** `retention P90D at 20 Nov: 15 Jul hours deleted, 22 Aug kept; lag PT10M at 10:50: watermark 10:40`.
+- **Test ID:** `PRE_200_hourly_rows_older_than_the_retention_are_deleted_by_the_rollup_run`, `PRE_200_a_purge_takes_bounded_batches_and_the_next_run_continues`, `PRE_200_no_slice_is_rolled_up_within_the_write_lag_window` (`NodeStatsRollupPostgresIT`), `PRE_200_retention_defaults_to_13_months_and_the_write_lag_window_to_five_minutes`, `PRE_200_a_retention_below_the_longest_window_and_a_lag_below_the_write_lag_window_are_refused`, `PRE_200_a_write_lag_window_below_five_minutes_is_accepted_on_the_dev_profile_only` (`StatsRetentionAndRoleCatalogueSettingsTest`)
+
+### PRE-201 The whole change set between two versions is read page by page, and the hashes come with the last page
+- **Traces to:** `TR-SEC-11`, `TR-DEF-03`, PD-139, #426
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v1 `ACTIVE` with 400 review steps; v2 `PENDING_APPROVAL` with every step renamed, reassigned and given another result variable: 1,200 changed values.
+- **When:** `bob` reads `GET /definitions/kyc-onboarding/versions/2/diff?limit=500`, then each `page.nextCursor`; and with a cursor this change set did not issue, `limit=501`, `limit=0` and `limit=many`.
+- **Then:**
+  - Three pages hold 500, 500 and 200 changes of one sequence (steps added, steps removed, changed values, links added, links removed, each sorted as before), each change on exactly one page, no gap, `truncated: false`. The answer names `page.offset`, `page.total` and `page.nextCursor`.
+  - `approvableHash`, `changeSetHash` and the `definitionHash` of both sides are present on the last page only (`null` or omitted before it). `changeSetHash` is the SHA-256 of both definition hashes and every change of the whole set, the same whatever the page size.
+  - Each cursor carries a digest of every change before it, so a page cannot be reached without reading the pages before it; a cursor this change set did not issue, another offset with a real digest, a limit outside 1 to 500 or not a number is `400 QUERY_INVALID`. Nothing is written.
+  - The read without `limit` and `cursor` is unchanged: at most 1,000 changed values, `truncated: true`, `approvableHash: null` and no `definitionHash` (`PRE-177` f).
+- **Example:** `1,200 changes, limit 500 -> pages of 500, 500, 200; changeSetHash on page 3 only`.
+- **Test ID:** `PRE_201_the_whole_change_set_is_read_page_by_page_and_the_hashes_come_with_the_last_page`, `PRE_201_a_cursor_this_change_set_did_not_issue_and_a_page_size_out_of_range_are_refused` (`ReviewedContentApprovalTest`), `PRE_201_a_paged_diff_gives_the_hashes_on_its_last_page_only_and_matches_the_contract` (`ProcessRestContractTest`)
+
+### PRE-202 A change set over the limit is approved with the hash of the whole set read, and a changed set is refused
+- **Traces to:** `TR-SEC-11`, `TR-SEC-04`, PD-139, #426
+- **Milestone:** M2
+- **Given:** `PRE-201`'s v2 with 1,200 changes against the effective v1; `bob` read every page and holds `changeSetHash S` and `definitionHash H`; `horus.bpm.processes.approval.require-content-hash` is `true`; a second pending version with one renamed step.
+- **When:**
+  - (a) `bob` approves v2 with `expectedDefinitionHash: H` and `expectedChangeSetHash: S`.
+  - (b) `bob` approves with `H` and another hash, then with `S` of an other form.
+  - (c) `bob` approves with `H` and no `expectedChangeSetHash`.
+  - (d) `bob` approves the small version with `H` alone, and with a wrong `expectedChangeSetHash`.
+- **Then:**
+  - (a) v2 is `ACTIVE`; the `APPROVED` history row and `processes.definition.approved.v1` carry `reviewedChangeSetHash: S` next to `reviewedDefinitionHash`. The change set is recomputed under the key lock after the status, four-eyes, lock-version and definition-hash checks, from the stored versions.
+  - (b) A hash that is not the change-set hash now (the version or the effective version changed after the review) is `409 CONTENT_CHANGED` with `currentChangeSetHash` and `currentDefinitionHash`; one that is not 64 lower-case hexadecimal characters is `400 INPUT_INVALID`; nothing is written, published or recorded.
+  - (c) `409 CHANGE_SET_TRUNCATED`, as in `PRE-177` (f); nothing is written.
+  - (d) A change set within 1,000 values is approved on `H` alone; a change-set hash, when sent, must match (`409 CONTENT_CHANGED` otherwise). A hash sent for a version with no effective version to compare with is `409 CONTENT_CHANGED`.
+  - The hash joins the idempotency request hash when named, so a repeat under the same key replays and a changed hash is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The check is the same through the Java API and REST.
+- **Example:** `1,200 changes, H and S read page by page -> ACTIVE outside dev; H without S -> 409 CHANGE_SET_TRUNCATED`.
+- **Test ID:** `PRE_202_a_change_set_over_the_limit_is_approved_with_the_hash_of_the_whole_set_and_records_it`, `PRE_202_a_change_set_hash_that_is_not_the_whole_set_now_is_refused_and_writes_nothing`, `PRE_202_an_unpaged_read_and_an_approval_without_the_set_hash_keep_refusing_a_truncated_set`, `PRE_202_a_change_set_within_the_limit_needs_no_set_hash_and_checks_one_when_sent` (`ReviewedContentApprovalTest`)
+
+### PRE-203 The instance timeline names its undo steps, what each undoes and where the undo of each saga scope stands
+- **Traces to:** `TR-COMP-02`, `TR-TEN-01`, #80
+- **Milestone:** M2
+- **Given:** the fund transfer of `PRE-073`: `hold-funds`, `debit-source` and `credit-target` inside the saga scope `transfer`, `credit-target` failing with `ACCOUNT_CLOSED`; once with every undo succeeding, once with `credit-back` failing on `ACCOUNT_FROZEN` for good, once read by `bank-b`.
+- **When:** an operator with `processes:read` reads `GET /instances/{id}/activities`.
+- **Then:**
+  - Every entry has `kind`: `STEP`, or `COMPENSATION` for `COMPENSATION_STARTED`, `COMPENSATION_STEP_SCHEDULED`, `COMPENSATION_STEP_COMPLETED`, `COMPENSATION_STEP_FAILED`, `COMPENSATION_STEP_MANUAL` and `COMPENSATED`. An entry of an undo has `scopeTokenId` and `scope` (`transfer`); an undo step has `compensates` (the step it undoes, newest forward step first: `debit-source`, then `hold-funds`), the forward `attemptId`, `handler`, and `attempt` and `errorCode` when they apply; the start has `cause`.
+  - `compensations` has one item per scope whose undo started, never cut by `limit`, in start order: `state` `UNDONE` when the scope ended (steps undone counted, `endedAt` set); `NOT_FULLY_UNDONE` when the last event of some step is a failure or a manual step, naming `blockedStep`, `incidentId` and `incidentCode` of its open incident, with no `COMPENSATED` entry; `IN_PROGRESS` otherwise. The cockpit shows the state as given and links `incidentId`.
+  - `bank-b` gets `404 INSTANCE_NOT_FOUND`. The read writes nothing and carries no variable or input value.
+- **Example:** `credit-target failed, undo debit-source then hold-funds -> scope transfer UNDONE, 2 steps; credit-back failed -> NOT_FULLY_UNDONE, blocked debit-source, incident COMPENSATION_FAILED`.
+- **Test ID:** `PRE_203_the_timeline_lists_the_undo_steps_in_reverse_order_with_what_they_undo_and_the_scope_is_undone`, `PRE_203_a_failed_undo_leaves_the_scope_not_fully_undone_and_names_its_step_and_incident`, `PRE_203_the_timeline_of_another_tenants_instance_is_not_found` (`SagaCompensationTest`), `PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304` (`ProcessRestContractTest`, the contract of the new fields)

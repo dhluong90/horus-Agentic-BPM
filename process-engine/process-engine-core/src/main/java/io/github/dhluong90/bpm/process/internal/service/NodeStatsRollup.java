@@ -33,9 +33,24 @@ public final class NodeStatsRollup {
      * @param slices slices added and committed
      * @param caughtUp whether the watermark reached {@code now - lag}
      * @param heldByOther whether another replica held the watermark, so this run stopped
+     * @param purged hourly rows older than {@code stats.rollup-retention} deleted by this run
      */
-    public record RunResult(int slices, boolean caughtUp, boolean heldByOther) {
+    public record RunResult(int slices, boolean caughtUp, boolean heldByOther, long purged) {
+
+        /**
+         * @param slices slices added and committed
+         * @param caughtUp whether the watermark reached {@code now - lag}
+         * @param heldByOther whether another replica held the watermark
+         */
+        public RunResult(int slices, boolean caughtUp, boolean heldByOther) {
+            this(slices, caughtUp, heldByOther, 0);
+        }
     }
+
+    /** Rows one purge transaction deletes. */
+    public static final int PURGE_BATCH = 5_000;
+    /** Purge transactions one run takes at most, so a first purge after an upgrade spreads over several runs. */
+    public static final int PURGE_MAX_BATCHES = 20;
 
     private enum SliceOutcome { ADDED, CAUGHT_UP, HELD }
 
@@ -69,6 +84,32 @@ public final class NodeStatsRollup {
      * @return what the run did
      */
     public RunResult run() {
+        RunResult rolled = rollUp();
+        if (rolled.heldByOther()) {
+            return rolled;
+        }
+        return new RunResult(rolled.slices(), rolled.caughtUp(), false, purge());
+    }
+
+    /**
+     * Deletes hourly rows older than {@code stats.rollup-retention}: whole days, counted back from now in UTC, in
+     * transactions of {@value #PURGE_BATCH} rows, at most {@value #PURGE_MAX_BATCHES} per run.
+     */
+    private long purge() {
+        Instant cutoff = clock.instant().atOffset(java.time.ZoneOffset.UTC).minus(settings.rollupRetention())
+                .truncatedTo(ChronoUnit.DAYS).toInstant();
+        long total = 0;
+        for (int i = 0; i < PURGE_MAX_BATCHES; i++) {
+            int deleted = transactions.inTransaction(() -> store.deleteBefore(cutoff, PURGE_BATCH));
+            total += deleted;
+            if (deleted < PURGE_BATCH) {
+                break;
+            }
+        }
+        return total;
+    }
+
+    private RunResult rollUp() {
         Instant started = clock.instant();
         transactions.inTransaction(() -> {
             store.ensureWatermark(NodeStatsStore.JOB_NAME, initialWatermark(started), replicaId, started);

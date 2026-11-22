@@ -245,7 +245,9 @@ paths:
         against the rule set version in effect now (`422 GUARDRAIL_CONTRACT_INVALID`, nothing written). Every
         handler and adapter a service step names must be registered in this host: otherwise `422
         VALIDATION_FAILED` with one problem per step naming `step -> name` (`HANDLER_NOT_REGISTERED`,
-        `ADAPTER_NOT_REGISTERED`), and the version stays `DRAFT` (`PRE-072`). Permission `processes:author` or
+        `ADAPTER_NOT_REGISTERED`), and the version stays `DRAFT` (`PRE-072`). Every `role:` an escalation level names must
+        be in the tenant's role list when the host registers a `RoleCatalogue` (`ESCALATION_ROLE_UNKNOWN`, naming the
+        step and the role; `PRE-180`); a host without one is not checked. Permission `processes:author` or
         `processes:deploy`. The answer lists in `warnings` each agent step field that declares no `mask`
         (`UNCLASSIFIED_FIELD`, PD-146, `PRE-205`); the warnings never block the request.
       parameters:
@@ -297,7 +299,19 @@ paths:
         versions that was cut off at its limit carries no hash that may be approved: the diff then has
         `approvableHash: null` and no `definitionHash` on either side, and an approval naming a hash is
         `409 CHANGE_SET_TRUNCATED` when the change list from the effective version to this one is cut off; nothing is
-        written. Until the diff is paged, such a version is approved only on the `dev` profile without a hash.
+        written.
+
+        A change set of more than 1,000 changed values is read page by page (`limit` and `cursor` on the diff,
+        PRE-201). The last page carries `changeSetHash`, the hash of the whole set; sending it as
+        `expectedChangeSetHash` next to `expectedDefinitionHash` makes the version approvable outside `dev` (PRE-202).
+        Without it the answer stays `409 CHANGE_SET_TRUNCATED`; with a hash that is not the hash of the change set
+        now (the version or the effective version changed after the review) it is `409 CONTENT_CHANGED` with
+        `currentChangeSetHash`. For a change set within 1,000 values the field is optional and checked when sent.
+        The history row and the event record `reviewedChangeSetHash`.
+
+        Every `role:` an escalation level names must be in the tenant's role list when the host registers a
+        `RoleCatalogue`; an unknown one is `422 VALIDATION_FAILED` with a problem `ESCALATION_ROLE_UNKNOWN` naming the
+        step and the role, and nothing is written (PRE-180). A host without a catalogue is not checked.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
         - $ref: '#/components/parameters/DefinitionVersionNumber'
@@ -316,6 +330,13 @@ paths:
                   description: >-
                     The `definitionHash` of the version the approver reviewed; required while
                     `approval.require-content-hash` is on. Not 64 lower-case hexadecimal characters is
+                    `400 INPUT_INVALID`
+                expectedChangeSetHash:
+                  type: [string, 'null']
+                  pattern: '^[0-9a-f]{64}$'
+                  description: >-
+                    The `changeSetHash` on the last page of the diff the approver read; required when the change set
+                    has more than 1,000 changed values (PRE-202). Not 64 lower-case hexadecimal characters is
                     `400 INPUT_INVALID`
                 comment: { type: [string, 'null'], maxLength: 2000 }
             example:
@@ -507,6 +528,17 @@ paths:
         review, so it has `approvableHash: null` and omits `definitionHash` on both sides.
 
         `base` defaults to the effective version of the key; without one the answer is `404 NO_EFFECTIVE_VERSION`.
+
+        With `limit` or `cursor` the whole change set is read, page by page (PRE-201, #426): a window of at most
+        `limit` changes (500; 200 when absent) of one ordered sequence (steps added, steps removed, changed values,
+        links added, links removed), each change on exactly one page and none cut off, `truncated` always false. The
+        answer has `page` (`offset`, `total`, `nextCursor`). Both definition hashes, `approvableHash` and
+        `changeSetHash` are present on the last page only, so an approver gets them by reading every page in order:
+        each cursor carries a digest of everything before it, and a cursor this change set did not issue is
+        `400 QUERY_INVALID`. `changeSetHash` covers both definition hashes and every change of the whole set; send it
+        as `expectedChangeSetHash` when approving (PRE-202). Without `limit` and `cursor` the read is as before, cut off
+        at 1,000 changed values with no approvable hash.
+
         A version that does not exist in the caller's tenant is `404 DEFINITION_NOT_FOUND`, also when it exists in
         another tenant. Read-only. Permission `processes:read`.
       parameters:
@@ -527,6 +559,16 @@ paths:
           description: The version compared from; the effective version when absent
           schema: { type: integer, minimum: 1 }
           example: 1
+        - name: limit
+          in: query
+          required: false
+          description: Changes per page, 1 to 500; with it or `cursor` the read is paged (PRE-201)
+          schema: { type: integer, minimum: 1, maximum: 500 }
+        - name: cursor
+          in: query
+          required: false
+          description: The `page.nextCursor` of the previous page; absent for the first page
+          schema: { type: string }
         - name: If-None-Match
           in: header
           required: false
@@ -2752,7 +2794,7 @@ components:
         endedAt: { type: [string, 'null'], format: date-time }
     InstanceActivities:
       type: object
-      required: [instanceId, startedAt, endedAt, nodes, entries, hasMore]
+      required: [instanceId, startedAt, endedAt, nodes, entries, compensations, hasMore]
       properties:
         instanceId: { type: string }
         startedAt: { type: string, format: date-time }
@@ -2795,6 +2837,41 @@ components:
               nodeId: { type: [string, 'null'] }
               actor: { type: [string, 'null'] }
               occurredAt: { type: string, format: date-time }
+              kind:
+                type: string
+                enum: [STEP, COMPENSATION]
+                description: '`COMPENSATION` for an entry of an undo: its start, one undo step, or its end (#80, PRE-203)'
+              compensates: { type: string, description: 'Undo steps only: the step this undo undoes' }
+              attemptId: { type: string, description: 'The attempt of the entry; for an undo step, the forward attempt it undoes' }
+              scopeTokenId: { type: string, description: 'Entries of an undo: the token of the saga scope' }
+              scope: { type: string, description: 'Entries of an undo: the BPMN id of the saga scope, for example disburse' }
+              attempt: { type: integer, minimum: 1, description: 'Undo steps that ran: the attempt number of the undo job' }
+              errorCode: { type: string, description: 'Undo steps that failed: the error code' }
+              handler: { type: string, description: 'Undo steps: the name of the undo handler' }
+              cause: { type: string, description: 'The start of an undo: the error code that caused it' }
+        compensations:
+          type: array
+          description: >-
+            One item per saga scope whose undo started, in the order they started, never cut by `limit` (#80,
+            PRE-203). The cockpit shows `state` as it is and never infers it from the entries
+          items:
+            type: object
+            required: [scopeTokenId, scope, state, startedAt, endedAt, cause, failingStep, stepsUndone, blockedStep, incidentId, incidentCode]
+            properties:
+              scopeTokenId: { type: string }
+              scope: { type: [string, 'null'], description: BPMN id of the saga scope }
+              state:
+                type: string
+                enum: [IN_PROGRESS, UNDONE, NOT_FULLY_UNDONE]
+                description: '`UNDONE`: every step undone and the scope ended; `NOT_FULLY_UNDONE`: an undo step failed for good or waits for a person and the walk is paused'
+              startedAt: { type: string, format: date-time }
+              endedAt: { type: [string, 'null'], format: date-time }
+              cause: { type: [string, 'null'], description: The error code of the forward step that failed }
+              failingStep: { type: [string, 'null'], description: The forward step whose failure started the undo }
+              stepsUndone: { type: integer, minimum: 0 }
+              blockedStep: { type: [string, 'null'], description: 'The step whose undo failed or waits for a person; null unless NOT_FULLY_UNDONE' }
+              incidentId: { type: [string, 'null'], description: The open incident of that step, to link to }
+              incidentCode: { type: [string, 'null'] }
         hasMore: { type: boolean, description: The instance has more entries than `entries` holds }
     NodeCounts:
       type: object
@@ -2971,14 +3048,26 @@ components:
           type: array
           description: Links only the base has, sorted by from, to and kind
           items: { $ref: '#/components/schemas/GraphDiffEdge' }
-        truncated: { type: boolean, description: True when more than 1,000 changed values were found }
+        truncated: { type: boolean, description: True when more than 1,000 changed values were found; always false on a page }
+        changeSetHash:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: On the last page of a paged read, the hash of the whole change set, for `expectedChangeSetHash` (PRE-202); null before it
+        page:
+          type: object
+          description: Present on a paged read only (PRE-201)
+          required: [offset, total, nextCursor]
+          properties:
+            offset: { type: integer, minimum: 0, description: Position of the first change of this page in the whole set }
+            total: { type: integer, minimum: 0, description: Changes in the whole set }
+            nextCursor: { type: [string, 'null'], description: Null on the last page }
     GraphDiffSide:
       type: object
       required: [version, status]
       properties:
         version: { type: integer, minimum: 1 }
         status: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, RETIRED] }
-        definitionHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Omitted when the diff is truncated }
+        definitionHash: { type: string, pattern: '^[0-9a-f]{64}$', description: Omitted when the diff is truncated, and on every page of a paged read but the last }
     GraphDiffNode:
       type: object
       required: [id, name, type]
@@ -3239,6 +3328,7 @@ components:
           items: { type: string }
         currentDefinitionHash: { type: string, description: 'Present on `CONTENT_CHANGED`, the hash of the content stored now' }
         currentLockVersion: { type: integer, description: 'Present on `CONTENT_CHANGED`, the lock version stored now' }
+        currentChangeSetHash: { type: string, description: 'Present on `CONTENT_CHANGED` when the change set was not the one reviewed (PRE-202), the hash of the change set now' }
         paths:
           type: array
           description: 'Present on `OUTPUT_INVALID` and `LAYOUT_INVALID`: each failing path and rule, for example `$.approvedLimit: required` or `$.nodes.ghost-step names a step that is not in the definition`, never a value'

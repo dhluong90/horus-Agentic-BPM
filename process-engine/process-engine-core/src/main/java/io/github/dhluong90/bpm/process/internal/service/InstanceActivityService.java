@@ -95,8 +95,81 @@ public final class InstanceActivityService {
             if (hasMore) {
                 entries = entries.subList(0, limit);
             }
-            return new InstanceActivities(instanceId, instance.startedAt(), instance.endedAt(), nodes, entries, hasMore);
+            List<InstanceActivities.Entry> undo = queries.compensationEntries(tenant, instanceId, from, to,
+                    COMPENSATION_EVENT_LIMIT);
+            Map<String, String> scopes = new HashMap<>();
+            for (InstanceActivities.Entry e : undo) {
+                if (e.scope() != null && e.scopeTokenId() != null) {
+                    scopes.putIfAbsent(e.scopeTokenId(), e.scope());
+                }
+            }
+            // An entry of the undo names its scope, so a client never pairs it with the failure by guessing.
+            List<InstanceActivities.Entry> timeline = new ArrayList<>();
+            for (InstanceActivities.Entry e : entries) {
+                timeline.add(e.scopeTokenId() != null && e.scope() == null ? e.inScope(scopes.get(e.scopeTokenId())) : e);
+            }
+            return new InstanceActivities(instanceId, instance.startedAt(), instance.endedAt(), nodes, timeline,
+                    hasMore, compensations(undo, scopes, store.openIncidents(tenant, instanceId)));
         });
+    }
+
+    /** Most undo history rows one instance's scopes are read from; a saga has at most 500 steps. */
+    static final int COMPENSATION_EVENT_LIMIT = 2_000;
+
+    /**
+     * Where the undo of each scope stands (#80, PRE-203), from its history: a scope that ended is {@code UNDONE}; one
+     * whose last event on some step is a failure or a call for a person is {@code NOT_FULLY_UNDONE}, naming that step
+     * and its open incident; otherwise the undo is {@code IN_PROGRESS}. Order of the scopes is the order they started.
+     */
+    static List<InstanceActivities.Compensation> compensations(List<InstanceActivities.Entry> undo,
+            Map<String, String> scopes, List<ProcessStore.IncidentRow> openIncidents) {
+        Map<String, List<InstanceActivities.Entry>> byScope = new java.util.LinkedHashMap<>();
+        for (InstanceActivities.Entry e : undo) {
+            if (e.scopeTokenId() != null) {
+                byScope.computeIfAbsent(e.scopeTokenId(), k -> new ArrayList<>()).add(e);
+            }
+        }
+        List<InstanceActivities.Compensation> out = new ArrayList<>();
+        for (Map.Entry<String, List<InstanceActivities.Entry>> scope : byScope.entrySet()) {
+            Instant started = null;
+            Instant ended = null;
+            String cause = null;
+            String failing = null;
+            int undone = 0;
+            Map<String, String> lastByStep = new java.util.LinkedHashMap<>();
+            for (InstanceActivities.Entry e : scope.getValue()) {
+                switch (e.type()) {
+                    case "COMPENSATION_STARTED" -> {
+                        started = started == null ? e.occurredAt() : started;
+                        cause = e.cause() == null || "-".equals(e.cause()) ? null : e.cause();
+                        failing = e.nodeId();
+                    }
+                    case "COMPENSATED" -> ended = e.occurredAt();
+                    case "COMPENSATION_STEP_COMPLETED" -> {
+                        undone++;
+                        lastByStep.put(e.compensates(), e.type());
+                    }
+                    case "COMPENSATION_STEP_SCHEDULED", "COMPENSATION_STEP_FAILED", "COMPENSATION_STEP_MANUAL" ->
+                            lastByStep.put(e.compensates(), e.type());
+                    default -> { }
+                }
+            }
+            if (started == null) {
+                started = scope.getValue().get(0).occurredAt();
+            }
+            String blocked = lastByStep.entrySet().stream().filter(x -> "COMPENSATION_STEP_FAILED".equals(x.getValue())
+                    || "COMPENSATION_STEP_MANUAL".equals(x.getValue())).map(Map.Entry::getKey).findFirst().orElse(null);
+            InstanceActivities.CompensationState state = ended != null ? InstanceActivities.CompensationState.UNDONE
+                    : blocked != null ? InstanceActivities.CompensationState.NOT_FULLY_UNDONE
+                    : InstanceActivities.CompensationState.IN_PROGRESS;
+            ProcessStore.IncidentRow incident = state == InstanceActivities.CompensationState.NOT_FULLY_UNDONE
+                    ? openIncidents.stream().filter(i -> blocked.equals(i.nodeId())).findFirst().orElse(null) : null;
+            out.add(new InstanceActivities.Compensation(scope.getKey(), scopes.get(scope.getKey()), state, started,
+                    ended, cause, failing, undone, state == InstanceActivities.CompensationState.NOT_FULLY_UNDONE
+                            ? blocked : null, incident == null ? null : incident.id(),
+                    incident == null ? null : incident.errorCode()));
+        }
+        return out;
     }
 
     private static InstanceActivities.Node node(ProcessQueryStore.NodeActivityRow row, ProcessStore.IncidentRow incident) {
