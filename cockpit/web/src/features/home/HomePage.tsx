@@ -193,7 +193,7 @@ function PendingBody<T>({ items, empty, action, onRetry, render }: { items: Load
   if (items.status === 'loading') return <LoadingRows rows={2} />;
   if (items.status === 'error') return <AreaError error={items.error} onRetry={onRetry} />;
   if (items.data.length === 0) {
-    return <EmptyState text={empty} action={action} />;
+    return <EmptyState icon="approvals" text={empty} action={action} />;
   }
   return <>{render(items.data.slice(0, RECENT_ROWS))}</>;
 }

@@ -10,6 +10,10 @@ import { INSTANCE_ID, REVIEW_TASK_ID } from './processDemo';
 export const INCIDENT_INSTANCE_ID = '01JD4I5NC1DENT00000000IN05';
 export const BOOKED_INSTANCE_ID = '01JD4I3B00KED000000000BK03';
 export const KYC_INSTANCE_ID = '01JD4I7KYC0000000000000KY7';
+export const UNDONE_INSTANCE_ID = '01JD4U9NDONE00000000000U09';
+export const STUCK_UNDO_INSTANCE_ID = '01JD4S7UCKUNDO000000000S10';
+/** The incident the stuck undo raised; the incident queue lists it (CKP-008) and the timeline links to it (CKP-049). */
+export const STUCK_UNDO_INCIDENT_ID = '01JD4N0INCIDENT000000UND10';
 
 export interface DemoCase {
   instance: Record<string, unknown> & { id: string; definitionKey: string; startedAt: string; status: string };
@@ -19,6 +23,7 @@ export interface DemoCase {
     endedAt: string | null;
     nodes: Record<string, unknown>[];
     entries: Record<string, unknown>[];
+    compensations?: Record<string, unknown>[];
     hasMore: boolean;
   };
 }
@@ -44,6 +49,13 @@ const entry = (type: string, occurredAt: string, nodeId: string | null = null, a
   entrySeq += 1;
   return { id: `01JD4H${String(entrySeq).padStart(20, '0')}`, type, nodeId, actor, occurredAt };
 };
+
+type UndoFields = { scope?: string; compensates?: string; handler?: string; attempt?: number; errorCode?: string; cause?: string };
+
+/** An entry of an undo, as the engine marks it: `kind` COMPENSATION, the saga scope, and what each undo step undoes (PRE-203). */
+const undo = (type: string, occurredAt: string, fields: UndoFields = {}) => ({
+  ...entry(type, occurredAt, null, 'engine:loans-7f9c'), kind: 'COMPENSATION', scopeTokenId: 'DISBURSE-SCOPE', scope: 'disburse', ...fields,
+});
 
 const scope = (id: string, nodeId: string) => ({ id: `${id.slice(0, 20)}SCOPE0`, kind: 'SCOPE', scopeTokenId: null, nodeId, status: 'WAITING_SCOPE' });
 const flowToken = (id: string, suffix: string, nodeId: string, status: string) => ({ id: `${id.slice(0, 20)}FLOW${suffix}`, kind: 'FLOW', scopeTokenId: `${id.slice(0, 20)}SCOPE0`, nodeId, status });
@@ -172,10 +184,88 @@ function kycWaiting(): DemoCase {
   };
 }
 
+const UNDO_STEPS = [
+  { compensates: 'book-loan', handler: 'reverseBooking' },
+  { compensates: 'credit-decision', handler: 'releaseCreditLine' },
+] as const;
+
+/** A loan whose offer could not be sent: the booking and the credit reservation are undone, newest first; the second after a retry. */
+function loanUndone(): DemoCase {
+  const id = UNDONE_INSTANCE_ID;
+  return {
+    instance: {
+      id, definitionKey: 'loan-origination', definitionVersion: 3, businessKey: 'APP-1047', status: 'FAILED', variables: {},
+      tokens: [], tasks: [], lockVersion: 11, startedBy: 'lan', startedAt: '2026-11-19T09:00:00Z', endedAt: '2026-11-19T09:04:12Z',
+    },
+    activities: {
+      instanceId: id, startedAt: '2026-11-19T09:00:00Z', endedAt: '2026-11-19T09:04:12Z', hasMore: false,
+      nodes: [
+        node({ nodeId: 'credit-decision', state: 'COMPLETED', enteredAt: '2026-11-19T09:02:10Z', completedAt: '2026-11-19T09:02:10Z', durationMs: 0 }),
+        node({ nodeId: 'book-loan', state: 'COMPLETED', enteredAt: '2026-11-19T09:02:10Z', completedAt: '2026-11-19T09:02:12Z', durationMs: 2_000, actor: 'svc-loans' }),
+        node({ nodeId: 'send-offer', state: 'ACTIVE', enteredAt: '2026-11-19T09:02:12Z', attempts: 3, actor: 'svc-loans' }),
+      ],
+      entries: [
+        entry('INSTANCE_STARTED', '2026-11-19T09:00:00Z', null, 'lan'),
+        entry('NODE_COMPLETED', '2026-11-19T09:02:12Z', 'book-loan', 'svc-loans'),
+        entry('ASYNC_ATTEMPT_FAILED', '2026-11-19T09:03:00Z', 'send-offer', 'svc-loans'),
+        undo('COMPENSATION_STARTED', '2026-11-19T09:03:01Z', { cause: 'MAX_ATTEMPTS_REACHED' }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T09:03:02Z', { ...UNDO_STEPS[0], attempt: 1 }),
+        undo('COMPENSATION_STEP_COMPLETED', '2026-11-19T09:03:04Z', { ...UNDO_STEPS[0], attempt: 1 }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T09:03:05Z', { ...UNDO_STEPS[1], attempt: 1 }),
+        undo('COMPENSATION_STEP_FAILED', '2026-11-19T09:03:35Z', { ...UNDO_STEPS[1], attempt: 1, errorCode: 'ADAPTER_TIMEOUT' }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T09:03:50Z', { ...UNDO_STEPS[1], attempt: 2 }),
+        undo('COMPENSATION_STEP_COMPLETED', '2026-11-19T09:03:52Z', { ...UNDO_STEPS[1], attempt: 2 }),
+        undo('COMPENSATED', '2026-11-19T09:03:52Z'),
+        entry('INSTANCE_ENDED', '2026-11-19T09:04:12Z'),
+      ],
+      compensations: [
+        { scopeTokenId: 'DISBURSE-SCOPE', scope: 'disburse', state: 'UNDONE', startedAt: '2026-11-19T09:03:01Z', endedAt: '2026-11-19T09:03:52Z', cause: 'MAX_ATTEMPTS_REACHED', failingStep: 'send-offer', stepsUndone: 2, blockedStep: null, incidentId: null, incidentCode: null },
+      ],
+    },
+  };
+}
+
+/** The same failure where the second undo step failed on every attempt: the scope is not fully undone and its incident is open. */
+function loanUndoStuck(): DemoCase {
+  const id = STUCK_UNDO_INSTANCE_ID;
+  return {
+    instance: {
+      id, definitionKey: 'loan-origination', definitionVersion: 3, businessKey: 'APP-1049', status: 'COMPENSATING', variables: {},
+      tokens: [scope(id, 'loan-origination')], tasks: [], lockVersion: 13, startedBy: 'minh', startedAt: '2026-11-19T10:00:00Z', endedAt: null,
+    },
+    activities: {
+      instanceId: id, startedAt: '2026-11-19T10:00:00Z', endedAt: null, hasMore: false,
+      nodes: [
+        node({ nodeId: 'credit-decision', state: 'INCIDENT', enteredAt: '2026-11-19T10:02:10Z', attempts: 3, actor: 'engine:loans-7f9c', incident: { code: 'COMPENSATION_FAILED', openedAt: '2026-11-19T10:05:00Z' } }),
+        node({ nodeId: 'book-loan', state: 'COMPLETED', enteredAt: '2026-11-19T10:02:10Z', completedAt: '2026-11-19T10:02:12Z', durationMs: 2_000, actor: 'svc-loans' }),
+        node({ nodeId: 'send-offer', state: 'ACTIVE', enteredAt: '2026-11-19T10:02:12Z', attempts: 3, actor: 'svc-loans' }),
+      ],
+      entries: [
+        entry('INSTANCE_STARTED', '2026-11-19T10:00:00Z', null, 'minh'),
+        entry('NODE_COMPLETED', '2026-11-19T10:02:12Z', 'book-loan', 'svc-loans'),
+        entry('ASYNC_ATTEMPT_FAILED', '2026-11-19T10:03:00Z', 'send-offer', 'svc-loans'),
+        undo('COMPENSATION_STARTED', '2026-11-19T10:03:01Z', { cause: 'MAX_ATTEMPTS_REACHED' }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T10:03:02Z', { ...UNDO_STEPS[0], attempt: 1 }),
+        undo('COMPENSATION_STEP_COMPLETED', '2026-11-19T10:03:04Z', { ...UNDO_STEPS[0], attempt: 1 }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T10:03:05Z', { ...UNDO_STEPS[1], attempt: 1 }),
+        undo('COMPENSATION_STEP_FAILED', '2026-11-19T10:03:35Z', { ...UNDO_STEPS[1], attempt: 1, errorCode: 'ADAPTER_TIMEOUT' }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T10:04:05Z', { ...UNDO_STEPS[1], attempt: 2 }),
+        undo('COMPENSATION_STEP_FAILED', '2026-11-19T10:04:35Z', { ...UNDO_STEPS[1], attempt: 2, errorCode: 'ADAPTER_TIMEOUT' }),
+        undo('COMPENSATION_STEP_SCHEDULED', '2026-11-19T10:04:50Z', { ...UNDO_STEPS[1], attempt: 3 }),
+        undo('COMPENSATION_STEP_FAILED', '2026-11-19T10:05:00Z', { ...UNDO_STEPS[1], attempt: 3, errorCode: 'ADAPTER_TIMEOUT' }),
+        entry('INCIDENT_RAISED', '2026-11-19T10:05:00Z', 'credit-decision', 'engine:loans-7f9c'),
+      ],
+      compensations: [
+        { scopeTokenId: 'DISBURSE-SCOPE', scope: 'disburse', state: 'NOT_FULLY_UNDONE', startedAt: '2026-11-19T10:03:01Z', endedAt: null, cause: 'MAX_ATTEMPTS_REACHED', failingStep: 'send-offer', stepsUndone: 1, blockedStep: 'credit-decision', incidentId: STUCK_UNDO_INCIDENT_ID, incidentCode: 'COMPENSATION_FAILED' },
+      ],
+    },
+  };
+}
+
 /** Every demo case, newest first as listInstances orders them. Task names follow the tenant's language. */
 export function demoCases(startedBy: string, taskNames: { review: string; approve: string }): DemoCase[] {
   entrySeq = 0;
-  const cases = [loanWaiting(startedBy), loanIncident(), kycWaiting(), loanBooked()];
+  const cases = [loanWaiting(startedBy), loanIncident(), kycWaiting(), loanBooked(), loanUndone(), loanUndoStuck()];
   for (const item of cases) {
     const tasks = item.instance['tasks'] as { nodeId: string; name: string }[];
     for (const task of tasks) task.name = task.nodeId === 'approve' ? taskNames.approve : taskNames.review;

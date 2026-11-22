@@ -40,4 +40,11 @@ public class HostMetadataAutoConfiguration {
         return new HostMetadataController(EngineAccessAutoConfiguration.modules(modules),
                 tenantSettings.orderedStream().toList(), properties, access);
     }
+
+    /** {@code GET /api/bpm/display-names} (#442). */
+    @Bean
+    DisplayNamesController horusBpmDisplayNamesController(EngineAccess access,
+            io.github.dhluong90.bpm.host.spi.DisplayNames names) {
+        return new DisplayNamesController(access, names);
+    }
 }

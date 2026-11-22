@@ -133,7 +133,27 @@ public class ProcessController {
                 throw new InputInvalidException("effectiveFrom must be an RFC 3339 date-time with an offset");
             }
         }
-        return version(definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom, idempotencyKey));
+        DefinitionVersion requested = definitions.requestApproval(DefinitionRef.of(key, version), lock, effectiveFrom,
+                idempotencyKey);
+        return json(HttpStatus.OK, withWarnings(Views.definition(requested), requested), requested.lockVersion(), null);
+    }
+
+    /**
+     * Adds {@code warnings} to a version body (PD-146, #438): one {@code UNCLASSIFIED_FIELD} entry per agent step field
+     * that declares no {@code mask}. A reminder only; empty when every field is classified or the reminder is off.
+     */
+    private tools.jackson.databind.node.ObjectNode withWarnings(tools.jackson.databind.node.ObjectNode body,
+            DefinitionVersion v) {
+        // Keeps the import warnings of the version (FOREIGN_EXTENSION_IGNORED, PD-141) and appends the reminders
+        tools.jackson.databind.node.ArrayNode warnings = body.get("warnings") instanceof
+                tools.jackson.databind.node.ArrayNode existing ? existing : body.putArray("warnings");
+        for (io.github.dhluong90.bpm.process.api.UnclassifiedField field
+                : definitions.unclassifiedFields(DefinitionRef.of(v.key(), v.version()))) {
+            warnings.addObject().put("code", io.github.dhluong90.bpm.process.api.UnclassifiedField.CODE)
+                    .put("step", field.step()).put("field", field.field()).put("direction", field.direction())
+                    .put("message", field.message());
+        }
+        return body;
     }
 
     /**
@@ -148,7 +168,7 @@ public class ProcessController {
         long lock = requiredLockVersion(ifMatch);
         JsonNode body = optionalBody(http);
         return version(definitions.approve(DefinitionRef.of(key, version), lock, text(body, "expectedDefinitionHash"),
-                text(body, "comment"), idempotencyKey));
+                text(body, "expectedChangeSetHash"), text(body, "comment"), idempotencyKey));
     }
 
     /** Sends a pending version back to draft ({@code processes:approve}). Body: {@code reason}, required. */
@@ -239,7 +259,7 @@ public class ProcessController {
         DefinitionVersion found = definitions.version(key, number);
         return ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON)
                 .header(HttpHeaders.ETAG, "\"" + found.definitionHash() + "\"")
-                .body(bytes(Views.definition(found)));
+                .body(bytes(withWarnings(Views.definition(found), found)));
     }
 
     /**
@@ -309,8 +329,13 @@ public class ProcessController {
     @GetMapping("/definitions/{key}/versions/{version}/diff")
     public ResponseEntity<byte[]> diff(@PathVariable("key") String key, @PathVariable("version") String version,
             @RequestParam(value = "base", required = false) String base,
+            @RequestParam(value = "limit", required = false) String limit,
+            @RequestParam(value = "cursor", required = false) String cursor,
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
         int target = versionNumber("version", version);
+        if (limit != null || cursor != null) {
+            return pagedDiff(key, target, base, limitOf(limit), cursor, ifNoneMatch);
+        }
         io.github.dhluong90.bpm.process.api.GraphDiff diff = base == null
                 ? definitions.diffFromEffective(DefinitionRef.of(key, target))
                 : definitions.diff(DefinitionRef.of(key, versionNumber("base", base)), DefinitionRef.of(key, target));
@@ -321,6 +346,34 @@ public class ProcessController {
         }
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.ETAG, etag)
                 .body(bytes(graphDiff(diff)));
+    }
+
+    /** The paged read of the complete change set (PRE-199, #426); the unpaged read above keeps its 1,000-value cap. */
+    private ResponseEntity<byte[]> pagedDiff(String key, int target, String base, Integer limit, String cursor,
+            String ifNoneMatch) {
+        io.github.dhluong90.bpm.process.api.GraphDiffPage page = base == null
+                ? definitions.diffPageFromEffective(DefinitionRef.of(key, target), limit, cursor)
+                : definitions.diffPage(DefinitionRef.of(key, versionNumber("base", base)),
+                        DefinitionRef.of(key, target), limit, cursor);
+        io.github.dhluong90.bpm.process.api.GraphDiff d = page.slice();
+        String etag = "\"" + io.github.dhluong90.bpm.process.internal.json.Hashes.sha256Parts("graph-diff-page.v1",
+                d.base().definitionHash(), d.target().definitionHash(), Integer.toString(page.offset()),
+                limit == null ? "" : limit.toString()) + "\"";
+        if (etag.equals(ifNoneMatch == null ? null : ifNoneMatch.strip())) {
+            return ResponseEntity.status(HttpStatus.NOT_MODIFIED).header(HttpHeaders.ETAG, etag).build();
+        }
+        // The hashes of both sides are named on the last page only: an approver reads every page to get them.
+        ObjectNode node = graphDiff(d, page.last());
+        node.put("identical", page.total() == 0);
+        node.remove("approvableHash");
+        putNullable(node, "approvableHash", page.approvableHash());
+        putNullable(node, "changeSetHash", page.changeSetHash());
+        ObjectNode paging = node.putObject("page");
+        paging.put("offset", page.offset());
+        paging.put("total", page.total());
+        putNullable(paging, "nextCursor", page.nextCursor());
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).header(HttpHeaders.ETAG, etag)
+                .body(bytes(node));
     }
 
     private static int versionNumber(String name, String value) {
@@ -337,11 +390,15 @@ public class ProcessController {
     }
 
     static ObjectNode graphDiff(io.github.dhluong90.bpm.process.api.GraphDiff d) {
+        return graphDiff(d, !d.truncated());
+    }
+
+    private static ObjectNode graphDiff(io.github.dhluong90.bpm.process.api.GraphDiff d, boolean withHashes) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("definitionKey", d.definitionKey());
         // PRE-177 (PD-139): a cut-off change list carries no hash that may be approved, on either side.
-        side(node.putObject("base"), d.base(), !d.truncated());
-        side(node.putObject("target"), d.target(), !d.truncated());
+        side(node.putObject("base"), d.base(), withHashes);
+        side(node.putObject("target"), d.target(), withHashes);
         putNullable(node, "approvableHash", d.approvableHash());
         node.put("identical", d.identical());
         tools.jackson.databind.node.ArrayNode added = node.putArray("nodesAdded");
@@ -388,6 +445,12 @@ public class ProcessController {
         node.put("to", edge.to());
         putNullable(node, "toName", edge.toName());
         node.put("kind", edge.kind());
+    }
+
+    private static void putIfPresent(ObjectNode node, String name, String value) {
+        if (value != null) {
+            node.put(name, value);
+        }
     }
 
     private static void putNullable(ObjectNode node, String name, String value) {
@@ -537,6 +600,33 @@ public class ProcessController {
                 item.put("actor", entry.actor());
             }
             item.put("occurredAt", entry.occurredAt().toString());
+            // #80: the kind and, for an undo, what it undoes and in which scope, so the cockpit never infers them.
+            item.put("kind", entry.kind());
+            putIfPresent(item, "compensates", entry.compensates());
+            putIfPresent(item, "attemptId", entry.attemptId());
+            putIfPresent(item, "scopeTokenId", entry.scopeTokenId());
+            putIfPresent(item, "scope", entry.scope());
+            if (entry.attempt() != null) {
+                item.put("attempt", entry.attempt());
+            }
+            putIfPresent(item, "errorCode", entry.errorCode());
+            putIfPresent(item, "handler", entry.handler());
+            putIfPresent(item, "cause", entry.cause());
+        }
+        tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
+        for (InstanceActivities.Compensation c : activities.compensations()) {
+            ObjectNode item = compensations.addObject();
+            item.put("scopeTokenId", c.scopeTokenId());
+            putNullable(item, "scope", c.scope());
+            item.put("state", c.state().name());
+            item.put("startedAt", c.startedAt().toString());
+            putTime(item, "endedAt", c.endedAt());
+            putNullable(item, "cause", c.cause());
+            putNullable(item, "failingStep", c.failingStep());
+            item.put("stepsUndone", c.stepsUndone());
+            putNullable(item, "blockedStep", c.blockedStep());
+            putNullable(item, "incidentId", c.incidentId());
+            putNullable(item, "incidentCode", c.incidentCode());
         }
         body.put("hasMore", activities.hasMore());
         byte[] bytes = bytes(body);

@@ -293,7 +293,7 @@ curl -s -u lan:$P -H 'Content-Type: application/xml' \
 curl -s -u lan:$P -H 'Content-Type: application/xml' \
   --data-binary @process-engine/process-engine-bpmn/src/test/resources/bpmn/unsupported.bpmn \
   localhost:8080/api/bpm/processes/v1/definitions
-# {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","problems":[
+# {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","unsupportedElements":[
 #   {"element":"boundaryEvent","elementId":"be-timeout","line":6,...},
 #   {"element":"inclusiveGateway","elementId":"ig-1","line":7,...},
 #   {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}

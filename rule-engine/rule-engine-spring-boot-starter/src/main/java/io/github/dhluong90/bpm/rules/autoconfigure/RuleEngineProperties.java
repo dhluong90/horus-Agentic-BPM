@@ -32,6 +32,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param decisionLog what the decision log records, how far ahead its partitions are created and how long it is kept
  * @param simulation limits of {@code :simulate}
  * @param explain the plain-language explanation of logged decisions
+ * @param classification the reminder about inputs that declare no {@code mask} (PD-146)
  */
 @ConfigurationProperties("horus.bpm.rules")
 public record RuleEngineProperties(
@@ -48,7 +49,21 @@ public record RuleEngineProperties(
         @DefaultValue Masking masking,
         @DefaultValue DecisionLog decisionLog,
         @DefaultValue Simulation simulation,
-        @DefaultValue Explain explain) {
+        @DefaultValue Explain explain,
+        @DefaultValue Classification classification) {
+
+    /**
+     * The reminder about inputs with no classification (PD-146, #438). Masking stays opt-in: an input is masked only
+     * when its author declares {@code mask: true}. With the reminder on, every input that declares neither
+     * {@code mask: true} nor {@code mask: false} is listed as an {@code UNCLASSIFIED_INPUT} warning on the version,
+     * at import, on {@code :validate} and at approval, and outside {@code dev} one start-up WARN counts them per
+     * approved version. It never blocks, never needs an acknowledgement and never looks at names or values.
+     *
+     * @param warnUnclassified whether to warn; default {@code true}. Set {@code false} for a deployment that classifies
+     *     fields elsewhere
+     */
+    public record Classification(@DefaultValue("true") boolean warnUnclassified) {
+    }
 
     /**
      * The plain-language explanation of logged decisions ({@code GET /decisions/{id}/explain}, RLE-030, PD-027).

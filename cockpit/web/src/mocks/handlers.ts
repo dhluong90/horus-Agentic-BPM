@@ -1,5 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse, type Scenario } from './fixtures';
+import { displayNamesAnswer } from './displayNames';
 import { createFakeProcessEngine, type ProcessSeed } from './processEngine';
 import type { AuditOptions } from './auditEngine';
 import { createFakeEngine, demoSeed, type AcknowledgementSettings, type StoredVersion } from './ruleEngine';
@@ -58,6 +59,7 @@ export function handlers(scenario: Scenario | (() => Scenario)) {
     http.get('*/cockpit-hosts.json', () => reply(current().registry)),
     http.get('*/api/bpm/meta', () => reply(current().meta)),
     http.get('*/api/bpm/me', () => reply(current().me)),
+    http.get('*/api/bpm/display-names', ({ request }) => HttpResponse.json(displayNamesAnswer(request.url, request.headers.get('accept-language')))),
     http.all('*/api/bpm/rules/v1/*', rules),
     http.all('*/api/bpm/processes/v1/*', processes),
   ];

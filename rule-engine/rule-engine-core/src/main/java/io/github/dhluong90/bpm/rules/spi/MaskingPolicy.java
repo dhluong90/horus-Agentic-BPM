@@ -112,6 +112,19 @@ public interface MaskingPolicy {
     }
 
     /**
+     * Whether the engine lists inputs that declare no {@code mask} (PD-146, #438): as {@code UNCLASSIFIED_INPUT}
+     * warnings on a version, on {@code :validate} and in the start-up summary. A reminder only; it never changes
+     * masking, never blocks, and never infers sensitivity from a name or a value. The starter's policy reads
+     * {@code horus.bpm.rules.classification.warn-unclassified}.
+     *
+     * @param tenantId the tenant
+     * @return true, the default, to warn; false to stay silent for this tenant
+     */
+    default boolean warnUnclassified(String tenantId) {
+        return true;
+    }
+
+    /**
      * Returns the policy with no key and no default masking: inputs with {@code mask: true} fail closed.
      *
      * @return the policy

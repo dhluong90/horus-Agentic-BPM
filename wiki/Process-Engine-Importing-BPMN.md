@@ -140,10 +140,10 @@ curl -s -u lan:$P -H 'Content-Type: application/xml' \
 Expected answer, `422`:
 
 ```json
-{"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","problems":[
-  {"code":"BPMN_UNSUPPORTED_ELEMENT","element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"S1",...},
-  {"code":"BPMN_UNSUPPORTED_ELEMENT","element":"inclusiveGateway","elementId":"ig-1","line":7,"stage":"S1",...},
-  {"code":"BPMN_UNSUPPORTED_ELEMENT","element":"endEvent with terminateEventDefinition","elementId":"end","line":8,"stage":"S1",...}],...}
+{"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","unsupportedElements":[
+  {"element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"S1","message":"..."},
+  {"element":"inclusiveGateway","elementId":"ig-1","line":7,"stage":"S1","message":"..."},
+  {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,"stage":"S1","message":"..."}],...}
 ```
 
 The answer lists every unsupported element in the file, each with its id, its line and its stage. Remove or replace each one and import again. At most 100 entries are listed; `violationsTruncated: true` says there were more. Ids are printed without control characters and cut at 200 characters.
@@ -173,6 +173,8 @@ These are refused in 0.2.0:
 An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
 
 ### A CMMN file
+
+The list is `unsupportedElements`, the same field and item shape the Rule Engine uses for a DMN file, so a client reads both engines with one parser. A successful import of a file with vendor attributes, such as `camunda:class`, answers `201` with a `warnings` list in the same item form (`FOREIGN_EXTENSION_IGNORED`, the attribute, the element id and the line): the stored source keeps them and the engine does not read them.
 
 A file whose root element is in a CMMN namespace, such as `http://www.omg.org/spec/CMMN/20151109/MODEL`, is refused as `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line`. The reader stops at the root element, so no other part of the file is checked. A root in any other unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` with the problem code `NOT_BPMN`.
 

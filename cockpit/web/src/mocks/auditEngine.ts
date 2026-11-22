@@ -36,7 +36,7 @@ export interface AuditVersion {
   canonicalHash: string;
   hitPolicy: string;
   inputs: { name: string; mask?: boolean }[];
-  rules: { id: string; when: Record<string, string> }[];
+  rules: { id: string; when: Record<string, string>; explain?: Partial<Record<'en' | 'vi', string>> }[];
   history: { action: string; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }[];
 }
 
@@ -123,7 +123,7 @@ const CATALOGUE = {
     error: 'The decision of {ruleSet} version {version} failed with {errorCode}. No output was produced.',
     value: '{input} is {value}', masked: '{input} is masked', missing: '{input} has no value',
     ge: 'which is at least {operand}', eq: 'which equals {operand}', in: 'which is one of {operand}', other: 'which satisfies {test}',
-    joinConditions: ', and ', joinOutputs: '; ', nothing: 'no value',
+    joinConditions: ', and ', joinOutputs: '; ', nothing: 'no value', group: ',', decimal: '.', yes: 'Yes', no: 'No', maskedValue: '(masked)',
   },
   vi: {
     because: 'Quy tắc {ruleId} của {ruleSet} phiên bản {version} khớp vì {conditions}.',
@@ -133,27 +133,84 @@ const CATALOGUE = {
     error: 'Quyết định theo {ruleSet} phiên bản {version} bị lỗi {errorCode}. Không có kết quả.',
     value: '{input} là {value}', masked: '{input} đã được che', missing: '{input} không có giá trị',
     ge: 'tức là ít nhất {operand}', eq: 'tức là bằng {operand}', in: 'tức là một trong {operand}', other: 'thỏa điều kiện {test}',
-    joinConditions: ', và ', joinOutputs: '; ', nothing: 'không có giá trị',
+    joinConditions: ', và ', joinOutputs: '; ', nothing: 'không có giá trị', group: '.', decimal: ',', yes: 'Có', no: 'Không', maskedValue: '(đã che)',
   },
 } as const;
 
 const fill = (template: string, params: Record<string, string>) => template.replaceAll(/\{(\w+)\}/g, (whole, name: string) => params[name] ?? whole);
 
-/** A value as the engine writes it in text: numbers without grouping, money in major units with its code. */
-function plain(value: Json, nothing: string): string {
-  if (value === null) return nothing;
-  if (typeof value === 'object' && !Array.isArray(value) && typeof value['currency'] === 'string' && typeof value['amount'] === 'number') return `${String(value['amount'])} ${value['currency']}`;
+type Words = (typeof CATALOGUE)['en' | 'vi'];
+
+/** A plain number or money such as `60000000 VND`, grouped for the language as the engine's catalogue does. */
+function grouped(plainText: string, words: Words): string {
+  const m = /^(-?)([0-9]+)(?:\.([0-9]+))?( [A-Z]{3})?$/.exec(plainText);
+  if (!m) return plainText;
+  const digits = m[2] ?? '';
+  const integer = digits.replace(/\B(?=(\d{3})+(?!\d))/g, words.group);
+  return `${m[1] ?? ''}${integer}${m[3] !== undefined ? words.decimal + m[3] : ''}${m[4] ?? ''}`;
+}
+
+/** A name as the engine writes it when the rule set declares no label: `txCount` as `tx count`. */
+function humanise(name: string): string {
+  const parts = name.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|[_-]+/).filter((part) => part !== '');
+  const words = parts.map((part) => (part.length > 1 && part === part.toUpperCase() && !/^\d+$/.test(part) ? part : part.toLowerCase()));
+  return words.length === 0 ? name : words.join(' ');
+}
+
+/** A logged value as the engine writes it in text: grouped numbers, money with its code, Yes or No. */
+function plain(value: Json, words: Words): string {
+  if (value === null) return words.nothing;
+  if (typeof value === 'boolean') return value ? words.yes : words.no;
+  if (typeof value === 'number') return grouped(String(value), words);
+  if (typeof value === 'object' && !Array.isArray(value) && typeof value['currency'] === 'string' && typeof value['amount'] === 'number') return grouped(`${String(value['amount'])} ${value['currency']}`, words);
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-function testText(test: string, words: (typeof CATALOGUE)['en' | 'vi']): string {
+/** A literal of a test as a reader would write it: a string without its quotes, Yes or No, a grouped number. */
+function literal(text: string, words: Words): string {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("'")) return trimmed.slice(1, -1);
+  if (trimmed === 'true') return words.yes;
+  if (trimmed === 'false') return words.no;
+  return grouped(trimmed, words);
+}
+
+function testText(test: string, words: Words): string {
   const ge = /^>=\s*(.+)$/.exec(test);
-  if (ge) return fill(words.ge, { operand: (ge[1] ?? '').replaceAll("'", '') });
+  if (ge) return fill(words.ge, { operand: literal(ge[1] ?? '', words) });
   const eq = /^==\s*(.+)$/.exec(test);
-  if (eq) return fill(words.eq, { operand: (eq[1] ?? '').replaceAll("'", '') });
+  if (eq) return fill(words.eq, { operand: literal(eq[1] ?? '', words) });
   const list = /^in\s*\[(.*)\]$/.exec(test);
-  if (list) return fill(words.in, { operand: (list[1] ?? '').replaceAll("'", '') });
+  if (list) return fill(words.in, { operand: (list[1] ?? '').split(',').map((item) => literal(item, words)).join(', ') });
   return fill(words.other, { test });
+}
+
+/**
+ * The author's sentences of the matched rows in one language, filled as the engine does (PD-123): every matched row
+ * needs one, else the generated sentence explains the whole decision. Masked inputs read "(masked)".
+ */
+function templated(d: StoredDecision, v: AuditVersion | undefined, language: 'en' | 'vi'): string | undefined {
+  if (d.outcome !== 'OK' || d.matchedRuleIds.length === 0) return undefined;
+  const words = CATALOGUE[language];
+  const masked = new Set((v?.inputs ?? []).filter((input) => input.mask === true).map((input) => input.name));
+  const sentences: string[] = [];
+  for (const ruleId of d.matchedRuleIds) {
+    const text = v?.rules.find((rule) => rule.id === ruleId)?.explain?.[language];
+    if (text === undefined) return undefined;
+    sentences.push(text.replaceAll(/\{(input|output)\.(\w+)\}|\{(ruleId|ruleSet|version)\}/g, (whole, kind: string | undefined, name: string | undefined, plainToken: string | undefined) => {
+      if (plainToken === 'ruleId') return ruleId;
+      if (plainToken === 'ruleSet') return d.ruleSet;
+      if (plainToken === 'version') return String(d.version);
+      if (kind === 'input' && name !== undefined) {
+        const value = d.inputs[name];
+        if (value === undefined) return whole;
+        return masked.has(name) || (typeof value === 'string' && value.startsWith('hmac:')) ? words.maskedValue : plain(value, words);
+      }
+      if (kind === 'output' && name !== undefined) return plain(d.outputs?.[name] ?? null, words);
+      return whole;
+    }));
+  }
+  return sentences.join(' ');
 }
 
 function explanation(d: StoredDecision, v: AuditVersion | undefined, language: 'en' | 'vi') {
@@ -178,17 +235,20 @@ function explanation(d: StoredDecision, v: AuditVersion | undefined, language: '
   } else if (matched.length === 0) {
     reasons.push({ code: 'NO_RULE_MATCHED', params: { ruleSet: d.ruleSet, version: d.version } });
     sentences.push(fill(words.noMatch, base));
+  } else if (templated(d, v, language) !== undefined) {
+    for (const row of matched) reasons.push({ code: 'RULE_MATCHED', params: { ruleId: row.ruleId, version: d.version } });
+    sentences.push(templated(d, v, language) ?? '');
   } else {
     for (const row of matched) {
       reasons.push({ code: 'RULE_MATCHED', params: { ruleId: row.ruleId, version: d.version } });
       const parts = row.conditions.map((c) => {
-        if (c.masked) { reasons.push({ code: 'VALUE_MASKED', params: { ruleId: row.ruleId, input: c.input } }); return fill(words.masked, { input: c.input }); }
-        if (c.missing) { reasons.push({ code: 'VALUE_MISSING', params: { ruleId: row.ruleId, input: c.input } }); return fill(words.missing, { input: c.input }); }
-        return `${fill(words.value, { input: c.input, value: plain(c.value, words.nothing) })}, ${testText(c.test, words)}`;
+        if (c.masked) { reasons.push({ code: 'VALUE_MASKED', params: { ruleId: row.ruleId, input: c.input } }); return fill(words.masked, { input: humanise(c.input) }); }
+        if (c.missing) { reasons.push({ code: 'VALUE_MISSING', params: { ruleId: row.ruleId, input: c.input } }); return fill(words.missing, { input: humanise(c.input) }); }
+        return `${fill(words.value, { input: humanise(c.input), value: plain(c.value, words) })}, ${testText(c.test, words)}`;
       });
       sentences.push(parts.length === 0 ? fill(words.always, { ...base, ruleId: row.ruleId }) : fill(words.because, { ...base, ruleId: row.ruleId, conditions: parts.join(words.joinConditions) }));
     }
-    const outputs = Object.entries(d.outputs ?? {}).map(([name, value]) => `${name} ${plain(value, words.nothing)}`).join(words.joinOutputs);
+    const outputs = Object.entries(d.outputs ?? {}).map(([name, value]) => `${humanise(name)} ${plain(value, words)}`).join(words.joinOutputs);
     if (outputs !== '') sentences.push(fill(words.result, { outputs }));
   }
   return {

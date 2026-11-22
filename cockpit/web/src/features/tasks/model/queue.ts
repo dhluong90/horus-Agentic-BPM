@@ -35,11 +35,6 @@ export function queryOf(view: QueueView): Pick<TaskQuery, 'assignment' | 'status
   }
 }
 
-/** The assignment that covers every tab this user sees, for the one query that asks the engine which are overdue. */
-export function overdueAssignment(views: readonly QueueView[]): TaskQuery['assignment'] {
-  return views.includes('all') ? ['any'] : ['mine', 'candidate'];
-}
-
 export type Assignee =
   | { kind: 'user'; id: string }
   | { kind: 'role'; name: string }
@@ -133,4 +128,23 @@ export function refusalOf(error: HostError): Refusal {
     default:
       return 'other';
   }
+}
+
+/** Why the engine refused a hand-over target (`reason` of 409 ASSIGNEE_NOT_ALLOWED, PRE-206); new reasons may come. */
+export const ASSIGNEE_REASONS = ['ALREADY_ASSIGNED', 'FOUR_EYES_PARTICIPANT', 'RESERVED_IDENTITY', 'MISSING_ROLE', 'MISSING_GROUP'] as const;
+export type AssigneeReason = (typeof ASSIGNEE_REASONS)[number];
+
+export interface AssigneeRefusal {
+  /** Undefined when the engine sent none, or one this cockpit does not know: the sentence stays general. */
+  reason: AssigneeReason | undefined;
+  /** The role or group the target lacks, from `required` (`role:<id>` or `group:<id>`). */
+  required: { kind: 'role' | 'group'; id: string } | undefined;
+}
+
+/** Reads `reason` and `required` from the problem; anything unreadable is left out, never guessed. */
+export function assigneeRefusalOf(error: HostError): AssigneeRefusal {
+  const members = error.kind === 'problem' ? error.members : undefined;
+  const reason = ASSIGNEE_REASONS.find((known) => known === members?.['reason']);
+  const required = typeof members?.['required'] === 'string' ? /^(role|group):(.+)$/.exec(members['required']) : null;
+  return { reason, required: required?.[2] !== undefined ? { kind: required[1] === 'role' ? 'role' : 'group', id: required[2] } : undefined };
 }

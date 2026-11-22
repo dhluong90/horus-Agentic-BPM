@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { setCrumbLabel } from '../../app/crumbs';
-import type { RuleSetVersion, VersionSummary } from '../../api/rules/schemas';
+import { isUnclassified, type RuleSetVersion, type VersionSummary } from '../../api/rules/schemas';
+import { UnclassifiedNote } from '../../components/UnclassifiedNote';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useNames, useWantNames } from '../processes/api/displayNames';
 import { useRulesSession } from './api/rulesContext';
 import { useApprove, useCopyVersion, useExportVersion, useReject, useRequestPublish, useSaveDraft, useVersion, useVersionDiff, useVersions } from './api/useRules';
 import { saveFile } from '../../app/saveFile';
@@ -12,6 +14,9 @@ import { DraftWorkspace } from './components/DraftWorkspace';
 import { EvidenceExport } from './components/EvidenceExport';
 import { RuleSetHistoryView } from './components/RuleSetHistoryView';
 import { useFilePicker } from './components/ImportFileButton';
+import { ImportSpreadsheetDialog } from './components/ImportSpreadsheetDialog';
+import type { PickedSheet } from './api/useRules';
+import { refusedWith } from './model/csvRefusals';
 import { MenuButton } from './components/MenuButton';
 import { PersonalDataWarnings } from './components/PersonalDataWarnings';
 import { ProblemNotice } from './components/ProblemNotice';
@@ -48,11 +53,13 @@ function policyKey(policy: string): 'policy.FIRST' | 'policy.UNIQUE' | 'policy.C
 /** One line under the name: the version and what state it is in, in words. */
 function Subtitle({ version, editing }: { version: RuleSetVersion; editing: boolean }) {
   const { t, locale } = useI18n();
+  const { user } = useNames();
+  useWantNames({ users: version.requestedBy ? [version.requestedBy] : [] });
   const n = String(version.version);
   let text: string;
   if (editing) text = t('editor.editing', { version: n });
   else if (version.status === 'PUBLISHED') text = t('head.inEffect', { version: n, policy: t(policyKey(version.hitPolicy)) });
-  else if (version.status === 'PENDING_APPROVAL') text = t('head.pending', { version: n, who: version.requestedBy ?? '', when: formatDateTime(version.requestedAt, locale) ?? '' });
+  else if (version.status === 'PENDING_APPROVAL') text = t('head.pending', { version: n, who: version.requestedBy ? user(version.requestedBy) : '', when: formatDateTime(version.requestedAt, locale) ?? '' });
   else if (version.status === 'DRAFT') text = t('head.draft', { version: n });
   else text = t('head.retired', { version: n });
   return <p className="rs-head__sub">{text}</p>;
@@ -143,6 +150,8 @@ interface WorkbenchProps {
   /** A success message; `sticky` keeps it until dismissed and moves the focus to the title, for a saved draft. */
   say: (text: string, sticky?: boolean) => void;
   importVersion: { start: (document: RuleDocument, fileName: string) => void; isPending: boolean; error: unknown; fileName: string | undefined };
+  /** A spreadsheet was picked: the page asks to confirm before importing it as the next draft. */
+  onSheet: (sheet: PickedSheet) => void;
   /** The file each version was imported from on this page, by version number. */
   importedFrom: Readonly<Record<number, string>>;
   /** The version whose title takes the focus when it opens: after an import, so the import button no longer holds it. */
@@ -155,7 +164,7 @@ interface WorkbenchProps {
   onReloadChanges: () => Promise<void>;
 }
 
-function Workbench({ version, versions, lens, navigate, say, importVersion, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain, onReloadChanges }: WorkbenchProps) {
+function Workbench({ version, versions, lens, navigate, say, importVersion, onSheet, importedFrom, focusTitle, onTitleFocused, openedHash, onReviewAgain, onReloadChanges }: WorkbenchProps) {
   useEffect(() => {
     // The editor closes on save before the table opens: the title of the table takes the focus, not the editor's.
     if (focusTitle !== version.version || lens === 'edit') return;
@@ -186,11 +195,14 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
     saveFile(exported.file, exported.fileName);
     say(t('export.done', { file: exported.fileName }));
   });
-  const picker = useFilePicker((document, fileName) => { exportFile.reset(); importVersion.start(document, fileName); });
+  const picker = useFilePicker((document, fileName) => { exportFile.reset(); importVersion.start(document, fileName); }, onSheet);
   const label = (name: string) => {
     const column = [...version.definition.inputs, ...version.definition.outputs].find((c) => c.name === name);
     return columnLabel(name, column?.description);
   };
+  // Reminders about unclassified inputs are a calm note, apart from the personal-data warnings an approver accepts.
+  const unclassified = [...new Set(version.warnings.filter(isUnclassified).map((warning) => label(warning.input)))];
+  const personalData = version.warnings.filter((warning) => !isUnclassified(warning));
   const base = baseOf(versions, version.version);
   const go = (next: Partial<{ version: number; lens: Lens }>) => {
     navigate({ name: 'rule-set', ruleSet: version.ruleSet, version: next.version ?? version.version, lens: next.lens ?? (next.version !== undefined ? undefined : lens) });
@@ -245,6 +257,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
                 {versions.map((v) => <option key={v.version} value={v.version}>{t(`versionState.${v.status}`, { version: String(v.version) })}</option>)}
               </select>
               <HeaderActions version={version} demoteRequest={lens === 'simulate'} onEdit={() => { go({ lens: 'edit' }); }}
+                onDiscarded={(discarded) => {
+                  say(t('discard.done', { version: String(discarded.version) }));
+                  // Back to where the author came from: the rule set's version in front, or the list when none is left.
+                  navigate(versions.some((v) => v.version !== discarded.version) ? { name: 'rule-set', ruleSet: discarded.ruleSet, version: undefined, lens: undefined } : { name: 'rule-sets' });
+                }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
                 requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
@@ -258,7 +275,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
         {newDraft.error ? <ProblemNotice error={newDraft.error} /> : null}
         {picker.input}
         {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located refusedFile={importVersion.fileName !== undefined ? { fileName: importVersion.fileName, columnLabel: label } : undefined} /> : null}
-        {exportFile.error ? <ProblemNotice error={exportFile.error} located columnLabel={label} /> : null}
+        {exportFile.error ? <ProblemNotice error={exportFile.error} located columnLabel={label} message={refusedWith(exportFile.error, 'CSV_NO_TABLE_FORM') ? t('export.noTable') : undefined} /> : null}
         {requestPublish.error ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
         {!editing ? (
           <div className="rs-head__tabs">
@@ -280,6 +297,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
                 items={[
                   { label: t('export.json'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'json' }); }, disabled: exportFile.isPending },
                   { label: t('export.dmn'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'dmn' }); }, disabled: exportFile.isPending },
+                  { label: t('export.csv'), onSelect: () => { exportFile.start({ name: version.ruleSet, version: version.version, format: 'csv' }); }, disabled: exportFile.isPending },
                 ]} />
               <MenuButton label={t('more.label')} className="btn btn--ghost" trigger={<>{t('more.label')} <span aria-hidden="true">⌄</span></>}
                 items={[{ label: t('more.source'), onSelect: () => { go({ lens: 'source' }); } }]} />
@@ -295,15 +313,16 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, impo
           }}
           onDiscard={() => { go({ lens: 'table' }); }} />
       ) : null}
+      {!editing && unclassified.length > 0 && (version.status === 'DRAFT' || version.status === 'PENDING_APPROVAL') ? <UnclassifiedNote fields={unclassified} /> : null}
       {editing ? null : <div className={wide ? 'workbench workbench--wide' : 'workbench'}>
         {main}
         {wide ? null : <aside className="workbench__side">
           {version.status === 'PENDING_APPROVAL' ? decision(false) : null}
-          {version.status === 'DRAFT' && version.warnings.length > 0 ? (
+          {version.status === 'DRAFT' && personalData.length > 0 ? (
             // The author sees what the approver will see, before requesting publication.
             <section aria-labelledby="draft-pii-title">
               <h2 id="draft-pii-title" className="sr-only">{t('pii.title')}</h2>
-              <PersonalDataWarnings warnings={version.warnings} definition={version.definition} />
+              <PersonalDataWarnings warnings={personalData} definition={version.definition} />
             </section>
           ) : null}
           {lens === 'history' ? <EvidenceExport ruleSet={version.ruleSet} versions={versions} /> : null}
@@ -342,6 +361,8 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
     setFocusTitle(created.version);
     navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'table' });
   });
+  // A picked spreadsheet waits here for the user's confirmation; nothing is sent before.
+  const [sheet, setSheet] = useState<PickedSheet | undefined>(undefined);
   const latest = versions.data?.[0];
   const selected = versionNumber ?? latest?.version;
   const known = selected !== undefined && versions.data?.some((v) => v.version === selected) === true;
@@ -396,8 +417,21 @@ export function RuleSetPage({ name, versionNumber, lens }: { name: string; versi
         importedFrom={importedFrom}
         focusTitle={focusTitle}
         onTitleFocused={titleFocused}
+        onSheet={(picked) => { setToast(undefined); setSheet(picked); }}
         importVersion={{ start: (document, fileName) => { setToast(undefined); picked.current = fileName; setPickedFile(fileName); importVersion.start(document); }, isPending: importVersion.isPending, error: importVersion.error, fileName: pickedFile }}
       />
+      {sheet !== undefined ? (
+        <ImportSpreadsheetDialog ruleSet={name} base={current.version} first={sheet}
+          columnLabel={(column) => { const c = [...current.definition.inputs, ...current.definition.outputs].find((x) => x.name === column); return columnLabel(column, c?.description); }}
+          onClose={() => { setSheet(undefined); }}
+          onCreated={(created, fileName) => {
+            setSheet(undefined);
+            setImportedFrom((known) => ({ ...known, [created.version]: fileName }));
+            setToast({ text: t('ruleSet.imported', { version: String(created.version) }), sticky: false });
+            setFocusTitle(created.version);
+            navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'table' });
+          }} />
+      ) : null}
       <Toast text={toast?.text} sticky={toast?.sticky ?? false} onClose={closeToast} />
     </section>
   );

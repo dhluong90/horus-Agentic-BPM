@@ -451,6 +451,88 @@ class SagaCompensationTest {
         assertThat(status(id)).isEqualTo("FAILED");
     }
 
+    // ---- PRE-203 (#80) ------------------------------------------------------------------------------------------
+
+    @Test
+    void PRE_203_the_timeline_lists_the_undo_steps_in_reverse_order_with_what_they_undo_and_the_scope_is_undone() {
+        // Given the failed transfer of PRE-073, whose undo ran to the end: credit-back, then release-hold
+        TestEngine engine = engine();
+        String id = failedTransfer(engine, "fund-transfer", "TRF-2026-0020");
+        drain(engine);
+        engine.identity.as("bank-a", "ops.lan", OPERATOR);
+
+        // When an operator reads the activities of the instance
+        var activities = engine.queries.activities(id, 200);
+
+        // Then the entries of the undo are kind COMPENSATION, name the step they undo and their saga scope, newest
+        // forward step first
+        var undo = activities.entries().stream().filter(e -> e.kind().equals("COMPENSATION")).toList();
+        assertThat(undo).extracting(e -> e.type() + ":" + e.compensates() + ":" + e.scope()).containsExactly(
+                "COMPENSATION_STARTED:null:transfer", "COMPENSATION_STEP_SCHEDULED:debit-source:transfer",
+                "COMPENSATION_STEP_COMPLETED:debit-source:transfer", "COMPENSATION_STEP_SCHEDULED:hold-funds:transfer",
+                "COMPENSATION_STEP_COMPLETED:hold-funds:transfer", "COMPENSATED:null:transfer");
+        assertThat(undo.get(0).cause()).isEqualTo("ACCOUNT_CLOSED");
+        assertThat(undo.get(2).handler()).isEqualTo("credit-back");
+        assertThat(undo.get(2).attemptId()).isNotNull();
+        assertThat(activities.entries().stream().filter(e -> e.kind().equals("STEP"))).isNotEmpty();
+        // And the scope reads undone, with the step that failed and how many steps were undone
+        assertThat(activities.compensations()).singleElement().satisfies(c -> {
+            assertThat(c.scope()).isEqualTo("transfer");
+            assertThat(c.state()).isEqualTo(io.github.dhluong90.bpm.process.api.InstanceActivities.CompensationState
+                    .UNDONE);
+            assertThat(c.failingStep()).isEqualTo("credit-target");
+            assertThat(c.cause()).isEqualTo("ACCOUNT_CLOSED");
+            assertThat(c.stepsUndone()).isEqualTo(2);
+            assertThat(c.endedAt()).isNotNull();
+            assertThat(c.blockedStep()).isNull();
+        });
+    }
+
+    @Test
+    void PRE_203_a_failed_undo_leaves_the_scope_not_fully_undone_and_names_its_step_and_incident() {
+        // Given the failed transfer where credit-back fails for good with ACCOUNT_FROZEN
+        TestEngine engine = engine();
+        creditBack.add(new AdapterResult.BusinessError("ACCOUNT_FROZEN", "account 0011-223344 is frozen"));
+        String id = failedTransfer(engine, "fund-transfer", "TRF-2026-0021");
+        step(engine);
+        Incident open = incident(engine, id);
+        engine.identity.as("bank-a", "ops.lan", OPERATOR);
+
+        // When an operator reads the activities
+        var activities = engine.queries.activities(id, 200);
+
+        // Then the failed undo is an entry with its error code, and the scope is not fully undone, linking the
+        // incident of the step; nothing says the transfer was put right
+        assertThat(activities.entries()).filteredOn(e -> e.type().equals("COMPENSATION_STEP_FAILED"))
+                .singleElement().satisfies(e -> {
+                    assertThat(e.compensates()).isEqualTo("debit-source");
+                    assertThat(e.errorCode()).isEqualTo("ACCOUNT_FROZEN");
+                    assertThat(e.scope()).isEqualTo("transfer");
+                });
+        assertThat(activities.entries()).noneMatch(e -> e.type().equals("COMPENSATED"));
+        assertThat(activities.compensations()).singleElement().satisfies(c -> {
+            assertThat(c.state()).isEqualTo(io.github.dhluong90.bpm.process.api.InstanceActivities.CompensationState
+                    .NOT_FULLY_UNDONE);
+            assertThat(c.blockedStep()).isEqualTo("debit-source");
+            assertThat(c.incidentId()).isEqualTo(open.id());
+            assertThat(c.incidentCode()).isEqualTo("COMPENSATION_FAILED");
+            assertThat(c.endedAt()).isNull();
+        });
+    }
+
+    @Test
+    void PRE_203_the_timeline_of_another_tenants_instance_is_not_found() {
+        // Given a failed transfer of bank-a
+        TestEngine engine = engine();
+        String id = failedTransfer(engine, "fund-transfer", "TRF-2026-0022");
+
+        // When bank-b reads its activities
+        engine.identity.as("bank-b", "ops.minh", OPERATOR);
+
+        // Then it is not found
+        assertThatThrownBy(() -> engine.queries.activities(id, 200)).isInstanceOf(InstanceNotFoundException.class);
+    }
+
     @Test
     void PRE_074_an_undo_that_times_out_on_every_attempt_is_resolved_by_a_second_person_and_the_walk_continues() {
         // Given the failed transfer, where credit-back times out on all 3 attempts

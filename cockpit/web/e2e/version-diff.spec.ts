@@ -72,7 +72,10 @@ test('CKP_002_keyboard_reaches_the_diff_region_then_the_decision', async ({ page
   const region = page.getByRole('region', { name: TEXT.en.table });
   await region.focus();
   await expect(region).toBeFocused();
-  // Tab moves on from the diff to the comment, and then Reject stays disabled until a reason is written.
+  // Tab passes the two Details disclosures of the version heads, then moves on to the comment; Reject stays disabled until a reason is written.
+  await page.keyboard.press('Tab');
+  await expect(region.getByText('Details').first()).toBeFocused();
+  await page.keyboard.press('Tab');
   await page.keyboard.press('Tab');
   await expect(page.getByLabel('Comment')).toBeFocused();
   await page.keyboard.type('Matches the 2027 tariff');

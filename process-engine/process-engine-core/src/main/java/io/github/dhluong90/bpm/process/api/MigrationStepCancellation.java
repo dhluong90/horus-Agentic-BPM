@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.process.api;
 import java.util.Objects;
 
 /**
- * A removed step of a migration plan (#106, PRE-201): the work waiting at {@code step} in the source version is
+ * A removed step of a migration plan (#106, PRE-208): the work waiting at {@code step} in the source version is
  * cancelled for the reason given, and the token continues at {@code moveTo} in the target version, which runs as on
  * arrival.
  *

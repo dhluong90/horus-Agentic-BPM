@@ -262,6 +262,18 @@ public interface ProcessStore {
     Optional<StoredDefinition> definitionVersion(String tenant, String key, int version);
 
     /**
+     * The {@code ACTIVE} definition versions of every tenant, at most {@code limit}, by tenant, key and version, for the
+     * start-up summary of unclassified fields (PD-146, #438). Engine-internal, across tenants on purpose: read once at
+     * start-up outside any request, never exposed to a caller.
+     *
+     * @param limit the most versions read
+     * @return the versions
+     */
+    default List<StoredDefinition> activeDefinitions(int limit) {
+        return List.of();
+    }
+
+    /**
      * One row per key, ordered by key, after {@code afterKey} (exclusive) when it is not null.
      *
      * @param now the time that decides the effective version

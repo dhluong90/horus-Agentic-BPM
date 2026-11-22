@@ -27,7 +27,7 @@ public interface JobStore {
      */
     String COMPENSATION = "COMPENSATION";
     /**
-     * Job kind that resumes a parent whose called child has ended (#92, PRE-204): written in the child's end transaction,
+     * Job kind that resumes a parent whose called child has ended (#92, PRE-211): written in the child's end transaction,
      * so that transaction never locks the parent, and fired in a transaction of its own that does.
      */
     String CALL_RESULT = "CALL_RESULT";

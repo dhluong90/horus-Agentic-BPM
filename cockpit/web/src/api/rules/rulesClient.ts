@@ -3,6 +3,8 @@ import { callHost, downloadFromHost, type HostRequest } from '../hostCall';
 import { HostCallError } from '../hostError';
 import {
   decisionResult,
+  discardedVersion,
+  type DiscardedVersion,
   page,
   ruleSetSummary,
   ruleSetVersion,
@@ -51,8 +53,8 @@ export interface RuleDocument {
   text: string;
 }
 
-/** The export formats the engine offers (exportVersion): the RFC 8785 canonical JSON document, or DMN 1.5. */
-export type ExportFormat = 'json' | 'dmn';
+/** The export formats the engine offers (exportVersion): the RFC 8785 canonical JSON document, DMN 1.5, or a spreadsheet file (CSV, PD-107). */
+export type ExportFormat = 'json' | 'dmn' | 'csv';
 
 /** An exported version: the bytes as the engine sent them and the file name to save them under. */
 export interface ExportedFile {
@@ -103,6 +105,8 @@ export interface RulesClient {
   reject(name: string, version: number, lockVersion: number, reviewedHash: string, reason: string, idempotencyKey: string): Promise<RuleSetVersion>;
   /** withdraw: the requester takes their own request back to DRAFT, with an optional reason (RLE-046, PD-089) */
   withdraw(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** discardDraft: the author drops their own draft; it becomes DISCARDED and stays in the history (RLE-098) */
+  discardDraft(name: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<DiscardedVersion>;
   /** getVersion */
   getVersion(name: string, version: number, options?: { source?: boolean; signal?: AbortSignal }): Promise<RuleSetVersion>;
   /** diffVersions: the engine's row-level diff of `version` against `base`; writes nothing (RLE-028) */
@@ -113,6 +117,8 @@ export interface RulesClient {
   importRuleSet(document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** importVersion: the next draft version of an existing rule set */
   importVersion(name: string, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** importVersion with `text/csv` and `base`: the file's bytes as picked become the next draft, on the columns of version `base` (RLE-192, PD-107); a refusal stores nothing */
+  importSpreadsheet(name: string, base: number, file: ArrayBuffer, idempotencyKey: string): Promise<RuleSetVersion>;
   /** importVersion with copyOf and no body: the next draft is a byte-for-byte copy of version `copyOf` (RLE-062) */
   copyVersion(name: string, copyOf: number, idempotencyKey: string): Promise<RuleSetVersion>;
   /** replaceDraft: the edited document replaces a DRAFT in place, bound to the lock version the author loaded */
@@ -202,6 +208,18 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       );
       return answer.data;
     },
+    async discardDraft(name, version, lockVersion, reason, idempotencyKey) {
+      const answer = await call(
+        {
+          method: 'POST',
+          path: `${versionPath(name, version)}:discard`,
+          headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
+          body: { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) },
+        },
+        discardedVersion,
+      );
+      return answer.data;
+    },
     async getVersion(name, version, options = {}) {
       const query = options.source ? '?include=source' : '';
       const answer = await call({ method: 'GET', path: `${versionPath(name, version)}${query}`, ...(options.signal ? { signal: options.signal } : {}) }, ruleSetVersion);
@@ -216,7 +234,7 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
         fetchImpl,
         baseUrl,
         { method: 'GET', path: `${versionPath(name, version)}/export?format=${format}`, ...(signal ? { signal } : {}) },
-        format === 'json' ? 'application/json' : 'application/xml',
+        format === 'json' ? 'application/json' : format === 'csv' ? 'text/csv' : 'application/xml',
       );
       return { file: answer.file, fileName: answer.fileName ?? `${name}-v${String(version)}.${format}` };
     },
@@ -234,6 +252,18 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
           path: `${RULES_BASE}/rule-sets/${segment(name)}/versions`,
           headers: { 'Idempotency-Key': idempotencyKey },
           body: { contentType: document.contentType, text: document.text },
+        },
+        ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async importSpreadsheet(name, base, file, idempotencyKey) {
+      const answer = await call(
+        {
+          method: 'POST',
+          path: `${RULES_BASE}/rule-sets/${segment(name)}/versions?base=${String(base)}`,
+          headers: { 'Idempotency-Key': idempotencyKey },
+          body: { contentType: 'text/csv', text: '', bytes: file },
         },
         ruleSetVersion,
       );

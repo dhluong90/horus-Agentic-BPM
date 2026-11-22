@@ -56,11 +56,14 @@ export type RuleSetDefinition = z.infer<typeof ruleSetDefinition>;
 
 export const VERSION_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'PUBLISHED', 'RETIRED'] as const;
 export type VersionStatus = (typeof VERSION_STATUSES)[number];
+/** A version the history still shows after its author discarded it (RLE-098); no list or picker offers it. */
+export const HISTORY_STATUSES = [...VERSION_STATUSES, 'DISCARDED'] as const;
+export type HistoryStatus = (typeof HISTORY_STATUSES)[number];
 
 const nullableString = z.string().nullable().optional();
 
 /** Lifecycle actions the engine says the caller may take now. A hint for screens; the engine checks again. */
-export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject', 'withdraw'] as const;
+export const ALLOWED_ACTIONS = ['request-publish', 'approve', 'reject', 'withdraw', 'discard'] as const;
 export type AllowedAction = (typeof ALLOWED_ACTIONS)[number];
 /** Unknown actions from a newer engine are dropped, never rejected. */
 const allowedActions = z.array(z.string()).transform((items) => items.filter((item): item is AllowedAction => (ALLOWED_ACTIONS as readonly string[]).includes(item)));
@@ -81,6 +84,13 @@ const lifecycle = {
   createdAt: z.string(),
   allowedActions: allowedActions.default([]),
 };
+
+/**
+ * The answer to `:discard` (RLE-098): the version is now DISCARDED, a status no screen lists, so only what the
+ * screen needs is read from it.
+ */
+export const discardedVersion = z.object({ ruleSet: z.string(), version: z.number().int().min(1), status: z.string(), lockVersion: z.number().int() }).loose();
+export type DiscardedVersion = z.infer<typeof discardedVersion>;
 
 /** An item of GET /rule-sets/{name}/versions: the lifecycle fields without the definition. */
 export const versionSummary = z.object(lifecycle).loose();
@@ -123,6 +133,8 @@ export const pendingRuleApproval = z
     canonicalHash: z.string().regex(/^[0-9a-f]{64}$/),
     lockVersion: z.number().int(),
     requestedBy: z.string(),
+    /** The requester as a screen shows them, in the caller's language; the id when the host knows no name (#442). */
+    requestedByName: z.string().min(1).optional(),
     requestedAt: z.string(),
     allowedActions: z.array(z.string()),
     deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
@@ -146,7 +158,7 @@ export type HistoryEntry = z.infer<typeof historyEntry>;
 export const versionHistory = z.object({ data: z.array(historyEntry) }).loose();
 
 /** Warning codes this cockpit shows. A warning with another code, from a newer engine, is dropped. */
-export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA'] as const;
+export const WARNING_CODES = ['UNMASKED_PERSONAL_DATA', 'UNCLASSIFIED_INPUT'] as const;
 export type WarningCode = (typeof WARNING_CODES)[number];
 
 const anyWarning = z.object({ code: z.string(), input: z.string(), matchedName: z.string().nullable().optional(), message: z.string(), requiresAcknowledgement: z.boolean().optional() }).loose();
@@ -159,6 +171,10 @@ export interface VersionWarning { code: WarningCode; input: string; matchedName:
 /** One warning the approver accepts, as the exact pair shown on screen (PD-104, RLE-053). */
 export interface AcknowledgedWarning { code: WarningCode; input: string }
 
+/** The reminder that an input is not classified (PD-146): never blocks, never needs an acceptance. */
+export const UNCLASSIFIED = 'UNCLASSIFIED_INPUT';
+export const isUnclassified = (warning: { code: WarningCode }): boolean => warning.code === UNCLASSIFIED;
+
 const pendingWarning = z.object({ code: z.string(), input: z.string() }).loose();
 
 /**
@@ -169,7 +185,8 @@ export function readPendingWarnings(value: unknown): AcknowledgedWarning[] | und
   if (!Array.isArray(value)) return undefined;
   return value.flatMap((item): AcknowledgedWarning[] => {
     const parsed = pendingWarning.safeParse(item);
-    return parsed.success && (WARNING_CODES as readonly string[]).includes(parsed.data.code) ? [{ code: parsed.data.code as WarningCode, input: parsed.data.input }] : [];
+    // A reminder (UNCLASSIFIED_INPUT) is never part of what an approver accepts.
+    return parsed.success && parsed.data.code !== UNCLASSIFIED && (WARNING_CODES as readonly string[]).includes(parsed.data.code) ? [{ code: parsed.data.code as WarningCode, input: parsed.data.input }] : [];
   });
 }
 

@@ -180,6 +180,46 @@ class TenantResolutionTest {
     }
 
     @Test
+    void RLE_037_dev_tenant_is_refused_when_another_profile_is_active_beside_dev() {
+        var runner = TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class)
+                .withPropertyValues("horus.bpm.tenancy.dev-tenant=bank-a");
+
+        for (String profiles : List.of("prod,dev", "dev,staging", "dev,test,prod")) {
+            runner.withPropertyValues("spring.profiles.active=" + profiles)
+                    .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                            .hasMessageContaining("horus.bpm.tenancy.dev-tenant"));
+        }
+        runner.withPropertyValues("spring.profiles.active=dev").run(context -> assertThat(context).hasNotFailed());
+        runner.withPropertyValues("spring.profiles.active=dev,test").run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void RLE_037_dev_tenant_never_serves_a_token_without_a_tenant() {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class)
+                .withPropertyValues("horus.bpm.tenancy.dev-tenant=bank-a", "spring.profiles.active=dev")
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+                    // A validated bearer token without tenant_id, as a client-credentials token would be
+                    MvcResult token = call(mvc, get("/api/bpm/me")
+                            .with(jwt().jwt(jwt -> jwt.subject("batch-client")).authorities(new SimpleGrantedAuthority("rules:read"))));
+                    // An introspected opaque token without the attribute
+                    MvcResult opaque = call(mvc, get("/api/bpm/me").with(authentication(new UsernamePasswordAuthenticationToken(
+                            new DefaultOAuth2AuthenticatedPrincipal("batch-client", Map.of("sub", "batch-client"),
+                                    List.of(new SimpleGrantedAuthority("rules:read"))),
+                            null, List.of(new SimpleGrantedAuthority("rules:read"))))));
+                    // A form-signed-in user without a tenant
+                    JsonNode formUser = json(call(mvc, get("/api/bpm/me")
+                            .with(user("lan").authorities(new SimpleGrantedAuthority("rules:read")))));
+
+                    assertThat(token.getResponse().getStatus()).isEqualTo(401);
+                    assertThat(token.getResponse().getHeader("WWW-Authenticate")).isEqualTo("Bearer error=\"invalid_token\"");
+                    assertThat(json(token).path("code").asString()).isEqualTo("UNAUTHENTICATED");
+                    assertThat(opaque.getResponse().getStatus()).isEqualTo(401);
+                    assertThat(formUser.path("tenant").path("current").asString()).isEqualTo("bank-a");
+                });
+    }
+
+    @Test
     void TR_SEC_03_a_tenant_outside_the_allowed_format_is_refused() {
         TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).run(context -> {
             MvcResult spaces = call(TestHosts.mockMvc(context), get("/api/bpm/me").with(caller("lan", "bank a", "rules:read")));

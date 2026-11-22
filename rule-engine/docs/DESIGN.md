@@ -508,7 +508,7 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `readings.style` | `sentence` | Style of plain-language readings of rules and of explanation `text` (CK-F-44, PD-077): `sentence` (patterns from the message catalogue) or `shorthand` (`tier: GOLD, PLATINUM`). If sentences miss the M1 checkpoint of 8 Jan 2027, M1 ships with `shorthand` only and the property accepts only that value until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `explain.default-language` | `en` | Language of `text` when the request names none available (PD-027, PD-077) |
 | `publication.require-simulation-report` | `false` | From M3 (RE-F-23, PD-022): when `true`, per host or per rule set (`publication.require-simulation-report.rule-sets`), `:request-publish` is refused with `422 VALIDATION_FAILED` unless a stored simulation report of the draft is attached. Off by default; in M1 the approver runs the simulation herself |
-| `decision-log.retention` | none; required from 1.0: before then unset keeps everything and warns | `keep-forever`, or whole months in ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs a WARN at every start-up saying the setting is unset, that everything is kept, the rough growth per row and the setting name (PD-130). `keep-forever` says the same choice explicitly and logs INFO. Only an explicit period enables drops. PD-050 is the 1.0 rule (#373, `RLE-100`): from 1.0 an unset value refuses start-up, naming the property, on every profile except `dev` alone (optionally with `test`, as for PD-139); until then it warns. The gate reads the major number of the starter jar's `Implementation-Version`; a build with no version behaves as before 1.0 |
+| `decision-log.retention` | none; required from 1.0: before then unset keeps everything and warns | `keep-forever`, or whole months in ISO 8601 (`P12M`, `P120M`, `P10Y`). The daily partition job drops whole monthly partitions of `rle_decision` whose upper bound is at or before the host clock minus the retention, and records each drop in `rle_decision_log_drop` (ADR-0010, section 5). Retention is never on by default: a value below `decision-log.retention-floor` or not in whole months is refused naming the property (PD-050, decided by the product owner). Unset, on every profile, nothing is ever dropped and start-up is not affected; it logs a WARN at every start-up saying the setting is unset, that everything is kept, the rough growth per row and the setting name (PD-130). `keep-forever` says the same choice explicitly and logs INFO. Only an explicit period enables drops. PD-050 is the 1.0 rule (#373, `RLE-100`): from 1.0 an unset value refuses start-up, naming the property, on every profile except `dev` alone (optionally with `test`, as for PD-139); until then it warns. The gate reads the major number of the build-generated `rule-engine.properties` next to the starter's classes (#450), never the jar manifest, so a shaded or repackaged jar and a class directory are gated alike; a missing resource or an unparseable version fails closed (refused outside `dev`) |
 | `decision-log.partitions-ahead` | `P7D` | How far ahead monthly partitions are created |
 | `cache.max-entries`, `cache.epoch-check-interval`, `cache.listen-notify` | `1000`, `PT5S`, `true` | ADR-0009 |
 | `evaluation.regex-max-reads` | `1000000` | Characters one `matches()` may read, `1` to `1000000`, lower only: the deterministic primary bound (`TR-SEC-02`, `RLE-007`, `TR-DET-05`). Past it the decision fails with `EVALUATION_ERROR`, `error_code = REGEX_TIMEOUT` |
@@ -532,9 +532,11 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `idempotency.retention` | `PT24H` | How long an idempotency record answers replays |
 | `tenancy.claim` | `tenant_id` | Attribute of the session principal, or claim of a validated token, that the default `TenantResolver` reads (PD-079, ADR-0014 decision 6). No header-based resolver is shipped; a host replaces the resolver with its own bean |
 | `tenancy.dev-tenant` | unset | Fixed tenant in the `dev` profile only; start-up is refused when set outside `dev` |
-| `tenancy.switching.enabled`, `tenancy.allowed-tenants-claim` | `false`, `allowed_tenants` | Opt-in tenant switch (ADR-0014 decision 5, PD-037, `RLE-018`): `X-Tenant-Id` is accepted for the signed-in tenant or a tenant in the verified token's allowed claim, never from the header alone; any other value is `403 TENANT_NOT_ALLOWED`; each switch writes `tenant.switch.accepted`. Host-wide, in `bpm-host-metadata` |
+| `tenancy.switching.enabled`, `tenancy.allowed-tenants-claim` | `false`, `allowed_tenants` | Opt-in tenant switch (ADR-0014 decision 5, PD-037, `RLE-018`): `X-Tenant-Id` is accepted for the signed-in tenant or a tenant in the verified token's allowed claim, never from the header alone; any other value is `403 TENANT_NOT_ALLOWED`; each switch writes `tenant.switch.accepted` on the security log and hands one record (actor, both tenants, time, correlation id) to the `TenantSwitchAudit` SPI before engine data is read (#451); the default writes it on the `io.github.dhluong90.bpm.audit` logger, a host bean replaces it, and a sink that throws fails the call. Host-wide, in `bpm-host-metadata` |
 | `rest.cors.allowed-origins` (+ `allowed-headers`, `allowed-methods`, `exposed-headers`, `max-age`) | empty | Exact origins for a standalone cockpit (ADR-0014 decision 4, `TR-SEC-09`); a `CorsFilter` ahead of the host's security chain, off when empty; no `*`, no credentials mode; start-up checks each origin. Host-wide |
-| `security.audiences` | empty | Accepted `aud` values of bearer tokens, applied as an `OAuth2TokenValidator<Jwt>` (`TR-SEC-12`); with a CORS origin set outside `dev`, this or Spring Boot's `...jwt.audiences` is required or start-up stops |
+| `security.audiences` | empty | Accepted `aud` values of bearer tokens, applied as an `OAuth2TokenValidator<Jwt>` (`TR-SEC-12`); with a CORS origin set outside `dev`, this or Spring Boot's `...jwt.audiences` is required or start-up stops. Spring Boot's own decoder applies it; a `JwtDecoder` the host defines itself is not changed, and outside `dev` with an audience set each such bean is named in one start-up WARN `jwt.decoder.audience.unchecked` (#451) |
+| `classification.warn-unclassified` | `true` | PD-146 (#438, `RLE-195`): each input that declares no `mask` is listed as an `UNCLASSIFIED_INPUT` warning on the version view, at import, at the publication request, for the approver and in `:validate`; outside `dev` one start-up WARN counts them per published version (`rle_version` status `PUBLISHED`, the `published-version-inputs` sweep). Never blocks, never needs an acknowledgement, never infers from a name or value. Read through `MaskingPolicy.warnUnclassified(tenant)`, a default method |
+| `display-names.roles`, `.groups`, `.users`, `.default-language` | empty, `en` | #442 (`RLE-196`): names per identifier and language, served by the default `DisplayNames` of `bpm-host-metadata` at `GET /api/bpm/display-names` and used for `requestedByName` in `GET /approvals` (through `CallerResolver.displayNameOf`, a default method). A host `DisplayNames` bean replaces it. Host-wide |
 | `lifecycle.reason-required`, `lifecycle.reason-max-length` | `true`, `2000` | Reason on `:reject` and `:retire`; a host may make it optional for reject only, never for retire (a retire must say why, ADR-0025) |
 | `lifecycle.system-actor` | `system:supersession` | Actor recorded for automatic supersession. It must start with `system:`, a namespace reserved for the engine's own actors: a caller whose id starts with `system:` is refused with `403 PERMISSION_DENIED` on every operation, so no host user can act or be recorded under an engine actor's name (security review of #269) |
 | `decision-log.retention-floor` | `P12M` | Shortest `decision-log.retention` accepted (PD-050), in whole months; a host may raise it to its own policy, so a shorter retention set by mistake stops start-up, and never set it below `P12M` (`TR-EXT-05`) |
@@ -694,7 +696,7 @@ ADR-0017 puts full DMN on the roadmap and ADR-0016 freezes the Java API at 1.0. 
 | `rule-set.v1` `hitPolicy` | `any`, `priority`, `ruleOrder`, `outputOrder` | "hitPolicy priority is added in stage S1" (`RLE-095`) | Hit policies are strings in the Java API and the REST responses. The `rle_version.hit_policy` check is widened with `NOT VALID` then `VALIDATE` (standards-compliance 9.3) |
 | `rule-set.v1` `expressionLanguage` | `feel` and the OMG FEEL namespace URIs | "expressionLanguage FEEL is added in stage S1" (`RLE-095`) | Stored per version (DN-02), so each version keeps its language |
 | `rule-set.v1` `errorMode` | `spec` | "errorMode spec is added in stage S1" (`RLE-095`, PD-125) | `strict` is accepted and left out of the canonical form, so no stored hash changes when `spec` arrives (`RLE-096`) |
-| DMN XML import | Every element outside the single-table subset | `422 DMN_UNSUPPORTED_ELEMENT` with element, id, line and stage; `422 CMMN_UNSUPPORTED` (`RLE-060`, `RLE-061`) | The reader builds the DMN-shaped model (ADR-0018), so DRDs extend it |
+| DMN XML import | Every element outside the single-table subset | `422 DMN_UNSUPPORTED_ELEMENT` with `unsupportedElements` of element, elementId, line, stage and message (PD-141, one shape in both engines); `422 CMMN_UNSUPPORTED` (`RLE-060`, `RLE-061`) | The reader builds the DMN-shaped model (ADR-0018), so DRDs extend it |
 | `DecisionRequest.decision`, evaluate body `decision` | Any id other than the rule set's name | `400 INPUT_INVALID` (`RLE-097`) | The request type already carries the id that S1 selects by |
 | `DecisionResult.Outcome` | The three sealed cases | Not applicable | Warnings come as a new member, not a new case |
 | `DecisionLogEntry.Outcome`, `SourceFormat`, REST enums (`hitPolicy`, `outcome`) | Not applicable | Not applicable | Documented as open: new values may be added, and hosts must not switch on them exhaustively (ADR-0016) |
@@ -704,6 +706,49 @@ API review checklist for the freeze, checked on `batch/s8`:
 - Engine JSON is the engine's own and ignores host Jackson settings (`RLE-023`).
 - A v1 rule set reads into the DMN model and is written back byte for byte (`RLE-024`).
 - Every reserved name above has a refusal test named by its statement.
+
+### 4.12 Spreadsheet round trip (`RLE-191` to `RLE-194`, PD-107, PD-142, #39)
+
+The engine reads and writes the CSV of a rule table, so a host without the cockpit gets the same round trip and the cockpit never interprets rule content. `CsvTable` in `rule-engine-core` turns the cells to and from the engine's normal forms through the same `V1Forms` that DMN import uses; the rows then go through the checks of an imported document. The base version supplies everything outside the rows, so a file cannot change inputs, outputs, hit policy or masks.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as Author in Excel
+  participant R as REST layer
+  participant V as VersionService
+  participant C as CsvTable
+  participant S as Store
+  U->>R: GET versions/1/export?format=csv
+  R->>V: export(card-fee, 1, CSV)
+  V->>C: write(canonical JSON of v1)
+  C-->>U: UTF-8 file, BOM, CRLF, shorthand cells
+  U->>U: edit a fee, save as CSV UTF-8
+  U->>R: POST versions?base=1, text/csv, Idempotency-Key
+  R->>V: importCsv(card-fee, 1, file)
+  V->>S: read base v1 in the caller's tenant
+  V->>C: read(base JSON, file)
+  alt a cell or column is refused
+    C-->>V: violations with rule id, column and code, no cell text
+    V-->>U: 422 VALIDATION_FAILED, nothing stored
+  else every cell reads
+    C-->>V: document JSON with v1's columns and the file's rows
+    V->>V: checks of a document, mask rules, step budget
+    V->>S: insert next draft, history, event
+    V-->>U: 201 draft
+  end
+```
+
+| Rule | Detail |
+|---|---|
+| Layout | One header line, then one line per rule in table order. Columns: `Rule`, each input by name, each output by name, `Description`. Names, not labels, so one file serves both languages |
+| Export | UTF-8 with a byte order mark, comma, CRLF, RFC 4180 quoting; amounts without thousands separators, ISO dates, `-` for any; a text that looks like shorthand is quoted; a description starting with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading `'` that import removes. A grouped condition, a list column or a calculated cell is `422` with `CSV_NO_TABLE_FORM` naming the rule |
+| Import | `POST .../versions?base={v}` with `Content-Type: text/csv`. Comma or semicolon from the header line, byte order mark optional, at most 1,048,576 bytes. A blank `Rule` gets the next free id, a duplicate is refused. The header lists exactly the base's inputs and outputs in order, then `Description` optionally |
+| Shorthand | `-` any; `GOLD, PLATINUM` a list; `< <= > >= =` a comparison; `18 to 65` a closed range, `[18..65)` any bracketed range; `!= VN, SG` not in; `null` is null; `"..."` quotes a text, `""` is a quote; money is `50000000 VND`; a date is `2026-11-20`. Read by the type of the column, so a bare word in a string column is text |
+| Damage | Scientific notation (`5E+07`), thousands separators (`50,000,000`, `50.000.000`, `50 000`), a date that is not an ISO date, text in a number column and an amount without a currency are refused with their rule and column, never read as another value. A list of numbers is written with a space after each comma (`1, 234`), since `1,234` is read as a damaged thousand |
+| Stored form | The draft stores the JSON document the rows make, in source format `JSON`, so no migration is needed. An export imported against the same version, unedited, has the same canonical hash. A rule's `explain` texts are carried over by rule id |
+| Masked values | No message quotes a cell, so a value of a masked input never leaves in an error; a problem the document checks find in a masked column has the plain message "The cell is not accepted" and no position |
+| Not in the file | `.xlsx` (PD-043 candidate, later), the grid editor and templates (slices 7.14, 7.15) |
 
 ### 4.8 Metrics
 
@@ -1075,7 +1120,7 @@ Targets, not measurements, on the reference shape (one replica, 20-connection po
 
 | # | Item | Plan | Owner and gate |
 |---|---|---|---|
-| 7.7 | Where the spreadsheet shorthand conversion runs (`GOLD, PLATINUM`, `>= 50000000 VND`, `18 to 65`) and the CSV header and quoting rules (PD-043, CK-F-35, CK-F-43) | Recommendation: in `rule-engine-core` behind a `ShorthandParser` used by import, the cockpit cell editor and the CSV reader, so one grammar and one message catalogue serve all three; CSV per RFC 4180, UTF-8 with BOM accepted, header row of input and output names | Architect, before CK-F-43 is sized (7 Dec 2026) |
+| 7.7 | Where the spreadsheet shorthand conversion runs (`GOLD, PLATINUM`, `>= 50000000 VND`, `18 to 65`) and the CSV header and quoting rules (PD-043, CK-F-35, CK-F-43) | Decided (PD-107, PD-142): the engine reads and writes the CSV in `rule-engine-core` (`CsvTable`), through the same normal forms as DMN import (`V1Forms`), so one grammar and one message catalogue serve the file and the Java API; the cockpit never interprets rule content. The layout and the import are in section 4.12. The cell editor reuses the same shorthand when it lands (CK-F-43) | Closed |
 | 7.8 | Reading contract UX-API-01: plain-language readings of rules in both styles, per language, from the same catalogue as explanations (PD-056, PD-077) | Endpoint `GET .../versions/{v}/readings?lang=` returning structured reading tokens and the rendered text; catalogue format shared with section 4.7 | Architect, M1 week 1 |
 | 7.9 | Mapping of nested And, Or and Not groups of the builder lens to table rows, where a row is a conjunction of cells (PD-076, CK-F-45) | Disjunctive normal form expansion into rows, bounded by a row limit; a group that cannot be expressed in the table is refused with a plain message, never stored in a second format | Architect, before CK-F-45 is sized (M3) |
 | 7.10 | Tenant purge against monthly partitions (PD-051, `TR-TEN-03`) | Per-partition `DELETE ... WHERE tenant_id` in batches under the four-eyes purge job, with the purge record in its own table; cost math before 1.1 planning | Architect, 1.1 planning |

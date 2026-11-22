@@ -1,7 +1,6 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { BpmMeV1 } from '../../../api/generated/bpm-me.v1';
 import { createProcessesClient, type ProcessesClient } from '../../../api/processes/processesClient';
-
 /** Who is calling which host's Process Engine: the client, and what /me says the user may do. */
 export interface ProcessesSession {
   client: ProcessesClient;

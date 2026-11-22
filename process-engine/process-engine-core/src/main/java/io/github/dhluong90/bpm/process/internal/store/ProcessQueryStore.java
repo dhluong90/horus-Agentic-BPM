@@ -89,4 +89,11 @@ public interface ProcessQueryStore {
      *     oldest first
      */
     List<InstanceActivities.Entry> historyEntries(String tenant, String instanceId, Instant from, Instant to, int limit);
+
+    /**
+     * @return at most {@code limit} history entries of the instance's undo ({@code COMPENSATION_*} and
+     *     {@code COMPENSATED}) between {@code from} and {@code to} inclusive, oldest first
+     */
+    List<InstanceActivities.Entry> compensationEntries(String tenant, String instanceId, Instant from, Instant to,
+            int limit);
 }

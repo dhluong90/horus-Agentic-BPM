@@ -58,7 +58,7 @@ describe('CKP-046 claim from Available to me', () => {
     currentProcessEngine().claimAs(QUEUE_TASKS.creditReviewOverdue, 'hoa');
     await userEvent.click(claim);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('hoa claimed this task first.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Hoa Tran claimed this task first.');
     await waitFor(() => { expect(screen.getByRole('tab', { name: 'Available to me (2)' })).toBeInTheDocument(); });
     expect(screen.queryByText('Case LN-2026-0142')).not.toBeInTheDocument();
     // No code, no raw body on the surface.
@@ -69,7 +69,7 @@ describe('CKP-046 claim from Available to me', () => {
     setScenario('tasks-supervisor');
     open(`#/tasks?view=all&task=${QUEUE_TASKS.collateral}`);
     const selected = await screen.findByRole('complementary', { name: 'Collateral valuation' });
-    await within(selected).findByText('Claimed by hoa', { selector: '.badge' });
+    await within(selected).findByText('Claimed by Hoa Tran', { selector: '.badge' });
     // Sau may hand it on, so Reassign is offered; there is no Claim for a task someone else holds.
     expect(within(selected).getByRole('button', { name: 'Reassign' })).toBeEnabled();
     expect(within(selected).queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('CKP-048 reassign with a reason', () => {
     expect(submit).not.toHaveAttribute('aria-disabled');
     await userEvent.click(submit);
 
-    expect(await screen.findByText('Credit review is now with hoa.')).toBeInTheDocument();
+    expect(await screen.findByText('Credit review is now with Hoa Tran.')).toBeInTheDocument();
     const reassign = currentProcessEngine().requests.find((request) => request.path.endsWith(':reassign'));
     expect(reassign?.path).toBe(`/api/bpm/processes/v1/tasks/${QUEUE_TASKS.creditReview}:reassign`);
     expect(JSON.parse(reassign?.body ?? '{}')).toEqual({ assignee: 'hoa', reason: 'Covering leave' });
@@ -121,7 +121,7 @@ describe('CKP-048 reassign with a reason', () => {
 
     // A claimed task is delegated.
     window.location.hash = `#/tasks?view=all&task=${QUEUE_TASKS.myCreditReview}`;
-    await waitFor(() => { expect(within(screen.getByRole('complementary', { name: 'Credit review' })).getByText(/Claimed by an/, { selector: '.badge' })).toBeInTheDocument(); });
+    await waitFor(() => { expect(within(screen.getByRole('complementary', { name: 'Credit review' })).getByText(/Claimed by An Nguyen/, { selector: '.badge' })).toBeInTheDocument(); });
     const claimed = screen.getByRole('complementary', { name: 'Credit review' });
     await userEvent.click(within(claimed).getByRole('button', { name: 'Reassign' }));
     dialog = await screen.findByRole('dialog', { name: 'Reassign Credit review' });
@@ -139,15 +139,17 @@ describe('CKP-048 reassign with a reason', () => {
     setScenario('tasks-supervisor');
     open(`#/tasks?view=all&task=${QUEUE_TASKS.approveLimit}`);
     const selected = await screen.findByRole('complementary', { name: 'Approve credit limit' });
-    expect(await within(selected).findByText('Four eyes: someone new to this case must do it.')).toBeInTheDocument();
+    expect(await within(selected).findByText('Someone who has not worked on this case must do it.')).toBeInTheDocument();
     await userEvent.click(within(selected).getByRole('button', { name: 'Reassign' }));
     const dialog = await screen.findByRole('dialog', { name: 'Reassign Approve credit limit' });
     await userEvent.type(within(dialog).getByLabelText("Colleague's user id"), 'hoa');
     await userEvent.type(within(dialog).getByLabelText('Reason'), 'Covering leave');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Reassign' }));
 
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent('hoa cannot take this task. They may lack its role, or have worked on this case.');
-    expect(dialog).not.toHaveTextContent(/ASSIGNEE_NOT_ALLOWED|409/);
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Hoa Tran worked on this case, so someone else must take this task.');
+    // The code stays one click away behind Details (styleguide section 9), never in the sentence.
+    expect(within(dialog).getByText(/ASSIGNEE_NOT_ALLOWED/)).not.toBeVisible();
+    expect(within(dialog).getByRole('alert').querySelector('p')).not.toHaveTextContent(/ASSIGNEE_NOT_ALLOWED|409/);
     // The reason is kept for another colleague; the task did not move.
     expect(within(dialog).getByLabelText('Reason')).toHaveValue('Covering leave');
     expect(currentProcessEngine().handOvers).toEqual([]);
@@ -172,5 +174,55 @@ describe('CKP-048 reassign with a reason', () => {
     expect(await within(selected).findByText('Some values of this task are masked.')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/hmac|\*\*\*|9f4a/);
     expect(within(selected).getByText('Role: Compliance reviewer')).toBeInTheDocument();
+  });
+});
+
+describe('CKP-050 overdue filter of the task queue', () => {
+  it('CKP_034_sla_breach_filter_uses_task_deadlines', async () => {
+    setScenario('tasks-supervisor');
+    open('#/tasks?view=all');
+    const filter = await screen.findByRole('button', { name: /^Overdue/ });
+    await waitFor(() => { expect(filter).toHaveAccessibleName('Overdue 2'); });
+    expect(filter).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(filter);
+
+    expect(window.location.hash).toBe('#/tasks?view=all&overdue=1');
+    const rows = await waitFor(() => {
+      const found = within(screen.getByRole('table')).getAllByRole('row').slice(1);
+      expect(found).toHaveLength(2);
+      return found;
+    });
+    // Oldest deadline first, in the engine's order; a task without a deadline never appears.
+    expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual(['Collateral valuationCase LN-2026-0128', 'Credit reviewCase LN-2026-0142']);
+    expect(screen.getByText('2 overdue, oldest first')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Overdue 2' })).toHaveAttribute('aria-pressed', 'true');
+    const query = tasksRequests().filter((request) => request.path.includes('slaBreached=true')).map((request) => request.path);
+    expect(query).toContain('/api/bpm/processes/v1/tasks?assignment=any&slaBreached=true&limit=50');
+    expect(document.body).not.toHaveTextContent('Prepare offer letter');
+  });
+
+  it('CKP_050_combined_with_my_tasks_and_none_overdue_says_so_in_one_line', async () => {
+    setScenario('tasks-operator');
+    open('#/tasks?view=mine&overdue=1');
+    expect(await screen.findByText('No overdue tasks.')).toBeInTheDocument();
+    expect(tasksRequests().some((request) => request.path === '/api/bpm/processes/v1/tasks?assignment=mine&slaBreached=true&limit=50')).toBe(true);
+    expect(screen.getByRole('link', { name: /Show every task/ })).toHaveAttribute('href', '#/tasks?view=mine');
+  });
+
+  it('CKP_050_overdue_by_reads_the_engine_duration_when_the_list_carries_it', async () => {
+    setScenario('tasks-supervisor');
+    const { http, HttpResponse } = await import('msw');
+    const { mockHost } = await import('../../mocks/node');
+    mockHost.use(http.get('*/api/bpm/processes/v1/tasks', ({ request }) => {
+      if (!request.url.includes('slaBreached=true')) return undefined;
+      const item = (id: string, name: string, dueAt: string, overdueBy: string) => ({
+        id, instanceId: '01JD4I5NC1DENT00000000IN05', definitionKey: 'loan-origination', definitionVersion: 3, businessKey: 'LN-2026-0142', nodeId: 'credit-review', name,
+        assignee: 'role:credit-officer', status: 'OPEN', lockVersion: 0, claimedBy: null, createdAt: '2026-11-19T01:00:00Z', dueAt, slaState: 'BREACHED', overdueBy,
+      });
+      return HttpResponse.json({ data: [item(QUEUE_TASKS.collateral, 'T4', '2026-11-20T02:00:00Z', 'PT26H'), item(QUEUE_TASKS.creditReviewOverdue, 'T1', '2026-11-21T03:00:00Z', 'PT1H')], nextCursor: null, hasNext: false });
+    }));
+    open('#/tasks?view=all&overdue=1');
+    expect(await screen.findByText('Overdue by 26 h')).toBeInTheDocument();
+    expect(screen.getByText('Overdue by 1 h')).toBeInTheDocument();
   });
 });

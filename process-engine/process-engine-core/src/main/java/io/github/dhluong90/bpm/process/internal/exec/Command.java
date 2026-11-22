@@ -163,7 +163,7 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
     }
 
     /**
-     * A migration moves a token to a step of the version the instance now runs on (#106, PRE-201): the work the token
+     * A migration moves a token to a step of the version the instance now runs on (#106, PRE-208): the work the token
      * waited for has already been cancelled by the shell, and the token enters the step as on arrival, so a task opens
      * or a job parks.
      *
@@ -179,7 +179,7 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
 
     /**
      * A called child instance ended without completing, or completed: the parent's {@code callProcess} step hears of it
-     * (#92, PRE-204, PRE-206). Delivered by the shell when the {@code CALL_RESULT} job fires, in its own transaction.
+     * (#92, PRE-211, PRE-213). Delivered by the shell when the {@code CALL_RESULT} job fires, in its own transaction.
      *
      * @param tokenId the waiting token
      * @param attemptId the token's call attempt, which the child was started under

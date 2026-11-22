@@ -1,4 +1,4 @@
--- Calling a child process and waiting for it (#92, PRE-204 to PRE-207, DESIGN section 4.2, PD-127, PD-144). A step of
+-- Calling a child process and waiting for it (#92, PRE-211 to PRE-214, DESIGN section 4.2, PD-127, PD-144). A step of
 -- type callProcess starts a child instance of another definition of the same tenant and waits for it:
 --   * pre_token gains the status WAITING_CHILD for the parent's token;
 --   * pre_timer gains the job kind CALL_RESULT, which resumes the parent in its own transaction once the child has

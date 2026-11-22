@@ -298,6 +298,14 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
     }
 
     @Override
+    public List<VersionInputs> publishedVersionInputs() {
+        return versions.stream().filter(v -> v.status() == VersionStatus.PUBLISHED)
+                .map(v -> new VersionInputs(v.tenantId(), v.ruleSet(), v.version(),
+                        io.github.dhluong90.bpm.rules.internal.json.EngineValues.read(v.canonicalJson()).get("inputs").toString()))
+                .toList();
+    }
+
+    @Override
     public void append(String tenantId, String id, String payloadJson, Instant createdAt) {
         // Every event any core test writes is checked against its schema file and its envelope (#241).
         JsonNode payload = EngineJson.JSON.readTree(payloadJson);

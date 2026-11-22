@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import { callHost, downloadFromHost, type HostRequest } from '../hostCall';
+import { chunksOf, displayNames, DISPLAY_NAMES_PATH, mergeNames, namesQuery, NO_NAMES, type DisplayNames, type WantedNames } from '../displayNames';
 import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
@@ -11,6 +12,10 @@ import {
   migrationExecution,
   migrationOutcomePage,
   migrationPlan,
+  incident,
+  incidentPage,
+  type Incident,
+  type IncidentStatus,
   instanceActivities,
   instanceSummaryPage,
   INSTANCE_STATUSES,
@@ -60,6 +65,12 @@ export interface TaskHandOver {
   reason: string;
 }
 
+/** A resolution proposed for an incident (PRE-078): the step's output, money as `{ amount, currency }`, and why. */
+export interface IncidentResolution {
+  output: Readonly<Record<string, unknown>>;
+  reason: string;
+}
+
 /**
  * What Approve sends (approveDefinition): the definitionHash of the content the approver reviewed, never one read
  * again at decision time (PD-139), and an optional comment.
@@ -84,6 +95,8 @@ export interface MigrationPlanRequest {
  * If-Match.
  */
 export interface ProcessesClient {
+  /** getDisplayNames (host contract): readable names of roles, groups and users in `language`; only the known ones */
+  getDisplayNames(wanted: WantedNames, language: string, signal?: AbortSignal): Promise<DisplayNames>;
   /** listDefinitions: one page of keys, ordered by key */
   listDefinitions(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<DefinitionSummary>>;
   /** listPendingApprovals: one page of definition versions waiting for a second person, oldest request first (PRE-190) */
@@ -132,6 +145,18 @@ export interface ProcessesClient {
   getMigrationExecution(id: string, signal?: AbortSignal): Promise<MigrationExecution>;
   /** listMigrationInstances: what happened to each instance, one outcome kind at a time, a bounded page */
   listMigrationInstances(request: { id: string; outcome: 'FAILED' | 'SKIPPED'; after?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<MigrationOutcomePage>;
+  /** listIncidents: one page of the incidents of one status, newest first */
+  listIncidents(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<Incident>>;
+  /** getIncident: one incident with the actions this caller may take */
+  getIncident(id: string, signal?: AbortSignal): Promise<Incident>;
+  /** retryIncident: run the failed step again, with a reason; one person's action (PRE-077) */
+  retryIncident(id: string, lockVersion: number, reason: string, idempotencyKey: string): Promise<Incident>;
+  /** resolveIncident: propose the output the waiting step completes with; a second person approves it (PRE-078, PD-126) */
+  resolveIncident(id: string, lockVersion: number, resolution: IncidentResolution, idempotencyKey: string): Promise<Incident>;
+  /** approveIncidentResolution: as a second person; the step completes with the proposed output */
+  approveResolution(id: string, lockVersion: number, comment: string, idempotencyKey: string): Promise<Incident>;
+  /** rejectIncidentResolution: as a second person, with a reason; the incident is open again */
+  rejectResolution(id: string, lockVersion: number, reason: string, idempotencyKey: string): Promise<Incident>;
   /** completeTask: the reviewer's answer and reason; the engine records HUMAN_OVERRIDE */
   completeTask(id: string, lockVersion: number, answer: TaskAnswer, idempotencyKey: string): Promise<ProcessInstance>;
 }
@@ -145,6 +170,12 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
   const withSignal = (signal: AbortSignal | undefined) => (signal ? { signal } : {});
 
   return {
+    async getDisplayNames(wanted, language, signal) {
+      const answers = await Promise.all(chunksOf(wanted).map(async (chunk) => (
+        await call({ method: 'GET', path: `${DISPLAY_NAMES_PATH}?${namesQuery(chunk)}`, headers: { 'Accept-Language': language }, ...withSignal(signal) }, displayNames)
+      ).data));
+      return answers.length === 0 ? NO_NAMES : mergeNames(answers);
+    },
     async listDefinitions(request = {}) {
       const query = new URLSearchParams();
       if (request.limit !== undefined) query.set('limit', String(request.limit));
@@ -219,6 +250,32 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async delegateTask(id, lockVersion, handOver, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ assignee: handOver.assignee, reason: handOver.reason }) };
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:delegate`, headers: command(lockVersion, idempotencyKey), body }, task)).data;
+    },
+    async listIncidents(request) {
+      const query = new URLSearchParams({ status: request.status });
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/incidents?${query.toString()}`, ...withSignal(request.signal) }, incidentPage)).data;
+    },
+    async getIncident(id, signal) {
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/incidents/${segment(id)}`, ...withSignal(signal) }, incident)).data;
+    },
+    async retryIncident(id, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/incidents/${segment(id)}:retry`, headers: command(lockVersion, idempotencyKey), body }, incident)).data;
+    },
+    async resolveIncident(id, lockVersion, resolution, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ output: resolution.output, reason: resolution.reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/incidents/${segment(id)}:resolve`, headers: command(lockVersion, idempotencyKey), body }, incident)).data;
+    },
+    async approveResolution(id, lockVersion, comment, idempotencyKey) {
+      const text = comment.trim();
+      const body = { contentType: 'application/json', text: JSON.stringify({ comment: text === '' ? null : text }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/incidents/${segment(id)}:approve-resolution`, headers: command(lockVersion, idempotencyKey), body }, incident)).data;
+    },
+    async rejectResolution(id, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/incidents/${segment(id)}:reject-resolution`, headers: command(lockVersion, idempotencyKey), body }, incident)).data;
     },
     async completeTask(id, lockVersion, answer, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ result: answer.result, reason: answer.reason }) };

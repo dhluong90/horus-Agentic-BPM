@@ -1,0 +1,36 @@
+sequenceDiagram
+  autonumber
+  box rgb(227,242,253) Public Zone
+    participant K as Checker (approver, cockpit)
+  end
+  box rgb(224,242,241) Host service
+    participant R as REST layer
+    participant D as DefinitionService
+  end
+  box rgb(255,248,225) Host PostgreSQL
+    participant DB as pre_definition
+  end
+  loop every page, in order
+    K->>R: GET /definitions/{key}/versions/2/diff?limit=500&cursor=C
+    R->>D: diffPageFromEffective(target, limit, cursor)
+    D->>DB: read effective v1 and v2 (stored, hash-checked)
+    D->>D: complete change set, one SHA-256 run over both hashes and every change
+    D->>D: check cursor digest = digest of the changes before it
+    D-->>R: page, nextCursor (digest of everything so far)
+    R-->>K: page without hashes (not the last page)
+  end
+  Note over K,R: the last page carries definitionHash H, approvableHash and changeSetHash S
+  K->>R: POST /definitions/{key}/versions/2:approve, If-Match, expectedDefinitionHash H, expectedChangeSetHash S
+  R->>D: approve(caller, H, S)
+  rect rgb(255,248,225)
+    Note over D,DB: one transaction, under the key lock
+    D->>DB: status, four eyes, lock version, H = stored hash
+    D->>D: recompute the change set against the effective version now
+    alt more than 1,000 changed values and no S
+      D-->>R: 409 CHANGE_SET_TRUNCATED, nothing written
+    else S is not the hash of the change set now
+      D-->>R: 409 CONTENT_CHANGED, currentChangeSetHash
+    else S matches (or the set is within 1,000 values)
+      D->>DB: status ACTIVE, history and event carry reviewedChangeSetHash
+    end
+  end

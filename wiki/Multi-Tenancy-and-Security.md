@@ -14,11 +14,15 @@ The engines ask one extension point, `TenantResolver`, for the tenant of every c
 |---|---|---|
 | Default resolver | Reads the `tenancy.claim` attribute (default `tenant_id`) of the authenticated principal in the host's Spring Security context. A server-side session login and a validated bearer token are handled alike | OIDC hosts, and host web applications that embed the cockpit behind their own session login |
 | Your own `TenantResolver` bean | Replaces the default; you do not exclude any auto-configuration | The tenant comes from your user directory, a realm, a path or a subdomain |
-| `tenancy.dev-tenant` | One fixed tenant for local work without an identity provider | The `dev` profile only. The starter refuses to start when it is set outside `dev` |
+| `tenancy.dev-tenant` | One fixed tenant for local work without an identity provider, for session principals only | A purely local start-up: the `dev` profile, with no profile other than `dev` or `test` beside it (`prod,dev` is refused). A validated token without a tenant is still refused with `401`, so a client-credentials token is never served as the development tenant |
 
 No header-based resolver ships. A gateway header as the tenant source was rejected: one misconfigured gateway would let one tenant's operator see another tenant's data. A host that writes a resolver that trusts a request header owns that risk.
 
 **Tenant switching is opt-in.** With `horus.bpm.tenancy.switching.enabled: true` the host accepts `X-Tenant-Id` for the signed-in tenant or for a tenant listed in the verified token's `allowed_tenants` claim (`horus.bpm.tenancy.allowed-tenants-claim`). The header never grants a tenant by itself, an unlisted, blank, malformed or repeated value is `403 TENANT_NOT_ALLOWED` with a `tenant.switch.refused` log entry, and every accepted switch writes `tenant.switch.accepted` with the user, both tenants and the correlation id. Off by default: then any header that differs from the caller's tenant is refused (`RLE-018`, `PRE-038`).
+
+**Every accepted switch is in the audit trail (#451).** Before the call reaches engine data, the host's `TenantSwitchAudit` bean receives one record: actor, original tenant, new tenant, time and correlation id. The default writes it as one `tenant.switch.accepted actor=... fromTenant=... toTenant=... at=... correlationId=...` line on the `io.github.dhluong90.bpm.audit` logger; route that logger to append-only storage, or declare your own bean that appends to your audit table or SIEM. A sink that throws fails the call, so no switched call runs without its record. A refused switch writes no audit record. After a switch, the original tenant's cases and rule sets are not found (`404`), and nothing is written for either tenant.
+
+**Token audience with your own decoder.** `horus.bpm.security.audiences` is applied as an `OAuth2TokenValidator<Jwt>` that Spring Boot's auto-configured `JwtDecoder` uses. A host that defines its own `JwtDecoder` bean gets no audience check from the engines: the starter does not rewrite your decoder, because replacing its validators could drop checks of your own. Outside `dev`, with an audience configured, the host logs one WARN at start-up per such bean, `jwt.decoder.audience.unchecked bean=<name>`, on the `io.github.dhluong90.bpm.security` logger. Add the `horusBpmAudienceValidator` bean to your decoder's validators, for example `decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefaultWithIssuer(issuer), audienceValidator))`.
 
 A call whose tenant cannot be resolved, for example a principal without the `tenant_id` attribute, is refused with `401 UNAUTHENTICATED` and touches no data (`RLE-037`). The `X-Tenant-Id` header is honoured only as the cockpit's tenant switch, for a tenant in the caller's allowed list; any other tenant gets `403 TENANT_NOT_ALLOWED`. Whatever the resolver, a principal that carries the tenant attribute must match the tenant the resolver returns, so a host resolver cannot move a caller into another tenant. Both rules are built for `/api/bpm/meta` and `/api/bpm/me` ([[Host Metadata and Permissions]]).
 
@@ -61,6 +65,8 @@ Expressions are parsed by a hand-written recursive-descent parser into a sealed,
 | Agent inputs | Masked before they are written to `pre_history`; the adapter receives the clear values (`TR-AGT-02`) |
 
 ## Cockpit security headers and CORS
+
+The example hosts, which banks copy, send the session cookie and `XSRF-TOKEN` with `Secure` and `SameSite=Lax`, and skip the CSRF check for a bearer request only when a token decoder is configured, so a session request with a junk `Authorization: Bearer` header is still CSRF-checked. The removed header-based tenancy properties stop the start-up even when the host declares its own `TenantResolver`.
 
 | Shape | Headers set by `cockpit-spring-boot-starter` |
 |---|---|

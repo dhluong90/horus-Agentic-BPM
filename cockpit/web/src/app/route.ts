@@ -40,15 +40,20 @@ export type Route =
   | { name: 'migrate'; key: string; version: number; from?: number | undefined }
   | { name: 'migration'; migrationId: string }
   | { name: 'instance'; instanceId: string }
-  | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined }
-  | { name: 'task'; taskId: string };
+  | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined; overdue?: boolean | undefined }
+  | { name: 'task'; taskId: string }
+  | { name: 'incidents'; view?: IncidentTab | undefined; incidentId?: string | undefined };
+
+/** The tabs of the incident queue (CKP-008): incidents to fix, and resolutions waiting for a second person (PD-126). */
+export const INCIDENT_TABS = ['open', 'pending'] as const;
+export type IncidentTab = (typeof INCIDENT_TABS)[number];
 
 /** The tabs of the task queue, kept in the URL so a reload or a link opens the same tab and task. */
 export const QUEUE_TABS = ['mine', 'candidate', 'all'] as const;
 export type QueueTab = (typeof QUEUE_TABS)[number];
 
 /** The menu areas. Every route belongs to exactly one. */
-export const AREAS = ['home', 'rules', 'approvals', 'decisions', 'processes', 'tasks'] as const;
+export const AREAS = ['home', 'rules', 'approvals', 'decisions', 'processes', 'tasks', 'incidents'] as const;
 export type Area = (typeof AREAS)[number];
 
 export function isArea(value: unknown): value is Area {
@@ -92,7 +97,7 @@ function isLens(value: string | undefined): value is Lens {
  * never a blank screen.
  */
 export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Route {
-  const [path = '', search = ''] = hash.replace(/^#\/?/, '').split('?');
+  const [path = '', search = ''] = splitHost(hash).rest.replace(/^#\/?/, '').split('?');
   const parts = path.split('/').filter(Boolean).map(safeDecode);
   const [area, ruleSet, version, lens] = parts;
   if (area === undefined) return fallback;
@@ -120,6 +125,7 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
   if (area === 'instances' && ruleSet !== undefined) return { name: 'instance', instanceId: ruleSet };
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'tasks') return queueRoute(new URLSearchParams(search));
+  if (area === 'incidents') return incidentRoute(new URLSearchParams(search));
   if (area === 'home' || area === 'approvals' || area === 'decisions' || area === 'processes') return { name: area };
   return { name: 'home' };
 }
@@ -134,6 +140,19 @@ function queueRoute(params: URLSearchParams): Route {
     name: 'tasks',
     ...(view !== undefined && (QUEUE_TABS as readonly string[]).includes(view) ? { view: view as QueueTab } : {}),
     ...(task !== undefined && TASK_ID.test(task) ? { taskId: task } : {}),
+    // The overdue filter (CKP-050) is kept in the link, so a shared link opens the same view.
+    ...(params.get('overdue') === '1' ? { overdue: true } : {}),
+  };
+}
+
+/** An incident id is a ULID like a task id; anything else in the link is ignored, never requested. */
+function incidentRoute(params: URLSearchParams): Route {
+  const view = params.get('view') ?? undefined;
+  const incident = params.get('incident') ?? undefined;
+  return {
+    name: 'incidents',
+    ...(view !== undefined && (INCIDENT_TABS as readonly string[]).includes(view) ? { view: view as IncidentTab } : {}),
+    ...(incident !== undefined && TASK_ID.test(incident) ? { incidentId: incident } : {}),
   };
 }
 
@@ -179,9 +198,17 @@ export function formatRoute(route: Route): string {
     case 'tasks': {
       const params = new URLSearchParams();
       if (route.view !== undefined) params.set('view', route.view);
+      if (route.overdue === true) params.set('overdue', '1');
       if (route.taskId !== undefined) params.set('task', route.taskId);
       const text = params.toString();
       return text === '' ? '#/tasks' : `#/tasks?${text}`;
+    }
+    case 'incidents': {
+      const params = new URLSearchParams();
+      if (route.view !== undefined) params.set('view', route.view);
+      if (route.incidentId !== undefined) params.set('incident', route.incidentId);
+      const text = params.toString();
+      return text === '' ? '#/incidents' : `#/incidents?${text}`;
     }
     case 'decisions': {
       const params = new URLSearchParams();
@@ -199,6 +226,36 @@ export function formatRoute(route: Route): string {
   }
 }
 
+const HOST_PREFIX = /^#\/hosts\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?=\/|\?|$)\/?/;
+
+/**
+ * Standalone mode names the host first: `#/hosts/loans/rules` (cockpit DESIGN section 4). The rest is the route
+ * within that host, so every screen parses and links as in embedded mode.
+ */
+export function splitHost(hash: string): { hostId: string | undefined; rest: string } {
+  const match = HOST_PREFIX.exec(hash);
+  if (!match) return { hostId: undefined, rest: hash === '' ? '' : hash };
+  return { hostId: match[1], rest: `#/${hash.slice(match[0].length)}` };
+}
+
+/** The hash of `rest` within host `hostId`; without a host, `rest` unchanged. */
+export function withHost(rest: string, hostId: string | undefined): string {
+  if (hostId === undefined) return rest;
+  const route = rest.replace(/^#\/?/, '');
+  return `#/hosts/${hostId}${route === '' ? '' : `/${route}`}`;
+}
+
+/**
+ * The host a link from a host screen names with `?host=` (PD-108: `#/decisions/{id}?host=loans`). Only a
+ * well-formed id is read; nothing else in the link is.
+ */
+export function linkedHost(hash: string): string | undefined {
+  const search = hash.split('?')[1];
+  if (search === undefined) return undefined;
+  const host = new URLSearchParams(search).get('host');
+  return host !== null && /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(host) && host.length <= 40 ? host : undefined;
+}
+
 function subscribe(onChange: () => void): () => void {
   window.addEventListener('hashchange', onChange);
   return () => {
@@ -209,7 +266,7 @@ function subscribe(onChange: () => void): () => void {
 export function useRoute(fallback?: Route): [Route, (route: Route) => void] {
   const hash = useSyncExternalStore(subscribe, () => window.location.hash, () => '');
   const navigate = useCallback((route: Route) => {
-    window.location.hash = formatRoute(route);
+    window.location.hash = withHost(formatRoute(route), splitHost(window.location.hash).hostId);
   }, []);
   return [parseRoute(hash, fallback), navigate];
 }

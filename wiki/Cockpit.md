@@ -50,7 +50,7 @@ sequenceDiagram
 |---|---|---|
 | `horus.bpm.cockpit.enabled` | `true` | `false` stops serving the cockpit |
 | `horus.bpm.cockpit.path` | `/bpm/cockpit` | Path under which the host serves the assets; starts with `/`, no trailing slash |
-| `horus.bpm.cockpit.auth-mode` | `host-session` | How the cockpit authenticates to this service. `host-session`: your session cookie, same origin. Sign-in through an identity provider arrives with standalone mode |
+| `horus.bpm.cockpit.auth-mode` | `host-session` | How the cockpit authenticates to this service. `host-session`: your session cookie, same origin. Sign-in through an identity provider is for the standalone cockpit ([Host it standalone](#host-it-standalone)) |
 | `horus.bpm.cockpit.host-label` | the host id | Name of this service in the cockpit header, up to 80 characters |
 | `horus.bpm.cockpit.environment` | none | Short label next to the service name, for example `UAT` |
 | `horus.bpm.cockpit.default-locale` | `en` | `en` or `vi`; the language until the user picks one with the EN / VI switch |
@@ -74,7 +74,11 @@ A cockpit route such as `/bpm/cockpit/rules/card-fee`, reloaded or bookmarked, g
 
 If the service answers `/api/bpm/me` or `/api/bpm/meta` with an error, the cockpit shows the error `code` and `correlationId` (give the `correlationId` to the service's operators) and does not show a partial header. A `404` there means the service does not serve the host metadata endpoints yet.
 
-Theming is through CSS variables, in a light and a dark theme. Labels exist in English and Vietnamese; one language is shown at a time (TR-UI-04).
+Theming is through CSS variables, in a light and a dark theme. Labels exist in English and Vietnamese; one language is shown at a time (TR-UI-04), and the EN / VI switch in the top bar changes every label at once. Every control of the shell is reachable with Tab, opened with Enter and closed with Esc, with a visible focus ring. Each pull request that touches the cockpit runs an axe-core audit in light and dark at 1440x900 and 1440x1200, and a coverage check that fails the build and names any key missing in Vietnamese.
+
+### Link to one decision
+
+A host screen can link to one decision: `<cockpit>/#/decisions/{decisionId}`, with `?host={hostId}` when the cockpit lists several services (PD-108). The link survives sign-in. It carries nothing else: no tenant, no token, no customer data. Without `host` while several services are listed, the cockpit asks which service logged the decision and requests nothing until one is chosen. A user without permission to read the decision log reads "You do not have permission to open decisions."; a missing decision and another tenant's decision read the same; an id that is not a decision id reads "This link is not valid." and nothing is requested.
 
 An embedded cockpit shows only the service that serves it. To see several services in one cockpit, host it standalone.
 
@@ -97,10 +101,45 @@ From 0.2 the process diagram is the default landing area, but only on a host tha
 
 ![Deployment shapes](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/deployment-shapes.svg)
 
-1. Download the cockpit archive of the matching release and serve it from any static web server.
-2. List your services in the cockpit's host registry, one base URL per service (TR-UI-01). The configuration format will be documented here before Cockpit 0.1 ships.
-3. Configure one OpenID Connect identity provider whose tokens every listed service accepts. The cockpit signs in once, as a public client with PKCE, and uses that sign-in for every host.
-4. Set `horus.bpm.rest.cors.allowed-origins` to the cockpit's exact origin and `horus.bpm.security.audiences` to the host's audience on each service (see [[Rule Engine Configuration]]); to let a user switch tenants, also `horus.bpm.tenancy.switching.enabled: true`; the cockpit calls `/api/bpm/rules/v1` and, from 0.2, `/api/bpm/processes/v1` directly. Allow the request headers the cockpit sends: `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`.
+1. Download the cockpit archive of the matching release and serve it from any static web server. It holds `index.html`, `assets/` and the sign-in callback page `auth/callback/index.html`.
+2. Put `cockpit-hosts.json` next to `index.html`, one entry per service (TR-UI-01). The cockpit checks it before it calls any service; a file that breaks a rule shows the location of the first problem, such as `/hosts/1/baseUrl`, and nothing else is called.
+3. Register the cockpit at your OpenID Connect identity provider as a public client (no secret) with the redirect URI `<cockpit address>/auth/callback/`, trailing slash included, and give each service a scope that yields a token with that service's audience.
+4. Set `horus.bpm.rest.cors.allowed-origins` to the cockpit's exact origin and `horus.bpm.security.audiences` to the host's audience on each service (see [[Rule Engine Configuration]]); to let a user switch tenants, also `horus.bpm.tenancy.switching.enabled: true`. The cockpit calls `/api/bpm/rules/v1` and, from 0.2, `/api/bpm/processes/v1` directly. Allow the request headers the cockpit sends: `Authorization`, `Accept`, `X-Requested-With`, `X-Tenant-Id`, `If-None-Match`, `If-Match` and `Idempotency-Key`.
+5. Send a `Content-Security-Policy` whose `connect-src` lists exactly the service origins and the identity provider, so a changed host list cannot reach a new origin.
+
+A sample `cockpit-hosts.json`:
+
+```json
+{
+  "schemaVersion": 1,
+  "auth": {
+    "mode": "oidc",
+    "issuer": "https://idp.bank.example/realms/operations",
+    "clientId": "horus-cockpit",
+    "scopes": ["profile"],
+    "tokenMode": "per-host"
+  },
+  "hosts": [
+    { "id": "loans", "label": { "en": "Loan origination", "vi": "Khởi tạo khoản vay" },
+      "baseUrl": "https://loans.api.bank.example", "scope": "loans-bpm", "environment": "production" },
+    { "id": "kyc", "label": "KYC onboarding",
+      "baseUrl": "https://kyc.api.bank.example", "scope": "kyc-bpm", "environment": "production" }
+  ],
+  "ui": { "defaultLocale": "vi" }
+}
+```
+
+| Rule | Detail |
+|---|---|
+| Addresses | `https://` only; `http://localhost` for development. Two services may not share an id or an address |
+| Scopes | With `tokenMode: per-host` (the default) every enabled service needs its `scope` |
+| Sign-in | Once per page load: authorization code with PKCE (`S256`), `state` and `nonce`. The sign-in request names every service's scope; each service's token is then requested with its own scope, so a token works at one service only |
+| Tokens | In memory only, never in `localStorage`, `sessionStorage` or a cookie. A reload signs in again through the identity provider's session. A token is renewed a minute before it expires |
+| Address | The service comes first in the address: `#/hosts/loans/rules`. Choosing another service in the top bar opens the same area there and shows only that service's data |
+| Versions | A cockpit release supports its own engine minor and the one before; Cockpit 0.3 works with engines 0.2 and 0.3. A service outside that range shows its engine version and the supported versions, and no screens |
+| Errors | A service that refuses `/api/bpm/me` shows the error code and the reference for that service; the other services stay usable |
+| Token renewal | A renewal the identity provider answers with a server error or `429` keeps the session: that service reads as unreachable and the next request tries again. Only a refused refresh token ends the session |
+| Tenant | With `horus.bpm.tenancy.switching.enabled: true` on the service and more than one tenant in the token's `allowed_tenants` claim, a tenant switcher sits beside the service in the top bar and lists only those tenants. Choosing one reloads that service's screens for it. A tenant the service refuses (`403 TENANT_NOT_ALLOWED`) brings you back to your own tenant with one sentence and the reference. With switching off, or one tenant, there is no switcher |
 
 Each host answers two endpoints the cockpit reads after sign-in:
 
@@ -161,19 +200,20 @@ A host that keeps production rule changes in Git can turn off cockpit editing pe
 | Task | What you do | What you see |
 |---|---|---|
 | Edit a table in a grid | On a draft you wrote, choose **Edit draft**; on the version in effect, **New draft** first stores a copy of it as the next draft and opens that. Change typed cells and rows; the arrow keys move between cells, Enter checks a cell and Esc puts it back | Each cell you leave or confirm is checked by the engine (`POST .../versions/{v}:validate`), which stores nothing. Its problems show on their row and cell in your language; an empty amount says what to type, for example `Enter an amount, for example 50,000,000 VND.`, with the engine's sentence under it. **Changes in this draft** lists only cells you have left and the engine accepted. **Save draft** stays disabled, with the reason beside it, until the cells are fixed, and saves into the draft with the lock version you opened (`PUT .../versions/{v}`, `If-Match`). If someone else saved the draft in the meantime, your edits stay on screen, the save bar names the cells they changed, and you choose **Load the latest version**. Requesting publication is a separate step on the saved draft. An approved version is never edited, and a draft another person wrote is read only for you |
+| Discard a draft | On a draft you wrote, choose **Discard draft**, add a reason if you like, and confirm | The button shows only where the engine offers it: on your own draft, with `rules:author`. Nothing changes before the engine answers (`POST .../versions/{v}:discard`, `If-Match`). Then the draft leaves every list and the screen returns to the rule set's version in front. Nothing is deleted: the history shows the version as Discarded, and its number is never used again |
 
 ## Process Engine tasks (Cockpit 0.2)
 
 | Area | What you can do |
 |---|---|
 | Definitions | Browse versions and see each version as a diagram. A definition with no stored layout is laid out automatically. Available now: the list of definitions and the diagram of the version in effect, laid out left to right, with a step list; a step type the cockpit does not know shows as a dashed box naming its type. Stored layouts follow |
-| Instances | Open an instance and see its diagram with the live token positions, its history timeline, and per step when it ran, how long it took, the attempts and who acted. Available now: a definition's Cases view lists its instances newest first; a case opens on its diagram, centred on the step where it is stuck, with a badge in words on the step where it waits and on a step with an open incident, that step selected first, and its activity in a panel beside the diagram; a wide case pans by drag or arrow keys, with a minimap and a Whole case overview, with Open the task when a task waits there. The breadcrumb of a task leads back to its case and process. The Timeline view lists the same history in time order. Every figure comes from the engine's activities read; the code of an incident is under Details |
-| Tasks | Available now for one host: My tasks, Available to me and, with `processes:task:manage`, All tasks, each in due-time order with overdue tasks marked in words. Claim a task, release it back to the queue, or open it. A supervisor reassigns a task to a colleague's user id with a required reason (1 to 500 characters), which the engine records in the task history; a colleague the engine refuses (missing role or group, or four eyes) is named in a plain sentence and the task stays where it was. Planned: one inbox merged across the hosts in the registry |
+| Instances | Open an instance and see its diagram with the live token positions, its history timeline, and per step when it ran, how long it took, the attempts and who acted. Available now: a definition's Cases view lists its instances newest first; a case opens on its diagram, centred on the step where it is stuck, with a badge in words on the step where it waits and on a step with an open incident, that step selected first, and its activity in a panel beside the diagram; a wide case pans by drag or arrow keys, with a minimap and a Whole case overview, with Open the task when a task waits there. The breadcrumb of a task leads back to its case and process. The Timeline view lists the same history in time order. When a saga undid steps after a failure, the Timeline also lists each undo step, marked with the symbol and the word "Undo", in the order the engine ran them, with a line per saga scope saying whether it is undone, being undone or not fully undone; a failed undo reads calmly with its attempts and **Open the incident**, which opens that incident in the Incidents queue, and the diagram marks undone steps with a label. Every figure comes from the engine's activities read; the code of an incident is under Details |
+| Tasks | Available now for one host: My tasks, Available to me and, with `processes:task:manage`, All tasks, each in due-time order with overdue tasks marked in words. **Overdue** beside the tabs shows the count of the tab's overdue tasks and, turned on, only those, oldest deadline first; which tasks are overdue is the engine's answer, and the filter stays in the link. Claim a task, release it back to the queue, or open it. A supervisor reassigns a task to a colleague's user id with a required reason (1 to 500 characters), which the engine records in the task history; a colleague the engine refuses (missing role or group, or four eyes) is named in a plain sentence and the task stays where it was. Planned: one inbox merged across the hosts in the registry |
 | Task forms | Complete a task through the form it declares, or follow its link to the host's own screen |
 | Agent tasks | Inspect bounded inputs, the JSON Schema verdict, the agent's output and the guardrail rules that fired; approve or override an escalated task with a reason. Available now from the review's link: masked values stay masked, the person who started the case or reported the answer cannot decide it, and an answer with masked values can only be overridden |
-| Incidents | Work one incident list merged across hosts; read cause and retry count; retry or resolve |
+| Incidents | Available now for one host: open incidents newest first with the step, the cause in words and the retry count, and a second list of results waiting for approval. **Retry** runs the step again with a reason; the row reads Retrying until the step is accepted. **Resolve** proposes the result the step should have returned, entered as named fields (text, number, amount, yes or no), with a reason; under the default `incidents.resolve-approval: four-eyes` a colleague with `processes:incident:manage` approves or rejects it, never the proposer (PD-126). An undo that must be done by hand is resolved, not retried. Readers with `processes:read` see the lists without actions. Planned: one list merged across the hosts in the registry |
 | Compensation runs | See which handlers ran, in which order, with which result |
-| SLA | List breaches |
+| SLA | The Overdue filter of the task queue (PD-024) |
 | Tenant switcher | If your token lists more than one allowed tenant, switch between them. The host accepts only a tenant in that list. Each screen shows one tenant; no screen combines tenants |
 
 Live counts of active tokens and incidents on each step of a definition diagram are planned for 0.2 and move to M3 if the 5 Mar 2027 checkpoint fails.

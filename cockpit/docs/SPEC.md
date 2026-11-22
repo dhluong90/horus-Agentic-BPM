@@ -86,13 +86,22 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `CKP_007_agent_task_inspector_shows_guardrail_and_override_controls`, `CKP_007_the_starter_of_the_case_cannot_decide_its_review`, `CKP_007_the_reporter_of_the_refused_answer_cannot_decide_its_review`, `CKP_007_a_masked_answer_cannot_be_approved_as_is_and_the_override_needs_the_masked_value`, `CKP_007_the_starter_is_told_in_one_line_why_they_cannot_decide`, `CKP_007_the_reporter_is_told_in_one_line_why_they_cannot_decide`, `CKP_007_a_masked_answer_opens_on_the_override_and_says_why_in_one_line`, `CKP_007_field_names_read_as_words_and_references_are_short`
 
 ### CKP-008 Incident queue surfaces root cause, retry count, and triggers `:retry` / `:resolve`
-- **Traces to:** `TR-OPS-03`
+- **Traces to:** `TR-OPS-03`, PD-126
 - **Milestone:** M2
-- **Given:** Instance `I12` has an `OPEN` incident (`AGENT_TIMEOUT`, `retryCount: 2`).
-- **When:** Operator opens Incidents queue, inspects the cause/context, and clicks **Retry**.
-- **Then:** Cockpit sends `POST /api/bpm/processes/v1/incidents/{id}:retry` with `Idempotency-Key` and `If-Match: "<lockVersion>"`, updating the incident list on `200 OK` (or showing conflict alert on `409`).
-- **Example:** `Click Retry on incident -> POST :retry -> row transitions from OPEN`.
-- **Test ID:** `CKP_008_incident_queue_retries_and_updates_status`
+- **Given:** Host `loans` runs the Process Engine with four `OPEN` incidents, among them `assess-documents` of case `APP-1045` (`AGENT_TIMEOUT`, `retryCount: 2`) and `book-loan` of a booked case (`COMPENSATION_MANUAL_REQUIRED`), and one `RESOLUTION_PENDING`. Tuan holds `processes:read` and `processes:incident:manage`; Hoa holds `processes:read` only.
+- **When:** Tuan opens Incidents, selects `assess-documents` and chooses Retry with the reason "Agent service back after maintenance"; then selects `book-loan`; Hoa opens Incidents.
+- **Then:** Incidents shows in the menu where a Process Engine host is registered and `/me` lists `processes:read`. The Open tab sends `GET /incidents?status=OPEN&limit=50` and lists the incidents newest first with the step by its name in the process (its id in words until the diagram is read), the cause in words ("The AI agent did not answer in time"), the retry count and when it was raised; the error code and the engine's cause summary are behind Details, never in the list. The selected incident shows its case (a link to the case), its process by name, the cause and the retry count, and the actions of its `allowedActions`. Retry asks for a reason (unavailable, with "Enter a reason to continue." beside it, until one is typed) and sends `POST /incidents/{id}:retry` with `{ reason }`, `If-Match: "<lockVersion>"` and an `Idempotency-Key`; only after the `202` does the row read "Retrying" and the toast say "Retry scheduled for Assess documents. The result shows on the next refresh."; the next read no longer lists the incident once the step was accepted. A `409 VERSION_CONFLICT` reads "Someone changed this incident. It has been read again; check it, then try again." inside the dialog, with the code behind Details. For `book-loan` Retry is unavailable with "Nothing to run again: undo the step by hand, then resolve." beside it and Resolve is offered. Hoa sees the list and the incident and one line saying fixing them needs the incident permission; no action is shown. At 1440x900 the list, the selected incident and its primary action are on screen without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, by keyboard alone, and axe-core reports no serious violation.
+- **Example:** `Retry assess-documents -> POST :retry {reason} 202 -> row Retrying -> next read: Open (3)`.
+- **Test ID:** `CKP_008_incident_queue_retries_and_updates_status`, `CKP_008_a_stale_incident_reads_as_a_plain_sentence_and_is_read_again`, `CKP_008_a_manual_undo_offers_resolve_only_and_says_why_retry_is_unavailable`, `CKP_008_a_reader_sees_the_queue_and_no_action`, `CKP_008_demo_an_incident_retried_from_the_queue_leaves_it_once_the_step_succeeds`, `CKP_008_retry_is_reached_and_sent_by_keyboard_alone_with_a_visible_focus`
+
+### CKP-080 Resolving an incident is a proposal a second person approves
+- **Traces to:** `TR-OPS-03`, `TR-SEC-11`, PD-126
+- **Milestone:** M2
+- **Given:** The incidents of `CKP-008`; `credit-decision` of case `APP-1042` is `OPEN` and its output schema requires `approvedLimit`; `verify-docs` of case `KYC-2207` is `RESOLUTION_PENDING` with a result Linh proposed. Tuan and Linh hold `processes:incident:manage`; the host's `/meta` setting `incidents.resolve-approval` is `four-eyes` (the default). Second case: a `dev` host with `single`.
+- **When:** Tuan resolves `credit-decision` with the field `limit` as an amount of 30,000,000 VND and a reason, then renames the field `approvedLimit`; Tuan opens `verify-docs` and approves it; Linh opens `verify-docs`; in the second case Tuan resolves `book-loan`.
+- **Then:** Resolve opens a dialog that says a colleague approves the result before the case moves on (or that it applies at once under `single`). The result is entered as fields in words, never raw JSON: a name, a kind (text, number, amount, yes or no) and a value; an amount shows separators as it is typed (`30,000,000`, `30.000.000` in Vietnamese) with its currency inside the field, and is sent as `{ amount, currency }` in integer minor units; a reason is required. The cockpit checks only the format; the engine's `422 OUTPUT_INVALID` names the failing paths, read as "The result does not match what the step expects: check Approved limit." and marked on the field, and nothing moves. After the `200` the incident is in Waiting for approval with "Proposed by Trần Minh Tuấn", and the proposal lists each field in words with money formatted. Approve result is unavailable to the proposer with "You proposed this result, so a colleague approves it." beside it, and Reject is not offered to them. Tuan approves Linh's proposal with `POST /incidents/{id}:approve-resolution` (`If-Match`, `Idempotency-Key`, optional comment); after the `200` the list is read again and says no result is waiting. Reject needs a reason and opens the incident again. In the second case the engine answers `RESOLVED` and the toast says the case moves on.
+- **Example:** `resolve {limit: 30,000,000 VND} -> 422 paths [/approvedLimit] -> resolve {approvedLimit} -> RESOLUTION_PENDING; proposer: Approve unavailable; second person: approve -> RESOLVED`.
+- **Test ID:** `CKP_080_a_proposed_result_is_built_from_fields_and_waits_for_a_colleague`, `CKP_080_a_second_person_approves_the_proposal_and_the_proposer_cannot`, `CKP_080_the_proposer_sees_approve_unavailable_with_the_reason`, `CKP_080_a_rejected_proposal_opens_the_incident_again_with_the_reason`, `CKP_080_under_the_single_setting_of_a_dev_host_a_resolution_applies_at_once`, `CKP_080_the_proposer_is_told_a_colleague_approves`, `CKP_080_the_resolve_mode_follows_the_host_setting_and_is_four_eyes_unless_single`
 
 ### CKP-011 Simulation screen replays logged decisions against a draft
 - **Traces to:** `TR-UI-02`
@@ -254,12 +263,21 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `T2 OPEN -> :reassign {hoa, Covering leave}; T4 CLAIMED -> :delegate {hoa, Covering leave}; T5 -> 409 ASSIGNEE_NOT_ALLOWED -> plain sentence`.
 - **Test ID:** `CKP_048_reassign_sends_reassign_for_an_open_task_and_delegate_for_a_claimed_one_with_the_reason`, `CKP_048_a_target_the_engine_refuses_reads_as_a_plain_sentence_and_the_task_stays`, `CKP_048_without_the_manage_permission_all_tasks_and_reassign_are_not_shown`, `CKP_048_masked_values_of_a_task_stay_masked_and_are_never_shown`, `CKP_048_tasks_show_only_with_a_task_permission_and_all_tasks_only_with_manage`, `CKP_048_an_open_task_is_reassigned_and_a_claimed_one_delegated_when_the_engine_allows`, `CKP_048_refusals_map_from_the_problem_code`, `CKP_048_reassign_is_done_by_keyboard_and_escape_closes_the_dialog_without_a_request`
 
+### CKP-049 An undo step that fails reads calmly, names the step and the attempts, and never says the case was put right
+- **Traces to:** `TR-COMP-02`, `TR-UI-03`, `PRE-203`, #80
+- **Milestone:** M2
+- **Given:** Instance `I9` where `releaseFunds`, the undo of `reserve-funds`, fails on every attempt and the engine opens an incident; `compensations[]` reads `NOT_FULLY_UNDONE`, `blockedStep` `reserve-funds`, with an `incidentId`.
+- **When:** An operator with `processes:read` opens `I9` and its Timeline.
+- **Then:** The timeline shows "Undo failed: Release funds" with "Failed after 3 attempts", in plain words with the symbol `!` and no red; above it the scope reads "Disburse: not fully undone" with "Open the incident", a link that opens that incident selected in the incident queue (`CKP-008`, `#/incidents?view=open&incident={incidentId}`). Nothing on the page says the case was put right. At 1440x900 the failure and the undo entries are visible without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, with axe-core.
+- **Example:** `releaseFunds fails 3 times -> "Undo failed: Release funds, Failed after 3 attempts"; scope "Disburse: not fully undone"`.
+- **Test ID:** `CKP_049_a_failed_undo_reads_calmly_and_never_says_the_case_was_put_right`
+
 ### CKP-022 The tenant switcher offers only allowed tenants and shows a refusal
 - **Traces to:** `TR-SEC-03`, `TR-TEN-01`
 - **Milestone:** M2
 - **Given:** `/me` returns `tenant.current: bank-a`, `tenant.allowed: [bank-a, bank-a-fin]`; a test proxy rewrites one request to `X-Tenant-Id: bank-b`.
 - **When:** The operator switches to `bank-a-fin`, then the rewritten request is sent.
-- **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "Tenant bank-b is not allowed for your account" with the `correlationId`. No screen shows rows from two tenants.
+- **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "The service did not accept that tenant for your account" with the `correlationId` behind Details. The sentence names no tenant, because the problem does not say which tenant was refused and the proxy changed the one the cockpit sent. The switcher is hidden when `/meta` reports `tenancy.switching: false` or `/me` allows one tenant. No screen shows rows from two tenants.
 - **Example:** `switch to bank-a-fin -> lists reload; forged bank-b -> 403 TENANT_NOT_ALLOWED`.
 - **Test ID:** `CKP_022_tenant_switcher_allowed_tenants_only`
 
@@ -407,12 +425,12 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Test ID:** `CKP_032_minimal_draft_editing_shows_errors_on_cells`
 
 ### CKP-033 Compensation runs appear in the instance timeline
-- **Traces to:** `TR-COMP-01`, `TR-OBS-01`
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-OBS-01`, `PRE-203`, #80
 - **Milestone:** M2
-- **Given:** Instance `I7` of `loan-booking` where `notify-partner` failed inside the `saga` `disburse` and the handlers `closeAccount` and `releaseFunds` ran, the second after one retry (`PRE-044`).
-- **When:** An operator with `processes:read` opens `I7`.
-- **Then:** The timeline lists, in time order and in text, the failure of `notify-partner`, then `closeAccount` and `releaseFunds` as compensation entries with their attempt ids, the retry of `releaseFunds`, and the scope `disburse` marked compensated; the diagram marks the compensated steps with an icon and a text label, not colour alone.
-- **Example:** `I7 timeline -> notify-partner FAILED, closeAccount COMPENSATED, releaseFunds retry 1 then COMPENSATED`.
+- **Given:** Instance `I7` of `loan-booking` where `reserve-funds` then `open-account` completed inside the saga `disburse` and `notify-partner` failed; the undo steps `closeAccount` and `releaseFunds` ran, the second after one retry (`PRE-044`). The engine reports the scope `disburse` as `UNDONE` with two steps undone.
+- **When:** An operator with `processes:read` opens `I7` and its Timeline.
+- **Then:** The timeline lists, in time order and in text, the failure of "Notify partner", then "Undo of Open account: Close account", then "Undo of Reserve funds: Release funds" with its retry, and the scope "Disburse: undone". Each undo entry carries the symbol ↺ and the word "Undo" besides the warning-hue left edge, so colour is never the only mark. The state of the scope is the engine's `compensations[].state`; the page never works it out from the entries. The diagram marks each undone step with ↺ and the label "Undone". No variable or input value appears; no code or id is shown in the page body.
+- **Example:** `I7 timeline -> Notify partner failed, Undo of Open account: Close account, Undo of Reserve funds: Release funds (attempt 2), Disburse: undone`.
 - **Test ID:** `CKP_033_compensation_runs_in_instance_timeline`
 
 ### CKP-034 SLA breaches are a filter of the task queue, measured against each task's own deadline
@@ -423,6 +441,15 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Then:** The cockpit sends the task query with `slaBreached=true` and shows only `T1`, with "overdue by 1 h" in text; `T3` never appears, because a task without a declared deadline cannot breach; no deadline is computed in the cockpit or from a product constant.
 - **Example:** `filter SLA breached at 11:00 -> T1 only, overdue by 1 h`.
 - **Test ID:** `CKP_034_sla_breach_filter_uses_task_deadlines`
+
+### CKP-050 Overdue count, order and wording, kept in the link
+- **Traces to:** `TR-CAL-01`, PD-024, PD-111
+- **Milestone:** M2
+- **Given:** On host `loans` at the engine clock 09:30 in Hanoi, `Collateral valuation` (claimed by Hoa) was due yesterday 16:00 and `Credit review` today 08:00; other tasks are due later or have no deadline. Sau holds `processes:task:manage`; An holds only `processes:task:work`, and none of her own tasks is overdue.
+- **When:** Sau turns on Overdue in All tasks and shares the link; An turns on Overdue in My tasks.
+- **Then:** The filter sits beside the tabs and reads "Overdue 2", the count of the tab's `slaBreached=true` list. Turned on, it is pressed, the query is `assignment=any&slaBreached=true&limit=50`, the header reads "2 overdue, oldest first", and the two tasks are listed in the engine's due-time order, oldest deadline first; a task without a deadline never appears. The link is `#/tasks?view=all&overdue=1`, so a shared link opens the same view. Each row shows "Overdue" with an icon, and "Overdue by 26 h" when the engine's task item carries `overdueBy` (PD-111); the browser computes no duration. For An the query is `assignment=mine&slaBreached=true&limit=50` and one line reads "No overdue tasks." with a link to every task. At 1440x900 the filter, the count and the first rows are on screen without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark; overdue is shown in words and an icon, not colour alone; the keyboard path and axe-core pass.
+- **Example:** `Overdue 2 -> GET /tasks?assignment=any&slaBreached=true -> Collateral valuation, Credit review`.
+- **Test ID:** `CKP_050_combined_with_my_tasks_and_none_overdue_says_so_in_one_line`, `CKP_050_overdue_by_reads_the_engine_duration_when_the_list_carries_it`, `CKP_050_the_overdue_filter_is_kept_in_the_link_and_anything_else_is_ignored`, `CKP_050_demo_the_queue_filtered_to_two_overdue_tasks_and_the_filter_kept_in_the_link`
 
 ### CKP-035 Every diagram has a keyboard-usable list of its steps and states in text, not colour alone
 - **Traces to:** `TR-UI-03`
@@ -451,6 +478,33 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `nationalId MASKED -> NOT_MASKED_BY_DEFAULT -> "National ID: mask removed (masked → not masked by default)"; Approve disabled -> tick -> approve {acknowledgedWarnings: [{UNMASKED_PERSONAL_DATA, nationalId}, {UNMASKED_PERSONAL_DATA, email}]}`.
 - **Test ID:** `CKP_037_the_warning_the_acceptance_and_approve_are_all_on_screen_at_1440x900`
 
+### CKP-038 A version exports as a spreadsheet file the engine writes
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, PD-107, PD-142, `RLE-191`
+- **Milestone:** M1
+- **Given:** Rule set `card-fee` v1 `PUBLISHED` with inputs `tier`, `balance` (money) and `txCount`, outputs `fee` and `waived`, five rows, and a user holding `rules:read`; in the second case a version whose row R2 uses a grouped condition.
+- **When:** The user opens Export and chooses "As spreadsheet (CSV)".
+- **Then:** One `GET .../versions/1/export?format=csv` is sent and `card-fee-v1.csv` is saved with the response bytes, unchanged: UTF-8 with a byte order mark, header `Rule,tier,balance,txCount,fee,waived,Description`, one line per rule, cells in shorthand. For the grouped version no file is saved and the screen says "This version cannot be a spreadsheet." with the row and the reason.
+- **Example:** `export card-fee v1 as CSV -> card-fee-v1.csv; R2 grouped -> "This version cannot be a spreadsheet." Row R2`.
+- **Test ID:** `CKP_038_a_version_exports_as_a_csv_file_the_engine_wrote`, `CKP_038_a_version_with_no_table_form_saves_nothing_and_names_the_rule`
+
+### CKP-039 A spreadsheet is imported as the next draft only after the user confirms, and a refusal stores nothing
+- **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-UI-04`, PD-107, PD-142, `RLE-192`, `RLE-193`, `RLE-194`
+- **Milestone:** M1
+- **Given:** A user holding `rules:author` on `card-fee` v1; files that change R3's fee, that write R2's balance without a currency, and (a reader, `rules:read` only) no import.
+- **When:** The user picks a `.csv` file with Import new version.
+- **Then:** A dialog says "Based on version 1", names the file and says it creates a new draft; nothing is sent before "Import as draft". One `POST .../versions?base=1` with `Content-Type: text/csv` and one `Idempotency-Key` follows, however often the button is pressed; after the `201` the screen says "Draft version 3 created" and opens the draft. A `422` stores nothing and lists one line per problem, "row R2, column Balance" and a plain reason in the user's language, never the cell's value. A `409` keeps the file and the dialog and offers "Try again", which sends a new key. A reader is offered Export and not Import.
+- **Example:** `R3 fee 32000 VND, base 1 -> confirm -> 201, "Draft version 3 created"; R2 ">= 51234567" -> "row R2, column Balance: the amount has no currency"`.
+- **Test ID:** `CKP_039_a_valid_file_is_sent_once_after_confirming_and_opens_the_new_draft`, `CKP_039_a_refused_cell_is_listed_by_row_and_column_without_its_value_and_nothing_is_saved`, `CKP_039_a_refusal_is_said_in_vietnamese_on_a_vietnamese_screen`, `CKP_039_a_conflict_keeps_the_file_and_the_dialog_and_a_retry_sends_a_new_key`, `CKP_039_cancelling_sends_nothing`, `CKP_039_a_reader_is_offered_export_and_not_import`, `CKP_039_keyboard_path_confirm_with_the_keyboard_and_escape_sends_nothing`, `CKP_039_visual_confirm_1440x900_dark_en`
+
+### CKP-040 Columns cannot change through a file, and damage from Excel is refused cell by cell
+- **Traces to:** `TR-DET-02`, `TR-UI-04`, PD-107, `RLE-192`, `RLE-193`
+- **Milestone:** M1
+- **Given:** A file with an added column `segment` and no `waived`; a file with `5E+07 VND` and `50,000,000 VND` in balance cells; a semicolon-separated file without a byte order mark.
+- **When:** Each is imported.
+- **Then:** The first is refused with "column segment" and "column waived" named and a reason that inputs and outputs cannot change through a file; the second with one line per damaged cell; nothing is saved. The semicolon file is accepted. No damaged value is read as another value.
+- **Example:** `header with segment -> "column segment: this column is not in the base version"`.
+- **Test ID:** `CKP_040_an_added_or_missing_column_is_refused_by_name`, `CKP_040_excel_damage_is_refused_cell_by_cell_and_a_semicolon_file_is_read`
+
 ---
 
 ## Definition Diagram, First Slice (Cockpit 0.2)
@@ -478,6 +532,24 @@ These two statements are the part of `CKP-016` and `CKP-029` that ships before s
 ## Decision Explorer, Version History and Evidence Export (PD-027, PD-108, PD-116)
 
 The engine decides and the cockpit shows: the explanation sentence, the masked values, the history and the evidence file with its SHA-256 all come from the Rule Engine (`GET /decisions`, `GET /decisions/{id}`, `GET /decisions/{id}/explain`, `GET /rule-sets/{name}/history`, `POST /rule-sets/{name}/evidence`). The cockpit computes none of them.
+
+### CKP-041 A link from a host screen opens one decision after sign-in
+- **Traces to:** `TR-SEC-05`, `TR-QA-01`, PD-108
+- **Milestone:** M1
+- **Given:** Decision `01JD2X…` logged on host `loans` for tenant `bank-a`, with `nationalId` masked and rule R2 matched. Thu holds `rules:log:read` and is not signed in. Second case: the registry lists `loans` and `cards`.
+- **When:** Thu opens `<cockpit>/#/decisions/01JD2X…`; in the second case `#/decisions/01JD2X…?host=loans`, then the same link without `host`.
+- **Then:** After sign-in the cockpit sends `GET /api/bpm/rules/v1/decisions/01JD2X…` once and shows the decision page with R2 highlighted, its reading and `nationalId` masked; signed in already, the page opens with no sign-in step. With `host=loans` the decision is read from `loans` only and the address becomes `#/hosts/loans/decisions/01JD2X…`. Without `host` the page asks "Which service logged this decision?" with both hosts and requests nothing until one is chosen. Nothing else in the link is read.
+- **Example:** `#/decisions/01JD2X…?host=loans -> sign-in -> #/hosts/loans/decisions/01JD2X…, one decision request to loans`.
+- **Test ID:** `CKP_041_link_lands_on_the_decision_after_sign_in`
+
+### CKP-042 A decision link refuses what the user may not see and what is not a decision id
+- **Traces to:** `TR-SEC-05`, `TR-QA-01`, PD-108
+- **Milestone:** M1
+- **Given:** Eve holds `rules:read` but not `rules:log:read`. `01JD9Z…` does not exist and `01JD7K…` belongs to tenant `bank-b`. A third link's id is longer than 26 characters or holds markup.
+- **When:** Eve opens a decision link; Thu opens the missing and the other tenant's link; anyone opens the third link.
+- **Then:** Eve reads "You do not have permission to open decisions." and no decision request is sent; a forced request gets `403`. Both of Thu's links read "Decision not found for tenant bank-a." with the same wording. The third link reads "This link is not valid.", sends no request and renders nothing of the link as markup. No personal data is read from or written to the address.
+- **Example:** `#/decisions/<img…> -> "This link is not valid.", 0 requests`.
+- **Test ID:** `CKP_042_decision_link_refusals`
 
 ### CKP-071 An auditor finds a rule set's or a case's decisions in a month and opens one
 - **Traces to:** `TR-OBS-05`, `TR-UI-02`, `TR-UI-04`, `RLE-029`, PD-108
@@ -559,3 +631,12 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 - **Then:** While loading, skeleton rows show at the height of real rows. No rows reads "This version has no rows yet." A 403 reads "You cannot read rows in plain words on this service." with no retry. `READINGS_TOO_LARGE` is a calm information note, not an error, without a number: "Too many rows to read at once", with "Open the table" (version) or "Compare in the table" (change), or "Run fewer samples." (simulation). Any other failure reads "The service could not answer. Try again." with Try again, the code and reference behind Details. A row that tests a masked input carries "Masked data is named here, never shown."; the masked value appears in no reading.
 - **Example:** `branch-fees -> "Too many rows to read at once" + Open the table; kyc-routing K1 -> "National ID is masked; its test is not shown"`.
 - **Test ID:** `CKP_079_too_many_rows_reads_calmly_and_offers_the_table`
+
+### CKP-081 The author of a draft discards it after confirming, and the screen moves on
+- **Traces to:** `TR-UI-02`, `TR-IDEM-01`, RLE-098, #418
+- **Milestone:** M2
+- **Given:** `card-fee` v1 is in effect and v2 is a draft Lan wrote. Lan holds `rules:author`; Minh holds `rules:approve`.
+- **When:** Lan opens v2, chooses Discard draft, cancels, chooses it again and confirms with the reason "Started from the wrong version"; Minh opens v2.
+- **Then:** Discard draft shows beside the draft's actions only when the engine lists `discard` in the version's `allowedActions`. It opens a dialog naming the version, with an optional reason; Cancel and Escape send nothing and return the focus to the button. Confirm sends `POST /rule-sets/card-fee/versions/2:discard` with `If-Match: "<lockVersion>"`, an `Idempotency-Key` and `{ reason }`; only after the `200` does the toast say "Version 2 draft discarded." and the screen return to the rule set, now on v1, with v2 gone from the version picker. A refusal (`409 VERSION_CONFLICT`, `409 INVALID_STATE`, `403 PERMISSION_DENIED`) reads as one plain sentence in the dialog with the code behind Details. The history shows a discarded version as "Discarded" with an icon. Minh sees no Discard draft. Checked at 1440x900 and 1440x1200, in English and Vietnamese, light and dark, by keyboard, and axe-core reports no serious violation.
+- **Example:** `v2 DRAFT allowedActions [request-publish, discard] -> Discard draft -> confirm -> POST :discard 200 -> #/rules/card-fee (v1)`.
+- **Test ID:** `CKP_081_the_author_discards_a_draft_after_confirming_and_returns_to_the_version_in_front`, `CKP_081_a_draft_without_discard_in_allowed_actions_shows_no_discard_button`, `CKP_081_discard_is_confirmed_by_keyboard_and_escape_closes_the_dialog_without_a_request`

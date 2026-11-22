@@ -24,6 +24,20 @@ export const definitionSummary = z
 export type DefinitionSummary = z.infer<typeof definitionSummary>;
 export const definitionSummaryPage = page(definitionSummary);
 
+/** One agent step input or output that declares neither mask true nor mask false (PD-146, PRE-205). */
+export interface UnclassifiedField { step: string; field: string; direction: 'INPUT' | 'OUTPUT' }
+
+const unclassifiedEntry = z.object({ code: z.literal('UNCLASSIFIED_FIELD'), step: z.string(), field: z.string(), direction: z.enum(['INPUT', 'OUTPUT']) }).loose();
+
+/** Read entry by entry: a warning this cockpit cannot read is dropped, never fatal; an engine without them sends none. */
+const unclassifiedWarnings = z
+  .array(z.unknown())
+  .optional()
+  .transform((items) => (items ?? []).flatMap((item): UnclassifiedField[] => {
+    const parsed = unclassifiedEntry.safeParse(item);
+    return parsed.success ? [{ step: parsed.data.step, field: parsed.data.field, direction: parsed.data.direction }] : [];
+  }));
+
 export const definitionVersion = z
   .object({
     id: z.string(),
@@ -43,6 +57,8 @@ export const definitionVersion = z
     approvedBy: nullableString,
     approvedAt: nullableString,
     decisionComment: nullableString,
+    /** Reminders that never block (PD-146): agent step fields with no classification. Names only, never a value. */
+    warnings: unclassifiedWarnings.optional(),
   })
   .loose();
 export type DefinitionVersion = z.infer<typeof definitionVersion>;
@@ -207,6 +223,8 @@ export const pendingDefinitionApproval = z
     definitionHash: z.string().regex(/^[0-9a-f]{64}$/),
     lockVersion: z.number().int(),
     requestedBy: z.string(),
+    /** The requester as a screen shows them, in the caller's language; the id when the host knows no name (#442). */
+    requestedByName: z.string().min(1).optional(),
     requestedAt: z.string(),
     allowedActions: z.array(z.string()),
     deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
@@ -247,10 +265,46 @@ export const nodeActivity = z
   .loose();
 export type NodeActivity = z.infer<typeof nodeActivity>;
 
+/** One history entry. The undo fields (#80, PRE-203) are present on the entries of an undo only. */
 export const activityEntry = z
-  .object({ id: z.string(), type: z.string(), nodeId: z.string().nullable(), actor: z.string().nullable(), occurredAt: z.string() })
+  .object({
+    id: z.string(),
+    type: z.string(),
+    nodeId: z.string().nullable(),
+    actor: z.string().nullable(),
+    occurredAt: z.string(),
+    kind: z.string().optional(),
+    compensates: z.string().optional(),
+    attemptId: z.string().optional(),
+    scopeTokenId: z.string().optional(),
+    scope: z.string().optional(),
+    attempt: z.number().int().min(1).optional(),
+    errorCode: z.string().optional(),
+    handler: z.string().optional(),
+    cause: z.string().optional(),
+  })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;
+
+export const COMPENSATION_STATES = ['IN_PROGRESS', 'UNDONE', 'NOT_FULLY_UNDONE'] as const;
+
+/** Where the undo of one saga scope stands, as the engine states it; the cockpit never infers it (PRE-203). */
+export const compensationScope = z
+  .object({
+    scopeTokenId: z.string(),
+    scope: z.string().nullable(),
+    state: z.string(),
+    startedAt: z.string(),
+    endedAt: z.string().nullable(),
+    cause: z.string().nullable(),
+    failingStep: z.string().nullable(),
+    stepsUndone: z.number().int().min(0),
+    blockedStep: z.string().nullable(),
+    incidentId: z.string().nullable(),
+    incidentCode: z.string().nullable(),
+  })
+  .loose();
+export type CompensationScope = z.infer<typeof compensationScope>;
 
 export const instanceActivities = z
   .object({
@@ -259,6 +313,8 @@ export const instanceActivities = z
     endedAt: z.string().nullable(),
     nodes: z.array(nodeActivity),
     entries: z.array(activityEntry),
+    /** Absent from an engine older than PRE-203. */
+    compensations: z.array(compensationScope).optional(),
     hasMore: z.boolean(),
   })
   .loose();
@@ -370,3 +426,47 @@ export const migrationOutcome = z
 export type MigrationOutcome = z.infer<typeof migrationOutcome>;
 export const migrationOutcomePage = z.object({ items: z.array(migrationOutcome), nextAfter: z.string().nullable().optional() }).loose();
 export type MigrationOutcomePage = z.infer<typeof migrationOutcomePage>;
+/** Incident statuses (PRE-077, PRE-078): open, a resolution waiting for a second person (PD-126), resolved. */
+export const INCIDENT_STATUSES = ['OPEN', 'RESOLUTION_PENDING', 'RESOLVED'] as const;
+export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
+
+/** What this caller may do with an incident now; computed per caller by the engine. Unknown actions are dropped. */
+export const INCIDENT_ACTIONS = ['retry', 'resolve', 'approve-resolution', 'reject-resolution'] as const;
+export type IncidentAction = (typeof INCIDENT_ACTIONS)[number];
+const incidentActions = z.array(z.string()).transform((items) => items.filter((item): item is IncidentAction => (INCIDENT_ACTIONS as readonly string[]).includes(item)));
+
+/** A proposed resolution: the output and reason one operator supplied, waiting for a second (PD-126). */
+export const pendingResolution = z
+  .object({
+    proposedBy: z.string(),
+    proposedAt: z.string(),
+    reason: nullableString,
+    output: z.record(z.string(), z.unknown()),
+    approvalMode: z.string().nullable().optional(),
+  })
+  .loose();
+export type PendingResolution = z.infer<typeof pendingResolution>;
+
+/** One incident of `GET /incidents` and `GET /incidents/{id}`, with the actions this caller may take. */
+export const incident = z
+  .object({
+    id: z.string(),
+    instanceId: z.string(),
+    nodeId: z.string(),
+    tokenId: nullableString,
+    errorCode: z.string(),
+    causeSummary: z.string(),
+    retryCount: z.number().int().min(0),
+    status: z.enum(INCIDENT_STATUSES),
+    lockVersion: z.number().int().min(0),
+    retrying: z.boolean(),
+    createdAt: z.string(),
+    resolvedAt: nullableString,
+    resolution: nullableString,
+    resolvedBy: nullableString,
+    pendingResolution: pendingResolution.nullable(),
+    allowedActions: incidentActions,
+  })
+  .loose();
+export type Incident = z.infer<typeof incident>;
+export const incidentPage = page(incident);

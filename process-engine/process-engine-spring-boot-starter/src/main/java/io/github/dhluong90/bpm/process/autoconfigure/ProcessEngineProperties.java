@@ -37,6 +37,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param migration migration plans of running instances (#74)
  * @param approval what a definition approval must name (PD-139)
  * @param incidents how incidents are resolved (PD-126)
+ * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  * @param calls limits of a process that calls another (#92)
  */
 @ConfigurationProperties("horus.bpm.processes")
@@ -61,7 +62,21 @@ public record ProcessEngineProperties(
         @DefaultValue Migration migration,
         @DefaultValue Approval approval,
         @DefaultValue Incidents incidents,
+        @DefaultValue Classification classification,
         @DefaultValue Calls calls) {
+
+    /**
+     * The reminder about agent step fields with no classification (PD-146, #438). Masking stays opt-in: an agent
+     * step's {@code horus:input} is masked only with {@code mask="true"}, an output property only with
+     * {@code "mask": true}. With the reminder on, every such field that declares neither true nor false is listed in
+     * the {@code warnings} of the version on {@code GET .../versions/{v}} and {@code :request-approval}, and outside
+     * {@code dev} one start-up WARN counts them per active version. It never blocks and never looks at names or values.
+     *
+     * @param warnUnclassified whether to warn; default {@code true}. Set {@code false} for a deployment that classifies
+     *     fields elsewhere
+     */
+    public record Classification(@DefaultValue("true") boolean warnUnclassified) {
+    }
 
     public ProcessEngineProperties {
         if (idempotencyRetention.isNegative() || idempotencyRetention.isZero()) {
@@ -412,6 +427,11 @@ public record ProcessEngineProperties(
      * @param rollupMaxSlice longest stretch of history one slice transaction reads
      * @param rollupMaxRun longest a run keeps taking slices before the next run continues from the watermark
      * @param rollupInitialBackfill how far back the first run starts on a database with no watermark
+     * @param rollupMinLag the write-lag window: the longest a step transaction may stay open before its history row
+     *     commits. No slice is rolled up within it and {@code rollup-lag} may not be shorter; a value below PT5M is
+     *     accepted on the {@code dev} profile only (#410)
+     * @param rollupRetention how long hourly statistics rows are kept, as an ISO-8601 period such as P13M or P90D, at
+     *     least P31D; older whole days are deleted by the rollup run (#410)
      */
     public record Stats(
             @DefaultValue("PT5S") Duration liveCacheTtl,
@@ -422,7 +442,9 @@ public record ProcessEngineProperties(
             @DefaultValue("PT5M") Duration rollupLag,
             @DefaultValue("PT1M") Duration rollupMaxSlice,
             @DefaultValue("PT60S") Duration rollupMaxRun,
-            @DefaultValue("PT1H") Duration rollupInitialBackfill) {
+            @DefaultValue("PT1H") Duration rollupInitialBackfill,
+            @DefaultValue("PT5M") Duration rollupMinLag,
+            @DefaultValue("P13M") java.time.Period rollupRetention) {
 
         public Stats {
             if (liveCacheTtl.isNegative() || liveCacheTtlLarge.isNegative()) {
@@ -434,16 +456,17 @@ public record ProcessEngineProperties(
             }
             try {
                 toRollupSettings(rollupEnabled, rollupInterval, rollupLag, rollupMaxSlice, rollupMaxRun,
-                        rollupInitialBackfill);
+                        rollupInitialBackfill, rollupMinLag, rollupRetention);
             } catch (IllegalArgumentException e) {
                 throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
             }
         }
 
         private static io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings toRollupSettings(boolean enabled,
-                Duration interval, Duration lag, Duration maxSlice, Duration maxRun, Duration backfill) {
+                Duration interval, Duration lag, Duration maxSlice, Duration maxRun, Duration backfill,
+                Duration minLag, java.time.Period retention) {
             return new io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings(enabled, interval, lag,
-                    maxSlice, maxRun, backfill);
+                    maxSlice, maxRun, backfill, minLag, retention);
         }
 
         LiveStatsSettings toSettings() {
@@ -452,7 +475,7 @@ public record ProcessEngineProperties(
 
         io.github.dhluong90.bpm.process.internal.service.NodeStatsSettings toRollup() {
             return toRollupSettings(rollupEnabled, rollupInterval, rollupLag, rollupMaxSlice, rollupMaxRun,
-                    rollupInitialBackfill);
+                    rollupInitialBackfill, rollupMinLag, rollupRetention);
         }
     }
 
@@ -505,7 +528,7 @@ public record ProcessEngineProperties(
     }
 
     /**
-     * A step that calls a child process (#92, PRE-205).
+     * A step that calls a child process (#92, PRE-212).
      *
      * @param maxDepth most calls one above another: a child started at a deeper level raises the incident
      *     {@code CALL_DEPTH_EXCEEDED} and no child starts; 1 to 5, may be lowered, never raised
@@ -534,7 +557,7 @@ public record ProcessEngineProperties(
      *     runner's plan is taken over after this time
      * @param lockWait how long the runner waits for an instance row another transaction holds when it opens the incident
      *     of a failed instance, {@code PT1S} to {@code PT30S}
-     * @param cancelApproval who approves the cancellation of a removed step's work (#106, PRE-203): {@code single} (the
+     * @param cancelApproval who approves the cancellation of a removed step's work (#106, PRE-210): {@code single} (the
      *     default): the holder of {@code processes:migration:manage} who proposes the plan is the only one needed for the
      *     cancellations, as the single-approver retirement of PD-102; {@code four-eyes} is reserved and refused at start-up
      *     until it is built
@@ -611,6 +634,7 @@ public record ProcessEngineProperties(
         return new EngineSettings(definitions.autoApprove(), definitions.maxNodes(), definitions.maxBytes(),
                 idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
                 lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion,
-                approval.requireContentHash(), incidents.toSetting());
+                approval.requireContentHash(), incidents.toSetting(),
+                classification == null || classification.warnUnclassified());
     }
 }

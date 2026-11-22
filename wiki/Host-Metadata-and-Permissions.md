@@ -266,6 +266,30 @@ A client must not repeat the sign-in more than once on `UNAUTHENTICATED` with `e
 | `horus.bpm.security.display-name-claims` | `name`, `preferred_username` | Claims tried in order for the display name, for example `name`, `upn` on Entra ID. At least one; same format |
 | `horus.bpm.limits.max-page-size` | `200` | The `limits.maxPageSize` of `/api/bpm/meta`, 1 to 200; may lower the engines' maximum, never raise it |
 | `horus.bpm.rules.security.role-permissions` | empty | Host authority to `rules:*` permissions |
+| `horus.bpm.display-names.roles.<id>.<language>` (also `.groups`, `.users`) | empty | Readable names served by `GET /api/bpm/display-names` and used for `requestedByName` in `GET /approvals` (#442). An id with a dot is written in brackets, `roles[ops.lead].en`. A host `DisplayNames` bean replaces them |
+| `horus.bpm.display-names.default-language` | `en` | Language used when the caller's has no name; two or three lower-case letters |
+
+## Display names
+
+`GET /api/bpm/display-names?roles=CARD_OFFICER,COMPLIANCE_REVIEWER&groups=hn-branch&users=lan` answers the readable names of roles, groups and users in the language of `Accept-Language`, for screens that otherwise show identifiers (#442). Only names the host knows are returned; show the identifier for the rest. At most 100 identifiers per kind; anything else is `400 INPUT_INVALID`. It needs a signed-in caller and no permission, and names grant nothing.
+
+```json
+{ "language": "vi", "roles": { "CARD_OFFICER": "Cán bộ thẻ" }, "groups": { "hn-branch": "Chi nhánh Hà Nội" }, "users": { "lan": "Trần Thị Lan" } }
+```
+
+By default the names come from `horus.bpm.display-names` (above). A host with a user directory declares a `DisplayNames` bean; every method has a default, so override only what you have:
+
+```java
+@Bean
+DisplayNames bankDirectoryNames(BankDirectory directory) {
+    return new DisplayNames() {
+        @Override
+        public Optional<String> user(String tenantId, String userId, Locale locale) {
+            return directory.fullName(tenantId, userId);
+        }
+    };
+}
+```
 
 ## Try it
 

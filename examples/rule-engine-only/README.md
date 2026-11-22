@@ -121,7 +121,9 @@ curl -s -i localhost:8080/api/bpm/meta
 
 Repeat the sign-in with `username=minh` to see `["rules:read","rules:approve","rules:simulate"]`. Calls that change state with the session need the CSRF token: the host sets it in the `XSRF-TOKEN` cookie and expects it back as `X-XSRF-TOKEN`.
 
-The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`) or with a token issuer that is not on this machine. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
+The demo users exist only on the `dev` profile, and the host refuses to start on `dev` beside another profile (other than `test`), or with a token issuer, JWK set or public key that is not on this machine. The development tenant serves form users only: a bearer token without `tenant_id` is refused with `401`, and the engines refuse `dev-tenant` beside any profile other than `dev` or `test`.
+
+The session cookie and `XSRF-TOKEN` are sent with `Secure` and `SameSite=Lax` ([`application.yml`](src/main/resources/application.yml)), so they travel only over https and on same-site requests; browsers and curl 7.79 or later accept them from `http://localhost`. A request with a bearer header skips the CSRF check only when the host validates tokens; otherwise a session request with a stray `Authorization: Bearer` header still needs the CSRF token. Without `dev` the user store is empty. The host accepts bearer tokens when an issuer, JWK set or public key is configured, and then requires its own audience; token claim `roles` becomes `ROLE_*` authorities and claim `tenant_id` the tenant.
 
 To see the `ruleEngine` component locally, start with `--management.endpoint.health.show-components=always`. It reports the schema version, `pendingMigrations`, and whether next month's partition exists.
 

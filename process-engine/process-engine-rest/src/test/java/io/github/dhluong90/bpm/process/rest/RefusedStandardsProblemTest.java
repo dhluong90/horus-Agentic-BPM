@@ -47,12 +47,15 @@ class RefusedStandardsProblemTest {
                 new ServletWebRequest(new MockHttpServletRequest())));
 
         assertThat(body.get("code").stringValue()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
-        assertThat(body.at("/problems/0/element").stringValue()).isEqualTo("boundaryEvent");
-        assertThat(body.at("/problems/0/elementId").stringValue()).isEqualTo("be-timeout");
-        assertThat(body.at("/problems/0/line").intValue()).isEqualTo(42);
-        assertThat(body.at("/problems/0/stage").stringValue()).isEqualTo("S1");
-        assertThat(body.at("/problems/1/code").stringValue()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
-        assertThat(body.at("/problems/1/stage").stringValue()).isEqualTo("not planned");
+        assertThat(body.at("/unsupportedElements/0/element").stringValue()).isEqualTo("boundaryEvent");
+        assertThat(body.at("/unsupportedElements/0/elementId").stringValue()).isEqualTo("be-timeout");
+        assertThat(body.at("/unsupportedElements/0/line").intValue()).isEqualTo(42);
+        assertThat(body.at("/unsupportedElements/0/stage").stringValue()).isEqualTo("S1");
+        assertThat(body.at("/unsupportedElements/0/message").stringValue()).isEqualTo("is not supported");
+        assertThat(body.at("/unsupportedElements/1/element").stringValue()).isEqualTo("conditionExpression");
+        assertThat(body.at("/unsupportedElements/0").has("code")).isFalse();
+        assertThat(body.has("problems")).isFalse();
+        assertThat(body.at("/unsupportedElements/1/stage").stringValue()).isEqualTo("not planned");
         assertThat(body.get("violationsTruncated").booleanValue()).isTrue();
         assertThat(body.at("/warnings/0/code").stringValue()).isEqualTo("FOREIGN_EXTENSION_IGNORED");
         assertThat(body.at("/warnings/0/line").intValue()).isEqualTo(30);

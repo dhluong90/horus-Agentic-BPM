@@ -12,6 +12,7 @@ const ACTIONS: Record<string, { key: MessageKey; glyph: string }> = {
   RETIRED: { key: 'history.RETIRED', glyph: '■' },
   WITHDRAWN: { key: 'history.WITHDRAWN', glyph: '↩' },
   DRAFT_UPDATED: { key: 'history.DRAFT_UPDATED', glyph: '✎' },
+  DISCARDED: { key: 'history.DISCARDED', glyph: '⌫' },
 };
 
 /** One entry of a version's audit trail: what happened in words, who did it, when, and the reason given. */

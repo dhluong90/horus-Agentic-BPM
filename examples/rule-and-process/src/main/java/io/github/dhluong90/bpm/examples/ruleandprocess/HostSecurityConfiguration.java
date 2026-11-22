@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.examples.ruleandprocess;
 import io.github.dhluong90.bpm.host.security.BpmProblemAccessDeniedHandler;
 import io.github.dhluong90.bpm.host.security.BpmProblemAuthenticationEntryPoint;
 import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
+import io.github.dhluong90.bpm.process.spi.RoleCatalogue;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.ArrayList;
@@ -71,6 +72,9 @@ class HostSecurityConfiguration {
     SecurityFilterChain hostSecurity(HttpSecurity http, ObjectProvider<JwtDecoder> jwtDecoder, Environment environment,
             BpmProblemAuthenticationEntryPoint problemEntryPoint, BpmProblemAccessDeniedHandler problemAccessDenied) {
         requireAudience(environment);
+        // Bearer requests skip CSRF only when this host validates tokens: without a decoder a junk bearer
+        // header must not turn the CSRF check off for a request that is really authenticated by the session.
+        boolean acceptsTokens = jwtDecoder.getIfAvailable() != null;
         RequestMatcher engineApi = PathPatternRequestMatcher.withDefaults().matcher("/api/bpm/**");
         // The engine module's beans, built from horus.bpm.security.challenge, so the chain and the engine endpoints
         // send the same challenge.
@@ -80,9 +84,9 @@ class HostSecurityConfiguration {
                 .formLogin(Customizer.withDefaults())
                 .logout(Customizer.withDefaults())
                 .csrf(csrf -> csrf
-                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                        .csrfTokenRepository(csrfCookies(environment))
                         .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
-                        .ignoringRequestMatchers(request -> bearerRequest(request)
+                        .ignoringRequestMatchers(request -> (acceptsTokens && bearerRequest(request))
                                 || (environment.matchesProfiles(DEV_PROFILE) && basicRequest(request))))
                 // Only pages are remembered for the redirect after sign-in, so an anonymous API call creates no session
                 .requestCache(cache -> cache.requestCache(pagesOnly(engineApi)))
@@ -94,7 +98,7 @@ class HostSecurityConfiguration {
             // credentials. Each call carries its credentials and no cookie, so CSRF does not apply to it.
             http.httpBasic(basic -> basic.authenticationEntryPoint(problemEntryPoint));
         }
-        if (jwtDecoder.getIfAvailable() != null) {
+        if (acceptsTokens) {
             http.oauth2ResourceServer(server -> server
                     .jwt(jwt -> jwt.jwtAuthenticationConverter(rolesAndPermissions()))
                     .authenticationEntryPoint(problemEntryPoint));
@@ -117,6 +121,18 @@ class HostSecurityConfiguration {
                 new NegatedRequestMatcher(favicon),
                 new NegatedRequestMatcher(backgroundCall)));
         return requestCache;
+    }
+
+    /**
+     * The {@code XSRF-TOKEN} cookie, readable by the page as the cockpit needs, with the same {@code Secure}
+     * and {@code SameSite=Lax} attributes as the session cookie ({@code server.servlet.session.cookie.*} in
+     * {@code application.yml}). Browsers accept a secure cookie from {@code http://localhost}.
+     */
+    static CookieCsrfTokenRepository csrfCookies(Environment environment) {
+        boolean secure = environment.getProperty("server.servlet.session.cookie.secure", Boolean.class, true);
+        CookieCsrfTokenRepository repository = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        repository.setCookieCustomizer(cookie -> cookie.secure(secure).sameSite("Lax"));
+        return repository;
     }
 
     /** A request authenticated by a bearer token sends no cookie, so a forged cross-site request cannot use it. */
@@ -171,8 +187,17 @@ class HostSecurityConfiguration {
     }
 
     /**
+     * The roles an escalation may name, checked at approval (PRE-180): those of the demo users, in the {@code dev}
+     * tenant. Without this bean the engine checks no role.
+     */
+    @Bean
+    RoleCatalogue hostRoleCatalogue(@Value("${horus.bpm.tenancy.dev-tenant:}") String devTenant) {
+        return new DemoRoleCatalogue(devTenant);
+    }
+
+    /**
      * Stops a {@code dev} start-up that looks like a shared environment: another profile active beside
-     * {@code dev} (other than {@code test}), or a token issuer that is not on this machine.
+     * {@code dev} (other than {@code test}), or a token issuer, key set or public key that is not on this machine.
      */
     static void requireLocalDevelopment(Environment environment) {
         for (String profile : environment.getActiveProfiles()) {
@@ -181,14 +206,29 @@ class HostSecurityConfiguration {
                         + profile + "' is active too. Remove dev outside local development.");
             }
         }
-        String issuer = environment.getProperty(JWT + "issuer-uri", "");
-        if (!issuer.isBlank()) {
-            String host = URI.create(issuer).getHost();
-            if (host == null || !(host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]"))) {
-                throw new IllegalStateException("The dev profile turns on demo users, but the token issuer " + issuer
+        for (String name : List.of("issuer-uri", "jwk-set-uri")) {
+            String uri = environment.getProperty(JWT + name, "");
+            if (!uri.isBlank() && !onThisMachine(uri)) {
+                throw new IllegalStateException("The dev profile turns on demo users, but the token " + name + " " + uri
                         + " is not on this machine. Remove dev outside local development.");
             }
         }
+        // A fixed public key is local only as a file or classpath resource; one fetched from a URL is refused.
+        String key = environment.getProperty(JWT + "public-key-location", "");
+        if (!key.isBlank() && !(key.startsWith("file:") || key.startsWith("classpath:") || onThisMachine(key))) {
+            throw new IllegalStateException("The dev profile turns on demo users, but tokens are also accepted with the "
+                    + "public key " + key + ", which is not on this machine. Remove dev outside local development.");
+        }
+    }
+
+    private static boolean onThisMachine(String uri) {
+        String host;
+        try {
+            host = URI.create(uri).getHost();
+        } catch (IllegalArgumentException malformed) {
+            return false;
+        }
+        return host != null && (host.equals("localhost") || host.equals("127.0.0.1") || host.equals("[::1]"));
     }
 
     /**

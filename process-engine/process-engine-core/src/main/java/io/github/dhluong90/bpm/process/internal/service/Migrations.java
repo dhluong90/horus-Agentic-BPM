@@ -248,7 +248,7 @@ public final class Migrations implements MigrationService {
                         new MigrationDryRun.InstanceSample(count, ids, count > ids.size())));
             }
         });
-        // PRE-201: a removed step whose call is in flight is never cut off. It is reported, and its instance is left on
+        // PRE-208: a removed step whose call is in flight is never cut off. It is reported, and its instance is left on
         // the source version for a later run; it does not make the plan invalid.
         long inFlight = 0;
         java.util.Set<String> inFlightIds = new HashSet<>();
@@ -345,7 +345,7 @@ public final class Migrations implements MigrationService {
     }
 
     /**
-     * Refuses instructions that cannot be carried out, before anything is written (PRE-200, PRE-202): a mapping or a
+     * Refuses instructions that cannot be carried out, before anything is written (PRE-207, PRE-209): a mapping or a
      * cancellation of a step the source does not have, a mapping to a step of another type or one the target lacks, a
      * cancellation of a step the target still has, a step handled twice, and a cancellation without a reason or a step
      * to continue at.

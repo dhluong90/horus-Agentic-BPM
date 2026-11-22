@@ -6,6 +6,7 @@ import { z } from 'zod';
  * - signed-out: the host redirected the call to its sign-in page, so the session really ended and a
  *   reload goes through the host's sign-in. A 401 problem is not this: the page was served, so the
  *   session works for the page and the API refused it for another reason; it stays a `problem`;
+ * - no-access: standalone mode only; the identity provider gives the user no token for this service;
  * - unreachable: no answer at all (network, timeout);
  * - unexpected-response: an answer that is neither the documented body nor a problem.
  */
@@ -23,6 +24,8 @@ export type HostError =
       members?: Readonly<Record<string, unknown>>;
     }
   | { kind: 'signed-out' }
+  /** Standalone mode: the identity provider refuses this service's scope to the user. */
+  | { kind: 'no-access' }
   | { kind: 'unreachable' }
   | { kind: 'unexpected-response'; status: number; correlationId: string | undefined };
 
@@ -31,9 +34,11 @@ export interface Violation {
   ruleId: string | null;
   column: string | null;
   message: string;
+  /** The engine's stable code of the problem (for a spreadsheet file, `CSV_*`); absent when the engine sent none. */
+  code?: string;
 }
 
-const violation = z.object({ ruleId: z.string().nullable().optional(), column: z.string().nullable().optional(), message: z.string() }).loose();
+const violation = z.object({ ruleId: z.string().nullable().optional(), column: z.string().nullable().optional(), message: z.string(), code: z.string().optional() }).loose();
 
 export class HostCallError extends Error {
   readonly hostError: HostError;
@@ -78,7 +83,7 @@ export async function readProblem(response: Response): Promise<HostError> {
   }
   const violations = (parsed.data.violations ?? []).flatMap((item) => {
     const read = violation.safeParse(item);
-    return read.success ? [{ ruleId: read.data.ruleId ?? null, column: read.data.column ?? null, message: read.data.message }] : [];
+    return read.success ? [{ ruleId: read.data.ruleId ?? null, column: read.data.column ?? null, message: read.data.message, ...(read.data.code !== undefined ? { code: read.data.code } : {}) }] : [];
   });
   const STANDARD = new Set(['type', 'title', 'status', 'detail', 'violations', 'code', 'correlationId', 'instance']);
   const extra: Record<string, unknown> = Object.fromEntries(Object.entries(parsed.data).filter(([key]) => !STANDARD.has(key)));

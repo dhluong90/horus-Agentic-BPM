@@ -154,7 +154,7 @@ class TenantSwitchingTest {
                     assertThat(log).contains("tenant.switch.accepted user=lan fromTenant=bank-a "
                             + "requestedTenant=bank-a-fin correlationId=" + switched.getResponse().getHeader("X-Correlation-Id")
                             + " clientCorrelationId=probe-3");
-                    assertThat(log.split("tenant.switch.accepted", -1)).hasSize(2);
+                    assertThat(log.split("tenant.switch.accepted user=", -1)).hasSize(2);
                 });
     }
 

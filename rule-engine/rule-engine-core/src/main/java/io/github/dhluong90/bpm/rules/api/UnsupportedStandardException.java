@@ -76,10 +76,7 @@ public final class UnsupportedStandardException extends HorusBpmException {
     }
 
     private static String describe(UnsupportedElement e) {
-        String stage = UnsupportedElement.NOT_PLANNED.equals(e.stage()) ? "is not planned"
-                : "is added in stage " + e.stage();
-        return "<" + e.element() + (e.id() == null ? "" : " id=\"" + e.id() + "\"") + "> is not supported; it "
-                + stage + " (line " + e.line() + ")";
+        return e.message();
     }
 
     /** @return the elements refused, in document order; empty for CMMN */

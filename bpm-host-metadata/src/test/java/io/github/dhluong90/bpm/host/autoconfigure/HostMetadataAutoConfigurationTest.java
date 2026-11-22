@@ -63,6 +63,12 @@ class HostMetadataAutoConfigurationTest {
                     .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                             .hasMessageContaining("is no longer supported: the engines take the tenant only from the "
                                     + "authenticated principal (PD-079)"));
+            // L3: a host that declares its own TenantResolver gets the same stop
+            TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class, TenantResolutionTest.FixedHostTenant.class)
+                    .withPropertyValues(removed, "spring.profiles.active=dev")
+                    .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                            .hasMessageContaining("is no longer supported: the engines take the tenant only from the "
+                                    + "authenticated principal (PD-079)"));
         }
     }
 

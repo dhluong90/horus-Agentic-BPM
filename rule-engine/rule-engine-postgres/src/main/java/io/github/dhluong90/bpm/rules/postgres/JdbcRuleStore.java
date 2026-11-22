@@ -542,6 +542,14 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     @Override
+    public List<VersionInputs> publishedVersionInputs() {
+        // Engine-internal, across tenants on purpose: the start-up summary of unclassified inputs (PD-146).
+        return RuleListQueries.PUBLISHED_VERSION_INPUTS.list(jdbc, ListQuery.params(),
+                (rs, row) -> new VersionInputs(rs.getString("tenant_id"), rs.getString("name"),
+                rs.getInt("version_num"), rs.getString("inputs")));
+    }
+
+    @Override
     public List<String> declaredInputs(String tenantId, String ruleSet) {
         // Tenant first, then the rule set by its unique name; at most 1,000 versions, newest first (RLE-071).
         return RuleListQueries.DECLARED_INPUTS.list(jdbc, ListQuery.params("tenant", tenantId, "ruleSet", ruleSet,

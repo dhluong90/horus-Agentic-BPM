@@ -18,9 +18,12 @@ import java.util.Objects;
  * @param readingsTruncated true when the document is valid but its readings are left out because the table has more
  *     rows than one request reads ({@link #TABLE_TOO_LARGE}); the validation itself is never refused for that
  * @param readingsReason why the readings are left out, or null when they are not
+ * @param warnings reminders that never make the document invalid, such as each input that declares no {@code mask}
+ *     ({@link VersionWarning#UNCLASSIFIED_INPUT}, PD-146); empty when there are none or when {@code valid} is false
  */
 public record DraftValidation(String ruleSet, int version, boolean valid, List<Problem> problems,
-        boolean problemsTruncated, List<Reading> readings, boolean readingsTruncated, String readingsReason)
+        boolean problemsTruncated, List<Reading> readings, boolean readingsTruncated, String readingsReason,
+        List<VersionWarning> warnings)
         implements Serializable {
 
     /** The reason code of {@code readingsReason} when the table has more rows than one request reads. */
@@ -30,6 +33,7 @@ public record DraftValidation(String ruleSet, int version, boolean valid, List<P
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
         problems = List.copyOf(problems);
         readings = List.copyOf(readings);
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
         if (readingsTruncated != (readingsReason != null)) {
             throw new IllegalArgumentException("readingsReason is set exactly when readingsTruncated is true");
         }
@@ -47,7 +51,25 @@ public record DraftValidation(String ruleSet, int version, boolean valid, List<P
      */
     public DraftValidation(String ruleSet, int version, boolean valid, List<Problem> problems,
             boolean problemsTruncated, List<Reading> readings) {
-        this(ruleSet, version, valid, problems, problemsTruncated, readings, false, null);
+        this(ruleSet, version, valid, problems, problemsTruncated, readings, false, null, List.of());
+    }
+
+    /**
+     * A validation without warnings, as before #438.
+     *
+     * @param ruleSet the rule set name
+     * @param version the draft's version number
+     * @param valid whether a save would be accepted
+     * @param problems the cell problems
+     * @param problemsTruncated whether more problems were found
+     * @param readings the readings
+     * @param readingsTruncated whether the readings are left out
+     * @param readingsReason why the readings are left out, or null
+     */
+    public DraftValidation(String ruleSet, int version, boolean valid, List<Problem> problems,
+            boolean problemsTruncated, List<Reading> readings, boolean readingsTruncated, String readingsReason) {
+        this(ruleSet, version, valid, problems, problemsTruncated, readings, readingsTruncated, readingsReason,
+                List.of());
     }
 
     /**

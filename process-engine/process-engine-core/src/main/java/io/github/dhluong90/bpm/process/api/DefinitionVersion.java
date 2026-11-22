@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.process.api;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -28,19 +29,65 @@ import java.util.Objects;
  * @param retiredBy who retired it ({@code system:effective-date} when a newer version took effect), or null
  * @param retiredAt when it was retired, or null
  * @param supersededBy the version number that superseded it, or null
+ * @param warnings what an import kept in the stored source but did not read, such as {@code FOREIGN_EXTENSION_IGNORED};
+ *     empty except in the answer to an import
  */
 public record DefinitionVersion(String id, String key, int version, String status, String name,
         String definitionHash, SourceFormat sourceFormat, String sourceHash, int nodeCount, String approvedBy,
         String createdBy, Instant createdAt, String source, long lockVersion, Instant effectiveFrom, String requestedBy,
         Instant requestedAt, Instant approvedAt, String decisionComment, String retiredBy, Instant retiredAt,
-        Integer supersededBy) {
+        Integer supersededBy, List<DefinitionProblem> warnings) {
 
     public DefinitionVersion {
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(key, "key must not be null");
         Objects.requireNonNull(status, "status must not be null");
         Objects.requireNonNull(definitionHash, "definitionHash must not be null");
         Objects.requireNonNull(sourceFormat, "sourceFormat must not be null");
+    }
+
+    /**
+     * The form without warnings.
+     *
+     * @param id the version id
+     * @param key the definition key
+     * @param version the version number
+     * @param status the status
+     * @param name the display name, or null
+     * @param definitionHash the definition hash
+     * @param sourceFormat the source format
+     * @param sourceHash the source hash
+     * @param nodeCount number of flow nodes
+     * @param approvedBy approver or null
+     * @param createdBy the importing identity
+     * @param createdAt when it was imported
+     * @param source how it arrived
+     * @param lockVersion optimistic lock
+     * @param effectiveFrom when it takes effect, or null
+     * @param requestedBy who requested approval, or null
+     * @param requestedAt when, or null
+     * @param approvedAt when approved, or null
+     * @param decisionComment the comment, or null
+     * @param retiredBy who retired it, or null
+     * @param retiredAt when, or null
+     * @param supersededBy the superseding version, or null
+     */
+    public DefinitionVersion(String id, String key, int version, String status, String name, String definitionHash,
+            SourceFormat sourceFormat, String sourceHash, int nodeCount, String approvedBy, String createdBy,
+            Instant createdAt, String source, long lockVersion, Instant effectiveFrom, String requestedBy,
+            Instant requestedAt, Instant approvedAt, String decisionComment, String retiredBy, Instant retiredAt,
+            Integer supersededBy) {
+        this(id, key, version, status, name, definitionHash, sourceFormat, sourceHash, nodeCount, approvedBy,
+                createdBy, createdAt, source, lockVersion, effectiveFrom, requestedBy, requestedAt, approvedAt,
+                decisionComment, retiredBy, retiredAt, supersededBy, List.of());
+    }
+
+    /** @param found what the import ignored @return a copy that carries it */
+    public DefinitionVersion withWarnings(List<DefinitionProblem> found) {
+        return new DefinitionVersion(id, key, version, status, name, definitionHash, sourceFormat, sourceHash,
+                nodeCount, approvedBy, createdBy, createdAt, source, lockVersion, effectiveFrom, requestedBy,
+                requestedAt, approvedAt, decisionComment, retiredBy, retiredAt, supersededBy, found);
     }
 
     /**

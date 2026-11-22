@@ -128,6 +128,8 @@ public final class RuleSetReader {
                 case JSON -> EngineJson.JSON.readTree(source);
                 // DMN is read into the lowest schema version that expresses it (TR-STD-03), then checked as JSON.
                 case DMN_XML -> EngineJson.JSON.readTree(EngineJson.JSON.writeValueAsBytes(DmnReader.toRuleSet(source)));
+                // a spreadsheet is turned into a JSON document by CsvTable against its base version before this point
+                case CSV -> throw new ValidationFailedException("A CSV file is imported against a base version");
             };
         } catch (JacksonException e) {
             throw new ValidationFailedException("Document is not well-formed " + format + ": " + e.getOriginalMessage());

@@ -120,7 +120,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     }
 
     /**
-     * PRE-201: a migration moves a waiting token to a step of the instance's new version. The shell has cancelled what
+     * PRE-208: a migration moves a waiting token to a step of the instance's new version. The shell has cancelled what
      * the token waited for; the token enters the step as on arrival, so its behaviour opens a task or parks a job.
      */
     private void moveToken(Command.MoveToken move, WorkingContext ctx) {

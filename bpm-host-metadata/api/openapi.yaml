@@ -1,11 +1,11 @@
 openapi: 3.1.0
 info:
   title: HORUS Agentic BPM host contract
-  version: 1.2.0
+  version: 1.3.0
   summary: What a host's engines are, and who the caller is.
   description: |
-    Every host that embeds an engine serves these two endpoints once, whatever engines it runs
-    (ADR-0014). Both need an authenticated caller and no other permission. The response bodies are
+    Every host that embeds an engine serves these endpoints once, whatever engines it runs
+    (ADR-0014); `/api/bpm/display-names` was added in 1.3.0 (#442). Both need an authenticated caller and no other permission. The response bodies are
     owned by the JSON Schemas in `cockpit/api/schema/`; this document references them and adds the
     headers and errors. Changes are additive within schema version 1.
   license:
@@ -84,6 +84,55 @@ paths:
                 roles: [ROLE_PRICING_ANALYST]
                 groups: []
         '304': { $ref: '#/components/responses/NotModified' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/bpm/display-names:
+    get:
+      operationId: getDisplayNames
+      summary: Readable names of roles, groups and users, in the caller's language
+      description: |
+        The names a screen shows instead of identifiers (#442, `RLE-196`, `PRE-206`): the role of a task in the
+        queue, a group, or the user who requested an approval. Names come from the host's `DisplayNames` bean; the
+        default reads `horus.bpm.display-names.roles|groups|users.<id>.<language>`. The language is the first of
+        `Accept-Language`, then `horus.bpm.display-names.default-language` (`en`). Only known names are returned:
+        a client shows the identifier for the rest. Each parameter may be repeated or comma-separated, at most 100
+        identifiers per kind. Needs an authenticated caller and no other permission; the tenant is the caller's.
+        Names are labels only and grant nothing.
+      parameters:
+        - { name: roles, in: query, required: false, schema: { type: string }, example: 'CARD_OFFICER,COMPLIANCE_REVIEWER' }
+        - { name: groups, in: query, required: false, schema: { type: string }, example: hn-branch }
+        - { name: users, in: query, required: false, schema: { type: string }, example: lan }
+        - name: Accept-Language
+          in: header
+          required: false
+          schema: { type: string }
+          example: vi-VN,vi;q=0.9
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: The known names, by kind and identifier.
+          headers:
+            Cache-Control:
+              description: '`private, no-cache`'
+              schema: { type: string, const: 'private, no-cache' }
+            Vary:
+              description: '`Accept-Language, Authorization, Cookie, X-Tenant-Id`'
+              schema: { type: string }
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DisplayNames' }
+              example:
+                language: vi
+                roles: { CARD_OFFICER: Cán bộ thẻ, COMPLIANCE_REVIEWER: Compliance reviewer }
+                groups: { hn-branch: Chi nhánh Hà Nội }
+                users: { lan: Trần Thị Lan }
+        '400':
+          description: '`INPUT_INVALID`: more than 100 identifiers of one kind, or one that is not 1 to 128 letters, digits or `. _ : @ -`.'
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
 components:
@@ -195,6 +244,15 @@ components:
                 instance: /api/bpm/me
                 correlationId: 01KAF3N8Q4V6W2Y9Z0A1B2C3D6
   schemas:
+    DisplayNames:
+      type: object
+      required: [language, roles, groups, users]
+      additionalProperties: false
+      properties:
+        language: { type: string, description: 'The language the names were asked in, or `und` when none was sent' }
+        roles: { type: object, additionalProperties: { type: string } }
+        groups: { type: object, additionalProperties: { type: string } }
+        users: { type: object, additionalProperties: { type: string } }
     Problem:
       description: RFC 9457 problem details with the engine contract's `code` and `correlationId` (ADR-0010).
       type: object

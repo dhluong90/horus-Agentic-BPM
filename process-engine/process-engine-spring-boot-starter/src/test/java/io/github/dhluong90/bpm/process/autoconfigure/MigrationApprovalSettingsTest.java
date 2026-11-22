@@ -95,7 +95,7 @@ class MigrationApprovalSettingsTest {
     }
 
     @Test
-    void PRE_203_cancelling_a_removed_steps_work_needs_the_single_permission_and_four_eyes_is_refused_until_built() {
+    void PRE_210_cancelling_a_removed_steps_work_needs_the_single_permission_and_four_eyes_is_refused_until_built() {
         assertThat(bind(Map.of()).migration().cancelApproval()).isEqualTo("single");
         assertThatThrownBy(() -> bind(Map.of("horus.bpm.processes.migration.cancel-approval", "four-eyes")))
                 .rootCause().hasMessageContaining("migration.cancel-approval must be single")
@@ -103,7 +103,7 @@ class MigrationApprovalSettingsTest {
     }
 
     @Test
-    void PRE_203_the_cancellation_reason_limit_follows_the_lifecycle_reason_length() {
+    void PRE_210_the_cancellation_reason_limit_follows_the_lifecycle_reason_length() {
         MigrationSettings settings = bind(Map.of("horus.bpm.processes.lifecycle.reason-max-length", "300")).migration()
                 .toSettings().withReasonMaxLength(300);
 

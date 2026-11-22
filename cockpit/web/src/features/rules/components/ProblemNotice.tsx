@@ -3,6 +3,7 @@ import { toHostError, type HostError, type Violation } from '../../../api/hostEr
 import { CopyButton } from '../../../components/CopyButton';
 import type { MessageKey } from '../../../i18n/en';
 import { placeError } from '../model/engineErrors';
+import { csvReason, isColumnProblem } from '../model/csvRefusals';
 import { refusalReason } from '../model/refusalReasons';
 import { useI18n } from '../../../i18n/I18nProvider';
 
@@ -30,6 +31,8 @@ function messageKey(error: HostError): MessageKey {
     }
     case 'signed-out':
       return 'error.signedOut.title';
+    case 'no-access':
+      return 'error.noAccess.title';
     case 'unreachable':
       return 'error.unreachable.title';
     case 'unexpected-response':
@@ -50,6 +53,8 @@ export interface RefusedFile {
 function Located({ violations, file, columnLabel }: { violations: readonly Violation[]; file: string | undefined; columnLabel: (name: string) => string }) {
   const { t } = useI18n();
   const place = (v: Violation): string | undefined => {
+    // A column of the file as a whole (added, missing, repeated, out of order): the place is the column.
+    if (v.ruleId === null && v.column !== null && isColumnProblem(v.code)) return file !== undefined ? t('import.placeColumn', { file, column: v.column }) : v.column;
     if (v.ruleId === null) return file;
     if (file !== undefined) return v.column !== null ? t('import.placeCell', { file, row: v.ruleId, column: columnLabel(v.column) }) : t('import.placeRow', { file, row: v.ruleId });
     return v.column !== null ? t('editor.errorCell', { row: v.ruleId, column: columnLabel(v.column) }) : t('editor.errorRow', { row: v.ruleId });
@@ -58,7 +63,7 @@ function Located({ violations, file, columnLabel }: { violations: readonly Viola
     <ul className="notice__located" aria-label={t('problem.locatedTitle')}>
       {violations.map((v, index) => {
         const where = place(v);
-        const reason = refusalReason(v.message);
+        const reason = csvReason(v.code) ?? refusalReason(v.message);
         return (
           <li key={index}>
             {where !== undefined ? <strong>{where}</strong> : null}

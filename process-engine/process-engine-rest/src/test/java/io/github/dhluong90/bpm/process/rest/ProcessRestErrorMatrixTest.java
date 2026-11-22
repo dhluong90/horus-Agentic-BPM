@@ -329,7 +329,7 @@ class ProcessRestErrorMatrixTest {
 
         @Override
         public DefinitionVersion approve(DefinitionRef ref, long expectedLockVersion, String expectedDefinitionHash,
-                String comment, String idempotencyKey) {
+                String expectedChangeSetHash, String comment, String idempotencyKey) {
             maybeFail();
             throw new UnsupportedOperationException();
         }
@@ -362,6 +362,20 @@ class ProcessRestErrorMatrixTest {
 
         @Override
         public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPage(DefinitionRef base, DefinitionRef target,
+                Integer limit, String cursor) {
+            maybeFail();
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.GraphDiffPage diffPageFromEffective(DefinitionRef target,
+                Integer limit, String cursor) {
             maybeFail();
             throw new UnsupportedOperationException();
         }

@@ -519,8 +519,9 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Given:** `tenancy.switching.enabled=true`; `minh`'s token has `tenant_id: bank-a` and `allowed_tenants: [bank-a, bank-a-fin]`; tenant `bank-b` has instance `I9`.
 - **When:** `minh` calls `GET /tasks` with no header, with `X-Tenant-Id: bank-a-fin`, and with `X-Tenant-Id: bank-b`; then `GET /instances/I9` with `X-Tenant-Id: bank-a-fin`.
 - **Then:** The first call returns `bank-a` tasks; the second returns `bank-a-fin` tasks; the third returns `403 TENANT_NOT_ALLOWED`, returns no data and writes a security log entry with user, requested tenant and `correlationId`; the fourth returns `404 INSTANCE_NOT_FOUND`.
+- **Then (audit, #451):** every accepted switch hands one record to the host's `TenantSwitchAudit` (actor, original tenant, new tenant, time, correlation id) before the call reaches engine data; the default writes one `tenant.switch.accepted` line on the `io.github.dhluong90.bpm.audit` logger, and the security log line stays. A refused switch (unlisted, malformed or repeated header) writes no audit record; a sink that throws fails the call. After `lan` (`tenant_id: bank-a`, `allowed_tenants: [bank-a, bank-b]`) switches to `bank-b`, `GET /instances/P1` of `bank-a`'s case `P1` is `404 INSTANCE_NOT_FOUND` and nothing is written for either tenant.
 - **Example:** `X-Tenant-Id: bank-b not in allowed_tenants -> 403 TENANT_NOT_ALLOWED, logged`.
-- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`
+- **Test ID:** `PRE_038_tenant_header_accepted_only_within_allowed_tenants`, `PRE_038_after_a_switch_to_bank_b_the_bank_a_instance_is_404_and_nothing_is_written`
 
 ---
 
@@ -926,14 +927,25 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
-  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order, each `{ element, elementId, line, stage }`. The XPath entry has the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`.
-  - `camunda:class` is a foreign extension and is not refused. It is listed under `warnings` as `FOREIGN_EXTENSION_IGNORED` with its namespace and line, and the stored source keeps it byte for byte.
+  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
+  - `camunda:class` is a foreign extension and is not refused. It is listed under `warnings` as `FOREIGN_EXTENSION_IGNORED` with its namespace and line, and the stored source keeps it byte for byte. Warnings keep the item fields of a problem (`code`, `message`, `element`, `elementId`, `line`).
   - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `parallelMultiple="true"` (`S3`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
   - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
-  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, intermediate throw event). No stage label names a sprint or a date.
+  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` or `messageEventDefinition` throw is `S2`, an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
 - **Example:** `5 unsupported -> 422 with stages S1, S1, S2, S3, not planned; camunda:class -> warning`.
-- **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`
+- **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_throw_event_takes_its_stage_from_its_event_definition`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`
+
+### PRE-204 A successful import lists the vendor attributes it kept but did not read
+- **Traces to:** `TR-STD-04`, `TR-STD-26`, PD-141, #380
+- **Milestone:** M3
+- **Given:** `card-block.bpmn` is a valid process whose start event carries `camunda:initiator="officer"` in the namespace `http://camunda.org/schema/1.0/bpmn`; caller `analyst-lan` holds `processes:deploy`.
+- **When:** It is imported with `Idempotency-Key: k-warn-1`, then again with the same key, and then the version is read.
+- **Then:**
+  - `201` with the stored version and a `warnings` list: one entry `FOREIGN_EXTENSION_IGNORED`, element `camunda:initiator`, `elementId` `s`, the `line` and the namespace in `message`: the same item as the `warnings` of a refusal. The stored source keeps the attribute byte for byte.
+  - The repeat returns the same body, warnings included. Reading the version later has no `warnings`: only the answer to an import carries them. A file with no vendor attribute has no `warnings` member.
+- **Example:** `camunda:initiator on startEvent s -> 201 with warnings[0] = FOREIGN_EXTENSION_IGNORED camunda:initiator`.
+- **Test ID:** `PRE_204_a_successful_import_lists_the_vendor_attribute_it_kept_but_did_not_read`, `PRE_204_reading_the_version_again_has_no_warnings_because_only_the_import_answer_carries_them`, `PRE_108_a_successful_read_returns_the_vendor_attributes_it_ignored_as_warnings`, `PRE_108_a_file_without_vendor_attributes_reads_with_no_warnings`
 
 ---
 
@@ -1095,7 +1107,7 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
   - (d) `404 DEFINITION_NOT_FOUND`; nothing is written.
   - (e) The repeat replays the first answer; the other hash is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
   - The check runs under the key lock after the status, four-eyes and lock-version checks, through the Java API and REST alike.
-  - (f) The diff is `truncated` with `approvableHash: null` and no `definitionHash` on either side; the approval is `409 CHANGE_SET_TRUNCATED` and nothing is written, published or recorded. A change list cut off at its limit carries no hash that may be approved.
+  - (f) The diff is `truncated` with `approvableHash: null` and no `definitionHash` on either side; the approval is `409 CHANGE_SET_TRUNCATED` and nothing is written, published or recorded. A change list cut off at its limit carries no hash that may be approved. This holds for the unpaged read and for an approval that names no change-set hash; the paged read and the whole-set hash of `PRE-201` and `PRE-202` are the way a change set over the limit is approved outside `dev`.
 - **Example:** `bob approves with H after the content became H2 -> 409 CONTENT_CHANGED (current H2), 0 rows`.
 - **Test ID:** `PRE_177_an_approval_with_the_reviewed_hash_publishes_the_version_and_records_the_hash`, `PRE_177_an_approval_of_content_changed_after_review_is_refused_naming_the_current_hash_and_writes_nothing`, `PRE_177_an_approval_without_a_hash_is_refused_while_the_setting_is_on`, `PRE_177_with_the_dev_relaxation_an_approval_without_a_hash_is_accepted`, `PRE_177_another_tenants_version_is_refused_and_nothing_is_written`, `PRE_177_a_replay_with_another_hash_under_the_same_key_is_a_key_reuse`, `PRE_177_a_truncated_diff_exposes_no_approvable_hash_and_an_approval_against_it_is_refused`, `PRE_177_the_two_approval_refusals_match_the_contract_and_name_the_current_content`, `PRE_177_an_approval_without_the_reviewed_hash_is_accepted_only_on_the_dev_profile`
 
@@ -1230,6 +1242,24 @@ A `serviceTask` with no `horus:mode`, or `horus:mode="local"`, calls a registere
 - **Then:** The first five are `409 ASSIGNEE_NOT_ALLOWED` (started the instance, completed an earlier task, lacks the role, already holds the task, reserved identity); the history, the events, the idempotency records and `T2`'s `lockVersion` are unchanged after each. `dan` succeeds. A task assigned to one user can go to `lan`. With no directory bean, a role or group task cannot be given to a named user: `409 ASSIGNEE_NOT_ALLOWED`.
 - **Example:** `delegate(T2, "alice") -> 409 ASSIGNEE_NOT_ALLOWED (started this instance); delegate(T2, "dan") -> 200`.
 - **Test ID:** `PRE_184_the_starter_and_an_earlier_completer_cannot_be_given_a_four_eyes_task`, `PRE_184_a_user_without_the_role_or_group_is_refused_and_a_user_task_goes_to_anyone`, `PRE_184_without_a_directory_a_role_task_cannot_be_given_to_a_named_user`
+
+### PRE-205 Agent step fields that declare no `mask` are listed as reminders and never block
+- **Traces to:** `TR-SEC-05`, PD-146, #438
+- **Milestone:** M2
+- **Given:** `loan-agent-assessment`, whose agent step `assess-documents` reads `applicationId` (`mask="false"`) and `requestedAmount` (no `mask`), and whose output schema marks `summary` `"mask": true` and leaves `riskScore` and `recommendation` undeclared; `horus.bpm.processes.classification.warn-unclassified` at its default `true`.
+- **When:** The pipeline imports it as a draft, reads the version, requests approval; the engine starts outside `dev` with the version active; then the same with the setting `false`.
+- **Then:** `GET .../versions/1` and `:request-approval` answer with `warnings` listing `{code: UNCLASSIFIED_FIELD, step: assess-documents, field, direction, message}` for `requestedAmount` (`INPUT`), `recommendation` and `riskScore` (`OUTPUT`, in the stored schema's order); the request succeeds (`PENDING_APPROVAL`). Start-up logs one WARN counting the fields per active version (`<tenant>/loan-agent-assessment v1: 3`) that names the setting and no field or value. With the setting `false` nothing is listed or logged. Only the declaration counts; names and values are never read. The V45 partial index `idx_pre_definition_active` serves the start-up read.
+- **Example:** `request-approval -> 200 PENDING_APPROVAL, warnings [UNCLASSIFIED_FIELD requestedAmount INPUT, ...]`.
+- **Test ID:** `PRE_205_unclassified_agent_fields_are_listed_and_the_approval_request_still_succeeds`, `PRE_205_a_silenced_deployment_lists_nothing_and_logs_no_summary`, `PRE_205_the_start_up_summary_counts_fields_per_active_version_without_names_or_values`, `PRE_205_the_reader_records_whether_an_input_declares_mask_and_the_hash_ignores_it`, `TR_OPS_01_V45_builds_a_valid_partial_index_on_existing_definitions_concurrently`
+
+### PRE-206 A refused hand-over says why, and screens show people and roles by name
+- **Traces to:** `TR-UI-08`, PD-110, #442
+- **Milestone:** M2
+- **Given:** `T2` and the targets of `PRE-184`; the open `check-documents` task of a second case, assigned to `role:LOAN_OFFICER`; the host's `DisplayNames` (default: `horus.bpm.display-names.roles|groups|users.<id>.<language>`) knows `alice` as "Nguyen Thi Alice"; `alice` requested approval of three definition versions.
+- **When:** `hoa` delegates `T2` to `carol`, `bob`, `alice` and `system:timer`, and reassigns `check-documents` to `lan`; `bob` lists `GET /approvals`; a screen asks `GET /api/bpm/display-names?roles=CARD_OFFICER&users=lan` with `Accept-Language: vi`.
+- **Then:** Each `409 ASSIGNEE_NOT_ALLOWED` carries `reason`: `ALREADY_ASSIGNED` (carol), `FOUR_EYES_PARTICIPANT` (bob, alice), `RESERVED_IDENTITY` (system:timer), `MISSING_ROLE` with `required: role:LOAN_OFFICER` (lan); `MISSING_GROUP` names `group:<id>`. Each approval item carries `requestedByName` "Nguyen Thi Alice", the id when the host knows no name; `requestedBy` keeps the id. `/display-names` returns known names in the caller's language with the default language as fallback, leaves unknown identifiers out, refuses more than 100 identifiers of a kind or a malformed one with `400 INPUT_INVALID`, and an anonymous call with `401`.
+- **Example:** `reassign(check-documents, lan) -> 409 {code: ASSIGNEE_NOT_ALLOWED, reason: MISSING_ROLE, required: role:LOAN_OFFICER}`.
+- **Test ID:** `PRE_206_each_assignee_refusal_names_its_reason_and_the_role_the_target_lacks`, `PRE_206_a_target_without_the_role_of_an_open_task_is_refused_naming_that_role`, `PRE_206_assignee_not_allowed_carries_the_reason_code_and_the_role_the_target_lacks`, `PRE_206_each_item_carries_the_requester_display_name_and_falls_back_to_the_id`, `PRE_206_names_come_back_in_the_callers_language_with_the_default_language_as_fallback`, `PRE_206_too_many_or_malformed_identifiers_are_400_and_an_anonymous_caller_is_401`, `PRE_206_a_default_language_outside_two_or_three_letters_stops_start_up`
 
 ### PRE-187 Moving a task needs the manage permission, a reason, If-Match and an Idempotency-Key, and never crosses tenants
 - **Traces to:** `TR-SEC-04`, `TR-TEN-01`, `TR-IDEM-03`, #263
@@ -1366,9 +1396,14 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - A: the assignment is unchanged, the level is counted so the sweep does not try it again, history records `ESCALATION_REFUSED` with `ESCALATION_TARGET_FORBIDDEN`, and an incident with that code opens.
   - B: the cancelled instance's task is not escalated; only the other tenant's task moves, and its event carries that tenant. A task is only ever changed under the lock of its own instance row, in the tenant stored on it.
   - C: one replica applies the level and the other, after the first commits, finds it applied and writes nothing.
-  - Not in this release: a target role the host `RoleCatalogue` does not list is not checked at approval (the SPI follows with its slice).
+  - D: see Variant D below.
+- **Variant D (#449): a target role the tenant does not have is refused at approval.**
+  - **Given:** a host that registers a `RoleCatalogue` (SPI `io.github.dhluong90.bpm.process.spi.RoleCatalogue`, `exists(tenantId, role)`) listing `CREDIT_OFFICER` and `BRANCH_SUPERVISOR` for `bank-a`; a definition whose user task `review-application` escalates to `role:RISK_HEAD`; the same definition escalating to `role:BRANCH_SUPERVISOR`; a host with no catalogue; `bank-b`, whose list does not hold `RISK_HEAD`.
+  - **When:** the version is sent for approval, and again when a second person approves it (the list may have changed between); the same with `BRANCH_SUPERVISOR`; with no catalogue; `bank-b` sends the definition naming a role only `bank-a` holds.
+  - **Then:** the unknown role is `422 VALIDATION_FAILED` with one problem `ESCALATION_ROLE_UNKNOWN` naming the step `review-application` and the role `role:RISK_HEAD` (once per role and step), at request-approval and at approval alike, and nothing is written; the known role is accepted at both; with no catalogue the default `RoleCatalogue.ACCEPT_ALL` checks nothing and the starter logs a warning at start-up outside the `dev` profile; the catalogue is asked with the caller's tenant, so one tenant's roles never satisfy another's; a `user:` or `group:` target is not asked (the host directory answers for people at run time, `PRE-183`).
+  - **Example:** `review-application -> role:RISK_HEAD, catalogue lists CREDIT_OFFICER and BRANCH_SUPERVISOR -> 422 ESCALATION_ROLE_UNKNOWN (review-application, role:RISK_HEAD), 0 rows`.
 - **Example:** `target user minh is the maker -> no change, incident ESCALATION_TARGET_FORBIDDEN`.
-- **Test ID:** `PRE_180_a_level_that_targets_the_maker_is_recorded_with_an_incident_and_changes_nothing`, `PRE_180_a_cancelled_instance_is_not_escalated_and_another_tenants_task_is_never_touched` (`TaskEscalationPostgresIT`)
+- **Test ID:** `PRE_180_a_level_that_targets_the_maker_is_recorded_with_an_incident_and_changes_nothing`, `PRE_180_a_cancelled_instance_is_not_escalated_and_another_tenants_task_is_never_touched` (`TaskEscalationPostgresIT`), `PRE_180_an_escalation_to_a_role_the_host_does_not_list_is_refused_at_request_and_at_approval`, `PRE_180_an_escalation_to_a_listed_role_is_sent_for_approval_and_approved`, `PRE_180_a_host_without_a_role_catalogue_checks_no_role`, `PRE_180_one_tenants_roles_never_satisfy_another_tenant` (`EscalationRoleCatalogueTest`), `PRE_180_a_host_without_a_role_catalogue_is_warned_outside_dev_and_one_with_a_catalogue_is_not` (`StatsRetentionAndRoleCatalogueSettingsTest`)
 
 ### PRE-181 The calendars in force and the calendar changes are read over REST, in the caller's tenant
 - **Traces to:** `TR-CAL-01`, `TR-TEN-01`
@@ -1388,10 +1423,69 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `propose(k-1) twice -> one change; approve(a-1) twice -> version 4 once, one event`.
 - **Test ID:** `PRE_182_a_proposal_repeated_with_the_same_key_returns_the_first_answer_and_writes_nothing_more`, `PRE_182_an_approval_repeated_with_the_same_key_applies_once_and_emits_one_event`, `PRE_182_two_concurrent_proposals_with_one_key_create_one_change_and_a_key_is_per_tenant`, `PRE_182_a_proposal_without_the_permission_is_refused_before_any_key_is_claimed` (`CalendarChangeIdempotencyPostgresIT`), `PRE_182_*` in `CalendarRestContractTest`
 
+---
+
+## Paged Definition Diff, Step Statistics Retention, Compensation Timeline (Batch S9, slice A1)
+
+### PRE-200 Hourly step statistics are kept for a configured time, and no slice is rolled up within the write-lag window
+- **Traces to:** `TR-PERF-10`, `TR-OPS-01`, #410
+- **Milestone:** M3
+- **Given:** `pre_node_stats_hourly` holds hours of `bank-a` and `bank-b` from 15 July 2026, one from 22 August 2026 and today's (20 November 2026, 10:50); `horus.bpm.processes.stats.rollup-retention` is `P90D`; `stats.rollup-min-lag` and `stats.rollup-lag` are `PT10M`; completions at 10:30 and 10:45; more expired hours than one run deletes.
+- **When:** the rollup runs; it runs again at 10:56; defaults and bad values are bound; a profile other than `dev` sets `rollup-min-lag` below `PT5M`.
+- **Then:**
+  - The run deletes hours whose start is older than the retention, counted in whole days back from now in UTC (here before 22 August 00:00), in every tenant, in transactions of 5,000 rows, at most 20 per run, skipping rows another replica holds; the next run continues. Newer hours stay. Nothing is deleted by a run another replica holds the watermark of.
+  - No slice reaches past `now - max(rollup-lag)`: at 10:50 only the 10:30 completion is counted and the watermark stops at 10:40; at 10:56 the 10:45 one is counted too.
+  - Defaults: `rollup-retention` `P13M`, `rollup-min-lag` `PT5M`. A retention under `P31D` (the longest statistics window) is refused at bind time; so is a `rollup-lag` shorter than `rollup-min-lag`, naming both properties. A `rollup-min-lag` below `PT5M` is refused at start-up unless the `dev` profile is active on its own.
+  - Migration V36 adds `idx_pre_node_stats_hourly_bucket` so the purge reads by time and never the whole table.
+- **Example:** `retention P90D at 20 Nov: 15 Jul hours deleted, 22 Aug kept; lag PT10M at 10:50: watermark 10:40`.
+- **Test ID:** `PRE_200_hourly_rows_older_than_the_retention_are_deleted_by_the_rollup_run`, `PRE_200_a_purge_takes_bounded_batches_and_the_next_run_continues`, `PRE_200_no_slice_is_rolled_up_within_the_write_lag_window` (`NodeStatsRollupPostgresIT`), `PRE_200_retention_defaults_to_13_months_and_the_write_lag_window_to_five_minutes`, `PRE_200_a_retention_below_the_longest_window_and_a_lag_below_the_write_lag_window_are_refused`, `PRE_200_a_write_lag_window_below_five_minutes_is_accepted_on_the_dev_profile_only` (`StatsRetentionAndRoleCatalogueSettingsTest`)
+
+### PRE-201 The whole change set between two versions is read page by page, and the hashes come with the last page
+- **Traces to:** `TR-SEC-11`, `TR-DEF-03`, PD-139, #426
+- **Milestone:** M2
+- **Given:** `kyc-onboarding` v1 `ACTIVE` with 400 review steps; v2 `PENDING_APPROVAL` with every step renamed, reassigned and given another result variable: 1,200 changed values.
+- **When:** `bob` reads `GET /definitions/kyc-onboarding/versions/2/diff?limit=500`, then each `page.nextCursor`; and with a cursor this change set did not issue, `limit=501`, `limit=0` and `limit=many`.
+- **Then:**
+  - Three pages hold 500, 500 and 200 changes of one sequence (steps added, steps removed, changed values, links added, links removed, each sorted as before), each change on exactly one page, no gap, `truncated: false`. The answer names `page.offset`, `page.total` and `page.nextCursor`.
+  - `approvableHash`, `changeSetHash` and the `definitionHash` of both sides are present on the last page only (`null` or omitted before it). `changeSetHash` is the SHA-256 of both definition hashes and every change of the whole set, the same whatever the page size.
+  - Each cursor carries a digest of every change before it, so a page cannot be reached without reading the pages before it; a cursor this change set did not issue, another offset with a real digest, a limit outside 1 to 500 or not a number is `400 QUERY_INVALID`. Nothing is written.
+  - The read without `limit` and `cursor` is unchanged: at most 1,000 changed values, `truncated: true`, `approvableHash: null` and no `definitionHash` (`PRE-177` f).
+- **Example:** `1,200 changes, limit 500 -> pages of 500, 500, 200; changeSetHash on page 3 only`.
+- **Test ID:** `PRE_201_the_whole_change_set_is_read_page_by_page_and_the_hashes_come_with_the_last_page`, `PRE_201_a_cursor_this_change_set_did_not_issue_and_a_page_size_out_of_range_are_refused` (`ReviewedContentApprovalTest`), `PRE_201_a_paged_diff_gives_the_hashes_on_its_last_page_only_and_matches_the_contract` (`ProcessRestContractTest`)
+
+### PRE-202 A change set over the limit is approved with the hash of the whole set read, and a changed set is refused
+- **Traces to:** `TR-SEC-11`, `TR-SEC-04`, PD-139, #426
+- **Milestone:** M2
+- **Given:** `PRE-201`'s v2 with 1,200 changes against the effective v1; `bob` read every page and holds `changeSetHash S` and `definitionHash H`; `horus.bpm.processes.approval.require-content-hash` is `true`; a second pending version with one renamed step.
+- **When:**
+  - (a) `bob` approves v2 with `expectedDefinitionHash: H` and `expectedChangeSetHash: S`.
+  - (b) `bob` approves with `H` and another hash, then with `S` of an other form.
+  - (c) `bob` approves with `H` and no `expectedChangeSetHash`.
+  - (d) `bob` approves the small version with `H` alone, and with a wrong `expectedChangeSetHash`.
+- **Then:**
+  - (a) v2 is `ACTIVE`; the `APPROVED` history row and `processes.definition.approved.v1` carry `reviewedChangeSetHash: S` next to `reviewedDefinitionHash`. The change set is recomputed under the key lock after the status, four-eyes, lock-version and definition-hash checks, from the stored versions.
+  - (b) A hash that is not the change-set hash now (the version or the effective version changed after the review) is `409 CONTENT_CHANGED` with `currentChangeSetHash` and `currentDefinitionHash`; one that is not 64 lower-case hexadecimal characters is `400 INPUT_INVALID`; nothing is written, published or recorded.
+  - (c) `409 CHANGE_SET_TRUNCATED`, as in `PRE-177` (f); nothing is written.
+  - (d) A change set within 1,000 values is approved on `H` alone; a change-set hash, when sent, must match (`409 CONTENT_CHANGED` otherwise). A hash sent for a version with no effective version to compare with is `409 CONTENT_CHANGED`.
+  - The hash joins the idempotency request hash when named, so a repeat under the same key replays and a changed hash is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The check is the same through the Java API and REST.
+- **Example:** `1,200 changes, H and S read page by page -> ACTIVE outside dev; H without S -> 409 CHANGE_SET_TRUNCATED`.
+- **Test ID:** `PRE_202_a_change_set_over_the_limit_is_approved_with_the_hash_of_the_whole_set_and_records_it`, `PRE_202_a_change_set_hash_that_is_not_the_whole_set_now_is_refused_and_writes_nothing`, `PRE_202_an_unpaged_read_and_an_approval_without_the_set_hash_keep_refusing_a_truncated_set`, `PRE_202_a_change_set_within_the_limit_needs_no_set_hash_and_checks_one_when_sent` (`ReviewedContentApprovalTest`)
+
+### PRE-203 The instance timeline names its undo steps, what each undoes and where the undo of each saga scope stands
+- **Traces to:** `TR-COMP-02`, `TR-TEN-01`, #80
+- **Milestone:** M2
+- **Given:** the fund transfer of `PRE-073`: `hold-funds`, `debit-source` and `credit-target` inside the saga scope `transfer`, `credit-target` failing with `ACCOUNT_CLOSED`; once with every undo succeeding, once with `credit-back` failing on `ACCOUNT_FROZEN` for good, once read by `bank-b`.
+- **When:** an operator with `processes:read` reads `GET /instances/{id}/activities`.
+- **Then:**
+  - Every entry has `kind`: `STEP`, or `COMPENSATION` for `COMPENSATION_STARTED`, `COMPENSATION_STEP_SCHEDULED`, `COMPENSATION_STEP_COMPLETED`, `COMPENSATION_STEP_FAILED`, `COMPENSATION_STEP_MANUAL` and `COMPENSATED`. An entry of an undo has `scopeTokenId` and `scope` (`transfer`); an undo step has `compensates` (the step it undoes, newest forward step first: `debit-source`, then `hold-funds`), the forward `attemptId`, `handler`, and `attempt` and `errorCode` when they apply; the start has `cause`.
+  - `compensations` has one item per scope whose undo started, never cut by `limit`, in start order: `state` `UNDONE` when the scope ended (steps undone counted, `endedAt` set); `NOT_FULLY_UNDONE` when the last event of some step is a failure or a manual step, naming `blockedStep`, `incidentId` and `incidentCode` of its open incident, with no `COMPENSATED` entry; `IN_PROGRESS` otherwise. The cockpit shows the state as given and links `incidentId`.
+  - `bank-b` gets `404 INSTANCE_NOT_FOUND`. The read writes nothing and carries no variable or input value.
+- **Example:** `credit-target failed, undo debit-source then hold-funds -> scope transfer UNDONE, 2 steps; credit-back failed -> NOT_FULLY_UNDONE, blocked debit-source, incident COMPENSATION_FAILED`.
+- **Test ID:** `PRE_203_the_timeline_lists_the_undo_steps_in_reverse_order_with_what_they_undo_and_the_scope_is_undone`, `PRE_203_a_failed_undo_leaves_the_scope_not_fully_undone_and_names_its_step_and_incident`, `PRE_203_the_timeline_of_another_tenants_instance_is_not_found` (`SagaCompensationTest`), `PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304` (`ProcessRestContractTest`, the contract of the new fields)
 
 ## Step Mapping, Child Processes and Imported Layout (#106, #92, #445)
 
-### PRE-200 A renamed step is mapped and its tasks keep their claim, deadline and four-eyes rule
+### PRE-207 A renamed step is mapped and its tasks keep their claim, deadline and four-eyes rule
 - **Traces to:** `TR-MIG-03`, `TR-MIG-01`, PD-023, #106
 - **Milestone:** M3
 - **Given:** 40 `loan-origination` v1 loans wait on user task `credit-review` (four-eyes, `horus:sla` `PT8H`), 15 of the tasks claimed; v2 renames the step `credit-assessment` with the same task kind; the plan is `v1 -> v2` with `mappings: [{ from: credit-review, to: credit-assessment }]`.
@@ -1401,9 +1495,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - Execution moves each token, open task and pending job to `credit-assessment`. Task ids, claims (15), `due_at` and the four-eyes flag are kept; a claimed task completes on the new step. Each instance gets one `MIGRATED` history row whose `steps` name `credit-review -> credit-assessment`.
   - A mapping to a step of another type, or to a step the target lacks, is `422 MIGRATION_PLAN_INVALID` naming the pair, and no plan row is written.
 - **Example:** `40 loans on credit-review -> credit-assessment, 15 claims kept; user task -> timer -> 422 naming credit-review -> cooling-off`.
-- **Test ID:** `PRE_200_a_renamed_step_is_mapped_and_its_tasks_keep_their_claim_deadline_and_four_eyes`, `PRE_200_a_mapping_to_another_kind_of_step_or_to_a_missing_step_is_refused_naming_the_pair` (`StepMappingMigrationPostgresIT`), `PRE_200_*` in `MigrationRestContractTest`
+- **Test ID:** `PRE_207_a_renamed_step_is_mapped_and_its_tasks_keep_their_claim_deadline_and_four_eyes`, `PRE_207_a_mapping_to_another_kind_of_step_or_to_a_missing_step_is_refused_naming_the_pair` (`StepMappingMigrationPostgresIT`), `PRE_207_*` in `MigrationRestContractTest`
 
-### PRE-201 A removed step's work is cancelled with a reason, the token continues where the plan says, and a call in flight is never cut off
+### PRE-208 A removed step's work is cancelled with a reason, the token continues where the plan says, and a call in flight is never cut off
 - **Traces to:** `TR-MIG-03`, `TR-MIG-02`, #106
 - **Milestone:** M3
 - **Given:** 12 loans wait on user task `legacy-manual-check` and 3 on remote step `legacy-score` (2 jobs `DUE`, 1 `CLAIMED` with a call in flight); v2 removes both steps; the plan has `cancellations: [{ step: legacy-manual-check, moveTo: credit-assessment, reason: "Check merged into credit assessment" }, { step: legacy-score, moveTo: bureau-score, reason: "Replaced by bureau score" }]`.
@@ -1413,9 +1507,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - Execution, per instance in one transaction: cancels the open task (`TASK_CANCELLED`, the plan's reason) or the `DUE` job (`JOB_CANCELLED`), moves the token to `moveTo`, whose step runs as on arrival (a task opens, a job parks), and writes `MIGRATED`. A cancelled task's context is not copied to history.
   - The in-flight instance stays on v1 and its outcome is `SKIPPED` with code `STEP_IN_FLIGHT`. A later plan for the same versions and instructions moves it once its job is no longer `CLAIMED`. Compensation stack entries of cancelled steps are kept unchanged.
 - **Example:** `12 tasks cancelled, 2 jobs cancelled, 1 STEP_IN_FLIGHT left on v1, moved by the later plan`.
-- **Test ID:** `PRE_201_a_removed_steps_work_is_cancelled_with_a_reason_and_the_token_continues_where_the_plan_says` (`StepMappingMigrationPostgresIT`)
+- **Test ID:** `PRE_208_a_removed_steps_work_is_cancelled_with_a_reason_and_the_token_continues_where_the_plan_says` (`StepMappingMigrationPostgresIT`)
 
-### PRE-202 A plan that leaves a removed step unhandled is listed, and one that names a step twice or cancels without a reason is refused
+### PRE-209 A plan that leaves a removed step unhandled is listed, and one that names a step twice or cancels without a reason is refused
 - **Traces to:** `TR-MIG-03`, `PRE-014`, #106
 - **Milestone:** M3
 - **Given:** v2 removes `legacy-manual-check`, where 5 loans wait; one plan neither maps nor cancels it; a second maps and cancels it; a third cancels it without a `reason`, a fourth without `moveTo`, a fifth with a `moveTo` that v2 lacks.
@@ -1425,9 +1519,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - The others are `422 MIGRATION_PLAN_INVALID` with `problems` naming the step. A reason is required and at most `lifecycle.reason-max-length` characters. A cancelled step must be absent from the target. At most 200 mappings and 200 cancellations.
   - No instance and no plan row is changed by the refused ones.
 - **Example:** `legacy-manual-check mapped and cancelled -> 422 "legacy-manual-check is handled twice"`.
-- **Test ID:** `PRE_202_a_plan_that_names_a_step_twice_or_cancels_without_a_reason_is_refused_and_an_unhandled_step_is_listed` (`StepMappingMigrationPostgresIT`)
+- **Test ID:** `PRE_209_a_plan_that_names_a_step_twice_or_cancels_without_a_reason_is_refused_and_an_unhandled_step_is_listed` (`StepMappingMigrationPostgresIT`)
 
-### PRE-203 Migration commands with step instructions are permissioned, idempotent, locked and tenant-bound
+### PRE-210 Migration commands with step instructions are permissioned, idempotent, locked and tenant-bound
 - **Traces to:** `TR-IDEM-01`, `TR-TEN-01`, `TR-SEC-04`, PD-102, PD-114, PD-131, #106
 - **Milestone:** M3
 - **Given:** Plan `M1` of `bank-a` with a mapping, proposed by `thu`.
@@ -1437,9 +1531,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - The caller without the permission is `403 PERMISSION_DENIED`; `bank-b` gets `404 MIGRATION_NOT_FOUND` and nothing is written; the stale approval is `409 VERSION_CONFLICT`.
   - Four-eyes for the execution is unchanged (PD-131). Cancellations need the same single permission as the rest of the plan: `migration.cancel-approval` is `single`, and `four-eyes` is refused at start-up until it is built.
 - **Example:** `bank-b approves M1 -> 404 MIGRATION_NOT_FOUND, 0 instances touched`.
-- **Test ID:** `PRE_203_migration_commands_with_instructions_are_permissioned_idempotent_locked_and_tenant_bound` (`StepMappingMigrationPostgresIT`), `PRE_203_*` in `MigrationApprovalSettingsTest`
+- **Test ID:** `PRE_210_migration_commands_with_instructions_are_permissioned_idempotent_locked_and_tenant_bound` (`StepMappingMigrationPostgresIT`), `PRE_210_*` in `MigrationApprovalSettingsTest`
 
-### PRE-204 A parent waits for its child and continues with the child's declared outputs only
+### PRE-211 A parent waits for its child and continues with the child's declared outputs only
 - **Traces to:** `TR-STD-28`, `PRE-043`, PD-127, PD-144, #92
 - **Milestone:** M2
 - **Given:** `account-opening` has a `callActivity` `kyc` with `calledElement: kyc-check`, inputs `customerId` and `segment`, and output `kycLevel`; `kyc-check` v1 is effective; `P1` has business key `AO-2026-1201`, customer `C-778` and segment `RETAIL`.
@@ -1450,9 +1544,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - A pinned version that is not `ACTIVE` raises the incident `NO_EFFECTIVE_VERSION` on the step and starts no child.
   - The import reads `callActivity` (`calledElement`, `horus:calledVersion`, `<horus:input>`, `<horus:output>`) as a `callProcess` step, exports it, and reads the export back to the same definition hash; `horus:in="all"` is `CALL_INPUT_ALL_REFUSED` and a missing or malformed `calledElement` is `CALLED_ELEMENT_INVALID`.
 - **Example:** `P1 at kyc -> C1 on kyc-check v1 -> kycLevel 2 back to P1, reviewNote not copied`.
-- **Test ID:** `PRE_204_a_parent_waits_for_its_child_and_continues_with_the_childs_declared_outputs_only`, `PRE_204_a_pinned_version_is_used_even_when_a_later_one_is_effective_and_a_retired_one_raises_an_incident` (`CallActivityPostgresIT`), `PRE_204_a_call_activity_is_read_with_its_called_key_version_inputs_and_outputs`, `PRE_204_the_export_of_a_call_activity_reads_back_to_the_same_definition_hash`, `PRE_204_a_call_activity_without_a_called_key_or_passing_all_variables_is_refused_by_name` (`CallActivityBpmnTest`)
+- **Test ID:** `PRE_211_a_parent_waits_for_its_child_and_continues_with_the_childs_declared_outputs_only`, `PRE_211_a_pinned_version_is_used_even_when_a_later_one_is_effective_and_a_retired_one_raises_an_incident` (`CallActivityPostgresIT`), `PRE_211_a_call_activity_is_read_with_its_called_key_version_inputs_and_outputs`, `PRE_211_the_export_of_a_call_activity_reads_back_to_the_same_definition_hash`, `PRE_211_a_call_activity_without_a_called_key_or_passing_all_variables_is_refused_by_name` (`CallActivityBpmnTest`)
 
-### PRE-205 A child start is never duplicated, and depth is bounded
+### PRE-212 A child start is never duplicated, and depth is bounded
 - **Traces to:** `TR-IDEM-01`, `TR-RES-01`, PD-144, #92
 - **Milestone:** M2
 - **Given:** A child `C1` started for `P1`'s `kyc` token; separately, `ping`, whose first step calls `ping`; separately, `account-opening` deployed before `kyc-check` exists.
@@ -1462,9 +1556,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - The chain stops at depth 5: the root and five calls exist, and the step that would start depth 6 raises the incident `CALL_DEPTH_EXCEEDED` and starts no child. `calls.max-depth` is 1 to 5 and may be lowered only.
   - A `calledElement` with no effective version raises `NO_EFFECTIVE_VERSION` when the step runs; at approval it is never a refusal, because the child may be approved later.
 - **Example:** `second child for the same token -> unique violation; ping -> 6 instances, depth 5 incident`.
-- **Test ID:** `PRE_205_a_second_child_for_the_same_token_and_attempt_is_refused_by_the_database`, `PRE_205_the_chain_of_calls_stops_at_the_depth_limit_with_an_incident_and_no_child`, `PRE_205_a_called_element_with_no_effective_version_raises_an_incident_at_run_time` (`CallActivityPostgresIT`), `PRE_205_*` in `CallsSettingsTest`
+- **Test ID:** `PRE_212_a_second_child_for_the_same_token_and_attempt_is_refused_by_the_database`, `PRE_212_the_chain_of_calls_stops_at_the_depth_limit_with_an_incident_and_no_child`, `PRE_212_a_called_element_with_no_effective_version_raises_an_incident_at_run_time` (`CallActivityPostgresIT`), `PRE_212_*` in `CallsSettingsTest`
 
-### PRE-206 A child's failure or cancellation reaches the parent, and a parent's cancel ends its children
+### PRE-213 A child's failure or cancellation reaches the parent, and a parent's cancel ends its children
 - **Traces to:** `TR-CAN-01`, `TR-INC-01`, PD-103, #92
 - **Milestone:** M2
 - **Given:** (a) `C1` ended `FAILED`; (b) `C1` is cancelled by an operator with the reason `duplicate case`; (c) `P1` is cancelled by `ops.lan` while `C1` waits on a task.
@@ -1473,9 +1567,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - (a) The parent step has an `OPEN` incident `CHILD_FAILED` on `kyc`. (b) Same, `CHILD_CANCELLED`, with the reason in the cause summary. The retry of (b) starts a new child for attempt 1 (`AO-2026-1205/kyc#1`) and the old child's result can no longer move the parent. A step with `horus:onFailure="compensate"` starts the parent's compensation instead of the incident.
   - (c) The cancel transaction locks `P1`, then `C1`, cancels both, with `C1`'s open task `CANCELLED`, and publishes `processes.instance.cancelled.v1` for each; `cancelledBy` is `ops.lan` and `C1`'s reason is `parent cancelled`.
 - **Example:** `P1 cancelled -> C1 cancelled in the same transaction, reason "parent cancelled"`.
-- **Test ID:** `PRE_206_a_cancelled_child_fails_the_parent_step_and_a_retry_starts_a_new_child_keyed_by_the_retry_count`, `PRE_206_a_child_that_ended_failed_fails_the_parent_step_with_child_failed`, `PRE_206_a_cancel_of_the_parent_cancels_its_child_in_the_same_transaction_with_the_parent_cancelled_reason` (`CallActivityPostgresIT`)
+- **Test ID:** `PRE_213_a_cancelled_child_fails_the_parent_step_and_a_retry_starts_a_new_child_keyed_by_the_retry_count`, `PRE_213_a_child_that_ended_failed_fails_the_parent_step_with_child_failed`, `PRE_213_a_cancel_of_the_parent_cancels_its_child_in_the_same_transaction_with_the_parent_cancelled_reason` (`CallActivityPostgresIT`)
 
-### PRE-207 A completed child is undone only by its call step's handler, inside the parent's tenant
+### PRE-214 A completed child is undone only by its call step's handler, inside the parent's tenant
 - **Traces to:** `TR-COMP-02`, `TR-TEN-01`, PD-127, #92
 - **Milestone:** M2
 - **Given:** (a) `kyc` sits in the saga `onboard` with `horus:compensate="reverse-kyc"`, has completed with child `C1`, and a later step fails with `onFailure: compensate`; (b) a definition in `bank-a` names `calledElement: kyc-check` while `kyc-check` exists only in `bank-b`; (c) a saga whose call step declares no undo.
@@ -1485,9 +1579,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - (b) The step raises `NO_EFFECTIVE_VERSION`; a child is always looked up and started in the parent's tenant, no definition can name a tenant, and no instance exists in `bank-b`.
   - (c) The import is `422 VALIDATION_FAILED` with `COMPENSATION_REQUIRED` naming the step; `horus:compensate="manual"` is accepted and raises `COMPENSATION_MANUAL_REQUIRED` when reached.
 - **Example:** `compensate past kyc -> reverse-kyc once; C1 stack untouched; kyc-check only in bank-b -> NO_EFFECTIVE_VERSION`.
-- **Test ID:** `PRE_207_a_completed_child_is_undone_only_by_the_call_steps_own_handler`, `PRE_207_a_child_is_looked_up_only_in_the_parents_tenant` (`CallActivityPostgresIT`), `PRE_207_a_call_inside_a_saga_must_declare_its_undo_or_declare_it_manual` (`CallActivityBpmnTest`)
+- **Test ID:** `PRE_214_a_completed_child_is_undone_only_by_the_call_steps_own_handler`, `PRE_214_a_child_is_looked_up_only_in_the_parents_tenant` (`CallActivityPostgresIT`), `PRE_214_a_call_inside_a_saga_must_declare_its_undo_or_declare_it_manual` (`CallActivityBpmnTest`)
 
-### PRE-208 A BPMN import stores the file's diagram as layout revision 1, apart from the definition
+### PRE-215 A BPMN import stores the file's diagram as layout revision 1, apart from the definition
 - **Traces to:** `TR-DEF-02`, `PRE-024`, `PRE-026`, #445, #102
 - **Milestone:** M3
 - **Given:** A BPMN file with a `BPMNDI` diagram of three steps, one flow with two waypoints and a shape of an element the process lacks; the same process imported again with other content and another diagram; a version imported before layouts were stored.
@@ -1497,4 +1591,4 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - The definition hash does not depend on the diagram: the same file with and without it has one hash, and the version carries no diagram.
   - Each import has its own revision 1. A saved change is revision 2 of that version, needs no approval and writes no `REQUESTED` or `APPROVED` row. A version stored before layouts reads without a layout (`204`).
 - **Example:** `import with diagram -> layout revision 1, source BPMN; re-import with other content -> its own revision 1`.
-- **Test ID:** `PRE_208_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition`, `PRE_208_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval`, `PRE_208_a_definition_stored_before_layouts_existed_still_reads_without_a_layout` (`ImportedLayoutPostgresIT`), `PRE_208_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else` (`CallActivityBpmnTest`)
+- **Test ID:** `PRE_215_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition`, `PRE_215_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval`, `PRE_215_a_definition_stored_before_layouts_existed_still_reads_without_a_layout` (`ImportedLayoutPostgresIT`), `PRE_215_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else` (`CallActivityBpmnTest`)

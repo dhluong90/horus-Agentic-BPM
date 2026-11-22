@@ -18,7 +18,6 @@ import { AuditError, LoggedValue, statusOf } from './components/AuditParts';
 import { OutcomeBadge } from './components/OutcomeBadge';
 import { DecisionLogLocked, knownOutcome } from './DecisionsPage';
 import { lastDecisionQuery } from './lastQuery';
-import { shortId } from './model/references';
 
 type View = 'conditions' | 'inputs' | 'table';
 
@@ -57,7 +56,7 @@ function DecisionView({ decisionId }: { decisionId: string }) {
   const explanation = useExplanation(decisionId, locale, wellFormed);
   const readsRules = can('rules:read');
   const version = useVersion(decision.data?.ruleSet ?? '', readsRules ? decision.data?.version : undefined);
-  const heading = t('dlog.detailTitle', { id: shortId(decisionId) });
+  const heading = t('dlog.detailTitle');
 
   if (!wellFormed) {
     return <Frame title={heading} subtitle={t('dlog.detailSubtitle')}><article className="card"><p className="notice-line">{t('dlog.error.notAnId')}</p></article></Frame>;

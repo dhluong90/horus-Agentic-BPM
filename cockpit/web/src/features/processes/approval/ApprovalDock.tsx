@@ -5,7 +5,8 @@ import { useI18n } from '../../../i18n/I18nProvider';
 import type { MessageKey } from '../../../i18n/en';
 import { ProblemNotice } from '../../rules/components/ProblemNotice';
 import { formatDateTime } from '../../rules/model/dates';
-import { shortHash, type ApprovalBlock } from '../model/graphDiff';
+import { type ApprovalBlock } from '../model/graphDiff';
+import { useDockHeight } from './dock';
 
 /** What the dock may start: approve with a comment, reject with a reason. Both wait for the engine's answer. */
 export interface DockAction<TArgs> {
@@ -44,11 +45,9 @@ const NO_DECISION: readonly ApprovalBlock[] = ['waiting', 'self-requested', 'sel
  * reviewed; when it is not offered, one line says why beside the disabled button. The engine checks everything
  * again and its refusal is shown in this screen's words, with the code behind Details.
  */
-export function ApprovalDock({ version, block, hash, approve, reject, onReviewAgain, onReload }: {
+export function ApprovalDock({ version, block, approve, reject, onReviewAgain, onReload }: {
   version: DefinitionVersion;
   block: ApprovalBlock | undefined;
-  /** The definitionHash the approval names: the content on screen. */
-  hash: string | undefined;
   approve: DockAction<{ comment: string }>;
   reject: DockAction<{ reason: string }>;
   /** The user confirms they checked the content now on screen. */
@@ -57,6 +56,7 @@ export function ApprovalDock({ version, block, hash, approve, reject, onReviewAg
   onReload: () => void;
 }) {
   const { t, locale } = useI18n();
+  const dock = useDockHeight<HTMLElement>();
   const [text, setText] = useState('');
   const textId = useId();
   const reasonId = useId();
@@ -75,7 +75,7 @@ export function ApprovalDock({ version, block, hash, approve, reject, onReviewAg
   const when = effectiveFrom !== undefined && Date.parse(effectiveFrom) > now ? formatDateTime(effectiveFrom, locale) : undefined;
   const reason = block !== undefined && block !== 'checking' ? t(`approval.block.${block}`, { version: String(version.version) }) : undefined;
   return (
-    <section className="card decision decision--dock pdock" aria-labelledby="pdock-title">
+    <section ref={dock} className="card decision decision--dock pdock" aria-labelledby="pdock-title">
       <h2 id="pdock-title" className="rules-card-title">{t('decision.title')}</h2>
       <div className="decision__body">
         {reason !== undefined ? (
@@ -105,7 +105,6 @@ export function ApprovalDock({ version, block, hash, approve, reject, onReviewAg
             <span aria-hidden="true">✓</span> {approve.isPending ? t('approval.approving') : t('approval.approve')}
           </button>
         </div>
-        {canApprove && hash !== undefined ? <p className="dock__hint">{t('approval.content')} <span className="mono">{shortHash(hash)}</span></p> : null}
         {canApprove && when !== undefined ? <p className="dock__hint">{t('decision.takesEffectOn', { when })}</p> : null}
         {decides ? <p id={hintId} className="sr-only">{t('dock.reasonHint')}</p> : null}
       </div>
@@ -122,6 +121,7 @@ export function ApprovalDock({ version, block, hash, approve, reject, onReviewAg
 /** After the engine's answer: what the decision did, in one line, announced politely. */
 export function DecidedLine({ version, outcome }: { version: DefinitionVersion; outcome: 'approved' | 'rejected' }) {
   const { t, locale } = useI18n();
+  const dock = useDockHeight<HTMLElement>();
   const [now] = useState(() => Date.now());
   const effectiveFrom = version.effectiveFrom ?? undefined;
   const when = effectiveFrom !== undefined ? formatDateTime(effectiveFrom, locale) : undefined;
@@ -129,7 +129,7 @@ export function DecidedLine({ version, outcome }: { version: DefinitionVersion; 
     ? t('approval.rejected', { version: String(version.version) })
     : when !== undefined && effectiveFrom !== undefined && Date.parse(effectiveFrom) > now ? t('approval.done', { when }) : t('approval.doneNow');
   return (
-    <section className="card decision decision--dock pdock pdock--done" aria-labelledby="pdock-title">
+    <section ref={dock} className="card decision decision--dock pdock pdock--done" aria-labelledby="pdock-title">
       <h2 id="pdock-title" className="rules-card-title">{t('decision.title')}</h2>
       <p className="pdock__done" role="status" aria-live="polite"><span className="pdock__check" aria-hidden="true">{outcome === 'approved' ? '✓' : '↩'}</span> {text}</p>
     </section>

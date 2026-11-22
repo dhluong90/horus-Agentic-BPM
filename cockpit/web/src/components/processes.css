@@ -227,6 +227,8 @@
 .dg-badge--warn text { fill: var(--warn); }
 .dg-badge--incident rect { fill: var(--bad-soft); stroke: var(--bad-fill); stroke-width: 1; }
 .dg-badge--incident text { fill: var(--bad); }
+.dg-badge--undone rect { fill: var(--warn-soft); stroke: var(--warn-fill); stroke-width: 1; }
+.dg-badge--undone text { fill: var(--warn); }
 .dg-badge--done circle { fill: var(--ok-soft); stroke: var(--ok-fill); stroke-width: 1; }
 .dg-badge--done text { fill: var(--ok); font-size: 15px; font-weight: 700; }
 .dg-node--pick { cursor: pointer; }
@@ -267,6 +269,21 @@
 .timeline { margin-top: 8px; max-height: calc(100vh - var(--topbar-h) - 250px); overflow: auto; }
 .timeline__what { color: var(--ink); }
 .timeline__what--bad { color: var(--bad); }
+.timeline__note { margin-left: 10px; color: var(--muted); font: var(--type-label); white-space: nowrap; }
+.timeline .qtable td { padding-block: 8px; }
+.timeline__undo { display: inline-flex; gap: 6px; align-items: baseline; }
+.timeline__glyph { flex: none; width: 16px; text-align: center; color: var(--warn); font-weight: 700; }
+.timeline__row--undo > td:first-child { box-shadow: inset 3px 0 0 var(--warn-fill); }
+.timeline__row--undo-stuck .timeline__what { font-weight: 600; }
+/* Undo state of a saga scope above the timeline: one calm line each, a warning hue only when the undo did not finish. */
+.undo-scopes { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 0; }
+.undo-scope { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: var(--radius-m); border: 1px solid var(--line); background: var(--surface-2); }
+.undo-scope--blocked { background: var(--warn-soft); border-color: var(--warn-fill); }
+.undo-scope__icon { flex: none; width: 16px; text-align: center; font-weight: 700; color: var(--ink-2); }
+.undo-scope--done .undo-scope__icon { color: var(--ok); }
+.undo-scope--blocked .undo-scope__icon { color: var(--warn); }
+.undo-scope__text { flex: 1 1 auto; margin: 0; color: var(--ink-2); }
+.undo-scope__text strong { color: var(--ink); font-weight: 600; margin-right: 6px; }
 .timeline__more { margin: 12px 0 0; font: var(--type-label); }
 .cases { margin-top: 8px; }
 .cases__more { display: flex; justify-content: center; padding: 16px 0 4px; }

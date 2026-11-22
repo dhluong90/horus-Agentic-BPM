@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
-/** PRE-205 (#92): {@code calls.max-depth} is 5 by default and may be lowered, never raised. */
+/** PRE-212 (#92): {@code calls.max-depth} is 5 by default and may be lowered, never raised. */
 class CallsSettingsTest {
 
     private static ProcessEngineProperties bind(Map<String, String> values) {
@@ -17,7 +17,7 @@ class CallsSettingsTest {
     }
 
     @Test
-    void PRE_205_the_call_depth_defaults_to_5_and_may_be_lowered_only() {
+    void PRE_212_the_call_depth_defaults_to_5_and_may_be_lowered_only() {
         assertThat(bind(Map.of()).calls().maxDepth()).isEqualTo(5);
         assertThat(bind(Map.of("horus.bpm.processes.calls.max-depth", "3")).calls().maxDepth()).isEqualTo(3);
         assertThatThrownBy(() -> bind(Map.of("horus.bpm.processes.calls.max-depth", "6"))).rootCause()
