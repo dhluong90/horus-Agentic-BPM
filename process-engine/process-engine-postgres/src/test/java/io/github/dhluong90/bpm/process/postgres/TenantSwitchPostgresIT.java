@@ -31,11 +31,11 @@ class TenantSwitchPostgresIT {
         for (String tenant : java.util.List.of("bank-a", "bank-b")) {
             engine.identity.as(tenant, "pipeline", "processes:deploy", "processes:read");
             engine.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,
-                    TestEngine.resource("/bpmn/card-fee-review.bpmn"), null));
+                    TestEngine.resource("/bpmn/loan-approval.bpmn"), null));
         }
         engine.identity.as("bank-a", "lan", "processes:start", "processes:read", "processes:cancel",
                 "processes:task:work");
-        ProcessInstance p1 = engine.services.start(new StartRequest("card-fee-review", "P1", Map.of(), null));
+        ProcessInstance p1 = engine.services.start(new StartRequest("loan-approval", "P1", Map.of("amount", Map.of("amount", "250000000", "currency", "VND")), null));
         String task = p1.tasks().get(0).id();
         assertThat(engine.services.instance(p1.id()).id()).isEqualTo(p1.id());
         Map<String, Integer> before = rows();
