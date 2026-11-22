@@ -15,7 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * {@code callProcess} (BPMN {@code callActivity}, #92, PRE-204 to PRE-207): the token waits as {@code WAITING_CHILD}
+ * {@code callProcess} (BPMN {@code callActivity}, #92, PRE-211 to PRE-214): the token waits as {@code WAITING_CHILD}
  * under a new attempt id while the shell starts a child instance of {@code calledElement} in the same tenant, and the
  * child's declared outputs come back when it ends. Variables cross only through {@code horus:input} (in) and
  * {@code horus:output} (out). A child that fails or is cancelled fails the step: with {@code horus:onFailure="compensate"}

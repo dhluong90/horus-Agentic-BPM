@@ -528,7 +528,7 @@ public record ProcessEngineProperties(
     }
 
     /**
-     * A step that calls a child process (#92, PRE-205).
+     * A step that calls a child process (#92, PRE-212).
      *
      * @param maxDepth most calls one above another: a child started at a deeper level raises the incident
      *     {@code CALL_DEPTH_EXCEEDED} and no child starts; 1 to 5, may be lowered, never raised
@@ -557,7 +557,7 @@ public record ProcessEngineProperties(
      *     runner's plan is taken over after this time
      * @param lockWait how long the runner waits for an instance row another transaction holds when it opens the incident
      *     of a failed instance, {@code PT1S} to {@code PT30S}
-     * @param cancelApproval who approves the cancellation of a removed step's work (#106, PRE-203): {@code single} (the
+     * @param cancelApproval who approves the cancellation of a removed step's work (#106, PRE-210): {@code single} (the
      *     default): the holder of {@code processes:migration:manage} who proposes the plan is the only one needed for the
      *     cancellations, as the single-approver retirement of PD-102; {@code four-eyes} is reserved and refused at start-up
      *     until it is built

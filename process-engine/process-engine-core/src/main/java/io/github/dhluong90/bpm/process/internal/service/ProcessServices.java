@@ -2925,7 +2925,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return actions;
     }
 
-    // ---- called child processes (#92, PRE-204 to PRE-207, DESIGN section 4.2) ------------------------------------
+    // ---- called child processes (#92, PRE-211 to PRE-214, DESIGN section 4.2) ------------------------------------
 
     private static final String CALL_ACTOR = "system:call";
     /** Sequence of a child's end job in the id space of the child's own ids, far above any kernel id. */
@@ -2945,7 +2945,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /**
      * Starts the child of a {@code callProcess} step in the parent's transaction, after the parent's rows are saved
-     * (PRE-204, PRE-205, PRE-207). The child is looked up and started in the parent's tenant, on the pinned version or
+     * (PRE-211, PRE-212, PRE-214). The child is looked up and started in the parent's tenant, on the pinned version or
      * the one effective now, and is unique per parent token and call attempt. A call that cannot start opens an
      * incident on the parent's step and starts nothing.
      */
@@ -3005,7 +3005,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /**
      * Writes the job that resumes the parent of an instance that has just ended, in the transaction that ended it. The
-     * parent row is not locked here; the job fires in a transaction of its own that locks it (PRE-206).
+     * parent row is not locked here; the job fires in a transaction of its own that locks it (PRE-213).
      */
     private void scheduleCallResult(String tenant, InstanceState child, ProcessStore.ParentLink link,
             List<HistoryEntry> history, Instant now) {
@@ -3089,7 +3089,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     /**
      * Cancels the children of a parent that is being cancelled, newest lock order last: the caller holds the parent, and
      * each child is locked and cancelled in turn with the reason {@code parent cancelled} and the actor of the
-     * cancellation, and so are its own children (PRE-206). A child that is compensating is left: an undo is never
+     * cancellation, and so are its own children (PRE-213). A child that is compensating is left: an undo is never
      * abandoned half way.
      */
     private void cancelChildren(String tenant, String parentId, String actor) {
@@ -3106,7 +3106,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
     }
 
-    // ---- migration of a step's work (#106, PRE-201) ---------------------------------------------------------------
+    // ---- migration of a step's work (#106, PRE-208) ---------------------------------------------------------------
 
     /**
      * After a migration has repointed an instance at the target version and cancelled the work of a removed step, the
@@ -3309,7 +3309,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     participants(tenant, row), row.sequence());
             run(definition, row, state, new Command.Cancel(reason, caller), RunAs.REQUEST);
             closeOnCancel(tenant, row.id(), caller, clock.instant());
-            // #92, PRE-206: lock order is parent, then child. The children end in this transaction.
+            // #92, PRE-213: lock order is parent, then child. The children end in this transaction.
             cancelChildren(tenant, row.id(), caller);
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));

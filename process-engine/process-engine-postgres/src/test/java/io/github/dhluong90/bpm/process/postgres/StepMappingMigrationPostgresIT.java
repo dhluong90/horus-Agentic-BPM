@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * Step instructions of a migration plan on PostgreSQL (#106, PRE-200 to PRE-203, {@code TR-MIG-03}): a renamed step is
+ * Step instructions of a migration plan on PostgreSQL (#106, PRE-207 to PRE-210, {@code TR-MIG-03}): a renamed step is
  * mapped and its tasks keep their claim, due time and four-eyes rule; a removed step's work is cancelled with a reason and
  * the token continues where the plan says; a plan that cannot be carried out is refused; and every command is
  * permissioned, idempotent, locked and tenant-bound.
@@ -150,7 +150,7 @@ class StepMappingMigrationPostgresIT {
     }
 
     @Test
-    void PRE_200_a_renamed_step_is_mapped_and_its_tasks_keep_their_claim_deadline_and_four_eyes() {
+    void PRE_207_a_renamed_step_is_mapped_and_its_tasks_keep_their_claim_deadline_and_four_eyes() {
         // Given 40 loans waiting on credit-review of v1, 15 of the tasks claimed, and v2 which renames the step
         importAs("bank-a", RENAME_V1);
         startLoans("bank-a", 0, 40);
@@ -210,7 +210,7 @@ class StepMappingMigrationPostgresIT {
     }
 
     @Test
-    void PRE_200_a_mapping_to_another_kind_of_step_or_to_a_missing_step_is_refused_naming_the_pair() {
+    void PRE_207_a_mapping_to_another_kind_of_step_or_to_a_missing_step_is_refused_naming_the_pair() {
         // Given v1 with a user task and a v2 that has a timer step and no credit-assessment
         importAs("bank-a", RENAME_V1);
         importAs("bank-a", RENAME_V1.replace("credit-review", "cooling-off").replace(
@@ -245,7 +245,7 @@ class StepMappingMigrationPostgresIT {
     }
 
     @Test
-    void PRE_201_a_removed_steps_work_is_cancelled_with_a_reason_and_the_token_continues_where_the_plan_says() {
+    void PRE_208_a_removed_steps_work_is_cancelled_with_a_reason_and_the_token_continues_where_the_plan_says() {
         // Given 12 loans on a manual check, 3 on a remote score (2 due, 1 with a call in flight), and v2 without both
         importAs("bank-a", REMOVE_V1);
         startLoans("bank-a", 12, 3);
@@ -306,7 +306,7 @@ class StepMappingMigrationPostgresIT {
     }
 
     @Test
-    void PRE_202_a_plan_that_names_a_step_twice_or_cancels_without_a_reason_is_refused_and_an_unhandled_step_is_listed() {
+    void PRE_209_a_plan_that_names_a_step_twice_or_cancels_without_a_reason_is_refused_and_an_unhandled_step_is_listed() {
         // Given v1 with a removed step legacy-manual-check that no instruction handles, and v2
         importAs("bank-a", REMOVE_V1);
         startLoans("bank-a", 5, 0);
@@ -345,7 +345,7 @@ class StepMappingMigrationPostgresIT {
     }
 
     @Test
-    void PRE_203_migration_commands_with_instructions_are_permissioned_idempotent_locked_and_tenant_bound() {
+    void PRE_210_migration_commands_with_instructions_are_permissioned_idempotent_locked_and_tenant_bound() {
         // Given plan M1 of bank-a with a mapping, proposed by thu
         importAs("bank-a", RENAME_V1);
         startLoans("bank-a", 0, 3);

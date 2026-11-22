@@ -1,4 +1,4 @@
--- Indexes of the child link of V42 (#92, PRE-205, PRE-206):
+-- Indexes of the child link of V42 (#92, PRE-212, PRE-213):
 --   uq_pre_instance_call   one child per (tenant, parent token, call attempt): a parent step that runs twice, or two
 --                          replicas that fire the same job, can never start a second child for the same attempt;
 --   idx_pre_instance_parent the children of one parent, which a cancel of the parent reads to cancel them, and the

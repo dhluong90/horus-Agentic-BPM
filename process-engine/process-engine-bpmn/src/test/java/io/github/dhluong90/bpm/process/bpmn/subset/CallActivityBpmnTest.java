@@ -17,9 +17,9 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
 /**
- * A {@code callActivity} is read as a {@code callProcess} step (#92, PRE-204, PD-127): the called key, the pinned version,
+ * A {@code callActivity} is read as a {@code callProcess} step (#92, PRE-211, PD-127): the called key, the pinned version,
  * the inputs it passes and the outputs it brings back; passing all variables is refused; a call inside a saga declares
- * its undo; and the export reads back to the same definition hash. A BPMN diagram is read as a layout (#445, PRE-208).
+ * its undo; and the export reads back to the same definition hash. A BPMN diagram is read as a layout (#445, PRE-215).
  */
 class CallActivityBpmnTest {
 
@@ -50,7 +50,7 @@ class CallActivityBpmnTest {
     }
 
     @Test
-    void PRE_204_a_call_activity_is_read_with_its_called_key_version_inputs_and_outputs() {
+    void PRE_211_a_call_activity_is_read_with_its_called_key_version_inputs_and_outputs() {
         // When a callActivity names the key, pins version 6, passes one input and brings one output back
         Process process = reader.read(file(FLOW.formatted(CALL)));
 
@@ -67,7 +67,7 @@ class CallActivityBpmnTest {
     }
 
     @Test
-    void PRE_204_the_export_of_a_call_activity_reads_back_to_the_same_definition_hash() {
+    void PRE_211_the_export_of_a_call_activity_reads_back_to_the_same_definition_hash() {
         // Given a process with a call activity
         Process process = reader.read(file(FLOW.formatted(CALL)));
 
@@ -80,7 +80,7 @@ class CallActivityBpmnTest {
     }
 
     @Test
-    void PRE_204_a_call_activity_without_a_called_key_or_passing_all_variables_is_refused_by_name() {
+    void PRE_211_a_call_activity_without_a_called_key_or_passing_all_variables_is_refused_by_name() {
         // When a callActivity has no calledElement, and another uses horus:in="all"
         // Then each is 422 VALIDATION_FAILED naming the problem
         assertThatThrownBy(() -> reader.read(file(FLOW.formatted("<bpmn:callActivity id=\"kyc\"/>"))))
@@ -93,7 +93,7 @@ class CallActivityBpmnTest {
     }
 
     @Test
-    void PRE_207_a_call_inside_a_saga_must_declare_its_undo_or_declare_it_manual() {
+    void PRE_214_a_call_inside_a_saga_must_declare_its_undo_or_declare_it_manual() {
         // Given a saga with a callProcess step that has no horus:compensate
         String saga = "<bpmn:startEvent id=\"start\"/><bpmn:transaction id=\"onboard\"><bpmn:startEvent id=\"s2\"/>"
                 + "%s<bpmn:endEvent id=\"e2\"/><bpmn:sequenceFlow id=\"a\" sourceRef=\"s2\" targetRef=\"kyc\"/>"
@@ -115,7 +115,7 @@ class CallActivityBpmnTest {
     }
 
     @Test
-    void PRE_208_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else() {
+    void PRE_215_a_diagram_is_read_as_a_layout_of_the_steps_and_flows_it_draws_and_nothing_else() {
         // Given a diagram with shapes for two steps, one of an unknown element, a flow with two waypoints, and a shape
         // out of range
         String diagram = "<bpmndi:BPMNDiagram id=\"dg\"><bpmndi:BPMNPlane id=\"pl\" bpmnElement=\"account-opening\">"

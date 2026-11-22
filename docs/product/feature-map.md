@@ -94,7 +94,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-09 | A `decision` step evaluates a rule set in the host transaction and routes on its outputs | S1 | M2 | PE 7.4 | | TR-EMB-04 | spec gap | RE-F-01, RE-F-20 | |
 | PE-F-10 | Four-eyes: the requester or an earlier actor cannot complete an approval task | S2 | M2 | PE 7.2 Logic | PRE-007 | TR-SEC-04 | specified | PE-F-07 | |
 | PE-F-11 | SLA deadlines respect working hours, holidays and time zone per tenant and do not move when the calendar changes | S2 | M2 | PE 7.2 Logic, 7.2 API | PRE-008, PRE-114 | TR-CAL-01, TR-CAL-02 | specified | | PD-118, PD-131 |
-| PE-F-12 | A step starts a child process (`callProcess`) and waits for it | S1 | M2 (cut candidate) | PE 7.4 | PRE-204 to PRE-207 | | specified | PE-F-26 | PD-031, PD-127, PD-144 |
+| PE-F-12 | A step starts a child process (`callProcess`) and waits for it | S1 | M2 (cut candidate) | PE 7.4 | PRE-211 to PRE-214 | | specified | PE-F-26 | PD-031, PD-127, PD-144 |
 | PE-F-13 | An overdue task escalates to the configured user or role | S2 | M2 | PE 7.4 | | TR-CAL-01 | spec gap | PE-F-11 | |
 | PE-F-14 | A tenant never reads or changes another tenant's definitions, instances, tasks or history | S1 | M2 | PE 7.4 | | TR-TEN-01, TR-TEN-02, TR-SEC-03 | spec gap | | |
 | PE-F-15 | Every transition is recorded in append-only history | S2, S3 | M2 | PE 7.2 Data, 7.4 | | TR-OBS-01 | spec gap | | |
@@ -113,7 +113,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-28 | Hosts manage definitions, instances, task queues, incidents and history through `/api/bpm/processes/v1`; deploy creates a draft (PD-033) | S1, S2 | M2 | PE 7.2 API | | TR-SEC-08, TR-IDEM-01 | spec gap | X-F-05 | PD-033 |
 | PE-F-29 | A migration plan is validated as a dry run that changes nothing | S2 | M2 | PE 7.2 Logic | PRE-014 | TR-MIG-01 | specified | PE-F-01 | PD-017 |
 | PE-F-30 | A migration executes in batches; one instance's failure affects only that instance | S2 | M2 (cut candidate) | PE 7.2 Logic | PRE-015 | TR-MIG-02 | specified | PE-F-29 | PD-017, PD-031 |
-| PE-F-31 | A migration maps renamed steps explicitly and cancels removed steps | S2 | M3 | PE 7.4, 8 | PRE-200 to PRE-203 | TR-MIG-03 | specified | PE-F-30 | PD-023 |
+| PE-F-31 | A migration maps renamed steps explicitly and cancels removed steps | S2 | M3 | PE 7.4, 8 | PRE-207 to PRE-210 | TR-MIG-03 | specified | PE-F-30 | PD-023 |
 | PE-F-32 | Hosts get metrics for active instances, incidents and timer lag, and events for start, completion and incident | S1, S2 | M2 | PE 7.2 Observability | PRE-084, PRE-085, PRE-086 | TR-OBS-02, TR-OBS-04, TR-OBS-06 | specified | X-F-07 | |
 | PE-F-33 | Throughput of 1 000 step transitions per second per replica is measured and reported | S1 | M2 | PE 7.4 | PRE-087 | TR-PERF-04 | specified | | PD-026 |
 | PE-F-34 | An MCP tool adapter is available as an example outside the engine artifacts | S3 | M3 | PE 8 | | TR-AGT-04 | spec gap | PE-F-24 | |

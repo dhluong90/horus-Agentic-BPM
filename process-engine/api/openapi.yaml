@@ -120,7 +120,7 @@ paths:
         the subset is named with its id, line and stage in `unsupportedElements` of `BPMN_UNSUPPORTED_ELEMENT`
         (`PRE-108`, PD-141: the same field and item shape as the Rule Engine), and a condition in another
         expression language is listed there too. Vendor attributes and extensions are kept in the stored source and
-        listed as `warnings`, in a refusal and in the `201` answer (`PRE-200`). The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
+        listed as `warnings`, in a refusal and in the `201` answer (`PRE-204`). The version is `DRAFT`, or `ACTIVE` only with dev auto-approval. A
         document identical to the latest version of its key returns that version, also with `201`. A draft is never
         the effective version: instances keep starting on the active one until the draft is approved. An `agentTask`
         whose guardrail rule set breaks the guardrail contract (missing in the tenant or without a version in effect,
@@ -1438,14 +1438,14 @@ paths:
       summary: Plan moving the running instances of one version to another
       description: |
         Creates a plan to move the running instances of `sourceVersion` to `targetVersion` of the same key in the
-        caller's tenant. Steps are matched by identical id, unless the plan says otherwise (PRE-200, PRE-201):
+        caller's tenant. Steps are matched by identical id, unless the plan says otherwise (PRE-207, PRE-208):
         `mappings` move the tokens, open tasks and pending jobs of a renamed step to its new id, and `cancellations`
         cancel the work of a removed step with a reason and continue the token at a named step of the target. A body
         with any other field is `400 INPUT_INVALID`. Creating a plan moves nothing. It writes the plan, one
         history row and `processes.migration.planned.v1` in one transaction.
 
         Instructions that cannot be carried out are `422 MIGRATION_PLAN_INVALID` with each problem in `paths`, and
-        nothing is written (PRE-202): a mapping to a step of another type or to a step the target lacks, a step
+        nothing is written (PRE-209): a mapping to a step of another type or to a step the target lacks, a step
         mapped or cancelled twice, a cancelled step the target still has, a cancellation without a `reason` (1 to
         `lifecycle.reason-max-length` characters) or without a `moveTo` that the target has, and more than 200
         mappings or 200 cancellations. A removed step that no instruction handles is not refused here: the dry run
@@ -1524,7 +1524,7 @@ paths:
         handled is a conflict with the number of running instances waiting there and their ids. A target that is no
         longer active is the conflict `TARGET_NOT_ACTIVE`. A cancelled step whose remote call is in flight is the
         conflict `STEP_IN_FLIGHT`: it does not make the plan invalid, and the instance stays on the source version
-        until a later run (PRE-201). `impact` counts the instances each kind of instruction touches (PRE-200). The
+        until a later run (PRE-208). `impact` counts the instances each kind of instruction touches (PRE-207). The
         plan is `valid` only without conflicts other than `STEP_IN_FLIGHT`. `movable` counts and lists the instances that would move. Each id list holds
         at most `migration.dry-run-sample-size` (100) ids in id order, with `truncated: true` when there are more.
 
@@ -3132,7 +3132,7 @@ components:
         kind: { type: string, pattern: '^(next|default|fork|branch\[[0-9]+\])$' }
     MigrationStepMapping:
       type: object
-      description: A renamed step (PRE-200); both steps must be of the same type
+      description: A renamed step (PRE-207); both steps must be of the same type
       required: [from, to]
       additionalProperties: false
       properties:
@@ -3140,7 +3140,7 @@ components:
         to: { type: string, maxLength: 100, description: The step id in the target version }
     MigrationStepCancellation:
       type: object
-      description: A removed step (PRE-201); its work is cancelled and the token continues at `moveTo`
+      description: A removed step (PRE-208); its work is cancelled and the token continues at `moveTo`
       required: [step, moveTo, reason]
       additionalProperties: false
       properties:
@@ -3235,7 +3235,7 @@ components:
         movable: { $ref: '#/components/schemas/MigrationInstanceSample' }
         impact:
           type: object
-          description: How many running instances each kind of step instruction touches (PRE-200, PRE-201)
+          description: How many running instances each kind of step instruction touches (PRE-207, PRE-208)
           required: [mapped, cancelled, inFlight, unmapped]
           properties:
             mapped: { type: integer, minimum: 0, description: Instances with a token at a mapped step }

@@ -58,7 +58,7 @@ class MigrationRestContractTest {
     }
 
     @Test
-    void PRE_200_a_plan_with_mappings_and_cancellations_reaches_the_service_and_comes_back_with_them() throws Exception {
+    void PRE_207_a_plan_with_mappings_and_cancellations_reaches_the_service_and_comes_back_with_them() throws Exception {
         MvcResult created = exchange(post(BASE + "/migrations").contentType(MediaType.APPLICATION_JSON)
                 .header("Idempotency-Key", "plan-2").content("{\"definitionKey\":\"loan-origination\",\"sourceVersion\":1,"
                         + "\"targetVersion\":2,\"mappings\":[{\"from\":\"credit-review\",\"to\":\"credit-assessment\"}],"
@@ -77,7 +77,7 @@ class MigrationRestContractTest {
     }
 
     @Test
-    void PRE_200_a_dry_run_reports_what_each_instruction_does() throws Exception {
+    void PRE_207_a_dry_run_reports_what_each_instruction_does() throws Exception {
         MvcResult report = exchange(post(BASE + "/migrations/" + PLAN + ":validate"));
 
         assertThat(report.getResponse().getContentAsString())
@@ -85,7 +85,7 @@ class MigrationRestContractTest {
     }
 
     @Test
-    void PRE_202_instructions_that_cannot_be_carried_out_are_422_with_each_problem_in_paths() throws Exception {
+    void PRE_209_instructions_that_cannot_be_carried_out_are_422_with_each_problem_in_paths() throws Exception {
         MvcResult refused = exchange(post(BASE + "/migrations").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"definitionKey\":\"bad-steps\",\"sourceVersion\":1,\"targetVersion\":2}"));
 

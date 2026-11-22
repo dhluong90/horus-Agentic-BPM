@@ -279,7 +279,7 @@ public final class MigrationRunner {
                 mappedTokens.add(token);
             } else if (cancel != null) {
                 cancelledTokens.add(token);
-                // PRE-201: a call in flight is never cut off; the instance is left on the source version.
+                // PRE-208: a call in flight is never cut off; the instance is left on the source version.
                 inFlight |= store.callInFlight(tenant, instanceId, token.id());
             }
         }

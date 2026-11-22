@@ -77,7 +77,7 @@ class ImportWarningsPostgresIT {
     }
 
     @Test
-    void PRE_200_a_successful_import_lists_the_vendor_attribute_it_kept_but_did_not_read() {
+    void PRE_204_a_successful_import_lists_the_vendor_attribute_it_kept_but_did_not_read() {
         CALLER.as("bank-a", "analyst-lan");
 
         DefinitionVersion imported = engine.importDefinition(request("k-warn-1"));
@@ -93,7 +93,7 @@ class ImportWarningsPostgresIT {
     }
 
     @Test
-    void PRE_200_reading_the_version_again_has_no_warnings_because_only_the_import_answer_carries_them() {
+    void PRE_204_reading_the_version_again_has_no_warnings_because_only_the_import_answer_carries_them() {
         CALLER.as("bank-a", "analyst-lan");
         DefinitionVersion imported = engine.importDefinition(request(null));
 

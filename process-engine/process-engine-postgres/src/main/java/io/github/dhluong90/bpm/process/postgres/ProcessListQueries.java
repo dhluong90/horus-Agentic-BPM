@@ -176,7 +176,7 @@ final class ProcessListQueries {
 
     /**
      * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent} (V43).
-     * A cancel of the parent reads them to cancel them (#92, PRE-206). Parameters: tenant, parent instance, limit.
+     * A cancel of the parent reads them to cancel them (#92, PRE-213). Parameters: tenant, parent instance, limit.
      */
     static final ListQuery INSTANCE_CHILDREN = new ListQuery("instance-children",
             new Bound.ParentKey("parent_instance_id", "the calls of one instance, bounded by its definition's steps "

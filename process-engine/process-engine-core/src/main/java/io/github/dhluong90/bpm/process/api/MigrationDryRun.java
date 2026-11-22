@@ -36,7 +36,7 @@ public record MigrationDryRun(String migrationId, String planHash, String defini
     public static final String CANCELLED = "CANCELLED";
     /**
      * A removed step whose remote call is in flight: the instance is left on the source version and moves on a later
-     * run. It does not make the plan invalid (#106, PRE-201).
+     * run. It does not make the plan invalid (#106, PRE-208).
      */
     public static final String STEP_IN_FLIGHT = "STEP_IN_FLIGHT";
 

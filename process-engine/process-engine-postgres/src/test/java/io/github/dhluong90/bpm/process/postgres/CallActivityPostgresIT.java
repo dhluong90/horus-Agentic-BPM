@@ -27,7 +27,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * A process calls a child process and waits for it (#92, PRE-204 to PRE-207, PD-127, PD-144) on PostgreSQL. Account
+ * A process calls a child process and waits for it (#92, PRE-211 to PRE-214, PD-127, PD-144) on PostgreSQL. Account
  * opening {@code account-opening} calls {@code kyc-check} at step {@code kyc} and continues with the child's declared
  * output {@code kycLevel} only. The clock is a {@link TestClock}; jobs are fired by hand; no test sleeps.
  */
@@ -179,7 +179,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_204_a_parent_waits_for_its_child_and_continues_with_the_childs_declared_outputs_only() {
+    void PRE_211_a_parent_waits_for_its_child_and_continues_with_the_childs_declared_outputs_only() {
         // Given account-opening with a callProcess step kyc, and kyc-check effective
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));
@@ -223,7 +223,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_204_a_pinned_version_is_used_even_when_a_later_one_is_effective_and_a_retired_one_raises_an_incident() {
+    void PRE_211_a_pinned_version_is_used_even_when_a_later_one_is_effective_and_a_retired_one_raises_an_incident() {
         // Given kyc-check v1 pinned by the step, then v2 effective
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted("horus:calledVersion=\"1\""));
@@ -241,7 +241,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_205_a_second_child_for_the_same_token_and_attempt_is_refused_by_the_database() {
+    void PRE_212_a_second_child_for_the_same_token_and_attempt_is_refused_by_the_database() {
         // Given P1 with its child C1 started for the kyc token, attempt 0
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));
@@ -261,7 +261,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_205_the_chain_of_calls_stops_at_the_depth_limit_with_an_incident_and_no_child() {
+    void PRE_212_the_chain_of_calls_stops_at_the_depth_limit_with_an_incident_and_no_child() {
         // Given ping, whose first step calls ping, and calls.max-depth at its default of 5
         deploy("bank-a", "ping", PING);
 
@@ -277,7 +277,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_205_a_called_element_with_no_effective_version_raises_an_incident_at_run_time() {
+    void PRE_212_a_called_element_with_no_effective_version_raises_an_incident_at_run_time() {
         // Given account-opening deployed before kyc-check exists: a warning at approval, never a refusal
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));
 
@@ -291,7 +291,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_206_a_cancelled_child_fails_the_parent_step_and_a_retry_starts_a_new_child_keyed_by_the_retry_count() {
+    void PRE_213_a_cancelled_child_fails_the_parent_step_and_a_retry_starts_a_new_child_keyed_by_the_retry_count() {
         // Given P1 waiting on C1, which an operator cancels for a duplicate case
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));
@@ -324,7 +324,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_206_a_child_that_ended_failed_fails_the_parent_step_with_child_failed() {
+    void PRE_213_a_child_that_ended_failed_fails_the_parent_step_with_child_failed() {
         // Given P1 waiting on C1, which ended FAILED (as a compensated child does), with its call result due
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));
@@ -348,7 +348,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_206_a_cancel_of_the_parent_cancels_its_child_in_the_same_transaction_with_the_parent_cancelled_reason() {
+    void PRE_213_a_cancel_of_the_parent_cancels_its_child_in_the_same_transaction_with_the_parent_cancelled_reason() {
         // Given P1 waiting on C1, whose KYC task is open
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));
@@ -373,7 +373,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_207_a_completed_child_is_undone_only_by_the_call_steps_own_handler() {
+    void PRE_214_a_completed_child_is_undone_only_by_the_call_steps_own_handler() {
         // Given a saga whose call step kyc declares reverse-kyc and has completed with child C1, and a later failure
         deploy("bank-a", "kyc-check", KYC_CHECK);
         deploy("bank-a", "onboarding", ONBOARD_SAGA);
@@ -400,7 +400,7 @@ class CallActivityPostgresIT {
     }
 
     @Test
-    void PRE_207_a_child_is_looked_up_only_in_the_parents_tenant() {
+    void PRE_214_a_child_is_looked_up_only_in_the_parents_tenant() {
         // Given kyc-check deployed in bank-b only, and account-opening in bank-a
         deploy("bank-b", "kyc-check", KYC_CHECK);
         deploy("bank-a", "account-opening", ACCOUNT_OPENING.formatted(""));

@@ -1124,7 +1124,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * A {@code callActivity} (#92, PRE-204): {@code calledElement} is the definition key of the child, the
+         * A {@code callActivity} (#92, PRE-211): {@code calledElement} is the definition key of the child, the
          * optional {@code horus:calledVersion} pins its version, {@code <horus:input>} passes a value in and
          * {@code <horus:output>} brings a named child variable back. {@code horus:in="all"} is refused: a child gets
          * only what the step names.

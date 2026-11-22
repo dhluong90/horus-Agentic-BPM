@@ -17,7 +17,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
- * A BPMN import writes the file's own diagram as layout revision 1 of the version it creates (#445, PRE-208), apart from
+ * A BPMN import writes the file's own diagram as layout revision 1 of the version it creates (#445, PRE-215), apart from
  * the definition: the hash does not depend on it, an import without a diagram stores none, each import has its own
  * revision 1, and a later change to the layout is a new revision that needs no approval.
  */
@@ -95,7 +95,7 @@ class ImportedLayoutPostgresIT {
     }
 
     @Test
-    void PRE_208_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition() {
+    void PRE_215_a_bpmn_import_stores_its_diagram_as_layout_revision_1_apart_from_the_definition() {
         // Given a BPMN file with a diagram of three steps, one flow with two waypoints, and a shape of an unknown element
         DefinitionVersion v1 = importAs("bank-a", V1, diagram(0));
         String id = definitionId("bank-a", 1);
@@ -121,7 +121,7 @@ class ImportedLayoutPostgresIT {
     }
 
     @Test
-    void PRE_208_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval() {
+    void PRE_215_each_import_has_its_own_revision_1_and_a_later_layout_change_needs_no_approval() {
         // Given two imports of the same process with different content and different diagrams
         importAs("bank-a", V1, diagram(0));
         importAs("bank-a", V2, diagram(50));
@@ -150,7 +150,7 @@ class ImportedLayoutPostgresIT {
     }
 
     @Test
-    void PRE_208_a_definition_stored_before_layouts_existed_still_reads_without_a_layout() {
+    void PRE_215_a_definition_stored_before_layouts_existed_still_reads_without_a_layout() {
         // Given a version imported by an engine that did not store layouts
         TestEngine plainEngine = TestEngine.replica("pod-2", clock).build();
         plainEngine.identity.as("bank-a", "pipeline", PIPELINE);
