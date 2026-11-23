@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A fund transfer as a standard BPMN transaction (#488): the hold and the debit each carry a compensation boundary
+     event whose compensation activity is their undo. When the target account turns out to be closed, the cancel end
+     event compensates the transaction, newest first, and the cancel boundary event sends the customer a notice. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_fund-transfer-cancel"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="fund-transfer-cancel" name="Fund transfer with a cancelled transaction" isExecutable="true">
+    <bpmn:startEvent id="start" name="Transfer requested"/>
+    <bpmn:transaction id="transfer" name="Move the money">
+      <bpmn:startEvent id="transfer-start"/>
+      <bpmn:serviceTask id="hold-funds" name="Hold the funds" horus:handler="place-hold" horus:resultVariable="hold">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="sourceAccount" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="hold-undo" attachedToRef="hold-funds" cancelActivity="false">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="release-hold-activity" name="Release the hold" isForCompensation="true"
+                        horus:handler="release-hold"/>
+      <bpmn:association id="hold-undo-link" associationDirection="One" sourceRef="hold-undo"
+                        targetRef="release-hold-activity"/>
+      <bpmn:serviceTask id="debit-source" name="Debit the source" horus:handler="core-banking" horus:mode="remote"
+                        horus:resultVariable="debit">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="debit-undo" attachedToRef="debit-source" cancelActivity="false">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="credit-back-activity" name="Credit the debit back" isForCompensation="true"
+                        horus:handler="credit-back" horus:mode="remote"/>
+      <bpmn:association id="debit-undo-link" associationDirection="One" sourceRef="debit-undo"
+                        targetRef="credit-back-activity"/>
+      <bpmn:exclusiveGateway id="target-open" default="to-end"/>
+      <bpmn:endEvent id="transfer-end"/>
+      <bpmn:endEvent id="transfer-cancel">
+        <bpmn:cancelEventDefinition/>
+      </bpmn:endEvent>
+      <bpmn:sequenceFlow id="transfer-start__hold" sourceRef="transfer-start" targetRef="hold-funds"/>
+      <bpmn:sequenceFlow id="hold__debit" sourceRef="hold-funds" targetRef="debit-source"/>
+      <bpmn:sequenceFlow id="debit__open" sourceRef="debit-source" targetRef="target-open"/>
+      <bpmn:sequenceFlow id="to-cancel" sourceRef="target-open" targetRef="transfer-cancel">
+        <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression"
+                                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">targetClosed &gt;= 1</bpmn:conditionExpression>
+      </bpmn:sequenceFlow>
+      <bpmn:sequenceFlow id="to-end" sourceRef="target-open" targetRef="transfer-end"/>
+    </bpmn:transaction>
+    <bpmn:boundaryEvent id="transfer-cancelled" name="Transfer cancelled" attachedToRef="transfer">
+      <bpmn:cancelEventDefinition/>
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="notify-customer" name="Tell the customer" horus:handler="notify-customer"/>
+    <bpmn:endEvent id="cancelled-end" name="Cancelled"/>
+    <bpmn:endEvent id="end" name="Transferred"/>
+    <bpmn:sequenceFlow id="start__transfer" sourceRef="start" targetRef="transfer"/>
+    <bpmn:sequenceFlow id="transfer__end" sourceRef="transfer" targetRef="end"/>
+    <bpmn:sequenceFlow id="cancelled__notify" sourceRef="transfer-cancelled" targetRef="notify-customer"/>
+    <bpmn:sequenceFlow id="notify__end" sourceRef="notify-customer" targetRef="cancelled-end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -16,5 +16,10 @@ public final class ScopeBehaviors implements BehaviorModule {
         registry.register(new SagaBehavior());
         registry.register(new SubProcessBehavior());
         registry.register(new ThrowCompensationBehavior());
+        registry.register(new CompensationEndBehavior.Compensate());
+        registry.register(new CompensationEndBehavior.Cancel());
+        // A compensation boundary and a cancel boundary hold no token; the walk and the cancel end find them.
+        registry.register(BoundaryCompensationBehavior.forCompensation());
+        registry.register(BoundaryCompensationBehavior.forCancel());
     }
 }

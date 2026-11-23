@@ -87,6 +87,30 @@ public interface ExecutionContext {
     void compensate(Token failing, String cause);
 
     /**
+     * A compensation throw event that the flow goes on after (#488): intermediate with an outgoing flow, or an end
+     * event. Every other live token under the thrower's scope is cancelled, the thrower waits, the instance is
+     * {@code COMPENSATING}, and the shell walks the undo entries of the scope and of the sub-processes completed in it,
+     * newest first. When the walk is done the instance is {@code RUNNING} again and the thrower leaves.
+     *
+     * @param thrower the token on the throw event
+     * @param targetActivityId the activity to undo (an {@code activityRef}), or null for the whole scope
+     */
+    default void compensateAndResume(Token thrower, String targetActivityId) {
+        throw new UnsupportedOperationException("compensateAndResume");
+    }
+
+    /**
+     * A cancel end event inside a transaction (#488): the transaction is compensated as for
+     * {@link #compensateAndResume}, and when the walk is done its cancel boundary event leaves the flow in the
+     * enclosing scope.
+     *
+     * @param end the token on the cancel end event
+     */
+    default void cancelTransaction(Token end) {
+        throw new UnsupportedOperationException("cancelTransaction");
+    }
+
+    /**
      * Raises a BPMN error from a token (#489, #493). The nearest error boundary that matches the code, on the step
      * itself or on an enclosing sub-process, call activity or saga block, catches it: the host activity and
      * everything under it is cancelled and the boundary's flow runs. A boundary without an error code catches every

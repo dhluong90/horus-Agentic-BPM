@@ -9,9 +9,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEven
 import java.util.Map;
 
 /**
- * {@code throwCompensation} (#67, PRE-076): undoes the completed steps of the enclosing {@code saga} block newest
- * first. As for a step that fails with {@code onFailure: compensate}, the instance ends {@code FAILED} once the walk
- * reaches the bottom of the stack (DESIGN section 3.3).
+ * {@code throwCompensation} (#67, PRE-076, #488): undoes the completed steps of the enclosing scope newest first, the
+ * steps of sub-processes completed in it included. With no outgoing flow it is the end of the road as before: like a
+ * step that fails with {@code onFailure: compensate}, the instance ends {@code FAILED} once the walk reaches the bottom
+ * of the stack (DESIGN section 3.3). With an outgoing flow it is the BPMN throw: the flow goes on after the walk, and
+ * an {@code activityRef} limits the undo to that activity.
  */
 final class ThrowCompensationBehavior implements FlowNodeBehavior<IntermediateThrowEvent> {
 
@@ -30,7 +32,11 @@ final class ThrowCompensationBehavior implements FlowNodeBehavior<IntermediateTh
 
     @Override
     public void enter(IntermediateThrowEvent node, Token token, ExecutionContext ctx) {
-        ctx.history("NODE_COMPLETED", token, Map.of());
-        ctx.compensate(token, CAUSE);
+        if (ctx.process().outgoing(node.id()).isEmpty()) {
+            ctx.history("NODE_COMPLETED", token, Map.of());
+            ctx.compensate(token, CAUSE);
+            return;
+        }
+        ctx.compensateAndResume(token, ((CompensateEventDefinition) node.eventDefinitions().get(0)).activityRef());
     }
 }

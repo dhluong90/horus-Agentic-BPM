@@ -1861,7 +1861,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Kind:** semantics
 - **Given:** Process `loan-booking-embedded`: `register-loan` (undone by `cancel-loan`) in the root scope, then a `subProcess` `disburse` with `reserve-funds` (undone by `release-funds`), `open-account` (undone by `close-account`) and `notify-partner` with `onFailure: compensate`, which the partner refuses. A second process `fund` with `hold` (undone by `release-hold`) and `debit` (`onFailure: compensate`) inside a sub-process, after `open` (undone by `close-account`) in the root scope.
 - **When:** `notify-partner` fails for good; and, in the second process, `debit` answers the business error `INSUFFICIENT_FUNDS`.
-- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are not walked by a later undo of the enclosing scope until S2 (DESIGN section 4.2).
+- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are walked by a later undo of the enclosing scope, with the sub-processes nested in it (`PRE-289`).
 - **Example:** `disburse fails -> close-account, release-funds run; cancel-loan does not`.
 - **Test ID:** `PRE_262_an_undo_started_inside_the_sub_process_walks_that_scope_and_never_the_enclosing_one` (`SubProcessScopeTest`), `PRE_262_an_embedded_sub_process_is_a_scope_whose_failure_undoes_only_its_own_steps` (`SagaCompensationTest`)
 
@@ -2098,3 +2098,47 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
 - **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
 - **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)
+
+### PRE-288 A cancel end event compensates its transaction newest first, and the cancel boundary event leaves the flow
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04`, `PRE-073`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `fund-transfer-cancel`: the transaction `transfer` holds `hold-funds` (local, with a compensation boundary event whose compensation activity runs `release-hold`) and `debit-source` (remote, with a compensation boundary event whose compensation activity runs the adapter `credit-back`), then an exclusive gateway that takes a cancel end event when the target account `0099-887766` is closed. A cancel boundary event on `transfer` leads to `notify-customer`. An instance moves `25,000,000 VND` from `0011-223344` and the target is closed.
+- **When:** `debit-source` is accepted and the flow reaches the cancel end event.
+- **Then:**
+  - The other live tokens of the transaction are cancelled, the instance is `COMPENSATING` and cannot be cancelled, and `processes.compensation.started.v1` carries the transaction's scope token, `depth` 2 and `cause` `CANCEL`. The customer has not been told.
+  - `credit-back` runs first as a `COMPENSATION` job keyed by its own id, with the forward job and attempt of the debit; `release-hold` runs second with the attempt of the hold; nothing else runs.
+  - With every entry `DONE` the transaction's scope token is `COMPENSATED`, the instance is `RUNNING` again, history records `COMPENSATED` and `BOUNDARY_FIRED` with trigger `CANCEL`, `notify-customer` runs once, and the instance ends `COMPLETED`: a cancelled transaction is a business outcome and no `processes.instance.failed.v1` is published.
+  - A cancel end event outside a transaction, or in a transaction with no cancel boundary event, a compensation boundary event with no compensation activity, and a compensation activity with a flow, are refused when the definition is compiled (`CANCEL_END_OUTSIDE_TRANSACTION`, `CANCEL_BOUNDARY_REQUIRED`, `COMPENSATION_ACTIVITY_MISSING`, `COMPENSATION_ACTIVITY_HAS_FLOW`).
+- **Example:** `debit 25,000,000 VND accepted, target closed -> credit-back, release-hold, then notify-customer; instance COMPLETED`.
+- **Test ID:** `PRE_288_a_cancel_end_compensates_the_transaction_newest_first_and_the_cancel_boundary_leaves_the_flow` (`SagaCompensationTest`), `PRE_288_the_cancel_end_waits_for_the_undo_and_the_cancel_boundary_then_takes_the_flow`, `PRE_288_a_compensation_boundary_without_its_activity_and_a_cancel_end_without_its_boundary_are_refused` (`TransactionCompensationTest`)
+
+### PRE-289 A compensation of the enclosing scope walks into the sub-processes completed in it
+- **Traces to:** `TR-COMP-01`, `PRE-044`, `PRE-262`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-booking-nested`: `register-loan` (undone by `cancel-loan`) in the root scope, then the sub-process `disburse` with `reserve-funds` (undone by `release-funds`), the sub-process `fees` with `charge-fee` (undone by `refund-fee`) and `open-account` (undone by `close-account`), all completed; then `notify-partner` in the root scope with `onFailure: compensate`, which the partner refuses.
+- **When:** `notify-partner` fails for good.
+- **Then:** The compensation is that of the root scope token and takes the entries of the root scope and of every scope token under it, newest pushed first across scopes: `close-account`, `refund-fee`, `release-funds`, `cancel-loan`, each once. Every entry is `DONE`, the root scope token is `COMPENSATED`, the instance ends `FAILED`, and the timeline lists the four undos under the one compensation of the root scope. An undo started inside a sub-process still walks only that sub-process and the scopes under it (`PRE-262`).
+- **Example:** `refused at notify-partner -> close-account, refund-fee, release-funds, cancel-loan`.
+- **Test ID:** `PRE_289_a_compensation_of_the_enclosing_scope_walks_into_the_sub_processes_completed_in_it` (`SagaCompensationTest`)
+
+### PRE-290 A failed undo is retried under its own job, and every undo runs once before the flow resumes
+- **Traces to:** `TR-COMP-02`, `TR-IDEM-04`, `PRE-074`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The cancelled transfer of `PRE-288`, where core banking refuses the first `credit-back` with `ACCOUNT_FROZEN`.
+- **When:** The first undo fails for good, and then operator `ops.lan` retries the incident after the account is unfrozen.
+- **Then:** After the failure the entry of `debit-source` is `FAILED`, an incident `COMPENSATION_FAILED` holds the walk, `release-hold` has not run, the instance is `COMPENSATING` and the cancel boundary has not fired. The retry runs `credit-back` again under the same job id with a new attempt id, so core banking sees one idempotency key; `release-hold` then runs exactly once, `notify-customer` runs once, both entries are `DONE`, the instance is `COMPLETED`, and nothing is left to run.
+- **Example:** `credit-back refused, retried -> one key, two attempts; release-hold once`.
+- **Test ID:** `PRE_290_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes` (`SagaCompensationTest`)
+
+### PRE-291 A compensation throw that names an activity undoes only that activity, and a second throw undoes nothing
+- **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-undo-one`: `register-loan`, `reserve-funds` and `open-account` complete in the root scope, each with an undo; then two compensation throw events with `activityRef="reserve-funds"` in a row, then the end.
+- **When:** The first throw runs, its undo completes, and the second throw runs.
+- **Then:** Only `release-funds` runs, once; the entries of `open-account` and `register-loan` stay `PENDING`; the second throw finds nothing `PENDING` for `reserve-funds` and the flow goes on at once; the instance ends `COMPLETED`, and history records `COMPENSATION_STARTED` on each throw. A compensation throw event or compensation end event with no `activityRef` undoes the whole scope the same way; one with no outgoing flow keeps the behaviour of `PRE-076`.
+- **Example:** `throw reserve-funds twice -> release-funds once`.
+- **Test ID:** `PRE_291_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing` (`SagaCompensationTest`)

@@ -108,6 +108,12 @@ final class WorkingContext implements ExecutionContext {
     void endCompensation(String scopeTokenId) {
         Token scope = tree().get(scopeTokenId).orElseThrow(() -> new ExecutionException("TOKEN_NOT_FOUND", null,
                 "No scope token " + scopeTokenId));
+        Optional<Token> waiting = tree().children(scopeTokenId).stream()
+                .filter(t -> t.kind() == TokenKind.FLOW && t.status() == TokenStatus.WAITING_EVENT).findFirst();
+        if (waiting.isPresent()) {
+            resumeAfterCompensation(scope, waiting.get());
+            return;
+        }
         for (Token live : tree().all()) {
             if (live.status().live() && !live.id().equals(scopeTokenId)) {
                 update(live.withStatus(TokenStatus.CANCELLED));
@@ -120,6 +126,49 @@ final class WorkingContext implements ExecutionContext {
         history("INSTANCE_ENDED", null, Map.of("status", "FAILED"));
         effect(new Effect.EmitEvent(nextId(), "processes.instance.failed.v1",
                 Map.of("instanceId", initial.instanceId())));
+    }
+
+    /**
+     * The walk of a throw or a cancel reached the bottom (#488): the instance runs again, the thrower leaves. A
+     * compensation throw event goes on by its outgoing flow or, as an end event, ends its token; a cancel end event
+     * leaves the transaction through its cancel boundary event.
+     */
+    private void resumeAfterCompensation(Token scope, Token thrower) {
+        status = InstanceStatus.RUNNING;
+        history.add(new HistoryEntry("COMPENSATED", scope.nodeId(), scope.id(), null, actor, now,
+                Map.of("scopeTokenId", scope.id())));
+        FlowNode node = process.node(thrower.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
+                thrower.nodeId(), "No node " + thrower.nodeId()));
+        Token active = thrower.withStatus(TokenStatus.ACTIVE);
+        update(active);
+        boolean cancel = node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent e
+                && e.eventDefinitions().size() == 1 && e.eventDefinitions().get(0) instanceof
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
+        history("NODE_COMPLETED", active, Map.of());
+        if (cancel) {
+            update(active.withStatus(TokenStatus.COMPLETED));
+            update(scope.withStatus(TokenStatus.COMPENSATED));
+            disarmBoundaries(scope.nodeId(), scope.scopeTokenId(), null);
+            BoundaryEvent boundary = process.boundariesOf(scope.nodeId()).stream().filter(b ->
+                    b.eventDefinitions().size() == 1 && b.eventDefinitions().get(0) instanceof
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition).findFirst()
+                    .orElseThrow(() -> new ExecutionException("CANCEL_BOUNDARY_MISSING", scope.nodeId(),
+                            "Transaction " + scope.nodeId() + " has no cancel boundary event"));
+            Token flow = createToken(TokenKind.FLOW, boundary.id(), scope.scopeTokenId());
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("boundaryId", boundary.id());
+            details.put("attachedTo", boundary.attachedToRef());
+            details.put("trigger", "CANCEL");
+            details.put("interrupting", true);
+            history("NODE_ENTERED", flow, Map.of());
+            history("BOUNDARY_FIRED", flow, details);
+            history("NODE_COMPLETED", flow, Map.of());
+            takeOutgoing(flow, boundary);
+        } else if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent) {
+            complete(active);
+        } else {
+            takeOutgoing(active, node);
+        }
     }
 
     // ---- ExecutionContext ---------------------------------------------------------------------------------
@@ -339,6 +388,46 @@ final class WorkingContext implements ExecutionContext {
         history.add(new HistoryEntry("COMPENSATION_STARTED", failing.nodeId(), failing.id(),
                 failing.activityInstanceId(), actor, now, details));
         effect(new Effect.StartCompensation(scope.id(), failing.nodeId(), cause));
+    }
+
+    @Override
+    public void compensateAndResume(Token thrower, String targetActivityId) {
+        Token scope = tree().get(thrower.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                thrower.nodeId(), "Token " + thrower.id() + " has no scope"));
+        startResumable(thrower, scope, "THROW_COMPENSATION", targetActivityId);
+    }
+
+    @Override
+    public void cancelTransaction(Token end) {
+        Token scope = tree().get(end.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                end.nodeId(), "Token " + end.id() + " has no scope"));
+        startResumable(end, scope, "CANCEL", null);
+    }
+
+    /**
+     * Starts a compensation that the flow resumes after (#488). The other live tokens under the scope are cancelled
+     * with their work, as the BPMN cancel of a transaction does; the thrower waits ({@code WAITING_EVENT}) so the
+     * shell's walk can find it, and the instance is {@code COMPENSATING}.
+     */
+    private void startResumable(Token thrower, Token scope, String cause, String target) {
+        for (Token child : tree().children(scope.id())) {
+            if (child.status().live() && !child.id().equals(thrower.id())) {
+                cancelTree(child, null);
+            }
+        }
+        update(new Token(thrower.id(), thrower.kind(), TokenStatus.WAITING_EVENT, thrower.scopeTokenId(),
+                thrower.nodeId(), null, thrower.locals()));
+        status = InstanceStatus.COMPENSATING;
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("scopeTokenId", scope.id());
+        details.put("scope", scope.nodeId());
+        details.put("cause", cause);
+        if (target != null) {
+            details.put("activity", target);
+        }
+        history.add(new HistoryEntry("COMPENSATION_STARTED", thrower.nodeId(), thrower.id(), null, actor, now,
+                details));
+        effect(new Effect.StartCompensation(scope.id(), thrower.nodeId(), cause));
     }
 
     /** Cancels one live flow token with the task, job or timer it waits on. */
