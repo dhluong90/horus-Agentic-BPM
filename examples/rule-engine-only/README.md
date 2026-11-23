@@ -48,19 +48,7 @@ docker exec horus-pg psql -U horus -d horus -c '\dt'
 
 docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_schema_history ORDER BY installed_rank'
 #  0       | Rule Engine baseline
-#  1       | V1__rle_baseline.sql
-#  2       | V2__rle_version_created_by.sql
-#  3       | V3__rle_version_history.sql
-#  4       | V4__rle_version_history_append_only.sql
-#  5       | V5__rle_engine_key.sql
-#  6       | V6__rle_version_history_draft_updated.sql
-#  10      | V10__rle_decision_pinned.sql
-#  11      | V11__rle_version_retired_at.sql
-#  12      | V12__rle_version_four_eyes_no_exemption.sql
-#  14      | V14__rle_setting_seen.sql
-#  15      | V15__rle_version_history_acknowledged_warnings.sql
-#  16      | V16__rle_masking_key_check.sql
-#  19      | V19__rle_decision_log_drop.sql
+#  1       | V1__baseline.sql
 ```
 
 Decision log retention is off by default: with `HORUS_DECISION_LOG_RETENTION` unset, every decision is kept, nothing is dropped, and every start-up logs a WARN saying so (set `keep-forever` to choose it on purpose; the warning then becomes an INFO):

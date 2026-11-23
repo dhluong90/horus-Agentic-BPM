@@ -20,7 +20,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@link MigrationStore} on PostgreSQL (#74, #90, migrations V23 to V25 and V34). Plans and their history are written by the
+ * {@link MigrationStore} on PostgreSQL (#74, #90). Plans and their history are written by the
  * plan command only. The dry-run reads are plain {@code SELECT} statements on the live token and running instance
  * indexes; multi-row reads go through {@link ProcessListQueries}.
  */
@@ -29,15 +29,15 @@ public final class JdbcMigrationStore implements MigrationStore {
     private static final String PLAN_COLUMNS = "tenant_id, id, definition_key, source_definition_id, source_version, "
             + "target_definition_id, target_version, plan_hash, approval, status, created_by, created_at, instructions";
 
-    /** Running instances of one version, on {@code idx_pre_instance_running_definition} (V25). */
+    /** Running instances of one version, on {@code idx_pre_instance_running_definition}. */
     static final String RUNNING_SQL = "SELECT count(*) FROM pre_instance WHERE tenant_id = ? AND definition_id = ? "
             + "AND status = 'RUNNING'";
-    /** Instances with a live token at any of the steps, on {@code idx_pre_token_live_node_instance} (V24). */
+    /** Instances with a live token at any of the steps, on {@code idx_pre_token_live_node_instance}. */
     static final String INSTANCES_AT_SQL = "SELECT count(DISTINCT instance_id) FROM pre_token WHERE tenant_id = ? "
             + "AND definition_id = ? AND status IN " + ProcessListQueries.LIVE_STATUSES
             + " AND current_node_id = ANY (?::text[])";
 
-    /** Instances with a call in flight at any of the steps, on {@code idx_pre_timer_inflight} (V41). */
+    /** Instances with a call in flight at any of the steps, on {@code idx_pre_timer_inflight}. */
     static final String IN_FLIGHT_COUNT_SQL = "SELECT count(DISTINCT instance_id) FROM pre_timer WHERE tenant_id = ? "
             + "AND definition_id = ? AND node_id = ANY (?::text[]) AND status = 'CLAIMED' "
             + "AND job_kind IN ('ASYNC_SERVICE','ASYNC_AGENT')";
@@ -59,7 +59,7 @@ public final class JdbcMigrationStore implements MigrationStore {
                 .update();
     }
 
-    /** The step instructions of a plan as the JSON stored in {@code pre_migration.instructions} (V40). */
+    /** The step instructions of a plan as the JSON stored in {@code pre_migration.instructions}. */
     static String instructions(MigrationPlan p) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("mappings", p.mappings().stream().map(m -> {

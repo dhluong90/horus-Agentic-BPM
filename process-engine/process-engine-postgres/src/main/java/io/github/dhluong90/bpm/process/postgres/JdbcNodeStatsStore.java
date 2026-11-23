@@ -20,7 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@link NodeStatsStore} on PostgreSQL (#110, migration V26). Every statement is registered in
+ * {@link NodeStatsStore} on PostgreSQL (#110). Every statement is registered in
  * {@link ProcessListQueries}. The write methods join the caller's transaction and never open one.
  */
 public final class JdbcNodeStatsStore implements NodeStatsStore {
@@ -122,7 +122,7 @@ public final class JdbcNodeStatsStore implements NodeStatsStore {
 
     @Override
     public int deleteBefore(Instant cutoff, int limit) {
-        // Bounded by the bucket_start BRIN index of V36 and by the limit; rows another purge holds are skipped.
+        // Bounded by the bucket_start BRIN index of the baseline and by the limit; rows another purge holds are skipped.
         return jdbc.sql("DELETE FROM pre_node_stats_hourly WHERE ctid IN (SELECT ctid FROM pre_node_stats_hourly "
                         + "WHERE bucket_start < ? LIMIT ? FOR UPDATE SKIP LOCKED)")
                 .params(ts(cutoff), limit).update();

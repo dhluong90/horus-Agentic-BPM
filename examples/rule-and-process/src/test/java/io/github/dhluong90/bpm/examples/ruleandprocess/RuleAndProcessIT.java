@@ -127,8 +127,7 @@ class RuleAndProcessIT {
                 + "WHERE tenant_id = 'bank-a' AND key_name = 'card-fee-review'").query(String.class).list())
                 .containsExactly("1 ACTIVE BPMN_XML STARTUP");
         assertThat(jdbc.sql("SELECT version FROM pre_schema_history WHERE success ORDER BY installed_rank")
-                .query(String.class).list()).containsExactly("0", "1", "2", "3", "4", "6", "7", "8", "9", "10", "13", "14", "17",
-                "18", "20", "21", "22", "23", "24", "25", "26", "27", "29", "30", "31", "32", "33", "34", "35", "36", "40", "41", "42", "43", "44", "45", "46", "47", "48", "49", "50");
+                .query(String.class).list()).containsExactly("0", "1");
         assertThat(jdbc.sql("SELECT count(*) FROM flyway_schema_history WHERE script LIKE '%pre_%'").query(Long.class)
                 .single()).isZero();
     }

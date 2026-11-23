@@ -32,7 +32,7 @@ import java.time.Instant;
  * @param createdAt creation time
  * @param retiredAt when it was retired, or null while it is not; selection reads it (ADR-0025 decision 3)
  * @param copiedFrom the earlier version this one restored as a draft (RLE-062), or null when it was imported
- * @param retirementRequest the pending four-eyes retirement (columns {@code retire_*}, V18), or null; only a
+ * @param retirementRequest the pending four-eyes retirement (columns {@code retire_*}), or null; only a
  *     {@code PUBLISHED} version has one, and selection never reads it
  */
 public record StoredVersion(

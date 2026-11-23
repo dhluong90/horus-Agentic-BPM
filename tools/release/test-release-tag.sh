@@ -13,6 +13,7 @@
 #            5. a per-module tag on a commit off main  both problems named in one run
 #            6. a POM Maven cannot read                refused, and a per-module tag is still named
 #            7. a tag named origin/main on the commit  refused: main is refs/remotes/origin/main only
+#            8. BASELINE_OPEN still True               refused, naming the file
 #          The checkout itself is never changed.
 # Exit:    0 when every case behaves as expected, 1 otherwise.
 
@@ -53,6 +54,9 @@ while IFS= read -r -d '' pom; do poms+=("$pom"); done < <(find "$repo" -name pom
 python3 "$WORK/rewrite-poms.py" "$group" "$RELEASE_GROUP_ID" "$version" "$release" "${poms[@]}"
 
 git_() { git -C "$repo" -c user.name=release-test -c user.email=release-test@example.invalid "$@"; }
+# The scratch release candidate has the migration baseline closed, as the release commit must.
+sed -i.bak 's/^BASELINE_OPEN = True/BASELINE_OPEN = False/' "$repo/tools/check-migration-order.py"
+rm "$repo/tools/check-migration-order.py.bak"
 git_ init -q -b main
 git_ add -A
 git_ commit -q -m "release candidate $release"
@@ -115,8 +119,16 @@ git_ update-ref refs/remotes/origin/main HEAD
 expect "an unreadable POM is refused and the tag form is still checked" "rule-engine/v$release" 1 \
   "so no module version or group id was checked" "is a per-module tag"
 
+# The baseline left open: a release must close it (#479). Restore the readable POM first.
+git_ checkout -q HEAD~1 -- bpm-bom/pom.xml
+sed -i.bak 's/^BASELINE_OPEN = False/BASELINE_OPEN = True/' "$repo/tools/check-migration-order.py"
+rm "$repo/tools/check-migration-order.py.bak"
+git_ commit -q -am "baseline left open"
+git_ update-ref refs/remotes/origin/main HEAD
+expect "a release with BASELINE_OPEN still True is refused" "v$release" 1 "BASELINE_OPEN is still True"
+
 if (( failures > 0 )); then
   echo "Release tag guard tests: $failures case(s) failed."
   exit 1
 fi
-echo "Release tag guard tests: all 7 cases behaved as expected."
+echo "Release tag guard tests: all 8 cases behaved as expected."

@@ -10,8 +10,8 @@ import { historyEntry, HISTORY_STATUSES } from './schemas';
 
 const nullableString = z.string().nullable().optional();
 
-/** The outcomes of a logged decision. OK with no matched rule is a no-match. */
-export const DECISION_OUTCOMES = ['OK', 'UNIQUE_HIT_VIOLATION', 'EVALUATION_ERROR'] as const;
+/** The outcomes of a logged decision, as the Rule Engine API names them (DecisionOutcome in its OpenAPI contract). */
+export const DECISION_OUTCOMES = ['MATCHED', 'NO_MATCH', 'UNIQUE_HIT_VIOLATION', 'EVALUATION_ERROR'] as const;
 export type DecisionOutcome = (typeof DECISION_OUTCOMES)[number];
 
 /** An item of GET /decisions and the body of GET /decisions/{id}. Masked inputs arrive as `hmac:<keyId>:<hex>`. */

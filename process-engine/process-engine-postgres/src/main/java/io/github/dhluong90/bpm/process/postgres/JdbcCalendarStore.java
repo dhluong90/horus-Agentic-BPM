@@ -27,7 +27,7 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@link CalendarStore} on PostgreSQL (#72, migration V20): {@code pre_calendar} with its working hours as JSON,
+ * {@link CalendarStore} on PostgreSQL (#72): {@code pre_calendar} with its working hours as JSON,
  * {@code pre_holiday} one row per date, and {@code pre_calendar_change}, the record of every proposal and decision.
  * Every statement filters by tenant first; reads join the caller's transaction.
  */

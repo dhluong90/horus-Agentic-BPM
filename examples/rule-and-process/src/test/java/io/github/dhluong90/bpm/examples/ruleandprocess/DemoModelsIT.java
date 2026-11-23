@@ -134,6 +134,56 @@ class DemoModelsIT {
     }
 
     @Test
+    void the_payment_approval_demo_completes_after_the_third_signature_when_the_complex_join_has_already_fired() throws Exception {
+        // Given tuan has submitted a large payment that three approvers are asked to sign
+        HttpResponse<String> started = send("tuan", "POST", "/api/bpm/processes/v1/instances",
+                "{\"definitionKey\":\"payment-approval\",\"businessKey\":\"PA-BUG3\",\"variables\":{}}");
+        assertThat(started.statusCode()).as(started.body()).isEqualTo(201);
+        String id = JSON.readTree(started.body()).get("id").stringValue();
+
+        // When an, hung and hoa sign in turn, the join fires on the second and the payment is released
+        signOff("an", id, "card-ops-signoff");
+        signOff("hung", id, "operations-signoff");
+        assertThat(status(id)).as("two of three signed: released, third sign-off still open").isEqualTo("RUNNING");
+        signOff("hoa", id, "supervisor-signoff");
+
+        // Then the third signature is absorbed and the instance completes instead of hanging in RUNNING
+        assertThat(status(id)).isEqualTo("COMPLETED");
+    }
+
+    private void signOff(String user, String instanceId, String nodeId) throws Exception {
+        JsonNode instance = JSON.readTree(get(user, "/api/bpm/processes/v1/instances/" + instanceId).body());
+        String task = null;
+        for (JsonNode t : instance.get("tasks")) {
+            if (nodeId.equals(t.get("nodeId").stringValue())) {
+                task = t.get("id").stringValue();
+            }
+        }
+        assertThat(task).as("open task " + nodeId + " in " + instance).isNotNull();
+        String base = "/api/bpm/processes/v1/tasks/" + task;
+        HttpResponse<String> claimed = send(user, "POST", base + ":claim", "", Map.of("If-Match", "\"0\"",
+                "Idempotency-Key", user + "-claims-" + task));
+        assertThat(claimed.statusCode()).as(claimed.body()).isEqualTo(200);
+        HttpResponse<String> done = send(user, "POST", base + ":complete", "{\"result\":{\"ok\":true}}",
+                Map.of("If-Match", "\"1\"", "Idempotency-Key", user + "-signs-" + task));
+        assertThat(done.statusCode()).as(done.body()).isEqualTo(200);
+    }
+
+    private String status(String instanceId) throws Exception {
+        return JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + instanceId).body()).get("status")
+                .stringValue();
+    }
+
+    private HttpResponse<String> send(String user, String method, String path, String body, Map<String, String> headers)
+            throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .header("Authorization", basic(user)).header("Content-Type", "application/json")
+                .method(method, HttpRequest.BodyPublishers.ofString(body));
+        headers.forEach(request::header);
+        return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    @Test
     void a_message_starts_the_event_gateway_process_and_the_parallel_one_then_a_signal_continues_it() throws Exception {
         // When operations delivers the loan application message, then the KYC documents message and the signal
         HttpResponse<String> intake = post("hung", "/api/bpm/processes/v1/messages:correlate",

@@ -336,7 +336,7 @@ public final class JdbcRuleStore implements RuleStore {
                 .update();
     }
 
-    /** An acknowledgement as stored in {@code acknowledged_warnings} (V15): a JSON array of {@code { code, input }}. */
+    /** An acknowledgement as stored in {@code acknowledged_warnings}: a JSON array of {@code { code, input }}. */
     private static String acknowledgedJson(List<AcknowledgedWarning> warnings) {
         tools.jackson.databind.node.ArrayNode array = EngineJson.NODES.arrayNode();
         warnings.forEach(w -> array.addObject().put("code", w.code()).put("input", w.input()));
@@ -374,7 +374,7 @@ public final class JdbcRuleStore implements RuleStore {
     }
 
     /**
-     * A rule set's own history rows, newest first, through {@code idx_rle_version_history_rule_set} (V24): tenant and
+     * A rule set's own history rows, newest first, through {@code idx_rle_version_history_rule_set}: tenant and
      * rule set lead, the index holds rule set rows only and is ordered as the query.
      */
     static final String RULE_SET_EVENTS_SQL = RuleListQueries.RULE_SET_EVENTS.sql();
@@ -401,7 +401,7 @@ public final class JdbcRuleStore implements RuleStore {
         if (versionIds.isEmpty()) {
             return List.of();
         }
-        // One query for a page of versions; each version's rows come from idx_rle_version_history_version (V3) in
+        // One query for a page of versions; each version's rows come from idx_rle_version_history_version in
         // time order, and the window keeps the oldest perVersionLimit of them.
         return RuleListQueries.HISTORY_OF_VERSIONS.list(jdbc, ListQuery.params("tenant", tenantId,
                 "ids", List.copyOf(versionIds), "perVersion", perVersionLimit), JdbcRuleStore::historyRow);
@@ -613,7 +613,7 @@ public final class JdbcRuleStore implements RuleStore {
                 retirementRequest(rs));
     }
 
-    /** The pending four-eyes retirement of a version row (V18, RLE-038), or null; the columns are set together. */
+    /** The pending four-eyes retirement of a version row, or null; the columns are set together. */
     private static RetirementRequest retirementRequest(ResultSet rs) throws SQLException {
         String requestedBy = rs.getString("retire_requested_by");
         if (requestedBy == null) {

@@ -229,6 +229,61 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertIn("V5 is a retired process-engine version", out)
         self.assertIn("highest process-engine version on main: V2; next free number: V3", out)
 
+    def test_the_v1_baseline_may_be_edited_in_place_until_1_0(self) -> None:
+        repo = self.repo({rule(1, "baseline"): "-- rule baseline\n", process(1, "baseline"): "-- process baseline\n"})
+        repo.commit({rule(1, "baseline"): "-- rule baseline, regenerated\n",
+                     process(1, "baseline"): "-- process baseline, regenerated\n"}, "regenerate both baselines")
+        status, out = repo.run()
+        self.assertEqual(0, status, out)
+
+    def test_editing_the_baseline_does_not_excuse_editing_another_released_migration(self) -> None:
+        repo = self.repo({rule(1, "baseline"): "-- baseline\n", rule(2, "later"): "-- two\n"})
+        repo.commit({rule(1, "baseline"): "-- baseline, edited\n", rule(2, "later"): "-- two, edited\n"}, "edit both")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+        self.assertIn("V2__later.sql: V2 is on main and this change edits it", out)
+        self.assertNotIn("V1__baseline.sql: V1 is on main", out)
+
+    def test_the_baseline_may_not_be_deleted_or_renamed(self) -> None:
+        repo = self.repo({rule(1, "baseline"): "-- baseline\n"})
+        repo.commit({rule(1, "baseline"): None, rule(1, "renamed"): "-- baseline\n"}, "rename the baseline")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+        self.assertIn("V1__baseline.sql: V1 is on main and this change deletes it", out)
+
+    def test_a_v1_with_another_name_is_not_the_baseline(self) -> None:
+        repo = self.repo({rule(1, "first"): "-- one\n"})
+        repo.commit({rule(1, "first"): "-- one, edited\n"}, "edit V1")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+
+    def test_after_1_0_the_baseline_is_released_like_any_migration(self) -> None:
+        path = rule(1, "baseline")
+        errors = check.check({path: "a"}, {path: "a"}, {path: "b"}, {e: {} for e in check.ENGINES}, baseline_open=False)
+        self.assertEqual(1, len(errors), errors)
+        self.assertIn("V1 is on main and this change edits it", errors[0])
+
+    def test_a_squash_replaces_every_released_migration_of_an_engine_with_the_baseline(self) -> None:
+        repo = self.repo()
+        repo.commit({**{rule(n, f"m{n}"): None for n in (1, 2, 3, 4, 5, 6, 10)}, rule(1, "baseline"): "-- squashed\n"},
+                    "squash the Rule Engine")
+        status, out = repo.run()
+        self.assertEqual(0, status, out)
+
+    def test_a_squash_of_one_engine_does_not_free_the_other(self) -> None:
+        repo = self.repo()
+        repo.commit({rule(1, "baseline"): "-- squashed\n", process(2, "claim"): None}, "drop a Process Engine migration")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+        self.assertIn("V2__claim.sql: V2 is on main and this change deletes it", out)
+
+    def test_a_squash_still_refuses_an_edit_of_another_released_migration(self) -> None:
+        repo = self.repo()
+        repo.commit({rule(1, "baseline"): "-- squashed\n", rule(4, "m4"): "-- four, edited\n"}, "squash and edit")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+        self.assertIn("V4__m4.sql: V4 is on main and this change edits it", out)
+
     def test_malformed_retired_line_is_a_usage_error(self) -> None:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as bad:
             bad.write("rule-engine seven no version\n")

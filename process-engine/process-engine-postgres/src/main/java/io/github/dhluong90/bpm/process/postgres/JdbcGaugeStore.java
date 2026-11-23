@@ -12,7 +12,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 /** {@link GaugeStore} on PostgreSQL: the three registered gauge queries of {@link ProcessListQueries}. */
 public final class JdbcGaugeStore implements GaugeStore {
 
-    /** The job kinds of {@code pre_timer} (V6): a fixed set, so the kind tag has a bounded number of values. */
+    /** The job kinds of {@code pre_timer}: a fixed set, so the kind tag has a bounded number of values. */
     public static final List<String> JOB_KINDS = List.of("TIMER", "SLA_ESCALATION", "ASYNC_AGENT", "ASYNC_SERVICE",
             "COMPENSATION", "DEFINITION_EFFECTIVE");
 

@@ -21,7 +21,7 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@link AgentReplayStore} on PostgreSQL (#98, migration V17). Recorded answers are read from {@code pre_history} by
+ * {@link AgentReplayStore} on PostgreSQL (#98). Recorded answers are read from {@code pre_history} by
  * the primary key's range on {@code (tenant_id, occurred_at)}, keyset-paged over {@code (occurred_at, id)}, joined to
  * their job in {@code pre_timer} for the guard spec; reviewer overrides are read through the instance index, and count only when a
  * field whose recorded value was kept changed (a masked field cannot be compared). Every

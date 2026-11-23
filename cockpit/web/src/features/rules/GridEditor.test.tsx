@@ -88,6 +88,41 @@ describe('grid editor', () => {
     await waitFor(() => { expect(changes).toHaveTextContent('Fee: 35,000 VND → 40,000 VND'); });
   });
 
+  it('CKP_006_text_typed_into_a_money_cell_is_kept_marked_and_blocks_save', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/2/edit');
+    const fee = await screen.findByLabelText('Row R1, Fee');
+    await user.clear(fee);
+    await user.type(fee, 'abc');
+    await user.keyboard('{Enter}');
+    // The typed value stays, the cell says what to fix, and Save draft is blocked with its reason.
+    expect(fee).toHaveValue('abc');
+    await waitFor(() => { expect(fee).toHaveAttribute('aria-invalid', 'true'); });
+    expect(fee).toHaveAccessibleDescription('Enter a number, for example 50,000,000.');
+    const save = screen.getByRole('button', { name: 'Save draft' });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAccessibleDescription('Fix the marked cells to save.');
+    expect(saves()).toEqual([]);
+
+    await user.clear(fee);
+    await user.type(fee, '12500');
+    await user.keyboard('{Enter}');
+    await waitFor(() => { expect(fee).toHaveAttribute('aria-invalid', 'false'); });
+    await waitFor(() => { expect(save).toBeEnabled(); });
+  });
+
+  it('CKP_006_text_typed_into_a_number_comparison_is_kept_marked_and_blocks_save', async () => {
+    const user = userEvent.setup();
+    open('#/rules/card-fee/2/edit');
+    const count = await screen.findByLabelText('Row R4, Tx count');
+    await user.clear(count);
+    await user.type(count, '20x');
+    await user.keyboard('{Enter}');
+    expect(count).toHaveValue('20x');
+    await waitFor(() => { expect(count).toHaveAttribute('aria-invalid', 'true'); });
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
+  });
+
   it('CKP_006_the_dock_says_once_that_there_is_nothing_to_save', async () => {
     open('#/rules/card-fee/2/edit');
     const save = await screen.findByRole('button', { name: 'Save draft' });

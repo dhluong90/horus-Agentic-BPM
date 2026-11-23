@@ -6,6 +6,7 @@ import type { MessageKey } from '../../../i18n/en';
 import { useI18n, type Locale, type Translate } from '../../../i18n/I18nProvider';
 import { useRulesSession } from '../api/rulesContext';
 import { useDraftCheck, useReplaceDraft } from '../api/useRules';
+import { amountProblems } from '../model/amountFormat';
 import { cellSentence } from '../model/cellMessages';
 import { diffRules } from '../model/diff';
 import { draftReducer, initialDraft } from '../model/draft';
@@ -107,7 +108,11 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
   const checkErrors: ErrorPlace[] = answer ? placeProblems(answer.problems, rowIds, columns, locale, t('cellError.other')) : [];
   // A save refused with 422 names its cells in the engine's English: each becomes one plain sentence here.
   const saveErrors = placeErrors(save.error ? toHostError(save.error) : undefined).map((e) => ({ ...e, message: t(cellSentence(e.message)) }));
-  const errors = checkErrors.length > 0 ? checkErrors : saveErrors;
+  // The grid's own format check on committed cells; it shows at once, before the engine is asked.
+  const formatErrors = amountProblems(version.definition, draft.committed, (key) => t(key));
+  const formatBlocked = amountProblems(version.definition, draft.rows, (key) => t(key)).length > 0;
+  const serviceErrors = checkErrors.length > 0 ? checkErrors : saveErrors;
+  const errors = formatErrors.length > 0 ? [...formatErrors, ...serviceErrors.filter((e) => e.kind !== 'cell' || !formatErrors.some((f) => f.kind === 'cell' && f.ruleId === e.ruleId && f.column === e.column))] : serviceErrors;
   const tableErrors = errors.filter((e) => e.kind === 'table');
   const located = errors.length > 0 && tableErrors.length === 0;
 
@@ -124,7 +129,7 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
         text: committed.text,
         rules: rulesOf(version, draft.committed),
         refused: {
-          cells: new Set(checkErrors.flatMap((e) => (e.kind === 'cell' ? [cellKey(e.ruleId, e.column)] : []))),
+          cells: new Set([...formatErrors, ...checkErrors].flatMap((e) => (e.kind === 'cell' ? [cellKey(e.ruleId, e.column)] : []))),
           rows: new Set(checkErrors.flatMap((e) => (e.kind === 'row' ? [e.ruleId] : []))),
         },
       });
@@ -134,7 +139,7 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
   let blocked: MessageKey | undefined;
   if (conflict) blocked = 'editor.block.conflict';
   else if (current.text === loaded.text) blocked = 'editor.block.nothing';
-  else if (known) blocked = 'editor.block.fix';
+  else if (known || formatBlocked) blocked = 'editor.block.fix';
 
   const reload = () => {
     setLoaded(load(latest));

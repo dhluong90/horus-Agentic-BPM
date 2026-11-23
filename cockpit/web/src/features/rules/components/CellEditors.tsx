@@ -28,10 +28,12 @@ export function shownAmount(canonical: string, locale: Locale): string {
   return groupWhileTyping(canonical.replace('.', DECIMAL[locale]), locale);
 }
 
-/** What the user typed back to canonical decimal text; anything but digits and one separator is dropped. */
+/**
+ * What the user typed back to canonical decimal text: group separators and spaces go, the decimal separator becomes
+ * a dot. Any other character stays as typed, so a wrong value is kept for the cell to flag, never silently erased.
+ */
 export function canonicalAmount(typed: string, locale: Locale): string {
-  const plain = typed.split(GROUP[locale]).join('').replace(DECIMAL[locale], '.');
-  return plain.replace(/[^\d.-]/g, '');
+  return typed.split(GROUP[locale]).join('').replace(DECIMAL[locale], '.').replace(/\s+/g, '');
 }
 
 function ErrorLine({ error, detail, errorId }: Pick<CellProps, 'error' | 'detail' | 'errorId'>) {
