@@ -59,8 +59,8 @@ describe('rule set list and version view', () => {
     const table = await screen.findByRole('table');
     const rows = within(table).getAllByRole('row').slice(1);
     await waitFor(() => { expect(within(rows[0] as HTMLElement).getByText('Waiting for approval')).toBeInTheDocument(); });
-    expect(rows[0]).toHaveTextContent('card-fee');
-    expect(rows[1]).toHaveTextContent('kyc-risk');
+    expect(rows[0]).toHaveTextContent('Card fee');
+    expect(rows[1]).toHaveTextContent('Kyc risk');
     expect(screen.getByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
 
@@ -83,7 +83,7 @@ describe('rule set list and version view', () => {
     const document_ = { schemaVersion: 1, ruleSet: 'fx-margin', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
       rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] };
     await user.upload(input, new File([JSON.stringify(document_)], 'fx-margin.json', { type: 'application/json' }));
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('fx-margin');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Fx margin');
     expect(await versionLine(1)).toBeInTheDocument();
     expect(contentTypes).toEqual(['application/yaml']);
   });
@@ -97,7 +97,7 @@ describe('rule set list and version view', () => {
   it('CKP_030_version_reads_as_a_table_and_the_source_only_on_purpose', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Card fee');
     expect(await versionLine(1)).toHaveTextContent('Version 1 · in effect · first matching row wins');
     expect(screen.getByText('50,000,000 VND')).toBeInTheDocument();
     expect(screen.getAllByText('Gold').length).toBeGreaterThan(0);

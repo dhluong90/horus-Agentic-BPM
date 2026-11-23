@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { tenantName } from '../app/names';
 import { useI18n } from '../i18n/I18nProvider';
 import { CheckIcon } from './icons';
 
@@ -6,11 +7,12 @@ import { CheckIcon } from './icons';
  * The tenant switcher of the top bar (CKP-022): the current tenant, and a menu of the tenants the host allows this
  * user. Shown only when the host has switching on and the user has more than one tenant.
  */
-export function TenantSwitcher({ tenants, current, onSelect }: { tenants: readonly string[]; current: string; onSelect: (tenant: string) => void }) {
+export function TenantSwitcher({ tenants, current, names, onSelect }: { tenants: readonly string[]; current: string; names?: Readonly<Record<string, string>> | undefined; onSelect: (tenant: string) => void }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const root = useRef<HTMLDivElement>(null);
+  const currentName = tenantName(names, current);
   const button = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -41,11 +43,11 @@ export function TenantSwitcher({ tenants, current, onSelect }: { tenants: readon
         aria-expanded={open}
         aria-controls={menuId}
         data-testid="tenant-switcher"
-        title={`${t('header.tenant')}: ${current}`}
+        title={`${t('header.tenant')}: ${currentName}`}
         onClick={() => { setOpen((value) => !value); }}
       >
-        <span className="sr-only">{`${t('header.tenant')}: ${current}, ${t('tenant.switch')}`}</span>
-        <span className="service-pill__tenant" aria-hidden="true">{current}</span>
+        <span className="sr-only">{`${t('header.tenant')}: ${currentName}, ${t('tenant.switch')}`}</span>
+        <span className="service-pill__tenant" aria-hidden="true">{currentName}</span>
         <svg className="service-pill__caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
       </button>
       <div className="host-picker__menu" id={menuId} hidden={!open}>
@@ -64,7 +66,7 @@ export function TenantSwitcher({ tenants, current, onSelect }: { tenants: readon
                     if (!selected) onSelect(tenant);
                   }}
                 >
-                  <span className="host-picker__label">{tenant}</span>
+                  <span className="host-picker__label">{tenantName(names, tenant)}<span className="host-picker__key">{t('tenant.key', { key: tenant })}</span></span>
                   {selected ? <span className="host-picker__check" aria-hidden="true"><CheckIcon /></span> : null}
                 </button>
               </li>

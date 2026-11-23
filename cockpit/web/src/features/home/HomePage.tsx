@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { nameOf } from '../../app/names';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { TaskSummary } from '../../api/processes/schemas';
 import { formatRoute, type Area } from '../../app/route';
@@ -188,3 +189,4 @@ function Dashboard({ pageLimit, me, engines, rules, approver, tasksOn, incidents
     </div>
   );
 }
+

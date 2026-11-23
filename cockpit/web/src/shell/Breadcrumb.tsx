@@ -1,4 +1,5 @@
-import { useCrumbLabel, useCrumbTrail } from '../app/crumbs';
+import { useCrumbLabel, useCrumbRuleSetName, useCrumbTrail } from '../app/crumbs';
+import { titleFromKey } from '../app/names';
 import { formatRoute, useRoute, type Route } from '../app/route';
 import { lastDecisionQuery } from '../features/decisions/lastQuery';
 import type { MessageKey } from '../i18n/en';
@@ -13,10 +14,13 @@ export function Breadcrumb() {
   const [route] = useRoute();
   const override = useCrumbLabel();
   const pageTrail = useCrumbTrail();
+  const ruleSetName = useCrumbRuleSetName();
   // A case and its task know their parents (process, case) only once loaded; the page sets that trail.
   const crumbs = (route.name === 'instance' || route.name === 'task' || route.name === 'migrate' || route.name === 'migration') && pageTrail !== undefined
     ? [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, ...pageTrail]
     : trail(route, t);
+  // The rule set's name comes from its page; until it loads, the crumb shows the key in words rather than the raw key.
+  if (route.name === 'rule-set' && crumbs[1] !== undefined) crumbs[1] = { ...crumbs[1], label: ruleSetName ?? titleFromKey(route.ruleSet) };
   const last = crumbs.at(-1);
   if (override !== undefined && route.name === 'rule-set' && last) crumbs[crumbs.length - 1] = { label: override };
   // A process is named by its display name, which only the page knows; until it loads, the crumb waits rather than show the key.

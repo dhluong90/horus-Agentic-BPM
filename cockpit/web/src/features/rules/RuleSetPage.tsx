@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { setCrumbLabel } from '../../app/crumbs';
+import { setCrumbLabel, setCrumbRuleSetName } from '../../app/crumbs';
+import { nameOf } from '../../app/names';
+import { CopyButton } from '../../components/CopyButton';
 import { isUnclassified, type RuleSetVersion, type VersionSummary } from '../../api/rules/schemas';
 import { UnclassifiedNote } from '../../components/UnclassifiedNote';
 import { useI18n } from '../../i18n/I18nProvider';
@@ -238,6 +240,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
     setCrumbLabel(crumb);
     return () => { setCrumbLabel(undefined); };
   }, [crumb]);
+  const title = nameOf('rule set', version.ruleSet, version);
+  useEffect(() => {
+    setCrumbRuleSetName(title);
+    return () => { setCrumbRuleSetName(undefined); };
+  }, [title]);
 
   const main: ReactNode = (
     <div className="card workbench__main">
@@ -251,9 +258,10 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
         <div className="rs-head__row">
           <div className="rs-head__titles">
             <h1 id="rule-set-title" className="rs-head__title" tabIndex={-1}>
-              {version.ruleSet} {editing ? <StatusBadge status="DRAFT" /> : <StatusBadge status={version.status} />}
+              {title} {editing ? <StatusBadge status="DRAFT" /> : <StatusBadge status={version.status} />}
             </h1>
             <Subtitle version={version} editing={editing} />
+            <p className="key-chip"><span className="key-chip__term">{t('ruleSet.key')}</span> <code className="key-chip__value">{version.ruleSet}</code> <CopyButton value={version.ruleSet} label={t('ruleSet.copyKey')} iconOnly /></p>
           </div>
           {!editing ? (
             <div className="rs-head__actions">

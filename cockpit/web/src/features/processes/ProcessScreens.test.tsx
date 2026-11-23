@@ -82,11 +82,12 @@ describe('CKP-017 instance on its diagram', () => {
     setScenario('processes-reviewer');
     open(`#/instances/${KYC_INSTANCE_ID}`);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Case KYC-2207' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Customer onboarding (KYC)' })).toBeInTheDocument();
     const diagram = await screen.findByRole('group', { name: 'Diagram of Case KYC-2207' });
     // The waiting step carries a token badge in words, not colour alone, and opens first in the inspector.
     const approve = await within(diagram).findByRole('button', { name: 'Approve high-risk customer Person task, Waiting for a person' });
     expect(approve).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Show step details' }));
     const inspector = screen.getByRole('complementary', { name: 'Selected step' });
     expect(within(inspector).getByText('Waiting for a person')).toBeInTheDocument();
     expect(within(inspector).getByText('Credit officer')).toBeInTheDocument();
@@ -112,6 +113,7 @@ describe('CKP-017 instance on its diagram', () => {
 
     const diagram = await screen.findByRole('group', { name: 'Diagram of Case APP-1045' });
     expect(await within(diagram).findByRole('button', { name: 'Assess documents Agent task, Incident: The agent did not answer in time.' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Show step details' }));
     const inspector = screen.getByRole('complementary', { name: 'Selected step' });
     expect(within(inspector).getByText('The agent did not answer in time.')).toBeInTheDocument();
     expect(within(inspector).getByText('3 attempts')).toBeInTheDocument();
@@ -133,8 +135,8 @@ describe('CKP-017 instance on its diagram', () => {
     expect(link).toHaveAttribute('href', `#/instances/${INSTANCE_ID}`);
     await userEvent.click(link);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Case APP-1042' })).toBeInTheDocument();
-    expect(await screen.findByText('Loan origination, version 3')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Loan origination' })).toBeInTheDocument();
+    expect(await screen.findByText('Case APP-1042, version 3')).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Loan origination' })).toHaveAttribute('href', '#/processes/loan-origination/3/cases');
   });
@@ -155,6 +157,7 @@ describe('CKP-017 instance on its diagram', () => {
     expect(await within(diagram).findByRole('button', { name: 'Assess documents Agent task, Waiting for a person' })).toBeInTheDocument();
     expect(await screen.findByText('This service does not report step activity yet.')).toBeInTheDocument();
     // With nothing to show, the task action is unavailable and says why, not a filled primary link.
+    await userEvent.click(screen.getByRole('button', { name: 'Show step details' }));
     const inspector = screen.getByRole('complementary', { name: 'Selected step' });
     expect(within(inspector).queryByRole('link', { name: 'Open the task' })).not.toBeInTheDocument();
     const action = within(inspector).getByRole('button', { name: 'Open the task' });
@@ -162,12 +165,33 @@ describe('CKP-017 instance on its diagram', () => {
     expect(action).toHaveAccessibleDescription('Opens once step activity is reported.');
   });
 
+  it('CKP_509_the_step_panel_collapses_by_keyboard_and_the_choice_is_remembered_per_viewer', async () => {
+    setScenario('processes-reviewer');
+    open(`#/instances/${KYC_INSTANCE_ID}`);
+    const toggle = await screen.findByRole('button', { name: 'Show step details' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    toggle.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'Hide step details' })).toHaveAttribute('aria-expanded', 'true');
+    expect(window.localStorage.getItem('horus.cockpit.instancePanel')).toBe('open');
+    await userEvent.keyboard('{Enter}');
+    expect(window.localStorage.getItem('horus.cockpit.instancePanel')).toBe('collapsed');
+  });
+
+  it('CKP_510_the_case_heading_names_the_process_and_keeps_the_case_number_in_the_subtitle', async () => {
+    setScenario('processes-reviewer');
+    open(`#/instances/${KYC_INSTANCE_ID}`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Customer onboarding (KYC)' })).toBeInTheDocument();
+    expect(screen.getByText('Case KYC-2207, version 2')).toBeInTheDocument();
+  });
+
   it('CKP_017_a_case_reads_in_vietnamese', async () => {
     setScenario('processes-reviewer');
     window.localStorage.setItem('horus.cockpit.locale', 'vi');
     resetProcessEngine({ locale: 'vi' });
     open(`#/instances/${INSTANCE_ID}`);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Hồ sơ APP-1042' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Khởi tạo khoản vay' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Hiện chi tiết bước' }));
     expect(await screen.findByRole('link', { name: 'Mở công việc' })).toBeInTheDocument();
   });
 

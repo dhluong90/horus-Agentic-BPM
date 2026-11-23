@@ -66,3 +66,15 @@ export function readStoredReadingStyle(): ReadingStyle | undefined {
 export function storeReadingStyle(style: ReadingStyle): void {
   write(READING_STYLE_KEY, style);
 }
+
+const INSTANCE_PANEL_KEY = 'horus.cockpit.instancePanel';
+
+/** Whether this viewer last left the case's step panel open or closed; undefined until they choose. A display preference only. */
+export function readInstancePanelOpen(): boolean | undefined {
+  const value = read(INSTANCE_PANEL_KEY);
+  return value === 'open' ? true : value === 'collapsed' ? false : undefined;
+}
+
+export function storeInstancePanelOpen(open: boolean): void {
+  write(INSTANCE_PANEL_KEY, open ? 'open' : 'collapsed');
+}

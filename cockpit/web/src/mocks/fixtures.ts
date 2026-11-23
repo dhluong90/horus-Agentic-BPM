@@ -45,7 +45,7 @@ export const META_MODULES = { rules: rulesModule, processes: processesModule, un
 export const meLan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'lan', displayName: 'Nguyễn Thị Lan' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'rules:author'],
   roles: ['PRICING_AUTHOR'],
 };
@@ -54,7 +54,7 @@ export const meLan: BpmMeV1 = {
 export const meDan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'dan', displayName: 'Đỗ Văn Dân' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read'],
   roles: ['PRICING_READER'],
 };
@@ -62,7 +62,7 @@ export const meDan: BpmMeV1 = {
 export const meMinh: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'minh', displayName: 'Trần Văn Minh' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'rules:approve', 'rules:log:read'],
   roles: ['PRICING_APPROVER'],
 };
@@ -71,7 +71,7 @@ export const meMinh: BpmMeV1 = {
 export const meHoa: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'hoa', displayName: 'Phạm Thị Hoa' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'processes:read', 'processes:task:work'],
   roles: ['COMPLIANCE_REVIEWER'],
 };
@@ -80,7 +80,7 @@ export const meHoa: BpmMeV1 = {
 export const meAn: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'an', displayName: 'Lê Thị An' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:task:work'],
   roles: ['credit-officer'],
   groups: ['loans-operations'],
@@ -90,7 +90,7 @@ export const meAn: BpmMeV1 = {
 export const meSau: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'sau', displayName: 'Võ Thị Sáu' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:task:work', 'processes:task:manage'],
   roles: ['credit-officer', 'credit-approver', 'operations-supervisor'],
   groups: ['loans-operations'],
@@ -100,7 +100,7 @@ export const meSau: BpmMeV1 = {
 export const meTuan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'tuan', displayName: 'Trần Minh Tuấn' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:read', 'processes:incident:manage'],
   roles: ['operations-officer'],
 };
@@ -109,7 +109,7 @@ export const meTuan: BpmMeV1 = {
 export const meLinh: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'linh', displayName: 'Đặng Thùy Linh' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:read', 'processes:incident:manage'],
   roles: ['operations-officer'],
 };
@@ -133,7 +133,7 @@ export const metaWithProcesses: BpmMetaV1 = {
 export const meHa: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'ha', displayName: 'Phạm Thu Hà' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'rules:log:read'],
   roles: ['INTERNAL_AUDITOR'],
 };

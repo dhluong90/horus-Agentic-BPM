@@ -11,6 +11,7 @@ import {
   GATEWAY_HALF,
   layoutGraph,
   MIN_SCALE,
+  READABLE_SCALE,
   WHOLE_FIT_MIN_SCALE,
   SYMBOL_SIZE,
   symbolCentre,
@@ -107,6 +108,10 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
 const BELOW_CANVAS = 52;
 const MIN_CANVAS_HEIGHT = 240;
 const LABEL_CHAR = 6.8;
+
+function floorOf(withBadges: boolean): number {
+  return withBadges ? READABLE_SCALE : MIN_SCALE;
+}
 
 function path(points: readonly Point[]): string {
   return points.map((p, index) => `${index === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
@@ -371,13 +376,15 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   }, [reserve, fill]);
 
   const whole = canvas !== undefined ? fitScale(layout, canvas, undefined, fitAll ? FIT_ALL_MIN_SCALE : WHOLE_FIT_MIN_SCALE) : MIN_SCALE;
-  const fit = fitAll ? Math.min(whole, sharedScale ?? whole) : canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
+  // A case draws no smaller than READABLE_SCALE, where its smallest text is 13 px; a definition keeps the 12 px floor.
+  const floor = floorOf(withBadges);
+  const fit = fitAll ? Math.min(whole, sharedScale ?? whole) : canvas !== undefined ? fitScale(layout, canvas, undefined, floor) : floor;
   useEffect(() => {
     if (fitAll && canvas !== undefined) onFitAll?.(whole);
   }, [fitAll, canvas, whole, onFitAll]);
   // "Whole case" (a case) or "Whole process" (a change) is offered only when the drawing does not fit at the 12 px
   // floor, so no edge of a change is ever out of reach (#443).
-  const offerWhole = !fitAll && (withBadges || marks !== undefined) && whole < MIN_SCALE;
+  const offerWhole = !fitAll && (withBadges || marks !== undefined) && whole < floorOf(withBadges);
   const mode: Zoom = zoom === 'whole' && !offerWhole ? 'fit' : zoom;
   const scale = mode === 'fit' ? fit : mode === 'whole' ? whole : MIN_SCALE;
   const width = Math.ceil(layout.width * scale);

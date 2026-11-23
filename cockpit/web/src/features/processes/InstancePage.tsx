@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import type { ActivityEntry, CompensationScope, InstanceActivities, ProcessInstance } from '../../api/processes/schemas';
 import { toHostError } from '../../api/hostError';
 import { setCrumbTrail } from '../../app/crumbs';
+import { nameOf } from '../../app/names';
+import { readInstancePanelOpen, storeInstancePanelOpen } from '../../preferences/storage';
 import { useNames, useWantNames, wantedOf } from './api/displayNames';
 import { formatRoute } from '../../app/route';
 import { CopyButton } from '../../components/CopyButton';
@@ -91,14 +93,18 @@ function InstanceLoaded({ instance }: { instance: ProcessInstance }) {
   const [lens, setLens] = useState<Lens>('diagram');
   const [picked, setPicked] = useState<string | undefined>(undefined);
   const processName = details.data?.name ?? undefined;
-  const title = instance.businessKey ? t('instance.title', { key: instance.businessKey }) : t('instance.crumb');
+  // The heading names the process; the case number sits in the subtitle and the breadcrumb (#510).
+  const title = processName ?? (details.isPending ? t('instance.crumb') : nameOf('process', instance.definitionKey));
+  const caseLabel = instance.businessKey ? t('instance.title', { key: instance.businessKey }) : t('instance.crumb');
   useEffect(() => {
     setCrumbTrail([
       ...(processName !== undefined ? [{ label: processName, href: formatRoute({ name: 'process', key: instance.definitionKey, version: instance.definitionVersion, lens: 'cases' }) }] : []),
-      { label: title },
+      { label: caseLabel },
     ]);
-  }, [processName, title, instance.definitionKey, instance.definitionVersion]);
-  const subtitle = processName !== undefined ? t('instance.subtitle', { process: processName, version: String(instance.definitionVersion) }) : t('instance.subtitlePlain');
+  }, [processName, caseLabel, instance.definitionKey, instance.definitionVersion]);
+  const subtitle = instance.businessKey
+    ? t('instance.caseSubtitle', { key: instance.businessKey, version: String(instance.definitionVersion) })
+    : t('instance.subtitlePlain');
   return (
     <section className="workspace instance" aria-labelledby="instance-title">
       <PageHead id="instance-title" title={title} subtitle={subtitle} action={<InstanceStatusPill status={instance.status} />} />
@@ -109,7 +115,7 @@ function InstanceLoaded({ instance }: { instance: ProcessInstance }) {
           <Tabs label={t('instance.lenses')} selected={lens} onSelect={setLens}
             items={[{ id: 'diagram', label: t('instance.lens.diagram') }, { id: 'timeline', label: t('instance.lens.timeline') }]}>
             {lens === 'diagram' ? (
-              <InstanceDiagram instance={instance} graph={graph.data} activities={activities.data} picked={picked} onPick={setPicked} label={t('instance.diagramLabel', { name: title })}
+              <InstanceDiagram instance={instance} graph={graph.data} activities={activities.data} picked={picked} onPick={setPicked} label={t('instance.diagramLabel', { name: caseLabel })}
                 load={{ pending: activities.isPending, error: activities.isError ? activities.error : undefined, retry: () => { void activities.refetch(); } }} />
             ) : (
               activities.isPending ? <LoadingRows rows={6} /> : activities.isError ? <ActivitiesError error={activities.error} onRetry={() => { void activities.refetch(); }} /> : <Timeline graph={graph.data} activities={activities.data} />
@@ -167,16 +173,34 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
   const order = useMemo(() => flowOrder(graph).map((node) => node.id), [graph]);
   const selected = picked ?? firstStep(marks, order);
   const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t)])), [marks, t]);
-  const overlay: DiagramOverlay = { badges, selected, onSelect: onPick };
   const node = graph.nodes.find((item) => item.id === selected);
+  // Collapsed until the viewer opens it or picks a step, unless they chose before; their choice is remembered.
+  const [open, setOpen] = useState(() => readInstancePanelOpen() ?? false);
+  const panelId = useId();
+  const toggle = () => {
+    storeInstancePanelOpen(!open);
+    setOpen(!open);
+  };
+  const pick = (nodeId: string) => {
+    onPick(nodeId);
+    setOpen(true);
+  };
+  const overlay: DiagramOverlay = { badges, selected, onSelect: pick };
+  const current = graph.nodes.find((item) => item.id === firstStep(marks, order));
+  const toolbar = (
+    <button type="button" className="btn btn--small btn--quiet hit instance-panel-toggle" aria-expanded={open} aria-controls={panelId} onClick={toggle}>
+      <span aria-hidden="true">{open ? '›' : '‹'}</span> {open ? t('instance.panel.hide') : t('instance.panel.show')}
+    </button>
+  );
   return (
-    <div className="instance-grid">
+    <div className={open ? 'instance-grid' : 'instance-grid instance-grid--wide'}>
       <div className="instance-grid__canvas">
         <Suspense fallback={<LoadingRows rows={6} />}>
-          <DefinitionDiagram graph={graph} label={label} overlay={overlay} />
+          <DefinitionDiagram graph={graph} label={label} overlay={overlay} toolbar={toolbar} reserve={DIAGRAM_RESERVE} />
         </Suspense>
+        <CaseTiles instance={instance} current={current} showAction={!open} />
       </div>
-      <aside className="inspector" aria-label={t('instance.inspector')} aria-live="polite">
+      <aside className="inspector" id={panelId} aria-label={t('instance.inspector')} aria-live="polite" hidden={!open}>
         {node === undefined ? (
           <p className="inspector__hint">{t('instance.pick')}</p>
         ) : (
@@ -184,6 +208,25 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
         )}
       </aside>
     </div>
+  );
+}
+
+/** Room kept under the canvas: the card's padding, the page margin and the tiles row. */
+const DIAGRAM_RESERVE = 132;
+
+/** Where the case stands, under the diagram: the step it waits at and who holds it; the task opens from here when the panel is closed. */
+function CaseTiles({ instance, current, showAction }: { instance: ProcessInstance; current: DiagramNode | undefined; showAction: boolean }) {
+  const { t } = useI18n();
+  const { assigneeName } = useNames();
+  const task = current !== undefined ? openTaskAt(instance, current.id) : undefined;
+  useWantNames(wantedOf(task !== undefined ? [task.assignee] : [], []));
+  const none = <span className="muted" aria-label={t('rulesArea.none')}>—</span>;
+  return (
+    <section className="case-tiles" aria-label={t('instance.tiles')}>
+      <div className="case-tile"><p className="case-tile__term">{t('instance.tile.step')}</p><p className="case-tile__value">{current !== undefined ? (current.name ?? current.id) : none}</p></div>
+      <div className="case-tile"><p className="case-tile__term">{t('instance.tile.assigned')}</p><p className="case-tile__value">{task !== undefined ? assigneeName(task.assignee) : none}</p></div>
+      {showAction && task !== undefined ? <TaskAction taskId={task.id} noActivity={false} /> : null}
+    </section>
   );
 }
 
@@ -325,14 +368,15 @@ function IncidentBox({ code, openedAt, replica }: { code: string; openedAt: stri
 function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolean }) {
   const { t } = useI18n();
   const { can } = useProcessesSession();
+  const reasonId = useId();
   const reason: MessageKey | undefined = !can('processes:task:work') ? 'instance.openTaskBlocked' : noActivity ? 'instance.openTaskNoActivity' : undefined;
   if (reason === undefined) {
     return <a className="btn btn--primary inspector__action" href={formatRoute({ name: 'task', taskId })}>{t('instance.openTask')}</a>;
   }
   return (
     <div className="inspector__blocked">
-      <button type="button" className="btn btn--primary inspector__action" aria-disabled="true" aria-describedby="instance-task-reason">{t('instance.openTask')}</button>
-      <p id="instance-task-reason" className="inspector__reason"><span aria-hidden="true">ⓘ</span> {t(reason)}</p>
+      <button type="button" className="btn btn--primary inspector__action" aria-disabled="true" aria-describedby={reasonId}>{t('instance.openTask')}</button>
+      <p id={reasonId} className="inspector__reason"><span aria-hidden="true">ⓘ</span> {t(reason)}</p>
     </div>
   );
 }

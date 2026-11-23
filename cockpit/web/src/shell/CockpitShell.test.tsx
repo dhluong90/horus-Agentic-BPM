@@ -29,12 +29,12 @@ describe('embedded shell, case A', () => {
 
     expect(await screen.findByTestId('header-user')).toHaveTextContent('Nguyễn Thị Lan');
     expect(screen.getByTestId('header-host')).toHaveTextContent('Retail banking');
-    expect(screen.getByTestId('header-tenant')).toHaveTextContent('bank-a');
+    expect(screen.getByTestId('header-tenant')).toHaveTextContent('Sao Mai retail');
     expect(screen.getByRole('heading', { level: 1, name: /Nguyễn Thị Lan/ })).toBeInTheDocument();
     // No backend of its own: the registry, then the host's two metadata endpoints, then only engine endpoints, same origin.
     expect(requested[0]).toMatch(/\/cockpit-hosts\.json$/);
     expect([...requested.slice(1, 3)].sort()).toEqual(['/api/bpm/me', '/api/bpm/meta']);
-    await screen.findByRole('link', { name: 'kyc-risk' });
+    await screen.findByRole('link', { name: 'Kyc risk' });
     expect(requested.slice(3).every((path) => path.startsWith('/api/bpm/rules/v1/'))).toBe(true);
   });
 

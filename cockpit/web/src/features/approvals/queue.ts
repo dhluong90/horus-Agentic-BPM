@@ -1,4 +1,5 @@
 import type { PendingDefinitionApproval } from '../../api/processes/schemas';
+import { nameOf } from '../../app/names';
 import type { PendingRuleApproval } from '../../api/rules/schemas';
 import { suppliedName } from '../../app/people';
 import type { Route } from '../../app/route';
@@ -51,7 +52,7 @@ function denial(code: string | undefined, allowed: boolean): Denial | undefined 
 export function fromRule(item: PendingRuleApproval, userId: string): ApprovalItem {
   const canApprove = item.allowedActions.includes('approve');
   return {
-    engine: 'rules', key: item.ruleSet, title: item.ruleSet, version: item.version, hash: item.canonicalHash, lockVersion: item.lockVersion,
+    engine: 'rules', key: item.ruleSet, title: nameOf('rule set', item.ruleSet, item), version: item.version, hash: item.canonicalHash, lockVersion: item.lockVersion,
     requestedBy: item.requestedBy, requesterName: suppliedName(item, 'requestedBy'), requestedAt: item.requestedAt, canApprove,
     approveDenied: denial(item.deniedActions['approve'], canApprove), mine: item.requestedBy === userId, canWithdraw: item.allowedActions.includes('withdraw'),
   };
