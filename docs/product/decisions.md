@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference (decision record) |
 | Owner area | Product |
-| Last reviewed | 2026-11-21 |
+| Last reviewed | 2026-11-23 |
 
 This log records every product decision about the engines: scope, milestones, priorities, product rules and the acceptance of architecture decisions that change what ships. The product manager writes the question and a recommendation first; the product owner decides (PD-001). Since 2026-11-19 the product manager also decides business and use-case questions under delegated authority, while the product owner keeps release dates, licensing and commercial terms and can overrule any entry (PD-073). Every decision follows the principle "generic by design" (PD-074). A decision is never applied to the roadmap, the feature map, a PRD or a SPEC before its status here is Decided.
 
@@ -170,6 +170,9 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-146](#pd-146-masking-stays-opt-in-the-engine-warns-about-unclassified-fields) | Masking stays opt-in; the engine warns about unclassified fields | Decided (product owner, 2026-11-22); supersedes PD-145, confirms PD-132 |
 | [PD-147](#pd-147-the-10-api-freeze-no-longer-gates-the-10-release) | The 1.0 API freeze no longer gates the 1.0 release | Decided (product owner, 2026-11-22); amends PD-135 |
 | [PD-148](#pd-148-release-only-after-a-final-demo-and-acceptance-test) | Release only after a final demo and acceptance test | Decided (product owner, 2026-11-22) |
+| [PD-149](#pd-149-10-is-one-baseline-release-with-bpmn-common-executable) | 1.0 is one baseline release with BPMN Common Executable | Decided (product owner, 2026-11-23); supersedes PD-057 and PD-062 stage plan |
+| [PD-150](#pd-150-process-models-are-imported-a-built-in-modeller-comes-after-10) | Process models are imported; a built-in modeller comes after 1.0 | Decided (product owner, 2026-11-23) |
+| [PD-151](#pd-151-lean-engineering-until-the-baseline) | Lean engineering until the baseline | Decided (product owner, 2026-11-23); defers #113 |
 
 ---
 
@@ -4123,4 +4126,56 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 **Consequences.**
 - #117 (Release 1.0) stays open.
 - The final demo and acceptance test come first; release steps follow only after the product owner decides.
+- Nothing is closed by this decision.
+
+### PD-149 1.0 is one baseline release with BPMN Common Executable
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-23 |
+| Question | What does 1.0 contain, and do the BPMN stages S1 to S3 still follow it? |
+| Raised by | Product owner |
+| Decision | Product owner decision (2026-11-23). Supersedes the staged BPMN plan of PD-057 and the stage releases 1.1 to 1.3. |
+
+**Decision.** 1.0 is one baseline release. It has a complete Rule Engine with simple UI rule editing, and a Process Engine that supports the BPMN 2.0 Common Executable conformance level: every executable element, plus pools, lanes and message flows. Choreography and conversation diagrams are out of scope.
+
+**Consequences.**
+- Full BPMN no longer waits for 1.1 to 1.3. The BPMN element features move to the 1.0 milestone.
+- Scope is every executable BPMN 2.0 element, including complex gateway, ad-hoc sub-process and multiple events (PE-F-66 moves to 1.0).
+- Full DMN (RE-F-43 to RE-F-47, X-F-26, X-F-27) stays after 1.0, pending the product owner's confirmation.
+- Interim tags such as 0.3.0 are not planned. Only the product owner decides releases (PD-148 still applies).
+
+### PD-150 Process models are imported; a built-in modeller comes after 1.0
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-23 |
+| Question | Does 1.0 include a built-in process modeller? |
+| Raised by | Product owner |
+| Decision | Product owner decision (2026-11-23). |
+
+**Decision.** Teams import process models from standard BPMN modellers such as Camunda Modeler or bpmn.io. A built-in modeller comes after 1.0.
+
+**Consequences.**
+- The cockpit canvas editor (CK-F-32) is not part of 1.0.
+- Import and display must handle what those modellers produce.
+
+### PD-151 Lean engineering until the baseline
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-23 |
+| Question | How much process does the work need while nobody runs 0.x in production? |
+| Raised by | Product owner |
+| Decision | Product owner decision (2026-11-23). Defers #113. |
+
+**Decision.** Nobody runs 0.x in production, so until 1.0 ships:
+- Each engine's migrations are squashed into one baseline migration, which may be edited until 1.0. From 1.0 on, migrations are forward-only again.
+- Tests are required for the bank-grade controls (four-eyes, idempotency, tenant isolation, masking, audit trail) and for engine semantics (BPMN, DMN and FEEL). Other SPEC statements need no traced test until 1.0.
+- The cockpit UI test suite stays in the repository. Its CI job is off until the baseline, when the suite is repaired.
+- The full CI matrix, benchmarks and the pooler leg run nightly. Pull requests run one Java leg.
+- The security audit (#365) runs once, before the baseline.
+- Mixed-version tolerance (#113, X-F-10) is deferred until after 1.0.
+
+**Consequences.**
 - Nothing is closed by this decision.
