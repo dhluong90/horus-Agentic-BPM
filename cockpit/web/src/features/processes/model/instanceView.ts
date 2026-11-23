@@ -87,7 +87,7 @@ const ENTRY_TYPES = [
   'ASYNC_STEP_SCHEDULED', 'ASYNC_ATTEMPT_FAILED', 'ASYNC_RESULT_ACCEPTED', 'ASYNC_RESULT_REFUSED', 'STEP_ROUTED_TO_REVIEW',
   'HUMAN_OVERRIDE', 'DECISION_EVALUATED', 'TIMER_SCHEDULED', 'TIMER_FIRED', 'TOKEN_JOINED', 'TOKEN_CANCELLED',
   'BOUNDARY_FIRED', 'EVENT_SUBPROCESS_STARTED', 'ERROR_THROWN', 'ESCALATION_THROWN', 'TERMINATED', 'LINK_JUMPED',
-  'HUMAN_OVERRIDE', 'DECISION_EVALUATED', 'TIMER_SCHEDULED', 'TIMER_FIRED', 'TOKEN_JOINED', 'JOIN_FIRED', 'TOKEN_CANCELLED',
+  'JOIN_FIRED',
   'INCIDENT_RAISED', 'INSTANCE_ENDED',
   'SIGNAL_WAITING', 'SIGNAL_RECEIVED', 'SIGNAL_THROWN', 'CONDITION_WAITING', 'CONDITION_MET',
   'MESSAGE_WAITING', 'MESSAGE_RECEIVED', 'MESSAGE_SENT',
@@ -121,6 +121,8 @@ export function loopProgress(activities: InstanceActivities | undefined): Map<st
     out.set(entry.nodeId, { done: counters.nrOfCompletedInstances ?? 0, total: counters.nrOfInstances, active: counters.nrOfActiveInstances ?? 0 });
   }
   return out;
+}
+
 /**
  * What a gateway chose or what a waiting join expects, in step names (#494): a split names the steps its taken flows
  * lead to and says when the default was taken; a join that waits names the steps it still expects a token from.

@@ -118,13 +118,13 @@ describe('CKP-070 diagram nodes are keyed by BPMN element type; unknown types re
   });
 
   it('CKP_070_an_unknown_type_stays_in_the_graph_with_its_type_name_and_the_rest_is_intact', () => {
-    // A compensation boundary is not drawn by this cockpit yet; the timer boundary of the loan demo is (#489).
+    // A link boundary is not drawn by this cockpit yet; the timer boundary of the loan demo is (#489).
     const graph = readBpmnGraph(LOAN_ORIGINATION_BPMN.replace(
       '<bpmn:timerEventDefinition><bpmn:timeDuration>P2D</bpmn:timeDuration></bpmn:timerEventDefinition>',
-      '<bpmn:compensateEventDefinition/>'));
+      '<bpmn:linkEventDefinition name="x"/>'));
     const boundary = graph.nodes.find((node) => node.id === 'no-documents');
-    expect(boundary).toEqual({ id: 'no-documents', name: 'No documents in 2 days', type: 'boundaryEvent:compensate', attachedTo: 'capture', interrupting: false });
-    expect(isKnownNodeType('boundaryEvent:compensate')).toBe(false);
+    expect(boundary).toEqual({ id: 'no-documents', name: 'No documents in 2 days', type: 'boundaryEvent:link', attachedTo: 'capture', interrupting: false });
+    expect(isKnownNodeType('boundaryEvent:link')).toBe(false);
     expect(isKnownNodeType('boundaryEvent:timer')).toBe(true);
     expect(graph.edges.some((edge) => edge.source === 'no-documents' && edge.target === 'remind')).toBe(true);
     expect(layoutGraph(graph).nodes.find((node) => node.id === 'no-documents')).toBeDefined();
