@@ -148,11 +148,13 @@ public record HostMetadataProperties(
      * @param roles role identifier to language to name
      * @param groups group identifier to language to name
      * @param users user identifier to language to name, for a small host without a directory
+     * @param tenants tenant id to language to name, shown by the tenant switcher
      */
     public record DisplayNamesSettings(@DefaultValue("en") String defaultLanguage,
             @DefaultValue Map<String, Map<String, String>> roles,
             @DefaultValue Map<String, Map<String, String>> groups,
-            @DefaultValue Map<String, Map<String, String>> users) {
+            @DefaultValue Map<String, Map<String, String>> users,
+            @DefaultValue Map<String, Map<String, String>> tenants) {
 
         /** Checks the language. */
         public DisplayNamesSettings {
@@ -163,6 +165,7 @@ public record HostMetadataProperties(
             roles = roles == null ? Map.of() : Map.copyOf(roles);
             groups = groups == null ? Map.of() : Map.copyOf(groups);
             users = users == null ? Map.of() : Map.copyOf(users);
+            tenants = tenants == null ? Map.of() : Map.copyOf(tenants);
         }
     }
 

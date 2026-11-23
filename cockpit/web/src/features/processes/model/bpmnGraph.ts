@@ -18,6 +18,9 @@ export const KNOWN_NODE_TYPES = [
   'serviceTask',
   'serviceTask:agentTask',
   'businessRuleTask',
+  'task',
+  'manualTask',
+  'scriptTask',
   'exclusiveGateway',
   'parallelGateway',
   'inclusiveGateway',
@@ -37,6 +40,8 @@ export interface DiagramNode {
   name: string | undefined;
   /** The BPMN element type with the HORUS subtype, for example `serviceTask:agentTask` or `boundaryEvent:timer`. */
   type: string;
+  /** The variable a script task stores its result in, shown beside the step in the timeline. */
+  resultVariable?: string;
 }
 
 export interface DiagramEdge {
@@ -129,7 +134,13 @@ export function readBpmnGraph(xml: string): DiagramGraph {
     if (NOT_A_STEP.has(child.localName)) continue;
     const defaultFlow = nonEmpty(child.getAttribute('default'));
     if (defaultFlow !== undefined) defaults.add(defaultFlow);
-    nodes.push({ id, name: nonEmpty(child.getAttribute('name')), type: nodeType(child) });
+    const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
+    nodes.push({
+      id,
+      name: nonEmpty(child.getAttribute('name')),
+      type: nodeType(child),
+      ...(resultVariable !== undefined ? { resultVariable } : {}),
+    });
   }
   const ids = new Set(nodes.map((node) => node.id));
   return {

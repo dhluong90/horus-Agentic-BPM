@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.host.autoconfigure;
 
 import io.github.dhluong90.bpm.host.internal.CorrelationIds;
+import io.github.dhluong90.bpm.host.spi.DisplayNames;
 import io.github.dhluong90.bpm.host.spi.EngineAccess;
 import io.github.dhluong90.bpm.host.spi.EngineAccessDeniedException;
 import io.github.dhluong90.bpm.host.spi.EngineCaller;
@@ -16,6 +17,7 @@ import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -65,8 +67,12 @@ final class HostMetadataController {
     private final List<ModuleTenantSettings> tenantSettings;
     private final HostMetadataProperties properties;
     private final EngineAccess access;
+    private final DisplayNames names;
     /** {@code /me} depends on the caller's credentials and on the switch request header. */
     static final String[] ME_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE, DefaultEngineAccess.TENANT_SWITCH_HEADER};
+    /** As {@link #ME_VARY}, and the language, when the body carries tenant display names. */
+    static final String[] ME_NAMES_VARY = {HttpHeaders.AUTHORIZATION, HttpHeaders.COOKIE,
+        DefaultEngineAccess.TENANT_SWITCH_HEADER, HttpHeaders.ACCEPT_LANGUAGE};
     /**
      * {@code /meta} with settings of the caller's tenant: the tenant comes from the credentials, and from the switch
      * header once tenant switching is offered, so the response varies by the same headers as {@code /me}.
@@ -75,11 +81,12 @@ final class HostMetadataController {
         DefaultEngineAccess.TENANT_SWITCH_HEADER};
 
     HostMetadataController(List<ModuleDescriptor> modules, HostMetadataProperties properties, EngineAccess access) {
-        this(modules, List.of(), properties, access);
+        this(modules, List.of(), properties, access, DisplayNames.none());
     }
 
     HostMetadataController(List<ModuleDescriptor> modules, List<ModuleTenantSettings> tenantSettings,
-            HostMetadataProperties properties, EngineAccess access) {
+            HostMetadataProperties properties, EngineAccess access, DisplayNames names) {
+        this.names = names;
         this.modules = List.copyOf(modules);
         this.tenantSettings = List.copyOf(tenantSettings);
         this.properties = properties;
@@ -212,6 +219,10 @@ final class HostMetadataController {
         Map<String, Object> tenant = new LinkedHashMap<>();
         tenant.put("current", caller.tenant());
         tenant.put("allowed", caller.allowedTenants());
+        Map<String, String> tenantNames = tenantNames(caller, request.getLocale());
+        if (!tenantNames.isEmpty()) {
+            tenant.put("names", tenantNames);
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("schemaVersion", 1);
         body.put("user", user);
@@ -219,7 +230,24 @@ final class HostMetadataController {
         body.put("permissions", permissions(caller));
         body.put("roles", roles(caller));
         body.put("groups", caller.groups());
-        return cacheable(request, body, ME_CACHE_CONTROL, ME_VARY);
+        return cacheable(request, body, ME_CACHE_CONTROL, tenantNames.isEmpty() ? ME_VARY : ME_NAMES_VARY);
+    }
+
+    /**
+     * Display names of the caller's allowed tenants only, so a tenant the caller may not select is never named. A
+     * tenant without a name, or a host bean that throws, is left out and the switcher shows the id.
+     */
+    private Map<String, String> tenantNames(EngineCaller caller, Locale locale) {
+        Map<String, String> found = new LinkedHashMap<>();
+        for (String tenantId : caller.allowedTenants()) {
+            try {
+                names.tenant(tenantId, locale).filter(name -> !name.isBlank())
+                        .ifPresent(name -> found.put(tenantId, name));
+            } catch (RuntimeException e) {
+                LOG.warn("DisplayNames.tenant threw " + e.getClass().getName() + "; the tenant id is shown instead.");
+            }
+        }
+        return found;
     }
 
     @ExceptionHandler(EngineAccessDeniedException.class)

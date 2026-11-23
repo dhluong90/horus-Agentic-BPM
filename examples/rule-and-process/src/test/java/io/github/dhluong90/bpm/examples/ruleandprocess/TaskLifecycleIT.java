@@ -134,7 +134,8 @@ class TaskLifecycleIT {
         assertThat(view.get("businessKey").stringValue()).isEqualTo("IT-T-READ");
         assertThat(view.get("allowedActions").toString()).isEqualTo("[\"claim\"]");
         assertThat(JSON.readTree(forHoa.body()).get("allowedActions").toString())
-                .as("hoa submitted it, so four eyes leaves her nothing to do").isEqualTo("[]");
+                .as("hoa submitted it, so four eyes bars her from claiming; she may only reassign (processes:task:manage, #483)")
+                .isEqualTo("[\"reassign\"]");
         assertThat(problem(forTuan)).isEqualTo("403 PERMISSION_DENIED");
     }
 

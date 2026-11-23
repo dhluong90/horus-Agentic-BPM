@@ -151,6 +151,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-216 | `PRE_216_*` in `TaskQueryPostgresIT` and `StepCatalogueRestContractTest` | Testcontainers with 100 and 101 role queues; problem body against the contract | M3 | `TR-PERF-07`, `TR-SEC-01` | Done (#408) |
 | PRE-217 | `PRE_217_*` in `AgentTaskIT` | Testcontainers, the real Rule Engine; import of a malformed set | M3 | `TR-UI-04` | Done (#386) |
 | PRE-218 | `PRE_218_*` in `ProcessRestErrorMatrixTest` and `IncidentRestContractTest` | WebMvc against the OpenAPI contract: tag, 304, changed content, page and view, refused caller | M3 | `TR-PERF-07`, `TR-TEN-01` | Done |
+| PRE-250 | `PRE_250_*` in `TaskElementsTest` and `TaskElementsImportTest` | Unit on the kernel with a card fee script; import and export round trip | M3 | `TR-STD-04`, `TR-SEC-01` | Done (#485) |
+| PRE-251 | `PRE_251_*` in `TaskElementsTest` | Unit on the kernel, a plain and a manual task | M3 | `TR-STD-04` | Done (#485) |
+| PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
+| PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

@@ -5,7 +5,7 @@
 | Type | Design specification |
 | Owner area | Product |
 | Last reviewed | 2026-11-19 |
-| Status | Proposed; menu visibility, the page ground and card titles decided in PD-093 |
+| Status | Light Green default theme added; otherwise proposed; menu visibility, the page ground and card titles decided in PD-093 |
 
 This is the build-ready styleguide for the cockpit and for the sign-in page of the example host. It turns the approved hybrid direction ([UX design](../ux-design.md), [PD-056](../decisions.md#pd-056-rule-management-ux-direction)) into CSS variables, a type scale, spacing, radius, elevation, the shell layout and the state of every core component.
 
@@ -26,6 +26,24 @@ It extends the token table in [UX design section 6](../ux-design.md#6-design-tok
 11. [Copy rules](#11-copy-rules)
 12. [CSS to add today](#12-css-to-add-today)
 13. [Review checklist](#13-review-checklist)
+
+## Default theme: Green
+
+The cockpit's default look is a light Green theme, chosen by the product owner. The light values in this guide are the Green values; the dark theme is unchanged. Blue and Orange are designed alternates (same roles, other hues); a theme switch comes after 1.0. The light theme has no dark surface: the contrast card is a pale sage tint with dark text.
+
+| Role | Token | Value | Use |
+|---|---|---|---|
+| Page and cards | `--bg`, `--surface` | `#F7F7F7`, `#FFFFFF` | Flat grey page, white cards and menu. Borders `--line` `#ECEEED`. |
+| Primary | `--primary-fill`, `--on-primary` | `#158370`, `#FFFFFF` | Primary button, 4.7:1 with white. Hover `#0E6B5C`, pressed `#0E4D41`. |
+| Accent text | `--accent` | `#0F7362` | Links and selected text, at least 4.5:1 on white and on `--accent-soft` `#DDF3EC`. |
+| Soft surfaces | `--surface-contrast`, `--accent-soft`, `--select`, `--teal-soft` | `#E1EFD4`, `#DDF3EC`, `#EAF6F2`, `#D6F0E8` | Sage focal card, mint tint, selected row. Text on them is `--ink` `#0E2F29`. |
+| Strong marks | `--spark-max`, `--rel-1`, `--teal` | `#0E4D41` | Selected chart bar, icon discs, headings on a tint. Light bars use `#3B9C88` (3.3:1 on white); a mark lighter than 3:1 carries a direct value label. |
+| Text | `--ink`, `--muted` | `#0E2F29`, `#5B6B66` | Body and secondary text, 5.6:1 on white. |
+| Done | `--ok`, `--ok-soft` | `#2A7236`, `#E1EFD4` | Published, approved. Always with an icon and a label. |
+| Warning | `--warn`, `--warn-soft` | `#8A5A00`, `#FBEFCF` | Needs attention soon. |
+| Error | `--bad`, `--bad-soft` | `#B53A36`, `#FBE4E1` | Failed, rejected. Done, warning and error never share a hue with the accent. |
+
+Fonts stay system fonts only. Later sections give the same tokens in full; their light column matches this table.
 
 ## 1. Principles
 
@@ -49,13 +67,13 @@ Meaning of each hue (from UX design section 6.1, repeated here because the build
 
 | Hue | Tokens | Means only | Never |
 |---|---|---|---|
-| Ocean blue | `--accent*`, `--primary-fill`, `--select` | Primary action, selected, link, focus, waiting for approval, matched row in Try it | A second blue for selection |
-| Green | `--ok*` | Published, approved, check passed, added row | Pending or review |
+| Green accent | `--accent*`, `--primary-fill`, `--select` | Primary action, selected, link, focus, waiting for approval, matched row in Try it | A second accent hue for selection |
+| Done green | `--ok*` | Published, approved, check passed, added row | Pending or review |
 | Amber | `--warn*` | Needs attention soon; the Demo tag | Plain information, a page frame, any environment tag other than Demo |
 | Red | `--bad*` | Error, failed validation, reject, destructive action | A planned fee cut, an unmatched row |
 | Indigo | `--indigo*`, `--diff-mod` | A changed value in a diff | Selection |
 | Violet | `--violet*` | Agent steps and route-to-human only | Anything in the rule screens |
-| Contrast slate | `--surface-contrast` | The single focal card of a screen (Home's next step; the sign-in brand panel) | More than one card per screen |
+| Contrast sage | `--surface-contrast` | The single focal card of a screen (Home's next step; the sign-in brand panel) | More than one card per screen |
 
 ## 3. Colour tokens for the shell
 
@@ -63,21 +81,21 @@ The shell's colour tokens in one table. `--primary-fill` and `--on-primary` alre
 
 | Token | Role | Light | Dark | Ratio, light | Ratio, dark | Measured against |
 |---|---|---|---|---|---|---|
-| `--primary-fill` | Primary button fill | `#0369A1` | `#0C9AD9` | 5.93 with `--on-primary`; 5.93 against `--surface` | 5.95 with `--on-primary`; 5.51 against `--surface` | `--on-primary`, `--surface` |
-| `--on-primary` | Text and icon on the primary fill | `#FFFFFF` | `#04131D` | 5.93 | 5.95 | `--primary-fill` |
-| `--surface-contrast` | The one focal card, sign-in brand panel | `#0F172A` | `#1B2840` | 16.49 | 1.30, separated by `--contrast-line` | `--bg` |
-| `--contrast-line` | Hairline of the contrast card | `transparent` | `#3B5A86` | | 2.73, decorative | `--bg` |
-| `--on-contrast` | Text on the contrast card | `#F8FAFC` | `#F1F5F9` | 17.06 | 13.46 | `--surface-contrast` |
-| `--on-contrast-muted` | Secondary text on it | `#A9B4C6` | `#A9B4C6` | 8.53 | 7.04 | `--surface-contrast` |
-| `--on-contrast-accent` | Link or count on it | `#7DD3FC` | `#7DD3FC` | 10.71 | 8.84 | `--surface-contrast` |
-| `--contrast-action` | Button fill on the contrast card | `#F8FAFC` | `#F1F5F9` | 17.06 with `--surface-contrast` text | 13.46 | text `#0F172A` / `#0B0F17` |
-| `--primary-hover` | Primary button, hover | `#075985` | `#38BDF8` | 7.56 with `--on-primary` | 8.78 with `--on-primary` | |
-| `--primary-active` | Primary button, pressed | `#0C4A6E` | `#0284C7` | 9.46 with `--on-primary` | 4.59 | |
+| `--primary-fill` | Primary button fill | `#158370` | `#0C9AD9` | 4.65 with `--on-primary`; 4.65 against `--surface` | 5.95 with `--on-primary`; 5.51 against `--surface` | `--on-primary`, `--surface` |
+| `--on-primary` | Text and icon on the primary fill | `#FFFFFF` | `#04131D` | 4.65 | 5.95 | `--primary-fill` |
+| `--surface-contrast` | The one focal card, sign-in brand panel | `#E1EFD4` | `#1B2840` | 1.12, separated by `--contrast-line` | 1.30, separated by `--contrast-line` | `--bg` |
+| `--contrast-line` | Hairline of the contrast card | `#CFE3BE` | `#3B5A86` | decorative | 2.73, decorative | `--bg` |
+| `--on-contrast` | Text on the contrast card | `#0E2F29` | `#F1F5F9` | 12.01 | 13.46 | `--surface-contrast` |
+| `--on-contrast-muted` | Secondary text on it | `#3F5650` | `#A9B4C6` | 6.58 | 7.04 | `--surface-contrast` |
+| `--on-contrast-accent` | Link or count on it | `#0E4D41` | `#7DD3FC` | 8.11 | 8.84 | `--surface-contrast` |
+| `--contrast-action` | Button fill on the contrast card | `#158370` | `#F1F5F9` | 4.65 with white text | 13.46 | text `#FFFFFF` / `#0B0F17` |
+| `--primary-hover` | Primary button, hover | `#0E6B5C` | `#38BDF8` | 6.41 with `--on-primary` | 8.78 with `--on-primary` | |
+| `--primary-active` | Primary button, pressed | `#0E4D41` | `#0284C7` | 9.74 with `--on-primary` | 4.59 | |
 | `--rail` | Menu background | `#FFFFFF` | `#0E141F` | | | |
 | `--rail-line` | Menu edge | `var(--line)` | `var(--line)` | decorative | decorative | |
-| `--env-tag` | Environment tag other than Demo (Production, UAT), fill | `#F1F4F8` | `rgba(148,163,184,.12)` | | | |
-| `--env-tag-ink` | Its text | `#334155` | `#C5CCD9` | 9.39 | 8.94 on `--surface` | `--env-tag` |
-| `--env-tag-line` | Its 1 px inner edge | `#B8C1CD` | `rgba(148,163,184,.34)` | decorative | decorative | |
+| `--env-tag` | Environment tag other than Demo (Production, UAT), fill | `#F1F4F3` | `rgba(148,163,184,.12)` | | | |
+| `--env-tag-ink` | Its text | `#2C4640` | `#C5CCD9` | 9.22 | 8.94 on `--surface` | `--env-tag` |
+| `--env-tag-line` | Its 1 px inner edge | `#B5C2BE` | `rgba(148,163,184,.34)` | decorative | decorative | |
 
 Two changes to how existing tokens are used:
 
@@ -162,7 +180,7 @@ Depth comes from a hairline plus a soft shadow. In dark mode shadows are nearly 
 | 0 | none | flat `--bg` | flat `--bg` | Page ground |
 | 1 | `--sh-1` | 1 px `--line` + `0 1px 2px rgba(15,23,42,.06)` | 1 px `--line` + inner highlight `rgba(255,255,255,.05)` | Cards, the table frame, the menu |
 | 2 | `--sh-2` | `0 6px 18px -8px rgba(15,23,42,.16), 0 1px 3px rgba(15,23,42,.06)` | inner highlight `.06` + `0 12px 28px -12px rgba(0,0,0,.75)` | Hovered list card, selected queue item |
-| 3 | `--sh-dock` | `0 -8px 24px -12px rgba(15,23,42,.18)` + top `--line` | inner highlight `.07` + top `--line-strong` | Sticky action dock at the bottom of the editor and the review |
+| 3 | `--sh-dock` | `0 -8px 24px -12px rgba(14,47,41,.18)` + top `--line` | inner highlight `.07` + top `--line-strong` | Sticky action dock at the bottom of the editor and the review |
 | 4 | `--sh-pop` | `0 16px 40px -8px rgba(15,23,42,.18), 0 2px 6px rgba(15,23,42,.06)` | 1 px `--line-strong` + `0 16px 40px -8px rgba(0,0,0,.8)` | Menus, selects, tooltips, toasts |
 | 5 | `--sh-3` + `--scrim` | `--sh-3` over `--scrim` | `--sh-3` over `--scrim` | Dialogs: request publish, approve, reject |
 
@@ -262,10 +280,10 @@ A version has three states: Draft, Waiting for approval and Published. A rejecte
 | State | Treatment |
 |---|---|
 | Default | `--ink-2` label, `--muted` icon |
-| Hover | `--surface-3` fill |
-| Selected | `--select` fill, `--accent` label and icon at 600, 3 px `--accent` bar on the left edge, `aria-current="page"` |
+| Hover | `--select` fill; on the selected item `--primary-hover` |
+| Selected | Filled pill: `--primary-fill`, `--on-primary` label and icon at 600, 10 px radius, no edge tick, `aria-current="page"`. Collapsed, the icon sits in the same pill |
 | Focus | 3 px `--focus` ring, 2 px offset |
-| With count | Pill on the right: `--primary-fill` with `--on-primary`, `--type-caption` 600 |
+| With count | Pill on the right: `--primary-fill` with `--on-primary`, `--type-caption` 600; on the selected pill it inverts to `--on-primary` with `--primary-fill` text |
 
 ### Tabs
 
@@ -336,10 +354,10 @@ Add these blocks to `cockpit/web/src/components/tokens.css` and to the example h
 ```css
 :root {
   /* Contrast card and sign-in brand panel: one per screen */
-  --surface-contrast: #0F172A; --contrast-line: transparent;
-  --on-contrast: #F8FAFC; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
-  --contrast-action: #F8FAFC; --on-contrast-action: #0F172A;
-  --primary-hover: #075985; --primary-active: #0C4A6E;
+  --surface-contrast: #E1EFD4; --contrast-line: #CFE3BE;
+  --on-contrast: #0E2F29; --on-contrast-muted: #3F5650; --on-contrast-accent: #0E4D41;
+  --contrast-action: #158370; --on-contrast-action: #FFFFFF;
+  --primary-hover: #0E6B5C; --primary-active: #0E4D41;
   --rail: #FFFFFF; --rail-line: var(--line);
 
   /* Type: size / line height */
@@ -357,8 +375,8 @@ Add these blocks to `cockpit/web/src/components/tokens.css` and to the example h
   --card-pad: 20px; --gap: 16px;
 
   /* Elevation 3 and 4 */
-  --sh-dock: 0 -8px 24px -12px rgba(15, 23, 42, .18);
-  --sh-pop: 0 16px 40px -8px rgba(15, 23, 42, .18), 0 2px 6px rgba(15, 23, 42, .06);
+  --sh-dock: 0 -8px 24px -12px rgba(14, 47, 41, .18);
+  --sh-pop: 0 16px 40px -8px rgba(14, 47, 41, .18), 0 2px 6px rgba(14, 47, 41, .06);
 }
 
 /* Explicit dark choice */

@@ -1510,7 +1510,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     TaskQueries taskQueries(io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore queryStore) {
         return new TaskQueries(tenants, callers, clock, transactions, queryStore, this::cursors, settings.maxPageSize(),
-                settings.maxRoles());
+                settings.maxRoles(), settings.dueSoonWindow());
     }
 
     private Cursors cursors() {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Spec-to-test gate (TR-QA-01).
 
-Every id in scope must have at least one running test whose name starts with
+Every enforced id in scope must have at least one running test whose name starts with
 that id, in upper case with hyphens written as underscores:
 
     RLE-013   ->  RLE_013_transactional_decision_log_rolls_back_with_host
@@ -13,19 +13,27 @@ Ids in scope, per module (a folder with docs/SPEC.md):
   * every requirement id (TR-*) in the first column of the
     "Requirement-level tests" table of docs/TEST-PLAN.md.
 
+Each statement carries a "- **Kind:** control|semantics|other" line (lean mode, PD-151):
+  * control: security, tenancy, audit, money, idempotency, approval, determinism;
+  * semantics: what an element or a rule does;
+  * other: everything else (screens, wording, lists, exports, reports).
+Control and semantics statements are enforced as below. An "other" statement without a test is
+reported as a warning and never fails the gate, so no statement needs a test id only to pass.
+Requirement ids (TR-*) of the TEST-PLAN are enforced as before.
+
 A statement that is deliberately not implemented yet is listed in
 <module>/docs/spec-pending.txt with the milestone that delivers it:
 
     RLE-001  M1
 
 The gate fails when
-  * an id in scope has neither a running test nor an allow-list entry;
+  * a control, semantics or requirement id has neither a running test nor an allow-list entry;
   * an allow-list entry names an id the module does not define, is listed
     twice, cannot be read, or has a milestone different from SPEC.md;
   * an allow-list entry's milestone is at or before the current milestone
     (tools/spec-coverage.ini), so no statement outlives its milestone;
-  * SPEC.md has a malformed id heading, a duplicate statement, or a statement
-    without a "- **Milestone:**" line;
+  * SPEC.md has a malformed id heading, a duplicate statement, a statement
+    without a "- **Milestone:**" line, or one without a valid "- **Kind:**" line;
   * the TEST-PLAN "Specification coverage" table lists other ids than SPEC.md.
 It warns when an allow-listed id already has a test, so the entry can be removed.
 
@@ -73,6 +81,8 @@ HEADING = re.compile(r"^(#{1,6})\s+(\S+)")
 ID_LIKE_HEADING_TOKEN = re.compile(r"^`?(?:RLE|PRE|CKP)-")
 STATEMENT_TOKEN = re.compile(rf"^({STATEMENT_ID})(?![\w-])")
 SPEC_MILESTONE = re.compile(r"^-\s+\*\*Milestone:\*\*\s+(M\d+)\b")
+SPEC_KIND = re.compile(r"^-\s+\*\*Kind:\*\*\s+(\S+)")
+KINDS = ("control", "semantics", "other")
 TR_ID = re.compile(rf"(?<![\w-])({REQUIREMENT_ID})(?![\w-])")
 TABLE_STATEMENT_ID = re.compile(rf"^\|\s*`?({STATEMENT_ID})(?![\w-])")
 PENDING_LINE = re.compile(rf"^({STATEMENT_ID}|{REQUIREMENT_ID})\s+(M\d+)$")
@@ -399,6 +409,7 @@ class Module:
     name: str
     path: Path
     spec_ids: Dict[str, str] = field(default_factory=dict)       # id -> milestone ("" if missing)
+    spec_kinds: Dict[str, str] = field(default_factory=dict)     # id -> control, semantics or other ("" if missing)
     requirement_ids: Set[str] = field(default_factory=set)
     partial_requirements: Set[str] = field(default_factory=set)
     plan_statement_ids: Optional[Set[str]] = None
@@ -441,13 +452,25 @@ def read_spec(path: Path, rel: str, module: Module) -> None:
                 current = None
                 continue
             module.spec_ids[current] = ""
+            module.spec_kinds[current] = ""
             continue
         milestone = SPEC_MILESTONE.match(line)
         if milestone and current and not module.spec_ids[current]:
             module.spec_ids[current] = milestone.group(1)
+        kind = SPEC_KIND.match(line)
+        if kind and current and not module.spec_kinds[current]:
+            if kind.group(1) in KINDS:
+                module.spec_kinds[current] = kind.group(1)
+            else:
+                module.errors.append(f"{rel}:{number}: {current} has Kind '{kind.group(1)}'; "
+                                     f"use one of {', '.join(KINDS)}")
+                module.spec_kinds[current] = "invalid"
     for spec_id, milestone in sorted(module.spec_ids.items()):
         if not milestone:
             module.errors.append(f"{rel}: {spec_id} has no '- **Milestone:** M<n>' line")
+    for spec_id, kind in sorted(module.spec_kinds.items()):
+        if not kind:
+            module.errors.append(f"{rel}: {spec_id} has no '- **Kind:** control|semantics|other' line")
 
 
 def read_test_plan(path: Path, module: Module) -> None:
@@ -557,6 +580,7 @@ class ModuleResult:
     with_tests: int
     partial: List[str]
     pending: int
+    unenforced: int = 0
 
 
 @dataclass
@@ -601,7 +625,7 @@ def check(root: Path, config_path: Optional[Path] = None) -> Result:
         roots_text = ", ".join(r.relative_to(root).as_posix() for r in roots)
         test_names = collect_test_names(root, roots)
         result.test_names[module.name] = test_names
-        with_tests = pending_count = 0
+        with_tests = pending_count = unenforced = 0
         for spec_id in module.in_scope:
             tests = tests_for(spec_id, test_names)
             if spec_id in module.pending:
@@ -611,6 +635,9 @@ def check(root: Path, config_path: Optional[Path] = None) -> Result:
                                            f"({tests[0]}); remove its line")
             elif tests:
                 with_tests += 1
+            elif module.spec_kinds.get(spec_id) == "other":
+                unenforced += 1
+                result.warnings.append(f"{spec_rel}: {spec_id} is kind other and has no test; not enforced")
             else:
                 source = spec_rel if spec_id in module.spec_ids else plan_rel
                 result.errors.append(f"{source}: {spec_id} has no running test whose name starts with "
@@ -634,7 +661,7 @@ def check(root: Path, config_path: Optional[Path] = None) -> Result:
 
         result.modules[module.name] = ModuleResult(
             module.name, len(module.in_scope), len(module.spec_ids), len(module.requirement_ids),
-            with_tests, sorted(module.partial_requirements - set(module.pending)), pending_count)
+            with_tests, sorted(module.partial_requirements - set(module.pending)), pending_count, unenforced)
     return result
 
 
@@ -657,7 +684,8 @@ def report(result: Result, out=sys.stdout) -> None:
     for m in result.modules.values():
         partial = f" ({len(m.partial)} partial per the TEST-PLAN: {', '.join(m.partial)})" if m.partial else ""
         print(f"{m.name}: {m.in_scope} ids in scope ({m.statements} statements, {m.requirements} requirements), "
-              f"{m.with_tests} with at least one named test{partial}, {m.pending} pending", file=out)
+              f"{m.with_tests} with at least one named test{partial}, {m.pending} pending, "
+              f"{m.unenforced} of kind other without a test (not enforced)", file=out)
     if result.errors:
         print(f"Spec-to-test gate FAILED: {len(result.errors)} problem(s), {len(result.warnings)} warning(s). "
               "Name a running test after the id (see wiki/Contributing.md) or list the id with its milestone "

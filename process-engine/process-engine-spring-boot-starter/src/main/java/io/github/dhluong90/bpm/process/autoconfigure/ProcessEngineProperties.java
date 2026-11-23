@@ -404,10 +404,15 @@ public record ProcessEngineProperties(
      * @param maxRange longest start-time range of a list query; may be lowered, never raised
      * @param maxRoles most role and group queues one task list reads; a caller with more gets
      *     {@code 400 ROLE_FAN_OUT_EXCEEDED} unless the request names one {@code role} or {@code group} (#408)
+     * @param dueSoonWindow a task due within this time reads {@code slaState: DUE_SOON} in the task list (PD-111,
+     *     #472); positive, one hour by default
      */
     public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange,
-            @DefaultValue("100") int maxRoles) {
+            @DefaultValue("100") int maxRoles, @DefaultValue("PT1H") Duration dueSoonWindow) {
         public Query {
+            if (dueSoonWindow.isNegative() || dueSoonWindow.isZero()) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.due-soon-window must be positive");
+            }
             if (maxRoles < 1 || maxRoles > EngineDefaults.MAX_ROLES_LIMIT) {
                 throw new IllegalArgumentException("horus.bpm.processes.query.max-roles must be 1 to "
                         + EngineDefaults.MAX_ROLES_LIMIT);
@@ -642,6 +647,7 @@ public record ProcessEngineProperties(
                 idempotencyRetention, handlers.slowCallWarning(), query.maxPageSize(), query.maxRange(),
                 lifecycle.reasonMaxLength(), makerChecker.enabled(), approverRule, retireLastVersion,
                 approval.requireContentHash(), incidents.toSetting(),
-                classification == null || classification.warnUnclassified(), query.maxRoles());
+                classification == null || classification.warnUnclassified(), query.maxRoles(),
+                query.dueSoonWindow());
     }
 }

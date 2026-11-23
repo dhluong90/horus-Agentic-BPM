@@ -71,11 +71,14 @@ horus:
         role-permissions:
           ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
           # Approves process definition versions requested by someone else (four eyes).
-          ROLE_PROCESS_APPROVER: [processes:approve, processes:read]
+          # Approvers also work incidents (retry, resolve), so lan and minh can clear a stuck case.
+          ROLE_PROCESS_APPROVER: [processes:approve, processes:read, processes:incident:manage]
           ROLE_TELLER: [processes:start, processes:read]
           ROLE_CARD_OFFICER: [processes:read, processes:task:work]
           # Cancelling an application's process is its own permission (PD-103); starting does not grant it.
-          ROLE_BRANCH_SUPERVISOR: [processes:read, processes:cancel]
+          # The supervisor also manages tasks (reassign, delegate), incidents and migrations of running cases.
+          ROLE_BRANCH_SUPERVISOR: [processes:read, processes:cancel, processes:task:manage, processes:incident:manage,
+            processes:migration:manage]
     cockpit:
       # How the cockpit header names this service.
       host-label: Card issuing

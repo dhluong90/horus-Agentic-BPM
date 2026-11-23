@@ -37,6 +37,9 @@ type Zoom = 'fit' | 'actual' | 'whole';
 /** How far one arrow key press pans the canvas, in screen pixels; with Shift, three times as far. */
 const PAN_STEP = 80;
 
+/** The least scale "Fit" may reach when it must show the whole drawing: the text is small, and Actual zooms in. */
+const FIT_ALL_MIN_SCALE = 0.2;
+
 /** A status badge on one step of an instance (CKP-017): its tone, icon and words, all decided by the caller. */
 export interface StepBadge {
   tone: 'token' | 'incident' | 'undone' | 'done' | 'warn';
@@ -253,7 +256,7 @@ function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked }: 
  * `reserve` is the room kept under the canvas, for a docked decision; `fill` makes the canvas take that height, so the
  * change list beside it keeps the same frame.
  */
-export default function DefinitionDiagram({ graph, label, overlay, marks, markLabel, selected: picked, toolbar, reserve = BELOW_CANVAS, fill = false }: {
+export default function DefinitionDiagram({ graph, label, overlay, marks, markLabel, selected: picked, toolbar, reserve = BELOW_CANVAS, fill = false, fitAll = false, sharedScale, onFitAll }: {
   graph: DiagramGraph;
   label: string;
   overlay?: DiagramOverlay | undefined;
@@ -263,6 +266,13 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   toolbar?: ReactNode;
   reserve?: number;
   fill?: boolean;
+  /**
+   * "Fit" shows the whole drawing, even below 100 %, so nothing is cropped on opening (CKP-027). `sharedScale` caps
+   * that scale, and `onFitAll` reports it, so two diagrams side by side can be drawn at the smaller of the two.
+   */
+  fitAll?: boolean;
+  sharedScale?: number | undefined;
+  onFitAll?: ((scale: number) => void) | undefined;
 }) {
   const { t } = useI18n();
   const marker = useId().replace(/:/g, '');
@@ -300,11 +310,14 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     };
   }, [reserve, fill]);
 
-  const fit = canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
-  const whole = canvas !== undefined ? fitScale(layout, canvas, undefined, WHOLE_FIT_MIN_SCALE) : MIN_SCALE;
+  const whole = canvas !== undefined ? fitScale(layout, canvas, undefined, fitAll ? FIT_ALL_MIN_SCALE : WHOLE_FIT_MIN_SCALE) : MIN_SCALE;
+  const fit = fitAll ? Math.min(whole, sharedScale ?? whole) : canvas !== undefined ? fitScale(layout, canvas) : MIN_SCALE;
+  useEffect(() => {
+    if (fitAll && canvas !== undefined) onFitAll?.(whole);
+  }, [fitAll, canvas, whole, onFitAll]);
   // "Whole case" (a case) or "Whole process" (a change) is offered only when the drawing does not fit at the 12 px
   // floor, so no edge of a change is ever out of reach (#443).
-  const offerWhole = (withBadges || marks !== undefined) && whole < MIN_SCALE;
+  const offerWhole = !fitAll && (withBadges || marks !== undefined) && whole < MIN_SCALE;
   const mode: Zoom = zoom === 'whole' && !offerWhole ? 'fit' : zoom;
   const scale = mode === 'fit' ? fit : mode === 'whole' ? whole : MIN_SCALE;
   const width = Math.ceil(layout.width * scale);

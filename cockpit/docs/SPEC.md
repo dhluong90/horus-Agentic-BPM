@@ -9,6 +9,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-001 Cockpit boots embedded or standalone from its host registry
 - **Traces to:** `TR-UI-01`, `ADR-0005`, `ADR-0014`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Case A: cockpit served by `cockpit-spring-boot-starter` at `/bpm/cockpit`, which generates `cockpit-hosts.json` with one host (`baseUrl` empty, `auth.mode: host-session`). Case B: standalone archive with `cockpit-hosts.json` listing host `loans` at `http://localhost:8080`, `auth.mode: oidc`.
 - **When:** The user opens the cockpit and signs in.
 - **Then:** The cockpit loads `cockpit-hosts.json`, calls `/api/bpm/meta` and `/api/bpm/me` on the host, lists rule sets through `/api/bpm/rules/v1/rule-sets`, and shows the host, the tenant and the user, without any backend of its own.
@@ -22,6 +23,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-002 Rule set diff highlights added, modified, and removed rows side by side
 - **Traces to:** `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Rule set `card-fee` has `v1` (`PUBLISHED`) and `v2` (`PENDING_APPROVAL` with `R2` fee changed from `30000 VND` to `0 VND` and `R6` added).
 - **When:** User opens Approval detail or Diff view comparing `v1` vs `v2`.
 - **Then:** UI highlights `R2` (`changed`) and `R6` (`added`) before the approval action. Showing a simulation report attached to the request is M3 and is not part of this statement.
@@ -32,6 +34,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-003 Maker-checker disables Approve button for requester and surfaces API 403 if forced
 - **Traces to:** `TR-SEC-04`, `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Logged-in user `alice` is the `requestedBy` identity of `card-fee` v2 (`PENDING_APPROVAL`).
 - **When:** `alice` views the Pending Approval screen; separately, `bob` (`rules:approve`) views the same screen.
 - **Then:** For `alice`, the Approve button is disabled with tooltip *"Requester cannot approve own publication"*; for `bob`, Approve and Reject (requiring a comment) are enabled and transition status to `PUBLISHED` upon confirmation.
@@ -41,6 +44,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-004 Simulation screen runs sample inputs without mutating production logs
 - **Traces to:** `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** `card-fee` v2 is in `DRAFT`.
 - **When:** Analyst types or pastes 5 sample rows from a spreadsheet or CSV (an optional name, then one column per input; no JSON is accepted, under the no-raw-JSON rule) and runs simulation.
 - **Then:** UI displays matched rule IDs, output values, and changed-outcome counts (`2 / 5 changed`), while decision log count remains unchanged.
@@ -50,6 +54,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-005 Decision log explorer renders masked PII and plain-language explanation
 - **Traces to:** `TR-SEC-05`, `TR-OBS-05`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Decision `01JD2X` logged with `nationalId` (`mask: true`) and matched rule `R2`.
 - **When:** User with `rules:log:read` opens Decision `01JD2X` in the Decisions screen.
 - **Then:** `nationalId` renders masked (`*** (hmac:9f4a...)`), never plaintext; matched row `R2` is highlighted in the rule table alongside the `/explain` text.
@@ -63,6 +68,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-006 Interactive rule table editor validates expressions inline via `:validate`
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, PD-113, `RLE-090`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `card-fee` v1 `PUBLISHED` and v2 `DRAFT` written by `lan` (`lockVersion 0`); `lan` holds `rules:author`, `minh` holds `rules:approve`; `authoring.cockpit-drafts` on.
 - **When:** `lan` opens the grid of v2 (Edit draft, route `#/rules/card-fee/2/edit`), empties the amount of `R2`'s Balance condition and presses Enter; then fixes it and saves. Separately: `R3`'s fee is changed while someone else saves v2 (`lockVersion` 1), and `lan` saves; `lan` opens the grid of v1 or of a draft another author wrote; `minh` opens v2 after it is requested.
 - **Then:**
@@ -80,6 +86,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-007 `agentTask` inspector displays bounded inputs, schema verdict, guardrail rules, and override diff
 - **Traces to:** `TR-AGT-01`, `TR-AGT-02`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Process instance `I9` ran `assess-documents` (`agentTask`) which triggered guardrail `R2` (`route-to-human`) creating approval task `T4`.
 - **When:** Compliance reviewer opens `T4` / instance `I9` in Cockpit 0.2.
 - **Then:** Screen shows masked agent inputs, JSON Schema check (`PASS`), structured agent output, triggered guardrail rule (`R2`), and lets the reviewer Approve or Override with required reason. Field names read as words (`declaredMonthlyIncome` reads `Declared monthly income`); a masked value is one `Masked` chip whose keyed fingerprint is never shown, only copied by a Copy reference action; a long reference shows its last characters (`…R2X7`) with the whole value in its tooltip and a copy action. The starter of the case and the reporter of the answer each see one line saying why they cannot decide (`You started this case, so someone else decides.`) beside the disabled action. An answer holding a masked value opens on Override, with Approve disabled and one line saying why (`Part of the answer is masked, so only an override is possible.`).
@@ -89,6 +96,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-008 Incident queue surfaces root cause, retry count, and triggers `:retry` / `:resolve`
 - **Traces to:** `TR-OPS-03`, PD-126
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Host `loans` runs the Process Engine with four `OPEN` incidents, among them `assess-documents` of case `APP-1045` (`AGENT_TIMEOUT`, `retryCount: 2`) and `book-loan` of a booked case (`COMPENSATION_MANUAL_REQUIRED`), and one `RESOLUTION_PENDING`. Tuan holds `processes:read` and `processes:incident:manage`; Hoa holds `processes:read` only.
 - **When:** Tuan opens Incidents, selects `assess-documents` and chooses Retry with the reason "Agent service back after maintenance"; then selects `book-loan`; Hoa opens Incidents.
 - **Then:** Incidents shows in the menu where a Process Engine host is registered and `/me` lists `processes:read`. The Open tab sends `GET /incidents?status=OPEN&limit=50` and lists the incidents newest first with the step by its name in the process (its id in words until the diagram is read), the cause in words ("The AI agent did not answer in time"), the retry count and when it was raised; the error code and the engine's cause summary are behind Details, never in the list. The selected incident shows its case (a link to the case), its process by name, the cause and the retry count, and the actions of its `allowedActions`. Retry asks for a reason (unavailable, with "Enter a reason to continue." beside it, until one is typed) and sends `POST /incidents/{id}:retry` with `{ reason }`, `If-Match: "<lockVersion>"` and an `Idempotency-Key`; only after the `202` does the row read "Retrying" and the toast say "Retry scheduled for Assess documents. The result shows on the next refresh."; the next read no longer lists the incident once the step was accepted. A `409 VERSION_CONFLICT` reads "Someone changed this incident. It has been read again; check it, then try again." inside the dialog, with the code behind Details. For `book-loan` Retry is unavailable with "Nothing to run again: undo the step by hand, then resolve." beside it and Resolve is offered. Hoa sees the list and the incident and one line saying fixing them needs the incident permission; no action is shown. At 1440x900 the list, the selected incident and its primary action are on screen without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, by keyboard alone, and axe-core reports no serious violation.
@@ -98,6 +106,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-080 Resolving an incident is a proposal a second person approves
 - **Traces to:** `TR-OPS-03`, `TR-SEC-11`, PD-126
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** The incidents of `CKP-008`; `credit-decision` of case `APP-1042` is `OPEN` and its output schema requires `approvedLimit`; `verify-docs` of case `KYC-2207` is `RESOLUTION_PENDING` with a result Linh proposed. Tuan and Linh hold `processes:incident:manage`; the host's `/meta` setting `incidents.resolve-approval` is `four-eyes` (the default). Second case: a `dev` host with `single`.
 - **When:** Tuan resolves `credit-decision` with the field `limit` as an amount of 30,000,000 VND and a reason, then renames the field `approvedLimit`; Tuan opens `verify-docs` and approves it; Linh opens `verify-docs`; in the second case Tuan resolves `book-loan`.
 - **Then:** Resolve opens a dialog that says a colleague approves the result before the case moves on (or that it applies at once under `single`). The result is entered as fields in words, never raw JSON: a name, a kind (text, number, amount, yes or no) and a value; an amount shows separators as it is typed (`30,000,000`, `30.000.000` in Vietnamese) with its currency inside the field, and is sent as `{ amount, currency }` in integer minor units; a reason is required. The cockpit checks only the format; the engine's `422 OUTPUT_INVALID` names the failing paths, read as "The result does not match what the step expects: check Approved limit." and marked on the field, and nothing moves. After the `200` the incident is in Waiting for approval with "Proposed by Trần Minh Tuấn", and the proposal lists each field in words with money formatted. Approve result is unavailable to the proposer with "You proposed this result, so a colleague approves it." beside it, and Reject is not offered to them. Tuan approves Linh's proposal with `POST /incidents/{id}:approve-resolution` (`If-Match`, `Idempotency-Key`, optional comment); after the `200` the list is read again and says no result is waiting. Reject needs a reason and opens the incident again. In the second case the engine answers `RESOLVED` and the toast says the case moves on.
@@ -107,6 +116,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-011 Simulation screen replays logged decisions against a draft
 - **Traces to:** `TR-UI-02`
 - **Milestone:** M3 (replay simulation moved to M3 by PD-042)
+- **Kind:** control
 - **Given:** `card-fee` v1 is published with 100 logged decisions and v2 is in `DRAFT`.
 - **When:** Analyst clicks *"Replay last 100 decisions"* and runs simulation.
 - **Then:** UI displays changed-outcome counts (`18 / 100 changed`) with the changed decisions listed, while decision log count remains unchanged.
@@ -120,6 +130,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-009 Keyboard navigation and WCAG 2.1 AA contrast pass in light and dark themes
 - **Traces to:** `TR-UI-03`
 - **Milestone:** M1 (Cockpit 0.1 screens); re-run at M2 over Cockpit 0.2 screens
+- **Kind:** other
 - **Given:** Cockpit loaded in both light and dark CSS themes.
 - **When:** Automated `axe-core` audit and keyboard-only navigation (`Tab` / `Enter` / `Esc`) run across Rule Sets, Approvals, and Incidents screens.
 - **Then:** Zero critical/serious WCAG 2.1 AA contrast violations and all interactive actions are reachable with visible focus rings.
@@ -129,6 +140,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-010 Complete English and Vietnamese UI localization without raw translation keys
 - **Traces to:** `TR-UI-04`
 - **Milestone:** M1 (Cockpit 0.1 screens); re-run at M2 over Cockpit 0.2 screens
+- **Kind:** other
 - **Given:** Locale switched between `en` and `vi`.
 - **When:** Render all Cockpit 0.1 and 0.2 views.
 - **Then:** Every label, button, column header, and status badge renders translated text in both `en` and `vi` with zero untranslated i18n keys.
@@ -142,6 +154,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-012 An invalid host registry stops the cockpit before any host is called
 - **Traces to:** `TR-UI-01`, `TR-SEC-09`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Three `cockpit-hosts.json` files: (a) valid with hosts `loans` and `kyc`; (b) `hosts[1].baseUrl` is `http://kyc.bank.example`; (c) two hosts share `id: loans`.
 - **When:** The cockpit starts with each file and network calls are recorded.
 - **Then:** (a) lists both hosts. (b) shows a configuration error naming `/hosts/1/baseUrl` and the https rule. (c) shows an error naming the duplicate id. In (b) and (c) no request leaves the browser except the one for `cockpit-hosts.json`.
@@ -151,6 +164,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-013 Sign-in uses PKCE once and requests one token per host, kept in memory
 - **Traces to:** `TR-SEC-12`, `TR-UI-01`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Registry with `tokenMode: per-host`, hosts `loans` (scope `loans-bpm`) and `kyc` (scope `kyc-bpm`); a test identity provider.
 - **When:** The user signs in and opens both hosts; then reloads the page.
 - **Then:** One authorization request with `code_challenge_method=S256`; one refresh grant per host scope; requests to `loans` carry the `loans-bpm` token and requests to `kyc` the `kyc-bpm` token; `localStorage`, `sessionStorage` and cookies of the cockpit origin hold no token. After reload the tokens are gone and sign-in runs again through the identity provider's session.
@@ -160,6 +174,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-014 Screens follow `/meta` features and `/me` permissions; old hosts are marked unsupported
 - **Traces to:** `TR-UI-08`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Cockpit `0.3.0`. Host `loans` reports engine `0.3.1` with feature `rules.simulation`; host `cards` reports `0.2.4` without `rules.simulation`; host `kyc` reports `0.1.9`. User `lan` has `rules:read` but not `rules:approve` on `loans`.
 - **When:** `lan` opens each host.
 - **Then:** `loans` shows Rule sets and Simulation and hides Approvals; `cards` shows Rule sets without Simulation; `kyc` is `UNSUPPORTED_VERSION`, showing "engine 0.1.9, supported 0.2 and 0.3" and no screens.
@@ -169,6 +184,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-015 In Cockpit 0.1 the user switches between hosts, one at a time
 - **Traces to:** `TR-UI-01`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Registry with `loans` and `kyc`, both `READY`; `loans` has rule set `card-fee`, `kyc` has `kyc-risk`.
 - **When:** The user selects `loans`, opens Rule sets, then switches to `kyc`.
 - **Then:** The list shows only `card-fee`, then only `kyc-risk`; the URL changes from `/hosts/loans/rules` to `/hosts/kyc/rules`; no cached entry of `loans` is shown under `kyc`.
@@ -182,6 +198,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-016 A definition without stored layout is laid out automatically
 - **Traces to:** `TR-UI-07`, `TR-DEF-02`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `kyc-onboarding` v2 with 14 steps and no layout; `loan-origination` v5 with 200 steps and a stored layout that covers 190 of them.
 - **When:** The user opens each definition diagram on the reference laptop profile.
 - **Then:** `kyc-onboarding` renders left to right with no overlapping nodes; `loan-origination` keeps the 190 stored positions and places the other 10 automatically, and renders in under 1 s. Every node shows its step type icon and name.
@@ -191,6 +208,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-017 The instance diagram shows tokens and per-node activity
 - **Traces to:** `TR-UI-07`, `TR-UI-03`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Instance `I7` of `kyc-onboarding` v2 completed `verify-docs` (2 attempts, 3 min 10 s) and waits at `approve` assigned to role `credit-officer`; `assess-documents` has an open incident.
 - **When:** The operator opens `I7` and selects `verify-docs`.
 - **Then:** `approve` shows a token badge with the text "Waiting for a person"; `assess-documents` shows an incident badge with its code; `verify-docs` shows "Completed, 2 attempts, 3 min 10 s, by svc-kyc"; status is given in text and icon, not colour alone. The timeline tab shows the same entries in time order.
@@ -200,6 +218,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-018 Live counts appear on each node of a definition diagram
 - **Traces to:** `TR-PERF-09`
 - **Milestone:** M2 (cut candidate)
+- **Kind:** other
 - **Given:** `kyc-onboarding` v2 with 40 tokens waiting at `approve`, 7 at `assess-documents` and 2 open incidents there.
 - **When:** The operator opens the definition diagram and waits 15 s.
 - **Then:** `approve` shows "40 waiting"; `assess-documents` shows "7 running, 2 incidents"; the legend shows "as of" with the response's `asOf`; after 15 s the cockpit refreshes once with `If-None-Match`.
@@ -213,6 +232,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-019 The merged inbox is in exact due-date order and says when it is incomplete
 - **Traces to:** `TR-UI-01`, `TR-PERF-07`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Hosts `loans` (120 tasks due from day 1 to day 120), `kyc` (12 tasks due on days 5 to 16) and `cards` (stub that times out after 6 s); page size 50; `hostTimeoutSeconds` 5.
 - **When:** The operator opens the inbox, then clicks Load more; 30 s later the refresh runs with no change on the hosts.
 - **Then:** The first view shows tasks up to day 50 (the `loans` frontier) including all 12 `kyc` tasks, in due-date order, and a banner "Cards unreachable, list incomplete" after 5 s. Load more requests only `loans`' next page. The refresh sends `If-None-Match`, gets `304` from both hosts and the list is unchanged.
@@ -222,6 +242,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-020 The merged incident list spans hosts and acts on the right host
 - **Traces to:** `TR-OPS-03`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `loans` has incident `N3` (`AGENT_TIMEOUT`, created 10:00); `kyc` has `N9` (`SERVICE_ERROR`, created 10:05).
 - **When:** The operator opens Incidents and retries `N3`.
 - **Then:** The list shows `N9` then `N3` with host labels; the retry goes to `loans` with `Idempotency-Key` and `If-Match`; on `200` the row shows "Retry scheduled", and the next refresh shows the result.
@@ -231,6 +252,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-021 A task is completed through its declared form, or by its link
 - **Traces to:** `TR-UI-02`, `TR-UI-03`, `TR-UI-04`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Task `T5` with a form requiring `decision` and `reason` when `decision = REJECT`, labels in `en` and `vi`; task `T6` with `link: /loans/review/{taskId}`.
 - **When:** The operator submits `T5` with `decision: REJECT` and no reason, then with a reason; then opens `T6`.
 - **Then:** The first submit shows the field error under `reason` (from the client check, and the API's `422 FORM_VALIDATION_FAILED` if the client check is bypassed); the second completes with `200` and the task leaves the inbox; `T6` opens `/loans/review/T6` with `rel="noopener noreferrer"` and no form.
@@ -240,6 +262,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-046 An operator claims a task from Available to me, and a task claimed first by a colleague says who
 - **Traces to:** `TR-UI-02`, `TR-UI-03`, `TR-UI-04`, `TR-IDEM-01`, PD-110, PD-111
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Host `loans` runs the Process Engine. Task `T1` (Credit review, case `LN-2026-0142`) is open for role `credit-officer` and due 21 Nov 2026 08:00 in Hanoi, before the engine clock; `T2` is open for the same role and due later; `T3` is open for group `loans-operations`. An holds `processes:task:work`, role `credit-officer` and group `loans-operations`. Second case: Hoa claims `T1` a moment before An.
 - **When:** An opens Tasks, chooses Available to me, and claims `T1`.
 - **Then:** Tasks shows in the menu only where a Process Engine host is registered and `/me` lists `processes:task:work` or `processes:task:manage`. Available to me sends `GET /tasks?assignment=candidate&status=OPEN&limit=50` and lists `T1`, `T2`, `T3` in the engine's due-time order with the count in the tab ("Available to me (3)", "50+" when the engine has more). Each row shows the step name, the case, who it is for in words ("Role: Credit officer", "Group: Loans operations", or the person), the due time and the status in words with an icon. Which tasks are overdue comes from the engine (`slaBreached=true`, or `slaState` when the list carries it); the browser computes no deadline. An overdue task shows an amber "Overdue" pill with an icon, the list header counts them ("1 overdue"), and a task without a deadline reads "No deadline". The first task is selected and shown beside the list with the actions of `GET /tasks/{id}` `allowedActions`. Claim sends `:claim` with `If-Match` (the task's `lockVersion`) and an `Idempotency-Key`; only after the `200` does `T1` leave Available to me and appear in My tasks, with "You claimed Credit review. It is in My tasks.". In the second case the `409` reads "hoa claimed this task first." above the list, no code or body is shown, and the list is read again without `T1`. An action the user may not take is shown unavailable, without the primary fill, with the reason in words beside it ("You worked on this case, so someone else does this task."). At 1440x900 the list, the selected task and its primary action are on screen without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, by keyboard alone, and axe-core reports no serious violation.
@@ -249,6 +272,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-047 An operator releases a claimed task back to Available to me
 - **Traces to:** `TR-UI-02`, `TR-IDEM-01`, PD-110
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** An claimed `T4` (Credit review, case `LN-2026-0139`).
 - **When:** An opens My tasks, selects `T4` and chooses Release.
 - **Then:** The selected task offers Open task (the task's screen, `#/tasks/{id}`) as its primary action and Release beside it. Release sends `:unclaim` with `If-Match` and an `Idempotency-Key`; after the `200` the task is back in Available to me, with "Credit review is back in Available to me.". Completing a task through its form is CKP-021.
@@ -258,6 +282,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-048 A supervisor reassigns a task to a colleague with a required reason
 - **Traces to:** `TR-UI-02`, `TR-UI-04`, `TR-IDEM-01`, `TR-SEC-05`, PD-110
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Sau holds `processes:task:work` and `processes:task:manage`. `T2` is open and `T4` is claimed by An. `T5` (Approve credit limit) is a four-eyes task of a case Hoa started. Second case: An holds only `processes:task:work`. Third case: a review task carries masked values.
 - **When:** Sau opens All tasks and reassigns `T2` and `T4` to `hoa` with the reason "Covering leave"; then reassigns `T5` to `hoa`; An opens a link to All tasks; Sau selects the review task.
 - **Then:** All tasks sends `GET /tasks?assignment=any&limit=50`. Reassign opens a dialog with the colleague's user id and a reason (1 to 500 characters, with a count); its Reassign button stays unavailable, with "Enter a user id and a reason to reassign." beside it, until both are entered, and sends nothing before. `T2` is sent with `:reassign` and `T4` with `:delegate`, each with `{ assignee: hoa, reason: Covering leave }`, `If-Match` and an `Idempotency-Key`; after each `200` the dialog closes with "Credit review is now with hoa." and the lists are read again. For `T5` the `409 ASSIGNEE_NOT_ALLOWED` reads "hoa cannot take this task. They may lack its role, or have worked on this case." inside the dialog, which keeps the reason, and the task does not move. In the second case All tasks and Reassign are not shown and no `assignment=any` request is sent. In the third case the task says "Some values of this task are masked." and no masked value or fingerprint is shown. Escape closes the dialog and returns the focus to Reassign.
@@ -267,6 +292,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-049 An undo step that fails reads calmly, names the step and the attempts, and never says the case was put right
 - **Traces to:** `TR-COMP-02`, `TR-UI-03`, `PRE-203`, #80
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Instance `I9` where `releaseFunds`, the undo of `reserve-funds`, fails on every attempt and the engine opens an incident; `compensations[]` reads `NOT_FULLY_UNDONE`, `blockedStep` `reserve-funds`, with an `incidentId`.
 - **When:** An operator with `processes:read` opens `I9` and its Timeline.
 - **Then:** The timeline shows "Undo failed: Release funds" with "Failed after 3 attempts", in plain words with the symbol `!` and no red; above it the scope reads "Disburse: not fully undone" with "Open the incident", a link that opens that incident selected in the incident queue (`CKP-008`, `#/incidents?view=open&incident={incidentId}`). Nothing on the page says the case was put right. At 1440x900 the failure and the undo entries are visible without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark, with axe-core.
@@ -276,6 +302,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-022 The tenant switcher offers only allowed tenants and shows a refusal
 - **Traces to:** `TR-SEC-03`, `TR-TEN-01`
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** `/me` returns `tenant.current: bank-a`, `tenant.allowed: [bank-a, bank-a-fin]`; a test proxy rewrites one request to `X-Tenant-Id: bank-b`.
 - **When:** The operator switches to `bank-a-fin`, then the rewritten request is sent.
 - **Then:** Every open list reloads with `X-Tenant-Id: bank-a-fin` and shows only that tenant's data; the rewritten request gets `403 TENANT_NOT_ALLOWED`; the cockpit returns to `bank-a` and shows "The service did not accept that tenant for your account" with the `correlationId` behind Details. The sentence names no tenant, because the problem does not say which tenant was refused and the proxy changed the one the cockpit sent. The switcher is hidden when `/meta` reports `tenancy.switching: false` or `/me` allows one tenant. No screen shows rows from two tenants.
@@ -285,6 +312,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-023 When a host turns off cockpit drafts, authoring is hidden and review stays
 - **Traces to:** `TR-DEF-04`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `/meta` of `loans` reports `processes.authoring.cockpit-drafts: false`; `kyc` reports `true`; user `carol` holds `processes:author` on both.
 - **When:** `carol` opens `kyc-onboarding` on each host.
 - **Then:** On `loans` there is no New draft or Edit action and the notice "Changes to this environment arrive through your release pipeline" is shown; version, `definitionHash`, diff and approval remain; on `kyc` New draft is offered.
@@ -298,6 +326,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-024 Process approval shows the graph diff and blocks the requester
 - **Traces to:** `TR-SEC-04`, `TR-UI-02`
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** `kyc-onboarding` v3 `PENDING_APPROVAL`, requested by `alice`, adding `fraud-check` and changing `approve.assignee.role`.
 - **When:** `alice` and then `bob` (`processes:approve`) open the approval.
 - **Then:** Both see `fraud-check` marked "added" and `approve` marked "changed: assignee role ops to credit-officer" on the diagram and in the list; for `alice` Approve is disabled with "Requester cannot approve own change"; `bob` approves with a comment and the status becomes `ACTIVE` with its effective date.
@@ -307,6 +336,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-025 The modeller offers only catalogue steps and saves a draft
 - **Traces to:** `TR-SEC-01`, `TR-UI-02`
 - **Milestone:** M3 (cut candidate, fallback 1.1)
+- **Kind:** other
 - **Given:** Step catalogue with handler `kyc.verifyDocuments` and agent adapter `doc-assessor`; user `carol` with `processes:author`.
 - **When:** `carol` opens the palette, adds `doc-assessor` as an `agentTask`, leaves `guardrails.decision` empty and saves; then fills it and saves.
 - **Then:** The palette lists exactly the catalogue entries and no free-text handler; the first save shows the engine's validation problem on the new node and the definition stays unchanged; the second save creates or updates a `DRAFT`, never an active version.
@@ -316,6 +346,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-026 The heatmap shows p50 and p95 per node for a chosen window
 - **Traces to:** `TR-PERF-10`
 - **Milestone:** M3 (cut candidate)
+- **Kind:** other
 - **Given:** Rollup for `kyc-onboarding` v2 over 7 days: `approve` p50 2 h, p95 9 h; `verify-docs` p50 40 s, p95 3 min.
 - **When:** The operator selects "Last 7 days"; then tries "Last 60 days".
 - **Then:** Each node shows its p50 and p95 in text, shaded by p95; the legend states the rollup lag; 60 days is not offered beyond the 31-day limit and the API's `400 QUERY_INVALID` is never reached from the UI.
@@ -325,6 +356,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-027 A migration plan is shown as two diagrams with mapped steps
 - **Traces to:** `TR-MIG-03`
 - **Milestone:** M3
+- **Kind:** other
 - **Given:** Plan from `kyc-onboarding` v2 to v3, where `legacy-review` is mapped to `manual-review` and 50 instances wait at `legacy-review`.
 - **When:** The operator opens the plan.
 - **Then:** v2 and v3 are side by side; `legacy-review` and `manual-review` are linked with "50 instances"; unmapped steps with waiting instances are listed; Execute is enabled only after a successful dry run.
@@ -334,6 +366,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-056 A dry run reads in plain words and changes nothing
 - **Traces to:** `TR-MIG-03`
 - **Milestone:** M3
+- **Kind:** other
 - **Given:** A plan from `kyc-onboarding` v2 to v3 covering 52 running cases, 2 of which stay on v2 because a call is in flight at a step the plan cancels.
 - **When:** The operator chooses Check plan.
 - **Then:** The cockpit reads the engine's dry run and shows "50 cases can move. 2 cannot." with one sentence per kind of instruction that touches cases (renamed step, removed step, call in flight, step not covered), the time of the check and how long it holds; no case, plan or version changes; no engine code or id shows.
@@ -343,6 +376,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-057 A move is proposed with a reason and approved by a second person, then its progress is shown
 - **Traces to:** `TR-MIG-03`, `TR-SEC-04`
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** A plan with a current, valid check; PD-114 (a fresh dry run and a reason) and PD-131 (a second holder of `processes:migration:manage` approves).
 - **When:** Sau enters "Moving to new KYC review" and chooses Ask approval to move 50 cases; then a second person opens the plan.
 - **Then:** One propose with an `Idempotency-Key` and the reason is sent, and only after a check that has not expired and still names this plan; the proposer sees Approve disabled with one line, "You proposed this move, so a second person approves it.", and no Send back; the second person sees who proposed it and why, the cockpit checks the plan again for them, and Approve sends the `lockVersion` of the proposal they were shown as `If-Match` (a proposal that moved on is refused and never approved blind); a reader without the permission sees the plan and one line saying it cannot be run; while the run goes the screen reads "40 of 52 moved" from the engine, calmly, with no alert.
@@ -352,6 +386,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-058 Cases not moved are listed with their reason, and masked values stay masked
 - **Traces to:** `TR-MIG-03`, `TR-SEC-05`
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** A finished run in which 49 cases moved, 1 was busy and 2 had a call in flight; the reference of one case is masked for this reader.
 - **When:** The run ends.
 - **Then:** The screen reads "49 moved. 3 not moved." and opens the Not moved list: each case by its reference with its reason in words and a link to the case; a masked reference shows as "Masked", never as stars or any part of the value; no engine code or id shows; nothing is announced as an alert.
@@ -365,6 +400,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-028 The initial bundle stays within its budget and diagrams load on demand
 - **Traces to:** `TR-UI-06`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** The production build of the cockpit.
 - **When:** The CI bundle check measures gzipped sizes and the first screen is loaded at 10 Mbit/s.
 - **Then:** The initial chunk is at most 500 KB gzipped; React Flow and dagre are in a separate chunk not requested until a diagram opens; the first screen is usable within 2 s.
@@ -378,6 +414,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-029 Diagram nodes are keyed by BPMN element type; unknown types render as generic nodes
 - **Traces to:** `TR-UI-07`, `TR-UI-08`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Host `loans` serves a definition with steps `start`, `userTask`, `agentTask` and `end`; host `cards` (a newer engine) serves a definition containing a node of BPMN type `boundaryEvent:timer` and reports `standards: { bpmnStage: S1 }` in `/api/bpm/meta`.
 - **When:** The operator opens both definition diagrams in the same cockpit build.
 - **Then:** `loans` renders node types `startEvent`, `userTask`, `serviceTask:agentTask` and `endEvent`; on `cards` the boundary node renders as a labelled generic node showing `boundaryEvent:timer` with no error and the rest of the diagram intact; the stage reported by each host is shown in the host details.
@@ -392,6 +429,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-030 An author lists rule sets, reads a version as a table, and imports or exports it
 - **Traces to:** `TR-UI-02`, `TR-IDEM-01`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Host `loans` with rule sets `card-fee` (v1 `PUBLISHED`, effective from `2026-11-01`; v2 `DRAFT`) and `kyc-risk` (v1 `PUBLISHED`). User `lan` holds `rules:read` and `rules:author`; user `dan` holds `rules:read` only. Files `card-fee-v3.yaml` (valid) and `card-fee-bad.yaml` (row `R4`, column `balance`, `50000000` without a currency). Viewports 1440x900 and 1440x1200.
 - **When:** `lan` opens Rule sets, opens `card-fee` v1, exports it as JSON, then imports `card-fee-v3.yaml` and then `card-fee-bad.yaml` from the `card-fee` page. `dan` opens the same pages.
 - **Then:** The list shows two rows with name, effective version, status and effective-from date, read from `GET /api/bpm/rules/v1/rule-sets`. The version view shows the rule table (row ids, conditions, outputs) and the hit policy; no YAML or JSON document is shown unless the user opens the source on purpose. Export calls `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=json` and downloads `card-fee-v1.json` whose bytes equal the response (`RLE-032`). The first import sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` with an `Idempotency-Key` and, only after the `201`, shows "Draft version 3 created" and opens v3; a double click sends one key and creates one version. The bad file's `422 VALIDATION_FAILED` is shown as "Import refused. Nothing was saved." with "card-fee-bad.yaml, row R4, column Balance" and the reason in the user's language, and no version is listed as created. For `dan` the Import action is not shown and Export is. At 1440x900 the list and the Import and Export actions are above the fold.
@@ -405,6 +443,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-031 The cockpit opens on Home, whose content follows the user's role, unless the host fixes the landing area
 - **Traces to:** `TR-UI-08`, `TR-EXT-08`, PD-092
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Host `loans` runs only the Rule Engine. `/api/bpm/meta` reports no `cockpit.landing`, so the default `home` applies. Users: `bob` holds `rules:approve`; `lan` holds `rules:author`; `dan` holds `rules:log:read` only; `eve` holds `rules:read` only; `zoe` holds no `rules:*` permission. Second case: the host sets `cockpit.landing: approvals`. Third case: `bob` follows a link to `card-fee` v2. Fourth case: the host sets the retired value `by-role`.
 - **When:** Each user signs in and the cockpit opens.
 - **Then:**
@@ -419,6 +458,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-032 An author edits a draft in the cockpit with cell text and row actions, and errors show on their cells
 - **Traces to:** `TR-UI-02`, `TR-IDEM-01`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Host `loans` with `card-fee` v1 `PUBLISHED` (rows `R1` to `R3`) and `authoring.cockpit-drafts` on; `lan` holds `rules:author`. Second case: the host turns `authoring.cockpit-drafts` off.
 - **When:** `lan` creates a draft from v1, types `GOLD, PLATINUM` in `R1`'s `tier` cell, copies `R2` as a new row `R4` and moves it above `R3`, types `>= 50000000` without a currency in `R4`'s `balance` cell, and saves; then fixes the cell to `>= 50000000 VND` and saves again.
 - **Then:** The first save sends the edited table through the existing draft endpoint (`PUT .../versions/2` with `If-Match`) and shows the engine's `422 VALIDATION_FAILED` on `R4`'s `balance` cell in plain words, with the other edits kept; the second save returns `200` and the draft shows rows `R1`, `R2`, `R4`, `R3` in that order. Inputs, outputs and the hit policy cannot be changed from this view. In the second case the edit actions are not shown and a direct `PUT` returns `403 DRAFT_AUTHORING_DISABLED`; import from a file still works.
@@ -428,6 +468,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-033 Compensation runs appear in the instance timeline
 - **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-OBS-01`, `PRE-203`, #80
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Instance `I7` of `loan-booking` where `reserve-funds` then `open-account` completed inside the saga `disburse` and `notify-partner` failed; the undo steps `closeAccount` and `releaseFunds` ran, the second after one retry (`PRE-044`). The engine reports the scope `disburse` as `UNDONE` with two steps undone.
 - **When:** An operator with `processes:read` opens `I7` and its Timeline.
 - **Then:** The timeline lists, in time order and in text, the failure of "Notify partner", then "Undo of Open account: Close account", then "Undo of Reserve funds: Release funds" with its retry, and the scope "Disburse: undone". Each undo entry carries the symbol ↺ and the word "Undo" besides the warning-hue left edge, so colour is never the only mark. The state of the scope is the engine's `compensations[].state`; the page never works it out from the entries. The diagram marks each undone step with ↺ and the label "Undone". No variable or input value appears; no code or id is shown in the page body.
@@ -437,6 +478,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-034 SLA breaches are a filter of the task queue, measured against each task's own deadline
 - **Traces to:** `TR-CAL-01`, `TR-PERF-07`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Tasks `T1` (`sla: PT4H` on calendar `vn-banking-hours`, due 10:00), `T2` (`sla: P2D`, due tomorrow) and `T3` (no SLA) on host `loans`; the clock reads 11:00.
 - **When:** An operator turns on the "SLA breached" filter of the task queue.
 - **Then:** The cockpit sends the task query with `slaBreached=true` and shows only `T1`, with "overdue by 1 h" in text; `T3` never appears, because a task without a declared deadline cannot breach; no deadline is computed in the cockpit or from a product constant.
@@ -446,6 +488,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-050 Overdue count, order and wording, kept in the link
 - **Traces to:** `TR-CAL-01`, PD-024, PD-111
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** On host `loans` at the engine clock 09:30 in Hanoi, `Collateral valuation` (claimed by Hoa) was due yesterday 16:00 and `Credit review` today 08:00; other tasks are due later or have no deadline. Sau holds `processes:task:manage`; An holds only `processes:task:work`, and none of her own tasks is overdue.
 - **When:** Sau turns on Overdue in All tasks and shares the link; An turns on Overdue in My tasks.
 - **Then:** The filter sits beside the tabs and reads "Overdue 2", the count of the tab's `slaBreached=true` list. Turned on, it is pressed, the query is `assignment=any&slaBreached=true&limit=50`, the header reads "2 overdue, oldest first", and the two tasks are listed in the engine's due-time order, oldest deadline first; a task without a deadline never appears. The link is `#/tasks?view=all&overdue=1`, so a shared link opens the same view. Each row shows "Overdue" with an icon, and "Overdue by 26 h" when the engine's task item carries `overdueBy` (PD-111); the browser computes no duration. For An the query is `assignment=mine&slaBreached=true&limit=50` and one line reads "No overdue tasks." with a link to every task. At 1440x900 the filter, the count and the first rows are on screen without scrolling; checked again at 1440x1200, in English and Vietnamese, light and dark; overdue is shown in words and an icon, not colour alone; the keyboard path and axe-core pass.
@@ -455,6 +498,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-035 Every diagram has a keyboard-usable list of its steps and states in text, not colour alone
 - **Traces to:** `TR-UI-03`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** The instance diagram of `I7` with tokens on two steps, one open incident and live counts per node.
 - **When:** A keyboard-only user tabs to the diagram and opens its step list; axe-core runs on the view in light and dark themes.
 - **Then:** The step list names every step in flow order with its type, token state, incident and count as text, and each entry moves focus to its node; token state, incidents and counts are also shown as text or icons with labels on the diagram (WCAG 1.4.1); axe-core reports no violation.
@@ -464,6 +508,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-036 The modeller canvas states its accessibility exemption and names the equal path
 - **Traces to:** `TR-UI-03`, `TR-DEF-04`
 - **Milestone:** M3
+- **Kind:** other
 - **Given:** The modeller canvas open on a draft definition.
 - **When:** A user opens it with a screen reader running, then follows the named path.
 - **Then:** The canvas announces and shows a notice that drawing is not keyboard accessible and that the definition can be edited as JSON or YAML and imported as a draft; the link opens the import path, which creates a draft that passes the same approval.
@@ -473,6 +518,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-037 The approval screen names undeclared personal-data inputs, needs their acceptance before Approve, and states masking changes
 - **Traces to:** `TR-UI-02`, `TR-UI-03`, `TR-UI-04`, PD-099 (mitigations 1 and 3), PD-104, `RLE-049`, `RLE-051`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Rule set `customer-screening` v1 `PUBLISHED` with inputs `nationalId` and `phoneNumber` (`mask: true`) and `segment`; v2 `PENDING_APPROVAL`, requested by `hoa`, where `nationalId` declares no `mask` and a new input `email` declares none. The engine answers v2 with two `UNMASKED_PERSONAL_DATA` warnings, both `requiresAcknowledgement: true`, and its diff against v1 with `masking`. `minh` holds `rules:approve`. Second case: `card-fee` v2 with no warning. Third case: the engine answers the approval `409 WARNINGS_NOT_ACKNOWLEDGED`. Fourth case: the engine marks no warning (a host whose `lifecycle.acknowledge-warnings` is empty, or a tenant whose `decision-log.mask-default` is on). Fifth case: the engine marks `nationalId` only, while `/api/bpm/meta` says nothing needs accepting.
 - **When:** `minh` opens v2 at 1440x900, in English and in Vietnamese, light and dark, ticks the acceptance and approves.
 - **Then:** The docked decision lists one line per input, "National ID: no masking rule", with no category or error code, a closing sentence that follows the number of inputs, and one checkbox naming the inputs: "I accept that these inputs are logged without masking: National ID, Email". Approve is unavailable until the box is ticked and then sends `acknowledgedWarnings` as the exact pairs shown, `[{ code: UNMASKED_PERSONAL_DATA, input: nationalId }, { code: UNMASKED_PERSONAL_DATA, input: email }]` (`RLE-053`). The warning, the box and Approve are visible without scrolling, each control at least 44 px. Above the side-by-side table the change sentences read "National ID: mask removed (masked → not masked by default)" and "Condition column added: Email, not masked by default"; the summary line carries "Mask removed on 1 column"; the proposed side's National ID and Email headers carry an amber marker whose tooltip is the sentence; Phone number and Segment carry none. In the second case there is no warning, no box and no marker, and Approve sends no acknowledgement. In the third case the warning shows the set the refusal returns, the box is cleared and names that set, "Approval needs this acceptance" shows, and nothing is sent again until the approver ticks and approves. In the fourth case the warning shows without the box. In the fifth case both lines show, and one checkbox names National ID only; Approve sends that one pair. The cockpit takes the marks from the engine, never from `/api/bpm/meta`. A draft with the same warnings shows them to its author, without the box. axe-core finds no serious violation.
@@ -482,6 +528,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-038 A version exports as a spreadsheet file the engine writes
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, PD-107, PD-142, `RLE-191`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Rule set `card-fee` v1 `PUBLISHED` with inputs `tier`, `balance` (money) and `txCount`, outputs `fee` and `waived`, five rows, and a user holding `rules:read`; in the second case a version whose row R2 uses a grouped condition.
 - **When:** The user opens Export and chooses "As spreadsheet (CSV)".
 - **Then:** One `GET .../versions/1/export?format=csv` is sent and `card-fee-v1.csv` is saved with the response bytes, unchanged: UTF-8 with a byte order mark, header `Rule,tier,balance,txCount,fee,waived,Description`, one line per rule, cells in shorthand. For the grouped version no file is saved and the screen says "This version cannot be a spreadsheet." with the row and the reason.
@@ -491,6 +538,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-039 A spreadsheet is imported as the next draft only after the user confirms, and a refusal stores nothing
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-UI-04`, PD-107, PD-142, `RLE-192`, `RLE-193`, `RLE-194`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** A user holding `rules:author` on `card-fee` v1; files that change R3's fee, that write R2's balance without a currency, and (a reader, `rules:read` only) no import.
 - **When:** The user picks a `.csv` file with Import new version.
 - **Then:** A dialog says "Based on version 1", names the file and says it creates a new draft; nothing is sent before "Import as draft". One `POST .../versions?base=1` with `Content-Type: text/csv` and one `Idempotency-Key` follows, however often the button is pressed; after the `201` the screen says "Draft version 3 created" and opens the draft. A `422` stores nothing and lists one line per problem, "row R2, column Balance" and a plain reason in the user's language, never the cell's value. A `409` keeps the file and the dialog and offers "Try again", which sends a new key. A reader is offered Export and not Import.
@@ -500,6 +548,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### CKP-040 Columns cannot change through a file, and damage from Excel is refused cell by cell
 - **Traces to:** `TR-DET-02`, `TR-UI-04`, PD-107, `RLE-192`, `RLE-193`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** A file with an added column `segment` and no `waived`; a file with `5E+07 VND` and `50,000,000 VND` in balance cells; a semicolon-separated file without a byte order mark.
 - **When:** Each is imported.
 - **Then:** The first is refused with "column segment" and "column waived" named and a reason that inputs and outputs cannot change through a file; the second with one line per damaged cell; nothing is saved. The semicolon file is accepted. No damaged value is read as another value.
@@ -515,6 +564,7 @@ These two statements are the part of `CKP-016` and `CKP-029` that ships before s
 ### CKP-069 A definition without a stored layout is drawn left to right with no overlapping nodes, each with its type and name
 - **Traces to:** `TR-UI-07`, `TR-DEF-02`, `TR-UI-03`, `TR-UI-06`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Host `loans` runs the Process Engine with `loan-origination` v3 `ACTIVE` (13 steps: a start event, a person task, an agent task, a decision, an exclusive gateway with the default flow `Declined`, service tasks, three end events and a boundary timer) and no stored layout; `card-dispute` v1 `DRAFT` with no version in effect. User `hoa` holds `processes:read`. Second case: a synthetic definition of 200 steps. Third case: user `hoa` holds `processes:task:work` only.
 - **When:** `hoa` opens Processes, opens `loan-origination`, then the Steps tab; the 200-step definition is laid out; in the third case `hoa` opens Processes.
 - **Then:** The list shows one row per key from `GET /api/bpm/processes/v1/definitions`, each opening the version in effect (`#/processes/loan-origination/3`) or, with none in effect, the latest (`#/processes/card-dispute/1`). The diagram is read from `GET .../definitions/loan-origination/versions/3/export?format=bpmn` and laid out by dagre left to right (node separation 28, rank separation 24, edge labels laid out with the graph so they keep clear of the nodes): every flow ends to the right of where it starts, no two node boxes intersect, each arrow ends on its target's outline, and the default flow carries the BPMN default mark and its name. Every node shows its type icon, its whole name and its type in words (`Assess documents, Agent task`), wrapped and never truncated; agent tasks use the violet of agent steps only. The breadcrumb names the process by its display name, not its key. At the default Fit every text in the diagram is at least 12 px: Fit scales the drawing to the canvas, up as well as down, but not below 100 %; a wider drawing scrolls inside the canvas. The Steps tab lists the 13 steps in flow order from the start event with their type in words, as the keyboard path through the diagram. The 200-step definition is laid out in under 1 s. The diagram code and dagre load in their own chunk only when a diagram opens. In the third case the page says in one line that the user's permissions show no process definitions, and no list is requested. At 1440x900 the title and the diagram are on screen without scrolling, in English and Vietnamese, light and dark, and axe-core reports no serious violation.
@@ -524,6 +574,7 @@ These two statements are the part of `CKP-016` and `CKP-029` that ships before s
 ### CKP-070 Diagram nodes are keyed by BPMN element type and HORUS subtype; an unknown type is drawn as a generic node naming its type
 - **Traces to:** `TR-UI-07`, `TR-UI-08`, ADR-0017 (DN-11)
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** The export of `loan-origination` v3 holds `startEvent`, `userTask`, `serviceTask` with `horus:type="agentTask"`, `businessRuleTask`, `exclusiveGateway`, `serviceTask` and `endEvent`, and a `boundaryEvent` with a `timerEventDefinition`, which this cockpit does not draw; `kyc-onboarding` v2 holds a `parallelGateway` and an `intermediateCatchEvent` with a timer. Second case: a document with a `DOCTYPE`, one with no process, and one that is not well-formed.
 - **When:** The operator opens both diagrams, in English and in Vietnamese.
 - **Then:** Nodes are keyed `startEvent`, `userTask`, `serviceTask:agentTask`, `businessRuleTask`, `exclusiveGateway`, `serviceTask`, `endEvent`, `parallelGateway` and `intermediateCatchEvent:timer`, each drawn with its own symbol and named in the user's language (`Wait one day, Hẹn giờ`). The boundary timer is kept with the key `boundaryEvent:timer`, drawn as a dashed generic box with its outgoing flow, showing its name and its kind in words from its event definition, with the timer icon (`Timer`, `Hẹn giờ`); a type with no known event definition reads `Other step` (`Bước khác`). The key is never shown as text. The rest of the diagram is intact and no error is shown. In the second case the diagram shows an error with Try again instead of a guessed drawing.
@@ -537,6 +588,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-041 A link from a host screen opens one decision after sign-in
 - **Traces to:** `TR-SEC-05`, `TR-QA-01`, PD-108
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Decision `01JD2X…` logged on host `loans` for tenant `bank-a`, with `nationalId` masked and rule R2 matched. Thu holds `rules:log:read` and is not signed in. Second case: the registry lists `loans` and `cards`.
 - **When:** Thu opens `<cockpit>/#/decisions/01JD2X…`; in the second case `#/decisions/01JD2X…?host=loans`, then the same link without `host`.
 - **Then:** After sign-in the cockpit sends `GET /api/bpm/rules/v1/decisions/01JD2X…` once and shows the decision page with R2 highlighted, its reading and `nationalId` masked; signed in already, the page opens with no sign-in step. With `host=loans` the decision is read from `loans` only and the address becomes `#/hosts/loans/decisions/01JD2X…`. Without `host` the page asks "Which service logged this decision?" with both hosts and requests nothing until one is chosen. Nothing else in the link is read.
@@ -546,6 +598,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-042 A decision link refuses what the user may not see and what is not a decision id
 - **Traces to:** `TR-SEC-05`, `TR-QA-01`, PD-108
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Eve holds `rules:read` but not `rules:log:read`. `01JD9Z…` does not exist and `01JD7K…` belongs to tenant `bank-b`. A third link's id is longer than 26 characters or holds markup.
 - **When:** Eve opens a decision link; Thu opens the missing and the other tenant's link; anyone opens the third link.
 - **Then:** Eve reads "You do not have permission to open decisions." and no decision request is sent; a forced request gets `403`. Both of Thu's links read "Decision not found for tenant bank-a." with the same wording. The third link reads "This link is not valid.", sends no request and renders nothing of the link as markup. No personal data is read from or written to the address.
@@ -555,6 +608,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-071 An auditor finds a rule set's or a case's decisions in a month and opens one
 - **Traces to:** `TR-OBS-05`, `TR-UI-02`, `TR-UI-04`, `RLE-029`, PD-108
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** `card-fee` has 124 decisions logged in November 2026 and case reference `LN-2026-0042` has one `card-fee` and one `kyc-risk` decision. Ha holds `rules:read` and `rules:log:read`. Second case: Lan holds no `rules:log:read`.
 - **When:** Ha opens Decisions, chooses `card-fee` and November 2026 and shows the decisions; then searches by case reference `LN-2026-0042`; then types `LN 42`; then opens a decision from the list.
 - **Then:** One `GET /decisions?ruleSet=card-fee&from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z&limit=50` is sent; the list shows the first 50, newest first, with when, the rule set and version, the outcome in words with an icon ("Rule R2 matched", "No rule matched", "Failed"), the case reference and a short decision id, and "Show more decisions" reads the next page with the cursor. The search lives in the URL (`#/decisions?ruleSet=card-fee&month=2026-11`). The case search sends `correlationId=LN-2026-0042` and lists both decisions. `LN 42` is refused on the field before any request. A row opens `#/decisions/{id}`. Nothing is searched until the user asks. In the second case Decisions is not in the menu (an area is hidden when it holds data the user may not read), a link to it reads "Not available", and no decision endpoint is called.
@@ -564,6 +618,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-072 A decision reads as the engine's sentence, its conditions and its inputs, with masked inputs masked
 - **Traces to:** `TR-SEC-05`, `TR-OBS-05`, `TR-UI-04`, `RLE-030`, `RLE-031`, PD-027, PD-108
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Decision `01KF2Q8Z0RQ6V2Y8M1C4N5P7T9` of `card-fee` v1 matched `R2` with `tier` `GOLD` and `balance` 60,000,000 VND, and logged `nationalId` as `hmac:k1:9f4a6c…`. A second decision failed with `EVALUATION_ERROR`. Ha holds `rules:log:read` and `rules:read`.
 - **When:** Ha opens the first decision in English and in Vietnamese, opens Inputs and Rule table; then the failed decision; then an id of another tenant; then `#/decisions/not-a-decision`.
 - **Then:** One `GET /decisions/{id}` and one `GET /decisions/{id}/explain?lang=en` (`lang=vi` in Vietnamese) are sent; the engine's `text` shows unchanged as the focal sentence, with the outcome as an icon and words. Conditions lists each condition of `R2` with the input's readable name ("Tier", "Balance"), the rule's condition as in the table ("Gold", "≥ 50,000,000 VND"), the recorded value with grouped amounts ("60,000,000 VND") and "Held". Inputs lists every logged input; `nationalId` reads "Masked" with a padlock and the reference `9f4a6c`, never a plain value and never as an error. Rule table shows the version with `R2` marked. The decision id shows in full with "Copy decision id", which copies exactly what is shown. The failed decision reads "The rule set could not be evaluated, so no result was produced." with the error edge, not the accent; the error code and the engine's sentence sit behind Details; Conditions says nothing was produced. Another tenant's decision reads "No decision with this id in tenant bank-a." A string that is not a decision id reads "This link does not name a decision." and no request is sent. No raw JSON is shown.
@@ -573,6 +628,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-073 The history lists every version, newest first, with its people, comments and events
 - **Traces to:** `TR-OBS-01`, `TR-UI-02`, `TR-UI-04`, PD-116
 - **Milestone:** M3
+- **Kind:** other
 - **Given:** `card-fee` v1 (created by Lan, approved by Minh with "Matches the tariff", retired when v2 took effect), v2 (rejected by Minh with "R2 waiver needs pricing committee minutes", sent again and approved with "Committee minutes attached") and v3 draft. Ha holds `rules:read`.
 - **When:** Ha opens `card-fee`, then History.
 - **Then:** One `GET /rule-sets/card-fee/history` is sent. One line per version, newest first, shows the status in words with an icon, "In effect from …" or "In effect … to …" or "Not in effect", who created, sent, approved and rejected it with when, and the approval comment and rejection reason. Each line opens to its events, oldest first, in words ("Rejected by Trần Văn Minh"), with the reason, which then replace that summary so nothing shows twice; an event the engine sends twice shows once; the version open on screen starts open. Evidence exports are listed below with who, what and when. Export evidence is beside the history; both are visible without scrolling at 1440x900.
@@ -582,6 +638,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-074 Evidence of chosen versions and decisions is exported by the engine and its SHA-256 is shown
 - **Traces to:** `TR-SEC-05`, `TR-OBS-01`, `TR-IDEM-01`, PD-116
 - **Milestone:** M3
+- **Kind:** other
 - **Given:** The history of `CKP-073`. Ha also holds `rules:log:read`.
 - **When:** Ha ticks versions 1 and 2, picks November 2026 and ticks decisions `01KF2Q8Z0RQ6V2Y8M1C4N5P7T9`, `01KF2Q8Z0RQ6V2Y8M1C4N5P7TA` and `01KF2Q8Z0RQ6V2Y8M1C4N5P7TB`, keeps CSV and exports; then clicks Export again quickly on a second export.
 - **Then:** One `POST /rule-sets/card-fee/evidence` with an `Idempotency-Key` and `{ format: csv, versions: [1, 2], decisionIds: [three ids] }` is sent; the saved file is the response bytes under the engine's file name; the card reads "Evidence exported", "Versions 1, 2 · 3 decisions", the file name, format and size, and "SHA-256" with all 64 hex digits of `X-Evidence-Sha256` and "Copy SHA-256", which copies exactly what is shown. A refusal shows just above Export and is scrolled into view beside it. The history then lists "Evidence exported by Phạm Thu Hà: 2 versions, 3 decisions". The file shows masked inputs as their keyed hash. A repeated click while the export runs sends nothing more.
@@ -591,6 +648,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-075 Export says why it is unavailable, and shows each refusal in words
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, `TR-UI-04`, PD-116
 - **Milestone:** M3
+- **Kind:** other
 - **Given:** The history of `CKP-073`. First case: Ha holds `rules:read` only. Second case: Ha holds `rules:log:read` and the 124 decisions of November 2026 are listed. Third case: the engine answers `422 EVIDENCE_TOO_LARGE`. Fourth case: it answers `403 PERMISSION_DENIED`. Fifth case: it answers `400 INPUT_INVALID` naming a chosen decision as one of another rule set. Sixth case: the history answers `404 RULE_SET_NOT_FOUND`.
 - **When:** Ha opens Export evidence and chooses as described.
 - **Then:** With nothing chosen, Export is unavailable with "Choose at least one version or decision." In the first case the decision picker is not shown, one line says adding decisions needs permission to read the decision log, and a versions-only export sends no `decisionIds`. In the second case the picker says "One file holds at most 100 decisions." and offers "Choose first 100" instead of choosing all; it ticks the first 100, the count reads "100 chosen", the other boxes are unavailable until one is unticked, and Export stays available. The third case reads "The file would be larger than 8 MB. Choose fewer decisions.", the fourth "You may not export this evidence on this service.", the fifth "Decision 01KF2Q…P7TA belongs to another rule set and cannot be exported here.", the sixth "This rule set was not found on this service."; each keeps the choices, and the code and reference sit behind Details with Copy.
@@ -600,6 +658,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-076 Each row of a version reads as the engine's sentence, in the user's language and the viewer's style
 - **Traces to:** `TR-UI-02`, `TR-UI-04`, `RLE-091`, PD-027, PD-077
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `card-fee` v1 `PUBLISHED` with rows `R1` to `R5`. Lan holds `rules:read`. The host's `rules.readings.style` is unset (sentence).
 - **When:** Lan opens the Readings tab of v1 in English, then in Vietnamese, then chooses Short and reloads.
 - **Then:** One `GET .../versions/1/readings` is sent. Each row shows its id and the engine's `full` text in the user's language, unchanged: `R2` reads "Rule R2 applies when tier is GOLD and balance is at least 50,000,000 VND. Then fee is 0 VND; waived is Yes." in English and "Quy tắc R2 áp dụng khi tier là GOLD và balance ít nhất là 50.000.000 VND. Khi đó fee là 0 VND; waived là Có." in Vietnamese, with no English on the Vietnamese screen. Sentence / Short switches every reading on screen to the `short` text without a new request; the choice is stored in the browser as a display preference (no user data) and survives a reload. Until the viewer chooses, the host's setting decides (`shorthand` gives Short). The cockpit never builds or edits a sentence.
@@ -609,6 +668,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-077 A change reads row by row with the old reading struck and the new one added
 - **Traces to:** `TR-UI-02`, `TR-UI-04`, `RLE-092`, PD-027
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `card-fee` v2 `PENDING_APPROVAL` against v1: `R3` fee raised from 30,000 to 35,000 VND, `R6` added, `R4` removed. Minh holds `rules:approve`.
 - **When:** Minh opens Changes and chooses Readings.
 - **Then:** One `GET .../versions/2/diff/readings?base=1` is sent and the side-by-side table is replaced, one view at a time. `R3` shows the v1 reading struck and the v2 reading added; `R6` reads "Added" with its reading only; `R4` reads "Removed" with its reading struck; a row whose `readingChanged` is false shows its reading once and says the wording did not change. "3 rows read the same." closes the list. Approve and Reject stay docked and visible at 1440x900.
@@ -618,6 +678,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-078 A simulation reads both outcomes and says whether the result changes
 - **Traces to:** `TR-UI-02`, `TR-UI-04`, `RLE-093`, PD-027
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `card-fee` v2 and v1 in effect. Minh holds `rules:simulate` and `rules:read`; Lan does not hold `rules:simulate`.
 - **When:** Minh opens Simulate in the inspector, chooses Tier Gold and presses Simulate; Lan opens Simulate.
 - **Then:** One `POST .../versions/2:simulate-readings` is sent with `{ "samples": [{ "inputs": { "tier": "GOLD" } }] }` and no `Idempotency-Key`; no decision is evaluated or logged. The result replaces the form, so it shows above the fold at 1440x900: "The result changes", the v2 reading and the v1 reading under "In effect: version 1", in the chosen style. "Change the sample" brings the form back with the sample kept. For Lan, Simulate is shown disabled with "You need permission to simulate rules." beside it.
@@ -627,6 +688,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-079 Readings show loading, empty, refused, too large, failed and masked states in words
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, `TR-UI-04`, `RLE-091`, `RLE-092`, `RLE-093`
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** `new-fees` v1 with no rows; `branch-fees` v1 with 501 rows; `kyc-routing` v1 whose `nationalId` is masked and tested by `K1`. The engine may answer `403 PERMISSION_DENIED`, `422 READINGS_TOO_LARGE` or `500`.
 - **When:** The readings, the change readings and the simulation are opened in each case.
 - **Then:** While loading, skeleton rows show at the height of real rows. No rows reads "This version has no rows yet." A 403 reads "You cannot read rows in plain words on this service." with no retry. `READINGS_TOO_LARGE` is a calm information note, not an error, without a number: "Too many rows to read at once", with "Open the table" (version) or "Compare in the table" (change), or "Run fewer samples." (simulation). Any other failure reads "The service could not answer. Try again." with Try again, the code and reference behind Details. A row that tests a masked input carries "Masked data is named here, never shown."; the masked value appears in no reading.
@@ -636,6 +698,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 ### CKP-081 The author of a draft discards it after confirming, and the screen moves on
 - **Traces to:** `TR-UI-02`, `TR-IDEM-01`, RLE-098, #418
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `card-fee` v1 is in effect and v2 is a draft Lan wrote. Lan holds `rules:author`; Minh holds `rules:approve`.
 - **When:** Lan opens v2, chooses Discard draft, cancels, chooses it again and confirms with the reason "Started from the wrong version"; Minh opens v2.
 - **Then:** Discard draft shows beside the draft's actions only when the engine lists `discard` in the version's `allowedActions`. It opens a dialog naming the version, with an optional reason; Cancel and Escape send nothing and return the focus to the button. Confirm sends `POST /rule-sets/card-fee/versions/2:discard` with `If-Match: "<lockVersion>"`, an `Idempotency-Key` and `{ reason }`; only after the `200` does the toast say "Version 2 draft discarded." and the screen return to the rule set, now on v1, with v2 gone from the version picker. A refusal (`409 VERSION_CONFLICT`, `409 INVALID_STATE`, `403 PERMISSION_DENIED`) reads as one plain sentence in the dialog with the code behind Details. The history shows a discarded version as "Discarded" with an icon. Minh sees no Discard draft. Checked at 1440x900 and 1440x1200, in English and Vietnamese, light and dark, by keyboard, and axe-core reports no serious violation.

@@ -499,7 +499,7 @@ class ProcessRestErrorMatrixTest {
             maybeFail();
             return new Page<>(List.of(new io.github.dhluong90.bpm.process.api.TaskSummary(taskTenant, INSTANCE,
                     "card-fee-review", 1, "APP-1001", "officer-review", "Officer reviews", "role:CARD_OFFICER",
-                    taskStatus, 0, null, STARTED, null)), taskNext);
+                    taskStatus, 0, null, STARTED, null, "NONE", null)), taskNext);
         }
 
         @Override

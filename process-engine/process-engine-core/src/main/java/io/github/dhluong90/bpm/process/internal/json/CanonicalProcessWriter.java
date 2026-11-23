@@ -1,6 +1,9 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
@@ -149,6 +152,12 @@ public final class CanonicalProcessWriter {
                             }
                         }
                     });
+                }
+                case Task t -> step.put("type", "task");
+                case ManualTask t -> step.put("type", "manualTask");
+                case ScriptTask t -> {
+                    step.put("type", "scriptTask");
+                    step.put("script", t.script() == null ? "" : t.script().strip());
                 }
                 case BusinessRuleTask t -> {
                     step.put("type", "decision");

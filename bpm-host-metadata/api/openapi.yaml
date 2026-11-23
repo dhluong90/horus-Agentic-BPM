@@ -69,7 +69,7 @@ paths:
             Cache-Control: { $ref: '#/components/headers/MeCacheControl' }
             ETag: { $ref: '#/components/headers/ETag' }
             Vary:
-              description: '`Authorization, Cookie, X-Tenant-Id`: the body depends on the caller.'
+              description: '`Authorization, Cookie, X-Tenant-Id`: the body depends on the caller; `Accept-Language` too when `tenant.names` is present.'
               schema: { type: string }
             X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
           content:
@@ -79,7 +79,7 @@ paths:
               example:
                 schemaVersion: 1
                 user: { id: lan, displayName: Lan Nguyen }
-                tenant: { current: bank-a, allowed: [bank-a] }
+                tenant: { current: bank-a, allowed: [bank-a], names: { bank-a: Bank A } }
                 permissions: ['rules:read', 'rules:author']
                 roles: [ROLE_PRICING_ANALYST]
                 groups: []

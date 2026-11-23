@@ -17,10 +17,13 @@
 }
 .navrail__item .area-icon { width: 20px; height: 20px; flex: none; color: var(--muted); }
 .navrail__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.navrail__item:hover { background: var(--surface-3); color: var(--ink); }
-.navrail__item[aria-current="page"] { background: var(--select); color: var(--accent); font-weight: 600; }
-.navrail__item[aria-current="page"] .area-icon { color: var(--accent); }
-.navrail__item[aria-current="page"]::before { content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent); }
+.navrail__item:hover { background: var(--select); color: var(--ink); }
+/* Active item: a filled pill in the primary fill, white text and icon, no edge tick (styleguide section 8). */
+.navrail__item[aria-current="page"] { background: var(--primary-fill); color: var(--on-primary); font-weight: 600; border-radius: var(--radius-seg); }
+.navrail__item[aria-current="page"] .area-icon { color: var(--on-primary); }
+.navrail__item[aria-current="page"]:hover { background: var(--primary-hover); color: var(--on-primary); }
+.navrail__item[aria-current="page"]:focus-visible { outline-offset: 3px; border-radius: var(--radius-seg); }
+.navrail__item[aria-current="page"] .navrail__count { background: var(--on-primary); color: var(--primary-fill); }
 .navrail__count { min-width: 22px; height: 20px; padding: 0 6px; border-radius: var(--radius-pill); background: var(--primary-fill); color: var(--on-primary); font: var(--type-caption); font-weight: 600; display: inline-grid; place-items: center; }
 .navrail__group { margin-top: 20px; }
 .navrail__heading { padding: 0 12px 6px; font: var(--type-caption); color: var(--muted); }
@@ -191,14 +194,20 @@
   .home__top, .queue { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
-  .frame { grid-template-columns: minmax(0, 1fr); }
-  .brand { width: auto; }
+  .frame { grid-template-columns: minmax(0, 1fr); align-content: start; }
+  .topbar { padding-right: 12px; gap: 8px; }
+  .topbar .brand { width: auto; padding: 0 8px 0 16px; }
+  .topbar .topbar__crumbs { display: none; }
   .navrail, .navrail--collapsed { width: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .navrail__sticky { position: static; height: auto; flex-direction: row; padding: 8px 12px; overflow-x: auto; }
   .navrail__list { flex-direction: row; }
   .navrail__group { margin: 0; display: flex; align-items: center; }
   .navrail__heading, .navrail__foot { display: none; }
   .frame .main { padding: 20px 16px 40px; }
+}
+/* Phone width: the mark alone, so the language, theme and account controls stay in view. */
+@media (max-width: 520px) {
+  .topbar .brand-name { display: none; }
 }
 
 /* Tabs with a control beside them (a filter of the list below): the tabs keep their underline, the control sits at the end. */

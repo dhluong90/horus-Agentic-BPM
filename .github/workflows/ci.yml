@@ -4,7 +4,14 @@ on:
   pull_request:
   push:
     branches: [main]
+    # A release tag runs the full matrix, so no release is cut from a commit only one leg has seen.
+    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      cockpit-ui:
+        description: Also run the cockpit Playwright UI suite (it is off on pull requests and on main)
+        type: boolean
+        default: false
   # Nightly, so a vulnerability published against a merged dependency fails main within a day.
   # GitHub notifies the workflow's owner when a scheduled run fails.
   schedule:
@@ -58,8 +65,8 @@ jobs:
   verify:
     # TR-EMB-02: the supported matrix (ADR-0011). Each Java version runs on both Spring Boot lines and
     # each Spring Boot line on PostgreSQL 14, 16 and 18, pairwise; Spring Boot 4.0.x has one leg while it
-    # is in open-source support. Pull requests run the first five legs; pushes to main, the nightly run
-    # and manual runs add the two PostgreSQL 16 legs, so a pull request is no heavier.
+    # is in open-source support. A pull request and a push to main run one leg (Java 21, Spring Boot 4.x,
+    # PostgreSQL 18); the nightly run, a manual run and a release tag run all seven (lean mode, PD-151).
     # The 3.5.x legs test the jars built on the 4.x baseline, as an adopter receives them: the same
     # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
     name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
@@ -71,15 +78,10 @@ jobs:
       # spring-boot-4.0 profile in pom.xml, after Spring Boot 4.0 leaves it on 2026-12-31.
       matrix:
         include: >-
-          ${{ fromJSON(format('[{0},{1},{2},{3},{4}{5}]',
-          '{"java":"21","boot":"4.x","postgres":"18"}',
-          '{"java":"21","boot":"3.5.x","postgres":"14"}',
-          '{"java":"25","boot":"4.x","postgres":"14"}',
-          '{"java":"25","boot":"3.5.x","postgres":"18"}',
-          '{"java":"21","boot":"4.0.x","postgres":"16"}',
-          github.event_name != 'pull_request'
-          && ',{"java":"25","boot":"4.x","postgres":"16"},{"java":"21","boot":"3.5.x","postgres":"16"}'
-          || '')) }}
+          ${{ fromJSON(
+          (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref_type == 'tag')
+          && '[{"java":"21","boot":"4.x","postgres":"18"},{"java":"21","boot":"3.5.x","postgres":"14"},{"java":"25","boot":"4.x","postgres":"14"},{"java":"25","boot":"3.5.x","postgres":"18"},{"java":"21","boot":"4.0.x","postgres":"16"},{"java":"25","boot":"4.x","postgres":"16"},{"java":"21","boot":"3.5.x","postgres":"16"}]'
+          || '[{"java":"21","boot":"4.x","postgres":"18"}]') }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
@@ -210,9 +212,9 @@ jobs:
   throughput-report:
     # PRE-087 (TR-PERF-04): the step throughput of one replica on PostgreSQL with history on, against the target of
     # 1,000 transitions per second. Reported and never a gate (PD-026): a result below the target, or more than 20 %
-    # below the previous report, is a warning in the job summary, and the job passes. Runs on main only.
+    # below the previous report, is a warning in the job summary, and the job passes. Runs nightly and on manual dispatch.
     name: Throughput report
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -465,6 +467,8 @@ jobs:
     # POM): the full rule set lifecycle with every statement checked for session state, partition maintenance from
     # two replicas at once, and two example hosts whose caches refresh by the epoch check alone.
     name: Rule Engine behind PgBouncer (transaction mode)
+    # Nightly and on manual dispatch only (lean mode, PD-151).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -507,11 +511,13 @@ jobs:
           retention-days: 14
 
   benchmark:
-    # TR-PERF-01 and TR-PERF-02 on every build: JMH (examples/rule-engine-benchmarks, never published) on the
+    # TR-PERF-01 and TR-PERF-02 every night: JMH (examples/rule-engine-benchmarks, never published) on the
     # hosted runner, JDK 21. tools/benchmark-report.py writes the report to the job summary and fails when the p99
     # of one evaluation of the 200-row first table reaches 100 us; the 1,000-row compile time is reported only.
     # The JSON result is kept 90 days, so the trend can be read from the artifacts.
     name: Rule Engine benchmarks (JMH)
+    # Nightly and on manual dispatch only (lean mode, PD-151).
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -569,20 +575,11 @@ jobs:
           retention-days: 90
 
   cockpit:
-    # The cockpit web application: licences of shipped packages, generated schemas, lint, types,
-    # Vitest, then Playwright on the Chromium of the Playwright image against the production build.
-    name: Cockpit (lint, typecheck, Vitest, Playwright)
+    # The cockpit web application on every pull request: licences of shipped packages, generated schemas,
+    # lint, types and Vitest. The Playwright UI suite is the separate cockpit-ui job below (lean mode, PD-151).
+    name: Cockpit (lint, typecheck, Vitest)
     runs-on: ubuntu-latest
-    # About 1,500 Playwright checks (every state at two sizes, two themes, two languages, with axe) take 17 to
-    # 20 minutes on a hosted runner; 30 leaves room without hiding a hung run.
-    timeout-minutes: 45
-    # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
-    # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
-    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below reads the tag
-    # from this file and checks it. Update the tag and the digest together with the lockfile.
-    container:
-      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
-      options: --ipc=host
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: cockpit/web
@@ -598,16 +595,6 @@ jobs:
           node-version-file: tools/release/node-version
           cache: npm
           cache-dependency-path: cockpit/web/package-lock.json
-
-      - name: The Playwright image matches the lockfile
-        run: |
-          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml)"
-          locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
-          if [ -z "$image" ] || [ "$locked" != "$image" ]; then
-            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image in ci.yml is '${image}'. Update the image tag and digest in ci.yml."
-            exit 1
-          fi
-          echo "@playwright/test $locked, image $image, Node $(node --version): browsers come from the image."
 
       - name: Install
         run: npm ci
@@ -626,6 +613,50 @@ jobs:
 
       - name: Vitest
         run: npm test
+
+  cockpit-ui:
+    # Playwright on the Chromium of the Playwright image against the production build. Off on pull requests,
+    # on main and nightly; it runs only when a person starts this workflow with "cockpit-ui" ticked, and
+    # before the baseline audit. The specs and visual baselines stay in cockpit/web/e2e.
+    name: Cockpit UI (Playwright)
+    if: github.event_name == 'workflow_dispatch' && inputs.cockpit-ui
+    runs-on: ubuntu-latest
+    # About 1,500 Playwright checks (every state at two sizes, two themes, two languages, with axe) take 17 to
+    # 20 minutes on a hosted runner; 45 leaves room without hiding a hung run.
+    timeout-minutes: 45
+    # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
+    # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
+    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below reads the tag
+    # from this file and checks it. Update the tag and the digest together with the lockfile.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: cockpit/web
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: tools/release/node-version
+          cache: npm
+          cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: The Playwright image matches the lockfile
+        run: |
+          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml)"
+          locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          if [ -z "$image" ] || [ "$locked" != "$image" ]; then
+            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image in ci.yml is '${image}'. Update the image tag and digest in ci.yml."
+            exit 1
+          fi
+          echo "@playwright/test $locked, image $image, Node $(node --version): browsers come from the image."
+
+      - name: Install
+        run: npm ci
 
       - name: Playwright (production build, 1440x900 and 1440x1200, light and dark, English and Vietnamese)
         # One worker per vCPU; Playwright's default is half of them.
@@ -674,3 +705,45 @@ jobs:
           fi
           echo "Comparing HEAD with $base"
           python3 tools/check-migration-order.py --base "$base" --head HEAD
+
+  nightly-report:
+    # A red night opens, or updates, one type:bug issue that names every failed job and leg, and links the
+    # run. Every job's result is also in the run summary. Only the scheduled run files issues.
+    name: Nightly report
+    if: always() && github.event_name == 'schedule'
+    needs: [spec-coverage, verify, throughput-report, feel-differential-nightly, dependency-gates, pooler, benchmark, cockpit, migration-order]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.run_id }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Run summary and issue
+        run: |
+          gh api --paginate "repos/${GH_REPO}/actions/runs/${RUN_ID}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name != "Nightly report") | "\(.conclusion)\t\(.name)"' > jobs.tsv
+          {
+            echo "### Nightly results"
+            echo
+            echo "| Job or leg | Result |"
+            echo "|---|---|"
+            awk -F'\t' '{ printf "| %s | %s |\n", $2, $1 }' jobs.tsv
+          } >> "$GITHUB_STEP_SUMMARY"
+          failed="$(awk -F'\t' '$1 == "failure" || $1 == "timed_out" { print "- " $2 }' jobs.tsv)"
+          if [ -z "$failed" ]; then
+            echo "Every nightly job passed."
+            exit 0
+          fi
+          title="Nightly CI is red"
+          body="$(printf 'The nightly run failed in these jobs or legs:\n\n%s\n\nRun: %s' "$failed" "$RUN_URL")"
+          existing="$(gh issue list --label type:bug --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --label type:bug --body "$body"
+          fi

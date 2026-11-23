@@ -60,6 +60,24 @@ class TenantSwitchingTest {
     }
 
     @Test
+    void tenant_display_names_in_me_cover_allowed_tenants_only() {
+        // Given names for bank-a, bank-a-fin and another bank's tenant bank-b, and lan allowed bank-a and bank-a-fin
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).withPropertyValues(SWITCHING,
+                "horus.bpm.display-names.tenants.bank-a.en=Bank A",
+                "horus.bpm.display-names.tenants.bank-a-fin.en=Bank A Finance",
+                "horus.bpm.display-names.tenants.bank-b.en=Bank B").run(context -> {
+                    // When lan reads /me
+                    MvcResult me = call(TestHosts.mockMvc(context), get("/api/bpm/me").with(lan()));
+
+                    // Then both allowed tenants are named, bank-b is neither named nor mentioned
+                    JsonNode names = json(me).path("tenant").path("names");
+                    assertThat(names.path("bank-a").asString()).isEqualTo("Bank A");
+                    assertThat(names.path("bank-a-fin").asString()).isEqualTo("Bank A Finance");
+                    assertThat(me.getResponse().getContentAsString()).doesNotContain("bank-b", "Bank B");
+                });
+    }
+
+    @Test
     void PRE_038_tenant_header_accepted_only_within_allowed_tenants(CapturedOutput output) {
         // Given a host with the process engine only, and minh of bank-a with the same allowed list
         TestHosts.runner().withUserConfiguration(ProcessesOnly.class).withPropertyValues(SWITCHING)

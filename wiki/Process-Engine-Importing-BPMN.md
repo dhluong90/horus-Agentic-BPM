@@ -76,6 +76,8 @@ The root element must declare the namespaces, and the process must be executable
 | `serviceTask` | `horus:handler`, the name of a `ServiceTaskHandler` bean in your host (a local step), or of a `ServiceAdapter` bean with `horus:mode="remote"` | `horus:mode` (`local`, the default, or `remote`), `horus:timeout` on a remote step only, `horus:resultVariable`, `horus:input` elements | `horus:handler="cardProfiles.load"` |
 | `businessRuleTask` | `horus:ruleSet`, the name of a published rule set | `horus:resultVariable`, `horus:input` elements | `horus:ruleSet="card-fee"` |
 | `userTask` | `horus:assignee` as `user:<id>`, `role:<role>` or `group:<group>`; `horus:resultVariable` | `horus:fourEyes="true"`: the starter and earlier completers may not complete it. `horus:sla`: working time until the task is due, an ISO 8601 duration such as `PT4H`, up to 366 days; `horus:calendar`: the tenant calendar it counts in (elapsed time without one; since 0.3.0). `horus:escalation` (needs `horus:sla`): up to three levels `target[|wait];...`, for example `role:branch-supervisor;role:regional-manager|PT4H`; `horus:onClaimed`: `release` (default) or `keep` (since 0.3.0) | `horus:assignee="role:CARD_OFFICER"` |
+| `task`, `manualTask` | | `name` | `<bpmn:manualTask id="post-card"/>`. Both pass the token on at once and the timeline records them as done by the engine; a manual task opens no work item |
+| `scriptTask` | `horus:resultVariable`; a `<bpmn:script>` child with one expression in `urn:horus-bpm:expr:v1` | `scriptFormat` set to `urn:horus-bpm:expr:v1` | `<bpmn:script>amount * 2</bpmn:script>` |
 | `callActivity` (a `callProcess` step, 0.3.0) | `calledElement`, the key of the definition to call, in your tenant | `horus:calledVersion` to pin a version, `horus:input` and `horus:output` elements, `horus:compensate`, `horus:onFailure="compensate"` | `calledElement="kyc-check"` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
@@ -90,6 +92,10 @@ Inputs to a service or rule step are `horus:input` elements inside `extensionEle
   </bpmn:extensionElements>
 </bpmn:businessRuleTask>
 ```
+
+### Script tasks
+
+A script is one expression, not a program. It reads the process variables, has at most 1,000 characters and 500 evaluation steps, and its value is stored in `horus:resultVariable`. It cannot call host code, name a Java class, assign a variable or loop. A script that does not parse is refused at import with `SCRIPT_INVALID` and its line; a script over the step budget fails its step with `SCRIPT_ERROR`. The language is the one the gateway conditions use ([[Rule Engine Expression Language|Rule-Engine-Expression-Language]]); FEEL scripts come later. A worked file is [`card-welcome.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-welcome.bpmn).
 
 ### Calling another process (0.3.0)
 
@@ -156,7 +162,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` |
 
-Examples: `boundaryEvent`, `inclusiveGateway`, `scriptTask`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused in 0.2.0:
 
@@ -164,7 +170,7 @@ These are refused in 0.2.0:
 |---|---|
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
 | Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
-| Activities | `subProcess`, `adHocSubProcess`, `task`, `scriptTask`, `manualTask`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
+| Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
@@ -187,13 +193,15 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `KEY_INVALID` | Make the `process` id kebab-case, for example `card-fee-review` |
 | `NOT_EXECUTABLE` | Set `isExecutable="true"` on the process |
 | `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask` |
+| `SCRIPT_MISSING`, `SCRIPT_INVALID` | Give the `scriptTask` a `<bpmn:script>` with one valid expression of at most 1,000 characters; the message names the position |
+| `RESULT_VARIABLE_INVALID` | Name the `scriptTask`'s `horus:resultVariable` with letters, digits and `_` |
 | `MODE_INVALID` | Set `horus:mode` to `local` or `remote`, or leave it out for a local step |
 | `TIMEOUT_INVALID` | Put `horus:timeout` only on a remote step, as a positive ISO-8601 duration such as `PT10S`; a local step runs in the caller's transaction and has no timeout of its own |
 | `RULE_SET_MISSING` | Add `horus:ruleSet` to the `businessRuleTask` |
 | `ASSIGNEE_INVALID` | Set `horus:assignee` to `user:<id>`, `role:<role>` or `group:<group>` |
 | `SLA_INVALID` | Set `horus:sla` to a positive ISO 8601 duration up to 366 days, such as `PT4H` or `P2D`; `horus:calendar` to a calendar key such as `vn-banking-hours`; a calendar needs an SLA |
 | `ESCALATION_INVALID` | Give `horus:escalation` at most three levels, each `user:<id>`, `role:<role>` or `group:<group>` with an optional `\|PT4H`-style wait (the first level may wait `PT0S`, later ones need a positive wait), never the assignment it replaces; the task needs `horus:sla`; `horus:onClaimed` is `release` or `keep` and needs an escalation |
-| `RESULT_VARIABLE_REQUIRED` | Add `horus:resultVariable` to the `userTask`, so a completion never overwrites other variables |
+| `RESULT_VARIABLE_REQUIRED` | Add `horus:resultVariable` to the `userTask` or `scriptTask`, so a completion never overwrites other variables |
 | `INPUT_INVALID`, `INPUT_DUPLICATE` | Give each `horus:input` a unique `name` (letters, digits, `_`) and a `value`; `mask` is allowed on an agent step's input only, as `true` or `false` |
 | `FLOW_REF_INVALID` | Give the `sequenceFlow` both `sourceRef` and `targetRef` |
 | `ASSOCIATION_DIRECTION_INVALID` | Set `associationDirection` on the `association` to `None`, `One` or `Both`, or leave it out |
