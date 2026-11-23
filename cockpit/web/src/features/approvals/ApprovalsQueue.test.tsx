@@ -42,10 +42,11 @@ describe('Approvals queue across both engines (#31)', () => {
     setScenario('processes-approver');
     open('');
 
-    const focus = await screen.findByRole('article', { name: 'card-fee · Version 2' });
-    expect(within(focus).getByRole('link', { name: '2 waiting' })).toHaveAttribute('href', '#/approvals');
-    const pending = await screen.findByRole('article', { name: /Pending approvals/ });
-    expect(await within(pending).findByRole('link', { name: 'Customer onboarding (KYC) · Version 3' })).toHaveAttribute('href', '#/processes/kyc-onboarding/3/changes');
+    const waiting = await screen.findByRole('article', { name: /Awaiting approval/ });
+    expect(await within(waiting).findByText('card-fee · Version 2')).toBeInTheDocument();
+    expect(within(waiting).getByText('Customer onboarding (KYC) · Version 3')).toBeInTheDocument();
+    expect(within(waiting).getByText('2 waiting')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: /Awaiting approval/ })).getByText('2')).toBeInTheDocument();
   });
 
   it('CKP_003_the_requester_sees_approve_disabled_with_the_engines_reason_on_both_kinds_of_change', async () => {

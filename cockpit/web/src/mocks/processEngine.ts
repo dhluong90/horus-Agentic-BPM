@@ -4,7 +4,7 @@ import {
   localiseDemo, VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
 } from './processDemo';
 import { demoCases } from './caseDemo';
-import { DIRECTORY, QUEUE_NOW, QUEUE_SEED } from './taskQueueDemo';
+import { DIRECTORY, QUEUE_NOW, QUEUE_SEED, type QueueSeedTask } from './taskQueueDemo';
 import { MIGRATION_DEFINITIONS } from './migrationDemo';
 import { createMigrationApi, type MigrationSeed } from './migrationEngine';
 import { demoIncidents, type StoredIncident } from './incidentDemo';
@@ -103,6 +103,8 @@ export interface ProcessSeed {
   activities?: 'ok' | 'missing' | 'failing';
   /** The loan origination task queue beside the review tasks; on by default. */
   queue?: boolean;
+  /** More queue tasks after the demo ones, for a demo user with their own work (Home). */
+  extraTasks?: readonly QueueSeedTask[];
   /** The onboarding migration demo: version 3 in effect, 52 cases on version 2, and the plan in the given state. */
   migration?: MigrationSeed;
   /** The demo incidents (CKP-008); on by default. */
@@ -129,6 +131,17 @@ const UNCLASSIFIED_DEMO = [
   { code: 'UNCLASSIFIED_FIELD', step: 'verify-docs', field: 'summary', direction: 'OUTPUT', message: 'Output summary of step verify-docs is not classified: it declares neither mask true nor mask false. This does not block approval.' },
 ];
 
+/**
+ * The engine's deadline fields on the engine clock QUEUE_NOW (#472, PD-111): `slaState` and `overdueBy`, an ISO 8601
+ * duration in whole minutes, null unless the task is breached.
+ */
+function slaOn(dueAt: string | null): { slaState: 'NONE' | 'ON_TIME' | 'BREACHED'; overdueBy: string | null } {
+  if (dueAt === null) return { slaState: 'NONE', overdueBy: null };
+  const late = Math.floor((Date.parse(QUEUE_NOW) - Date.parse(dueAt)) / 60_000);
+  if (late <= 0) return { slaState: 'ON_TIME', overdueBy: null };
+  return { slaState: 'BREACHED', overdueBy: `PT${String(Math.floor(late / 60))}H${String(late % 60)}M` };
+}
+
 export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const locale = seed.locale ?? 'en';
   // Stored versions, changed in place by approve and reject.
@@ -148,7 +161,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     [MASKED_TASK_ID, reviewTask(MASKED_TASK_ID, REVIEW_TASK_NAME[locale], 'assess-documents', { status: 'CLAIMED', lockVersion: 1, claimedBy: 'hoa', claimedAt: NOW,
       review: { ...review, output: { ...review.output, summary: '***' }, outputFields: 4 } })],
     [FORM_TASK_ID, reviewTask(FORM_TASK_ID, FORM_TASK_NAME[locale], 'capture', { review: undefined, fourEyes: false })],
-    ...(seed.queue === false ? [] : QUEUE_SEED.map((item): [string, StoredTask] => [item.id, {
+    ...(seed.queue === false ? [] : [...QUEUE_SEED, ...(seed.extraTasks ?? [])].map((item): [string, StoredTask] => [item.id, {
       id: item.id, name: item.name[locale], nodeId: item.nodeId, assignee: item.assignee, businessKey: item.businessKey, dueAt: item.dueAt, createdAt: item.createdAt,
       fourEyes: item.fourEyes, startedBy: item.startedBy, status: item.status, lockVersion: item.status === 'CLAIMED' ? 1 : 0, claimedBy: item.claimedBy,
       claimedAt: item.claimedBy !== null ? item.createdAt : null, completedBy: null, completedAt: null, review: undefined,
@@ -211,6 +224,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const summaryBody = (task: StoredTask) => ({
     id: task.id, instanceId: INSTANCE_ID, definitionKey: 'loan-origination', definitionVersion: 3, businessKey: task.businessKey, nodeId: task.nodeId,
     name: task.name, assignee: task.assignee, status: task.status, lockVersion: task.lockVersion, claimedBy: task.claimedBy, createdAt: task.createdAt, dueAt: task.dueAt,
+    ...slaOn(task.dueAt),
   });
 
   /** listTasks: by assignment and status, due time first and tasks without one last, then id. */

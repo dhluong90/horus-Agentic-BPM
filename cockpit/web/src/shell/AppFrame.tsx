@@ -108,7 +108,7 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
   const merged = useFederation() !== undefined && (route.name === 'tasks' || route.name === 'incidents') && route.scope === 'all';
   switch (route.name) {
     case 'home':
-      return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} />;
+      return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} refresh={refresh} />;
     case 'rule-sets':
     case 'rule-set':
       return <RulesArea route={route} pageLimit={pageLimit} />;

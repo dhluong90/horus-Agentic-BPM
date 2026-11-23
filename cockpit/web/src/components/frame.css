@@ -63,23 +63,6 @@
 .link-action { display: inline-flex; align-items: center; gap: 4px; min-height: var(--target-min); color: var(--accent); font: var(--type-label); font-weight: 600; text-decoration: none; white-space: nowrap; }
 .link-action:hover { text-decoration: underline; }
 
-/* ---------- Home ---------- */
-.home { display: flex; flex-direction: column; gap: var(--gap); }
-.home__top { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
-.home__top--single { grid-template-columns: minmax(0, 1fr); }
-.focus-card {
-  display: flex; flex-direction: column; gap: 6px; padding: 28px 28px 24px; border-radius: var(--radius-xl);
-  background: var(--surface-contrast); border: 1px solid var(--contrast-line); color: var(--on-contrast);
-}
-.focus-card__eyebrow { font: var(--type-label); color: var(--on-contrast-muted); }
-.focus-card__title { font: var(--type-h1); font-size: 22px; color: var(--on-contrast); letter-spacing: -.01em; }
-.focus-card__meta { font: var(--type-body); color: var(--on-contrast-muted); }
-.focus-card__actions { display: flex; align-items: center; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
-.btn.btn--contrast { background: var(--contrast-action); border-color: var(--contrast-action); color: var(--on-contrast-action); }
-.btn.btn--contrast:hover { background: var(--contrast-action); opacity: .92; }
-.focus-card :focus-visible { outline-color: var(--on-contrast-accent); }
-.link-action--contrast { color: var(--on-contrast-accent); }
-
 /* ---------- Rows ---------- */
 .rows { display: flex; flex-direction: column; }
 .row { position: relative; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 4px; border-top: 1px solid var(--line); }
@@ -191,7 +174,7 @@
 
 /* ---------- Narrow screens ---------- */
 @media (max-width: 1180px) {
-  .home__top, .queue { grid-template-columns: minmax(0, 1fr); }
+  .queue { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
   .frame { grid-template-columns: minmax(0, 1fr); align-content: start; }
