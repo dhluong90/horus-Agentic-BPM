@@ -17,7 +17,7 @@ class BehaviorCatalogTest {
         assertThat(registry.behaviorFor(new InclusiveGateway("g", null, null, null, null, null, null)))
                 .as("the gateway stream registers the inclusive gateway (#494)").isPresent();
         assertThat(registry.behaviorFor(new ComplexGateway("c", null, null, null, null, null, null, null)))
-                .as("no stream has registered complex gateways yet").isEmpty();
+                .as("the gateway stream registers the complex gateway (#500)").isPresent();
         assertThat(registry.settleSteps()).hasSize(1);
     }
 }
