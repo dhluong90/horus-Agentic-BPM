@@ -80,6 +80,11 @@ final class WorkingContext implements ExecutionContext {
                 initial.instanceId() + ":" + nodeId + ":" + token.id() + ":" + store + ":" + item);
     }
 
+    @Override
+    public String businessKey() {
+        return initial.businessKey();
+    }
+
     Transition transition() {
         InstanceState state = new InstanceState(initial.instanceId(), initial.tenantId(), initial.definitionId(),
                 initial.businessKey(), status, tokens, variables, participants, sequence);
@@ -776,7 +781,9 @@ final class WorkingContext implements ExecutionContext {
     private void resolveEventGateway(Token winner, FlowNode from) {
         Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> gateway =
                 process.eventGatewayOf(from.id());
-        if (gateway.isEmpty()) {
+        if (gateway.isEmpty() || gateway.get().eventGatewayType()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL) {
+            // #499: every catch of a parallel gateway is awaited; none of them cancels another.
             return;
         }
         List<String> targets = process.outgoing(gateway.get().id()).stream().map(SequenceFlow::targetRef).toList();

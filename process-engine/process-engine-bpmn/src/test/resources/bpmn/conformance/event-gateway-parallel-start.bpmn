@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="m-kyc" name="kyc-documents"/>
+  <bpmn:signal id="s-sanction" name="sanction-screening-done"/>
+  <bpmn:process id="onboarding" isExecutable="true">
+    <bpmn:eventBasedGateway id="intake" instantiate="true" eventGatewayType="Parallel"/>
+    <bpmn:intermediateCatchEvent id="kyc"><bpmn:messageEventDefinition messageRef="m-kyc"/></bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="sanction"><bpmn:signalEventDefinition signalRef="s-sanction"/></bpmn:intermediateCatchEvent>
+    <bpmn:userTask id="check-kyc" horus:assignee="role:OPS" horus:resultVariable="r1"/>
+    <bpmn:userTask id="clear-sanction" horus:assignee="role:OPS" horus:resultVariable="r2"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="intake" targetRef="kyc"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="intake" targetRef="sanction"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="kyc" targetRef="check-kyc"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="sanction" targetRef="clear-sanction"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="check-kyc" targetRef="end"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="clear-sanction" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

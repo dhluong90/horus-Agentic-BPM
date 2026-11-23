@@ -15,6 +15,7 @@ import io.github.dhluong90.bpm.process.internal.exec.InstanceState;
 import io.github.dhluong90.bpm.process.internal.exec.InstanceStatus;
 import io.github.dhluong90.bpm.process.internal.exec.ProcessCompiler;
 import io.github.dhluong90.bpm.process.internal.exec.StepResult;
+import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.exec.Transition;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalProcessWriter;
@@ -216,6 +217,30 @@ class ConformanceSuiteTest {
     }
 
     @Test
+    void PRE_355_a_parallel_instantiating_event_gateway_starts_on_one_catch_and_awaits_every_other() throws IOException {
+        Process process = read("event-gateway-parallel-start.bpmn");
+
+        Outcome byMessage = run(process, new Command.Start(Map.of(), "officer.hoa", "kyc"), Map.of(), DataStorePort.NONE);
+        Outcome bySignal = run(process, new Command.Start(Map.of(), "system:signal", "sanction"), Map.of(),
+                DataStorePort.NONE);
+
+        // The message starts it: its review runs, and the signal is still awaited, so the instance is not over
+        assertThat(byMessage.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        assertThat(byMessage.visited()).contains("check-kyc").doesNotContain("clear-sanction");
+        assertThat(byMessage.effects()).filteredOn(Effect.CreateSubscription.class::isInstance)
+                .extracting(e -> ((Effect.CreateSubscription) e).name()).containsExactly("sanction-screening-done");
+        // The signal starts it: the message is awaited under the key of the instance
+        assertThat(bySignal.visited()).contains("clear-sanction").doesNotContain("check-kyc");
+        assertThat(bySignal.effects()).filteredOn(Effect.CreateSubscription.class::isInstance)
+                .singleElement().satisfies(e -> {
+                    assertThat(((Effect.CreateSubscription) e).name()).isEqualTo("kyc-documents");
+                    assertThat(((Effect.CreateSubscription) e).correlationKey()).isEqualTo("K-499");
+                });
+        // Nothing was cancelled
+        assertThat(byMessage.state().tokens()).noneMatch(t -> t.status() == TokenStatus.CANCELLED);
+    }
+
+    @Test
     void PRE_353_a_compensation_event_sub_process_of_two_tasks_pushes_them_so_the_walk_runs_them_in_flow_order()
             throws IOException {
         Outcome out = run(read("compensation-event-subprocess.bpmn"), Map.of(), Map.of("reserve-funds", Map.of()));
@@ -269,7 +294,7 @@ class ConformanceSuiteTest {
     void PRE_348_every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import() throws IOException {
         for (String file : List.of("data-objects.bpmn", "gateways.bpmn", "parallel-join.bpmn",
                 "sub-process-and-timer.bpmn", "compensation-background.bpmn", "parallel-multiple-start.bpmn",
-                "multiple-throw-and-end.bpmn", "event-gateway-start.bpmn", "compensation-event-subprocess.bpmn",
+                "multiple-throw-and-end.bpmn", "event-gateway-start.bpmn", "event-gateway-parallel-start.bpmn", "compensation-event-subprocess.bpmn",
                 "data-store.bpmn")) {
             Process source = read(file);
 

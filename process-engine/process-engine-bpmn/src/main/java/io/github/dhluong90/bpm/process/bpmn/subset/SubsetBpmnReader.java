@@ -1333,18 +1333,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to, or with
-         * {@code instantiate="true"} (#499) starts the process on the first of them to fire. The parallel type is named
-         * as unsupported with stage S3.
+         * {@code instantiate="true"} (#499) starts the process on the first of them to fire. The parallel type (#499) waits for all of them
+         * after the first.
          */
         private FlowElement eventBasedGateway() throws XMLStreamException {
             String id = id();
             String gwName = attr("name");
             boolean instantiate = "true".equals(attr("instantiate"));
             boolean parallel = "Parallel".equals(attr("eventGatewayType"));
-            if (parallel) {
-                unsupported("eventBasedGateway with eventGatewayType Parallel", id, BpmnStages.S3, "is not supported in"
-                        + " this release; stage S3 adds the parallel event-based gateway");
-            }
             Node children = children("eventBasedGateway", id, false);
             return new EventBasedGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED, instantiate,
                     parallel ? EventBasedGatewayType.PARALLEL : EventBasedGatewayType.EXCLUSIVE, children.info());

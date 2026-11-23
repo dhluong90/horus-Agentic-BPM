@@ -34,6 +34,11 @@ public interface ExecutionContext {
         throw new UnsupportedOperationException("dataStoreAccess");
     }
 
+    /** @return the business key of the instance, or null (#499: a parallel event gateway's message catches use it) */
+    default String businessKey() {
+        return null;
+    }
+
     /** @return the host's data stores; none by default */
     default DataStorePort dataStores() {
         return DataStorePort.NONE;

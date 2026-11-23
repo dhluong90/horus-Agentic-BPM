@@ -409,7 +409,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Execute (#488, #487) | | | A compensation boundary on a call activity, sub-process or transaction executes; `waitForCompletion="false"` is not planned |
-| Event-based gateway | Refused | Import | Execute | The exclusive form executes since 0.3.0 (#495), the instantiating one too (#499); the parallel form comes in S3 |
+| Event-based gateway | Refused | Import | Execute | The exclusive form executes since 0.3.0 (#495), the instantiating one too (#499), and so does the parallel form (#499, PRE-355) |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
 | Collaboration: pools, lanes, message flows, artifacts | Import, display and export (#497): one definition per executable pool, black-box pools kept | | Message flows execute between pools through 5.4 | |
 | Complex gateway, ad-hoc subprocess, multiple and parallel multiple events | Refused | Import | Import | Execute |

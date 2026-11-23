@@ -337,6 +337,19 @@ public interface ProcessStore {
     }
 
     /**
+     * Whether an instance of a process key waits for a signal of the name (#499): the signal then belongs to it and does
+     * not start another instance of a parallel instantiating event-based gateway.
+     *
+     * @param tenant tenant
+     * @param definitionKey the process key
+     * @param name signal name
+     * @return true when a subscription of the tenant for the name belongs to a version of the key
+     */
+    default boolean signalWaiterOfDefinition(String tenant, String definitionKey, String name) {
+        return false;
+    }
+
+    /**
      * The active versions of a tenant whose start event is a signal start for the name, newest first (#492). The caller
      * keeps only a version that is the key's effective one.
      *
