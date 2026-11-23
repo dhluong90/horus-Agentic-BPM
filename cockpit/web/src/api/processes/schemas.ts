@@ -282,6 +282,16 @@ export const activityEntry = z
     errorCode: z.string().optional(),
     handler: z.string().optional(),
     cause: z.string().optional(),
+    /** The counters of a loop or multi-instance step when the entry was written (#496); `nrOfInstances` is absent for a standard loop. */
+    instances: z
+      .object({
+        loopCounter: z.number().int().min(1).optional(),
+        nrOfInstances: z.number().int().min(0).optional(),
+        nrOfActiveInstances: z.number().int().min(0).optional(),
+        nrOfCompletedInstances: z.number().int().min(0).optional(),
+      })
+      .loose()
+      .optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

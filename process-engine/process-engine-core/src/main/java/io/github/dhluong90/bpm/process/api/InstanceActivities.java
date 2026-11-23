@@ -135,16 +135,43 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      * @param errorCode for an undo step that failed, its error code; null otherwise
      * @param handler for an undo step, the undo handler's name; null otherwise
      * @param cause for the start of an undo, the error code that caused it; null otherwise
+     * @param instances for the entries of a loop or multi-instance step ({@code MI_*}, #496), the counters when the
+     *     entry was written; null otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause) {
+            String handler, String cause, Instances instances) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(type, "type");
             Objects.requireNonNull(occurredAt, "occurredAt");
             Objects.requireNonNull(kind, "kind");
+        }
+
+        /**
+         * An entry with no loop counters.
+         *
+         * @param id the entry id
+         * @param type the history type
+         * @param nodeId the step, or null
+         * @param actor the identity, or null
+         * @param occurredAt when
+         * @param kind step or undo
+         * @param compensates the step an undo step undoes, or null
+         * @param attemptId the attempt, or null
+         * @param scopeTokenId the saga scope token, or null
+         * @param scope the saga scope, or null
+         * @param attempt the attempt number of an undo job, or null
+         * @param errorCode the error code of a failed undo step, or null
+         * @param handler the undo handler, or null
+         * @param cause the cause of an undo, or null
+         */
+        public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
+                String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
+                String errorCode, String handler, String cause) {
+            this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
+                    errorCode, handler, cause, null);
         }
 
         /**
@@ -157,18 +184,40 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause);
+                    scopeNodeId, attempt, errorCode, handler, cause, instances);
+        }
+
+        /**
+         * @param counters the counters of a loop or multi-instance step
+         * @return the same entry carrying them
+         */
+        public Entry withInstances(Instances counters) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, counters);
         }
 
         /** @return true for the history types the undo of a saga writes */
         public static boolean isCompensationType(String type) {
             return type.startsWith("COMPENSATION_") || "COMPENSATED".equals(type);
         }
+    }
+
+    /**
+     * The counters of a loop or multi-instance step when an entry was written (#496), so a timeline reads "3 of 5
+     * done" without computing it.
+     *
+     * @param loopCounter the repetition the entry is about, counted from 1; null for an entry about the whole step
+     * @param nrOfInstances how many repetitions the step has; null for a standard loop, which has no fixed number
+     * @param nrOfActiveInstances how many are running
+     * @param nrOfCompletedInstances how many have ended
+     */
+    public record Instances(Integer loopCounter, Integer nrOfInstances, Integer nrOfActiveInstances,
+            Integer nrOfCompletedInstances) {
     }
 }

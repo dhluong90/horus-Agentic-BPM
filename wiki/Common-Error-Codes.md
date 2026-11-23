@@ -282,6 +282,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### Step failures of a process call
 A step that calls another process (0.3.0) raises an incident, not an HTTP error, when the call cannot run or the child does not complete: `NO_EFFECTIVE_VERSION` (the called definition has no effective version, or the pinned version is not active, in the tenant), `CALL_DEPTH_EXCEEDED` (the call would sit deeper than `calls.max-depth`, at most 5), `CHILD_FAILED`, `CHILD_CANCELLED` (the cause names the child's cancellation reason) and `OUTPUT_VARIABLE_MISSING` (the child did not set a declared output). Retry the incident to start a new child. A migration outcome `SKIPPED` with the code `STEP_IN_FLIGHT` means a call was in flight at a removed step; a later plan moves the instance.
 
+### Step failures of a loop
+A step that repeats (0.3.0) raises an incident, not an HTTP error, when it cannot start: `MULTI_INSTANCE_LIMIT` (its collection, cardinality or `loopMaximum` is over `multi-instance.max`, at most 1,000) and `MULTI_INSTANCE_COLLECTION_INVALID` (the variable named by `horus:collection` is missing or not a list, or the cardinality is not a whole number of 0 or more). No task, job or child is created. Correct the variable, then retry the step. A repetition that fails has the incident of its own step, and the other repetitions go on.
+
 ### LAYOUT_NOT_FOUND
 `404`. The version has no such layout revision (`GET .../layout?revision=n`). A version with no layout at all answers `204`, not an error.
 

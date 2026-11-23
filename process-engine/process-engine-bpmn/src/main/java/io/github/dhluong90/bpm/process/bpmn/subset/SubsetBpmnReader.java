@@ -11,7 +11,14 @@ import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
 import io.github.dhluong90.bpm.process.internal.expr.Script;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataInput;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataOutput;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceBehavior;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceLoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.StandardLoopCharacteristics;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
@@ -351,8 +358,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
          *
          * @param inSaga whether the container is a {@code saga}, where {@code throwCompensation} may stand
          */
-        private void container(List<FlowElement> elements, List<Artifact> artifacts, boolean inSaga)
+        private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts, boolean inSaga)
                 throws XMLStreamException {
+            LoopCharacteristics own = null;
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (!BPMN.equals(xml.getNamespaceURI())) {
@@ -360,7 +368,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     continue;
                 }
                 behaviourAttributes();
+                lastLoop = null;
+                int before = elements.size();
                 switch (local) {
+                    case "standardLoopCharacteristics", "multiInstanceLoopCharacteristics" ->
+                            own = loopCharacteristics(local, "the enclosing sub-process");
                     case "startEvent" -> elements.add(event(true));
                     case "endEvent" -> elements.add(event(false));
                     case "serviceTask" -> elements.add(serviceTask());
@@ -414,7 +426,130 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         skip();
                     }
                 }
+                if (lastLoop != null) {
+                    attachLoop(elements, before, lastLoop);
+                    lastLoop = null;
+                }
             }
+            return own;
+        }
+
+        /** The loop characteristics read from the activity just read, handed to {@link #container}. */
+        private LoopCharacteristics lastLoop;
+
+        /** Puts the loop characteristics on the activity {@code container} just added; any other element refuses them. */
+        private void attachLoop(List<FlowElement> elements, int before, LoopCharacteristics loop) {
+            if (elements.size() > before && elements.get(elements.size() - 1) instanceof Activity activity) {
+                elements.set(elements.size() - 1, withLoop(activity, loop));
+            } else if (elements.size() > before) {
+                invalid.add(new DefinitionProblem("LOOP_ON_UNSUPPORTED_ACTIVITY", "Loop characteristics are on a task, a"
+                        + " call activity or an embedded sub-process", "loopCharacteristics",
+                        safe(elements.get(elements.size() - 1).id()), line()));
+            }
+        }
+
+        private static FlowElement withLoop(Activity activity, LoopCharacteristics loop) {
+            ActivityAttributes a = activity.activity();
+            ActivityAttributes looped = new ActivityAttributes(a.isForCompensation(), a.startQuantity(),
+                    a.completionQuantity(), a.defaultFlow(), a.ioSpecification(), a.dataInputAssociations(),
+                    a.dataOutputAssociations(), a.resources(), loop);
+            return switch (activity) {
+                case Task t -> new Task(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.info());
+                case ManualTask t -> new ManualTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.info());
+                case UserTask t -> new UserTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.implementation(),
+                        t.info());
+                case ServiceTask t -> new ServiceTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.operationRef(), t.info());
+                case BusinessRuleTask t -> new BusinessRuleTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.info());
+                case ScriptTask t -> new ScriptTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.scriptFormat(), t.script(), t.info());
+                case CallActivity t -> new CallActivity(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.calledElement(), t.info());
+                case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.triggeredByEvent(), t.flowElements(), t.artifacts(), t.laneSets(), t.info());
+                default -> activity;
+            };
+        }
+
+        /**
+         * {@code standardLoopCharacteristics} or {@code multiInstanceLoopCharacteristics} (#496). A loop has a
+         * {@code loopMaximum} and a {@code loopCondition}; a multi-instance step takes its repetitions from
+         * {@code horus:collection} (a list variable, with {@code horus:elementVariable} naming the item) or from a
+         * {@code loopCardinality}, runs them in parallel or, with {@code isSequential="true"}, one after another, puts
+         * what each yields in {@code horus:outputCollection} (from {@code horus:outputElement}, else the step's result
+         * variable), and ends early when its {@code completionCondition} holds.
+         */
+        private LoopCharacteristics loopCharacteristics(String local, String owner) throws XMLStreamException {
+            String loopId = attr("id");
+            if ("standardLoopCharacteristics".equals(local)) {
+                boolean testBefore = "true".equals(attr("testBefore"));
+                Integer max = integer(attr("loopMaximum"), "loopMaximum", owner);
+                Expression condition = null;
+                while (nextChild()) {
+                    if (BPMN.equals(xml.getNamespaceURI()) && "loopCondition".equals(xml.getLocalName())) {
+                        condition = loopExpression("loopCondition", owner);
+                    } else {
+                        loopChild(local, owner);
+                    }
+                }
+                return new StandardLoopCharacteristics(loopId, testBefore, max, condition, null);
+            }
+            boolean sequential = "true".equals(attr("isSequential"));
+            String collection = horus("collection");
+            String element = horus("elementVariable");
+            String outputCollection = horus("outputCollection");
+            String outputElement = horus("outputElement");
+            Expression cardinality = null;
+            Expression completion = null;
+            while (nextChild()) {
+                String child = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "loopCardinality".equals(child)) {
+                    cardinality = loopExpression("loopCardinality", owner);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "completionCondition".equals(child)) {
+                    completion = loopExpression("completionCondition", owner);
+                } else {
+                    loopChild(local, owner);
+                }
+            }
+            return new MultiInstanceLoopCharacteristics(loopId, sequential, MultiInstanceBehavior.NONE, cardinality,
+                    collection, outputCollection, element == null ? null : new DataInput(null, element, null, false,
+                            null), outputElement == null ? null : new DataOutput(null, outputElement, null, false,
+                            null), completion, null, null, null);
+        }
+
+        /** Any other child of a loop element is named as unsupported, never ignored. */
+        private void loopChild(String element, String owner) throws XMLStreamException {
+            if (BPMN.equals(xml.getNamespaceURI())) {
+                unsupported(element + " child " + xml.getLocalName(), owner, BpmnStages.of(xml.getLocalName()));
+            }
+            skip();
+        }
+
+        private Integer integer(String text, String attribute, String owner) {
+            if (text == null) {
+                return null;
+            }
+            try {
+                return Integer.valueOf(text);
+            } catch (NumberFormatException e) {
+                invalid.add(new DefinitionProblem("LOOP_INVALID", attribute + " is a whole number", "loopCharacteristics",
+                        safe(owner), line()));
+                return null;
+            }
+        }
+
+        /** The text of a loop expression, in the language of the document; any language but v1 is refused. */
+        private Expression loopExpression(String element, String owner) throws XMLStreamException {
+            String language = attr("language") != null ? attr("language") : documentLanguage;
+            int at = line();
+            String text = text();
+            if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
+                String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language " + safe(language)
+                        + " is not supported; use " + BpmnNamespaces.EXPR_V1, element, safe(owner), at, stage));
+            }
+            return new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
         }
 
         /**
@@ -432,7 +567,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            container(elements, artifacts, true);
+            if (container(elements, artifacts, true) != null) {
+                invalid.add(new DefinitionProblem("LOOP_ON_UNSUPPORTED_ACTIVITY", "A saga block cannot repeat; put the"
+                        + " loop on a sub-process inside it", "transaction", safe(id), line()));
+            }
             for (FlowElement e : elements) {
                 // PD-127: a completed child is never left silently in place, so a call inside a saga declares its undo.
                 if (e instanceof CallActivity c && c.info().extensions().first(CompensateHandlerRef.class).isEmpty()) {
@@ -459,7 +597,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            container(elements, artifacts, false);
+            LoopCharacteristics own = container(elements, artifacts, false);
+            // Read after the nested steps, which reset it: the marker of this sub-process, if any, goes to its container.
+            lastLoop = own;
             return new SubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), byEvent,
                     withRefs(elements), artifacts, List.of(), null);
         }
@@ -1388,6 +1528,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 String local = xml.getLocalName();
                 if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
                     skip();
+                } else if (BPMN.equals(ns) && ("standardLoopCharacteristics".equals(local)
+                        || "multiInstanceLoopCharacteristics".equals(local))) {
+                    lastLoop = loopCharacteristics(local, id);
                 } else if (BPMN.equals(ns) && "script".equals(local) && "scriptTask".equals(element)) {
                     scriptLine = line();
                     scriptText = text();

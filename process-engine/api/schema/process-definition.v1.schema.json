@@ -126,7 +126,26 @@
         "id": { "$ref": "#/$defs/nodeId" },
         "type": { "type": "string" },
         "name": { "type": "string" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "loop": { "$ref": "#/$defs/loop" }
+      }
+    },
+    "loop": {
+      "type": "object",
+      "description": "A step that repeats: a standard loop (kind loop, with max, optional condition and testBefore) or a multi-instance step (kind parallel or sequential, with collection and element, or cardinality, and optional outputCollection, outputElement and completionCondition).",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["loop", "parallel", "sequential"] },
+        "max": { "type": "integer", "minimum": 1 },
+        "condition": { "type": "string" },
+        "testBefore": { "type": "boolean" },
+        "collection": { "type": "string" },
+        "element": { "type": "string" },
+        "cardinality": { "type": "string" },
+        "outputCollection": { "type": "string" },
+        "outputElement": { "type": "string" },
+        "completionCondition": { "type": "string" }
       }
     },
     "step": {

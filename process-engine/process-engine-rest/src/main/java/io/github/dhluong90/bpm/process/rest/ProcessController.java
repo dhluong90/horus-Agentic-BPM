@@ -448,6 +448,12 @@ public class ProcessController {
         node.put("kind", edge.kind());
     }
 
+    private static void putCounter(ObjectNode node, String name, Integer value) {
+        if (value != null) {
+            node.put(name, value);
+        }
+    }
+
     private static void putIfPresent(ObjectNode node, String name, String value) {
         if (value != null) {
             node.put(name, value);
@@ -613,6 +619,14 @@ public class ProcessController {
             putIfPresent(item, "errorCode", entry.errorCode());
             putIfPresent(item, "handler", entry.handler());
             putIfPresent(item, "cause", entry.cause());
+            if (entry.instances() != null) {
+                // #496: the counters of a loop or multi-instance step when the entry was written.
+                ObjectNode counters = item.putObject("instances");
+                putCounter(counters, "loopCounter", entry.instances().loopCounter());
+                putCounter(counters, "nrOfInstances", entry.instances().nrOfInstances());
+                putCounter(counters, "nrOfActiveInstances", entry.instances().nrOfActiveInstances());
+                putCounter(counters, "nrOfCompletedInstances", entry.instances().nrOfCompletedInstances());
+            }
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {

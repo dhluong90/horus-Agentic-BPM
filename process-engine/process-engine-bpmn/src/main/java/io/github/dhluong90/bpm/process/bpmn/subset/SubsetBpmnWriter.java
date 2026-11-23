@@ -20,6 +20,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceLoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.StandardLoopCharacteristics;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
@@ -194,8 +199,9 @@ public final class SubsetBpmnWriter {
         node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
                 f.action())));
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
+        LoopCharacteristics loop = node instanceof Activity activity ? activity.activity().loopCharacteristics() : null;
         if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
-                && node.outgoing().isEmpty() && !(node instanceof SubProcess)) {
+                && node.outgoing().isEmpty() && !(node instanceof SubProcess) && loop == null) {
             xml.line(lvl, "<" + tag + attributes + "/>");
             return;
         }
@@ -235,17 +241,64 @@ public final class SubsetBpmnWriter {
             }
             xml.line(lvl + 1, "</bpmn:extensionElements>");
         }
+        node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
+        node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
+        if (loop != null) {
+            loopCharacteristics(xml, loop, lvl + 1);
+        }
+        // The script follows the activity's own content in the schema's order (#496: after a loop marker).
         if (script != null) {
             xml.line(lvl + 1, "<bpmn:script>" + text(script) + "</bpmn:script>");
         }
-        node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
-        node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
         if (node instanceof SubProcess sub) {
             // #486: the steps and flows of the scope, nested one level deeper; the diagram is generated for the top level only.
             sub.flowElements().forEach(inner -> flowElement(xml, inner, lvl + 1));
             sub.artifacts().forEach(inner -> artifact(xml, inner, lvl + 1));
         }
         xml.line(lvl, "</" + tag + ">");
+    }
+
+    /** #496: the loop or multi-instance marker of an activity, read back to the same definition hash. */
+    private static void loopCharacteristics(Xml xml, LoopCharacteristics loop, int lvl) {
+        switch (loop) {
+            case StandardLoopCharacteristics standard -> {
+                String start = "<bpmn:standardLoopCharacteristics" + (standard.testBefore() ? " testBefore=\"true\"" : "")
+                        + optional("loopMaximum", standard.loopMaximum() == null ? null
+                                : String.valueOf(standard.loopMaximum()));
+                if (standard.loopCondition() == null) {
+                    xml.line(lvl, start + "/>");
+                } else {
+                    xml.line(lvl, start + ">");
+                    expression(xml, "loopCondition", standard.loopCondition(), lvl + 1);
+                    xml.line(lvl, "</bpmn:standardLoopCharacteristics>");
+                }
+            }
+            case MultiInstanceLoopCharacteristics mi -> {
+                String start = "<bpmn:multiInstanceLoopCharacteristics" + (mi.isSequential() ? " isSequential=\"true\"" : "")
+                        + optional("horus:collection", mi.loopDataInputRef())
+                        + optional("horus:elementVariable", mi.inputDataItem() == null ? null : mi.inputDataItem().name())
+                        + optional("horus:outputCollection", mi.loopDataOutputRef())
+                        + optional("horus:outputElement", mi.outputDataItem() == null ? null : mi.outputDataItem().name());
+                if (mi.loopCardinality() == null && mi.completionCondition() == null) {
+                    xml.line(lvl, start + "/>");
+                } else {
+                    xml.line(lvl, start + ">");
+                    if (mi.loopCardinality() != null) {
+                        expression(xml, "loopCardinality", mi.loopCardinality(), lvl + 1);
+                    }
+                    if (mi.completionCondition() != null) {
+                        expression(xml, "completionCondition", mi.completionCondition(), lvl + 1);
+                    }
+                    xml.line(lvl, "</bpmn:multiInstanceLoopCharacteristics>");
+                }
+            }
+        }
+    }
+
+    private static void expression(Xml xml, String tag, Expression expression, int lvl) {
+        String language = expression.language() == null ? BpmnNamespaces.EXPR_V1 : expression.language();
+        xml.line(lvl, "<bpmn:" + tag + " xsi:type=\"bpmn:tFormalExpression\" language=" + attr(language) + ">"
+                + text(expression.text()) + "</bpmn:" + tag + ">");
     }
 
     private static void artifact(Xml xml, Artifact artifact, int lvl) {

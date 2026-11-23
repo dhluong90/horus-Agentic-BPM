@@ -45,7 +45,14 @@ export interface DiagramNode {
   resultVariable?: string;
   /** The id of the sub-process or saga block this step stands in; absent for a step of the process itself (#486). */
   parentId?: string;
+  /**
+   * How the step repeats (#496): `loop` for a standard loop, `parallel` or `sequential` for a multi-instance step.
+   * Absent for a step that runs once. Read from the BPMN export; the cockpit draws the marker and never edits it.
+   */
+  loop?: LoopKind;
 }
+
+export type LoopKind = 'loop' | 'parallel' | 'sequential';
 
 export interface DiagramEdge {
   id: string;
@@ -66,6 +73,7 @@ export interface DiagramGraph {
 const NOT_A_STEP = new Set([
   'sequenceFlow', 'laneSet', 'textAnnotation', 'association', 'group', 'dataObject', 'dataObjectReference',
   'dataStoreReference', 'documentation', 'extensionElements', 'property', 'ioSpecification', 'category',
+  'standardLoopCharacteristics', 'multiInstanceLoopCharacteristics',
 ]);
 
 export class DiagramReadError extends Error {
@@ -109,6 +117,16 @@ export function nodeType(element: Element): string {
   return local;
 }
 
+/** The loop marker of an activity: its own `standardLoopCharacteristics` or `multiInstanceLoopCharacteristics` child. */
+export function loopKind(element: Element): LoopKind | undefined {
+  for (const child of elementChildren(element)) {
+    if (child.namespaceURI !== BPMN) continue;
+    if (child.localName === 'standardLoopCharacteristics') return 'loop';
+    if (child.localName === 'multiInstanceLoopCharacteristics') return child.getAttribute('isSequential') === 'true' ? 'sequential' : 'parallel';
+  }
+  return undefined;
+}
+
 /** Elements that hold steps of their own: a sub-process (not an event sub-process) and a saga block. */
 function isContainer(element: Element): boolean {
   return (element.localName === 'subProcess' && element.getAttribute('triggeredByEvent') !== 'true') || element.localName === 'transaction';
@@ -133,11 +151,13 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
     const defaultFlow = nonEmpty(child.getAttribute('default'));
     if (defaultFlow !== undefined) defaults.add(defaultFlow);
     const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
+    const loop = loopKind(child);
     nodes.push({
       id,
       name: nonEmpty(child.getAttribute('name')),
       type: nodeType(child),
       ...(resultVariable !== undefined ? { resultVariable } : {}),
+      ...(loop !== undefined ? { loop } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
     });
     if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);

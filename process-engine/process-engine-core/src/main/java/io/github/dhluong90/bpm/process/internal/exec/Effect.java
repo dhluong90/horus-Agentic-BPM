@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
  */
-public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
+public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.CancelChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
 
     /**
      * Insert a job in {@code pre_timer}.
@@ -171,6 +171,15 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
             this(calledElement, tokenId, variables, null, null);
         }
     }
+
+    /**
+     * The step on a {@code callProcess} token ended without its child: a multi-instance completion condition became
+     * true while this instance was still waiting (#496). The shell cancels the child that token started, and the
+     * children below it, in the same transaction.
+     *
+     * @param tokenId the call activity token whose child is cancelled
+     */
+    record CancelChildInstance(String tokenId) implements Effect {    }
 
     /**
      * Push a compensation entry for a completed activity.

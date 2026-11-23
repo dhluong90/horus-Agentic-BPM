@@ -24,6 +24,7 @@ final class WorkingContext implements ExecutionContext {
     private final InstanceState initial;
     private final CompiledProcess process;
     private final ExpressionEvaluator expressions;
+    private final Loops loops;
     private final Instant now;
     private final String actor;
     private final List<Token> tokens;
@@ -36,7 +37,8 @@ final class WorkingContext implements ExecutionContext {
     private long sequence;
 
     WorkingContext(InstanceState state, CompiledProcess process, ExpressionEvaluator expressions, Clock clock,
-            String actor) {
+            String actor, int maxInstances) {
+        this.loops = new Loops(this, maxInstances);
         this.initial = state;
         this.process = process;
         this.expressions = expressions;
@@ -70,6 +72,10 @@ final class WorkingContext implements ExecutionContext {
 
     InstanceStatus status() {
         return status;
+    }
+
+    Loops loops() {
+        return loops;
     }
 
     boolean isParticipant(String identity) {
@@ -198,6 +204,10 @@ final class WorkingContext implements ExecutionContext {
 
     @Override
     public void takeOutgoing(Token token, FlowNode from) {
+        if (loops.endsInstance(token, from)) {
+            // One repetition of a loop ended (#496); the loop, not the repetition, leaves the activity.
+            return;
+        }
         List<SequenceFlow> outgoing = process.outgoing(from.id());
         if (outgoing.isEmpty()) {
             throw new ExecutionException("NO_OUTGOING_FLOW", from.id(), from.id() + " has no outgoing sequence flow");
@@ -284,6 +294,10 @@ final class WorkingContext implements ExecutionContext {
         Token scope = tree().get(token.scopeTokenId()).orElseThrow();
         if (tree().live(scope.id()).isEmpty()) {
             update(scope.withStatus(TokenStatus.COMPLETED));
+            if (scope.scopeTokenId() != null && loops.endsInstanceScope(scope)) {
+                // One repetition of a looped sub-process ended (#496).
+                return;
+            }
             if (scope.scopeTokenId() == null) {
                 status = InstanceStatus.COMPLETED;
                 history("INSTANCE_ENDED", null, Map.of("status", "COMPLETED"));

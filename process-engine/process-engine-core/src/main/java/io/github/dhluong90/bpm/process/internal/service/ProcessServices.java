@@ -226,6 +226,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
     /** {@code calls.max-depth} (#92). */
     private volatile int maxCallDepth = EngineDefaults.MAX_CALL_DEPTH;
+    private volatile int maxLoopInstances = DefaultExecutionKernel.DEFAULT_MAX_INSTANCES;
     private volatile io.github.dhluong90.bpm.process.internal.store.LayoutStore importedLayouts;
     private volatile Map<SourceFormat, java.util.function.BiFunction<byte[], Process, String>> layoutExtractors =
             Map.of();
@@ -2933,6 +2934,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private static final long CALL_RESULT_SEQUENCE = 2_000_000L;
 
     /**
+     * Sets the most repetitions one looped activity may have ({@code multi-instance.max}, #496): a collection or a
+     * loop maximum over it opens an incident and creates no task. Set before the first instance runs.
+     *
+     * @param instances 1 to {@link EngineDefaults#MAX_LOOP_INSTANCES}
+     */
+    public void useMaxLoopInstances(int instances) {
+        if (instances < 1 || instances > EngineDefaults.MAX_LOOP_INSTANCES) {
+            throw new IllegalArgumentException("multi-instance.max must be 1 to " + EngineDefaults.MAX_LOOP_INSTANCES);
+        }
+        this.maxLoopInstances = instances;
+    }
+
+    /**
      * Sets how deep one call may sit above another ({@code calls.max-depth}).
      *
      * @param depth 1 to {@link EngineDefaults#MAX_CALL_DEPTH}
@@ -3094,7 +3108,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * abandoned half way.
      */
     private void cancelChildren(String tenant, String parentId, String actor) {
+        cancelChildren(tenant, parentId, actor, null);
+    }
+
+    /**
+     * As {@link #cancelChildren(String, String, String)}, for the children started by some of the parent's tokens only
+     * (#496: a multi-instance loop ended while those children still ran); null means every child.
+     */
+    private void cancelChildren(String tenant, String parentId, String actor, java.util.Set<String> parentTokens) {
         for (String childId : store.activeChildren(tenant, parentId, EngineDefaults.MAX_PAGE_SIZE)) {
+            if (parentTokens != null && store.parentLink(tenant, childId)
+                    .map(link -> !parentTokens.contains(link.parentTokenId())).orElse(true)) {
+                continue;
+            }
             InstanceRow child = store.lockInstance(tenant, childId).orElse(null);
             if (child == null || !"RUNNING".equals(child.status())) {
                 continue;
@@ -4317,6 +4343,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Effect.StartCompensation[] compensation = new Effect.StartCompensation[1];
         // #92: children are started after this instance's own rows are saved, in the same transaction.
         List<Effect.StartChildInstance> childStarts = new ArrayList<>();
+        // #496: call-activity tokens whose child is no longer wanted, because a multi-instance loop ended without it.
+        java.util.Set<String> cancelledChildTokens = new java.util.LinkedHashSet<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -4385,6 +4413,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.PushCompensation push -> pushes.add(push);
                         case Effect.StartCompensation started -> compensation[0] = started;
                         case Effect.StartChildInstance child -> childStarts.add(child);
+                        case Effect.CancelChildInstance cancel -> cancelledChildTokens.add(cancel.tokenId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -4580,6 +4609,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
             store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, now));
         }
+        if (!cancelledChildTokens.isEmpty()) {
+            cancelChildren(tenant, state.instanceId(), switch (as) {
+                case RunAs.CallerRequest r -> callers.currentCallerId();
+                case RunAs.EngineWork w -> w.actor();
+            }, cancelledChildTokens);
+        }
         for (Effect.StartChildInstance call : childStarts) {
             startChild(definition, row, state, call, newIncidents, now);
         }
@@ -4744,7 +4779,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
             Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
-            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions),
+            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances),
                     AgentMemory.sources(process));
         });
     }

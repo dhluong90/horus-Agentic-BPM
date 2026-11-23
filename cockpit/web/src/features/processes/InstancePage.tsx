@@ -23,6 +23,7 @@ import {
   firstStep,
   incidentKey,
   isProblemEntry,
+  loopProgress,
   nodeMarks,
   scopeState,
   undoEntryType,
@@ -31,6 +32,7 @@ import {
   openTaskAt,
   TOKEN_ICON,
   TOKEN_KEY,
+  type LoopProgress,
   type NodeMark,
 } from './model/instanceView';
 import { nodeTypeLabel } from './model/nodeLabels';
@@ -130,12 +132,25 @@ function ActivitiesError({ error, onRetry }: { error: unknown; onRetry: () => vo
   return <AreaError error={error} onRetry={onRetry} />;
 }
 
-function badgeOf(mark: NodeMark, t: T): StepBadge {
+/** The counters an entry of a repeating step carries, in words: "3 of 5 done", or "2 done" for a standard loop. */
+function progressWords(counters: { nrOfInstances?: number | undefined; nrOfCompletedInstances?: number | undefined }, t: T): string {
+  const done = String(counters.nrOfCompletedInstances ?? 0);
+  return counters.nrOfInstances !== undefined ? t('instance.badge.loopProgress', { done, total: String(counters.nrOfInstances) }) : t('instance.badge.loopCount', { done });
+}
+
+function badgeOf(mark: NodeMark, t: T, progress: LoopProgress | undefined): StepBadge {
   switch (mark.kind) {
     case 'incident':
       return { tone: 'incident', icon: '✕', text: t('instance.badge.incident'), label: t('instance.badge.incidentLabel', { what: t(incidentKey(mark.code)) }) };
     case 'token': {
       const words = t(TOKEN_KEY[mark.status]);
+      if (progress !== undefined) {
+        // A step that repeats says how many repetitions are done, as the engine counted them (#496).
+        const text = progress.total !== undefined
+          ? t('instance.badge.loopProgress', { done: String(progress.done), total: String(progress.total) })
+          : t('instance.badge.loopCount', { done: String(progress.done) });
+        return { tone: 'token', icon: TOKEN_ICON[mark.status], text, label: `${text}, ${words}` };
+      }
       const text = mark.count > 1 ? t('instance.badge.tokens', { what: words, count: String(mark.count) }) : words;
       return { tone: 'token', icon: TOKEN_ICON[mark.status], text, label: text };
     }
@@ -166,7 +181,8 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
   const marks = useMemo(() => nodeMarks(instance, activities), [instance, activities]);
   const order = useMemo(() => flowOrder(graph).map((node) => node.id), [graph]);
   const selected = picked ?? firstStep(marks, order);
-  const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t)])), [marks, t]);
+  const progress = useMemo(() => loopProgress(activities), [activities]);
+  const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t, progress.get(id))])), [marks, t, progress]);
   const overlay: DiagramOverlay = { badges, selected, onSelect: onPick };
   const node = graph.nodes.find((item) => item.id === selected);
   return (
@@ -375,7 +391,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                 <tr key={entry.id}>
                   <td className="tnum muted">{formatDateTime(entry.occurredAt, locale)}</td>
                   <td className={isProblemEntry(entry) ? 'timeline__what timeline__what--bad' : 'timeline__what'}>
-                    {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type))}
+                    {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type), { counter: String(entry.instances?.loopCounter ?? '') })}
+                    {entry.instances !== undefined ? <span className="muted timeline__note"> · {progressWords(entry.instances, t)}</span> : null}
                   </td>
                   <td className={trail(entry.nodeId).length > 0 ? 'timeline__step timeline__step--nested' : 'timeline__step'} data-depth={trail(entry.nodeId).length}>
                     {trail(entry.nodeId).length > 0 ? <span className="muted timeline__trail">{trail(entry.nodeId).join(' › ')} › </span> : null}

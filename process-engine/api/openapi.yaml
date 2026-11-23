@@ -2525,7 +2525,7 @@ components:
         instanceId: { type: string }
         nodeId: { type: string }
         tokenId: { type: [string, 'null'] }
-        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`; a step that calls a process (#92) raises `CHILD_FAILED` or `CHILD_CANCELLED` when its child ended without completing, `NO_EFFECTIVE_VERSION` when the called definition has no effective or pinned version in the tenant, `CALL_DEPTH_EXCEEDED` when the call would sit deeper than `calls.max-depth`, and `OUTPUT_VARIABLE_MISSING` when the child did not set a declared output; an undo of a compensation walk that failed is `COMPENSATION_FAILED` and a manual undo `COMPENSATION_MANUAL_REQUIRED` (#67): their `nodeId` is the step being undone, their `tokenId` the scope token walked, and their resolution marks the undo done by hand' }
+        errorCode: { type: string, description: 'For example `ADAPTER_TIMEOUT`, `AGENT_TIMEOUT` or `UNHANDLED_BUSINESS_ERROR`; a step that calls a process (#92) raises `CHILD_FAILED` or `CHILD_CANCELLED` when its child ended without completing, `NO_EFFECTIVE_VERSION` when the called definition has no effective or pinned version in the tenant, `CALL_DEPTH_EXCEEDED` when the call would sit deeper than `calls.max-depth`, and `OUTPUT_VARIABLE_MISSING` when the child did not set a declared output; a looped step (#496) raises `MULTI_INSTANCE_LIMIT` when its collection, cardinality or loop maximum is over `multi-instance.max`, and `MULTI_INSTANCE_COLLECTION_INVALID` when its collection is not a list; an undo of a compensation walk that failed is `COMPENSATION_FAILED` and a manual undo `COMPENSATION_MANUAL_REQUIRED` (#67): their `nodeId` is the step being undone, their `tokenId` the scope token walked, and their resolution marks the undo done by hand' }
         causeSummary: { type: string, description: Built from codes and numbers only, never from a handler's detail }
         retryCount: { type: integer, minimum: 0 }
         status: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED] }
@@ -3053,6 +3053,17 @@ components:
               errorCode: { type: string, description: 'Undo steps that failed: the error code' }
               handler: { type: string, description: 'Undo steps: the name of the undo handler' }
               cause: { type: string, description: 'The start of an undo: the error code that caused it' }
+              instances:
+                type: object
+                description: >-
+                  Entries of a loop or multi-instance step (`MI_STARTED`, `MI_INSTANCE_STARTED`, `MI_INSTANCE_COMPLETED`,
+                  `MI_INSTANCE_CANCELLED`, `MI_COMPLETED`, `MI_REFUSED`, #496): the counters when the entry was written, so the
+                  cockpit reads "3 of 5 done" and never counts
+                properties:
+                  loopCounter: { type: integer, minimum: 1, description: 'The repetition the entry is about, counted from 1; absent for an entry about the whole step' }
+                  nrOfInstances: { type: integer, minimum: 0, description: 'How many repetitions the step has; absent for a standard loop, which has no fixed number' }
+                  nrOfActiveInstances: { type: integer, minimum: 0 }
+                  nrOfCompletedInstances: { type: integer, minimum: 0 }
         compensations:
           type: array
           description: >-

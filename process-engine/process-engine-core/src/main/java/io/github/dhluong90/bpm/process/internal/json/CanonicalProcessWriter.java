@@ -255,8 +255,53 @@ public final class CanonicalProcessWriter {
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
+            // #496: only when declared, so the hash of a step that does not repeat is unchanged.
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity
+                    && activity.activity().loopCharacteristics() != null) {
+                writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
+            }
             if (!(node instanceof ExclusiveGateway) && !(node instanceof IntermediateThrowEvent) && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
+            }
+        }
+    }
+
+    /** The {@code loop} of a step: a standard loop or a multi-instance step, with only what the definition declares. */
+    private static void writeLoop(ObjectNode loop,
+            io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics characteristics) {
+        switch (characteristics) {
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.StandardLoopCharacteristics standard -> {
+                loop.put("kind", "loop");
+                if (standard.loopMaximum() != null) {
+                    loop.put("max", standard.loopMaximum());
+                }
+                if (standard.loopCondition() != null && standard.loopCondition().text() != null) {
+                    loop.put("condition", standard.loopCondition().text().strip());
+                }
+                if (standard.testBefore()) {
+                    loop.put("testBefore", true);
+                }
+            }
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceLoopCharacteristics mi -> {
+                loop.put("kind", mi.isSequential() ? "sequential" : "parallel");
+                if (mi.loopDataInputRef() != null) {
+                    loop.put("collection", mi.loopDataInputRef());
+                }
+                if (mi.inputDataItem() != null) {
+                    loop.put("element", mi.inputDataItem().name());
+                }
+                if (mi.loopCardinality() != null && mi.loopCardinality().text() != null) {
+                    loop.put("cardinality", mi.loopCardinality().text().strip());
+                }
+                if (mi.loopDataOutputRef() != null) {
+                    loop.put("outputCollection", mi.loopDataOutputRef());
+                }
+                if (mi.outputDataItem() != null) {
+                    loop.put("outputElement", mi.outputDataItem().name());
+                }
+                if (mi.completionCondition() != null && mi.completionCondition().text() != null) {
+                    loop.put("completionCondition", mi.completionCondition().text().strip());
+                }
             }
         }
     }

@@ -86,6 +86,10 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 List.of(tenant, instanceId, ts(from), ts(to), limit), (rs, row) -> historyEntry(rs));
     }
 
+    private static Integer counter(Map<String, Object> details, String key) {
+        return details.get(key) instanceof Number n ? n.intValue() : null;
+    }
+
     /** An entry as the timeline shows it: the undo's own fields come from the history row's token, attempt and details. */
     private static InstanceActivities.Entry historyEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
         String type = rs.getString("event_type");
@@ -93,6 +97,13 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         String node = rs.getString("node_id");
         String actor = rs.getString("actor_id");
         Instant at = instant(rs, "occurred_at");
+        if (type.startsWith("MI_")) {
+            // #496: the counters of a loop or multi-instance step, as the engine wrote them.
+            Map<String, Object> counters = Values.readMap(rs.getString("details"));
+            return new InstanceActivities.Entry(id, type, node, actor, at).withInstances(new InstanceActivities.Instances(
+                    counter(counters, "loopCounter"), counter(counters, "nrOfInstances"),
+                    counter(counters, "nrOfActiveInstances"), counter(counters, "nrOfCompletedInstances")));
+        }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
             return new InstanceActivities.Entry(id, type, node, actor, at);
         }
@@ -350,11 +361,29 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         Values.readMap(rs.getString("locals"))));
     }
 
+    private static void placeWithEnclosing(Token token, Map<String, Token> byId, java.util.Set<String> placed,
+            List<Token> ordered) {
+        if (!placed.add(token.id())) {
+            return;
+        }
+        Token enclosing = token.scopeTokenId() == null ? null : byId.get(token.scopeTokenId());
+        if (enclosing != null) {
+            placeWithEnclosing(enclosing, byId, placed, ordered);
+        }
+        ordered.add(token);
+    }
+
     @Override
     public void saveTokens(String tenant, String instanceId, String definitionId, List<Token> tokens, Instant now) {
-        // Scope tokens first, so the self-reference of flow tokens resolves.
-        List<Token> ordered = tokens.stream().sorted((a, b) -> Boolean.compare(a.kind() != TokenKind.SCOPE,
-                b.kind() != TokenKind.SCOPE)).toList();
+        // An enclosing token first, so the self-reference of a token resolves: a flow under its scope, an instance
+        // scope under its multi-instance body (#496).
+        Map<String, Token> byId = new java.util.HashMap<>();
+        tokens.forEach(t -> byId.put(t.id(), t));
+        List<Token> ordered = new java.util.ArrayList<>();
+        java.util.Set<String> placed = new java.util.HashSet<>();
+        for (Token t : tokens) {
+            placeWithEnclosing(t, byId, placed, ordered);
+        }
         for (Token t : ordered) {
             int written = jdbc.sql("INSERT INTO pre_token (tenant_id, id, instance_id, definition_id, token_kind, scope_token_id, "
                             + "current_node_id, status, activity_instance_id, locals, entered_at, created_at) "

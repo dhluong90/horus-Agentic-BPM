@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
-import { ancestorsOf, isKnownNodeType, type DiagramGraph } from '../model/bpmnGraph';
+import { ancestorsOf, isKnownNodeType, type DiagramGraph, type LoopKind } from '../model/bpmnGraph';
 import {
   CAPTION_GAP,
   CAPTION_LINE_HEIGHT,
@@ -203,11 +203,27 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
       <text aria-hidden="true" className="dg-node__type" x={node.x + padX + TYPE_INDENT} y={typeTop + 13}>
         {node.typeLines.map((line, index) => <tspan key={index} x={node.x + padX + TYPE_INDENT} dy={index === 0 ? 0 : typeRow}>{index < node.typeLines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
+      {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width / 2} cy={node.y + node.height - 11} /> : null}
       {steps !== undefined ? <text aria-hidden="true" className="dg-node__steps" x={node.x + padX} y={node.y + node.height - 9}>{steps}</text> : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
       {onToggle !== undefined && toggleLabel !== undefined ? <Toggle x={node.x + node.width - 26} y={node.y + node.height - 24} open={false} label={toggleLabel} onToggle={onToggle} /> : null}
     </g>
   );
+}
+
+/**
+ * The BPMN marker of a step that repeats (#496), centred on the foot of its box: three vertical bars for a parallel
+ * multi-instance step, three horizontal bars for a sequential one, a circular arrow for a standard loop. The words
+ * are in the step's accessible name; the marker itself is decoration and never the only sign.
+ */
+function LoopMarker({ kind, cx, cy }: { kind: LoopKind; cx: number; cy: number }) {
+  const half = 7;
+  const path = kind === 'parallel'
+    ? [-4, 0, 4].map((dx) => `M${(cx + dx).toFixed(1)} ${(cy - half).toFixed(1)}V${(cy + half).toFixed(1)}`).join('')
+    : kind === 'sequential'
+      ? [-4, 0, 4].map((dy) => `M${(cx - half).toFixed(1)} ${(cy + dy).toFixed(1)}H${(cx + half).toFixed(1)}`).join('')
+      : `M${(cx + 6).toFixed(1)} ${(cy - 2).toFixed(1)}A6.5 6.5 0 1 0 ${(cx + 4).toFixed(1)} ${(cy + 5).toFixed(1)}M${(cx + 6).toFixed(1)} ${(cy - 7).toFixed(1)}V${(cy - 2).toFixed(1)}H${(cx + 1).toFixed(1)}`;
+  return <path className={`dg-loop dg-loop--${kind}`} data-loop={kind} aria-hidden="true" d={path} />;
 }
 
 /** The control that opens or closes a sub-process in place: a small square with a plus or a minus, reachable by keyboard. */
@@ -236,6 +252,7 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={12} />
       <text aria-hidden="true" className="dg-frame__name" x={node.x + FRAME_PAD} y={node.y + FRAME_HEADER - 11}>{node.name ?? node.id}</text>
+      {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width - FRAME_PAD - 38} cy={node.y + 15} /> : null}
       <Toggle x={node.x + node.width - FRAME_PAD - 18} y={node.y + 6} open label={toggleLabel} onToggle={onToggle} />
     </g>
   );
@@ -270,16 +287,16 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   );
 }
 
-function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
-  node: PlacedNode; typeLabel: string; badge: StepBadge | undefined; interaction: Interaction;
+function Node({ node, typeLabel, loopLabel, badge, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
+  node: PlacedNode; typeLabel: string; loopLabel: string | undefined; badge: StepBadge | undefined; interaction: Interaction;
   mark: Mark | undefined; markLabel: ((mark: Mark) => string) | undefined; picked: boolean;
   steps: string | undefined; onToggle: (() => void) | undefined; toggleLabel: string | undefined;
 }) {
   const known = isKnownNodeType(node.type);
   // A selectable step's name starts with the words drawn on it, in order, so speech input can name it (WCAG 2.5.3).
   const label = interaction.onSelect !== undefined
-    ? `${node.name ?? node.id} ${typeLabel}${[badge?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
-    : `${node.name ?? node.id}, ${typeLabel}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
+    ? `${node.name ?? node.id} ${typeLabel}${[loopLabel, badge?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
+    : `${node.name ?? node.id}, ${typeLabel}${loopLabel !== undefined ? `, ${loopLabel}` : ''}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
   if (node.shape === 'task' || !known) {
     // A type this cockpit does not draw is laid out and drawn as a dashed box, named in words.
     const kind = node.type === 'serviceTask:agentTask' ? 'agent' : known ? 'task' : 'generic';
@@ -477,13 +494,13 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
               )) : null}
             </defs>
             <g>{layout.nodes.filter((node) => node.container?.open === true).map((node) => (
-              <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}`}
+              <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}${node.loop !== undefined ? `, ${t(`diagram.loop.${node.loop}`)}` : ''}`}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
                 onToggle={() => { toggle(node.id); }} toggleLabel={t('diagram.collapse', { name: node.name ?? node.id })} />
             ))}</g>
             <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
             <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (
-              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} badge={overlay?.badges.get(node.id)}
+              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} loopLabel={node.loop !== undefined ? t(`diagram.loop.${node.loop}`) : undefined} badge={overlay?.badges.get(node.id)}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
                 mark={marks?.nodes.get(node.id)} markLabel={markLabel} picked={picked === node.id}
                 steps={node.container !== undefined ? t('diagram.stepCount', { count: String(node.container.steps) }) : undefined}

@@ -63,7 +63,8 @@ public record ProcessEngineProperties(
         @DefaultValue Approval approval,
         @DefaultValue Incidents incidents,
         @DefaultValue Classification classification,
-        @DefaultValue Calls calls) {
+        @DefaultValue Calls calls,
+        @DefaultValue MultiInstance multiInstance) {
 
     /**
      * The reminder about agent step fields with no classification (PD-146, #438). Masking stays opt-in: an agent
@@ -551,6 +552,22 @@ public record ProcessEngineProperties(
             if (maxDepth < 1 || maxDepth > EngineDefaults.MAX_CALL_DEPTH) {
                 throw new IllegalArgumentException("horus.bpm.processes.calls.max-depth must be 1 to "
                         + EngineDefaults.MAX_CALL_DEPTH + ", was " + maxDepth);
+            }
+        }
+    }
+
+    /**
+     * Loops and multi-instance steps (#496).
+     *
+     * @param max most repetitions of one looped activity: a collection, a cardinality or a {@code loopMaximum}
+     *     over it opens the incident {@code MULTI_INSTANCE_LIMIT} and creates no task; 1 to 1,000, default 1,000
+     */
+    public record MultiInstance(@DefaultValue("1000") int max) {
+
+        public MultiInstance {
+            if (max < 1 || max > EngineDefaults.MAX_LOOP_INSTANCES) {
+                throw new IllegalArgumentException("horus.bpm.processes.multi-instance.max must be 1 to "
+                        + EngineDefaults.MAX_LOOP_INSTANCES + ", was " + max);
             }
         }
     }

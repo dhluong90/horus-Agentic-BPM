@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Card limit check: a script runs once per card of a batch, in parallel, and flags the cards whose limit is over
+     50,000,000 VND. The list of flags comes out in the order of the cards, in the variable limitFlags; a clerk then
+     reviews the batch (a manual task, done outside the engine). Start it with {"cards": [{"limit": 30000000},
+     {"limit": 80000000}]}. Not loaded at start-up; import it with the steps in the Process Engine import guide. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-limit-check"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-limit-check" name="Card limit check" isExecutable="true">
+    <bpmn:startEvent id="start" name="Batch received"/>
+    <bpmn:scriptTask id="check-limit" name="Check the limit of each card" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="overLimit">
+      <bpmn:multiInstanceLoopCharacteristics horus:collection="cards" horus:elementVariable="card"
+                                             horus:outputCollection="limitFlags" horus:outputElement="overLimit"/>
+      <bpmn:script>card.limit &gt; 50000000</bpmn:script>
+    </bpmn:scriptTask>
+    <bpmn:manualTask id="review-batch" name="Review the flagged cards"/>
+    <bpmn:endEvent id="end" name="Batch checked"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="check-limit"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="check-limit" targetRef="review-batch"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="review-batch" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>
