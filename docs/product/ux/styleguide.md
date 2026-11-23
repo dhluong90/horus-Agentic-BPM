@@ -5,7 +5,7 @@
 | Type | Design specification |
 | Owner area | Product |
 | Last reviewed | 2026-11-19 |
-| Status | Proposed; menu visibility, the page ground and card titles decided in PD-093 |
+| Status | Light Green default theme added; otherwise proposed; menu visibility, the page ground and card titles decided in PD-093 |
 
 This is the build-ready styleguide for the cockpit and for the sign-in page of the example host. It turns the approved hybrid direction ([UX design](../ux-design.md), [PD-056](../decisions.md#pd-056-rule-management-ux-direction)) into CSS variables, a type scale, spacing, radius, elevation, the shell layout and the state of every core component.
 
@@ -26,6 +26,24 @@ It extends the token table in [UX design section 6](../ux-design.md#6-design-tok
 11. [Copy rules](#11-copy-rules)
 12. [CSS to add today](#12-css-to-add-today)
 13. [Review checklist](#13-review-checklist)
+
+## Default theme: Green
+
+The cockpit's default look is a light Green theme, chosen by the product owner. It replaces the Ocean blue light values below; the dark theme is unchanged. Blue and Orange are designed alternates (same roles, other hues); a theme switch comes after 1.0. The light theme has no dark surface: the contrast card is a pale sage tint with dark text.
+
+| Role | Token | Value | Use |
+|---|---|---|---|
+| Page and cards | `--bg`, `--surface` | `#F7F7F7`, `#FFFFFF` | Flat grey page, white cards and menu. Borders `--line` `#ECEEED`. |
+| Primary | `--primary-fill`, `--on-primary` | `#158370`, `#FFFFFF` | Primary button, 4.7:1 with white. Hover `#0E6B5C`, pressed `#0E4D41`. |
+| Accent text | `--accent` | `#0F7362` | Links and selected text, at least 4.5:1 on white and on `--accent-soft` `#DDF3EC`. |
+| Soft surfaces | `--surface-contrast`, `--accent-soft`, `--select`, `--teal-soft` | `#E1EFD4`, `#DDF3EC`, `#EAF6F2`, `#D6F0E8` | Sage focal card, mint tint, selected row. Text on them is `--ink` `#0E2F29`. |
+| Strong marks | `--spark-max`, `--rel-1`, `--teal` | `#0E4D41` | Selected chart bar, icon discs, headings on a tint. Light bars use `#7FCBBA`. |
+| Text | `--ink`, `--muted` | `#0E2F29`, `#5B6B66` | Body and secondary text, 5.6:1 on white. |
+| Done | `--ok`, `--ok-soft` | `#2A7236`, `#E1EFD4` | Published, approved. Always with an icon and a label. |
+| Warning | `--warn`, `--warn-soft` | `#8A5A00`, `#FBEFCF` | Needs attention soon. |
+| Error | `--bad`, `--bad-soft` | `#B53A36`, `#FBE4E1` | Failed, rejected. Done, warning and error never share a hue with the accent. |
+
+Fonts stay system fonts only. Where later sections show the Ocean blue or Contrast slate light values, this section wins.
 
 ## 1. Principles
 
