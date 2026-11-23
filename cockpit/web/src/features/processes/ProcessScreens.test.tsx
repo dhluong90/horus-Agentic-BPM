@@ -264,7 +264,7 @@ describe('#499 data objects and data stores', () => {
       await waitFor(() => { expect(document.querySelector('[data-minimap]')).not.toBeNull(); });
       expect(diagram.closest('.dg__frame')).toHaveClass('dg__frame--clear-map');
     } finally {
-      for (const name of Object.keys(heights)) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+      for (const name of Object.keys(heights)) Reflect.deleteProperty(HTMLElement.prototype, name);
     }
   });
 
