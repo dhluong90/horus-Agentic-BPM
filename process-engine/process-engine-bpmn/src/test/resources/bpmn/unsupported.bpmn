@@ -5,6 +5,6 @@
     <bpmn:userTask id="review"/>
     <bpmn:boundaryEvent id="be-timeout" attachedToRef="review"/>
     <bpmn:inclusiveGateway id="ig-1"/>
-    <bpmn:endEvent id="end"><bpmn:cancelEventDefinition/></bpmn:endEvent>
+    <bpmn:endEvent id="end"><bpmn:linkEventDefinition name="x"/></bpmn:endEvent>
   </bpmn:process>
 </bpmn:definitions>

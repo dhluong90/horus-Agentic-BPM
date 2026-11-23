@@ -42,7 +42,17 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         if (state.status() != required) {
             throw new ExecutionException("INVALID_STATE", null, "Instance " + state.instanceId() + " is " + state.status());
         }
-        WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command));
+        WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command), new ScopeArming() {
+            @Override
+            public void arm(WorkingContext c, Token scope) {
+                armEventSubProcesses(c, scope);
+            }
+
+            @Override
+            public void completed(WorkingContext c, Token scope, FlowNode block) {
+                scopeCompleted(c, scope, block);
+            }
+        });
         switch (command) {
             case Command.Start start -> start(start, ctx);
             case Command.CompleteTask complete -> trigger(complete.tokenId(), TokenStatus.WAITING_USER, null, complete, ctx);
@@ -73,18 +83,25 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         }
         drain(ctx);
         settleConditions(ctx);
+        while (ctx.settleDeferred()) {
+            drain(ctx);
+            settleConditions(ctx);
+        }
         return ctx.transition();
     }
 
     /**
      * Conditional events (#492): when a command changed the instance variables, every token waiting on a conditional
-     * catch event asks its condition again, in this transaction and for this instance only, never by polling. A token
-     * that moves on may change variables itself, so the pass repeats until nothing fires, within the step budget.
+     * catch event, and every armed conditional event sub-process (#487), asks its condition again, in this transaction
+     * and for this instance only, never by polling. A token that moves on may change variables itself, so the pass
+     * repeats while the variables keep changing, within the step budget. A conditional event sub-process that was just
+     * armed is asked once too, so a condition that already holds starts it.
      */
     private void settleConditions(WorkingContext ctx) {
         int passes = 0;
-        boolean changed = ctx.variablesChanged();
-        while (changed) {
+        long seen = ctx.variableVersion();
+        boolean go = ctx.variablesChanged() | ctx.takeConditionArmed();
+        while (go) {
             if (++passes > MAX_STEPS_PER_APPLY) {
                 throw new ExecutionException("STEP_LIMIT", null, "Conditional events fire without end in one transaction");
             }
@@ -97,17 +114,50 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     continue;
                 }
                 FlowNode node = node(token.nodeId());
-                if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent catchEvent
-                        && catchEvent.eventDefinitions().size() == 1 && catchEvent.eventDefinitions().get(0)
-                                instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition)) {
+                if (!isConditionalWait(node)) {
                     // Only a conditional wait asks its condition again; a signal, message or boundary wait is woken by its own command.
                     continue;
                 }
                 behaviorFor(node).trigger(node, token, new Command.VariablesChanged(Map.of(), ctx.actor()), ctx);
             }
             drain(ctx);
-            changed = waiting.stream().anyMatch(id -> ctx.tree().get(id).map(Token::status).orElse(null)
-                    != TokenStatus.WAITING_EVENT);
+            go = ctx.variableVersion() != seen | ctx.takeConditionArmed();
+            seen = ctx.variableVersion();
+        }
+    }
+
+    private static boolean isConditionalWait(FlowNode node) {
+        return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
+                && (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                        || node instanceof StartEvent)
+                && event.eventDefinitions().size() == 1
+                && event.eventDefinitions().get(0) instanceof
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
+    }
+
+    /**
+     * #487: arms the event sub-processes of a scope that has just opened. One that waits on a timer, a message, a
+     * signal or a condition gets a token on its start event, which parks as the matching catch event does. Error,
+     * escalation and compensation ones wait for nothing and are found when something is thrown.
+     */
+    private void scopeCompleted(WorkingContext ctx, Token scope, FlowNode block) {
+        behaviorFor(block).scopeCompleted(block, scope, ctx);
+    }
+
+    private void armEventSubProcesses(WorkingContext ctx, Token scope) {
+        for (io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess esp
+                : process.eventSubProcessesOf(scope.nodeId())) {
+            StartEvent start = process.triggerOf(esp.id()).orElseThrow();
+            if (start.eventDefinitions().size() != 1 || start.eventDefinitions().get(0) instanceof
+                    io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition
+                    || start.eventDefinitions().get(0) instanceof
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition
+                    || start.eventDefinitions().get(0) instanceof
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition) {
+                continue;
+            }
+            Token listener = ctx.createToken(TokenKind.FLOW, start.id(), scope.id());
+            behaviorFor(start).enter(start, listener, ctx);
         }
     }
 
@@ -128,6 +178,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                 .or(() -> process.process().flowElements().stream().filter(StartEvent.class::isInstance)
                         .map(StartEvent.class::cast).findFirst())
                 .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No start event"));
+        armEventSubProcesses(ctx, root);
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
     }

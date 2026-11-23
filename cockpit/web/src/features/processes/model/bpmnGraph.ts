@@ -17,6 +17,7 @@ export const KNOWN_NODE_TYPES = [
   'userTask',
   'serviceTask',
   'serviceTask:agentTask',
+  'serviceTask:compensation',
   'businessRuleTask',
   'task',
   'manualTask',
@@ -28,10 +29,19 @@ export const KNOWN_NODE_TYPES = [
   'callActivity',
   'transaction',
   'subProcess',
+  'subProcess:event',
+  'startEvent:timer',
+  'startEvent:error',
+  'startEvent:escalation',
+  'startEvent:compensate',
   'intermediateThrowEvent:compensate',
   'boundaryEvent:timer',
   'boundaryEvent:error',
   'boundaryEvent:escalation',
+  'boundaryEvent:compensate',
+  'boundaryEvent:cancel',
+  'endEvent:compensate',
+  'endEvent:cancel',
   'endEvent:error',
   'endEvent:escalation',
   'endEvent:terminate',
@@ -68,8 +78,13 @@ export interface DiagramNode {
   parentId?: string;
   /** For a boundary event (#489): the id of the task, call activity or sub-process it sits on. */
   attachedTo?: string;
-  /** For a boundary event: whether it cancels what it sits on when it fires; false is drawn with a dashed ring. */
+  /**
+   * For a boundary event: whether it cancels what it sits on when it fires. For the start event of an event sub-process
+   * (#487) and the event sub-process itself: whether it cancels the rest of its scope. False is drawn with a dashed ring.
+   */
   interrupting?: boolean;
+  /** For an event sub-process (#487): what starts it, the name of its start event's definition: `timer`, `message`, `signal`, `conditional`, `error`, `escalation` or `compensate`. */
+  trigger?: string;
   /** For a link throw or catch (#493): the name that pairs the two. */
   linkName?: string;
 }
@@ -83,6 +98,8 @@ export interface DiagramEdge {
   isDefault: boolean;
   /** A link between a throw and its catch of the same name (#493), drawn dashed; not a sequence flow. */
   isLink?: boolean;
+  /** An association from a compensation boundary event to its compensation activity (#488), drawn dotted; not a sequence flow. */
+  isAssociation?: boolean;
 }
 
 export interface DiagramGraph {
@@ -136,6 +153,8 @@ export function nodeType(element: Element): string {
   const local = element.localName;
   if (local === 'serviceTask') {
     const subtype = nonEmpty(element.getAttributeNS(HORUS, 'type'));
+    // #488: a task that is the undo of another step, run by compensation and never by a flow.
+    if (subtype === undefined && element.getAttribute('isForCompensation') === 'true') return `${local}:compensation`;
     return subtype === undefined ? local : `${local}:${subtype}`;
   }
   if (local.endsWith('Event')) {
@@ -146,9 +165,15 @@ export function nodeType(element: Element): string {
   return local;
 }
 
-/** Elements that hold steps of their own: a sub-process (not an event sub-process) and a saga block. */
+/** Elements that hold steps of their own: a sub-process, an event sub-process (#487) and a saga block. */
 function isContainer(element: Element): boolean {
-  return (element.localName === 'subProcess' && element.getAttribute('triggeredByEvent') !== 'true') || element.localName === 'transaction';
+  return element.localName === 'subProcess' || element.localName === 'transaction';
+}
+
+/** The start event of an event sub-process, which carries what starts it (#487). */
+function triggerOf(element: Element): { trigger: string | undefined; interrupting: boolean } {
+  const start = elementChildren(element).find((child) => child.namespaceURI === BPMN && child.localName === 'startEvent');
+  return { trigger: start === undefined ? undefined : eventKind(start), interrupting: start?.getAttribute('isInterrupting') !== 'false' };
 }
 
 /** Nested sub-processes the cockpit follows; a deeper one is drawn as a plain box, never skipped. */
@@ -166,12 +191,20 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false });
       continue;
     }
+    if (child.localName === 'association') {
+      // #488: only the line from a compensation boundary event to its compensation activity is drawn; the ends decide below.
+      const source = nonEmpty(child.getAttribute('sourceRef'));
+      const target = nonEmpty(child.getAttribute('targetRef'));
+      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: undefined, isDefault: false, isAssociation: true });
+      continue;
+    }
     if (NOT_A_STEP.has(child.localName)) continue;
     const defaultFlow = nonEmpty(child.getAttribute('default'));
     if (defaultFlow !== undefined) defaults.add(defaultFlow);
     const boundary = child.localName === 'boundaryEvent';
     const attachedTo = boundary ? nonEmpty(child.getAttribute('attachedToRef')) : undefined;
     const link = child.localName.startsWith('intermediate') ? linkNameOf(child) : undefined;
+    const byEvent = child.localName === 'subProcess' && child.getAttribute('triggeredByEvent') === 'true' ? triggerOf(child) : undefined;
     const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
     nodes.push({
       id,
@@ -180,6 +213,8 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       ...(resultVariable !== undefined ? { resultVariable } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
       ...(attachedTo !== undefined ? { attachedTo, interrupting: child.getAttribute('cancelActivity') !== 'false' } : {}),
+      ...(child.localName === 'startEvent' && child.getAttribute('isInterrupting') === 'false' ? { interrupting: false } : {}),
+      ...(byEvent !== undefined ? { interrupting: byEvent.interrupting, ...(byEvent.trigger !== undefined ? { trigger: byEvent.trigger } : {}) } : {}),
       ...(link !== undefined ? { linkName: link } : {}),
     });
     if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);

@@ -1861,7 +1861,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Kind:** semantics
 - **Given:** Process `loan-booking-embedded`: `register-loan` (undone by `cancel-loan`) in the root scope, then a `subProcess` `disburse` with `reserve-funds` (undone by `release-funds`), `open-account` (undone by `close-account`) and `notify-partner` with `onFailure: compensate`, which the partner refuses. A second process `fund` with `hold` (undone by `release-hold`) and `debit` (`onFailure: compensate`) inside a sub-process, after `open` (undone by `close-account`) in the root scope.
 - **When:** `notify-partner` fails for good; and, in the second process, `debit` answers the business error `INSUFFICIENT_FUNDS`.
-- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are not walked by a later undo of the enclosing scope until S2 (DESIGN section 4.2).
+- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are walked by a later undo of the enclosing scope, with the sub-processes nested in it (`PRE-289`).
 - **Example:** `disburse fails -> close-account, release-funds run; cancel-loan does not`.
 - **Test ID:** `PRE_262_an_undo_started_inside_the_sub_process_walks_that_scope_and_never_the_enclosing_one` (`SubProcessScopeTest`), `PRE_262_an_embedded_sub_process_is_a_scope_whose_failure_undoes_only_its_own_steps` (`SagaCompensationTest`)
 
@@ -1873,7 +1873,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** Each file is imported and compiled.
 - **Then:** The first reads with the steps and flows of `onboard` nested under it, and its canonical form holds a step of type `subProcess` with its own `steps`; the BPMN export reads back to the same canonical form. The second is refused as `422 BPMN_UNSUPPORTED_ELEMENT` for `subProcess with triggeredByEvent`, stage `S1`. The third is refused at activation with `FLOW_CROSSES_SAGA` naming the flow, because a flow never crosses the boundary of a scope. The fourth is refused with `NO_END_EVENT` naming `onboard`.
 - **Example:** `flow fraud -> end across the boundary -> FLOW_CROSSES_SAGA`.
-- **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_is_refused_with_its_stage_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)
+- **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_with_a_flow_in_or_out_is_refused_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)
 
 ### PRE-280 An interrupting timer boundary cancels the task it sits on and runs its own flow
 - **Traces to:** `TR-STD-04`, `PRE-006`, #489
@@ -2098,3 +2098,134 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
 - **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
 - **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)
+
+### PRE-288 A cancel end event compensates its transaction newest first, and the cancel boundary event leaves the flow
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04`, `PRE-073`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `fund-transfer-cancel`: the transaction `transfer` holds `hold-funds` (local, with a compensation boundary event whose compensation activity runs `release-hold`) and `debit-source` (remote, with a compensation boundary event whose compensation activity runs the adapter `credit-back`), then an exclusive gateway that takes a cancel end event when the target account `0099-887766` is closed. A cancel boundary event on `transfer` leads to `notify-customer`. An instance moves `25,000,000 VND` from `0011-223344` and the target is closed.
+- **When:** `debit-source` is accepted and the flow reaches the cancel end event.
+- **Then:**
+  - The other live tokens of the transaction are cancelled, the instance is `COMPENSATING` and cannot be cancelled, and `processes.compensation.started.v1` carries the transaction's scope token, `depth` 2 and `cause` `CANCEL`. The customer has not been told.
+  - `credit-back` runs first as a `COMPENSATION` job keyed by its own id, with the forward job and attempt of the debit; `release-hold` runs second with the attempt of the hold; nothing else runs.
+  - With every entry `DONE` the transaction's scope token is `COMPENSATED`, the instance is `RUNNING` again, history records `COMPENSATED` and `BOUNDARY_FIRED` with trigger `CANCEL`, `notify-customer` runs once, and the instance ends `COMPLETED`: a cancelled transaction is a business outcome and no `processes.instance.failed.v1` is published.
+  - A cancel end event outside a transaction, or in a transaction with no cancel boundary event, a compensation boundary event with no compensation activity, and a compensation activity with a flow, are refused when the definition is compiled (`CANCEL_END_OUTSIDE_TRANSACTION`, `CANCEL_BOUNDARY_REQUIRED`, `COMPENSATION_ACTIVITY_MISSING`, `COMPENSATION_ACTIVITY_HAS_FLOW`).
+- **Example:** `debit 25,000,000 VND accepted, target closed -> credit-back, release-hold, then notify-customer; instance COMPLETED`.
+- **Test ID:** `PRE_288_a_cancel_end_compensates_the_transaction_newest_first_and_the_cancel_boundary_leaves_the_flow` (`SagaCompensationTest`), `PRE_288_the_cancel_end_waits_for_the_undo_and_the_cancel_boundary_then_takes_the_flow`, `PRE_288_a_compensation_boundary_without_its_activity_and_a_cancel_end_without_its_boundary_are_refused` (`TransactionCompensationTest`)
+
+### PRE-289 A compensation of the enclosing scope walks into the sub-processes completed in it
+- **Traces to:** `TR-COMP-01`, `PRE-044`, `PRE-262`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-booking-nested`: `register-loan` (undone by `cancel-loan`) in the root scope, then the sub-process `disburse` with `reserve-funds` (undone by `release-funds`), the sub-process `fees` with `charge-fee` (undone by `refund-fee`) and `open-account` (undone by `close-account`), all completed; then `notify-partner` in the root scope with `onFailure: compensate`, which the partner refuses.
+- **When:** `notify-partner` fails for good.
+- **Then:** The compensation is that of the root scope token and takes the entries of the root scope and of every scope token under it, newest pushed first across scopes: `close-account`, `refund-fee`, `release-funds`, `cancel-loan`, each once. Every entry is `DONE`, the root scope token is `COMPENSATED`, the instance ends `FAILED`, and the timeline lists the four undos under the one compensation of the root scope. An undo started inside a sub-process still walks only that sub-process and the scopes under it (`PRE-262`).
+- **Example:** `refused at notify-partner -> close-account, refund-fee, release-funds, cancel-loan`.
+- **Test ID:** `PRE_289_a_compensation_of_the_enclosing_scope_walks_into_the_sub_processes_completed_in_it` (`SagaCompensationTest`)
+
+### PRE-290 A failed undo is retried under its own job, and every undo runs once before the flow resumes
+- **Traces to:** `TR-COMP-02`, `TR-IDEM-04`, `PRE-074`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The cancelled transfer of `PRE-288`, where core banking refuses the first `credit-back` with `ACCOUNT_FROZEN`.
+- **When:** The first undo fails for good, and then operator `ops.lan` retries the incident after the account is unfrozen.
+- **Then:** After the failure the entry of `debit-source` is `FAILED`, an incident `COMPENSATION_FAILED` holds the walk, `release-hold` has not run, the instance is `COMPENSATING` and the cancel boundary has not fired. The retry runs `credit-back` again under the same job id with a new attempt id, so core banking sees one idempotency key; `release-hold` then runs exactly once, `notify-customer` runs once, both entries are `DONE`, the instance is `COMPLETED`, and nothing is left to run.
+- **Example:** `credit-back refused, retried -> one key, two attempts; release-hold once`.
+- **Test ID:** `PRE_290_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes` (`SagaCompensationTest`)
+
+### PRE-291 A compensation throw that names an activity undoes only that activity, and a second throw undoes nothing
+- **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-undo-one`: `register-loan`, `reserve-funds` and `open-account` complete in the root scope, each with an undo; then two compensation throw events with `activityRef="reserve-funds"` in a row, then the end.
+- **When:** The first throw runs, its undo completes, and the second throw runs.
+- **Then:** Only `release-funds` runs, once; the entries of `open-account` and `register-loan` stay `PENDING`; the second throw finds nothing `PENDING` for `reserve-funds` and the flow goes on at once; the instance ends `COMPLETED`, and history records `COMPENSATION_STARTED` on each throw. A compensation throw event or compensation end event with no `activityRef` undoes the whole scope the same way; one with no outgoing flow keeps the behaviour of `PRE-076`.
+- **Example:** `throw reserve-funds twice -> release-funds once`.
+- **Test ID:** `PRE_291_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing` (`SagaCompensationTest`)
+
+### PRE-320 An interrupting event sub-process cancels the other work of its scope and ends the scope when it ends
+- **Traces to:** `TR-STD-04`, `TR-STD-13`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `loan-application` with the task `assess` for an underwriter, and the event sub-process `withdrawal` whose start event is a message start for `applicant-withdrew`, keyed by the variable `applicationId`, interrupting; its one step is `close-file`.
+- **When:** The instance `LA-2026-0042` is waiting at `assess`, and `applicant-withdrew` arrives for that key.
+- **Then:**
+  - The task `assess` is `CANCELLED` with its work item, `close-file` runs, and history records `EVENT_SUBPROCESS_STARTED` with trigger `MESSAGE` and `interrupting` true. A completion of the cancelled task is refused.
+  - The instance is `RUNNING` until `close-file` ends and then `COMPLETED`: the scope ends with the event sub-process. A message after that finds no subscription.
+- **Example:** `applicant-withdrew for LA-2026-0042 -> assess cancelled, close-file, COMPLETED`.
+- **Test ID:** `PRE_320_an_interrupting_message_event_sub_process_cancels_the_other_work_and_the_scope_ends_with_it` (`EventSubProcessTest`), `PRE_320_an_interrupting_message_event_sub_process_cancels_the_wait_and_leaves_no_subscription` (`EventSubProcessPostgresIT`)
+
+### PRE-321 A non-interrupting event sub-process runs beside the main flow, and again for the next trigger where the trigger can come again
+- **Traces to:** `TR-STD-04`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a reminder event sub-process on a timer of 24 hours, `isInterrupting="false"`, and a repricing event sub-process on the signal `rate-card-updated`, `isInterrupting="false"`.
+- **When:** The timer fires while `assess` is open; the underwriter completes `assess` before the reminder ends; the signal is broadcast twice.
+- **Then:**
+  - The task stays open and the reminder runs once. No second timer is scheduled: a timer fires once. The instance is `RUNNING` until both the main flow and the reminder have ended.
+  - Each broadcast starts the repricing once. Its old subscription is deleted and a new one is written in the same transaction, so a delivery for the first subscription is refused after it was used.
+  - A message start behaves as the signal does: each message of its key starts the handler.
+- **Example:** `timer after 24 h -> reminder runs, assess still open; two rate changes -> two repricings`.
+- **Test ID:** `PRE_321_a_non_interrupting_timer_event_sub_process_runs_once_beside_the_main_flow`, `PRE_321_a_non_interrupting_signal_event_sub_process_starts_again_for_every_broadcast` (`EventSubProcessTest`), `PRE_321_a_non_interrupting_timer_event_sub_process_runs_beside_the_wait_and_the_scope_ends_over_nothing` (`EventSubProcessPostgresIT`)
+
+### PRE-322 Each start of an event sub-process triggers when its event happens: timer, message, signal and condition
+- **Traces to:** `TR-STD-04`, `TR-STD-11`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a conditional event sub-process `assessment.score >= 80` that notifies compliance.
+- **When:** The instance starts with no score; the underwriter completes `assess` with a score of 85. Another instance starts with a score of 90 and an interrupting handler. A third has four reviews that write the score 85, 90, 60 and 95, with a non-interrupting handler.
+- **Then:**
+  - The condition is asked in the transaction that changes the variables, never by polling; at 85 the handler starts, in the same transaction as the completion, before the scope ends. A condition that cannot be read yet, because the variable is not set, is false and fails nothing.
+  - A condition that is true when the scope opens starts the handler at once, and an interrupting one cancels the task.
+  - A non-interrupting condition starts the handler at 85 and at 95 only: at 90 it still held, and at 60 it was reset.
+  - The timer start (`PRE-321`), the message start (`PRE-320`) and the signal start (`PRE-321`) trigger as shown there; a timer is the same job kind and lease as an intermediate timer.
+- **Example:** `score 85 -> notify-compliance; 90 -> nothing; 60, 95 -> notify-compliance again`.
+- **Test ID:** `PRE_322_a_conditional_event_sub_process_starts_when_the_variables_make_its_condition_true`, `PRE_322_a_conditional_event_sub_process_that_is_true_when_its_scope_opens_starts_at_once`, `PRE_322_a_non_interrupting_conditional_starts_again_only_after_its_condition_has_been_false` (`EventSubProcessTest`)
+
+### PRE-323 An error or an escalation raised inside a scope is caught by the event sub-process of that scope, the nearest catcher first
+- **Traces to:** `TR-STD-04`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A disbursement sub-process whose `check-limit` ends with the error `LIMIT_EXCEEDED` while `manual-review` is open, and an error event sub-process inside it; a debit whose business error `INSUFFICIENT_FUNDS` has a boundary event on the step and a catch-all error event sub-process in the process; a KYC sub-process that raises the escalation `AML_HIT` and goes on, with an escalation event sub-process in the process around it, interrupting or not.
+- **When:** Each is raised.
+- **Then:**
+  - The error ends the other work of the scope: the review is cancelled with its work item, the handler runs and no incident opens. When the handler ends the sub-process is complete and the parent goes on.
+  - Walking outwards, an event sub-process of a scope is tried before the boundary events on that scope's own activity, a specific code before a catch-all, and the event sub-process a handler stands in is skipped, so a handler's own error is not caught by itself. A boundary on the step wins over the event sub-process of the scope.
+  - A non-interrupting escalation handler runs beside the KYC, which goes on to `verify`; an interrupting one cancels the thrower and the sub-process. An error start event is always interrupting (`EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING`).
+- **Example:** `LIMIT_EXCEEDED in disburse -> review cancelled, notify-limit; INSUFFICIENT_FUNDS -> the boundary, not the process handler`.
+- **Test ID:** `PRE_323_an_error_raised_inside_a_sub_process_is_caught_by_its_error_event_sub_process`, `PRE_323_a_business_error_of_a_step_is_caught_by_an_error_event_sub_process_of_the_process`, `PRE_323_a_boundary_on_the_step_wins_over_an_event_sub_process_of_the_scope_and_a_specific_code_over_a_catch_all`, `PRE_323_an_escalation_from_a_sub_process_starts_the_event_sub_process_of_the_process_around_it`, `PRE_323_an_interrupting_escalation_handler_cancels_the_sub_process_that_raised_it` (`EventSubProcessTest`), `PRE_323_a_business_error_of_a_step_is_taken_by_the_error_event_sub_process_and_opens_no_incident` (`EventSubProcessPostgresIT`)
+
+### PRE-324 An event sub-process waits only while its scope is open, and its timer or subscription goes when the scope ends
+- **Traces to:** `TR-STD-04`, `TR-STD-13`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a timer, a signal and a message event sub-process, all waiting; a screening sub-process with its own message event sub-process.
+- **When:** The main flow ends; the screening ends.
+- **Then:**
+  - The waits do not count as work: the instance completes, the timer job is cancelled and the signal subscription deleted, and no live token is left. A running event sub-process does count, so a non-interrupting handler keeps its scope open.
+  - A sub-process arms its event sub-processes when it opens and drops them when it ends. The start event of an event sub-process holds one token that is never shown as work on the timeline.
+- **Example:** `assess completes -> COMPLETED, timer cancelled, subscription deleted`.
+- **Test ID:** `PRE_324_a_scope_that_ends_removes_the_timer_and_the_subscriptions_of_its_waiting_event_sub_processes`, `PRE_324_an_event_sub_process_of_a_sub_process_is_armed_when_it_opens_and_dropped_when_it_ends` (`EventSubProcessTest`), `PRE_324_a_non_interrupting_signal_event_sub_process_starts_for_each_broadcast_and_its_subscription_goes_with_the_scope` (`EventSubProcessPostgresIT`)
+
+### PRE-325 Event sub-processes import, export to the same definition and are refused with a code when they are misplaced or unfinished
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example `loan-application-event-subprocesses.bpmn` (message, timer and signal event sub-processes); a process with a timer start event; an event sub-process with a flow in, one whose start event has no trigger, a message one without `horus:correlationKey`, an error one with `isInterrupting="false"`, and a boundary event on one.
+- **When:** Each is imported, and the valid ones are exported and imported again.
+- **Then:** The valid files read, compile and export to the same canonical definition: `triggeredByEvent` on the sub-process, the trigger kind with its duration, code or signal, and `interrupting` false on the start step when declared; definitions without them keep their hash. The others are `422 VALIDATION_FAILED` with `START_TRIGGER_MISPLACED`, `EVENT_SUBPROCESS_HAS_FLOW`, `EVENT_SUBPROCESS_TRIGGER_REQUIRED`, `CORRELATION_KEY_REQUIRED`, `EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING` and `BOUNDARY_ATTACHED_INVALID`; nothing is stored. A message start event inside an event sub-process never starts a process: only the start event of the process itself does.
+- **Example:** `timer start event on the process -> START_TRIGGER_MISPLACED`.
+- **Test ID:** `PRE_325_event_sub_processes_export_and_read_back_to_the_same_definition`, `PRE_325_a_misplaced_or_unfinished_event_sub_process_is_refused_with_its_code` (`EventSubProcessTest`)
+
+### PRE-326 A completed sub-process, transaction or call activity is undone by the handler its compensation event sub-process or compensation boundary event names
+- **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, `PRE-289`, #487
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-booking` with the sub-process `disburse`, whose step `reserve-funds` is undone by `release-funds`, and a compensation event sub-process inside it holding one service task `reverse-disbursement` with `horus:input account=${instance.account}`; the same sub-process with a compensation boundary event and compensation activity instead; and a call activity `check-credit` with a compensation boundary event whose activity is `cancel-credit-hold`.
+- **When:** The step completes and `disburse` ends; the child of `check-credit` completes.
+- **Then:**
+  - On the end of the sub-process one entry is pushed on the stack of the scope it stands in, after the entries of its steps, so a later compensation of that scope runs `reverse-disbursement` first, with `account` read when the sub-process ended and nothing else of the variables. Each entry still runs once (`PRE-290`).
+  - The handler adds to the undo of the steps inside: they are undone after it. A sub-process that is cancelled or interrupted before it ends pushes nothing.
+  - A call activity pushes the entry of its boundary's compensation activity when the child completes, with the child's id, as a `horus:compensate` handler does. A compensation event sub-process needs a sub-process or transaction, one service task with `horus:handler`, and no compensation boundary event beside it (`COMPENSATION_HANDLER_SCOPE`, `COMPENSATION_EVENT_SUBPROCESS_SHAPE`, `COMPENSATION_DUPLICATE`).
+- **Example:** `disburse ends -> push release-funds, then reverse-disbursement; a later undo runs reverse-disbursement, release-funds`.
+- **Test ID:** `PRE_326_a_compensation_event_sub_process_pushes_the_undo_of_its_sub_process_when_it_completes`, `PRE_326_a_compensation_boundary_event_on_a_sub_process_or_a_call_activity_names_its_undo`, `PRE_326_a_compensation_event_sub_process_has_one_undo_task_in_a_sub_process_that_has_no_other_undo` (`EventSubProcessTest`)

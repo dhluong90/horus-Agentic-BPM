@@ -687,11 +687,15 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public void pushCompensation(CompensationEntry e) {
         jdbc.sql("INSERT INTO pre_compensation_stack (tenant_id, id, instance_id, scope_token_id, seq, step_id, "
                         + "forward_job_id, forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, "
-                        + "completed_at) SELECT ?, ?, ?, ?, coalesce(max(seq), 0) + 1, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ? "
-                        + "FROM pre_compensation_stack WHERE tenant_id = ? AND instance_id = ? AND scope_token_id = ?")
-                .params(e.tenantId(), e.id(), e.instanceId(), e.scopeTokenId(), e.stepId(), e.forwardJobId(),
-                        e.forwardAttemptId(), e.handler(), e.mode(), e.inputSnapshotJson(), e.status(), e.jobId(),
-                        ts(e.pushedAt()), ts(e.completedAt()), e.tenantId(), e.instanceId(), e.scopeTokenId())
+                        + "completed_at, instance_seq) SELECT ?, ?, ?, ?, "
+                        + "(SELECT coalesce(max(seq), 0) + 1 FROM pre_compensation_stack WHERE tenant_id = ? "
+                        + "AND instance_id = ? AND scope_token_id = ?), ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, "
+                        + "(SELECT coalesce(max(instance_seq), 0) + 1 FROM pre_compensation_stack WHERE tenant_id = ? "
+                        + "AND instance_id = ?)")
+                .params(e.tenantId(), e.id(), e.instanceId(), e.scopeTokenId(), e.tenantId(), e.instanceId(),
+                        e.scopeTokenId(), e.stepId(), e.forwardJobId(), e.forwardAttemptId(), e.handler(), e.mode(),
+                        e.inputSnapshotJson(), e.status(), e.jobId(), ts(e.pushedAt()), ts(e.completedAt()),
+                        e.tenantId(), e.instanceId())
                 .update();
     }
 
@@ -714,7 +718,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 rs.getString("scope_token_id"), rs.getInt("seq"), rs.getString("step_id"),
                 rs.getString("forward_job_id"), rs.getString("forward_attempt_id"), rs.getString("handler"),
                 rs.getString("mode"), rs.getString("input_snapshot"), rs.getString("status"), rs.getString("job_id"),
-                instant(rs, "pushed_at"), instant(rs, "completed_at"));
+                instant(rs, "pushed_at"), instant(rs, "completed_at"), rs.getInt("instance_seq"));
     }
 
     @Override

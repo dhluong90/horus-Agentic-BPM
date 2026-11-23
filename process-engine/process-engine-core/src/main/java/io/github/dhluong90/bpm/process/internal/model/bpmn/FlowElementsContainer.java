@@ -30,4 +30,20 @@ public interface FlowElementsContainer {
         }
         return java.util.Collections.unmodifiableList(out);
     }
+
+    /**
+     * Every artifact of this container and of the containers nested in it, in document order (#488: the associations
+     * that tie a compensation boundary event to its compensation activity).
+     *
+     * @return all artifacts
+     */
+    default List<Artifact> allArtifacts() {
+        List<Artifact> out = new java.util.ArrayList<>(artifacts());
+        for (FlowElement element : flowElements()) {
+            if (element instanceof FlowElementsContainer nested) {
+                out.addAll(nested.allArtifacts());
+            }
+        }
+        return java.util.Collections.unmodifiableList(out);
+    }
 }

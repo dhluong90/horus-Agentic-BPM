@@ -38,5 +38,10 @@ public final class EventBehaviors implements BehaviorModule {
         registry.register(new MessageStartEventBehavior());
         registry.register(new ReceiveTaskBehavior());
         registry.register(new SendTaskBehavior());
+        // #487: the start events of event sub-processes that no other start event covers.
+        registry.register(new EventSubProcessStarts.Timer());
+        registry.register(EventSubProcessStarts.Passive.error());
+        registry.register(EventSubProcessStarts.Passive.escalation());
+        registry.register(EventSubProcessStarts.Passive.compensation());
     }
 }

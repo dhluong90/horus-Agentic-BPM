@@ -93,6 +93,15 @@ final class MessageSupport {
 
     /** The message arrived: its named payload fields become variables and the token leaves the step. */
     static void deliver(FlowNode node, Token token, Command trigger, ExecutionContext ctx) {
+        receive(node, token, trigger, ctx);
+        Token active = token.withStatus(TokenStatus.ACTIVE);
+        ctx.update(active);
+        ctx.history("NODE_COMPLETED", token, Map.of());
+        ctx.takeOutgoing(active, node);
+    }
+
+    /** The first half of a delivery: the named payload fields become variables and the receipt is recorded (#487). */
+    static void receive(FlowNode node, Token token, Command trigger, ExecutionContext ctx) {
         if (!(trigger instanceof Command.CorrelateMessage message)) {
             throw new ExecutionException("COMMAND_NOT_SUPPORTED", node.id(), "Expected a message");
         }
@@ -107,10 +116,6 @@ final class MessageSupport {
         brought.forEach((k, v) -> ctx.variables().set(k, v));
         ctx.history("MESSAGE_RECEIVED", token, Map.of("message", message.messageName(), "subscriptionId",
                 message.subscriptionId()));
-        Token active = token.withStatus(TokenStatus.ACTIVE);
-        ctx.update(active);
-        ctx.history("NODE_COMPLETED", token, Map.of());
-        ctx.takeOutgoing(active, node);
     }
 
     /** The step hands its message to the host's adapter, once; the caller moves the token on. */

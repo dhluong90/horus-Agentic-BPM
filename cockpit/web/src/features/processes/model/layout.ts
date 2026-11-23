@@ -40,6 +40,8 @@ export interface PlacedEdge {
   isDefault: boolean;
   /** A link between a throw and its catch (#493), drawn dashed. */
   isLink?: boolean;
+  /** The line from a compensation boundary event to its compensation activity (#488), drawn dotted. */
+  isAssociation?: boolean;
   points: Point[];
   /** Centre of the edge's label, in the space dagre kept free for it. */
   labelAt: Point | undefined;
@@ -175,7 +177,7 @@ function shift(level: Level, dx: number, dy: number): void {
 /** Counts the steps under a container at every level, leaving out start and end events. */
 function stepCount(graph: DiagramGraph, id: string): number {
   return graph.nodes.filter((node) => node.parentId === id).reduce(
-    (sum, node) => sum + (node.type === 'startEvent' || node.type === 'endEvent' ? 0 : 1) + stepCount(graph, node.id), 0);
+    (sum, node) => sum + (node.type.startsWith('startEvent') || node.type === 'endEvent' ? 0 : 1) + stepCount(graph, node.id), 0);
 }
 
 /**

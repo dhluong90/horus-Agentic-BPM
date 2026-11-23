@@ -83,6 +83,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
@@ -2022,7 +2023,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private static boolean startsOn(CompiledProcess process, String name) {
+        // Only the start event of the process itself: one in an event sub-process (#487) waits inside an instance.
         return process.nodes().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
+                && process.containerOf(s.id()).equals(process.process().id())
                 && s.eventDefinitions().stream().anyMatch(d -> d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition m
                 && name.equals(m.messageRef())));
     }
@@ -3675,7 +3678,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * step's attempt id is its job id, whose accepted attempt is the job's current one; a local step has no job.
      */
     private ProcessStore.CompensationEntry entryOf(Effect.PushCompensation push, String tenant, String instanceId,
-            FlowNode node, Instant now) {
+            FlowNode forwardNode, FlowNode compensationActivity, Instant now) {
+        // #488: an undo that a compensation boundary event names runs as its compensation activity says (local or
+        // remote); a horus:compensate undo runs as the step itself does.
+        FlowNode node = compensationActivity != null ? compensationActivity : forwardNode;
         JobRow forward = jobs.findJob(tenant, push.attemptId()).filter(j -> JobStore.isAsync(j.jobKind()))
                 .orElse(null);
         String forwardJobId = forward == null ? null : forward.id();
@@ -3686,15 +3692,62 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String mode = MANUAL.equals(push.handler()) ? MANUAL : remote ? "remote" : "local";
         return new ProcessStore.CompensationEntry(tenant, Ulid.next(now), instanceId, push.scopeTokenId(), 0,
                 push.nodeId(), forwardJobId, forwardAttemptId, push.handler(), mode, Values.write(push.inputSnapshot()),
-                ProcessStore.CompensationEntry.PENDING, null, now, null);
+                ProcessStore.CompensationEntry.PENDING, null, now, null, 0);
     }
 
-    /** The entries of one scope token, newest first. */
-    private List<ProcessStore.CompensationEntry> scopeStack(String tenant, String instanceId, String scopeTokenId) {
+    /**
+     * The entries a walk of {@code walkScope} takes, newest pushed first (#488): those of the scope token itself and of
+     * every scope token under it, the sub-processes completed in it, so an enclosing scope's undo reaches what its
+     * sub-processes did. With a throw that names an activity, only the entries of that activity: its own step, or
+     * the steps run in a sub-process of that id.
+     */
+    private List<ProcessStore.CompensationEntry> walkStack(StoredDefinition definition, String tenant,
+            String instanceId, String walkScope) {
+        List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = store.tokens(tenant, instanceId);
+        java.util.Map<String, io.github.dhluong90.bpm.process.internal.exec.Token> byId = new java.util.HashMap<>();
+        tokens.forEach(t -> byId.put(t.id(), t));
+        java.util.Set<String> scopes = new java.util.HashSet<>(java.util.Set.of(walkScope));
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (io.github.dhluong90.bpm.process.internal.exec.Token t : tokens) {
+                if (t.kind() == io.github.dhluong90.bpm.process.internal.exec.TokenKind.SCOPE
+                        && t.scopeTokenId() != null && scopes.contains(t.scopeTokenId()) && scopes.add(t.id())) {
+                    grew = true;
+                }
+            }
+        }
+        String target = tokens.stream().filter(t -> walkScope.equals(t.scopeTokenId())
+                && t.status() == TokenStatus.WAITING_EVENT).findFirst()
+                .flatMap(t -> compiled(definition).process().node(t.nodeId()))
+                .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event)
+                .map(n -> ((io.github.dhluong90.bpm.process.internal.model.bpmn.Event) n).eventDefinitions())
+                .filter(d -> d.size() == 1 && d.get(0) instanceof
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition)
+                .map(d -> ((io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition) d.get(0))
+                        .activityRef())
+                .orElse(null);
         return store.compensationEntries(tenant, instanceId).stream()
-                .filter(e -> e.scopeTokenId().equals(scopeTokenId))
-                .sorted(java.util.Comparator.comparingInt(ProcessStore.CompensationEntry::seq).reversed())
+                .filter(e -> scopes.contains(e.scopeTokenId()))
+                .filter(e -> target == null || undoesActivity(e, target, byId, walkScope))
+                .sorted(java.util.Comparator.comparingInt(ProcessStore.CompensationEntry::instanceSeq).reversed())
                 .toList();
+    }
+
+    /** Whether an entry belongs to the activity: its own step, or a step run inside that sub-process's scope. */
+    private static boolean undoesActivity(ProcessStore.CompensationEntry entry, String activityId,
+            java.util.Map<String, io.github.dhluong90.bpm.process.internal.exec.Token> byId, String walkScope) {
+        if (entry.stepId().equals(activityId)) {
+            return true;
+        }
+        io.github.dhluong90.bpm.process.internal.exec.Token scope = byId.get(entry.scopeTokenId());
+        while (scope != null && !scope.id().equals(walkScope)) {
+            if (scope.nodeId().equals(activityId)) {
+                return true;
+            }
+            scope = scope.scopeTokenId() == null ? null : byId.get(scope.scopeTokenId());
+        }
+        return false;
     }
 
     /**
@@ -3703,7 +3756,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private void startCompensation(StoredDefinition definition, String tenant, String instanceId,
             Effect.StartCompensation started) {
-        long depth = scopeStack(tenant, instanceId, started.scopeTokenId()).stream()
+        long depth = walkStack(definition, tenant, instanceId, started.scopeTokenId()).stream()
                 .filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).count();
         InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
         Instant now = clock.instant();
@@ -3734,7 +3787,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * incident; with none left the scope is {@code COMPENSATED} and the instance {@code FAILED} (PRE-013).
      */
     private void advanceWalk(StoredDefinition definition, String tenant, String instanceId, String scopeTokenId) {
-        List<ProcessStore.CompensationEntry> stack = scopeStack(tenant, instanceId, scopeTokenId);
+        List<ProcessStore.CompensationEntry> stack = walkStack(definition, tenant, instanceId, scopeTokenId);
         if (stack.stream().anyMatch(e -> !ProcessStore.CompensationEntry.PENDING.equals(e.status())
                 && !ProcessStore.CompensationEntry.DONE.equals(e.status()))) {
             return;
@@ -3857,11 +3910,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 details.put("jobId", job.id());
                 details.put("attempt", job.attempt());
                 store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
-                        "COMPENSATION_STEP_COMPLETED", entry.stepId(), entry.scopeTokenId(), attemptId, reportedBy, now,
+                        "COMPENSATION_STEP_COMPLETED", entry.stepId(), job.tokenId(), attemptId, reportedBy, now,
                         details)));
-                closeRetried(tenant, row.id(), entry.scopeTokenId(), now);
+                closeRetried(tenant, row.id(), job.tokenId(), now);
                 advanceWalk(store.definition(tenant, row.definitionId()).orElseThrow(), tenant, row.id(),
-                        entry.scopeTokenId());
+                        job.tokenId());
             }
             case StepResult.BusinessError error -> giveBack(job, attemptId, error.code(), false, true, reportedBy);
             case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), false,
@@ -3882,9 +3935,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("jobId", job.id());
         details.put("errorCode", cause);
         store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
-                "COMPENSATION_STEP_FAILED", entry.stepId(), entry.scopeTokenId(),
+                "COMPENSATION_STEP_FAILED", entry.stepId(), job.tokenId(),
                 attemptId(job.id(), Math.max(1, job.attempt())), COMPENSATION_ACTOR, now, details)));
-        raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), entry.scopeTokenId(),
+        raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), job.tokenId(),
                 entry.stepId(), job.id(), attemptId(job.id(), Math.max(1, job.attempt())), Math.max(0, job.attempt() - 1),
                 COMPENSATION_FAILED, cause, "Undo " + entry.handler() + " of " + entry.stepId() + " (entry "
                         + entry.id() + ", forward job " + (entry.forwardJobId() == null ? "-" : entry.forwardJobId())
@@ -3924,8 +3977,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /** The entry an undo incident holds: on its scope token and step, {@code FAILED} or {@code MANUAL}. */
     private ProcessStore.CompensationEntry heldEntry(ProcessStore.IncidentRow incident) {
-        return store.compensationEntries(incident.tenantId(), incident.instanceId()).stream()
-                .filter(e -> e.scopeTokenId().equals(incident.tokenId()) && e.stepId().equals(incident.nodeId())
+        return walkStack(store.definition(incident.tenantId(), store.findInstance(incident.tenantId(),
+                incident.instanceId()).orElseThrow().definitionId()).orElseThrow(), incident.tenantId(),
+                incident.instanceId(), incident.tokenId()).stream()
+                .filter(e -> e.stepId().equals(incident.nodeId())
                         && (ProcessStore.CompensationEntry.FAILED.equals(e.status())
                                 || ProcessStore.CompensationEntry.MANUAL.equals(e.status())))
                 .findFirst()
@@ -3985,7 +4040,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("resolvedBy", approver);
         details.put("manual", true);
         store.appendHistory(tenant, pending.instanceId(), pending.definitionId(), List.of(new HistoryEntry(
-                "COMPENSATION_STEP_COMPLETED", entry.stepId(), entry.scopeTokenId(), null, approver, now, details)));
+                "COMPENSATION_STEP_COMPLETED", entry.stepId(), pending.tokenId(), null, approver, now, details)));
         ProcessStore.IncidentRow current = store.lockIncident(tenant, pending.id()).orElseThrow();
         ProcessStore.IncidentRow resolved = current.resolved(COMPLETED_MANUALLY, approver, now);
         writeIncident(resolved);
@@ -3999,7 +4054,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             extra.put("comment", comment);
         }
         recordResolved(resolved, approver, null, extra, now);
-        advanceWalk(locked.definition(), tenant, pending.instanceId(), entry.scopeTokenId());
+        advanceWalk(locked.definition(), tenant, pending.instanceId(), pending.tokenId());
         return resolved;
     }
 
@@ -4925,7 +4980,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // After the tokens: an entry references its scope token.
         for (Effect.PushCompensation push : pushes) {
             FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
-            store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, now));
+            FlowNode viaBoundary = node.extensions().first(CompensateHandlerRef.class).isPresent() ? null
+                    : compiled.process().compensationActivityOf(node.id()).orElse(null);
+            store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, viaBoundary, now));
         }
         for (Effect.StartChildInstance call : childStarts) {
             startChild(definition, row, state, call, newIncidents, now);
@@ -5111,8 +5168,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions),
                     AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
                             n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
-                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent c
-                            && c.eventDefinitions().stream().anyMatch(
+                            || (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent)
+                            && ((io.github.dhluong90.bpm.process.internal.model.bpmn.Event) n).eventDefinitions()
+                            .stream().anyMatch(
                             io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition.class::isInstance)));
         });
     }
