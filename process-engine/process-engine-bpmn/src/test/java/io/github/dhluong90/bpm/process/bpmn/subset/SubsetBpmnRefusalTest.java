@@ -208,7 +208,7 @@ class SubsetBpmnRefusalTest {
     void PRE_108_event_definitions_take_the_stage_of_their_kind() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:messageEventDefinition/></bpmn:startEvent>"
                 + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition/></bpmn:startEvent>"
-                + "<bpmn:endEvent id=\"c\"><bpmn:signalEventDefinition/></bpmn:endEvent>"
+                + "<bpmn:endEvent id=\"c\"><bpmn:conditionalEventDefinition/></bpmn:endEvent>"
                 + "<bpmn:endEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:endEvent>" + TAIL)
                 .getBytes(StandardCharsets.UTF_8);
 
