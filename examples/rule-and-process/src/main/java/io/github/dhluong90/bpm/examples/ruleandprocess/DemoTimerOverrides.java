@@ -4,9 +4,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -21,9 +25,11 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.ProtocolResolver;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.util.StreamUtils;
 
 /**
@@ -55,13 +61,32 @@ record DemoTimerOverrides(Map<String, Duration> timers) {
      * @return the text with each configured timer's duration replaced
      */
     String apply(String model) {
+        return apply(model, new HashSet<>());
+    }
+
+    /**
+     * @param model the BPMN text
+     * @param matched receives the id of every configured timer that this model contained
+     * @return the text with each configured timer's duration replaced
+     */
+    String apply(String model, Set<String> matched) {
         String result = model;
         for (Map.Entry<String, Duration> entry : timers.entrySet()) {
             Pattern pattern = Pattern.compile(TIMER.pattern().formatted(Pattern.quote(entry.getKey())));
-            result = pattern.matcher(result).replaceAll(
-                    m -> Matcher.quoteReplacement(m.group(1) + entry.getValue() + m.group(2)));
+            Matcher found = pattern.matcher(result);
+            if (found.find()) {
+                matched.add(entry.getKey());
+                result = found.replaceAll(m -> Matcher.quoteReplacement(m.group(1) + entry.getValue() + m.group(2)));
+            }
         }
         return result;
+    }
+
+    /** Warns once for each configured id that no model matched, so a mistyped id is not silently ignored. */
+    void warnUnmatched(Set<String> matched, Logger log) {
+        timers.keySet().stream().filter(id -> !matched.contains(id)).sorted().forEach(id -> log.warn(
+                "horus.demo.timers.{} matched no timer in the demo models; the timer keeps its own duration. "
+                        + "Check the element id and that the model uses a plain bpmn:timeDuration.", id));
     }
 
     /** Registers the resolver on the host's context before the start-up import reads any model. */
@@ -75,6 +100,8 @@ record DemoTimerOverrides(Map<String, Duration> timers) {
             return new Resolver();
         }
     }
+
+    private static final Logger LOG = LoggerFactory.getLogger(DemoTimerOverrides.class);
 
     private static final class Resolver implements BeanFactoryPostProcessor, ApplicationContextAware {
 
@@ -93,7 +120,25 @@ record DemoTimerOverrides(Map<String, Duration> timers) {
             if (overrides.timers().isEmpty() || !(context instanceof GenericApplicationContext generic)) {
                 return;
             }
+            warnAboutUnmatched(overrides, generic);
             generic.addProtocolResolver(new ModelResolver(overrides, generic));
+        }
+
+        /** Reads every demo model once at start-up and warns for each configured id that no model holds. */
+        private static void warnAboutUnmatched(DemoTimerOverrides overrides, ResourceLoader loader) {
+            Set<String> matched = new HashSet<>();
+            try {
+                for (Resource model : new PathMatchingResourcePatternResolver(loader.getClassLoader())
+                        .getResources("classpath:processes/*.bpmn")) {
+                    try (var in = model.getInputStream()) {
+                        overrides.apply(StreamUtils.copyToString(in, StandardCharsets.UTF_8), matched);
+                    }
+                }
+            } catch (IOException e) {
+                LOG.warn("Cannot scan the demo models to check horus.demo.timers: {}", e.getMessage());
+                return;
+            }
+            overrides.warnUnmatched(matched, LOG);
         }
     }
 
@@ -113,7 +158,7 @@ record DemoTimerOverrides(Map<String, Duration> timers) {
             if (!location.startsWith("classpath:processes/") || !location.endsWith(".bpmn")) {
                 return null;
             }
-            Resource original = new org.springframework.core.io.ClassPathResource(
+            Resource original = new ClassPathResource(
                     location.substring("classpath:".length()), loader.getClassLoader());
             try (var in = original.getInputStream()) {
                 String text = StreamUtils.copyToString(in, StandardCharsets.UTF_8);

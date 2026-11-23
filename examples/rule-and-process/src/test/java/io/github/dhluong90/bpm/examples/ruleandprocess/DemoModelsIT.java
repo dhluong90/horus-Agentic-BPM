@@ -278,11 +278,9 @@ class DemoModelsIT {
         String id = start("hoa", "card-dispute", "DISPUTE-TIMER", Map.of("amountMinor", 1_000_000));
 
         // Then the non-interrupting boundary fires: the reminder runs while the assessment task stays open
-        String activities = "";
-        for (int i = 0; i < 60 && !activities.contains("remind-officer"); i++) {
-            Thread.sleep(1_000);
-            activities = get("hoa", "/api/bpm/processes/v1/instances/" + id + "/activities").body();
-        }
+        String activities = awaitUntil("the reminder step after the timer", 60,
+                () -> get("hoa", "/api/bpm/processes/v1/instances/" + id + "/activities").body(),
+                body -> body.contains("remind-officer"));
         assertThat(activities).as("the reminder step ran after the timer").contains("remind-officer");
         JsonNode instance = JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + id).body());
         assertThat(openTasks(instance)).containsExactly("assess");
@@ -331,15 +329,33 @@ class DemoModelsIT {
 
     /** The undo runs on the engine's adapter threads, so the instance is COMPENSATING for a moment. */
     private JsonNode awaitStatus(String id, String status) throws Exception {
-        JsonNode instance = null;
-        for (int i = 0; i < 60; i++) {
-            instance = JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + id).body());
-            if (status.equals(instance.get("status").stringValue())) {
-                break;
+        return JSON.readTree(awaitUntil("instance " + id + " to reach " + status, 30,
+                () -> get("hoa", "/api/bpm/processes/v1/instances/" + id).body(),
+                body -> status.equals(JSON.readTree(body).get("status").stringValue())));
+    }
+
+    @FunctionalInterface
+    private interface Check<T> {
+        boolean test(T value) throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface Fetch<T> {
+        T get() throws Exception;
+    }
+
+    /** Polls every 500 ms until the check passes; fails with a clear message when the time in seconds runs out. */
+    private static <T> T awaitUntil(String what, int seconds, Fetch<T> fetch, Check<T> done) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);
+        T value = fetch.get();
+        while (!done.test(value)) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("Timed out after " + seconds + " s waiting for " + what + "; last answer: " + value);
             }
             Thread.sleep(500);
+            value = fetch.get();
         }
-        return instance;
+        return value;
     }
 
     private static List<String> openTasks(JsonNode instance) {

@@ -2,10 +2,10 @@
 <!-- Card dispute: an officer assesses a dispute and, if it is not done in two days, a reminder goes to the officer
      while the task stays open (a timer boundary that does not interrupt). The refund step answers the business error
      REFUND_LIMIT_EXCEEDED when the amount is above the officer's limit; an error boundary takes that code to a senior
-     approval instead of opening an incident. Start it with amountMinor (the refund in minor units): above 5,000,000 the
-     refund step raises the error, at or below it the refund posts. Both paths end at one customer notification through a link, so the
-     notification is modelled once. Not loaded at start-up; import it with the steps in the Process Engine import
-     guide. -->
+     approval instead of opening an incident. Start it with amountMinor (the refund in minor units): above 5,000,000
+     the refund step raises the error, at or below it the refund posts. Both paths end at one customer notification
+     through a link, so the notification is modelled once. The dev profile loads it at start-up; elsewhere, import it
+     with the steps in the Process Engine import guide. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_card-dispute"

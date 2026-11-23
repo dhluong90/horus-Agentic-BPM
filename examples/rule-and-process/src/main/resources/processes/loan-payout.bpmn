@@ -7,6 +7,9 @@
      sub-process, the debit credit-back, the hold release) before the customer is told. Start it with
      failCredit, amountMinor, currency and sourceAccount. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_loan-payout"
                   targetNamespace="urn:horus-bpm:examples"
@@ -75,4 +78,43 @@
     <bpmn:sequenceFlow id="f6" sourceRef="undo-payout" targetRef="tell-failure"/>
     <bpmn:sequenceFlow id="f7" sourceRef="tell-failure" targetRef="rolled-back"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_loan-payout">
+    <bpmndi:BPMNPlane id="Plane_loan-payout" bpmnElement="loan-payout">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="277" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="payout_di" bpmnElement="payout" isExpanded="true"><dc:Bounds x="240" y="60" width="640" height="470"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="payout-start_di" bpmnElement="payout-start"><dc:Bounds x="280" y="122" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reserve_di" bpmnElement="reserve"><dc:Bounds x="360" y="100" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="debit_di" bpmnElement="debit"><dc:Bounds x="520" y="100" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="payout-end_di" bpmnElement="payout-end"><dc:Bounds x="680" y="122" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reserve-undo_di" bpmnElement="reserve-undo"><dc:Bounds x="392" y="162" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="debit-undo_di" bpmnElement="debit-undo"><dc:Bounds x="552" y="162" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="release-activity_di" bpmnElement="release-activity"><dc:Bounds x="360" y="250" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="credit-back-activity_di" bpmnElement="credit-back-activity"><dc:Bounds x="520" y="250" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-disbursement_di" bpmnElement="undo-disbursement" isExpanded="true"><dc:Bounds x="300" y="350" width="400" height="140"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-start_di" bpmnElement="undo-start"><dc:Bounds x="330" y="415" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reverse-disbursement_di" bpmnElement="reverse-disbursement"><dc:Bounds x="410" y="393" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-end_di" bpmnElement="undo-end"><dc:Bounds x="570" y="415" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="credit-customer_di" bpmnElement="credit-customer"><dc:Bounds x="940" y="255" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="credit-failed_di" bpmnElement="credit-failed"><dc:Bounds x="972" y="317" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="tell-success_di" bpmnElement="tell-success"><dc:Bounds x="1100" y="255" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="paid_di" bpmnElement="paid"><dc:Bounds x="1260" y="277" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-payout_di" bpmnElement="undo-payout"><dc:Bounds x="972" y="420" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="tell-failure_di" bpmnElement="tell-failure"><dc:Bounds x="1100" y="398" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="rolled-back_di" bpmnElement="rolled-back"><dc:Bounds x="1260" y="420" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="295"/><di:waypoint x="240" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="880" y="295"/><di:waypoint x="940" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="1040" y="295"/><di:waypoint x="1100" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="1200" y="295"/><di:waypoint x="1260" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="990" y="353"/><di:waypoint x="990" y="420"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f6_di" bpmnElement="f6"><di:waypoint x="1008" y="438"/><di:waypoint x="1100" y="438"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f7_di" bpmnElement="f7"><di:waypoint x="1200" y="438"/><di:waypoint x="1260" y="438"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="p1_di" bpmnElement="p1"><di:waypoint x="316" y="140"/><di:waypoint x="360" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="p2_di" bpmnElement="p2"><di:waypoint x="460" y="140"/><di:waypoint x="520" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="p3_di" bpmnElement="p3"><di:waypoint x="620" y="140"/><di:waypoint x="680" y="140"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="reserve-undo-link_di" bpmnElement="reserve-undo-link"><di:waypoint x="410" y="198"/><di:waypoint x="410" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="debit-undo-link_di" bpmnElement="debit-undo-link"><di:waypoint x="570" y="198"/><di:waypoint x="570" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="u1_di" bpmnElement="u1"><di:waypoint x="366" y="433"/><di:waypoint x="410" y="433"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="u2_di" bpmnElement="u2"><di:waypoint x="510" y="433"/><di:waypoint x="570" y="433"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>

@@ -135,7 +135,8 @@ class DemoStepHandlers {
 
     /**
      * The credit step of {@code loan-payout}: a start variable {@code failCredit = true} makes it answer the business
-     * error CREDIT_REJECTED, so a presenter chooses the happy path or the undo.
+     * error CREDIT_REJECTED, so a presenter chooses the happy path or the undo. Only the boolean {@code true} fails the
+     * step; the string "true" or a missing variable takes the happy path, which is the safe default.
      */
     @Bean
     ServiceTaskHandler payoutCredit() {
