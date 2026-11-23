@@ -1023,6 +1023,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-197 The engine lists the templates a new rule set can start from, and a host adds its own
 - **Traces to:** `TR-UI-02`, `TR-EXT-01`, `TR-EXT-04`, PD-112, #83
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** `lan` holds `rules:author`; `dan` holds `rules:read` only. Case A: a host with no template folder. Case B: the host's folder `horus.bpm.rules.templates.location` holds `deposit-rate-by-term.json` (English and Vietnamese label and description, one `integer` input `termMonths`, one `decimal` output `annualRate`). Case C: the host sets `horus.bpm.rules.templates.hidden: [blank]` and the folder holds `b-second.json` and `a-first.json`.
 - **When:** `lan` sends `GET /api/bpm/rules/v1/rule-set-templates`; `dan` sends it; a caller with no identity sends it; the document of `fee-by-tier` is composed as the cockpit does (a name added, the inputs, outputs and rows copied) and imported.
 - **Then:** Case A: `200` with the four built-in templates in the order `fee-by-tier`, `eligibility-with-reason`, `limit-by-segment`, `blank`, each with `id`, `labels` and `descriptions` holding `en` and `vi`, `source: BUILT_IN`, `hitPolicy`, `inputs` (name, type, `allowed`), `outputs` and the first `rows` (`when` and `then` cells). `fee-by-tier` has the input `tier` with `allowed` `GOLD`, `PLATINUM`, `CLASSIC`, the output `fee` of type `money` and a first row `R1` with `tier: "== 'GOLD'"` and `fee: "0 VND"`; `blank` has one input, one output and one default row with an empty `when`; `limit-by-segment` is `unique`. Case B: five templates, `deposit-rate-by-term` last, `source: HOST`, with its own texts in both languages. Case C: `blank` is not listed, the other three are, and the host's follow in file name order (`a-first`, `b-second`); a file that does not end in `.json` and a folder that does not exist add nothing. The composed `fee-by-tier` document is accepted by `POST /rule-sets` as draft version 1. `dan` is `403 PERMISSION_DENIED` and nothing is read; no identity is `401 UNAUTHENTICATED`. Templates belong to the host and the answer is the same for every tenant; listing writes nothing.
@@ -1032,6 +1033,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-198 A template that is not valid stops the start and names its file
 - **Traces to:** `TR-EXT-04`, `TR-SEC-03`, PD-112
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** A template folder with one bad file at a time: `{ not json`; a template with no `vi` label; a document with an input of type `percentage`; a document that carries a `ruleSet` name; a second file that reuses the id `blank` while the built-in `blank` is shown; a file of 65,537 bytes; and a `templates.location` that is a file. Separately a `templates.hidden` of `fee-by-teir`.
 - **When:** The host starts.
 - **Then:** Start-up fails with a message that names the file (`Template file <name> ...`) and the problem: not well-formed JSON, `labels.vi` missing, "not a valid rule set" for the document the engine would refuse at import, a template has no name of its own, "the id 'blank' is already used by another template; hide the built-in one or rename this one", "larger than 65536 bytes", "is not a folder". A hidden id that is not built in fails naming `horus.bpm.rules.templates.hidden` and the id, so a typo never leaves a template on show. When the host hides the built-in `blank`, a file with the id `blank` takes its place. Every template is checked once, as an imported document is, so a listed template always composes into a rule set the engine accepts; nothing is read per request.
@@ -1041,6 +1043,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-199 The engine runs a simulation and stores a report for the approver
 - **Traces to:** `TR-OBS-01`, `TR-IDEM-01`, `TR-TEN-01`, `TR-SEC-02`, PD-115, #109
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** `card-fee` v1 in force with 100 logged decisions of November 2026, 18 of them for `STANDARD` customers, and draft v2 that lowers the fee from 50,000 VND to 30,000 VND. `lan` holds `rules:author`, `rules:simulate` and `rules:read`; `minh` holds `rules:approve` and `rules:read`; `sim` holds `rules:simulate` only; `audit` holds `rules:read` and `rules:log:read`. `loan-tier` v1 charges `STANDARD` customers 10,000 VND and draft v2 5,000 VND.
 - **When:** `lan` sends `POST .../versions/2/simulation-reports` with `{"source":"REPLAY","from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","limit":100}` and an `Idempotency-Key`, twice. `lan` sends a `SAMPLES` report on `loan-tier` v2 with a `GOLD` and a `STANDARD` sample, one carrying a `label`. `lan` sends a `SAMPLES` report on `card-fee` v2, whose rows call `today()`. `sim` sends the replay. `minh` sends it. A period of 40 days. The same key with another `limit`.
 - **Then:**
@@ -1055,6 +1058,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-200 A report is immutable, bound to the version's content, and never holds a masked value
 - **Traces to:** `TR-SEC-04`, `TR-SEC-02`, `TR-TEN-01`, `TR-OBS-04`, PD-115
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** A report on `card-fee` v2 as in `RLE-199`; `id-check-fee` with the input `nationalId` (`mask: true`), v1 in force with one decision whose `nationalId` was `079201001234` and one with a null one, and draft v2 that lowers the fee; `bank-b` has its own `card-fee` v1.
 - **When:** The draft is replaced with a fee of 20,000 VND and the report is read; two reports are listed; SQL runs `UPDATE`, `DELETE` and `TRUNCATE` on the report table; `lan` runs a report on `id-check-fee` v2 for November; `bank-b` asks for `bank-a`'s report by id under its own `card-fee`, under `bank-a`'s version number, and lists it; `bank-c`, with no `card-fee`, lists it.
 - **Then:**
@@ -1069,6 +1073,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-201 A publication request carries a report, and a host can require one
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-04`, PD-115, #109
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** Reports on `card-fee` v2 as in `RLE-199`. Case A: the default settings. Case B: the host sets `horus.bpm.rules.lifecycle.require-simulation-report: [card-fee]`; `loan-fee` is not listed. Case C: the draft is replaced after the report was run. Case D: draft v3 of `card-fee` and a report of v2.
 - **When:** `lan` sends `POST .../versions/2:request-publish` with `{"simulationReportId": "<report>"}`; `lan` does so with the replaced draft; with v2's report on v3, and with an id nobody issued; in case B without a report on `card-fee` v2 and on `loan-fee` v2; with a body member that is not text. The settings are given `Card Fee` and `card-fee` twice. `GET /api/bpm/meta`.
 - **Then:**
@@ -1082,6 +1087,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-202 A replay is read in plain language, and a decision that cannot be replayed fails closed
 - **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027, #96
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** `card-fee` v1 with 100 logged November decisions and draft v2 as in `RLE-199`; `id-check-fee` as in `RLE-200` with one masked decision; `audit` holds `rules:read`, `rules:simulate` and `rules:log:read`.
 - **When:** `audit` sends `POST .../versions/2:simulate-history-readings` with `{"from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z"}`; the same on `id-check-fee`; with a `limit` of 501; as a caller missing each of the three permissions in turn.
 - **Then:**
