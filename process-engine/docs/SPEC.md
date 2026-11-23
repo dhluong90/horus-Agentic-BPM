@@ -1795,3 +1795,69 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
 - **Example:** `System.exit(0) -> refused at activation`.
 - **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`
+
+### PRE-270 A broadcast wakes every waiter of its own tenant, by job, and never a waiter of another tenant
+- **Traces to:** `TR-TEN-01`, `TR-STD-11`, `TR-STD-14`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Three `rate-watcher` instances of `bank-a` and one of `bank-b` wait at the signal catch `wait-rate-card` for `rate-card-updated`; a `rate-publisher` instance of `bank-a` reaches a signal throw of the same name; another `rate-watcher` of `bank-a` is cancelled while it waits.
+- **When:** The publisher throws, then the due jobs fire; a broadcast follows the cancel.
+- **Then:**
+  - The throw is a write in the publisher's transaction: the publisher continues and ends, and three `SIGNAL_DELIVERY` jobs of `bank-a` are due while the three waiters still wait. The waiters are not locked by the thrower. The publisher's history has `SIGNAL_THROWN` with `waiters` 3.
+  - When the jobs fire, each waiter continues to its repricing task in a transaction of its own and its subscription is gone. The `bank-b` waiter has no job, no task and still waits.
+  - A waiter cancelled before the broadcast has no subscription and is not counted.
+- **Example:** `bank-a throws rate-card-updated -> 3 jobs, 3 repricing tasks; bank-b waiter unchanged`.
+- **Test ID:** `PRE_270_a_throw_wakes_every_waiter_of_its_tenant_by_job_and_never_a_waiter_of_another_tenant`, `PRE_270_a_cancelled_waiter_leaves_no_subscription_and_is_not_woken` (`SignalEventsPostgresIT`)
+
+### PRE-271 A signal catch waits on one subscription and is woken once, by its own subscription only
+- **Traces to:** `TR-STD-11`, `TR-STD-13`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** An instance at `wait-rate-card`, with the subscription `S1` the kernel asked the shell to store.
+- **When:** A delivery names another subscription; then one names `S1`; then `S1` is delivered again.
+- **Then:** The first is `STALE_ATTEMPT` and changes nothing. The second moves the token to the next step and asks the shell to delete `S1`. The third is `INVALID_STATE`: a second delivery never moves the token again.
+- **Example:** `deliver(S1) twice -> second INVALID_STATE`.
+- **Test ID:** `PRE_271_a_signal_catch_waits_on_one_subscription_and_a_delivery_moves_it_on`, `PRE_271_a_delivery_for_another_subscription_or_a_second_delivery_is_refused` (`SignalAndConditionalEventsTest`)
+
+### PRE-272 A signal throw or signal end event broadcasts once and does not wait
+- **Traces to:** `TR-STD-11`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `rate-publisher` with an intermediate signal throw `announce` before a task, and `rate-closer` whose end event is a signal end.
+- **When:** Each instance starts.
+- **Then:** Each asks the shell for exactly one broadcast of its signal name. The publisher's token passes to the task at once; the closer's instance completes. Neither carries data from its variables into the signal.
+- **Example:** `announce -> BroadcastSignal(rate-card-updated), token at archive`.
+- **Test ID:** `PRE_272_a_signal_throw_broadcasts_once_and_the_thrower_goes_on`, `PRE_272_a_signal_end_broadcasts_and_ends_the_instance` (`SignalAndConditionalEventsTest`)
+
+### PRE-273 A broadcast needs its permission and an idempotency key; a retry wakes and starts nobody twice
+- **Traces to:** `TR-IDEM-01`, `TR-TEN-01`, `TR-SEC-04`, #492
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `bank-b` has a waiting `rate-watcher`, `bank-a` has one too and an active `repricing-on-signal` whose start event is a signal start for `rate-card-updated`.
+- **When:** `bank-b`'s operator broadcasts with the key `K1` and again with `K1`; a caller without `processes:signal:broadcast` broadcasts; a caller with it sends no key; `bank-a` broadcasts with `K1`, twice, and `bank-b` once more with `K2`.
+- **Then:**
+  - The `bank-b` retry returns the first answer and writes no second signal and no second job; only the `bank-b` waiter is woken, the `bank-a` waiter still waits.
+  - The caller without the permission is `403 PERMISSION_DENIED`; the caller without a key is `428 PRECONDITION_REQUIRED`; neither writes a signal.
+  - `bank-a`'s broadcast starts one `repricing-on-signal` instance on the version effective now, its retry starts none, and `bank-b`'s broadcast starts none. The tenant is never read from the request.
+- **Example:** `bank-a K1 twice -> 1 instance, same signalId`.
+- **Test ID:** `PRE_273_a_broadcast_from_the_api_reaches_its_own_tenant_only_and_a_retry_wakes_nobody_twice`, `PRE_273_a_broadcast_needs_its_permission_and_an_idempotency_key`, `PRE_273_a_signal_start_event_starts_one_instance_for_a_broadcast_of_its_tenant_and_a_retry_starts_none` (`SignalEventsPostgresIT`)
+
+### PRE-274 A conditional catch passes at once when true, otherwise waits for a change of the variables, and never fails the step that changed them
+- **Traces to:** `TR-STD-11`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A conditional catch `limit > 0` with `limit` 5000 on arrival; a conditional catch `decision.approved == true` after the task `set-limit`; a conditional start `amount >= 1000000`.
+- **When:** The first instance arrives; the task is completed with `approved` false, then true; the conditional start receives `amount` 500000.
+- **Then:** The first passes at once and records `CONDITION_MET` with `onArrival` true. The second stays waiting after `false`, and moves on in the completion transaction that makes the condition true; a condition that cannot be evaluated yet is not true and never fails the completion. The start is refused with `START_CONDITION_FALSE` and stores nothing.
+- **Example:** `approved false -> waits; approved true -> issue-card`.
+- **Test ID:** `PRE_274_a_conditional_catch_whose_condition_is_true_on_arrival_passes_at_once`, `PRE_274_a_conditional_catch_waits_until_a_completed_task_makes_its_condition_true`, `PRE_274_a_conditional_catch_stays_while_the_condition_is_false_and_never_fails_the_step_that_changes_variables`, `PRE_274_a_conditional_start_whose_condition_is_false_is_refused` (`SignalAndConditionalEventsTest`)
+
+### PRE-275 Signal and conditional events import with their signal names, are refused when broken, and export back to the same definition
+- **Traces to:** `TR-STD-11`, `TR-STD-05`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A file with a `signal` element named `rate-card-updated` declared after the process, a signal catch, a signal end and a conditional catch; a file whose `signalRef` names no signal and whose condition does not parse; a signal named `rate card!`.
+- **When:** Each is imported, and the first is exported and imported again.
+- **Then:** The first reads with the signal name on both signal events. The second is `422 VALIDATION_FAILED` with `SIGNAL_REF_INVALID` and `CONDITION_INVALID`; the third with `SIGNAL_NAME_INVALID`; nothing is stored. The export reads back to the same canonical definition.
+- **Example:** `signalRef Signal_missing -> SIGNAL_REF_INVALID`.
+- **Test ID:** `PRE_275_a_signal_event_carries_the_name_of_the_signal_it_refers_to_wherever_the_signal_is_declared`, `PRE_275_a_signal_reference_to_no_signal_and_a_broken_condition_are_refused_by_name`, `PRE_275_a_signal_name_outside_the_allowed_characters_is_refused`, `PRE_275_the_export_of_signal_and_conditional_events_reads_back_to_the_same_definition`, `PRE_275_the_worked_example_reads_and_compiles` (`SignalAndConditionalEventsImportTest`), `PRE_275_signal_and_conditional_events_are_known_symbols_not_generic_nodes`, `PRE_275_the_timeline_names_the_signal_and_condition_entries` (cockpit `signalEvents.test.ts`)

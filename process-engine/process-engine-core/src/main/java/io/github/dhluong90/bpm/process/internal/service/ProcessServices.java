@@ -4,6 +4,8 @@ import io.github.dhluong90.bpm.process.api.AsyncStepNotFoundException;
 import io.github.dhluong90.bpm.process.api.AsyncStepService;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.GuardrailContractInvalidException;
+import io.github.dhluong90.bpm.process.api.SignalBroadcast;
+import io.github.dhluong90.bpm.process.api.SignalRequest;
 import io.github.dhluong90.bpm.process.api.StepCompletion;
 import io.github.dhluong90.bpm.process.spi.AdapterResult;
 import io.github.dhluong90.bpm.process.internal.exec.Ids;
@@ -117,7 +119,7 @@ import java.util.function.Function;
  * {@link #recordAttempt} in a fresh one (ADR-0008). Thread-safe.
  */
 public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, AsyncStepService,
-        io.github.dhluong90.bpm.process.api.IncidentService {
+        io.github.dhluong90.bpm.process.api.IncidentService, io.github.dhluong90.bpm.process.api.SignalService {
 
     /**
      * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
@@ -139,6 +141,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_APPROVE = "processes:approve";
     static final String PERMISSION_STEP_COMPLETE = "processes:step:complete";
     static final String PERMISSION_INCIDENT_MANAGE = "processes:incident:manage";
+    static final String PERMISSION_SIGNAL_BROADCAST = "processes:signal:broadcast";
     /** History types of the incident commands (#68). */
     static final String INCIDENT_RETRIED = "INCIDENT_RETRIED";
     static final String INCIDENT_RESOLUTION_PROPOSED = "INCIDENT_RESOLUTION_PROPOSED";
@@ -1814,7 +1817,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     public Map<String, JobHandler> jobHandlers() {
         return Map.of(JobStore.TIMER, this::fireTimer, JobStore.DEFINITION_EFFECTIVE, this::fireDefinitionEffective,
-                JobStore.CALL_RESULT, this::fireCallResult);
+                JobStore.CALL_RESULT, this::fireCallResult, JobStore.SIGNAL_DELIVERY, this::fireSignalDelivery);
     }
 
     /**
@@ -3002,6 +3005,108 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // The child runs as engine work started by the parent's step, in the parent's tenant, with no caller.
         run(child, childRow, InstanceState.created(childId, tenant, child.id(), businessKey),
                 new Command.Start(call.variables(), CALL_ACTOR), new RunAs.EngineWork(tenant, CALL_ACTOR));
+    }
+
+    // ---- signals (#492) -----------------------------------------------------------------------------------
+
+    private static final String SIGNAL_ACTOR = "system:signal";
+    /** The most active versions read for one signal; a tenant with more signal start events for one name is a defect. */
+    private static final int SIGNAL_START_LIMIT = 50;
+    /** How deep signal starts nest in one transaction: an instance started by a signal may throw a signal. */
+    private static final ThreadLocal<int[]> SIGNAL_START_DEPTH = ThreadLocal.withInitial(() -> new int[1]);
+
+    @Override
+    public SignalBroadcast broadcast(SignalRequest request) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_SIGNAL_BROADCAST);
+        if (request == null || request.name() == null || !SignalRequest.NAME.matcher(request.name()).matches()) {
+            throw new InputInvalidException("name must be 1 to 100 letters, digits, '.', '_', ':' or '-', starting with a"
+                    + " letter or digit");
+        }
+        if (request.idempotencyKey() == null || request.idempotencyKey().isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key, so a retry cannot wake the waiters twice");
+        }
+        String requestHash = Hashes.sha256Parts("signal", caller, request.name());
+        return transactions.inTransaction(() -> idempotent(tenant, "signal-broadcast", request.idempotencyKey(),
+                requestHash, () -> broadcastSignal(tenant, Ulid.next(clock.instant()), request.name(), caller),
+                b -> Values.write(Map.of("signalId", b.signalId(), "name", b.name(), "waiters", b.waiters(),
+                        "startedInstances", b.startedInstances())),
+                json -> {
+                    Map<String, Object> m = Values.readMap(json);
+                    List<String> ids = new ArrayList<>();
+                    ((List<?>) m.get("startedInstances")).forEach(id -> ids.add(String.valueOf(id)));
+                    return new SignalBroadcast((String) m.get("signalId"), (String) m.get("name"),
+                            ((Number) m.get("waiters")).intValue(), ids);
+                }));
+    }
+
+    /**
+     * One broadcast in the caller's transaction (#492). It reads and writes only the tenant given, which comes from the
+     * authenticated context or from the throwing instance, never from a request body. It writes the signal, one
+     * {@code SIGNAL_DELIVERY} job for each waiting subscription of the tenant, and starts the effective version of each
+     * definition whose signal start event has the name. It locks no waiting instance: the jobs do, one at a time.
+     */
+    private SignalBroadcast broadcastSignal(String tenant, String signalId, String name, String thrownBy) {
+        Instant now = clock.instant();
+        if (!store.insertSignal(tenant, signalId, name, thrownBy, now)) {
+            return new SignalBroadcast(signalId, name, 0, List.of());
+        }
+        int waiters = store.wakeSignalWaiters(tenant, name, signalId, jobSettings.timerLease(),
+                jobSettings.maxAttempts(), now);
+        List<String> started = new ArrayList<>();
+        int[] depth = SIGNAL_START_DEPTH.get();
+        for (StoredDefinition candidate : store.signalStartDefinitions(tenant, name, SIGNAL_START_LIMIT)) {
+            StoredDefinition effective = store.effectiveDefinition(tenant, candidate.key(), now).orElse(null);
+            if (effective == null || !effective.id().equals(candidate.id())) {
+                continue;
+            }
+            if (depth[0] >= maxCallDepth) {
+                throw new StepFailedException("-", "SIGNAL_START_DEPTH_EXCEEDED", "signal starts nest deeper than "
+                        + maxCallDepth);
+            }
+            String instanceId = Ulid.next(now);
+            InstanceRow row = new InstanceRow(tenant, instanceId, effective.id(), effective.key(), effective.version(),
+                    null, "RUNNING", "{}", 0, 0, SIGNAL_ACTOR, now, null);
+            store.insertInstance(row);
+            depth[0]++;
+            try {
+                run(effective, row, InstanceState.created(instanceId, tenant, effective.id(), null),
+                        new Command.Start(Map.of(), SIGNAL_ACTOR), new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
+            } finally {
+                depth[0]--;
+            }
+            started.add(instanceId);
+        }
+        return new SignalBroadcast(signalId, name, waiters, started);
+    }
+
+    /**
+     * Fires a {@code SIGNAL_DELIVERY} job inside the fire transaction: locks the waiting instance, checks the claim, and
+     * tells the waiting token its signal came. A job for an instance that ended, or a token that moved on, is consumed
+     * without effect and its subscription row is removed.
+     */
+    private boolean fireSignalDelivery(JobRow job, java.util.function.BooleanSupplier claimHeld) {
+        String tenant = job.tenantId();
+        InstanceRow row = store.lockInstance(tenant, job.instanceId()).orElse(null);
+        if (!claimHeld.getAsBoolean()) {
+            return false;
+        }
+        List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = row == null || !"RUNNING".equals(row.status())
+                ? List.of() : store.tokens(tenant, row.id());
+        boolean waiting = tokens.stream().anyMatch(t -> t.id().equals(job.tokenId())
+                && t.status() == TokenStatus.WAITING_EVENT && job.id().equals(t.activityInstanceId()));
+        if (!waiting) {
+            store.deleteSubscription(tenant, job.id());
+            LOG.log(System.Logger.Level.DEBUG, "process.signal.obsolete tenant={0} job={1}", tenant, job.id());
+            return true;
+        }
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        String name = String.valueOf(Values.readMap(job.payloadJson()).get("signal"));
+        try (io.github.dhluong90.bpm.process.spi.EventScope ignored = jobScope(job.id())) {
+            run(definition, row, stateOf(tenant, row), new Command.DeliverSignal(job.tokenId(), job.id(), name),
+                    new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
+        }
+        return true;
     }
 
     /**
@@ -4317,6 +4422,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Effect.StartCompensation[] compensation = new Effect.StartCompensation[1];
         // #92: children are started after this instance's own rows are saved, in the same transaction.
         List<Effect.StartChildInstance> childStarts = new ArrayList<>();
+        // #492: broadcasts are written after this instance's own rows are saved, in the same transaction.
+        List<Effect.BroadcastSignal> broadcasts = new ArrayList<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -4385,6 +4492,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.PushCompensation push -> pushes.add(push);
                         case Effect.StartCompensation started -> compensation[0] = started;
                         case Effect.StartChildInstance child -> childStarts.add(child);
+                        case Effect.BroadcastSignal signal -> broadcasts.add(signal);
+                        case Effect.CreateSubscription sub when "SIGNAL".equals(sub.kind()) ->
+                                store.insertSignalSubscription(state.tenantId(), sub.subscriptionId(), sub.name(),
+                                        definition.id(), state.instanceId(), sub.tokenId(), sub.nodeId(), clock.instant());
+                        case Effect.DeleteSubscription gone ->
+                                store.deleteSubscription(state.tenantId(), gone.subscriptionId());
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -4582,6 +4695,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         for (Effect.StartChildInstance call : childStarts) {
             startChild(definition, row, state, call, newIncidents, now);
+        }
+        for (Effect.BroadcastSignal signal : broadcasts) {
+            String thrownBy = switch (as) {
+                case RunAs.CallerRequest r -> callers.currentCallerId();
+                case RunAs.EngineWork w -> w.actor();
+            };
+            SignalBroadcast sent = broadcastSignal(tenant, signal.signalId(), signal.name(), thrownBy);
+            Map<String, Object> thrown = new LinkedHashMap<>();
+            thrown.put("signal", signal.name());
+            thrown.put("signalId", signal.signalId());
+            thrown.put("waiters", sent.waiters());
+            thrown.put("startedInstances", sent.startedInstances().size());
+            store.appendHistory(tenant, state.instanceId(), definition.id(), List.of(new HistoryEntry("SIGNAL_THROWN",
+                    signal.nodeId(), signal.tokenId(), null, thrownBy, clock.instant(), thrown)));
         }
         newIncidents.forEach(site -> raiseIncident(site, now));
         if (compensation[0] != null) {

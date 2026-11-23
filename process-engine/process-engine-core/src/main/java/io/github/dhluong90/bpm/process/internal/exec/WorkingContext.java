@@ -82,6 +82,11 @@ final class WorkingContext implements ExecutionContext {
         }
     }
 
+    /** @return whether this apply changed the instance variables, which is when conditional events are asked again */
+    boolean variablesChanged() {
+        return !variables.equals(initial.variables());
+    }
+
     void putAllVariables(Map<String, Object> values) {
         variables.putAll(values);
     }
@@ -336,6 +341,10 @@ final class WorkingContext implements ExecutionContext {
         if (cancelWork && child.status() == TokenStatus.WAITING_USER && child.activityInstanceId() != null) {
             effect(new Effect.CancelUserTask(child.activityInstanceId()));
         }
+        if (child.status() == TokenStatus.WAITING_EVENT && child.activityInstanceId() != null) {
+            // The wait of a signal catch is a subscription row; a conditional wait has none, and deleting its id is a no-op.
+            effect(new Effect.DeleteSubscription(child.activityInstanceId()));
+        }
         if (cancelWork && (child.status() == TokenStatus.WAITING_ASYNC || child.status() == TokenStatus.WAITING_TIMER)
                 && child.activityInstanceId() != null) {
             // The attempt id of an async step is its job id; a running call's TX2 then finds the job
@@ -363,6 +372,9 @@ final class WorkingContext implements ExecutionContext {
                 if (child.status() == TokenStatus.WAITING_TIMER && child.activityInstanceId() != null) {
                     // The waiting token's activity instance is its timer job; cancel it now (ADR-0020).
                     effect(new Effect.CancelJob(child.activityInstanceId()));
+                }
+                if (child.status() == TokenStatus.WAITING_EVENT && child.activityInstanceId() != null) {
+                    effect(new Effect.DeleteSubscription(child.activityInstanceId()));
                 }
                 history("TOKEN_CANCELLED", child, Map.of());
             }

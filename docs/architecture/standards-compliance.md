@@ -318,7 +318,7 @@ Source: [`diagrams/message-correlation.mmd`](diagrams/message-correlation.mmd).
 
 Source: [`diagrams/signal-broadcast.mmd`](diagrams/signal-broadcast.mmd).
 
-A broadcast writes `pre_signal` and one `SIGNAL_DELIVERY` job in the caller's transaction and returns. The poller delivers to the subscriptions that existed at `thrown_at`, in batches of at most 100 instance locks per transaction, with a keyset cursor in the job payload, so a broadcast to 100,000 waiting instances never becomes one long transaction. Delivery is exactly once per subscription: the subscription row is deleted (catch) or the boundary token created (non-interrupting) in the transaction that holds that instance's lock. Signal start events start one instance per definition subscribed, idempotent by `(signalId, definition)`. The signal scope is the tenant within one host; across hosts the host forwards the signal (section 7.5).
+A broadcast writes `pre_signal` and, in one `INSERT .. SELECT` over the tenant's subscriptions of that name, one `SIGNAL_DELIVERY` job for each waiter in the caller's transaction, and returns (as built in #492; the job id is the subscription id, so a waiter is woken once). The poller fires each job in a transaction of its own that locks only that waiter, on any replica, so a broadcast to 100,000 waiting instances never becomes one long transaction and the thrower locks none of them. The batched keyset cursor in a single job, first designed here, trades one job row per waiter for one job per signal; it stays the option if the job rows of a very large broadcast become the cost. Delivery is exactly once per subscription: the subscription row is deleted (catch) or the boundary token created (non-interrupting) in the transaction that holds that instance's lock. Signal start events start one instance per definition subscribed, idempotent by `(signalId, definition)`. The signal scope is the tenant within one host; across hosts the host forwards the signal (section 7.5).
 
 ### 5.6 Event subprocesses
 
@@ -389,8 +389,8 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Data objects, data associations, data stores (references) | Refused | Execute | | |
 | Script task (FEEL or `horus-expr-v1`) | Execute with `horus-expr-v1` (#485) | Execute with FEEL | | |
 | Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | |
-| Signal start, catch, boundary, throw and end | Refused | Import | Execute | |
-| Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
+| Signal start, catch, boundary, throw and end | Refused | Import | Execute | Start, intermediate catch, intermediate throw and end execute since 0.3.0 (#492); boundary with the boundary events |
+| Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | Intermediate catch and a process-level start execute since 0.3.0 (#492); the start of an event subprocess and the boundary come with them |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
 | Collaboration: pools, lanes, message flows, artifacts | Refused | Import and display | Message flows execute between pools through 5.4 | |

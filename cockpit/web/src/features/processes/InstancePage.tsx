@@ -379,6 +379,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
                     {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
                       ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
+                    {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
+                      ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

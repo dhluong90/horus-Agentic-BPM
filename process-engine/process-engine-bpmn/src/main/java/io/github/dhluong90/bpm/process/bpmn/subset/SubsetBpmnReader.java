@@ -9,7 +9,11 @@ import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
+import io.github.dhluong90.bpm.process.internal.expr.Condition;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.expr.Script;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
@@ -106,6 +110,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
     private static final String BPMN = BpmnNamespaces.BPMN;
     private static final String HORUS = BpmnNamespaces.HORUS;
+    /** A signal name: what a broadcast and a signal event match on, at most 100 characters. */
+    static final Pattern SIGNAL_NAME = io.github.dhluong90.bpm.process.api.SignalRequest.NAME;
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     /** The longest SLA a user task may declare: a year of working time is already beyond any service level. */
     static final java.time.Duration MAX_SLA = java.time.Duration.ofDays(366);
@@ -225,6 +231,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private int startLine;
         private String documentLanguage;
         private final Set<String> sharedDefinitionIds = new HashSet<>();
+        /** Signal id to signal name, from the document-level signal elements. */
+        private final Map<String, String> signalNames = new HashMap<>();
         private final List<DefinitionProblem> unresolvedRefs = new ArrayList<>();
         /** Category value id to its label and its category id, from the document-level categories. */
         private final Map<String, String[]> categoryValues = new HashMap<>();
@@ -257,6 +265,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                 } else if (BPMN.equals(ns) && "category".equals(local)) {
                     category();
+                } else if (BPMN.equals(ns) && "signal".equals(local)) {
+                    String signalId = attr("id");
+                    if (signalId != null) {
+                        signalNames.put(signalId, attr("name"));
+                    }
+                    skip();
                 } else if (BPMN.equals(ns)) {
                     if (local.endsWith("EventDefinition") && attr("id") != null) {
                         sharedDefinitionIds.add(attr("id"));
@@ -273,6 +287,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     invalid.add(ref);
                 }
             }
+            if (process != null) {
+                process = withSignalNames(process);
+            }
             if (!unsupported.isEmpty()) {
                 throw new BpmnUnsupportedElementException(unsupported, warnings, unsupportedTruncated);
             }
@@ -283,6 +300,108 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 throw new ValidationFailedException(invalid);
             }
             return withCategoryLabels(process);
+        }
+
+        /** A {@code signalEventDefinition}; its {@code signalRef} is resolved to the signal's name at the end. */
+        private EventDefinition signalDefinition(String eventId, String element) throws XMLStreamException {
+            String definitionId = attr("id");
+            String ref = attr("signalRef");
+            if (ref == null) {
+                invalid.add(new DefinitionProblem("SIGNAL_REF_MISSING", "A signal event needs signalRef, the id of a signal"
+                        + " element", element, safe(eventId), line()));
+            }
+            children("signalEventDefinition", eventId, false);
+            return new SignalEventDefinition(definitionId, ref, null);
+        }
+
+        /** A {@code conditionalEventDefinition} with its {@code condition}, checked for syntax now. */
+        private EventDefinition conditionalDefinition(String eventId, String element) throws XMLStreamException {
+            String definitionId = attr("id");
+            int line = line();
+            Expression condition = null;
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "condition".equals(local)) {
+                    String language = attr("language") != null ? attr("language") : documentLanguage;
+                    String text = text().strip();
+                    if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
+                        String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                        addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
+                                + safe(language) + " is not supported; use " + BpmnNamespaces.EXPR_V1, "condition",
+                                safe(eventId), line, stage));
+                    }
+                    condition = new Expression(text, language == null ? BpmnNamespaces.EXPR_V1 : language, null);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported("conditionalEventDefinition child " + local, eventId, BpmnStages.of(local));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            if (condition == null || condition.text().isBlank()) {
+                invalid.add(new DefinitionProblem("CONDITION_MISSING", "A conditional event needs a condition with an"
+                        + " expression", element, safe(eventId), line));
+            } else {
+                try {
+                    Condition.parse(condition.text());
+                } catch (ConditionException e) {
+                    invalid.add(new DefinitionProblem("CONDITION_INVALID", e.getMessage(), element, safe(eventId), line));
+                }
+            }
+            return new ConditionalEventDefinition(definitionId, condition, null);
+        }
+
+        /** Replaces each signal's id with its name, and refuses a reference to no signal or an unusable name. */
+        private Process withSignalNames(Process p) {
+            return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(),
+                    resolveSignals(p.flowElements()), p.artifacts(), p.laneSets(), p.info());
+        }
+
+        private List<FlowElement> resolveSignals(List<FlowElement> elements) {
+            List<FlowElement> out = new ArrayList<>();
+            for (FlowElement e : elements) {
+                out.add(switch (e) {
+                    case StartEvent s -> new StartEvent(s.id(), s.name(), s.incoming(), s.outgoing(),
+                            signalsOf("startEvent", s.id(), s.eventDefinitions()), s.eventDefinitionRefs(), s.data(),
+                            s.parallelMultiple(), s.isInterrupting(), s.info());
+                    case EndEvent s -> new EndEvent(s.id(), s.name(), s.incoming(), s.outgoing(),
+                            signalsOf("endEvent", s.id(), s.eventDefinitions()), s.eventDefinitionRefs(), s.data(),
+                            s.info());
+                    case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), c.incoming(),
+                            c.outgoing(), signalsOf("intermediateCatchEvent", c.id(), c.eventDefinitions()),
+                            c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
+                    case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), t.incoming(),
+                            t.outgoing(), signalsOf("intermediateThrowEvent", t.id(), t.eventDefinitions()),
+                            t.eventDefinitionRefs(), t.data(), t.info());
+                    case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.method(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    default -> e;
+                });
+            }
+            return out;
+        }
+
+        private List<EventDefinition> signalsOf(String element, String eventId, List<EventDefinition> definitions) {
+            List<EventDefinition> out = new ArrayList<>();
+            for (EventDefinition d : definitions) {
+                if (d instanceof SignalEventDefinition signal && signal.signalRef() != null) {
+                    String name = signalNames.get(signal.signalRef());
+                    if (!signalNames.containsKey(signal.signalRef())) {
+                        invalid.add(new DefinitionProblem("SIGNAL_REF_INVALID", "signalRef '" + safe(signal.signalRef())
+                                + "' is not the id of a signal element of this document", element, safe(eventId), 0));
+                    } else if (name == null || !SIGNAL_NAME.matcher(name).matches()) {
+                        invalid.add(new DefinitionProblem("SIGNAL_NAME_INVALID", "A signal needs a name of 1 to 100"
+                                + " letters, digits, '.', '_', ':' or '-', starting with a letter or digit", element,
+                                safe(eventId), 0));
+                    } else {
+                        out.add(new SignalEventDefinition(signal.id(), name, signal.info()));
+                        continue;
+                    }
+                }
+                out.add(d);
+            }
+            return out;
         }
 
         /** A document-level category: only its values are kept, as labels of the groups that refer to them. */
@@ -454,6 +573,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             int line = line();
             CompensateEventDefinition compensate = null;
+            List<EventDefinition> signals = new ArrayList<>();
             int definitions = 0;
             while (nextChild()) {
                 String local = xml.getLocalName();
@@ -464,6 +584,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                     compensate = new CompensateEventDefinition(attr("id"), null, true, null);
                     children(local, id, false);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
+                    definitions++;
+                    signals.add(signalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions++;
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
@@ -484,8 +607,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 invalid.add(new DefinitionProblem("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", element, safe(id), line));
             }
-            return new IntermediateThrowEvent(id, name, List.of(), List.of(),
-                    compensate == null ? List.of() : List.of(compensate), List.of(), null, null);
+            List<EventDefinition> list = compensate != null ? List.of(compensate) : signals;
+            return new IntermediateThrowEvent(id, name, List.of(), List.of(), list, List.of(), null, null);
         }
 
         /**
@@ -585,6 +708,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String element = start ? "startEvent" : "endEvent";
             String id = id();
             String name = attr("name");
+            List<EventDefinition> defs = new ArrayList<>();
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "eventDefinitionRef".equals(local)) {
@@ -595,6 +719,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     unresolvedRefs.add(new DefinitionProblem("EVENT_DEFINITION_REF_UNRESOLVED", "eventDefinitionRef '"
                             + safe(ref) + "' does not resolve to an event definition of this document", element,
                             safe(id), line));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
+                    defs.add(signalDefinition(id, element));
+                } else if (start && BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
+                    defs.add(conditionalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
@@ -606,9 +734,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
+            if (defs.size() > 1) {
+                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+            }
             return start
-                    ? new StartEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, false, true, null)
-                    : new EndEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, null);
+                    ? new StartEvent(id, name, List.of(), List.of(), defs, List.of(), null, false, true, null)
+                    : new EndEvent(id, name, List.of(), List.of(), defs, List.of(), null, null);
         }
 
         /**
@@ -621,12 +752,19 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             int line = line();
             TimerEventDefinition timer = null;
+            EventDefinition other = null;
             int definitions = 0;
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     definitions++;
                     timer = timer(id);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
+                    definitions++;
+                    other = signalDefinition(id, element);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
+                    definitions++;
+                    other = conditionalDefinition(id, element);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions++;
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
@@ -660,7 +798,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 });
             }
             return new IntermediateCatchEvent(id, name, List.of(), List.of(),
-                    timer == null ? List.of() : List.of(timer), List.of(), null, false, null);
+                    timer != null ? List.of(timer) : other != null ? List.of(other) : List.of(), List.of(), null, false,
+                    null);
         }
 
         private TimerEventDefinition timer(String eventId) throws XMLStreamException {

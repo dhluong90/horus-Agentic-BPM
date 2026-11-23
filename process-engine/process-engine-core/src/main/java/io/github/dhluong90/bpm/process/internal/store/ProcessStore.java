@@ -274,6 +274,79 @@ public interface ProcessStore {
     }
 
     /**
+     * Records a broadcast signal of a tenant (#492). The id is the idempotency key of the broadcast: a second insert of
+     * the same id writes nothing.
+     *
+     * @param tenant tenant
+     * @param id the broadcast id
+     * @param name the signal name
+     * @param thrownBy the caller or the engine identity that threw it
+     * @param now when
+     * @return whether this call recorded it
+     */
+    default boolean insertSignal(String tenant, String id, String name, String thrownBy, Instant now) {
+        throw new UnsupportedOperationException("This store keeps no signals");
+    }
+
+    /**
+     * Stores the wait of a token on a signal (#492): one row of the tenant, deleted when it is woken or cancelled.
+     *
+     * @param tenant tenant
+     * @param id the subscription id, which is the waiting token's activity instance id
+     * @param name the signal name
+     * @param definitionId definition version of the instance
+     * @param instanceId the waiting instance
+     * @param tokenId the waiting token
+     * @param nodeId the catching event
+     * @param now when
+     */
+    default void insertSignalSubscription(String tenant, String id, String name, String definitionId, String instanceId,
+            String tokenId, String nodeId, Instant now) {
+        throw new UnsupportedOperationException("This store keeps no signal subscriptions");
+    }
+
+    /**
+     * Deletes a subscription of a tenant; a missing one is not an error.
+     *
+     * @param tenant tenant
+     * @param id subscription id
+     */
+    default void deleteSubscription(String tenant, String id) {
+        throw new UnsupportedOperationException("This store keeps no signal subscriptions");
+    }
+
+    /**
+     * Writes one {@code SIGNAL_DELIVERY} job, due now, for each waiting subscription of the tenant for the signal, in one
+     * statement and without locking any instance (#492). The job id is the subscription id, so a subscription is woken at
+     * most once however many broadcasts reach it before it is consumed.
+     *
+     * @param tenant the broadcaster's tenant, the only one read or written
+     * @param name signal name
+     * @param signalId the broadcast the jobs belong to, kept in the job payload
+     * @param lease lease of a claim
+     * @param maxAttempts claims after which a job fails
+     * @param now due time and creation time
+     * @return the number of jobs written
+     */
+    default int wakeSignalWaiters(String tenant, String name, String signalId, java.time.Duration lease,
+            int maxAttempts, Instant now) {
+        throw new UnsupportedOperationException("This store keeps no signal subscriptions");
+    }
+
+    /**
+     * The active versions of a tenant whose start event is a signal start for the name, newest first (#492). The caller
+     * keeps only a version that is the key's effective one.
+     *
+     * @param tenant tenant
+     * @param name signal name
+     * @param limit the most versions read
+     * @return the versions
+     */
+    default List<StoredDefinition> signalStartDefinitions(String tenant, String name, int limit) {
+        return List.of();
+    }
+
+    /**
      * One row per key, ordered by key, after {@code afterKey} (exclusive) when it is not null.
      *
      * @param now the time that decides the effective version

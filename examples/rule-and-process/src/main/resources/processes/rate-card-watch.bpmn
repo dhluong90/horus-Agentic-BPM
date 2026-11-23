@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Card pricing waits for a new rate card, reprices the card fees, and tells the rest of the tenant it is done.
+     Any instance of the same tenant that waits for card-fees-repriced continues; no other tenant's does. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_rate-card-watch"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:signal id="Signal_rate_card_updated" name="rate-card-updated"/>
+  <bpmn:signal id="Signal_fees_repriced" name="card-fees-repriced"/>
+  <bpmn:process id="rate-card-watch" name="Reprice card fees when the rate card changes" isExecutable="true">
+    <bpmn:startEvent id="start" name="Watch started"/>
+    <bpmn:intermediateCatchEvent id="wait-rate-card" name="Rate card updated">
+      <bpmn:signalEventDefinition signalRef="Signal_rate_card_updated"/>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:userTask id="reprice" name="Reprice card fees" horus:assignee="role:PRICING_OFFICER" horus:resultVariable="repriced"/>
+    <bpmn:endEvent id="end" name="Card fees repriced">
+      <bpmn:signalEventDefinition signalRef="Signal_fees_repriced"/>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="start__wait-rate-card" sourceRef="start" targetRef="wait-rate-card"/>
+    <bpmn:sequenceFlow id="wait-rate-card__reprice" sourceRef="wait-rate-card" targetRef="reprice"/>
+    <bpmn:sequenceFlow id="reprice__end" sourceRef="reprice" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

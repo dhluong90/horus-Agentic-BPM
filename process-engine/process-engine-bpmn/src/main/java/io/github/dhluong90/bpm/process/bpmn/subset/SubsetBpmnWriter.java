@@ -7,7 +7,12 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
@@ -93,12 +98,19 @@ public final class SubsetBpmnWriter {
         xml.line(0, "                  targetNamespace=\"urn:horus-bpm:definitions\"");
         xml.line(0, "                  expressionLanguage=\"" + BpmnNamespaces.EXPR_V1 + "\"");
         xml.line(0, "                  exporter=\"HORUS Process Engine\">");
+        // Each signal a process uses is one signal element, so the file reads back to the same names.
+        Map<String, String> signalIds = new LinkedHashMap<>();
+        process.flowElements().stream().filter(FlowNode.class::isInstance).map(FlowNode.class::cast)
+                .flatMap(n -> eventDefinitions(n).stream()).filter(SignalEventDefinition.class::isInstance)
+                .map(d -> ((SignalEventDefinition) d).signalRef())
+                .forEach(name -> signalIds.computeIfAbsent(name, k -> "Signal_" + (signalIds.size() + 1)));
+        signalIds.forEach((name, id) -> xml.line(1, "<bpmn:signal id=" + attr(id) + " name=" + attr(name) + "/>"));
         xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
                 + " isExecutable=\"true\">");
         for (FlowElement element : process.flowElements()) {
             switch (element) {
                 case SequenceFlow flow -> sequenceFlow(xml, flow);
-                case FlowNode node -> node(xml, node);
+                case FlowNode node -> node(xml, node, signalIds);
                 default -> throw new IllegalArgumentException("Element " + element.id() + " ("
                         + element.getClass().getSimpleName() + ") is outside the exportable subset");
             }
@@ -109,6 +121,7 @@ public final class SubsetBpmnWriter {
         process.flowElements().forEach(e -> ids.add(e.id()));
         process.artifacts().forEach(a -> ids.add(a.id()));
         ids.add(process.id());
+        ids.addAll(signalIds.values());
         ids.add("Definitions_" + process.id());
         categories(xml, process, ids);
         diagram(xml, process, ids);
@@ -116,7 +129,38 @@ public final class SubsetBpmnWriter {
         return xml.out.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private static void node(Xml xml, FlowNode node) {
+    /** An intermediate event is exported only with the signal or conditional definitions this writer knows. */
+    private static boolean exportable(List<EventDefinition> definitions) {
+        return definitions.size() == 1 && (definitions.get(0) instanceof SignalEventDefinition
+                || definitions.get(0) instanceof ConditionalEventDefinition);
+    }
+
+    private static List<EventDefinition> eventDefinitions(FlowNode node) {
+        return switch (node) {
+            case StartEvent s -> s.eventDefinitions();
+            case EndEvent e -> e.eventDefinitions();
+            case IntermediateCatchEvent c -> c.eventDefinitions();
+            case IntermediateThrowEvent t -> t.eventDefinitions();
+            default -> List.of();
+        };
+    }
+
+    /** The signal and conditional definitions of an event, as the lines of its children. */
+    private static List<String> eventDefinitionLines(FlowNode node, Map<String, String> signalIds) {
+        List<String> lines = new ArrayList<>();
+        for (EventDefinition definition : eventDefinitions(node)) {
+            if (definition instanceof SignalEventDefinition signal) {
+                lines.add("<bpmn:signalEventDefinition signalRef=" + attr(signalIds.get(signal.signalRef())) + "/>");
+            } else if (definition instanceof ConditionalEventDefinition conditional) {
+                lines.add("<bpmn:conditionalEventDefinition><bpmn:condition xsi:type=\"bpmn:tFormalExpression\" language=\""
+                        + BpmnNamespaces.EXPR_V1 + "\">" + text(conditional.condition().text())
+                        + "</bpmn:condition></bpmn:conditionalEventDefinition>");
+            }
+        }
+        return lines;
+    }
+
+    private static void node(Xml xml, FlowNode node, Map<String, String> signalIds) {
         String tag;
         StringBuilder attributes = new StringBuilder(" id=" + attr(node.id()) + optional("name", node.name()));
         List<InputMapping> inputs = List.of();
@@ -126,6 +170,8 @@ public final class SubsetBpmnWriter {
         switch (node) {
             case StartEvent s -> tag = "bpmn:startEvent";
             case EndEvent e -> tag = "bpmn:endEvent";
+            case IntermediateCatchEvent c when exportable(c.eventDefinitions()) -> tag = "bpmn:intermediateCatchEvent";
+            case IntermediateThrowEvent t when exportable(t.eventDefinitions()) -> tag = "bpmn:intermediateThrowEvent";
             case ServiceTask t when agent != null -> {
                 tag = "bpmn:serviceTask";
                 attributes.append(" horus:type=\"agentTask\"").append(optional("horus:agent", agent.agent()))
@@ -186,8 +232,9 @@ public final class SubsetBpmnWriter {
         node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
                 f.action())));
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
+        List<String> eventLines = eventDefinitionLines(node, signalIds);
         if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
-                && node.outgoing().isEmpty()) {
+                && node.outgoing().isEmpty() && eventLines.isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;
         }
@@ -232,6 +279,7 @@ public final class SubsetBpmnWriter {
         }
         node.incoming().forEach(id -> xml.line(3, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(3, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
+        eventLines.forEach(line -> xml.line(3, line));
         xml.line(2, "</" + tag + ">");
     }
 
@@ -431,6 +479,8 @@ public final class SubsetBpmnWriter {
         return switch (node) {
             case StartEvent s -> new int[] {36, 36};
             case EndEvent e -> new int[] {36, 36};
+            case IntermediateCatchEvent c -> new int[] {36, 36};
+            case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };

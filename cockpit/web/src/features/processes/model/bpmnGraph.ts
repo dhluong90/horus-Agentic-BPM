@@ -28,6 +28,12 @@ export const KNOWN_NODE_TYPES = [
   'callActivity',
   'transaction',
   'intermediateThrowEvent:compensate',
+  'startEvent:signal',
+  'startEvent:conditional',
+  'endEvent:signal',
+  'intermediateCatchEvent:signal',
+  'intermediateThrowEvent:signal',
+  'intermediateCatchEvent:conditional',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 

@@ -137,14 +137,14 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_a_throw_event_takes_its_stage_from_its_event_definition() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:intermediateThrowEvent id=\"sig\"><bpmn:signalEventDefinition/></bpmn:intermediateThrowEvent>"
+                + "<bpmn:intermediateThrowEvent id=\"lnk\"><bpmn:linkEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"msg\"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"esc\"><bpmn:escalationEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"none\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
-                        tuple("sig", "S2"), tuple("msg", "S2"), tuple("esc", "S1"), tuple("none", "S0")));
+                        tuple("lnk", "S1"), tuple("msg", "S2"), tuple("esc", "S1"), tuple("none", "S0")));
     }
 
     @Test

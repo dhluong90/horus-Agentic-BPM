@@ -134,7 +134,7 @@
       "required": ["id", "type"],
       "properties": {
         "type": {
-          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "throwCompensation"]
+          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "throwCompensation", "signalCatch", "signalThrow", "conditionalCatch"]
         }
       },
       "allOf": [
@@ -149,17 +149,60 @@
         { "if": { "properties": { "type": { "const": "timer" } } }, "then": { "$ref": "#/$defs/timerStep" } },
         { "if": { "properties": { "type": { "const": "callProcess" } } }, "then": { "$ref": "#/$defs/callProcessStep" } },
         { "if": { "properties": { "type": { "const": "saga" } } }, "then": { "$ref": "#/$defs/sagaStep" } },
-        { "if": { "properties": { "type": { "const": "throwCompensation" } } }, "then": { "$ref": "#/$defs/throwCompensationStep" } }
+        { "if": { "properties": { "type": { "const": "throwCompensation" } } }, "then": { "$ref": "#/$defs/throwCompensationStep" } },
+        { "if": { "properties": { "type": { "const": "signalCatch" } } }, "then": { "$ref": "#/$defs/signalCatchStep" } },
+        { "if": { "properties": { "type": { "const": "signalThrow" } } }, "then": { "$ref": "#/$defs/signalThrowStep" } },
+        { "if": { "properties": { "type": { "const": "conditionalCatch" } } }, "then": { "$ref": "#/$defs/conditionalCatchStep" } }
       ]
+    },
+    "signalName": {
+      "description": "The name a signal event and a broadcast match on, within one tenant.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$"
     },
     "startStep": {
       "$ref": "#/$defs/common",
       "unevaluatedProperties": false,
-      "properties": { "next": { "$ref": "#/$defs/next" } }
+      "properties": {
+        "next": { "$ref": "#/$defs/next" },
+        "signal": { "description": "A signal start event: a broadcast of this name starts an instance.", "$ref": "#/$defs/signalName" },
+        "condition": { "description": "A conditional start event: the instance starts only when this condition is true for the start variables.", "type": "string", "minLength": 1 }
+      },
+      "not": { "required": ["signal", "condition"] }
     },
     "endStep": {
       "$ref": "#/$defs/common",
-      "unevaluatedProperties": false
+      "unevaluatedProperties": false,
+      "properties": {
+        "signal": { "description": "A signal end event: broadcasts this signal when reached.", "$ref": "#/$defs/signalName" }
+      }
+    },
+    "signalCatchStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["signal"],
+      "properties": {
+        "signal": { "$ref": "#/$defs/signalName" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "signalThrowStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["signal"],
+      "properties": {
+        "signal": { "$ref": "#/$defs/signalName" },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "conditionalCatchStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["condition"],
+      "properties": {
+        "condition": { "description": "Passes at once when true on arrival, otherwise waits until a change of the instance variables makes it true.", "type": "string", "minLength": 1 },
+        "next": { "$ref": "#/$defs/next" }
+      }
     },
     "userTaskStep": {
       "$ref": "#/$defs/common",

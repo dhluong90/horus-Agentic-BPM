@@ -155,6 +155,12 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-251 | `PRE_251_*` in `TaskElementsTest` | Unit on the kernel, a plain and a manual task | M3 | `TR-STD-04` | Done (#485) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
+| PRE-270 | `PRE_270_*` in `SignalEventsPostgresIT` | A throw wakes the waiters of its tenant by job and never another tenant's | M3 | `TR-TEN-01` | Done (#492) |
+| PRE-271 | `PRE_271_*` in `SignalAndConditionalEventsTest` | A signal catch is woken once, by its own subscription | M3 | `TR-STD-13` | Done (#492) |
+| PRE-272 | `PRE_272_*` in `SignalAndConditionalEventsTest` | Signal throw and signal end broadcast once | M3 | `TR-STD-11` | Done (#492) |
+| PRE-273 | `PRE_273_*` in `SignalEventsPostgresIT` | Permission, idempotency key, tenant of the broadcast, signal start | M3 | `TR-IDEM-01` | Done (#492) |
+| PRE-274 | `PRE_274_*` in `SignalAndConditionalEventsTest` | Conditional catch on arrival, on change of variables, conditional start | M3 | `TR-STD-11` | Done (#492) |
+| PRE-275 | `PRE_275_*` in `SignalAndConditionalEventsImportTest` | Import, refusal and export of signal and conditional events | M3 | `TR-STD-05` | Done (#492) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 
