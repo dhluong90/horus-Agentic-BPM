@@ -71,6 +71,52 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
+    void TR_OPS_02_version_history_accepts_a_rule_set_row_and_refuses_a_malformed_row_of_either_kind() {
+        DataSource db = migratedDatabase();
+        JdbcClient jdbc = JdbcClient.create(db);
+        jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES ('bank-a', 'RS1', 'card-fee', now())")
+                .update();
+        jdbc.sql("""
+                INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, canonical_json,
+                  canonical_hash, source_format, source_document, source_hash, created_at)
+                VALUES ('bank-a', 'V1', 'RS1', 1, 'DRAFT', 'FIRST', '{}', repeat('a', 64), 'YAML', 'x', repeat('b', 64),
+                  now())
+                """).update();
+        String evidence = "'{\"format\":\"csv\",\"versions\":[1],\"decisionIds\":[],"
+                + "\"contentSha256\":\"9f4a\",\"bytes\":10}'";
+        jdbc.sql("INSERT INTO rle_version_history (tenant_id, id, version_id, action, to_status, actor, lock_version,"
+                + " occurred_at) VALUES ('bank-a', 'H1', 'V1', 'CREATED', 'DRAFT', 'lan', 0, now())").update();
+
+        // A rule set row: an evidence export of a rule set, with evidence and no version
+        jdbc.sql("INSERT INTO rle_version_history (tenant_id, id, rule_set_id, action, actor, occurred_at, evidence)"
+                + " VALUES ('bank-a', 'H2', 'RS1', 'EVIDENCE_EXPORTED', 'ha', now(), " + evidence + ")").update();
+
+        List<String> refused = List.of(
+                // a version row without its status after or its lock version
+                "INSERT INTO rle_version_history (tenant_id, id, version_id, action, actor, occurred_at)"
+                        + " VALUES ('bank-a', 'H3', 'V1', 'REQUESTED', 'lan', now())",
+                // an export recorded on a version
+                "INSERT INTO rle_version_history (tenant_id, id, version_id, action, to_status, actor, lock_version,"
+                        + " occurred_at, evidence) VALUES ('bank-a', 'H4', 'V1', 'EVIDENCE_EXPORTED', 'DRAFT', 'ha', 0,"
+                        + " now(), " + evidence + ")",
+                // a rule set row without evidence
+                "INSERT INTO rle_version_history (tenant_id, id, rule_set_id, action, actor, occurred_at)"
+                        + " VALUES ('bank-a', 'H5', 'RS1', 'EVIDENCE_EXPORTED', 'ha', now())",
+                // a rule set row of another tenant's rule set
+                "INSERT INTO rle_version_history (tenant_id, id, rule_set_id, action, actor, occurred_at, evidence)"
+                        + " VALUES ('bank-b', 'H6', 'RS1', 'EVIDENCE_EXPORTED', 'ha', now(), " + evidence + ")",
+                // an unknown action
+                "INSERT INTO rle_version_history (tenant_id, id, rule_set_id, action, actor, occurred_at, evidence)"
+                        + " VALUES ('bank-a', 'H7', 'RS1', 'EVIDENCE_DELETED', 'ha', now(), " + evidence + ")");
+        for (String sql : refused) {
+            assertThatThrownBy(() -> jdbc.sql(sql).update()).as(sql).hasMessageContaining("violates");
+        }
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_version_history").query(Long.class).single()).isEqualTo(2L);
+        assertThat(jdbc.sql("SELECT conname FROM pg_constraint WHERE conrelid = 'rle_version_history'::regclass"
+                + " AND NOT convalidated").query(String.class).list()).isEmpty();
+    }
+
+    @Test
     void TR_OPS_04_migration_creates_the_partitioned_decision_log_with_only_the_default_partition() {
         DataSource db = freshDatabase();
 

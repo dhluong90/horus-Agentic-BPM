@@ -77,6 +77,7 @@ A tag build (`BPM_RELEASE_TAG`, set by the workflow on tag pushes) runs `tools/r
 - the root and **every** module of the reactor (read from the effective POM) are at exactly `X.Y.Z`, so a `-SNAPSHOT` is never tagged as a release and no module is left behind;
 - every module has the group id `io.github.dhluong90.bpm` (ADR-0022), so no release ships under the old `io.github.dhluong90.bpm` coordinates; the rename is #21;
 - the tagged commit is on `main`: an ancestor of `refs/remotes/origin/main` (`git merge-base --is-ancestor`). The guard reads that full ref name, so a tag or branch named `origin/main` cannot stand in for it, and it assumes the remote `origin` is this repository, as `actions/checkout` sets it.
+- `BASELINE_OPEN` in `tools/check-migration-order.py` is `False`. Until 1.0 the V1 baseline of each engine may be edited in place (#479); the release commit sets the constant to `False`, and the guard refuses a tag while it is `True`.
 
 **The guard catches mistakes; it is not access control.** Anyone who can push a tag can run the workflow. Who may create `v*` tags, and whether a published Release can be changed afterwards, are repository settings. For now the repository has no tag ruleset (PD-091).
 
