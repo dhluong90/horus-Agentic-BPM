@@ -20,6 +20,8 @@ export interface RulesSession {
   simulationReports: boolean;
   /** Whether the host announces replay of logged decisions in plain words (/meta feature rules.history-readings). */
   historyReadings: boolean;
+  /** Whether the host turns on the nested And/Or/Not condition builder (/meta feature rules.condition-builder); off by default (PD-076). */
+  conditionBuilder: boolean;
   /** True when the host lists this rule set in lifecycle.require-simulation-report: a publication request must carry a report. */
   requiresReport: (ruleSet: string) => boolean;
 }
@@ -29,6 +31,7 @@ export interface ReportHostSettings {
   templates?: boolean;
   simulationReports?: boolean;
   historyReadings?: boolean;
+  conditionBuilder?: boolean;
   /** The rule set names of lifecycle.require-simulation-report; empty when the host requires none. */
   requireReport?: readonly string[];
 }
@@ -57,7 +60,7 @@ export function RulesProvider({
   const { permissions } = me;
   const tenant = me.tenant.current;
   const userId = me.user.id;
-  const { templates = false, simulationReports = false, historyReadings = false, requireReport } = hostSettings;
+  const { templates = false, simulationReports = false, historyReadings = false, conditionBuilder = false, requireReport } = hostSettings;
   const required = requireReport?.join(',') ?? '';
   const value = useMemo<RulesSession>(() => {
     const granted = new Set(permissions);
@@ -72,9 +75,10 @@ export function RulesProvider({
       templates,
       simulationReports,
       historyReadings,
+      conditionBuilder,
       requiresReport: (ruleSet) => required.split(',').includes(ruleSet),
     };
-  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, readingStyle, templates, simulationReports, historyReadings, required, fetchImpl]);
+  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, readingStyle, templates, simulationReports, historyReadings, conditionBuilder, required, fetchImpl]);
   return <RulesContext.Provider value={value}>{children}</RulesContext.Provider>;
 }
 

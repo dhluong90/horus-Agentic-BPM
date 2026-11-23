@@ -7,7 +7,9 @@ import type { DraftAction, DraftState } from '../model/draft';
 import type { ErrorPlace } from '../model/engineErrors';
 import { clauseLabel, readCondition, readOutput, type CellReading } from '../model/reading';
 import type { EditableRow } from '../model/table';
+import { fromText, isCompound, readWords, type Words } from '../model/condition';
 import { BoolToggle, ChoiceEditor, CompareEditor, MoneyEditor, TextEditor } from './CellEditors';
+import { ConditionBuilder } from './ConditionBuilder';
 import { TableHead } from './DecisionTable';
 import { MenuButton } from './MenuButton';
 import { cellMove, nextFocus } from '../model/gridKeys';
@@ -38,7 +40,26 @@ function cellProblem(engine: string | undefined, model: CellModel, example: stri
   return hint === undefined ? { error: engine, detail: undefined } : { error: t(hint.key, hint.params), detail: engine };
 }
 
-function ConditionCell({ row, input, definition, error: engine, dispatch }: { row: EditableRow; input: InputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
+/** What a condition cell shows when the builder is on: its own editor, and the way into the builder. */
+interface BuilderCell { open: boolean; onToggle: () => void }
+
+/** A nested condition in plain words, as the button that opens the builder; the stored text stays under Details. */
+function NestedSummary({ words, root, label, error, errorId, builder, buildKey }: { words: Words; root: Parameters<typeof readWords>[0]; label: string; error: string | undefined; errorId: string; builder: BuilderCell; buildKey: string }) {
+  const { t } = useI18n();
+  const reading = readWords(root, words);
+  return (
+    <div className={error !== undefined ? 'cell-edit cell-edit--bad' : 'cell-edit'}>
+      <button type="button" className="cb-summary" data-build={buildKey} aria-expanded={builder.open} aria-label={t('builder.summaryFor', { cell: label, reading })}
+        {...(error !== undefined ? { 'aria-describedby': errorId } : {})} onClick={builder.onToggle}>
+        <span className="cb-summary__text">{reading}</span>
+        <span aria-hidden="true" className="cb-summary__chevron">⌄</span>
+      </button>
+      {error !== undefined ? <span id={errorId} className="cell-error"><span aria-hidden="true">✕</span> {error}</span> : null}
+    </div>
+  );
+}
+
+function ConditionCell({ row, input, definition, error: engine, dispatch, builder }: { row: EditableRow; input: InputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction>; builder: BuilderCell | undefined }) {
   const { t, locale } = useI18n();
   const column = clauseLabel(input, locale);
   const label = t('editor.cellLabel', { row: row.id, column });
@@ -53,10 +74,26 @@ function ConditionCell({ row, input, definition, error: engine, dispatch }: { ro
   const { error, detail } = choose !== undefined ? { error: choose, detail: undefined } : cellProblem(engine, model, exampleOf(readCondition(row.original?.when[input.name], locale)), currency, t);
   const onText = (next: string) => { dispatch({ type: 'edit-cell', key: row.key, part: 'when', column: input.name, text: next }); };
   const common = { label, error, detail, errorId, column };
-  if (model.kind === 'raw' || kind === 'raw' || kind === 'text') return <TextEditor {...common} text={text} mono onText={onText} />;
-  if (kind === 'choice') return <ChoiceEditor {...common} model={model} options={(input.allowed ?? []).map(String)} onText={onText} />;
-  if (kind === 'bool') return <BoolToggle {...common} value={model.kind === 'bool' ? model.value : undefined} condition onText={onText} />;
-  return <CompareEditor {...common} model={model} currency={currency} onText={onText} />;
+  const buildKey = `${row.key}|${input.name}`;
+  const nested = builder !== undefined ? fromText(text, input.name, definition.inputs) : undefined;
+  if (builder !== undefined && nested?.ok === true && isCompound(nested.root)) {
+    const words: Words = { locale, t, label: (name) => { const found = definition.inputs.find((candidate) => candidate.name === name); return found ? clauseLabel(found, locale) : name; } };
+    return <NestedSummary words={words} root={nested.root} label={label} error={error} errorId={errorId} builder={builder} buildKey={buildKey} />;
+  }
+  let editor;
+  if (model.kind === 'raw' || kind === 'raw' || kind === 'text') editor = <TextEditor {...common} text={text} mono onText={onText} />;
+  else if (kind === 'choice') editor = <ChoiceEditor {...common} model={model} options={(input.allowed ?? []).map(String)} onText={onText} />;
+  else if (kind === 'bool') editor = <BoolToggle {...common} value={model.kind === 'bool' ? model.value : undefined} condition onText={onText} />;
+  else editor = <CompareEditor {...common} model={model} currency={currency} onText={onText} />;
+  if (builder === undefined) return editor;
+  return (
+    <div className="cb-cell">
+      {editor}
+      <button type="button" className="cb-open hit" data-build={buildKey} aria-expanded={builder.open} aria-label={t('builder.openFor', { cell: label })} title={t('builder.openFor', { cell: label })} onClick={builder.onToggle}>
+        {t('builder.open')}
+      </button>
+    </div>
+  );
 }
 
 function OutputCell({ row, output, definition, error: engine, dispatch }: { row: EditableRow; output: OutputClause; definition: RuleSetDefinition; error: string | undefined; dispatch: Dispatch<DraftAction> }) {
@@ -103,16 +140,27 @@ interface Held { key: string; part: 'when' | 'then'; column: string; text: strin
  * Arrow keys move between cells, Enter commits a cell and Escape puts back the value it had. A commit (Enter,
  * leaving a cell, a row action) is what the engine checks; nothing is stored before Save draft.
  */
-export function DraftEditor({ definition, draft, dispatch, errors, readings }: {
+export function DraftEditor({ definition, draft, dispatch, errors, readings, builder = false }: {
   definition: RuleSetDefinition;
   draft: DraftState;
   dispatch: Dispatch<DraftAction>;
   errors: readonly ErrorPlace[];
   /** The engine's sentence of each row by row id, from the last non-storing check; undefined when that call failed. */
   readings: ReadonlyMap<string, string> | undefined;
+  /** The host turns on the nested And/Or/Not condition builder (/meta feature rules.condition-builder). */
+  builder?: boolean;
 }) {
   const { t } = useI18n();
   const [deleting, setDeleting] = useState<EditableRow | undefined>(undefined);
+  // The cell whose condition builder is open, one at a time; closing returns the focus to the button that opened it.
+  const [building, setBuilding] = useState<{ key: string; column: string } | undefined>(undefined);
+  const opener = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (building !== undefined || opener.current === undefined) return;
+    const key = opener.current;
+    opener.current = undefined;
+    document.querySelector<HTMLElement>(`[data-build="${key}"]`)?.focus();
+  }, [building]);
   const columns = definition.inputs.length + definition.outputs.length + 2;
   const held = useRef<Held | undefined>(undefined);
   const cellOf = (target: EventTarget | null) => (target instanceof HTMLElement ? target.closest<HTMLTableCellElement>('td[data-cell]') : null);
@@ -181,7 +229,12 @@ export function DraftEditor({ definition, draft, dispatch, errors, readings }: {
                           {error !== undefined ? <span className="cell-error"><span aria-hidden="true">✕</span> {error}</span> : null}
                         </>
                       ) : (
-                        <ConditionCell row={row} input={input} definition={definition} error={error} dispatch={dispatch} />
+                        <ConditionCell row={row} input={input} definition={definition} error={error} dispatch={dispatch}
+                          builder={builder ? { open: building?.key === row.key && building.column === input.name, onToggle: () => {
+                            const open = building?.key === row.key && building.column === input.name;
+                            opener.current = `${row.key}|${input.name}`;
+                            setBuilding(open ? undefined : { key: row.key, column: input.name });
+                          } } : undefined} />
                       )}
                     </td>
                   );
@@ -195,6 +248,14 @@ export function DraftEditor({ definition, draft, dispatch, errors, readings }: {
                   <RowMenu row={row} index={index} count={draft.rows.length} dispatch={dispatch} onDelete={() => { setDeleting(row); }} />
                 </td>
               </tr>
+              {builder && building?.key === row.key ? (
+                <tr className="dt__builder-row">
+                  <td colSpan={columns}>
+                    <BuilderPanel row={row} column={building.column} definition={definition} draft={draft} errors={errors} dispatch={dispatch}
+                      onClose={() => { opener.current = `${row.key}|${building.column}`; setBuilding(undefined); }} />
+                  </td>
+                </tr>
+              ) : null}
               {!bad && sentence !== undefined ? (
                 <tr className="dt__reading-row">
                   <td colSpan={columns} className="dt__reading">
@@ -219,6 +280,27 @@ export function DraftEditor({ definition, draft, dispatch, errors, readings }: {
         {readings === undefined ? <p className="editor-foot__keys" role="status">{t('editor.readingUnavailable')}</p> : null}
       </div>
     </div>
+  );
+}
+
+/** The builder of one cell, fed by the draft: its text, what the engine last checked, and the engine's problems for the cell. */
+function BuilderPanel({ row, column, definition, draft, errors, dispatch, onClose }: { row: EditableRow; column: string; definition: RuleSetDefinition; draft: DraftState; errors: readonly ErrorPlace[]; dispatch: Dispatch<DraftAction>; onClose: () => void }) {
+  const { t, locale } = useI18n();
+  const input = definition.inputs.find((candidate) => candidate.name === column);
+  if (input === undefined) return null;
+  const problems = errors.flatMap((e) => (e.kind === 'cell' && e.ruleId === row.id && e.column === column ? [{ message: e.message, position: e.position }] : []));
+  return (
+    <ConditionBuilder
+      cell={t('editor.cellLabel', { row: row.id, column: clauseLabel(input, locale) })}
+      column={input}
+      definition={definition}
+      text={row.when[column] ?? ''}
+      checked={draft.committed.find((r) => r.key === row.key)?.when[column] ?? ''}
+      problems={problems}
+      onText={(next) => { dispatch({ type: 'edit-cell', key: row.key, part: 'when', column, text: next }); }}
+      onCommit={() => { dispatch({ type: 'commit' }); }}
+      onClose={onClose}
+    />
   );
 }
 
