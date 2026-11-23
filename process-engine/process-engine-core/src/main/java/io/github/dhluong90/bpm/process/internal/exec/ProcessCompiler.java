@@ -3,7 +3,11 @@ package io.github.dhluong90.bpm.process.internal.exec;
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
@@ -126,13 +130,59 @@ public final class ProcessCompiler {
         }
         for (FlowNode node : nodes.values()) {
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
-            if (!(node instanceof EndEvent) && !throwsCompensation(node) && out.isEmpty()) {
+            if (!(node instanceof EndEvent) && !throwsCompensation(node) && !isLinkThrow(node) && out.isEmpty()) {
                 problems.add(DefinitionProblem.of("NO_OUTGOING_FLOW", "Only an end event may have no outgoing flow",
                         node.id()));
             }
             if (throwsCompensation(node) && !(nodes.get(containerOf.get(node.id())) instanceof Transaction)) {
                 problems.add(DefinitionProblem.of("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", node.id()));
+            }
+            if (node instanceof BoundaryEvent boundary) {
+                FlowNode host = boundary.attachedToRef() == null ? null : nodes.get(boundary.attachedToRef());
+                if (!(host instanceof Activity)) {
+                    problems.add(DefinitionProblem.of("BOUNDARY_ATTACHED_INVALID", "A boundary event is attached to a task,"
+                            + " a call activity or a sub-process of its own scope; " + boundary.attachedToRef()
+                            + " is not one", node.id()));
+                } else if (!containerOf.get(host.id()).equals(containerOf.get(boundary.id()))) {
+                    problems.add(DefinitionProblem.of("BOUNDARY_ATTACHED_INVALID", "A boundary event stands in the same"
+                            + " scope as the activity it is attached to", node.id()));
+                }
+                if (flows.stream().anyMatch(f -> f.targetRef().equals(boundary.id()))) {
+                    problems.add(DefinitionProblem.of("BOUNDARY_HAS_INCOMING", "A boundary event is entered by its"
+                            + " activity, not by a sequence flow", node.id()));
+                }
+                if (!boundary.cancelActivity() && boundary.eventDefinitions().size() == 1
+                        && boundary.eventDefinitions().get(0) instanceof ErrorEventDefinition) {
+                    problems.add(DefinitionProblem.of("BOUNDARY_ERROR_NOT_INTERRUPTING", "An error boundary event always"
+                            + " cancels its activity; remove cancelActivity=\"false\"", node.id()));
+                }
+            }
+            if (isLinkThrow(node)) {
+                String name = CompiledProcess.linkName(node).orElse(null);
+                if (name == null || name.isBlank()) {
+                    problems.add(DefinitionProblem.of("LINK_NAME_REQUIRED", "A link event needs a name", node.id()));
+                } else if (nodes.values().stream().noneMatch(n -> n instanceof IntermediateCatchEvent
+                        && CompiledProcess.linkName(n).filter(name::equals).isPresent()
+                        && containerOf.get(n.id()).equals(containerOf.get(node.id())))) {
+                    problems.add(DefinitionProblem.of("LINK_CATCH_MISSING", "The link throw '" + name + "' has no link"
+                            + " catch of the same name in its scope", node.id()));
+                }
+                if (!out.isEmpty()) {
+                    problems.add(DefinitionProblem.of("LINK_THROW_HAS_OUTGOING", "A link throw leaves by its link, not by a"
+                            + " sequence flow", node.id()));
+                }
+            }
+            if (node instanceof IntermediateCatchEvent && CompiledProcess.linkName(node).isPresent()) {
+                String name = CompiledProcess.linkName(node).get();
+                boolean duplicate = nodes.values().stream().anyMatch(n -> n != node
+                        && n instanceof IntermediateCatchEvent && CompiledProcess.linkName(n).filter(name::equals).isPresent()
+                        && containerOf.get(n.id()).equals(containerOf.get(node.id()))
+                        && n.id().compareTo(node.id()) < 0);
+                if (duplicate) {
+                    problems.add(DefinitionProblem.of("LINK_CATCH_DUPLICATE", "Two link catches named '" + name
+                            + "' stand in one scope; a link name has one catch", node.id()));
+                }
             }
             if (node instanceof ExclusiveGateway gateway) {
                 out.stream().filter(f -> f.id().equals(gateway.defaultFlow()) && f.conditionExpression() != null)
@@ -185,8 +235,21 @@ public final class ProcessCompiler {
                 Map<String, FlowNode> inside = new java.util.LinkedHashMap<>();
                 nodes.values().stream().filter(n -> container.equals(containerOf.get(n.id())))
                         .forEach(n -> inside.put(n.id(), n));
-                reachability(startOf.get(container), inside, flows.stream()
-                        .filter(f -> container.equals(containerOf.get(f.id()))).toList(), problems);
+                List<SequenceFlow> edges = new ArrayList<>(flows.stream()
+                        .filter(f -> container.equals(containerOf.get(f.id()))).toList());
+                // A boundary event is reached from its activity and a link catch from its link throw (#489, #493).
+                for (FlowNode n : inside.values()) {
+                    if (n instanceof BoundaryEvent b && b.attachedToRef() != null) {
+                        edges.add(new SequenceFlow("boundary:" + b.id(), null, b.attachedToRef(), b.id(), null, null, null));
+                    } else if (isLinkThrow(n)) {
+                        CompiledProcess.linkName(n).flatMap(name -> inside.values().stream().filter(c ->
+                                c instanceof IntermediateCatchEvent && CompiledProcess.linkName(c)
+                                        .filter(name::equals).isPresent()).findFirst())
+                                .ifPresent(c -> edges.add(new SequenceFlow("link:" + n.id(), null, n.id(), c.id(), null,
+                                        null, null)));
+                    }
+                }
+                reachability(startOf.get(container), inside, edges, problems);
             }
         }
         if (!problems.isEmpty()) {
@@ -236,6 +299,13 @@ public final class ProcessCompiler {
     }
 
     /** @return whether the node is a {@code throwCompensation}: a throw event with one compensate definition */
+    /** A link throw: an intermediate throw event with one link event definition (#493). */
+    static boolean isLinkThrow(FlowNode node) {
+        return node instanceof IntermediateThrowEvent t && t.eventDefinitions().size() == 1
+                && t.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
+                        .LinkEventDefinition;
+    }
+
     static boolean throwsCompensation(FlowNode node) {
         return node instanceof IntermediateThrowEvent t && t.eventDefinitions().size() == 1
                 && t.eventDefinitions().get(0) instanceof CompensateEventDefinition;

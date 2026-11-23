@@ -80,6 +80,9 @@ The root element must declare the namespaces, and the process must be executable
 | `scriptTask` | `horus:resultVariable`; a `<bpmn:script>` child with one expression in `urn:horus-bpm:expr:v1` | `scriptFormat` set to `urn:horus-bpm:expr:v1` | `<bpmn:script>amount * 2</bpmn:script>` |
 | `callActivity` (a `callProcess` step, 0.3.0) | `calledElement`, the key of the definition to call, in your tenant | `horus:calledVersion` to pin a version, `horus:input` and `horus:output` elements, `horus:compensate`, `horus:onFailure="compensate"` | `calledElement="kyc-check"` |
 | `subProcess` (embedded, since 0.3.0) | a none `startEvent`, steps and at least one `endEvent` inside it | `name`. It reads and writes the process variables like the rest of the process; no flow crosses its border | `<bpmn:subProcess id="hand-over">` |
+| `boundaryEvent` (since 0.3.0) | `attachedToRef`, the id of a task, call activity or sub-process in the same scope; one `timerEventDefinition` (`timeDuration` or `timeDate`), `errorEventDefinition` or `escalationEventDefinition`; at least one outgoing flow | `cancelActivity="false"` for a non-interrupting one (timer and escalation only); `errorRef` or `escalationRef` naming a root `error` or `escalation` | `<bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="false">` |
+| `endEvent` with an `errorEventDefinition`, `escalationEventDefinition` or `terminateEventDefinition` (since 0.3.0) | for an error: `errorRef` to a root `error` with an `errorCode` | `escalationRef` on an escalation end | `<bpmn:endEvent id="refused"><bpmn:errorEventDefinition errorRef="Err_limit"/></bpmn:endEvent>` |
+| `intermediateThrowEvent` with an `escalationEventDefinition`, or a `linkEventDefinition`; `intermediateCatchEvent` with a `linkEventDefinition` (since 0.3.0) | `name` on each link definition; a throw needs a catch of the same name in the same scope | `escalationRef` | `<bpmn:linkEventDefinition name="notify"/>` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
@@ -113,6 +116,31 @@ A `subProcess` groups steps that run from their own start event to their own end
 ```
 
 A flow from inside to outside is refused at activation (`FLOW_CROSSES_SAGA`). An event sub-process is refused as `S1`.
+
+### Boundary events, errors and escalations (0.3.0)
+
+A boundary event sits on a task, a call activity or a sub-process and takes a path when something happens while that step runs. A timer uses the same timers and calendar rules as any timer. An interrupting boundary cancels the step (its work item, its pending call, a called child, or everything inside a sub-process) and takes its own flow; with `cancelActivity="false"` the step stays open and the flow runs once. The timer is cancelled when the step ends on its own.
+
+An error boundary catches a business error before it becomes an incident: the code a handler answers with, or an error end event inside a sub-process. The code comes from a root `error`; a boundary without `errorRef` catches every code, and one with a code wins over it. A call activity whose child failed or was cancelled raises `CHILD_FAILED` or `CHILD_CANCELLED`. An error always interrupts. An error end event that nothing catches opens an incident on the end event, as an unhandled business error does.
+
+An escalation goes up the same way. An escalation end or throw event that nothing catches is recorded in the timeline and the flow goes on.
+
+```xml
+<bpmn:error id="Err_limit" name="Refund limit exceeded" errorCode="REFUND_LIMIT_EXCEEDED"/>
+<bpmn:process id="card-dispute" isExecutable="true">
+  <bpmn:serviceTask id="post-refund" horus:handler="disputes.refund"/>
+  <bpmn:boundaryEvent id="over-limit" attachedToRef="post-refund">
+    <bpmn:errorEventDefinition errorRef="Err_limit"/>
+  </bpmn:boundaryEvent>
+  <bpmn:sequenceFlow id="f6" sourceRef="over-limit" targetRef="senior-approval"/>
+  ...
+```
+
+The worked example `examples/rule-and-process/src/main/resources/processes/card-dispute.bpmn` has a non-interrupting timer boundary, an error boundary and a link pair. An error cannot be thrown by an intermediate event (it is not BPMN); use an error end event. A boundary on a step with several boundaries is drawn side by side on its lower edge in the cockpit; the diagram and the timeline show them and never edit them.
+
+### Terminate and link events (0.3.0)
+
+A `terminateEventDefinition` on an end event cancels every other token of its scope, with their tasks, timers and called children: at the top level the instance completes, inside a sub-process only the sub-process ends and the parent goes on. A link throw jumps to the link catch of the same name in the same scope with no sequence flow, so several paths can end at one step. A throw with no catch of its name is refused at import as `LINK_CATCH_MISSING` with the element id; a name used by two catches in one scope is `LINK_CATCH_DUPLICATE`.
 
 ### Calling another process (0.3.0)
 
@@ -164,9 +192,9 @@ Expected answer, `422`:
 
 ```json
 {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","unsupportedElements":[
-  {"element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"S1","message":"..."},
+  {"element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"not planned","message":"..."},
   {"element":"inclusiveGateway","elementId":"ig-1","line":7,"stage":"S1","message":"..."},
-  {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,"stage":"S1","message":"..."}],...}
+  {"element":"endEvent with messageEventDefinition","elementId":"end","line":8,"stage":"S2","message":"..."}],...}
 ```
 
 The answer lists every unsupported element in the file, each with its id, its line and its stage. Remove or replace each one and import again. At most 100 entries are listed; `violationsTruncated: true` says there were more. Ids are printed without control characters and cut at 200 characters.
@@ -177,16 +205,16 @@ The answer lists every unsupported element in the file, each with its id, its li
 |---|---|
 | `S1`, `S2`, `S3` | The stage after 1.0 that adds the element |
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
-| `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` |
+| `S0` | An element of the current stage that this release has not finished: an `intermediateThrowEvent` with no event definition |
 
-Examples: `boundaryEvent`, `inclusiveGateway`, an event sub-process, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `inclusiveGateway`, an event sub-process, data objects and a timer cycle are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused in 0.2.0:
 
 | Kind | Elements |
 |---|---|
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
-| Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
+| Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event that is neither a timer nor a link, an intermediate throw event that is neither a compensation, an escalation nor a link, and any start event or an end event with a message or signal definition |
 | Activities | an event sub-process (`subProcess` with `triggeredByEvent="true"`), `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
@@ -221,6 +249,9 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `RESULT_VARIABLE_REQUIRED` | Add `horus:resultVariable` to the `userTask` or `scriptTask`, so a completion never overwrites other variables |
 | `INPUT_INVALID`, `INPUT_DUPLICATE` | Give each `horus:input` a unique `name` (letters, digits, `_`) and a `value`; `mask` is allowed on an agent step's input only, as `true` or `false` |
 | `FLOW_REF_INVALID` | Give the `sequenceFlow` both `sourceRef` and `targetRef` |
+| `BOUNDARY_ATTACHED_INVALID`, `BOUNDARY_HAS_INCOMING`, `BOUNDARY_ERROR_NOT_INTERRUPTING` | Attach the boundary event to a task, call activity or sub-process in its own scope with `attachedToRef`; no flow enters a boundary event; an error boundary has no `cancelActivity="false"` |
+| `ERROR_CODE_REQUIRED`, `ERROR_REF_UNRESOLVED`, `ESCALATION_REF_UNRESOLVED` | Point an error end event's `errorRef` at a root `error` that has an `errorCode`; point `errorRef` and `escalationRef` at a root element of the file |
+| `LINK_CATCH_MISSING`, `LINK_CATCH_DUPLICATE`, `LINK_NAME_REQUIRED`, `LINK_THROW_HAS_OUTGOING` | Name every link event, give each link throw one link catch of the same name in its scope, and draw no flow out of a throw |
 | `ASSOCIATION_DIRECTION_INVALID` | Set `associationDirection` on the `association` to `None`, `One` or `Both`, or leave it out |
 | `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
 | `NO_PROCESS` | Add a `process` element |

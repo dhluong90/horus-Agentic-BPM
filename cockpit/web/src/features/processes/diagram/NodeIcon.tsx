@@ -27,6 +27,23 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <path d="M5 2.5H2.5v11H5M11 2.5h2.5v11H11" {...common} />;
       case 'intermediateCatchEvent:timer':
         return <><circle cx="8" cy="8" r="6" {...common} /><path d="M8 4.5V8l2.5 1.5" {...common} /></>;
+      case 'boundaryEvent:timer':
+        return <><circle cx="8" cy="8" r="6" {...common} /><path d="M8 4.5V8l2.5 1.5" {...common} /></>;
+      case 'boundaryEvent:error':
+        return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} />;
+      case 'endEvent:error':
+        return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} fill="currentColor" />;
+      case 'boundaryEvent:escalation':
+      case 'intermediateThrowEvent:escalation':
+        return <path d="M8 2l5 11-5-3-5 3z" {...common} />;
+      case 'endEvent:escalation':
+        return <path d="M8 2l5 11-5-3-5 3z" {...common} fill="currentColor" />;
+      case 'endEvent:terminate':
+        return <circle cx="8" cy="8" r="5" {...common} fill="currentColor" />;
+      case 'intermediateThrowEvent:link':
+        return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} fill="currentColor" />;
+      case 'intermediateCatchEvent:link':
+        return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} />;
       case 'intermediateThrowEvent:compensate':
         return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} />;
       case 'generic':

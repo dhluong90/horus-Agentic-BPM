@@ -141,7 +141,7 @@ function Edge({ edge, marker, defaultLabel, mark }: { edge: PlacedEdge; marker: 
   const at = edge.labelAt;
   const pill = edge.label !== undefined ? Math.ceil(edge.label.length * LABEL_CHAR) + 14 : 0;
   return (
-    <g className={mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
+    <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
       <path d={path(edge.points)} markerEnd={`url(#${marker}${mark !== undefined ? `-${mark}` : ''})`} />
       {tick !== undefined ? <path className="dg-edge__default" d={tick}><title>{defaultLabel}</title></path> : null}
       {edge.label !== undefined && at ? (
@@ -244,17 +244,22 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
 function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const centre = symbolCentre(node);
   const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : undefined;
-  const intermediate = node.type.startsWith('intermediate');
+  // #489, #493: a boundary event sits on its activity with a double ring, dashed when it does not interrupt; an end event
+  // that raises or terminates carries its symbol inside the thick ring.
+  const boundary = node.type.startsWith('boundaryEvent');
+  const intermediate = node.type.startsWith('intermediate') || boundary;
+  const endSymbol = node.type.startsWith('endEvent:');
+  const soft = boundary && node.interrupting === false;
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
   return (
-    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
+    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
       {node.shape === 'event' ? (
         <>
           <circle cx={centre.x} cy={centre.y} r={EVENT_RADIUS} />
           {intermediate ? <circle cx={centre.x} cy={centre.y} r={EVENT_RADIUS - 4} /> : null}
-          {intermediate ? <NodeIcon type={nodeIconKind(node.type)} x={centre.x - 8} y={centre.y - 8} /> : null}
+          {intermediate || endSymbol ? <NodeIcon type={nodeIconKind(node.type)} x={centre.x - 8} y={centre.y - 8} /> : null}
         </>
       ) : (
         <>
@@ -262,9 +267,11 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
           {glyph !== undefined ? <text x={centre.x} y={centre.y + 7} textAnchor="middle" className="dg-node__glyph" aria-hidden="true">{glyph}</text> : null}
         </>
       )}
-      <text aria-hidden="true" className="dg-node__caption" x={centre.x} y={captionTop + 12} textAnchor="middle">
-        {node.lines.map((line, index) => <tspan key={index} x={centre.x} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
-      </text>
+      {node.lines.length > 0 ? (
+        <text aria-hidden="true" className="dg-node__caption" x={centre.x} y={captionTop + 12} textAnchor="middle">
+          {node.lines.map((line, index) => <tspan key={index} x={centre.x} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
+        </text>
+      ) : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={centre.x + 20} y={centre.y - 20} /> : null}
     </g>
   );

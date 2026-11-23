@@ -66,7 +66,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage() {
-        // Given loan.bpmn with a boundary event (42), inclusive gateway (57), send task (63), ad-hoc sub-process (70)
+        // Given loan.bpmn with a message boundary event (42), inclusive gateway (57), send task (63), ad-hoc sub-process (70)
         // and an XPath condition (88), and camunda:class on a service task (30)
         byte[] file = bytes("loan.bpmn");
 
@@ -74,7 +74,7 @@ class SubsetBpmnRefusalTest {
             assertThat(e.code()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
             assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
-                    tuple("boundaryEvent", "be-timeout", 42, "S1"),
+                    tuple("boundaryEvent with messageEventDefinition", "be-timeout", 42, "S2"),
                     tuple("inclusiveGateway", "ig-1", 57, "S1"),
                     tuple("sendTask", "notify", 63, "S2"),
                     tuple("adHocSubProcess", "adhoc-1", 70, "S3"),
@@ -139,12 +139,12 @@ class SubsetBpmnRefusalTest {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
                 + "<bpmn:intermediateThrowEvent id=\"sig\"><bpmn:signalEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"msg\"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>"
-                + "<bpmn:intermediateThrowEvent id=\"esc\"><bpmn:escalationEventDefinition/></bpmn:intermediateThrowEvent>"
+                + "<bpmn:intermediateThrowEvent id=\"err\"><bpmn:errorEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"none\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
-                        tuple("sig", "S2"), tuple("msg", "S2"), tuple("esc", "S1"), tuple("none", "S0")));
+                        tuple("sig", "S2"), tuple("msg", "S2"), tuple("err", "not planned"), tuple("none", "S0")));
     }
 
     @Test
@@ -207,12 +207,13 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_event_definitions_take_the_stage_of_their_kind() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:messageEventDefinition/></bpmn:startEvent>"
-                + "<bpmn:endEvent id=\"b\"><bpmn:terminateEventDefinition/></bpmn:endEvent>"
-                + "<bpmn:endEvent id=\"c\"><bpmn:errorEventDefinition/></bpmn:endEvent>" + TAIL)
+                + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition/></bpmn:startEvent>"
+                + "<bpmn:endEvent id=\"c\"><bpmn:signalEventDefinition/></bpmn:endEvent>"
+                + "<bpmn:endEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:endEvent>" + TAIL)
                 .getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
-                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "S1", "S1"));
+                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "S1", "S2", "S2"));
     }
 
     private static byte[] bytes(String name) {

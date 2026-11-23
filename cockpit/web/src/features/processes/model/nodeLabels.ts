@@ -19,6 +19,15 @@ const KEYS: Record<KnownNodeType, MessageKey> = {
   transaction: 'node.transaction',
   subProcess: 'node.subProcess',
   'intermediateThrowEvent:compensate': 'node.compensate',
+  'boundaryEvent:timer': 'node.boundaryTimer',
+  'boundaryEvent:error': 'node.boundaryError',
+  'boundaryEvent:escalation': 'node.boundaryEscalation',
+  'endEvent:error': 'node.errorEnd',
+  'endEvent:escalation': 'node.escalationEnd',
+  'endEvent:terminate': 'node.terminateEnd',
+  'intermediateThrowEvent:escalation': 'node.escalationThrow',
+  'intermediateThrowEvent:link': 'node.linkThrow',
+  'intermediateCatchEvent:link': 'node.linkCatch',
 };
 
 /** Event definitions a node of an unknown element type can still be named by: `boundaryEvent:timer` is a timer. */
@@ -30,6 +39,8 @@ const KIND_KEYS: Readonly<Record<string, MessageKey>> = {
   escalation: 'node.escalation',
   conditional: 'node.conditional',
   compensate: 'node.compensate',
+  terminate: 'node.terminate',
+  link: 'node.link',
 };
 
 /** The icon a node is drawn with: its own type, the timer icon for any timer, or the generic icon. */

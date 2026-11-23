@@ -24,9 +24,13 @@ public final class CompiledProcess {
     private final Map<String, List<SequenceFlow>> outgoing;
     private final Map<FacetKey<?>, Object> facets;
     private final Map<String, String> containers;
+    private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries;
 
     private CompiledProcess(Builder builder) {
         this.containers = Map.copyOf(builder.containers);
+        Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> attached = new HashMap<>();
+        builder.boundaries.forEach((k, v) -> attached.put(k, List.copyOf(v)));
+        this.boundaries = Collections.unmodifiableMap(attached);
         this.definitionId = builder.definitionId;
         this.process = builder.process;
         this.nodes = Collections.unmodifiableMap(builder.nodes);
@@ -103,6 +107,40 @@ public final class CompiledProcess {
     }
 
     /** @return every flow node, in document order, those of {@code saga} blocks included */
+    /**
+     * @param activityId the id of an activity
+     * @return the boundary events attached to it (#489), in document order; empty for most activities
+     */
+    public List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent> boundariesOf(String activityId) {
+        return boundaries.getOrDefault(activityId, List.of());
+    }
+
+    /**
+     * @param node a node
+     * @return the name of its link event definition when it is a link throw or catch event (#493), else empty
+     */
+    public static Optional<String> linkName(FlowNode node) {
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
+                && event.eventDefinitions().size() == 1
+                && event.eventDefinitions().get(0) instanceof
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition link) {
+            return Optional.ofNullable(link.name());
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * @param name a link name
+     * @param containerId the scope the link throw stands in
+     * @return the link catch event of that name in that scope (#493)
+     */
+    public Optional<FlowNode> linkCatch(String name, String containerId) {
+        return nodes.values().stream()
+                .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                        && linkName(n).filter(name::equals).isPresent() && containerOf(n.id()).equals(containerId))
+                .findFirst();
+    }
+
     public List<FlowNode> nodes() {
         return List.copyOf(nodes.values());
     }
@@ -125,6 +163,8 @@ public final class CompiledProcess {
         private final Map<String, List<SequenceFlow>> outgoing = new HashMap<>();
         private final Map<FacetKey<?>, Object> facets = new HashMap<>();
         private final Map<String, String> containers = new HashMap<>();
+        private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries =
+                new HashMap<>();
 
         private Builder(String definitionId, Process process) {
             this.definitionId = Objects.requireNonNull(definitionId, "definitionId must not be null");
@@ -138,6 +178,10 @@ public final class CompiledProcess {
                 if (element instanceof FlowNode node) {
                     nodes.put(node.id(), node);
                     containers.put(node.id(), containerId);
+                    if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent boundary
+                            && boundary.attachedToRef() != null) {
+                        boundaries.computeIfAbsent(boundary.attachedToRef(), k -> new ArrayList<>()).add(boundary);
+                    }
                     if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer c) {
                         index(node.id(), c.flowElements());
                     }

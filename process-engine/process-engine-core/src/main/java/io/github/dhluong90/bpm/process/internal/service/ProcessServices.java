@@ -3088,6 +3088,30 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Cancels the child that one call step of a running parent started, because a boundary event or a terminate end
+     * cancelled the step (#489, #493). The parent is locked by the caller; the child is locked and cancelled with the
+     * reason {@code parent step cancelled}, and so are its own children. Its end schedules a result job for the parent,
+     * which finds no waiting token and is consumed.
+     */
+    private void cancelCalledChild(String tenant, String parentId, String parentTokenId) {
+        for (String childId : store.activeChildren(tenant, parentId, EngineDefaults.MAX_PAGE_SIZE)) {
+            ProcessStore.ParentLink link = store.parentLink(tenant, childId).orElse(null);
+            if (link == null || !link.parentTokenId().equals(parentTokenId)) {
+                continue;
+            }
+            InstanceRow child = store.lockInstance(tenant, childId).orElse(null);
+            if (child == null || !"RUNNING".equals(child.status())) {
+                continue;
+            }
+            StoredDefinition definition = store.definition(tenant, child.definitionId()).orElseThrow();
+            run(definition, child, stateOf(tenant, child), new Command.Cancel("parent step cancelled", CALL_ACTOR),
+                    new RunAs.EngineWork(tenant, CALL_ACTOR));
+            closeOnCancel(tenant, child.id(), CALL_ACTOR, clock.instant());
+            cancelChildren(tenant, child.id(), CALL_ACTOR);
+        }
+    }
+
+    /**
      * Cancels the children of a parent that is being cancelled, newest lock order last: the caller holds the parent, and
      * each child is locked and cancelled in turn with the reason {@code parent cancelled} and the actor of the
      * cancellation, and so are its own children (PRE-213). A child that is compensating is left: an undo is never
@@ -4317,6 +4341,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Effect.StartCompensation[] compensation = new Effect.StartCompensation[1];
         // #92: children are started after this instance's own rows are saved, in the same transaction.
         List<Effect.StartChildInstance> childStarts = new ArrayList<>();
+        // #489, #493: children whose call step was cancelled by a boundary event or a terminate end.
+        List<Effect.CancelChildInstance> childCancels = new ArrayList<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -4385,6 +4411,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.PushCompensation push -> pushes.add(push);
                         case Effect.StartCompensation started -> compensation[0] = started;
                         case Effect.StartChildInstance child -> childStarts.add(child);
+                        case Effect.CancelChildInstance cancel -> childCancels.add(cancel);
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -4582,6 +4609,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         for (Effect.StartChildInstance call : childStarts) {
             startChild(definition, row, state, call, newIncidents, now);
+        }
+        for (Effect.CancelChildInstance call : childCancels) {
+            cancelCalledChild(tenant, state.instanceId(), call.tokenId());
         }
         newIncidents.forEach(site -> raiseIncident(site, now));
         if (compensation[0] != null) {

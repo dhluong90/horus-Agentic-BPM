@@ -1,5 +1,9 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
@@ -198,6 +202,8 @@ final class WorkingContext implements ExecutionContext {
 
     @Override
     public void takeOutgoing(Token token, FlowNode from) {
+        // #489: the activity is left, so the timers of its boundary events never fire.
+        disarmBoundaries(from.id(), token.scopeTokenId(), null);
         List<SequenceFlow> outgoing = process.outgoing(from.id());
         if (outgoing.isEmpty()) {
             throw new ExecutionException("NO_OUTGOING_FLOW", from.id(), from.id() + " has no outgoing sequence flow");
@@ -368,6 +374,211 @@ final class WorkingContext implements ExecutionContext {
             }
         }
         update(scope.withStatus(TokenStatus.CANCELLED));
+    }
+
+    // ---- boundary events, error and escalation, terminate, link (#489, #493) --------------------------------------
+
+    /** @return whether a live token already waits on this boundary event in the scope (a retry enters the step again) */
+    boolean hasLiveBoundaryToken(BoundaryEvent boundary, String scopeTokenId) {
+        return tokens.stream().anyMatch(t -> t.nodeId().equals(boundary.id()) && t.kind() == TokenKind.FLOW
+                && t.status().live() && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId));
+    }
+
+    /**
+     * Stops the waiting timers of the boundary events of an activity, silently: the activity ended on its own, so
+     * nothing was interrupted and the timeline has nothing to say.
+     */
+    private void disarmBoundaries(String activityId, String scopeTokenId, String exceptTokenId) {
+        for (BoundaryEvent boundary : process.boundariesOf(activityId)) {
+            for (Token t : List.copyOf(tokens)) {
+                if (t.kind() == TokenKind.FLOW && t.nodeId().equals(boundary.id()) && t.status().live()
+                        && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId) && !t.id().equals(exceptTokenId)) {
+                    update(t.withStatus(TokenStatus.CANCELLED));
+                    if (t.status() == TokenStatus.WAITING_TIMER && t.activityInstanceId() != null) {
+                        effect(new Effect.CancelJob(t.activityInstanceId()));
+                    }
+                }
+            }
+        }
+    }
+
+    /** Cancels a token and everything under it, with the work each waits on. */
+    private int cancelTree(Token token, String exceptWorkOf) {
+        int cancelled = 0;
+        if (token.kind() != TokenKind.FLOW) {
+            for (Token child : tree().children(token.id())) {
+                if (child.status().live()) {
+                    cancelled += cancelTree(child, exceptWorkOf);
+                }
+            }
+            update(token.withStatus(TokenStatus.CANCELLED));
+            return cancelled;
+        }
+        update(token.withStatus(TokenStatus.CANCELLED));
+        boolean work = !token.id().equals(exceptWorkOf) && token.activityInstanceId() != null;
+        if (work && token.status() == TokenStatus.WAITING_USER) {
+            effect(new Effect.CancelUserTask(token.activityInstanceId()));
+        } else if (work && (token.status() == TokenStatus.WAITING_ASYNC || token.status() == TokenStatus.WAITING_TIMER)) {
+            effect(new Effect.CancelJob(token.activityInstanceId()));
+        } else if (work && token.status() == TokenStatus.WAITING_CHILD) {
+            effect(new Effect.CancelChildInstance(token.id(), token.activityInstanceId()));
+        }
+        history("TOKEN_CANCELLED", token, Map.of());
+        return 1;
+    }
+
+    /** The token that stands for the running activity {@code activityId} in a scope: a flow token, or the scope token. */
+    private Optional<Token> hostOf(String activityId, String scopeTokenId) {
+        return tokens.stream().filter(t -> t.nodeId().equals(activityId) && t.status().live()
+                && t.kind() != TokenKind.MI_BODY && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId))
+                .findFirst();
+    }
+
+    /** Cancels a host activity: its tree, and the timers of its other boundaries. */
+    private void interrupt(Token host, String exceptWorkOf, String exceptBoundaryToken) {
+        cancelTree(host, exceptWorkOf);
+        disarmBoundaries(host.nodeId(), host.scopeTokenId(), exceptBoundaryToken);
+    }
+
+    @Override
+    public void fireBoundary(Token boundaryToken, BoundaryEvent boundary) {
+        Optional<Token> host = hostOf(boundary.attachedToRef(), boundaryToken.scopeTokenId());
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("boundaryId", boundary.id());
+        details.put("attachedTo", boundary.attachedToRef());
+        details.put("trigger", "TIMER");
+        details.put("interrupting", boundary.cancelActivity());
+        if (boundary.cancelActivity()) {
+            host.ifPresent(h -> interrupt(h, null, boundaryToken.id()));
+        }
+        // The boundary is entered when it fires, not when it is armed, so an unfired one never shows as running.
+        history("NODE_ENTERED", boundaryToken, Map.of());
+        history("BOUNDARY_FIRED", boundaryToken, details);
+        Token active = boundaryToken.withStatus(TokenStatus.ACTIVE);
+        update(active);
+        history("NODE_COMPLETED", boundaryToken, Map.of());
+        takeOutgoing(active, boundary);
+    }
+
+    /** A boundary that catches a thrown error or escalation, and the activity token it is attached to. */
+    private record Catcher(BoundaryEvent boundary, Token host) {
+    }
+
+    private static String codeOf(EventDefinition definition, boolean error) {
+        if (error && definition instanceof ErrorEventDefinition e) {
+            return e.errorCode();
+        }
+        if (!error && definition instanceof EscalationEventDefinition e) {
+            return e.escalationCode();
+        }
+        return null;
+    }
+
+    private static boolean isKind(BoundaryEvent boundary, boolean error) {
+        if (boundary.eventDefinitions().size() != 1) {
+            return false;
+        }
+        EventDefinition d = boundary.eventDefinitions().get(0);
+        return error ? d instanceof ErrorEventDefinition : d instanceof EscalationEventDefinition;
+    }
+
+    /** Walks from the raising token outward and returns the nearest matching boundary (specific code before catch-all). */
+    private Optional<Catcher> findCatcher(Token source, String code, boolean error, boolean fromStep) {
+        Token host;
+        if (fromStep) {
+            host = source;
+        } else {
+            host = source.scopeTokenId() == null ? null : tree().get(source.scopeTokenId()).orElse(null);
+        }
+        while (host != null && host.scopeTokenId() != null) {
+            BoundaryEvent specific = null;
+            BoundaryEvent any = null;
+            for (BoundaryEvent b : process.boundariesOf(host.nodeId())) {
+                if (!isKind(b, error)) {
+                    continue;
+                }
+                String declared = codeOf(b.eventDefinitions().get(0), error);
+                if (declared == null && any == null) {
+                    any = b;
+                } else if (declared != null && declared.equals(code) && specific == null) {
+                    specific = b;
+                }
+            }
+            BoundaryEvent caught = specific != null ? specific : any;
+            if (caught != null) {
+                return Optional.of(new Catcher(caught, host));
+            }
+            host = tree().get(host.scopeTokenId()).orElse(null);
+        }
+        return Optional.empty();
+    }
+
+    /** Runs the flow of a catching boundary in the scope of its host. */
+    private void runCatch(Catcher found, Token source, String code, String trigger, boolean fromStep) {
+        BoundaryEvent boundary = found.boundary();
+        Token host = found.host();
+        if (boundary.cancelActivity()) {
+            interrupt(host, fromStep ? source.id() : null, null);
+        }
+        Token flow = createToken(TokenKind.FLOW, boundary.id(), host.scopeTokenId());
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("boundaryId", boundary.id());
+        details.put("attachedTo", boundary.attachedToRef());
+        details.put("trigger", trigger);
+        details.put("code", code == null ? "-" : code);
+        details.put("interrupting", boundary.cancelActivity());
+        history("NODE_ENTERED", flow, Map.of());
+        history("BOUNDARY_FIRED", flow, details);
+        history("NODE_COMPLETED", flow, Map.of());
+        takeOutgoing(flow, boundary);
+    }
+
+    @Override
+    public boolean throwError(Token source, String code, boolean fromStep) {
+        Optional<Catcher> found = findCatcher(source, code, true, fromStep);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("code", code == null ? "-" : code);
+        found.ifPresent(c -> details.put("caughtBy", c.boundary().id()));
+        history("ERROR_THROWN", source, details);
+        if (found.isEmpty()) {
+            return false;
+        }
+        runCatch(found.get(), source, code, "ERROR", fromStep);
+        return true;
+    }
+
+    @Override
+    public boolean throwEscalation(Token thrower, String code) {
+        Optional<Catcher> found = findCatcher(thrower, code, false, false);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("code", code == null ? "-" : code);
+        found.ifPresent(c -> details.put("caughtBy", c.boundary().id()));
+        history("ESCALATION_THROWN", thrower, details);
+        if (found.isEmpty()) {
+            return false;
+        }
+        runCatch(found.get(), thrower, code, "ESCALATION", false);
+        return found.get().boundary().cancelActivity();
+    }
+
+    @Override
+    public void terminate(Token token) {
+        int cancelled = 0;
+        Token scope = tree().get(token.scopeTokenId()).orElseThrow();
+        for (Token other : tree().children(scope.id())) {
+            if (!other.id().equals(token.id()) && other.status().live()) {
+                cancelled += cancelTree(other, null);
+            }
+        }
+        history("TERMINATED", token, Map.of("scopeTokenId", scope.id(), "cancelled", cancelled));
+        complete(token);
+    }
+
+    @Override
+    public void jump(Token token, String nodeId) {
+        Token moved = token.movedTo(nodeId, null);
+        update(moved);
+        agenda.add(moved.id());
     }
 
     @Override

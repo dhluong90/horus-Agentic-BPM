@@ -46,7 +46,7 @@ class SubsetBpmnReaderTest {
                         .extracting(DefinitionProblem::element, DefinitionProblem::elementId, DefinitionProblem::line)
                         .contains(org.assertj.core.groups.Tuple.tuple("boundaryEvent", "be-timeout", 6),
                                 org.assertj.core.groups.Tuple.tuple("inclusiveGateway", "ig-1", 7),
-                                org.assertj.core.groups.Tuple.tuple("endEvent with terminateEventDefinition", "end", 8)));
+                                org.assertj.core.groups.Tuple.tuple("endEvent with messageEventDefinition", "end", 8)));
     }
 
     @Test
