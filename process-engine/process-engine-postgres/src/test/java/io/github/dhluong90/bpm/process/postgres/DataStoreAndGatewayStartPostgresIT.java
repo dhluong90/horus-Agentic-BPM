@@ -79,6 +79,32 @@ class DataStoreAndGatewayStartPostgresIT {
             </bpmn:process>
             """;
 
+    /** The parallel type (#499): the message starts the instance and the signal and the second message are awaited. */
+    private static final String ONBOARDING = """
+            <bpmn:message id="m-kyc" name="kyc-documents"/>
+            <bpmn:message id="m-consent" name="consent-signed"/>
+            <bpmn:signal id="s-sanction" name="sanction-screening-done"/>
+            <bpmn:process id="onboarding" isExecutable="true">
+              <bpmn:eventBasedGateway id="intake" instantiate="true" eventGatewayType="Parallel"/>
+              <bpmn:intermediateCatchEvent id="kyc"><bpmn:messageEventDefinition messageRef="m-kyc"/></bpmn:intermediateCatchEvent>
+              <bpmn:intermediateCatchEvent id="consent"><bpmn:messageEventDefinition messageRef="m-consent"/></bpmn:intermediateCatchEvent>
+              <bpmn:intermediateCatchEvent id="sanction"><bpmn:signalEventDefinition signalRef="s-sanction"/></bpmn:intermediateCatchEvent>
+              <bpmn:userTask id="check-kyc" horus:assignee="role:OPS" horus:resultVariable="r1"/>
+              <bpmn:userTask id="file-consent" horus:assignee="role:OPS" horus:resultVariable="r2"/>
+              <bpmn:userTask id="clear-sanction" horus:assignee="role:OPS" horus:resultVariable="r3"/>
+              <bpmn:endEvent id="end"/>
+              <bpmn:sequenceFlow id="f1" sourceRef="intake" targetRef="kyc"/>
+              <bpmn:sequenceFlow id="f2" sourceRef="intake" targetRef="consent"/>
+              <bpmn:sequenceFlow id="f3" sourceRef="intake" targetRef="sanction"/>
+              <bpmn:sequenceFlow id="f4" sourceRef="kyc" targetRef="check-kyc"/>
+              <bpmn:sequenceFlow id="f5" sourceRef="consent" targetRef="file-consent"/>
+              <bpmn:sequenceFlow id="f6" sourceRef="sanction" targetRef="clear-sanction"/>
+              <bpmn:sequenceFlow id="f7" sourceRef="check-kyc" targetRef="end"/>
+              <bpmn:sequenceFlow id="f8" sourceRef="file-consent" targetRef="end"/>
+              <bpmn:sequenceFlow id="f9" sourceRef="clear-sanction" targetRef="end"/>
+            </bpmn:process>
+            """;
+
     /** A store whose rows are keyed by tenant: the adapter honours the tenant it is given. */
     private static final class TenantStore implements DataStoreAdapter {
         private final String name;
@@ -296,5 +322,95 @@ class DataStoreAndGatewayStartPostgresIT {
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.MessageNotCorrelatedException.class);
         assertThatThrownBy(() -> start("bank-a", "loan-intake", "BK-1", Map.of())).hasMessageContaining("START_TRIGGER_REQUIRED");
         assertThat(count("SELECT count(*) FROM pre_instance")).isZero();
+    }
+
+    @Test
+    void PRE_355_the_first_event_creates_the_instance_and_every_other_catch_is_awaited() {
+        // Given an onboarding that starts on kyc-documents and awaits consent-signed and sanction-screening-done
+        deploy("bank-a", "onboarding", ONBOARDING);
+
+        // When the first message arrives for customer CIF-1001
+        engine.identity.as("bank-a", "intake-consumer", PIPELINE);
+        MessageDelivery first = engine.services.correlate("kyc-documents", "CIF-1001", Map.of(), "kyc-1");
+
+        // Then one instance runs after the first catch and two catches wait, none cancelled
+        assertThat(first.outcome()).isEqualTo(MessageDelivery.Outcome.STARTED);
+        assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_USER'",
+                first.instanceId())).isOne();
+        assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_EVENT'",
+                first.instanceId())).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'CANCELLED'",
+                first.instanceId())).isZero();
+
+        // When the other message and the signal come
+        MessageDelivery second = engine.services.correlate("consent-signed", "CIF-1001", Map.of(), "consent-1");
+        engine.services.broadcast(new SignalRequest("sanction-screening-done", "sig-1"));
+        engine.jobs.pollOnce();
+
+        // Then the same instance now waits at three reviews and no second instance exists
+        assertThat(second.outcome()).isEqualTo(MessageDelivery.Outcome.DELIVERED);
+        assertThat(second.instanceId()).isEqualTo(first.instanceId());
+        assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_USER'",
+                first.instanceId())).isEqualTo(3);
+        assertThat(count("SELECT count(*) FROM pre_instance WHERE definition_key = 'onboarding'")).isOne();
+    }
+
+    @Test
+    void PRE_355_two_events_of_one_customer_on_two_replicas_create_one_instance() throws Exception {
+        // Given two replicas of the engine on one database
+        deploy("bank-a", "onboarding", ONBOARDING);
+        TestEngine other = TestEngine.replica("pod-2", clock).build();
+        java.util.concurrent.ExecutorService pods = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.CyclicBarrier sameMoment = new java.util.concurrent.CyclicBarrier(2);
+            // When kyc-documents and consent-signed for CIF-2002 arrive at the same moment, one on each replica
+            java.util.concurrent.Future<MessageDelivery> a = pods.submit(() -> {
+                engine.identity.as("bank-a", "consumer-1", PIPELINE);
+                sameMoment.await();
+                return engine.services.correlate("kyc-documents", "CIF-2002", Map.of(), "k-1");
+            });
+            java.util.concurrent.Future<MessageDelivery> b = pods.submit(() -> {
+                other.identity.as("bank-a", "consumer-2", PIPELINE);
+                sameMoment.await();
+                return other.services.correlate("consent-signed", "CIF-2002", Map.of(), "c-1");
+            });
+            MessageDelivery da = a.get(30, java.util.concurrent.TimeUnit.SECONDS);
+            MessageDelivery db = b.get(30, java.util.concurrent.TimeUnit.SECONDS);
+
+            // Then one instance exists, and it waits at two reviews and for the signal
+            assertThat(count("SELECT count(*) FROM pre_instance WHERE definition_key = 'onboarding'")).isOne();
+            assertThat(da.instanceId()).isEqualTo(db.instanceId());
+            assertThat(List.of(da.outcome(), db.outcome()))
+                    .containsExactlyInAnyOrder(MessageDelivery.Outcome.STARTED, MessageDelivery.Outcome.DELIVERED);
+            assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_USER'",
+                    da.instanceId())).isEqualTo(2);
+            assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_EVENT'",
+                    da.instanceId())).isOne();
+        } finally {
+            pods.shutdownNow();
+            other.close();
+        }
+    }
+
+    @Test
+    void PRE_355_the_same_customer_key_in_two_tenants_starts_an_instance_in_each() {
+        // Given the onboarding in bank-a and bank-b
+        deploy("bank-a", "onboarding", ONBOARDING);
+        deploy("bank-b", "onboarding", ONBOARDING);
+
+        // When both banks receive kyc-documents for CIF-3003, then bank-b's consent-signed
+        engine.identity.as("bank-a", "consumer", PIPELINE);
+        MessageDelivery a = engine.services.correlate("kyc-documents", "CIF-3003", Map.of(), "a-1");
+        engine.identity.as("bank-b", "consumer", PIPELINE);
+        MessageDelivery b = engine.services.correlate("kyc-documents", "CIF-3003", Map.of(), "b-1");
+        MessageDelivery consent = engine.services.correlate("consent-signed", "CIF-3003", Map.of(), "b-2");
+
+        // Then each tenant has its own instance and the consent reached bank-b's only
+        assertThat(a.instanceId()).isNotEqualTo(b.instanceId());
+        assertThat(consent.instanceId()).isEqualTo(b.instanceId());
+        assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_USER'",
+                a.instanceId())).isOne();
+        assertThat(count("SELECT count(*) FROM pre_token WHERE instance_id = ? AND status = 'WAITING_USER'",
+                b.instanceId())).isEqualTo(2);
     }
 }

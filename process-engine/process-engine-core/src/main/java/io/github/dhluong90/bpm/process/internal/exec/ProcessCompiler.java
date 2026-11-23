@@ -190,9 +190,9 @@ public final class ProcessCompiler {
             }
             if (node instanceof EventBasedGateway gateway) {
                 // #495: a gateway waits on two or more catch events; each is entered by this gateway alone, and no flow has a condition.
-                if (gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL) {
-                    problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "a parallel event-based gateway has no"
-                            + " behaviour in this release", "eventBasedGateway", node.id(), 0));
+                if (gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL && !gateway.instantiate()) {
+                    problems.add(DefinitionProblem.of("EVENT_GATEWAY_PARALLEL_INSTANTIATE", "A parallel event-based"
+                            + " gateway starts the process; set instantiate=\"true\"", node.id()));
                 }
                 if (gateway.instantiate()) {
                     if (!containerOf.get(node.id()).equals(process.id())) {

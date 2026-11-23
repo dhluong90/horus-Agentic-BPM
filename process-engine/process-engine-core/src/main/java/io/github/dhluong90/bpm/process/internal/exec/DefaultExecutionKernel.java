@@ -283,6 +283,15 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.history("EVENT_GATEWAY_STARTED", flow, Map.of("gateway", gateway.id(), "catch", catchNode.id()));
         ctx.history("NODE_COMPLETED", flow, Map.of());
         ctx.takeOutgoing(flow, catchNode);
+        if (gateway.eventGatewayType()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL) {
+            // #499: the others are awaited too, each on its own token; none cancels another.
+            for (io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow f : process.outgoing(gateway.id())) {
+                if (!f.targetRef().equals(catchNode.id())) {
+                    ctx.take(ctx.createToken(TokenKind.FLOW, gateway.id(), root.id()), f.id());
+                }
+            }
+        }
     }
 
     private void trigger(String tokenId, TokenStatus expected, String attemptId, Command command, WorkingContext ctx) {

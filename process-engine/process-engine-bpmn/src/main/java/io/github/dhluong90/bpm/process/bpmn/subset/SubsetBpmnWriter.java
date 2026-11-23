@@ -454,6 +454,8 @@ public final class SubsetBpmnWriter {
             case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> {
                 tag = "bpmn:eventBasedGateway";
                 attributes.append(g.instantiate() ? " instantiate=\"true\"" : "");
+                attributes.append(g.eventGatewayType() == io.github.dhluong90.bpm.process.internal.model.bpmn
+                        .EventBasedGatewayType.PARALLEL ? " eventGatewayType=\"Parallel\"" : "");
             }
             case ComplexGateway g -> {
                 tag = "bpmn:complexGateway";

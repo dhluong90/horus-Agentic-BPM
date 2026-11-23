@@ -82,7 +82,7 @@ class RefusedStandardsIT {
                 + "<bpmn:process id=\"loan-refusal\" isExecutable=\"true\">\n"
                 + "<bpmn:startEvent id=\"start\"/>\n"
                 + "<bpmn:globalTask id=\"do-1\"/>\n"
-                + "<bpmn:eventBasedGateway id=\"notify\" eventGatewayType=\"Parallel\"/>\n"
+                + "<bpmn:choreographyTask id=\"notify\"/>\n"
                 + "</bpmn:process></bpmn:definitions>\n";
 
         HttpResponse<String> response = post("/api/bpm/processes/v1/definitions", "application/xml", loan);
@@ -91,7 +91,7 @@ class RefusedStandardsIT {
         JsonNode body = JSON.readTree(response.body());
         assertThat(body.get("code").stringValue()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
         assertThat(body.get("unsupportedElements")).extracting(p -> p.get("element").stringValue() + ":" + p.get("stage").stringValue()
-                + ":" + p.get("line").intValue()).containsExactly("globalTask:not planned:5", "eventBasedGateway with eventGatewayType Parallel:S3:6");
+                + ":" + p.get("line").intValue()).containsExactly("globalTask:not planned:5", "choreographyTask:not planned:6");
         assertThat(count("pre_definition")).isEqualTo(before);
     }
 

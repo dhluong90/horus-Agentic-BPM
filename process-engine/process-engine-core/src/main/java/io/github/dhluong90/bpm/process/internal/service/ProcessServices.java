@@ -2048,7 +2048,24 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new MessageDelivery(started == null ? MessageDelivery.Outcome.WAITING
                     : MessageDelivery.Outcome.STARTED, started, null);
         }
+        if (key != null && startsParallelOnGateway(starting)) {
+            // #499: the arrivals of one key are serialised, so a second event that reaches another replica while the
+            // first is creating the instance waits for it and then finds the subscription, not a second instance.
+            store.lockDefinitions(tenant, starting.key());
+            List<ProcessStore.MessageSubscriptionRow> waiting = store.subscriptions(tenant, name, key, 2);
+            if (waiting.size() == 1) {
+                return deliverMessage(tenant, waiting.get(0), name, payload);
+            }
+        }
         return startByMessage(tenant, caller, starting, key, payload, name);
+    }
+
+    /** @return whether the process starts on an instantiating event-based gateway of the parallel type (#499) */
+    private boolean startsParallelOnGateway(StoredDefinition definition) {
+        return compiled(definition).process().nodes().stream().anyMatch(n ->
+                n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g && g.instantiate()
+                && g.eventGatewayType()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL);
     }
 
     /** @return the start event of the process itself that waits for all of several triggers (PD-149), or null */
@@ -3516,6 +3533,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 if (instance != null) {
                     started.add(instance);
                 }
+                continue;
+            }
+            if (startsParallelOnGateway(effective) && store.signalWaiterOfDefinition(tenant, effective.key(), name)) {
+                // #499: an instance of this process already awaits the signal; it is theirs, not a second start.
                 continue;
             }
             if (depth[0] >= maxCallDepth) {

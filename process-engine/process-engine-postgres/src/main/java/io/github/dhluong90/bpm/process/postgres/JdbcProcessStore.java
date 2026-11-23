@@ -331,6 +331,14 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public boolean signalWaiterOfDefinition(String tenant, String definitionKey, String name) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM pre_event_subscription s JOIN pre_definition d "
+                        + "ON d.tenant_id = s.tenant_id AND d.id = s.definition_id "
+                        + "WHERE s.tenant_id = ? AND s.kind = 'SIGNAL' AND s.event_name = ? AND d.key_name = ?)")
+                .params(tenant, name, definitionKey).query(Boolean.class).single();
+    }
+
+    @Override
     public int updateDefinition(StoredDefinition d) {
         return jdbc.sql("UPDATE pre_definition SET status = ?, effective_from = ?, approved_by = ?, approved_at = ?, "
                         + "requested_by = ?, requested_at = ?, decision_comment = ?, retired_by = ?, retired_at = ?, "

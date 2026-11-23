@@ -404,6 +404,10 @@ public final class CanonicalProcessWriter {
                         // #499: the gateway starts the instance; the names of its signal and message catches let a
                         // broadcast or a message find the definition.
                         step.put("instantiate", true);
+                        if (g.eventGatewayType()
+                                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL) {
+                            step.put("eventGatewayType", "parallel");
+                        }
                         ArrayNode signals = step.putArray("signals");
                         ArrayNode messages = step.putArray("messages");
                         for (SequenceFlow f : out) {
