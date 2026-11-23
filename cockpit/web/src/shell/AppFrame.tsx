@@ -63,6 +63,7 @@ export function reportHostOf(meta: BpmMetaV1): ReportHostSettings {
     templates: module?.features.includes('rules.templates') === true,
     simulationReports: module?.features.includes('rules.simulation-reports') === true,
     historyReadings: module?.features.includes('rules.history-readings') === true,
+    conditionBuilder: module?.features.includes('rules.condition-builder') === true,
     requireReport: typeof required === 'string' ? required.split(',').map((name) => name.trim()).filter((name) => name !== '') : [],
   };
 }
