@@ -4141,7 +4141,8 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Consequences.**
 - Full BPMN no longer waits for 1.1 to 1.3. The BPMN element features move to the 1.0 milestone.
-- Complex gateways, ad-hoc subprocesses and multiple events are not in the Common Executable level and move to after 1.0.
+- Scope is every executable BPMN 2.0 element, including complex gateway, ad-hoc sub-process and multiple events (PE-F-66 moves to 1.0).
+- Full DMN (RE-F-43 to RE-F-47, X-F-26, X-F-27) stays after 1.0, pending the product owner's confirmation.
 - Interim tags such as 0.3.0 are not planned. Only the product owner decides releases (PD-148 still applies).
 
 ### PD-150 Process models are imported; a built-in modeller comes after 1.0

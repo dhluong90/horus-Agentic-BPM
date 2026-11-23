@@ -148,7 +148,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-63 | Every BPMN 2.0.2 element imports, is stored losslessly and exports again; every MIWG reference model round-trips; activating a definition with an element the release cannot run is refused naming the element and the stage that adds it | S1 | M3 (1.0) | PE 8 | | TR-STD-04, TR-STD-10 | design preview | PE-F-41, PE-F-53 | PD-057, PD-062, PD-064, PD-065, PD-149 |
 | PE-F-64 | Signals broadcast to every waiting subscription exactly once in bounded batches; conditional events and event-based gateways execute | S1, S2 | M3 (1.0) | PE 8 | | TR-STD-11, TR-STD-14 | design preview | PE-F-40 | PD-057, PD-062, PD-149 |
 | PE-F-65 | Full compensation (compensation activities, `activityRef`, compensation event subprocesses), transaction cancel and hazards execute; script tasks run FEEL | S1, S2 | M3 (1.0) | PE 8 | | TR-STD-11 | design preview | PE-F-26, PE-F-60 | PD-057, PD-062, PD-149 |
-| PE-F-66 | Complex gateways, ad-hoc subprocesses, multiple and parallel multiple events and instantiating event-based gateways execute; an optional message buffer with a time to live; the conformance suite passes 100 percent | S1 | later (after 1.0) | PE 8 | | TR-STD-11 | design preview | PE-F-64 | PD-057, PD-062, PD-149 |
+| PE-F-66 | Complex gateways, ad-hoc subprocesses, multiple and parallel multiple events and instantiating event-based gateways execute; an optional message buffer with a time to live; the conformance suite passes 100 percent | S1 | M3 (1.0) | PE 8 | | TR-STD-11 | design preview | PE-F-64 | PD-057, PD-062, PD-149 |
 
 ## Cockpit
 
@@ -281,10 +281,10 @@ Each cell: features (specified / spec gap / design preview). Generated from the 
 | Module | M0 | M1 | M2 | M3 | 1.1 (S1) | 1.2 (S2) | 1.3 (S3) | Later | Total |
 |---|---|---|---|---|---|---|---|---|---|
 | Rule Engine | 0 | 31 (17 / 14 / 0) | 2 (0 / 2 / 0) | 7 (1 / 6 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 4 (0 / 1 / 3) | 49 (18 / 23 / 8) |
-| Process Engine | 0 | 0 | 44 (23 / 21 / 0) | 19 (1 / 10 / 8) | 0 | 0 | 0 | 3 (0 / 0 / 3) | 66 (24 / 31 / 11) |
+| Process Engine | 0 | 0 | 44 (23 / 21 / 0) | 20 (1 / 10 / 9) | 0 | 0 | 0 | 2 (0 / 0 / 2) | 66 (24 / 31 / 11) |
 | Cockpit | 0 | 14 (7 / 7 / 0) | 16 (4 / 12 / 0) | 12 (1 / 9 / 2) | 0 | 0 | 0 | 3 (0 / 0 / 3) | 45 (12 / 28 / 5) |
 | Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 4 (0 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 5 (1 / 0 / 4) | 30 (12 / 12 / 6) |
-| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (28 / 37 / 0) | 42 (3 / 29 / 10) | 5 (0 / 0 / 5) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 15 (1 / 1 / 13) | 190 (66 / 94 / 30) |
+| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (28 / 37 / 0) | 43 (3 / 29 / 11) | 5 (0 / 0 / 5) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 14 (1 / 1 / 12) | 190 (66 / 94 / 30) |
 
 ![Features per module per milestone](images/fm-features-per-module.svg)
 
@@ -327,4 +327,4 @@ PD-043 moved RE-F-26 from the M1 list to M2 up front, and PD-075 moved RE-F-15 t
 
 Use case ids (`UC-RE-nn`) are defined in [Rule Engine users and journeys](rule-engine-users-and-journeys.md).
 
-PD-149 (2026-11-23) moved ten BPMN features to M3, the 1.0 baseline: PE-F-40, PE-F-59 to PE-F-65, CK-F-41 and CK-F-42. PE-F-66 (complex gateways, ad-hoc subprocesses, multiple events) is outside the Common Executable level and moves to later. PD-151 moved X-F-10 (mixed-version tolerance, #113) to later. Total stays 190.
+PD-149 (2026-11-23) moved eleven BPMN features to M3, the 1.0 baseline: PE-F-40, PE-F-59 to PE-F-66, CK-F-41 and CK-F-42. PD-151 moved X-F-10 (mixed-version tolerance, #113) to later. Total stays 190.

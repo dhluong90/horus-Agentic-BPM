@@ -47,17 +47,11 @@ Decisions on scope follow principle 13, generic by design: where business needs 
 | Pilot banks run at most about 15 services and one identity provider whose tokens every service accepts | Ask pilot candidates for their setup | That pilot uses one cockpit per service |
 | The diagram work fits the M2 estimate | Two-day diagram spike in M0 | Live counts on the diagram leave M2 |
 
-## After 1.0: full BPMN 2.0 and DMN
+## 1.0 baseline: BPMN 2.0 and the Rule Engine
 
-BPMN 2.0 and DMN are the models (principle 9). 1.0 executes a published subset; three releases extend it. Their dates are not set yet.
+1.0 is one baseline release. You bring BPMN 2.0 models from a standard modeller such as Camunda Modeler or bpmn.io and run every executable element, including pools, lanes and message flows, next to a complete Rule Engine with simple UI rule editing. A built-in modeller comes after 1.0. Only the product owner decides when it ships.
 
-| Release | What you can do when it ships |
-|---|---|
-| 1.1 | Bring any BPMN 2.0 model and see it in full; run models with subprocesses, boundary events and multi-instance; run DMN decision models at Conformance Level 2. Also targeted: tenant export with an optional governed purge, and sealed monthly audit partitions |
-| 1.2 | Processes in different services talk through messages and signals; full FEEL and DMN Conformance Level 3 |
-| 1.3 | BPMN 2.0.2 execution and DMN Level 3 conformance, with only the published deviations |
-
-CMMN is never supported. Choreography and conversation diagrams are kept untouched with a warning, not executed.
+Full DMN levels and conformance evidence come after 1.0, with no dates yet. CMMN is never supported. Choreography and conversation diagrams are kept untouched with a warning, not executed.
 
 ## Not before 1.0
 

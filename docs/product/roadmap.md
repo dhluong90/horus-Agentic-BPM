@@ -18,9 +18,9 @@ Pending decisions that would change this roadmap are marked "(PD-nnn, pending)".
 | M0 Architecture | 18 Nov to 4 Dec 2026 (2 weeks) | Contributors verify schema, transaction boundaries and module rules against a live PostgreSQL; the product design is decided | 3 |
 | M1 Rule Engine and Cockpit, release 0.2.0 | 7 Dec 2026 to 15 Jan 2027 (6 weeks) | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 57 |
 | M2 Process Engine with `agentTask`, release 0.3.0 | 18 Jan to 26 Mar 2027 (10 weeks) | Teams run approvals, sagas and guarded AI agent steps in their own service, and operators see and work every instance on its diagram from one inbox | 66 |
-| M3 Agentic depth, compatibility, release 1.0.0 | 29 Mar to 21 May 2027 (8 weeks) | Teams import BPMN 2.0 models from any standard modeller and run every executable element, in one 1.0 baseline with a complete Rule Engine; adopters run evaluated agent changes and governed process changes | 42 |
+| M3 Agentic depth, compatibility, release 1.0.0 | 29 Mar to 21 May 2027 (8 weeks) | Teams import BPMN 2.0 models from any standard modeller and run every executable element, in one 1.0 baseline with a complete Rule Engine; adopters run evaluated agent changes and governed process changes | 43 |
 | After 1.0: DMN levels and conformance evidence (1.1 to 1.3) | Not scheduled (PD-149) | DMN decision models at Level 2 and 3 run; published conformance evidence | 7 |
-| After 1.0 | Candidates | Broader reach: agent-chosen steps, multi-agent planning, more databases, a hosted cockpit; the emergency approval path until its ADR sets a milestone; tenant exit and sealed audit months, targeted 1.1 | 15 |
+| After 1.0 | Candidates | Broader reach: agent-chosen steps, multi-agent planning, more databases, a hosted cockpit; the emergency approval path until its ADR sets a milestone; tenant exit and sealed audit months, targeted 1.1 | 14 |
 
 ![Milestones M0 to M3 and the standards track S1 to S3, with gates and cut checkpoints](images/rm-milestones.svg)
 
@@ -393,13 +393,13 @@ The April and May public holidays leave about seven working weeks. The 1.0 quali
 
 **Outcome.** Teams import BPMN 2.0 models from standard modellers such as Camunda Modeler or bpmn.io and run every executable element in their own service, next to a complete Rule Engine with simple UI rule editing. 1.0 is one baseline release; there are no interim tags such as 0.3.0, and only the product owner decides releases (PD-148).
 
-**In 1.0.** BPMN 2.0 Common Executable conformance level: every executable element, plus pools, lanes and message flows. Features: PE-F-40, PE-F-59 to PE-F-65, CK-F-41, CK-F-42 and the import and display of PE-F-63. This replaces the earlier plan of full BPMN after 1.0 in stages S1 to S3 (PD-057).
+**In 1.0.** BPMN 2.0 Common Executable conformance level: every executable BPMN 2.0 element, including complex gateway, ad-hoc sub-process and multiple events, plus pools, lanes and message flows. Features: PE-F-40, PE-F-59 to PE-F-66, CK-F-41, CK-F-42 and the import and display of PE-F-63. This replaces the earlier plan of full BPMN after 1.0 in stages S1 to S3 (PD-057).
 
-**Not in 1.0.** Choreography and conversation diagrams; complex gateways, ad-hoc subprocesses and multiple events (PE-F-66); a built-in modeller (PD-150, CK-F-32).
+**Not in 1.0.** Choreography and conversation diagrams; a built-in modeller (PD-150, CK-F-32).
 
 **Lean until the baseline (PD-151).** One squashed baseline migration per engine, editable until 1.0 and forward-only after; tests required for bank-grade controls and engine semantics; cockpit UI CI job off until the baseline; full CI matrix, benchmarks and pooler leg nightly with one Java leg per pull request; one security audit (#365) before the baseline; mixed-version tolerance (#113, X-F-10) after 1.0.
 
-**After 1.0.** The DMN levels and the conformance-evidence features (RE-F-43 to RE-F-47, X-F-26, X-F-27) stay after 1.0 with no dates.
+**After 1.0.** The DMN levels and the conformance-evidence features (RE-F-43 to RE-F-47, X-F-26, X-F-27) stay after 1.0 with no dates, pending the product owner's confirmation.
 
 ## After 1.0 (candidates)
 
