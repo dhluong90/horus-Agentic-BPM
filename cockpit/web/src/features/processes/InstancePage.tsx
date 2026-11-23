@@ -27,6 +27,7 @@ import {
   isProblemEntry,
   loopProgress,
   nodeMarks,
+  routingWords,
   scopeState,
   undoEntryType,
   wordsOf,
@@ -424,6 +425,14 @@ function TriggerDetail({ node }: { node: DiagramNode | undefined }) {
       {' · '}{t(node.interrupting === false ? 'instance.timeline.beside' : 'instance.timeline.interrupted')}
     </span>
   );
+/** Which branches a gateway took and why a join waits, beside its timeline row (#494). */
+function RoutingNote({ entry, graph }: { entry: InstanceActivities['entries'][number]; graph: DiagramGraph }) {
+  const { t } = useI18n();
+  const routing = routingWords(entry, graph);
+  if (routing === undefined) return null;
+  const steps = routing.steps.join(', ');
+  const key = routing.kind === 'waiting' ? 'instance.timeline.waitingFor' : routing.kind === 'tookDefault' ? 'instance.timeline.tookDefault' : 'instance.timeline.took';
+  return <span className="muted"> · {t(key, { steps })}</span>;
 }
 
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
@@ -476,6 +485,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
                     {entry.type === 'EVENT_SUBPROCESS_STARTED' ? <TriggerDetail node={graph.nodes.find((node) => node.id === entry.nodeId)} /> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
+                    <RoutingNote entry={entry} graph={graph} />
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

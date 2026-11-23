@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Payment screening: an inclusive gateway sends a payment to every review that applies (AML for 100,000,000 VND or
+     more, sanctions for a cross-border payment) or to the standard check when none does. The second inclusive gateway
+     waits for every review that was started and for none that was not, then releases the payment. Not loaded at
+     start-up; import it with the steps in the Process Engine import guide. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_payment-screening"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="payment-screening" name="Payment screening" isExecutable="true">
+    <bpmn:startEvent id="start" name="Payment received"/>
+    <bpmn:inclusiveGateway id="screen" name="Which reviews apply?" default="screen__standard"/>
+    <bpmn:userTask id="aml-review" name="AML review" horus:assignee="role:AML_OFFICER" horus:resultVariable="aml"/>
+    <bpmn:userTask id="sanctions-review" name="Sanctions review" horus:assignee="role:SANCTIONS_OFFICER" horus:resultVariable="sanctions"/>
+    <bpmn:userTask id="standard-check" name="Standard check" horus:assignee="role:PAYMENT_OFFICER" horus:resultVariable="standard"/>
+    <bpmn:inclusiveGateway id="settle" name="All started reviews done"/>
+    <bpmn:userTask id="release" name="Release the payment" horus:assignee="role:PAYMENT_OFFICER" horus:resultVariable="released"/>
+    <bpmn:endEvent id="end" name="Payment released"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="screen"/>
+    <bpmn:sequenceFlow id="screen__aml" sourceRef="screen" targetRef="aml-review">
+      <bpmn:conditionExpression>amount &gt;= 100000000 VND</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="screen__sanctions" sourceRef="screen" targetRef="sanctions-review">
+      <bpmn:conditionExpression>crossBorder == true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="screen__standard" sourceRef="screen" targetRef="standard-check"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="aml-review" targetRef="settle"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="sanctions-review" targetRef="settle"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="standard-check" targetRef="settle"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="settle" targetRef="release"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="release" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

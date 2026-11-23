@@ -26,6 +26,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEven
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
@@ -345,6 +346,10 @@ public final class SubsetBpmnWriter {
             case ParallelGateway g -> tag = "bpmn:parallelGateway";
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";
+                attributes.append(optional("default", g.defaultFlow()));
+            }
+            case InclusiveGateway g -> {
+                tag = "bpmn:inclusiveGateway";
                 attributes.append(optional("default", g.defaultFlow()));
             }
             default -> throw new IllegalArgumentException("Element " + node.id() + " ("
@@ -686,6 +691,7 @@ public final class SubsetBpmnWriter {
             case IntermediateCatchEvent c -> new int[] {36, 36};
             case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
+            case InclusiveGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };
     }

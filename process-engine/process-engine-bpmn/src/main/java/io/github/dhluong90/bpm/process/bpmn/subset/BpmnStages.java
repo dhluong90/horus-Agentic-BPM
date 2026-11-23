@@ -24,7 +24,6 @@ final class BpmnStages {
             Map.entry("intermediateCatchEvent", S1),
             Map.entry("boundaryEvent", S1),
             Map.entry("subProcess", S1),
-            Map.entry("inclusiveGateway", S1),
             Map.entry("dataObject", S1),
             Map.entry("dataObjectReference", S1),
             Map.entry("dataStore", S1),

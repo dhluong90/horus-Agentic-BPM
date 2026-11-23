@@ -139,10 +139,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      *     keys {@code name}, {@code correlationKey} (as the host's masker made it) and {@code result}; null otherwise
      * @param instances for the entries of a loop or multi-instance step ({@code MI_*}, #496), the counters when the
      *     entry was written; null otherwise
+     * @param routing for a gateway that chose its flows or a join that waits (#494), what it chose or waits for; null
+     *     otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause, Integer waiters, java.util.Map<String, String> message, Instances instances) {
+            String handler, String cause, Integer waiters, java.util.Map<String, String> message, Instances instances,
+            Routing routing) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -153,12 +156,12 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
                     new java.util.LinkedHashMap<>(message));
         }
 
-        /** An entry with no count of woken waiters, no message part and no loop counters. */
+        /** An entry with no count of woken waiters, no message part and no loop counters and no routing. */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
                 String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
                 String errorCode, String handler, String cause) {
             this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
-                    errorCode, handler, cause, null, null, null);
+                    errorCode, handler, cause, null, null, null, null);
         }
 
         /**
@@ -171,7 +174,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         /**
@@ -186,13 +189,19 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public static Entry signalThrown(String id, String nodeId, String actor, Instant occurredAt, Integer waiters) {
             return new Entry(id, "SIGNAL_THROWN", nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null,
-                    null, null, null, waiters, null, null);
+                    null, null, null, waiters, null, null, null);
+        }
+
+        /** @return the same entry with the routing of a gateway or join */
+        public Entry withRouting(Routing newRouting) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing);
         }
 
         /**
@@ -203,7 +212,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing);
         }
 
         /**
@@ -212,7 +221,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withInstances(Instances counters) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, counters);
+                    attempt, errorCode, handler, cause, waiters, message, counters, routing);
         }
 
         /** @return true for the history types the undo of a saga writes */
@@ -232,5 +241,21 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      */
     public record Instances(Integer loopCounter, Integer nrOfInstances, Integer nrOfActiveInstances,
             Integer nrOfCompletedInstances) {
+    }
+
+    /**
+     * What a gateway chose or why a join waits (#494).
+     *
+     * @param flows the sequence flow ids a split took; empty for a join
+     * @param reason {@code conditions} when every taken flow had a true condition, {@code default} when the default
+     *     flow was taken because none had; null for a join
+     * @param waitingFor the ids of the steps a waiting join still expects a token from; empty for a split
+     */
+    public record Routing(List<String> flows, String reason, List<String> waitingFor) {
+
+        public Routing {
+            flows = flows == null ? List.of() : List.copyOf(flows);
+            waitingFor = waitingFor == null ? List.of() : List.copyOf(waitingFor);
+        }
     }
 }

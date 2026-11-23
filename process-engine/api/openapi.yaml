@@ -3209,6 +3209,9 @@ components:
                   nrOfInstances: { type: integer, minimum: 0, description: 'How many repetitions the step has; absent for a standard loop, which has no fixed number' }
                   nrOfActiveInstances: { type: integer, minimum: 0 }
                   nrOfCompletedInstances: { type: integer, minimum: 0 }
+              flows: { type: array, items: { type: string }, description: 'A gateway that chose its flows (`NODE_COMPLETED`): the ids of the sequence flows it took (#494)' }
+              reason: { type: string, enum: [conditions, default], description: '`conditions`: every flow taken had no condition or a true one; `default`: none had, so the default flow was taken' }
+              waitingFor: { type: array, items: { type: string }, description: 'An inclusive join that waits (`TOKEN_JOINED`): the ids of the steps a token can still arrive from; empty when it fires (#494)' }
         compensations:
           type: array
           description: >-

@@ -94,6 +94,7 @@ The root element must declare the namespaces, and the process must be executable
 | `endEvent` with an `errorEventDefinition`, `escalationEventDefinition`, `terminateEventDefinition`, `compensateEventDefinition` or `cancelEventDefinition` (since 0.3.0) | for an error: `errorRef` to a root `error` with an `errorCode`; a cancel end stands directly in a transaction that has a cancel boundary event | `escalationRef` on an escalation end; `activityRef` on a compensation end | `<bpmn:endEvent id="refused"><bpmn:errorEventDefinition errorRef="Err_limit"/></bpmn:endEvent>` |
 | `intermediateThrowEvent` with an `escalationEventDefinition`, a `compensateEventDefinition` or a `linkEventDefinition`; `intermediateCatchEvent` with a `linkEventDefinition` (since 0.3.0) | `name` on each link definition; a throw needs a catch of the same name in the same scope | `escalationRef`; `activityRef` on a compensation throw | `<bpmn:linkEventDefinition name="notify"/>` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
+| `inclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="screen__standard"`. Takes every outgoing flow whose condition is true, or the default; with several incoming flows it waits for every token that can still reach it, see below |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
 Inputs to a service or rule step are `horus:input` elements inside `extensionElements`:
@@ -232,6 +233,10 @@ A signal is declared once in the document, as `<bpmn:signal id="Signal_rate" nam
 
 Signals carry no data into an instance. A broadcast needs `processes:signal:broadcast` and an `Idempotency-Key`; see [[Process Engine API]]. A worked file is [`rate-card-watch.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/rate-card-watch.bpmn).
 
+### Inclusive gateway
+
+A split takes every outgoing flow that has no condition or a true one, one token each, and the `default` flow only when none qualifies; none and no default fails the step with `NO_PATH`. A gateway with several incoming flows is a join: it holds each arriving token until no other token of the same scope can still reach it, so it waits for exactly the branches the split started, however many, and not for those it did not. A token on a branch that never reaches the join, or that leaves for another end, does not hold it, and a token going round a loop that leads back to the join does. A block (`transaction`) that reaches the join counts as one token. Two joins that wait for each other fail the command with `JOIN_DEADLOCK`; change the model. The cockpit timeline shows the steps a split took, the default when it was taken, and the steps a waiting join expects. A worked file is [`payment-screening.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/payment-screening.bpmn).
+
 ### Calling another process (0.3.0)
 
 A `callActivity` starts a child instance of another definition of the same tenant and waits for it. The child gets only the values the step passes, and the step takes back only the outputs it names:
@@ -300,13 +305,13 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `S0` | An element of the current stage that this release has not finished: an `intermediateThrowEvent` with no event definition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: `inclusiveGateway`, data objects and a timer cycle are `S1`; `eventBasedGateway` is `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: data objects and a timer cycle are `S1`; `eventBasedGateway` is `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused:
 
 | Kind | Elements |
 |---|---|
-| Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
+| Gateways | `eventBasedGateway`, `complexGateway` |
 | Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event, and an event with several definitions |
 | Activities | `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |

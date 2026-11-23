@@ -635,6 +635,18 @@ public class ProcessController {
                 putCounter(counters, "nrOfActiveInstances", entry.instances().nrOfActiveInstances());
                 putCounter(counters, "nrOfCompletedInstances", entry.instances().nrOfCompletedInstances());
             }
+            if (entry.routing() != null) {
+                // #494: the flows a split took and why, or the steps a waiting join still expects a token from.
+                if (!entry.routing().flows().isEmpty()) {
+                    tools.jackson.databind.node.ArrayNode taken = item.putArray("flows");
+                    entry.routing().flows().forEach(taken::add);
+                    putIfPresent(item, "reason", entry.routing().reason());
+                }
+                if (!entry.routing().waitingFor().isEmpty()) {
+                    tools.jackson.databind.node.ArrayNode waiting = item.putArray("waitingFor");
+                    entry.routing().waitingFor().forEach(waiting::add);
+                }
+            }
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {

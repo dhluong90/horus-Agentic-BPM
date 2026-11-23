@@ -45,7 +45,7 @@ class SubsetBpmnReaderTest {
                 .satisfies(e -> assertThat(((BpmnUnsupportedElementException) e).problems())
                         .extracting(DefinitionProblem::element, DefinitionProblem::elementId, DefinitionProblem::line)
                         .contains(org.assertj.core.groups.Tuple.tuple("boundaryEvent", "be-timeout", 6),
-                                org.assertj.core.groups.Tuple.tuple("inclusiveGateway", "ig-1", 7),
+                                org.assertj.core.groups.Tuple.tuple("dataObject", "do-1", 7),
                                 org.assertj.core.groups.Tuple.tuple("endEvent with linkEventDefinition", "end", 8)));
     }
 
@@ -132,7 +132,7 @@ class SubsetBpmnReaderTest {
     @Test
     void echoed_ids_are_cut_at_200_characters_and_lose_control_characters() {
         String id = "x".repeat(200) + "&#13;&#10;y";
-        assertThatThrownBy(() -> reader.read(doc("<bpmn:inclusiveGateway id=\"" + id + "\"/>")))
+        assertThatThrownBy(() -> reader.read(doc("<bpmn:dataObject id=\"" + id + "\"/>")))
                 .isInstanceOf(BpmnUnsupportedElementException.class)
                 .satisfies(e -> assertThat(((BpmnUnsupportedElementException) e).problems().get(0).elementId())
                         .hasSizeLessThanOrEqualTo(200).doesNotContain("\r", "\n"));

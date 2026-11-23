@@ -320,6 +320,9 @@ final class WorkingContext implements ExecutionContext {
         if (node instanceof ExclusiveGateway gateway) {
             return gateway.defaultFlow();
         }
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway gateway) {
+            return gateway.defaultFlow();
+        }
         if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
             return activity.activity().defaultFlow();
         }
@@ -371,6 +374,9 @@ final class WorkingContext implements ExecutionContext {
     private void settle(Token scope) {
         List<Token> live = tree().live(scope.id());
         if (live.stream().anyMatch(t -> !isListener(t))) {
+            return;
+        }
+        if (waitsAtInclusiveJoin(scope)) {
             return;
         }
         if (!conditionsSettled && live.stream().anyMatch(this::isConditionalListener) && variablesChanged()) {
@@ -466,6 +472,16 @@ final class WorkingContext implements ExecutionContext {
     /** @return a number that grows with every write to the instance variables, to tell whether a pass changed them */
     long variableVersion() {
         return variableVersion;
+    }
+
+    /**
+     * A token waiting at an inclusive join is not live, but the scope is not over while one waits: the join fires
+     * once the other tokens have ended, and its outgoing token ends the scope.
+     */
+    private boolean waitsAtInclusiveJoin(Token scope) {
+        return tree().children(scope.id()).stream().anyMatch(t -> t.status() == TokenStatus.JOINED
+                && process.node(t.nodeId()).orElse(null) instanceof
+                io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway);
     }
 
     @Override

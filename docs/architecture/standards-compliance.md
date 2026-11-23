@@ -351,7 +351,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 |---|---|
 | Exclusive | As M2; default flow; error `NO_OUTGOING_FLOW` incident when no condition holds and there is no default |
 | Parallel | As M2 |
-| Inclusive (S1) | Split: every flow whose condition is true, the default when none. Join: fires when no live token of the same scope can still reach it. The compiler stores per join the set of nodes that reach it without passing through it; under the instance lock the check scans the live tokens of the scope (typically under 20). The check runs on every arrival and every token end in the scope, so a token ending elsewhere cannot leave a join waiting (no lost wakeup) |
+| Inclusive (S1) | Split: every flow whose condition is true, the default when none. Join: fires when no live token of the same scope can still reach it. The compiler stores per join the set of nodes that reach it without passing through it; under the instance lock the check scans the live tokens of the scope (typically under 20). The check runs on every arrival and every token end in the scope, so a token ending elsewhere cannot leave a join waiting (no lost wakeup). Built in #494 as a settle step that runs when the agenda of an apply is empty; two joins that wait for each other fail the command with `JOIN_DEADLOCK` |
 | Event-based (S2) | Subscriptions and timer jobs for every following catch event in one transaction; the first to fire cancels the others under the instance lock; instantiating event-based gateways at process start in S3 |
 | Complex (S3) | `activationCondition` over `_activationCount` evaluated under the instance lock; reset semantics as in BPMN 2.0.2 section 13.4.4 |
 
@@ -391,6 +391,8 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Event subprocess with timer, error, escalation start | Refused | Execute | | |
 | Event subprocess with timer, message, signal, conditional, error, escalation or compensation start, interrupting or not (#487) | Execute (#487) | | | The compensation one is the undo of its sub-process, and the steps inside are still undone after it |
 | Inclusive gateway | Refused | Execute | | |
+| Inclusive gateway | Execute (#494) | | | |
+| Multi-instance (parallel, sequential) on tasks and subprocesses | Refused | Execute | | |
 | Data objects, data associations, data stores (references) | Refused | Execute | | |
 | Script task (FEEL or `horus-expr-v1`) | Execute with `horus-expr-v1` (#485) | Execute with FEEL | | |
 | Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | |

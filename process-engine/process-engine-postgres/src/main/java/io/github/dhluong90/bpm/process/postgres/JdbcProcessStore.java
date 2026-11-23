@@ -90,6 +90,10 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         return details.get(key) instanceof Number n ? n.intValue() : null;
     }
 
+    private static List<String> strings(Object value) {
+        return value instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of();
+    }
+
     /** An entry as the timeline shows it: the undo's own fields come from the history row's token, attempt and details. */
     private static InstanceActivities.Entry historyEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
         String type = rs.getString("event_type");
@@ -124,7 +128,19 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                     counter(counters, "nrOfActiveInstances"), counter(counters, "nrOfCompletedInstances")));
         }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
-            return new InstanceActivities.Entry(id, type, node, actor, at);
+            InstanceActivities.Entry plain = new InstanceActivities.Entry(id, type, node, actor, at);
+            // #494: what a gateway chose and what a waiting join expects, read from the row's details.
+            if ("NODE_COMPLETED".equals(type) || "TOKEN_JOINED".equals(type)) {
+                Map<String, Object> details = Values.readMap(rs.getString("details"));
+                List<String> flows = strings(details.get("flows"));
+                List<String> waiting = strings(details.get("waitingFor"));
+                if (!flows.isEmpty() || !waiting.isEmpty()) {
+                    Object reason = details.get("reason");
+                    return plain.withRouting(new InstanceActivities.Routing(flows, reason == null ? null
+                            : reason.toString(), waiting));
+                }
+            }
+            return plain;
         }
         Map<String, Object> details = Values.readMap(rs.getString("details"));
         boolean step = type.startsWith("COMPENSATION_STEP_");

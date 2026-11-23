@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { InstanceActivities, ProcessInstance } from '../../../api/processes/schemas';
-import { assigneeWords, scopeState, undoEntryType, wordsOf, durationParts, entryKey, firstStep, incidentKey, nodeMarks } from './instanceView';
+import { routingWords, assigneeWords, scopeState, undoEntryType, wordsOf, durationParts, entryKey, firstStep, incidentKey, nodeMarks } from './instanceView';
 
 const instance: ProcessInstance = {
   id: 'I7', definitionKey: 'kyc-onboarding', definitionVersion: 2, businessKey: 'KYC-2207', status: 'RUNNING', lockVersion: 1, startedBy: 'svc-kyc', startedAt: '2026-11-20T01:00:00Z',
@@ -72,5 +72,24 @@ describe('instance view', () => {
     expect(scopeState({ ...base, state: 'UNDONE' })).toBe('UNDONE');
     expect(scopeState({ ...base, state: 'NOT_FULLY_UNDONE' })).toBe('NOT_FULLY_UNDONE');
     expect(scopeState({ ...base, state: 'SOMETHING_NEW' })).toBe('IN_PROGRESS');
+  });
+});
+
+describe('PRE-301 PRE-302 a gateway entry says which branches were taken and why a join waits', () => {
+  const graph = {
+    nodes: [{ id: 'aml-review', name: 'AML review' }, { id: 'standard-check', name: undefined }, { id: 'sanctions-review', name: 'Sanctions review' }],
+    edges: [{ id: 'screen__aml', target: 'aml-review' }, { id: 'screen__standard', target: 'standard-check' }],
+  };
+  const entry = (extra: Record<string, unknown>) => ({ id: 'e', type: 'NODE_COMPLETED', nodeId: 'screen', actor: null, occurredAt: '2026-11-23T03:00:00Z', ...extra });
+
+  it('PRE_301_a_split_names_the_steps_it_took_and_says_when_it_took_the_default', () => {
+    expect(routingWords(entry({ flows: ['screen__aml'], reason: 'conditions' }), graph)).toEqual({ kind: 'took', steps: ['AML review'] });
+    expect(routingWords(entry({ flows: ['screen__standard'], reason: 'default' }), graph)).toEqual({ kind: 'tookDefault', steps: ['Standard check'] });
+  });
+
+  it('PRE_302_a_join_that_waits_names_the_steps_it_waits_for_and_other_entries_say_nothing', () => {
+    expect(routingWords(entry({ type: 'TOKEN_JOINED', waitingFor: ['sanctions-review'] }), graph)).toEqual({ kind: 'waiting', steps: ['Sanctions review'] });
+    expect(routingWords(entry({ type: 'TOKEN_JOINED', waitingFor: [] }), graph)).toBeUndefined();
+    expect(routingWords(entry({}), graph)).toBeUndefined();
   });
 });

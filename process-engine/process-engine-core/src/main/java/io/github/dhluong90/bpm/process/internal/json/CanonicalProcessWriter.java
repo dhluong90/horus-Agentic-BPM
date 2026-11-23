@@ -31,6 +31,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefin
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -316,6 +317,20 @@ public final class CanonicalProcessWriter {
                     flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
                             .ifPresent(f -> step.put("default", f.targetRef()));
                 }
+                case InclusiveGateway g -> {
+                    step.put("type", "inclusiveGateway");
+                    // Every branch whose condition holds is taken; a branch with no condition is always taken.
+                    ArrayNode branches = step.putArray("branches");
+                    for (SequenceFlow f : out) {
+                        if (f.id().equals(g.defaultFlow())) {
+                            continue;
+                        }
+                        branches.addObject().put("when", f.conditionExpression() == null ? "true"
+                                : f.conditionExpression().text()).put("next", f.targetRef());
+                    }
+                    flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
+                            .ifPresent(f -> step.put("default", f.targetRef()));
+                }
                 case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
                         && c.eventDefinitions().get(0) instanceof TimerEventDefinition timer -> {
                     // process-definition.v1 timerStep: duration or until (DESIGN section 5.1).
@@ -418,7 +433,7 @@ public final class CanonicalProcessWriter {
                     && activity.activity().loopCharacteristics() != null) {
                 writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
             }
-            if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
+            if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }

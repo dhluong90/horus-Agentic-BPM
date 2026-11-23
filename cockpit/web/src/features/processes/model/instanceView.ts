@@ -87,6 +87,7 @@ const ENTRY_TYPES = [
   'ASYNC_STEP_SCHEDULED', 'ASYNC_ATTEMPT_FAILED', 'ASYNC_RESULT_ACCEPTED', 'ASYNC_RESULT_REFUSED', 'STEP_ROUTED_TO_REVIEW',
   'HUMAN_OVERRIDE', 'DECISION_EVALUATED', 'TIMER_SCHEDULED', 'TIMER_FIRED', 'TOKEN_JOINED', 'TOKEN_CANCELLED',
   'BOUNDARY_FIRED', 'EVENT_SUBPROCESS_STARTED', 'ERROR_THROWN', 'ESCALATION_THROWN', 'TERMINATED', 'LINK_JUMPED',
+  'HUMAN_OVERRIDE', 'DECISION_EVALUATED', 'TIMER_SCHEDULED', 'TIMER_FIRED', 'TOKEN_JOINED', 'JOIN_FIRED', 'TOKEN_CANCELLED',
   'INCIDENT_RAISED', 'INSTANCE_ENDED',
   'SIGNAL_WAITING', 'SIGNAL_RECEIVED', 'SIGNAL_THROWN', 'CONDITION_WAITING', 'CONDITION_MET',
   'MESSAGE_WAITING', 'MESSAGE_RECEIVED', 'MESSAGE_SENT',
@@ -119,6 +120,24 @@ export function loopProgress(activities: InstanceActivities | undefined): Map<st
     out.set(entry.nodeId, { done: counters.nrOfCompletedInstances ?? 0, total: counters.nrOfInstances, active: counters.nrOfActiveInstances ?? 0 });
   }
   return out;
+/**
+ * What a gateway chose or what a waiting join expects, in step names (#494): a split names the steps its taken flows
+ * lead to and says when the default was taken; a join that waits names the steps it still expects a token from.
+ * Names come from the diagram; an id the diagram does not have is shown in words. Returns undefined for any other entry.
+ */
+export function routingWords(
+  entry: ActivityEntry,
+  graph: { nodes: { id: string; name: string | undefined }[]; edges: { id: string; target: string }[] },
+): { kind: 'took' | 'tookDefault' | 'waiting'; steps: string[] } | undefined {
+  const name = (id: string) => graph.nodes.find((node) => node.id === id)?.name ?? wordsOf(id);
+  if (entry.type === 'NODE_COMPLETED' && entry.flows !== undefined && entry.flows.length > 0) {
+    const steps = entry.flows.map((flow) => name(graph.edges.find((edge) => edge.id === flow)?.target ?? flow));
+    return { kind: entry.reason === 'default' ? 'tookDefault' : 'took', steps };
+  }
+  if (entry.type === 'TOKEN_JOINED' && entry.waitingFor !== undefined && entry.waitingFor.length > 0) {
+    return { kind: 'waiting', steps: entry.waitingFor.map(name) };
+  }
+  return undefined;
 }
 
 /** Whether an entry is a problem, shown with the error icon and word. */

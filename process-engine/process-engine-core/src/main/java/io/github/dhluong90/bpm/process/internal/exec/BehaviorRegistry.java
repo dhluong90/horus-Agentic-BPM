@@ -23,6 +23,7 @@ public final class BehaviorRegistry {
 
     private final Map<Key, FlowNodeBehavior<?>> behaviors = new LinkedHashMap<>();
     private final List<CompileStep> compileSteps = new ArrayList<>();
+    private final List<SettleStep> settleSteps = new ArrayList<>();
 
     /**
      * @param behavior a behaviour; a second behaviour for the same node type and event definition key is refused
@@ -44,6 +45,15 @@ public final class BehaviorRegistry {
      */
     public BehaviorRegistry compileStep(CompileStep step) {
         compileSteps.add(step);
+        return this;
+    }
+
+    /**
+     * @param step a step run when the agenda of an apply is empty
+     * @return this registry
+     */
+    public BehaviorRegistry settleStep(SettleStep step) {
+        settleSteps.add(step);
         return this;
     }
 
@@ -70,6 +80,11 @@ public final class BehaviorRegistry {
             Function<String, Optional<EventDefinition>> shared) {
         Key key = new Key(node.getClass(), EventDefinitionKey.of(node, shared));
         return Optional.ofNullable((FlowNodeBehavior<N>) behaviors.get(key));
+    }
+
+    /** @return settle steps in registration order */
+    public List<SettleStep> settleSteps() {
+        return List.copyOf(settleSteps);
     }
 
     /** @return compile steps in registration order */
