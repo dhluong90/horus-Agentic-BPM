@@ -26,12 +26,16 @@ Set `SITE_BASE` to build for a sub-path, for example `SITE_BASE=/1.0/ npm run bu
 
 ## CI
 
-The workflow [`docs-site.yml`](../.github/workflows/docs-site.yml) builds the site on every pull request that touches `wiki/` or `site/`. It also runs the commands of the Getting Started page in order (`tools/extract-guide-commands.py`). It publishes nothing.
+The workflow [`docs-site.yml`](../.github/workflows/docs-site.yml) runs on every pull request that touches `wiki/` or `site/`. It publishes nothing. Jobs:
+
+- **Build the site from the wiki:** licence check, generator tests, build, and a check that no page loads anything from another origin.
+- **Site accessibility (axe):** `cockpit/web/scripts/axe-site.mjs` opens two pages with a diagram and code blocks at 1440x900 and 1440x1200, light and dark. It fails if the Mermaid diagram is not drawn, a code block has no copy button, or axe-core reports a serious violation. Contrast fixes live in [`.vitepress/theme/contrast.css`](.vitepress/theme/contrast.css).
+- **Getting Started guide runs:** the commands of the Getting Started page, in order (`tools/extract-guide-commands.py`).
 
 ## Licences
 
-Direct packages: VitePress 1.6.4, vitepress-plugin-mermaid 2.0.17 and Mermaid 11.17, all MIT. Their transitive dependencies are not checked: the repository's licence gate (job "Dependency licences, SBOM and vulnerabilities") scans Maven dependencies only, and the site is a build tool that is not shipped in any jar. Wiring `site/` into a gate is a follow-up.
+The cockpit's licence script runs over the whole tree of `site/` (`node ../cockpit/web/scripts/check-licences.mjs --include-dev --exceptions=licence-exceptions.json`), because every package ends up in the built pages. It allows Apache-2.0, MIT, BSD and ISC. Two packages are listed in [`licence-exceptions.json`](licence-exceptions.json): `khroma` (no licence field, MIT licence file) and `robust-predicates` (Unlicense, a public-domain dedication; awaiting the product owner's decision).
 
 ## Not done
 
-Publishing under `/1.0/` with `latest`, and the version switcher, are not set up. They would publish the site publicly; see the pull request.
+Publishing under `/1.0/` with `latest`, and the version switcher, are deferred to #475 (after 1.0). Publishing publicly is the product owner's decision.
