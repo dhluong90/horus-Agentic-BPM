@@ -9,7 +9,6 @@ import io.github.dhluong90.bpm.process.internal.exec.Token;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
-import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -64,12 +63,13 @@ final class CallActivityBehavior implements FlowNodeBehavior<CallActivity> {
                 }
                 brought.forEach((k, v) -> ctx.variables().set(k, v));
                 // PD-127: the call is one step; its undo is the step's own handler, which gets the child's id.
-                node.extensions().first(CompensateHandlerRef.class).ifPresent(undo -> {
+                // #488: the undo is the step's own handler, or the compensation activity of a compensation boundary event.
+                InvocationSupport.undoHandler(node, ctx).ifPresent(undo -> {
                     Map<String, Object> snapshot = new LinkedHashMap<>(StepSupport.inputs(node, token, ctx));
                     snapshot.put(InvocationSupport.FORWARD_RESULT, brought);
                     snapshot.put("childInstanceId", ended.childInstanceId());
                     ctx.effect(new Effect.PushCompensation(token.scopeTokenId(), node.id(), ended.attemptId(),
-                            undo.handler(), snapshot));
+                            undo, snapshot));
                 });
                 ctx.history("CHILD_COMPLETED", token, Map.of("childInstanceId", ended.childInstanceId()));
                 Token active = token.withStatus(TokenStatus.ACTIVE);

@@ -126,7 +126,26 @@
         "id": { "$ref": "#/$defs/nodeId" },
         "type": { "type": "string" },
         "name": { "type": "string" },
-        "description": { "type": "string" }
+        "description": { "type": "string" },
+        "loop": { "$ref": "#/$defs/loop" }
+      }
+    },
+    "loop": {
+      "type": "object",
+      "description": "A step that repeats: a standard loop (kind loop, with max, optional condition and testBefore) or a multi-instance step (kind parallel or sequential, with collection and element, or cardinality, and optional outputCollection, outputElement and completionCondition).",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["loop", "parallel", "sequential"] },
+        "max": { "type": "integer", "minimum": 1 },
+        "condition": { "type": "string" },
+        "testBefore": { "type": "boolean" },
+        "collection": { "type": "string" },
+        "element": { "type": "string" },
+        "cardinality": { "type": "string" },
+        "outputCollection": { "type": "string" },
+        "outputElement": { "type": "string" },
+        "completionCondition": { "type": "string" }
       }
     },
     "step": {
@@ -134,7 +153,7 @@
       "required": ["id", "type"],
       "properties": {
         "type": {
-          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "subProcess", "throwCompensation", "signalCatch", "signalThrow", "conditionalCatch"]
+          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "subProcess", "throwCompensation", "signalCatch", "signalThrow", "conditionalCatch", "eventBasedGateway"]
         }
       },
       "allOf": [
@@ -153,7 +172,8 @@
         { "if": { "properties": { "type": { "const": "throwCompensation" } } }, "then": { "$ref": "#/$defs/throwCompensationStep" } },
         { "if": { "properties": { "type": { "const": "signalCatch" } } }, "then": { "$ref": "#/$defs/signalCatchStep" } },
         { "if": { "properties": { "type": { "const": "signalThrow" } } }, "then": { "$ref": "#/$defs/signalThrowStep" } },
-        { "if": { "properties": { "type": { "const": "conditionalCatch" } } }, "then": { "$ref": "#/$defs/conditionalCatchStep" } }
+        { "if": { "properties": { "type": { "const": "conditionalCatch" } } }, "then": { "$ref": "#/$defs/conditionalCatchStep" } },
+        { "if": { "properties": { "type": { "const": "eventBasedGateway" } } }, "then": { "$ref": "#/$defs/eventBasedGatewayStep" } }
       ]
     },
     "signalName": {
@@ -400,6 +420,17 @@
             { "$ref": "#/$defs/nodeId" },
             { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/nodeId" } }
           ]
+        }
+      }
+    },
+    "eventBasedGatewayStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["next"],
+      "properties": {
+        "next": {
+          "description": "The catch events (message, signal, timer, conditional) or receive tasks the gateway waits on; the first to fire wins and the others are cancelled.",
+          "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/nodeId" }
         }
       }
     },

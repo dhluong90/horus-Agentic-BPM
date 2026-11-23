@@ -229,12 +229,16 @@ export function useDraftCheck(ruleSet: string, version: number, document: RuleDo
   });
 }
 
-/** `report` is the simulation report to attach to the request (RLE-201); without one the request carries none. */
+/**
+ * `report` is the simulation report to attach to the request (RLE-201); `effectiveFrom` is when the version should take
+ * effect (RLE-210). Without either the request carries neither.
+ */
 export function useRequestPublish(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    ({ version, report }: { version: VersionSummary; report?: string | undefined }, key) => client.requestPublish(version.ruleSet, version.version, version.lockVersion, key, report),
+    ({ version, report, effectiveFrom }: { version: VersionSummary; report?: string | undefined; effectiveFrom?: string | undefined }, key) =>
+      client.requestPublish(version.ruleSet, version.version, version.lockVersion, key, { simulationReportId: report, effectiveFrom }),
     async (version) => {
       await refresh();
       onDone(version);

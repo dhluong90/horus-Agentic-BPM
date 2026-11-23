@@ -86,16 +86,61 @@ const ENTRY_TYPES = [
   'INSTANCE_STARTED', 'NODE_ENTERED', 'NODE_COMPLETED', 'SCOPE_ENTERED', 'TASK_CLAIMED', 'TASK_UNCLAIMED', 'TASK_COMPLETED',
   'ASYNC_STEP_SCHEDULED', 'ASYNC_ATTEMPT_FAILED', 'ASYNC_RESULT_ACCEPTED', 'ASYNC_RESULT_REFUSED', 'STEP_ROUTED_TO_REVIEW',
   'HUMAN_OVERRIDE', 'DECISION_EVALUATED', 'TIMER_SCHEDULED', 'TIMER_FIRED', 'TOKEN_JOINED', 'TOKEN_CANCELLED',
-  'BOUNDARY_FIRED', 'ERROR_THROWN', 'ESCALATION_THROWN', 'TERMINATED', 'LINK_JUMPED',
+  'BOUNDARY_FIRED', 'EVENT_SUBPROCESS_STARTED', 'ERROR_THROWN', 'ESCALATION_THROWN', 'TERMINATED', 'LINK_JUMPED',
+  'JOIN_FIRED',
   'INCIDENT_RAISED', 'INSTANCE_ENDED',
   'SIGNAL_WAITING', 'SIGNAL_RECEIVED', 'SIGNAL_THROWN', 'CONDITION_WAITING', 'CONDITION_MET',
   'MESSAGE_WAITING', 'MESSAGE_RECEIVED', 'MESSAGE_SENT',
+  'MI_STARTED', 'MI_INSTANCE_STARTED', 'MI_INSTANCE_COMPLETED', 'MI_INSTANCE_CANCELLED', 'MI_COMPLETED', 'MI_REFUSED',
+  'EVENT_GATEWAY_WAITING', 'EVENT_GATEWAY_RESOLVED',
 ] as const;
 type EntryType = (typeof ENTRY_TYPES)[number];
 
 /** A history entry in words; an entry type this cockpit does not know reads "Recorded by the engine", never its code. */
 export function entryKey(type: string): MessageKey {
   return (ENTRY_TYPES as readonly string[]).includes(type) ? (`instance.entry.${type as EntryType}` as MessageKey) : 'instance.entry.other';
+}
+
+/** How far a step that repeats has come: repetitions ended, and how many there are when that is fixed (#496). */
+export interface LoopProgress {
+  done: number;
+  /** Absent for a standard loop, which has no fixed number of repetitions. */
+  total: number | undefined;
+  active: number;
+}
+
+/**
+ * The progress of each step that repeats, as the engine counted it in its latest entry for the step. The entries are in
+ * time order, so the last one wins; the cockpit counts nothing itself.
+ */
+export function loopProgress(activities: InstanceActivities | undefined): Map<string, LoopProgress> {
+  const out = new Map<string, LoopProgress>();
+  for (const entry of activities?.entries ?? []) {
+    const counters = entry.instances;
+    if (entry.nodeId === null || counters === undefined) continue;
+    out.set(entry.nodeId, { done: counters.nrOfCompletedInstances ?? 0, total: counters.nrOfInstances, active: counters.nrOfActiveInstances ?? 0 });
+  }
+  return out;
+}
+
+/**
+ * What a gateway chose or what a waiting join expects, in step names (#494): a split names the steps its taken flows
+ * lead to and says when the default was taken; a join that waits names the steps it still expects a token from.
+ * Names come from the diagram; an id the diagram does not have is shown in words. Returns undefined for any other entry.
+ */
+export function routingWords(
+  entry: ActivityEntry,
+  graph: { nodes: { id: string; name: string | undefined }[]; edges: { id: string; target: string }[] },
+): { kind: 'took' | 'tookDefault' | 'waiting'; steps: string[] } | undefined {
+  const name = (id: string) => graph.nodes.find((node) => node.id === id)?.name ?? wordsOf(id);
+  if (entry.type === 'NODE_COMPLETED' && entry.flows !== undefined && entry.flows.length > 0) {
+    const steps = entry.flows.map((flow) => name(graph.edges.find((edge) => edge.id === flow)?.target ?? flow));
+    return { kind: entry.reason === 'default' ? 'tookDefault' : 'took', steps };
+  }
+  if (entry.type === 'TOKEN_JOINED' && entry.waitingFor !== undefined && entry.waitingFor.length > 0) {
+    return { kind: 'waiting', steps: entry.waitingFor.map(name) };
+  }
+  return undefined;
 }
 
 /** Whether an entry is a problem, shown with the error icon and word. */

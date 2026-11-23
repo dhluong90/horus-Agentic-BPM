@@ -17,8 +17,21 @@ export type Engine = 'rules' | 'processes';
 export const DENIAL_CODES = ['PERMISSION_REQUIRED', 'SELF_APPROVAL_FORBIDDEN', 'AUTHOR_UNKNOWN'] as const;
 export type Denial = (typeof DENIAL_CODES)[number] | 'UNAVAILABLE';
 
+/** What waits for a second person: a rule version, a process definition version, a migration plan or a calendar change. */
+export type ApprovalType = 'rule' | 'definition' | 'migration' | 'calendar';
+
 export interface ApprovalItem {
   engine: Engine;
+  /** What kind of change it is; the review screen and the wording follow it. */
+  type: ApprovalType;
+  /** The id of the migration plan or calendar change, which the review link names; undefined for a version. */
+  id: string | undefined;
+  /** For a migration plan: the version its cases run on now. */
+  sourceVersion: number | undefined;
+  /** The date the requester asked a rule version to take effect, when one was set (RLE-210). */
+  effectiveFrom: string | undefined;
+  /** What the proposer wrote for a migration plan or a calendar change. */
+  reason: string | undefined;
   /** The rule set name or the definition key: what the review link names. */
   key: string;
   /** What a person reads: the rule set name, or the process's name (its key when it has none). */
@@ -42,7 +55,8 @@ export interface ApprovalItem {
 }
 
 /** One stable identity per item across both engines. */
-export const itemKey = (item: Pick<ApprovalItem, 'engine' | 'key' | 'version'>) => `${item.engine}/${item.key}/${String(item.version)}`;
+export const itemKey = (item: Pick<ApprovalItem, 'engine' | 'key' | 'version'> & Partial<Pick<ApprovalItem, 'type' | 'id'>>) =>
+  (item.type === 'migration' || item.type === 'calendar') && item.id !== undefined ? `${item.engine}/${item.type}/${item.id}` : `${item.engine}/${item.key}/${String(item.version)}`;
 
 function denial(code: string | undefined, allowed: boolean): Denial | undefined {
   if (allowed) return undefined;
@@ -52,7 +66,7 @@ function denial(code: string | undefined, allowed: boolean): Denial | undefined 
 export function fromRule(item: PendingRuleApproval, userId: string): ApprovalItem {
   const canApprove = item.allowedActions.includes('approve');
   return {
-    engine: 'rules', key: item.ruleSet, title: nameOf('rule set', item.ruleSet, item), version: item.version, hash: item.canonicalHash, lockVersion: item.lockVersion,
+    engine: 'rules', type: 'rule', id: undefined, sourceVersion: undefined, reason: undefined, effectiveFrom: item.effectiveFrom ?? undefined, key: item.ruleSet, title: nameOf('rule set', item.ruleSet, item), version: item.version, hash: item.canonicalHash, lockVersion: item.lockVersion,
     requestedBy: item.requestedBy, requesterName: suppliedName(item, 'requestedBy'), requestedAt: item.requestedAt, canApprove,
     approveDenied: denial(item.deniedActions['approve'], canApprove), mine: item.requestedBy === userId, canWithdraw: item.allowedActions.includes('withdraw'),
   };
@@ -60,8 +74,10 @@ export function fromRule(item: PendingRuleApproval, userId: string): ApprovalIte
 
 export function fromProcess(item: PendingDefinitionApproval, userId: string): ApprovalItem {
   const canApprove = item.allowedActions.includes('approve');
+  const type: ApprovalType = item.kind === 'MIGRATION_PLAN' ? 'migration' : item.kind === 'CALENDAR_CHANGE' ? 'calendar' : 'definition';
   return {
-    engine: 'processes', key: item.key, title: item.name ?? item.key, version: item.version, hash: item.definitionHash, lockVersion: item.lockVersion,
+    engine: 'processes', type, id: type === 'definition' ? undefined : item.id ?? undefined, sourceVersion: item.sourceVersion ?? undefined, reason: item.reason ?? undefined, effectiveFrom: undefined,
+    key: item.key, title: item.name ?? item.key, version: item.version, hash: item.contentHash ?? item.definitionHash ?? '', lockVersion: item.lockVersion,
     requestedBy: item.requestedBy, requesterName: suppliedName(item, 'requestedBy'), requestedAt: item.requestedAt, canApprove,
     approveDenied: denial(item.deniedActions['approve'], canApprove), mine: item.requestedBy === userId, canWithdraw: false,
   };
@@ -112,9 +128,31 @@ export function denialMessage(denied: Denial): MessageKey {
   return `approvals.denied.${denied}`;
 }
 
-/** The existing review screen of the item, where the change is read and decided: the rule diff or the process diff. */
-export function reviewRoute(item: Pick<ApprovalItem, 'engine' | 'key' | 'version'>): Route {
+/**
+ * The existing review screen of the item, where the change is read and decided: the rule diff, the process diff, the
+ * migration plan, or the calendar change.
+ */
+export function reviewRoute(item: Pick<ApprovalItem, 'engine' | 'key' | 'version'> & Partial<Pick<ApprovalItem, 'type' | 'id'>>): Route {
+  if (item.type === 'migration' && item.id !== undefined) return { name: 'migration', migrationId: item.id };
+  if (item.type === 'calendar' && item.id !== undefined) return { name: 'calendar-change', changeId: item.id };
   return item.engine === 'rules'
     ? { name: 'rule-set', ruleSet: item.key, version: item.version, lens: 'changes' }
     : { name: 'process', key: item.key, version: item.version, lens: 'changes' };
+}
+
+/** What a person reads as the item's title: "card-fee, version 2", or the move or calendar it asks for. */
+export function itemTitle(item: Pick<ApprovalItem, 'type' | 'title' | 'version' | 'sourceVersion'>, t: (key: MessageKey, params?: Record<string, string>) => string): string {
+  if (item.type === 'migration') return t('approvals.migrationTitle', { name: item.title, source: String(item.sourceVersion ?? ''), target: String(item.version) });
+  if (item.type === 'calendar') return t('approvals.calendarTitle', { name: item.title });
+  return t('rules.nameVersion', { name: item.title, version: String(item.version) });
+}
+
+/** The label of what the item is: the engine's kind, or a migration plan or a calendar change under Process. */
+export function kindLabel(item: Pick<ApprovalItem, 'type'>): MessageKey {
+  switch (item.type) {
+    case 'rule': return 'approvals.kind.rules';
+    case 'migration': return 'approvals.kind.migration';
+    case 'calendar': return 'approvals.kind.calendar';
+    case 'definition': return 'approvals.kind.processes';
+  }
 }

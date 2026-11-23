@@ -449,6 +449,12 @@ public class ProcessController {
         node.put("kind", edge.kind());
     }
 
+    private static void putCounter(ObjectNode node, String name, Integer value) {
+        if (value != null) {
+            node.put(name, value);
+        }
+    }
+
     private static void putIfPresent(ObjectNode node, String name, String value) {
         if (value != null) {
             node.put(name, value);
@@ -621,6 +627,40 @@ public class ProcessController {
                 ObjectNode message = item.putObject("message");
                 entry.message().forEach(message::put);
             }
+            if (entry.instances() != null) {
+                // #496: the counters of a loop or multi-instance step when the entry was written.
+                ObjectNode counters = item.putObject("instances");
+                putCounter(counters, "loopCounter", entry.instances().loopCounter());
+                putCounter(counters, "nrOfInstances", entry.instances().nrOfInstances());
+                putCounter(counters, "nrOfActiveInstances", entry.instances().nrOfActiveInstances());
+                putCounter(counters, "nrOfCompletedInstances", entry.instances().nrOfCompletedInstances());
+            }
+            if (entry.routing() != null) {
+                // #494: the flows a split took and why, or the steps a waiting join still expects a token from.
+                if (!entry.routing().flows().isEmpty()) {
+                    tools.jackson.databind.node.ArrayNode taken = item.putArray("flows");
+                    entry.routing().flows().forEach(taken::add);
+                    putIfPresent(item, "reason", entry.routing().reason());
+                }
+                if (!entry.routing().waitingFor().isEmpty()) {
+                    tools.jackson.databind.node.ArrayNode waiting = item.putArray("waitingFor");
+                    entry.routing().waitingFor().forEach(waiting::add);
+                }
+            }
+            if (entry.event() != null) {
+                ObjectNode event = item.putObject("event");
+                entry.event().forEach((k, v) -> {
+                    if (v instanceof java.util.List<?> list) {
+                        tools.jackson.databind.node.ArrayNode array = event.putArray(k);
+                        list.forEach(x -> array.add(String.valueOf(x)));
+                    } else if (v instanceof Boolean b) {
+                        event.put(k, b);
+                    } else {
+                        event.put(k, String.valueOf(v));
+                    }
+                });
+            }
+            putIfPresent(item, "resultVariable", entry.resultVariable());
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {
@@ -721,6 +761,28 @@ public class ProcessController {
     }
 
     /**
+     * Starts one enabled activity of an open ad-hoc sub-process ({@code processes:task:manage}, #500). Body:
+     * {@code scopeTokenId} and {@code activityId}. {@code If-Match} carries the instance {@code lockVersion} and
+     * {@code Idempotency-Key} makes a retry safe; both are required.
+     */
+    @PostMapping(value = "/instances/{id}:start-ad-hoc-activity", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> startAdHocActivity(@PathVariable("id") String id, HttpServletRequest http,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the instance's lockVersion (its ETag), for "
+                    + "example \"2\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot start the activity twice");
+        }
+        JsonNode request = parse(boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
+        ProcessInstance instance = engine.startAdHocActivity(id, lockVersion(ifMatch), text(request, "scopeTokenId"),
+                text(request, "activityId"), idempotencyKey);
+        return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
      * Reads a task with the caller's {@code allowedActions} ({@code processes:task:work}); the {@code ETag} is its
      * lock version.
      */
@@ -728,6 +790,17 @@ public class ProcessController {
     public ResponseEntity<byte[]> task(@PathVariable("id") String id) {
         TaskView task = tasks.task(id);
         return json(HttpStatus.OK, Views.task(task), task.lockVersion(), null);
+    }
+
+    /**
+     * Reads the form a task is completed through ({@code processes:task:work}): the schema, hints and prefilled data
+     * of the form its step declares, masked fields still masked, or the link to the host's own screen. The
+     * {@code ETag} is the task's lock version, the value to send as {@code If-Match} on completion.
+     */
+    @GetMapping("/tasks/{id}/form")
+    public ResponseEntity<byte[]> taskForm(@PathVariable("id") String id) {
+        io.github.dhluong90.bpm.process.api.TaskForm form = tasks.form(id);
+        return json(HttpStatus.OK, Views.taskForm(form), form.lockVersion(), null);
     }
 
     /**

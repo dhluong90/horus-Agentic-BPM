@@ -150,6 +150,28 @@ export const task = z
 export type Task = z.infer<typeof task>;
 
 /**
+ * The form a task is completed through, or the link to the host's own screen (`GET /tasks/{id}/form`, PRE-031). The
+ * schema and hints stay open: the engine checks them at import, the cockpit only draws what it understands.
+ */
+export const taskForm = z
+  .object({
+    schemaVersion: z.number().int(),
+    taskId: z.string(),
+    lockVersion: z.number().int(),
+    form: z
+      .object({
+        schema: z.record(z.string(), z.unknown()),
+        hints: z.record(z.string(), z.unknown()),
+        data: z.record(z.string(), z.unknown()),
+      })
+      .loose()
+      .optional(),
+    link: z.string().optional(),
+  })
+  .loose();
+export type TaskForm = z.infer<typeof taskForm>;
+
+/**
  * How a task stands against its deadline, when the engine says so (PD-111, #81). Until the list carries it, the
  * queue reads which tasks are overdue from the engine's own `slaBreached=true` query; the browser computes neither.
  */
@@ -215,12 +237,24 @@ export type ProcessInstance = z.infer<typeof processInstance>;
  * An item of GET /approvals (PRE-190): a definition version waiting for a second person, with the hash a reviewer
  * sends back as expectedDefinitionHash and what this caller may do. Never the definition or a variable.
  */
+export const PENDING_KINDS = ['DEFINITION', 'MIGRATION_PLAN', 'CALENDAR_CHANGE'] as const;
 export const pendingDefinitionApproval = z
   .object({
+    /** What waits: a definition version, a migration plan or a calendar change (#473); an engine without kinds sends only definitions. */
+    kind: z.enum(PENDING_KINDS).default('DEFINITION'),
+    /** The id of the migration plan or calendar change; the version's own id for a definition. */
+    id: nullableString,
     key: z.string(),
     name: nullableString,
+    /** The version; for a migration plan the version it moves to. */
     version: z.number().int().min(1),
-    definitionHash: z.string().regex(/^[0-9a-f]{64}$/),
+    /** For a migration plan, the version its cases run on now. */
+    sourceVersion: z.number().int().nullable().optional(),
+    definitionHash: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+    /** The hash of what the reviewer is shown, sent back with the approval (PD-139); the definition hash on an older engine. */
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    /** What the proposer wrote (a migration plan or a calendar change). */
+    reason: nullableString,
     lockVersion: z.number().int(),
     requestedBy: z.string(),
     /** The requester as a screen shows them, in the caller's language; the id when the host knows no name (#442). */
@@ -230,7 +264,33 @@ export const pendingDefinitionApproval = z
     deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
   })
   .loose();
-export type PendingDefinitionApproval = z.infer<typeof pendingDefinitionApproval>;
+/** `kind` may be absent: an engine from before #473 lists definition versions only. */
+export type PendingDefinitionApproval = z.input<typeof pendingDefinitionApproval>;
+
+/** A holiday, a weekly range or the zone of a business calendar, as the engine writes a proposed or previous value. */
+const calendarValue = z.object({ zone: z.string(), week: z.record(z.string(), z.array(z.string())).optional(), holidays: z.record(z.string(), z.string()).optional() }).loose();
+
+/** A change of a business calendar waiting for a second person, or decided (listCalendarChanges, getCalendarChange; PRE-181). */
+export const calendarChange = z
+  .object({
+    id: z.string(),
+    calendarKey: z.string(),
+    status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
+    baseVersion: z.number().int(),
+    previous: calendarValue.nullable().optional(),
+    proposed: calendarValue,
+    reason: z.string(),
+    proposedBy: z.string(),
+    proposedAt: z.string(),
+    decidedBy: nullableString,
+    decidedAt: nullableString,
+    comment: nullableString,
+    /** The hash an approval names (PD-139, #473). */
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+  })
+  .loose();
+export type CalendarChange = z.infer<typeof calendarChange>;
+export const calendarChangePage = page(calendarChange);
 export const pendingDefinitionApprovalPage = page(pendingDefinitionApproval);
 
 export const instanceSummary = z
@@ -286,6 +346,32 @@ export const activityEntry = z
     waiters: z.number().int().min(0).optional(),
     /** Message steps only (#491): the name, the key as the host masked it, and the delivery result. */
     message: z.object({ name: z.string(), correlationKey: z.string().optional(), result: z.string() }).loose().optional(),
+    /** The counters of a loop or multi-instance step when the entry was written (#496); `nrOfInstances` is absent for a standard loop. */
+    instances: z
+      .object({
+        loopCounter: z.number().int().min(1).optional(),
+        nrOfInstances: z.number().int().min(0).optional(),
+        nrOfActiveInstances: z.number().int().min(0).optional(),
+        nrOfCompletedInstances: z.number().int().min(0).optional(),
+      })
+      .loose()
+      .optional(),
+    /** A gateway that chose its flows (#494): the ids of the flows it took, and why. */
+    flows: z.array(z.string()).optional(),
+    reason: z.string().optional(),
+    /** An inclusive join that waits (#494): the steps a token can still arrive from. */
+    waitingFor: z.array(z.string()).optional(),
+    /** `BOUNDARY_FIRED` and `EVENT_GATEWAY_RESOLVED` entries only (#490, #495): what fired, or which catch won and which were cancelled. */
+    event: z.object({
+      trigger: z.string().optional(),
+      name: z.string().optional(),
+      interrupting: z.boolean().optional(),
+      gateway: z.string().optional(),
+      winner: z.string().optional(),
+      cancelled: z.array(z.string()).optional(),
+    }).loose().optional(),
+    /** The `NODE_COMPLETED` of a script step: the variable it set, as recorded when it ran (#518). */
+    resultVariable: z.string().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

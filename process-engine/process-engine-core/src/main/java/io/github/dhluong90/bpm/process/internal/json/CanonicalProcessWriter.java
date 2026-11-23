@@ -27,10 +27,12 @@ import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -47,6 +49,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.util.List;
@@ -74,7 +77,7 @@ public final class CanonicalProcessWriter {
         if (process.name() != null) {
             doc.put("name", process.name());
         }
-        writeSteps(doc.putArray("steps"), process.flowElements());
+        writeSteps(doc.putArray("steps"), process.flowElements(), process.artifacts());
         return doc;
     }
 
@@ -82,7 +85,8 @@ public final class CanonicalProcessWriter {
      * The steps of one container. A {@code saga} block ({@code transaction}, #67) is a step of type {@code saga}
      * whose own steps are nested under {@code steps}, so a definition without one keeps the hash it had.
      */
-    private static void writeSteps(ArrayNode steps, List<FlowElement> elements) {
+    private static void writeSteps(ArrayNode steps, List<FlowElement> elements,
+            List<io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact> artifacts) {
         List<SequenceFlow> flows = elements.stream().filter(SequenceFlow.class::isInstance)
                 .map(SequenceFlow.class::cast).toList();
         for (FlowElement element : elements) {
@@ -99,6 +103,12 @@ public final class CanonicalProcessWriter {
                 case StartEvent s -> {
                     step.put("type", "start");
                     writeEventDefinition(step, s.eventDefinitions());
+                    if (s.eventDefinitions().size() > 1) {
+                        writeMultiple(step, s.eventDefinitions(), s.parallelMultiple());
+                    }
+                    if (!s.isInterrupting()) {
+                        step.put("interrupting", false);
+                    }
                 }
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof ErrorEventDefinition d -> {
@@ -116,6 +126,18 @@ public final class CanonicalProcessWriter {
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof TerminateEventDefinition ->
                         step.put("type", "terminateEnd");
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof CompensateEventDefinition d -> {
+                    // #488: an end event that undoes its scope, or one activity of it, before it ends.
+                    step.put("type", "compensationEnd");
+                    if (d.activityRef() != null) {
+                        step.put("activity", d.activityRef());
+                    }
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof
+                                io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition ->
+                        step.put("type", "cancelEnd");
                 case EndEvent e -> {
                     step.put("type", "end");
                     writeEventDefinition(step, e.eventDefinitions());
@@ -150,8 +172,30 @@ public final class CanonicalProcessWriter {
                                     step.put("escalationCode", e.escalationCode());
                                 }
                             }
+                            case CompensateEventDefinition c -> {
+                                // #488: the compensation activity is part of the step, so it is part of the hash.
+                                step.put("trigger", "compensation");
+                                artifacts.stream().filter(a -> a instanceof
+                                        io.github.dhluong90.bpm.process.internal.model.bpmn.Association x
+                                        && b.id().equals(x.sourceRef())).findFirst().ifPresent(a ->
+                                        step.put("compensatedBy", ((io.github.dhluong90.bpm.process.internal.model
+                                                .bpmn.Association) a).targetRef()));
+                            }
+                            case io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition c ->
+                                    step.put("trigger", "cancel");
+                            case MessageEventDefinition m -> step.put("trigger", "message");
+                            case SignalEventDefinition sg -> {
+                                step.put("trigger", "signal");
+                                step.put("signal", sg.signalRef());
+                            }
+                            case ConditionalEventDefinition c -> {
+                                step.put("trigger", "condition");
+                                step.put("condition", normal(c.condition().language(), c.condition().text().strip()));
+                            }
                             default -> step.put("trigger", "other");
                         }
+                    } else {
+                        writeMultiple(step, b.eventDefinitions(), b.parallelMultiple());
                     }
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
@@ -266,6 +310,19 @@ public final class CanonicalProcessWriter {
                             spec.put("calendar", sla.calendar());
                         }
                     });
+                    // Likewise only when declared (PRE-031): a key, a schema path with its hints, or a link.
+                    t.extensions().first(FormSpec.class).ifPresent(form -> {
+                        if (form.formKey() != null) {
+                            step.put("form", form.formKey());
+                        } else if (form.link() != null) {
+                            step.putObject("form").put("link", form.link());
+                        } else {
+                            ObjectNode spec = step.putObject("form").put("schema", form.schema());
+                            if (form.hints() != null) {
+                                spec.set("hints", EngineJson.JSON.readTree(form.hints()));
+                            }
+                        }
+                    });
                     // Likewise only when declared (PRE-178).
                     t.extensions().first(EscalationSpec.class).ifPresent(escalation -> {
                         ObjectNode spec = step.putObject("escalation");
@@ -285,6 +342,20 @@ public final class CanonicalProcessWriter {
                         branches.addObject().put("when", f.conditionExpression() == null ? "true"
                                 : normal(f.conditionExpression().language(), f.conditionExpression().text()))
                                 .put("next", f.targetRef());
+                    }
+                    flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
+                            .ifPresent(f -> step.put("default", f.targetRef()));
+                }
+                case InclusiveGateway g -> {
+                    step.put("type", "inclusiveGateway");
+                    // Every branch whose condition holds is taken; a branch with no condition is always taken.
+                    ArrayNode branches = step.putArray("branches");
+                    for (SequenceFlow f : out) {
+                        if (f.id().equals(g.defaultFlow())) {
+                            continue;
+                        }
+                        branches.addObject().put("when", f.conditionExpression() == null ? "true"
+                                : f.conditionExpression().text()).put("next", f.targetRef());
                     }
                     flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
                             .ifPresent(f -> step.put("default", f.targetRef()));
@@ -315,6 +386,49 @@ public final class CanonicalProcessWriter {
                     step.put("type", "signalThrow");
                     step.put("signal", signal.signalRef());
                 }
+                case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> {
+                    // #495: the catch events it waits on, in document order.
+                    step.put("type", "eventBasedGateway");
+                    ArrayNode next = step.putArray("next");
+                    out.forEach(f -> next.add(f.targetRef()));
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() > 1 -> {
+                    step.put("type", "multipleCatch");
+                    writeMultiple(step, c.eventDefinitions(), c.parallelMultiple());
+                }
+                case ComplexGateway g -> {
+                    // #500: the activation condition, every outgoing branch with its condition, and the default.
+                    step.put("type", "complexGateway");
+                    if (g.activationCondition() != null && g.activationCondition().text() != null) {
+                        step.put("activation", normal(g.activationCondition().language(),
+                                g.activationCondition().text()));
+                    }
+                    ArrayNode branches = step.putArray("branches");
+                    for (SequenceFlow f : out) {
+                        if (f.id().equals(g.defaultFlow())) {
+                            continue;
+                        }
+                        branches.addObject().put("when", f.conditionExpression() == null ? "true"
+                                : normal(f.conditionExpression().language(), f.conditionExpression().text()))
+                                .put("next", f.targetRef());
+                    }
+                    flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
+                            .ifPresent(f -> step.put("default", f.targetRef()));
+                }
+                case io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess adHoc -> {
+                    // #500: ordering, completion condition and cancel flag are part of the step, so of the hash.
+                    step.put("type", "adHocSubProcess");
+                    step.put("ordering", adHoc.ordering() == io.github.dhluong90.bpm.process.internal.model.bpmn
+                            .AdHocOrdering.SEQUENTIAL ? "sequential" : "parallel");
+                    if (!adHoc.cancelRemainingInstances()) {
+                        step.put("cancelRemaining", false);
+                    }
+                    if (adHoc.completionCondition() != null && adHoc.completionCondition().text() != null) {
+                        step.put("completionCondition", normal(adHoc.completionCondition().language(),
+                                adHoc.completionCondition().text()));
+                    }
+                    writeSteps(step.putArray("steps"), adHoc.flowElements(), adHoc.artifacts());
+                }
                 case ParallelGateway g -> {
                     step.put("type", "parallelGateway");
                     // A fork lists every branch in document order; a single next is written below.
@@ -336,16 +450,24 @@ public final class CanonicalProcessWriter {
                 }
                 case Transaction saga -> {
                     step.put("type", "saga");
-                    writeSteps(step.putArray("steps"), saga.flowElements());
+                    writeSteps(step.putArray("steps"), saga.flowElements(), saga.artifacts());
                 }
                 case SubProcess sub -> {
                     // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
                     step.put("type", "subProcess");
-                    writeSteps(step.putArray("steps"), sub.flowElements());
+                    if (sub.triggeredByEvent()) {
+                        // #487: an event sub-process is started by the trigger of its own start event.
+                        step.put("triggeredByEvent", true);
+                    }
+                    writeSteps(step.putArray("steps"), sub.flowElements(), sub.artifacts());
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
-                        && t.eventDefinitions().get(0) instanceof CompensateEventDefinition ->
-                        step.put("type", "throwCompensation");
+                        && t.eventDefinitions().get(0) instanceof CompensateEventDefinition d -> {
+                    step.put("type", "throwCompensation");
+                    if (d.activityRef() != null) {
+                        step.put("activity", d.activityRef());
+                    }
+                }
                 // #491: message steps. The message name, the key variable and the mappings follow below.
                 case IntermediateCatchEvent c when messageOf(c) != null -> step.put("type", "messageCatch");
                 case IntermediateThrowEvent t when messageOf(t) != null -> step.put("type", "messageThrow");
@@ -362,8 +484,11 @@ public final class CanonicalProcessWriter {
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity a
+                    && a.activity().isForCompensation()) {
+                step.put("forCompensation", true);
+            }
             boolean ends = node instanceof IntermediateThrowEvent t && (t.eventDefinitions().isEmpty()
-                    || t.eventDefinitions().get(0) instanceof CompensateEventDefinition
                     || t.eventDefinitions().get(0) instanceof LinkEventDefinition);
             String message = messageOf(node);
             if (message != null) {
@@ -375,18 +500,76 @@ public final class CanonicalProcessWriter {
                     mapped.forEach(o -> received.put(o.name(), o.from()));
                 }
             }
-            if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
+            // #496: only when declared, so the hash of a step that does not repeat is unchanged.
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity
+                    && activity.activity().loopCharacteristics() != null) {
+                writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
+            }
+            if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway)
+                    && !(node instanceof ComplexGateway)
+                    && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
     }
 
-    /** A start or end event's signal or condition, written only when declared so other definitions keep their hash. */
+    /**
+     * A start or end event's signal or condition, and the trigger of an event sub-process's start event (#487), written
+     * only when declared so other definitions keep their hash.
+     */
     private static void writeEventDefinition(ObjectNode step, List<EventDefinition> definitions) {
         if (definitions.size() != 1) {
             return;
         }
+        writeOneDefinition(step, definitions);
+    }
+
+    /**
+     * The definitions of a multiple event (#500): {@code multiple} fires on any one, {@code parallelMultiple} only when
+     * all of them have occurred. Each is written as its own entry, so the hash covers every one.
+     */
+    private static void writeMultiple(ObjectNode step, List<EventDefinition> definitions, boolean parallel) {
+        step.put("trigger", parallel ? "parallelMultiple" : "multiple");
+        ArrayNode events = step.putArray("events");
+        for (EventDefinition d : definitions) {
+            ObjectNode entry = events.addObject();
+            switch (d) {
+                case MessageEventDefinition m -> entry.put("trigger", "message").put("message", m.messageRef());
+                case SignalEventDefinition sg -> entry.put("trigger", "signal").put("signal", sg.signalRef());
+                case ConditionalEventDefinition c -> entry.put("trigger", "conditional").put("condition",
+                        normal(c.condition().language(), c.condition().text().strip()));
+                default -> writeOneDefinition(entry, List.of(d));
+            }
+        }
+    }
+
+    private static void writeOneDefinition(ObjectNode step, List<EventDefinition> definitions) {
         switch (definitions.get(0)) {
+            case TimerEventDefinition t -> {
+                step.put("trigger", "timer");
+                if (t.timeDuration() != null && t.timeDuration().text() != null) {
+                    step.put("duration", t.timeDuration().text().strip());
+                }
+                if (t.timeDate() != null && t.timeDate().text() != null) {
+                    step.put("until", t.timeDate().text().strip());
+                }
+                if (t.timeCycle() != null && t.timeCycle().text() != null) {
+                    step.put("cycle", t.timeCycle().text().strip());
+                }
+            }
+            case ErrorEventDefinition e -> {
+                step.put("trigger", "error");
+                if (e.errorCode() != null) {
+                    step.put("errorCode", e.errorCode());
+                }
+            }
+            case EscalationEventDefinition e -> {
+                step.put("trigger", "escalation");
+                if (e.escalationCode() != null) {
+                    step.put("escalationCode", e.escalationCode());
+                }
+            }
+            case CompensateEventDefinition c -> step.put("trigger", "compensation");
             case SignalEventDefinition signal -> step.put("signal", signal.signalRef());
             case ConditionalEventDefinition conditional -> step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
             default -> { }
@@ -402,6 +585,46 @@ public final class CanonicalProcessWriter {
                     .map(d -> ((MessageEventDefinition) d).messageRef()).findFirst().orElse(null);
             default -> null;
         };
+    }
+
+    /** The {@code loop} of a step: a standard loop or a multi-instance step, with only what the definition declares. */
+    private static void writeLoop(ObjectNode loop,
+            io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics characteristics) {
+        switch (characteristics) {
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.StandardLoopCharacteristics standard -> {
+                loop.put("kind", "loop");
+                if (standard.loopMaximum() != null) {
+                    loop.put("max", standard.loopMaximum());
+                }
+                if (standard.loopCondition() != null && standard.loopCondition().text() != null) {
+                    loop.put("condition", standard.loopCondition().text().strip());
+                }
+                if (standard.testBefore()) {
+                    loop.put("testBefore", true);
+                }
+            }
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceLoopCharacteristics mi -> {
+                loop.put("kind", mi.isSequential() ? "sequential" : "parallel");
+                if (mi.loopDataInputRef() != null) {
+                    loop.put("collection", mi.loopDataInputRef());
+                }
+                if (mi.inputDataItem() != null) {
+                    loop.put("element", mi.inputDataItem().name());
+                }
+                if (mi.loopCardinality() != null && mi.loopCardinality().text() != null) {
+                    loop.put("cardinality", mi.loopCardinality().text().strip());
+                }
+                if (mi.loopDataOutputRef() != null) {
+                    loop.put("outputCollection", mi.loopDataOutputRef());
+                }
+                if (mi.outputDataItem() != null) {
+                    loop.put("outputElement", mi.outputDataItem().name());
+                }
+                if (mi.completionCondition() != null && mi.completionCondition().text() != null) {
+                    loop.put("completionCondition", mi.completionCondition().text().strip());
+                }
+            }
+        }
     }
 
     /**

@@ -14,6 +14,7 @@ export default withMermaid({
   cleanUrls: true,
   // Links to repository files and the GitHub wiki are external by design; internal ones were checked by prepare.mjs.
   ignoreDeadLinks: false,
+  markdown: { theme: { light: 'github-light-high-contrast', dark: 'github-dark-high-contrast' } },
   themeConfig: {
     sidebar,
     // Search runs in the browser on an index built into the site: no request to another origin.

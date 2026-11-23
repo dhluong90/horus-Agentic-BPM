@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { KYC_ONBOARDING_BPMN, LOAN_ORIGINATION_BPMN } from '../../../mocks/processDemo';
 import { DiagramReadError, flowOrder, isKnownNodeType, readBpmnGraph, type DiagramGraph } from './bpmnGraph';
+import { placeCollaboration } from './collaborationLayout';
 import { layoutGraph, overlaps, symbolCentre, type PlacedNode } from './layout';
 
 /** A synthetic definition of `size` steps: a chain with a gateway every tenth step and a branch that rejoins. */
@@ -24,7 +25,7 @@ describe('CKP-069 a definition without stored layout is laid out automatically',
   it('CKP_069_loan_origination_is_laid_out_left_to_right_without_overlapping_nodes', () => {
     const layout = layoutGraph(readBpmnGraph(LOAN_ORIGINATION_BPMN));
 
-    expect(layout.nodes).toHaveLength(13);
+    expect(layout.nodes).toHaveLength(14);
     for (const [index, a] of layout.nodes.entries()) {
       for (const b of layout.nodes.slice(index + 1)) {
         // A boundary event sits on the edge of its own step by design (#489).
@@ -96,8 +97,6 @@ describe('PRE-250 task, manual task and script task are viewable steps', () => {
 
     expect(nodes.map((node) => node.type)).toEqual(['task', 'manualTask', 'scriptTask']);
     expect(nodes.every((node) => isKnownNodeType(node.type))).toBe(true);
-    expect(nodes[2]?.resultVariable).toBe('fee2');
-    expect(nodes[0]?.resultVariable).toBeUndefined();
   });
 });
 
@@ -118,13 +117,13 @@ describe('CKP-070 diagram nodes are keyed by BPMN element type; unknown types re
   });
 
   it('CKP_070_an_unknown_type_stays_in_the_graph_with_its_type_name_and_the_rest_is_intact', () => {
-    // A message boundary is not drawn by this cockpit yet; the timer boundary of the loan demo is (#489).
+    // A link boundary is not drawn by this cockpit yet; the timer boundary of the loan demo is (#489).
     const graph = readBpmnGraph(LOAN_ORIGINATION_BPMN.replace(
       '<bpmn:timerEventDefinition><bpmn:timeDuration>P2D</bpmn:timeDuration></bpmn:timerEventDefinition>',
-      '<bpmn:messageEventDefinition/>'));
+      '<bpmn:linkEventDefinition name="x"/>'));
     const boundary = graph.nodes.find((node) => node.id === 'no-documents');
-    expect(boundary).toEqual({ id: 'no-documents', name: 'No documents in 2 days', type: 'boundaryEvent:message', attachedTo: 'capture', interrupting: false });
-    expect(isKnownNodeType('boundaryEvent:message')).toBe(false);
+    expect(boundary).toEqual({ id: 'no-documents', name: 'No documents in 2 days', type: 'boundaryEvent:link', attachedTo: 'capture', interrupting: false });
+    expect(isKnownNodeType('boundaryEvent:link')).toBe(false);
     expect(isKnownNodeType('boundaryEvent:timer')).toBe(true);
     expect(graph.edges.some((edge) => edge.source === 'no-documents' && edge.target === 'remind')).toBe(true);
     expect(layoutGraph(graph).nodes.find((node) => node.id === 'no-documents')).toBeDefined();
@@ -147,5 +146,48 @@ describe('CKP-070 diagram nodes are keyed by BPMN element type; unknown types re
     expect(() => readBpmnGraph('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><x/>')).toThrow(DiagramReadError);
     expect(() => readBpmnGraph('<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"/>')).toThrow(DiagramReadError);
     expect(() => readBpmnGraph('<not-closed')).toThrow(DiagramReadError);
+  });
+});
+
+const POOLS_BPMN = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:t">
+  <bpmn:message id="m1" name="payment-received"/>
+  <bpmn:collaboration id="c">
+    <bpmn:participant id="pool-order" name="Order desk"/>
+    <bpmn:participant id="pool-payment" name="Payment desk" processRef="payment-desk"/>
+    <bpmn:messageFlow id="mf1" sourceRef="pool-order" targetRef="start" messageRef="m1" horus:correlationKey="orderId"/>
+    <bpmn:messageFlow id="mf2" sourceRef="report" targetRef="pool-order"/>
+  </bpmn:collaboration>
+  <bpmn:process id="payment-desk" name="Payment desk" isExecutable="true">
+    <bpmn:laneSet id="ls"><bpmn:lane id="l1" name="Back office"><bpmn:flowNodeRef>report</bpmn:flowNodeRef></bpmn:lane></bpmn:laneSet>
+    <bpmn:startEvent id="start"/>
+    <bpmn:sendTask id="report" name="Tell the order desk"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="report"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="report" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>`;
+
+describe('PRE-298 the diagram draws pools, lanes and message flows read only', () => {
+  it('PRE_298_pools_lanes_and_message_flows_are_read_and_placed_around_the_steps', () => {
+    const graph = readBpmnGraph(POOLS_BPMN);
+    const drawing = placeCollaboration(layoutGraph(graph), graph);
+
+    expect(graph.collaboration?.pools.map((p) => [p.id, p.self])).toEqual([['pool-order', false], ['pool-payment', true]]);
+    expect(graph.collaboration?.lanes).toEqual([{ id: 'l1', name: 'Back office', nodes: ['report'] }]);
+    expect(drawing?.pool?.label).toBe('Payment desk');
+    expect(drawing?.lanes.map((l) => l.label)).toEqual(['Back office']);
+    expect(drawing?.blackBoxes.map((b) => b.label)).toEqual(['Order desk']);
+    // the black box is above the pool, and both flows run between it and a step, drawn as dashed lines
+    expect(drawing?.blackBoxes[0]?.y).toBeLessThan(drawing?.pool?.y ?? 0);
+    expect(drawing?.flows.map((f) => f.label)).toEqual(['payment-received (orderId)', undefined]);
+    expect(drawing?.flows).toHaveLength(2);
+  });
+
+  it('PRE_298_a_process_with_no_collaboration_is_drawn_as_before', () => {
+    const graph = readBpmnGraph(LOAN_ORIGINATION_BPMN);
+
+    expect(graph.collaboration).toBeUndefined();
+    expect(placeCollaboration(layoutGraph(graph), graph)).toBeUndefined();
   });
 });

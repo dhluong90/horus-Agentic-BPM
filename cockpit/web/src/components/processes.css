@@ -45,12 +45,26 @@
 /* A boundary event that does not interrupt is drawn with a dashed ring, and a link is a dashed line (#489, #493). */
 .dg-node--soft circle { stroke-dasharray: 4 3; }
 .dg-edge--link path:first-child { stroke-dasharray: 5 4; }
+.dg-edge--association path:first-child { stroke-dasharray: 1.5 4; stroke-linecap: round; }
+/* Pools, lanes and message flows (#497): calm frames behind the steps, a dashed line for a message. */
+.dg-pool rect { fill: none; stroke: var(--node-stroke); stroke-width: 1.5; }
+.dg-pool--black-box rect { fill: var(--surface-2); }
+.dg-pool__name { fill: var(--ink); font: var(--type-label); font-weight: 600; }
+.dg-lane rect { fill: var(--surface-2); fill-opacity: 0.55; stroke: var(--line); stroke-width: 1; stroke-dasharray: 2 3; }
+.dg-lane__name { fill: var(--edge-label); font: var(--type-caption); }
+.dg-edge--message path:first-child { stroke-dasharray: 6 4; }
 .dg-node--agent { color: var(--violet); }
+/* An event sub-process (#487) has a dotted border, like BPMN draws it, and its trigger sits in the corner. */
+.dg-node[data-type="subProcess:event"] rect, .dg-frame[data-type="subProcess:event"] rect { stroke-dasharray: 2 3; }
+.dg-node .dg-trigger circle, .dg-frame .dg-trigger circle { fill: var(--surface); stroke: var(--node-stroke); stroke-width: 1.25; }
+.dg-frame .dg-trigger { color: var(--ink); }
 /* An open sub-process is a calm frame behind its steps; a closed one is a task box with a count and a control (#486). */
 .dg-frame rect { fill: var(--surface-2); stroke: var(--node-stroke); stroke-width: 1.5; }
 .dg-frame__name { fill: var(--ink); font: var(--type-label); font-weight: 600; }
 .dg-frame--selected rect { stroke: var(--accent); stroke-width: 3; }
 .dg-node__steps { fill: var(--muted); font: var(--type-caption); }
+/* The marker of a step that repeats (#496): bars for multi-instance, an arrow for a loop; outline only, in the node's ink. */
+.dg-loop { fill: none; stroke: var(--ink); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .dg-toggle { cursor: pointer; }
 .dg-node .dg-toggle rect, .dg-frame .dg-toggle rect { fill: var(--surface); stroke: var(--node-stroke); stroke-width: 1.25; }
 .dg-node .dg-toggle path, .dg-frame .dg-toggle path { fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
@@ -58,6 +72,7 @@
 .dg-node--agent rect { stroke: var(--violet); fill: var(--violet-soft); }
 .dg-node--generic rect { stroke-dasharray: 5 4; fill: var(--surface-2); }
 .dg-node__glyph { fill: var(--ink-2); font: 700 20px/1 var(--font-ui); }
+.dg-node__event-gateway circle, .dg-node__event-gateway path { fill: none; stroke: var(--ink-2); stroke-width: 1.25; stroke-linejoin: round; }
 .dg-node__name { fill: var(--ink); font: var(--type-label); font-weight: 600; }
 .dg-node__type { fill: var(--muted); font: var(--type-caption); }
 .dg-node--agent .dg-node__type { fill: var(--violet); }
@@ -317,3 +332,23 @@
 .timeline__more { margin: 12px 0 0; font: var(--type-label); }
 .cases { margin-top: 8px; }
 .cases__more { display: flex; justify-content: center; padding: 16px 0 4px; }
+
+/* ---------- Task form (CKP-021) ---------- */
+.taskform__card { max-width: 960px; }
+.taskform__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; align-items: start; }
+@media (max-width: 900px) { .taskform__grid { grid-template-columns: minmax(0, 1fr); } }
+.taskform__field--wide { grid-column: 1 / -1; }
+.taskform__field, .taskform__group { scroll-margin-bottom: 240px; }
+.taskform__field .field__input, .taskform__field select.field__input { min-height: var(--target-min); width: 100%; }
+.taskform__star { color: var(--bad); }
+.taskform__group { border: 0; margin: 0; padding: 0; min-width: 0; }
+.taskform__group legend { padding: 0; margin-bottom: 4px; }
+.taskform__options { display: flex; flex-wrap: wrap; gap: 4px 20px; min-height: var(--target-min); align-items: center; }
+.taskform__option { display: inline-flex; align-items: center; gap: 8px; min-height: var(--target-min); cursor: pointer; }
+.taskform__option input { width: 18px; height: 18px; }
+.taskform__money { display: flex; gap: 8px; }
+.taskform__money .taskform__currency { flex: none; width: 88px; text-align: center; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-2); font-weight: 600; }
+.taskform__money .taskform__amount { flex: 1 1 auto; text-align: right; }
+.taskform__masked { display: flex; align-items: center; gap: 12px; min-height: var(--target-min); }
+.taskform__keep { align-self: flex-start; }
+.taskform .review-dock { margin-top: 16px; max-width: 960px; }

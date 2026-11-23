@@ -8,7 +8,7 @@ import type { HostError } from '../../../api/hostError';
  */
 
 export type ErrorPlace =
-  | { kind: 'cell'; ruleId: string; column: string; message: string; code?: string | undefined }
+  | { kind: 'cell'; ruleId: string; column: string; message: string; code?: string | undefined; position?: number | null | undefined }
   | { kind: 'row'; ruleId: string; message: string }
   | { kind: 'table'; message: string };
 
@@ -39,6 +39,7 @@ export interface CheckProblem {
   ruleId: string | null;
   column: string | null;
   code?: string | undefined;
+  position?: number | null | undefined;
   message: Readonly<Record<string, string>>;
 }
 
@@ -58,7 +59,7 @@ export function placeProblems(
   return problems.map((p): ErrorPlace => {
     const message = p.message[locale] ?? fallback;
     if (p.ruleId === null || !rowIds.has(p.ruleId)) return { kind: 'table', message };
-    if (p.column !== null && columns.has(p.column)) return { kind: 'cell', ruleId: p.ruleId, column: p.column, message, code: p.code };
+    if (p.column !== null && columns.has(p.column)) return { kind: 'cell', ruleId: p.ruleId, column: p.column, message, code: p.code, position: p.position };
     return { kind: 'row', ruleId: p.ruleId, message };
   });
 }

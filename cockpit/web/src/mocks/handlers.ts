@@ -12,7 +12,7 @@ function reply(response: MockResponse) {
 }
 
 // The dev server's engine: card-fee must carry a simulation report with its publication request, and the pending version already does.
-let engine = createFakeEngine(demoSeed(), {}, {}, { required: ['card-fee'], demoReport: true });
+let engine = createFakeEngine(demoSeed(), {}, {}, { required: ['card-fee', 'premium-fees'], demoReport: true });
 
 /**
  * A fresh mock Rule Engine with the demo data, or the given versions, for test isolation; optionally with the
@@ -20,6 +20,11 @@ let engine = createFakeEngine(demoSeed(), {}, {}, { required: ['card-fee'], demo
  */
 export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}, audit: AuditOptions = {}, reports: ReportOptions = {}): ReturnType<typeof createFakeEngine> {
   engine = createFakeEngine(seed, acknowledgement, audit, reports);
+  return engine;
+}
+
+/** The mock Rule Engine in use, so a dev session can carry its versions to another signed-in user. */
+export function currentRuleEngine(): ReturnType<typeof createFakeEngine> {
   return engine;
 }
 

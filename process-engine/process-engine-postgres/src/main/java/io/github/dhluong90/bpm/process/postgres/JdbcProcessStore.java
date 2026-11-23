@@ -86,6 +86,14 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 List.of(tenant, instanceId, ts(from), ts(to), limit), (rs, row) -> historyEntry(rs));
     }
 
+    private static Integer counter(Map<String, Object> details, String key) {
+        return details.get(key) instanceof Number n ? n.intValue() : null;
+    }
+
+    private static List<String> strings(Object value) {
+        return value instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of();
+    }
+
     /** An entry as the timeline shows it: the undo's own fields come from the history row's token, attempt and details. */
     private static InstanceActivities.Entry historyEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
         String type = rs.getString("event_type");
@@ -112,8 +120,38 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
             });
             return new InstanceActivities.Entry(id, type, node, actor, at).withMessage(message);
         }
+        if (type.startsWith("MI_")) {
+            // #496: the counters of a loop or multi-instance step, as the engine wrote them.
+            Map<String, Object> counters = Values.readMap(rs.getString("details"));
+            return new InstanceActivities.Entry(id, type, node, actor, at).withInstances(new InstanceActivities.Instances(
+                    counter(counters, "loopCounter"), counter(counters, "nrOfInstances"),
+                    counter(counters, "nrOfActiveInstances"), counter(counters, "nrOfCompletedInstances")));
+        }
+        if ("BOUNDARY_FIRED".equals(type) || "EVENT_GATEWAY_RESOLVED".equals(type)) {
+            return new InstanceActivities.Entry(id, type, node, actor, at)
+                    .withEvent(eventPart(type, Values.readMap(rs.getString("details"))));
+        }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
-            return new InstanceActivities.Entry(id, type, node, actor, at);
+            InstanceActivities.Entry plain = new InstanceActivities.Entry(id, type, node, actor, at);
+            // #494: what a gateway chose and what a waiting join expects, read from the row's details.
+            if ("NODE_COMPLETED".equals(type) || "TOKEN_JOINED".equals(type)) {
+                Map<String, Object> details = Values.readMap(rs.getString("details"));
+                List<String> flows = strings(details.get("flows"));
+                List<String> waiting = strings(details.get("waitingFor"));
+                if (!flows.isEmpty() || !waiting.isEmpty()) {
+                    Object reason = details.get("reason");
+                    return plain.withRouting(new InstanceActivities.Routing(flows, reason == null ? null
+                            : reason.toString(), waiting));
+                }
+            }
+            // A script step records the variable it set (#518), so the timeline never reads it from the diagram.
+            if ("NODE_COMPLETED".equals(type)) {
+                Object variable = Values.readMap(rs.getString("details")).get("resultVariable");
+                if (variable instanceof String name && !name.isBlank()) {
+                    return plain.withResultVariable(name);
+                }
+            }
+            return plain;
         }
         Map<String, Object> details = Values.readMap(rs.getString("details"));
         boolean step = type.startsWith("COMPENSATION_STEP_");
@@ -130,6 +168,32 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 scope == null ? ("COMPENSATED".equals(type) ? node : null) : scope.toString(),
                 attempt instanceof Number n ? n.intValue() : null, error == null ? null : error.toString(),
                 handler == null ? null : handler.toString(), cause == null ? null : cause.toString());
+    }
+
+    /** What a boundary event or an event-based gateway tells the timeline (#490, #495): names and codes, never a value. */
+    private static Map<String, Object> eventPart(String type, Map<String, Object> details) {
+        Map<String, Object> event = new java.util.LinkedHashMap<>();
+        if ("EVENT_GATEWAY_RESOLVED".equals(type)) {
+            event.put("gateway", String.valueOf(details.get("gatewayId")));
+            event.put("winner", String.valueOf(details.get("winner")));
+            event.put("cancelled", details.get("cancelled") instanceof List<?> l ? l.stream().map(String::valueOf).toList()
+                    : List.of());
+            return event;
+        }
+        String trigger = String.valueOf(details.get("trigger"));
+        event.put("trigger", trigger);
+        Object name = switch (trigger) {
+            case "MESSAGE" -> details.get("message");
+            case "SIGNAL" -> details.get("signal");
+            case "CONDITION" -> details.get("condition");
+            case "ERROR", "ESCALATION" -> "-".equals(details.get("code")) ? null : details.get("code");
+            default -> null;
+        };
+        if (name != null) {
+            event.put("name", String.valueOf(name));
+        }
+        event.put("interrupting", Boolean.TRUE.equals(details.get("interrupting")));
+        return event;
     }
 
     // ---- definitions --------------------------------------------------------------------------------------
@@ -409,11 +473,29 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         Values.readMap(rs.getString("locals"))));
     }
 
+    private static void placeWithEnclosing(Token token, Map<String, Token> byId, java.util.Set<String> placed,
+            List<Token> ordered) {
+        if (!placed.add(token.id())) {
+            return;
+        }
+        Token enclosing = token.scopeTokenId() == null ? null : byId.get(token.scopeTokenId());
+        if (enclosing != null) {
+            placeWithEnclosing(enclosing, byId, placed, ordered);
+        }
+        ordered.add(token);
+    }
+
     @Override
     public void saveTokens(String tenant, String instanceId, String definitionId, List<Token> tokens, Instant now) {
-        // Scope tokens first, so the self-reference of flow tokens resolves.
-        List<Token> ordered = tokens.stream().sorted((a, b) -> Boolean.compare(a.kind() != TokenKind.SCOPE,
-                b.kind() != TokenKind.SCOPE)).toList();
+        // An enclosing token first, so the self-reference of a token resolves: a flow under its scope, an instance
+        // scope under its multi-instance body (#496).
+        Map<String, Token> byId = new java.util.HashMap<>();
+        tokens.forEach(t -> byId.put(t.id(), t));
+        List<Token> ordered = new java.util.ArrayList<>();
+        java.util.Set<String> placed = new java.util.HashSet<>();
+        for (Token t : tokens) {
+            placeWithEnclosing(t, byId, placed, ordered);
+        }
         for (Token t : ordered) {
             int written = jdbc.sql("INSERT INTO pre_token (tenant_id, id, instance_id, definition_id, token_kind, scope_token_id, "
                             + "current_node_id, status, activity_instance_id, locals, entered_at, created_at) "
@@ -687,11 +769,15 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public void pushCompensation(CompensationEntry e) {
         jdbc.sql("INSERT INTO pre_compensation_stack (tenant_id, id, instance_id, scope_token_id, seq, step_id, "
                         + "forward_job_id, forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, "
-                        + "completed_at) SELECT ?, ?, ?, ?, coalesce(max(seq), 0) + 1, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ? "
-                        + "FROM pre_compensation_stack WHERE tenant_id = ? AND instance_id = ? AND scope_token_id = ?")
-                .params(e.tenantId(), e.id(), e.instanceId(), e.scopeTokenId(), e.stepId(), e.forwardJobId(),
-                        e.forwardAttemptId(), e.handler(), e.mode(), e.inputSnapshotJson(), e.status(), e.jobId(),
-                        ts(e.pushedAt()), ts(e.completedAt()), e.tenantId(), e.instanceId(), e.scopeTokenId())
+                        + "completed_at, instance_seq) SELECT ?, ?, ?, ?, "
+                        + "(SELECT coalesce(max(seq), 0) + 1 FROM pre_compensation_stack WHERE tenant_id = ? "
+                        + "AND instance_id = ? AND scope_token_id = ?), ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, "
+                        + "(SELECT coalesce(max(instance_seq), 0) + 1 FROM pre_compensation_stack WHERE tenant_id = ? "
+                        + "AND instance_id = ?)")
+                .params(e.tenantId(), e.id(), e.instanceId(), e.scopeTokenId(), e.tenantId(), e.instanceId(),
+                        e.scopeTokenId(), e.stepId(), e.forwardJobId(), e.forwardAttemptId(), e.handler(), e.mode(),
+                        e.inputSnapshotJson(), e.status(), e.jobId(), ts(e.pushedAt()), ts(e.completedAt()),
+                        e.tenantId(), e.instanceId())
                 .update();
     }
 
@@ -714,7 +800,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 rs.getString("scope_token_id"), rs.getInt("seq"), rs.getString("step_id"),
                 rs.getString("forward_job_id"), rs.getString("forward_attempt_id"), rs.getString("handler"),
                 rs.getString("mode"), rs.getString("input_snapshot"), rs.getString("status"), rs.getString("job_id"),
-                instant(rs, "pushed_at"), instant(rs, "completed_at"));
+                instant(rs, "pushed_at"), instant(rs, "completed_at"), rs.getInt("instance_seq"));
     }
 
     @Override

@@ -180,7 +180,7 @@ test.describe('link to one decision (CKP-041)', () => {
 });
 
 test.describe('tenant switcher (CKP-022)', () => {
-  const tenants = { allowed: ['bank-a', 'bank-a-fin'], ruleSets: { 'bank-a': 'card-fee', 'bank-a-fin': 'kyc-risk' } };
+  const tenants = { allowed: ['bank-a', 'bank-a-fin'], ruleSets: { 'bank-a': 'card-fee', 'bank-a-fin': 'kyc-risk' }, names: { 'bank-a': 'Bank A Retail', 'bank-a-fin': 'Bank A Finance' } };
 
   test('CKP_022_tenant_switcher_allowed_tenants_only', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -192,14 +192,15 @@ test.describe('tenant switcher (CKP-022)', () => {
     await expectInsideViewport(page, switcher);
     await switcher.click();
     const items = page.locator('.tenant-switcher__item');
-    await expect(items).toHaveText(['bank-a', 'bank-a-fin']);
+    // The host's display names from /me (#474), each with its id beside it.
+    await expect(items).toHaveText(['Bank A Retailbank-a', 'Bank A Financebank-a-fin']);
     await expect(items.first()).toHaveAttribute('aria-current', 'true');
 
-    await page.getByRole('button', { name: 'bank-a-fin' }).click();
+    await page.getByRole('button', { name: 'Bank A Finance bank-a-fin' }).click();
     // The list reloads for the new tenant only: its own rule set, nothing of bank-a's.
     await expect(page.getByRole('link', { name: 'kyc-risk' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'card-fee' })).toHaveCount(0);
-    await expect(switcher).toContainText('bank-a-fin');
+    await expect(switcher).toContainText('Bank A Finance');
     const switched = record.paths.loans.map((path, index) => [path, record.tenantsSent.loans[index]]).filter(([path]) => path?.endsWith('/rule-sets'));
     expect(switched.at(-1)).toEqual(['/api/bpm/rules/v1/rule-sets', 'bank-a-fin']);
     // Never two tenants on one screen: the header names one, the list shows one.
@@ -218,8 +219,8 @@ test.describe('tenant switcher (CKP-022)', () => {
     const notice = page.getByTestId('tenant-refused');
     await expect(notice).toContainText('The service did not accept that tenant for your account.');
     expect(record.tenantsSent.loans).toContain('bank-b');
-    await expect(page.getByTestId('tenant-switcher')).toContainText('bank-a');
-    await expect(page.getByTestId('tenant-switcher')).not.toContainText('bank-a-fin');
+    await expect(page.getByTestId('tenant-switcher')).toContainText('Bank A Retail');
+    await expect(page.getByTestId('tenant-switcher')).not.toContainText('Bank A Finance');
     await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'kyc-risk' })).toHaveCount(0);
     await notice.locator('summary').click();

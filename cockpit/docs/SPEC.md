@@ -257,7 +257,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The operator submits `T5` with `decision: REJECT` and no reason, then with a reason; then opens `T6`.
 - **Then:** The first submit shows the field error under `reason` (from the client check, and the API's `422 FORM_VALIDATION_FAILED` if the client check is bypassed); the second completes with `200` and the task leaves the inbox; `T6` opens `/loans/review/T6` with `rel="noopener noreferrer"` and no form.
 - **Example:** `REJECT without reason -> error at /reason; with reason -> 200, removed from inbox`.
-- **Test ID:** `CKP_021_task_form_completion_and_link`
+- **Test ID:** `CKP_021_task_form_completion_and_link`, `CKP_021_a_task_declared_with_a_link_opens_the_hosts_screen_and_shows_no_form`, `CKP_021_a_task_whose_step_declares_no_form_says_so`, `CKP_021_the_form_reads_in_vietnamese_with_vietnamese_separators`, `TR_SEC_05_a_masked_field_is_never_shown_or_sent_unless_the_operator_replaces_it`, `TR_IDEM_01_a_retry_of_the_same_completion_sends_the_same_key_and_the_same_version`, `PRE_031_the_screen_shows_the_engines_refusal_under_the_field_it_names_and_sends_no_value_back`
 
 ### CKP-046 An operator claims a task from Available to me, and a task claimed first by a colleague says who
 - **Traces to:** `TR-UI-02`, `TR-UI-03`, `TR-UI-04`, `TR-IDEM-01`, PD-110, PD-111
@@ -704,3 +704,23 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 - **Then:** Discard draft shows beside the draft's actions only when the engine lists `discard` in the version's `allowedActions`. It opens a dialog naming the version, with an optional reason; Cancel and Escape send nothing and return the focus to the button. Confirm sends `POST /rule-sets/card-fee/versions/2:discard` with `If-Match: "<lockVersion>"`, an `Idempotency-Key` and `{ reason }`; only after the `200` does the toast say "Version 2 draft discarded." and the screen return to the rule set, now on v1, with v2 gone from the version picker. A refusal (`409 VERSION_CONFLICT`, `409 INVALID_STATE`, `403 PERMISSION_DENIED`) reads as one plain sentence in the dialog with the code behind Details. The history shows a discarded version as "Discarded" with an icon. Minh sees no Discard draft. Checked at 1440x900 and 1440x1200, in English and Vietnamese, light and dark, by keyboard, and axe-core reports no serious violation.
 - **Example:** `v2 DRAFT allowedActions [request-publish, discard] -> Discard draft -> confirm -> POST :discard 200 -> #/rules/card-fee (v1)`.
 - **Test ID:** `CKP_081_the_author_discards_a_draft_after_confirming_and_returns_to_the_version_in_front`, `CKP_081_a_draft_without_discard_in_allowed_actions_shows_no_discard_button`, `CKP_081_discard_is_confirmed_by_keyboard_and_escape_closes_the_dialog_without_a_request`
+
+### CKP-090 An author can ask a rule version to take effect on a date, and cannot ask for a past one
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`, RLE-210, #470
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `card-fee` v2 is a draft Lan wrote, with `rules:author`; the host does not require a report.
+- **When:** Lan chooses Request publish; then Choose a start date, On a date, and enters 1 January 2027 09:00; then a time that has passed.
+- **Then:** Request publish alone sends no body, as before. With a date the request body is `{"effectiveFrom": "<that instant in UTC>"}`. A time that has passed shows "Choose a time that has not passed.", disables the button and sends nothing; the engine refuses it all the same with `422 EFFECTIVE_DATE_IN_PAST`, shown in words. The approvals preview shows when the version takes effect.
+- **Example:** `On a date 2027-01-01T09:00 -> POST :request-publish {"effectiveFrom":"2027-01-01T02:00:00.000Z"}`
+- **Test IDs:** `CKP_090_the_request_carries_the_date_the_author_chose`, `CKP_090_a_date_that_has_passed_cannot_be_requested`, `CKP_090_without_a_date_the_one_click_request_is_unchanged`
+
+### CKP-091 Migration plans and calendar changes wait in the approvals queue and are approved on the hash that was shown
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`, PRE-346, PD-139, #473
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Lan proposed the holiday 1 January 2028 for `vn-banking-hours`; Minh and Lan both hold `processes:calendar:manage`; a migration plan of loan-origination is proposed by Lan.
+- **When:** Minh opens Approvals, then the change, and chooses Approve; Lan opens the same change; Minh opens Processes.
+- **Then:** The queue lists the change as Calendar and the plan as Move cases, each opening its own review. Minh's Approve sends `expectedChangeHash`, the engine's `contentHash` of the change he was shown; the migration review sends `expectedPlanHash` the same way. Lan sees Approve disabled with "You made this change, so someone else approves it." and nothing is sent. Processes has a Calendar changes list that opens the change.
+- **Example:** `Approve -> POST /calendar-changes/<id>:approve {"expectedChangeHash":"<64 hex>"}`
+- **Test IDs:** `CKP_091_a_pending_calendar_change_is_in_the_approvals_queue_and_opens_its_review`, `CKP_091_approve_names_the_change_the_approver_was_shown`, `CKP_091_the_proposer_cannot_approve_her_own_change_and_is_told_why`, `CKP_091_the_list_under_processes_opens_the_pending_change`, `CKP_091_a_migration_plan_carries_its_plan_hash_and_opens_the_plan`, `CKP_091_a_calendar_change_carries_its_change_hash_and_the_proposer_may_not_approve`, `CKP_091_a_definition_version_is_as_before_and_two_kinds_of_one_key_never_share_an_identity`

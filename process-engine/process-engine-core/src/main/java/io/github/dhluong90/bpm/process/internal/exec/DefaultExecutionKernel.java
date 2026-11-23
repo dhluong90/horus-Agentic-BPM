@@ -1,7 +1,10 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
@@ -21,6 +24,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private final CompiledProcess process;
     private final BehaviorRegistry behaviors;
     private final ExpressionEvaluator expressions;
+    private final int maxInstances;
+
+    /** Most repetitions of one looped activity when the host does not say ({@code multi-instance.max}). */
+    public static final int DEFAULT_MAX_INSTANCES = 1_000;
 
     /**
      * @param process the compiled definition
@@ -28,6 +35,22 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
      * @param expressions the expression evaluator
      */
     public DefaultExecutionKernel(CompiledProcess process, BehaviorRegistry behaviors, ExpressionEvaluator expressions) {
+        this(process, behaviors, expressions, DEFAULT_MAX_INSTANCES);
+    }
+
+    /**
+     * @param process the compiled definition
+     * @param behaviors registered behaviours
+     * @param expressions the expression evaluator
+     * @param maxInstances most repetitions of one looped activity; a loop that would exceed it opens an incident and
+     *     starts nothing
+     */
+    public DefaultExecutionKernel(CompiledProcess process, BehaviorRegistry behaviors, ExpressionEvaluator expressions,
+            int maxInstances) {
+        if (maxInstances < 1) {
+            throw new IllegalArgumentException("maxInstances must be at least 1");
+        }
+        this.maxInstances = maxInstances;
         this.process = Objects.requireNonNull(process, "process must not be null");
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors must not be null");
         this.expressions = Objects.requireNonNull(expressions, "expressions must not be null");
@@ -42,7 +65,17 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         if (state.status() != required) {
             throw new ExecutionException("INVALID_STATE", null, "Instance " + state.instanceId() + " is " + state.status());
         }
-        WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command));
+        WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command), maxInstances, new ScopeArming() {
+            @Override
+            public void arm(WorkingContext c, Token scope) {
+                armEventSubProcesses(c, scope);
+            }
+
+            @Override
+            public void completed(WorkingContext c, Token scope, FlowNode block) {
+                scopeCompleted(c, scope, block);
+            }
+        });
         switch (command) {
             case Command.Start start -> start(start, ctx);
             case Command.CompleteTask complete -> trigger(complete.tokenId(), TokenStatus.WAITING_USER, null, complete, ctx);
@@ -68,23 +101,31 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.RetryStep retry -> retry(retry, ctx);
             case Command.Compensate compensate -> compensate(compensate, ctx);
             case Command.EndCompensation end -> ctx.endCompensation(end.scopeTokenId());
+            case Command.StartAdHocActivity adHoc -> startAdHoc(adHoc, ctx);
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");
         }
         drain(ctx);
         settleConditions(ctx);
+        while (ctx.settleDeferred()) {
+            drain(ctx);
+            settleConditions(ctx);
+        }
         return ctx.transition();
     }
 
     /**
      * Conditional events (#492): when a command changed the instance variables, every token waiting on a conditional
-     * catch event asks its condition again, in this transaction and for this instance only, never by polling. A token
-     * that moves on may change variables itself, so the pass repeats until nothing fires, within the step budget.
+     * catch event, and every armed conditional event sub-process (#487), asks its condition again, in this transaction
+     * and for this instance only, never by polling. A token that moves on may change variables itself, so the pass
+     * repeats while the variables keep changing, within the step budget. A conditional event sub-process that was just
+     * armed is asked once too, so a condition that already holds starts it.
      */
     private void settleConditions(WorkingContext ctx) {
         int passes = 0;
-        boolean changed = ctx.variablesChanged();
-        while (changed) {
+        long seen = ctx.variableVersion();
+        boolean go = ctx.variablesChanged() | ctx.takeConditionArmed();
+        while (go) {
             if (++passes > MAX_STEPS_PER_APPLY) {
                 throw new ExecutionException("STEP_LIMIT", null, "Conditional events fire without end in one transaction");
             }
@@ -97,18 +138,76 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     continue;
                 }
                 FlowNode node = node(token.nodeId());
-                if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent catchEvent
-                        && catchEvent.eventDefinitions().size() == 1 && catchEvent.eventDefinitions().get(0)
-                                instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition)) {
+                if (!isConditionalWait(node, token)) {
                     // Only a conditional wait asks its condition again; a signal, message or boundary wait is woken by its own command.
                     continue;
                 }
                 behaviorFor(node).trigger(node, token, new Command.VariablesChanged(Map.of(), ctx.actor()), ctx);
             }
             drain(ctx);
-            changed = waiting.stream().anyMatch(id -> ctx.tree().get(id).map(Token::status).orElse(null)
-                    != TokenStatus.WAITING_EVENT);
+            go = ctx.variableVersion() != seen | ctx.takeConditionArmed();
+            seen = ctx.variableVersion();
         }
+    }
+
+    private static boolean isConditionalWait(FlowNode node, Token token) {
+        return (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                || node instanceof StartEvent || node instanceof BoundaryEvent)
+                && MultipleWaits.waitsOnCondition(node, token);
+    }
+
+    /**
+     * #487: arms the event sub-processes of a scope that has just opened. One that waits on a timer, a message, a
+     * signal or a condition gets a token on its start event, which parks as the matching catch event does. Error,
+     * escalation and compensation ones wait for nothing and are found when something is thrown.
+     */
+    private void scopeCompleted(WorkingContext ctx, Token scope, FlowNode block) {
+        behaviorFor(block).scopeCompleted(block, scope, ctx);
+    }
+
+    private void armEventSubProcesses(WorkingContext ctx, Token scope) {
+        for (io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess esp
+                : process.eventSubProcessesOf(scope.nodeId())) {
+            StartEvent start = process.triggerOf(esp.id()).orElseThrow();
+            if (start.eventDefinitions().size() == 1 && (start.eventDefinitions().get(0) instanceof
+                    io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition
+                    || start.eventDefinitions().get(0) instanceof
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition
+                    || start.eventDefinitions().get(0) instanceof
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition)) {
+                continue;
+            }
+            Token listener = ctx.createToken(TokenKind.FLOW, start.id(), scope.id());
+            behaviorFor(start).enter(start, listener, ctx);
+        }
+    }
+
+    /** #500: the host starts an enabled activity of an open ad-hoc sub-process. */
+    private void startAdHoc(Command.StartAdHocActivity command, WorkingContext ctx) {
+        Token scope = ctx.tree().get(command.scopeTokenId()).orElseThrow(() ->
+                new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + command.scopeTokenId()));
+        io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess node = process.adHoc(scope.nodeId())
+                .filter(n -> scope.kind() == TokenKind.SCOPE && scope.status().live()).orElseThrow(() ->
+                        new ExecutionException("INVALID_STATE", scope.nodeId(), "Token " + scope.id()
+                                + " is not an open ad-hoc sub-process"));
+        boolean known = node.flowElements().stream().anyMatch(e -> e.id().equals(command.activityId())
+                && e instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity);
+        if (!known) {
+            throw new ExecutionException("ACTIVITY_NOT_FOUND", node.id(), node.id() + " has no activity "
+                    + command.activityId());
+        }
+        boolean running = !ctx.tree().live(scope.id()).isEmpty();
+        boolean closing = Boolean.TRUE.equals(scope.locals().get(WorkingContext.AD_HOC_DONE));
+        if (closing || running && node.ordering()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocOrdering.SEQUENTIAL) {
+            throw new ExecutionException("ACTIVITY_NOT_ENABLED", node.id(), command.activityId() + " cannot start now: "
+                    + (closing ? "the completion condition holds and the running activities finish first"
+                    : "ordering is Sequential and another activity is running"));
+        }
+        Token flow = ctx.createToken(TokenKind.FLOW, command.activityId(), scope.id());
+        ctx.history("AD_HOC_ACTIVITY_STARTED", flow, Map.of("adHocId", node.id(), "activityId", command.activityId(),
+                "actor", String.valueOf(command.actor())));
+        ctx.enqueue(flow);
     }
 
     private void start(Command.Start start, WorkingContext ctx) {
@@ -128,6 +227,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                 .or(() -> process.process().flowElements().stream().filter(StartEvent.class::isInstance)
                         .map(StartEvent.class::cast).findFirst())
                 .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No start event"));
+        armEventSubProcesses(ctx, root);
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
     }
@@ -232,6 +332,20 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
 
     private void drain(WorkingContext ctx) {
         int steps = 0;
+        boolean settled;
+        do {
+            steps = drainAgenda(ctx, steps);
+            settled = false;
+            if (ctx.status() == InstanceStatus.RUNNING) {
+                for (SettleStep step : behaviors.settleSteps()) {
+                    settled |= step.settle(ctx);
+                }
+            }
+        } while (settled);
+    }
+
+    private int drainAgenda(WorkingContext ctx, int before) {
+        int steps = before;
         String next;
         while ((next = ctx.nextOnAgenda()) != null) {
             if (++steps > MAX_STEPS_PER_APPLY) {
@@ -245,8 +359,13 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             FlowNode node = node(token.nodeId());
             ctx.history("NODE_ENTERED", token, Map.of());
             armBoundaries(node, token, ctx);
+            if (ctx.loops().startsLoop(node, token)) {
+                ctx.loops().enter(node, token);
+                continue;
+            }
             behaviorFor(node).enter(node, token, ctx);
         }
+        return steps;
     }
 
     /**
@@ -256,8 +375,9 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
      */
     private void armBoundaries(FlowNode node, Token token, WorkingContext ctx) {
         for (BoundaryEvent boundary : process.boundariesOf(node.id())) {
-            if (boundary.eventDefinitions().size() != 1
-                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition)
+            if (boundary.eventDefinitions().stream().noneMatch(d -> d instanceof TimerEventDefinition
+                            || d instanceof MessageEventDefinition || d instanceof SignalEventDefinition
+                            || d instanceof ConditionalEventDefinition)
                     || ctx.hasLiveBoundaryToken(boundary, token.scopeTokenId())) {
                 continue;
             }
@@ -281,6 +401,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.Cancel c -> c.actor();
             case Command.RetryStep r -> r.actor();
             case Command.VariablesChanged v -> v.actor();
+            case Command.StartAdHocActivity a -> a.actor();
             default -> null;
         };
     }

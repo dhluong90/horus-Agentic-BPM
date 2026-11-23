@@ -461,7 +461,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-DEF-01`
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** File A uses only the subset of ADR-0013 with BPMNDI shapes; file B adds a `boundaryEvent` `be-timeout` on line 42 and an `inclusiveGateway` `ig-1` on line 57; file C starts with a `DOCTYPE` declaring an external entity.
+- **Given:** File A uses only the subset of ADR-0013 with BPMNDI shapes; file B adds a `boundaryEvent` `be-timeout` on line 42 and a `dataObject` `do-1` on line 57; file C starts with a `DOCTYPE` declaring an external entity.
 - **When:** Each is posted to `POST /api/bpm/processes/v1/definitions:import-bpmn`.
 - **Then:** A returns `201` with `status: DRAFT`, `source: BPMN` and layout revision 1 from BPMNDI. B returns `422 BPMN_UNSUPPORTED_ELEMENT` listing both elements with id and line. C returns `422 BPMN_UNSAFE_XML` and no entity is resolved. No transaction is opened for B or C.
 - **Example:** `boundaryEvent be-timeout line 42 -> 422 BPMN_UNSUPPORTED_ELEMENT`.
@@ -544,7 +544,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **When:** `GET /tasks/T5/form`; then `:complete` with `{decision: REJECT}`; then with `{decision: REJECT, reason: "income not verified"}`; then the second definition is imported.
 - **Then:** The form response carries the schema, the hints and masked prefilled data; the first completion returns `422 FORM_VALIDATION_FAILED` with pointer `/reason`; the second returns `200`; the import returns `422 VALIDATION_FAILED` with problem `FORM_LINK_NOT_ALLOWED`.
 - **Example:** `complete {decision: REJECT} -> 422 FORM_VALIDATION_FAILED /reason`.
-- **Test ID:** `PRE_031_task_form_resolved_and_completion_validated`
+- **Test ID:** `PRE_031_task_form_resolved_and_completion_validated` (`TaskFormTest`), `PRE_031_a_foreign_link_is_refused_at_import_while_no_origin_is_listed` (`TaskFormTest`), `PRE_031_a_rejection_needs_a_reason_and_an_approval_does_not`, `PRE_031_a_missing_decision_and_a_value_outside_the_enum_are_named_by_field_never_by_value`, `PRE_031_violations_become_json_pointers`, `PRE_031_a_date_and_the_money_object_are_checked` (`TaskFormsTest`)
 
 ### PRE-032 The step catalogue lists only what the host registered
 - **Traces to:** `TR-SEC-01`
@@ -556,6 +556,26 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Then (shape, #103):** The answer is `{handlers, agents, ruleSets: {decision, guardrail}, calendars, roles}`. A handler is `{name, mode: local | remote, inputSchema, compensable}`; the host states the schema and `compensable` through the default methods `inputSchema()` and `compensable()` of `ServiceTaskHandler` and `ServiceAdapter`, and a host that states nothing shows an empty schema and `false`. A rule set is `{name, version, hitPolicy, inputs, outputs}` for the version in effect on the engine clock; it is also a guardrail rule set when its hit policy is `first` or `unique` and it declares `allow: boolean` (and `reasons` as `string` or `list<string>` when it declares them), the same output checks as `PRE-016`. Roles come from the default method `RoleCatalogue.roles(tenant)`, which lists none unless the host overrides it. The tenant is the resolver's: a `bank-b` author sees `bank-b`'s calendars, rule sets and roles and none of `bank-a`'s, and the read writes nothing. Each list is cut at 500 entries. The `ETag` is a hash of the body and `If-None-Match` with it answers `304`.
 - **Example:** `catalogue -> 1 handler, 1 agent, 2 decision rule sets, 1 guardrail rule set, 1 calendar`.
 - **Test ID:** `PRE_032_step_catalogue_lists_registered_steps_only` (`StepCatalogueIT`), `PRE_032_the_catalogue_lists_the_rule_sets_published_in_the_callers_tenant_only` (`AgentTaskIT`, over the real Rule Engine), `PRE_032_catalogue_body_matches_the_contract_and_carries_an_etag`, `PRE_032_a_caller_without_processes_author_is_403_PERMISSION_DENIED` (`StepCatalogueRestContractTest`)
+
+### PRE-219 A declared form is checked at import and approval, and is part of the definition hash
+- **Traces to:** `TR-UI-02`, `TR-SEC-01`, `TR-STD-03`, #79
+- **Milestone:** M2
+- **Kind:** control
+- **Given:** `userTask` declarations `horus:form="credit-review"` (a key), `horus:formSchema="forms/approve.schema.json"` with `horus:formHints` (a path), and `horus:formLink="/loans/review/{taskId}"` (a link); the host's `FormRegistry` knows `forms/approve.schema.json` only; `tasks.form-link-origins` is empty.
+- **When:** Definitions are imported with an unregistered key; with a schema that uses `pattern`; with hints that order a field the schema does not declare; with two of the three declarations on one step; with a path `../../etc/passwd`; with the link `https://evil.example/t/{taskId}`; and then the correct one, whose link text is later changed in a second import.
+- **Then:** Each refusal is `422 VALIDATION_FAILED` with exactly one problem: `FORM_NOT_REGISTERED`, `FORM_SCHEMA_INVALID`, `FORM_HINTS_INVALID`, `FORM_INVALID`, `FORM_INVALID` and `FORM_LINK_NOT_ALLOWED`; nothing is written. The link is accepted once `tasks.form-link-origins` lists `https://evil.example`. A relative link is always accepted; `//host`, `javascript:`, a URL with user information, a placeholder other than `{taskId}` and `{instanceId}`, and a link above 2,000 characters never are. The form is printed in the canonical form only when declared, so a definition without one keeps its hash, and changing the link text gives a new version with a new `definition_hash`. Request-approval and approval check the registry again, so a form removed since the import blocks them with the same problem.
+- **Example:** `formLink https://evil.example/t/{taskId} -> 422 FORM_LINK_NOT_ALLOWED; with the origin listed -> 201`.
+- **Test ID:** `PRE_219_an_unregistered_form_a_bad_schema_and_bad_hints_are_each_refused_with_their_code`, `PRE_219_a_task_declares_at_most_one_form_and_a_reference_stays_inside_the_form_folder`, `PRE_219_the_same_link_is_accepted_once_its_origin_is_listed`, `PRE_219_the_form_is_part_of_the_definition_hash_so_changing_it_needs_a_new_approval`, `PRE_219_request_approval_checks_the_registry_again_so_a_form_removed_since_import_blocks_it` (`TaskFormTest`), `PRE_219_a_link_is_relative_or_on_a_listed_origin_and_nothing_else`, `PRE_219_a_schema_outside_the_task_form_subset_is_named_by_path_and_rule` (`TaskFormsTest`), `PRE_219_a_schema_path_is_read_as_the_schema_without_hints`, `PRE_219_a_form_key_is_read_from_its_envelope_with_the_hints`, `PRE_219_a_name_outside_the_folder_or_not_plain_is_not_registered`, `PRE_219_the_settings_accept_relative_origins_and_a_relative_folder_only` (`ClasspathFormRegistryTest`)
+
+### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
+- **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
+- **Milestone:** M2
+- **Kind:** control
+- **Given:** Task `T5` of instance `LN-2027-0042` whose form declares `idNumber` with `"mask": true` and `decision`; the instance variables `idNumber = 079012345678` and `decision = APPROVE`; task `T6` declared with the link `/loans/review/{taskId}`; task `T7` whose step declares no form.
+- **When:** `GET /tasks/T5/form`, `GET /tasks/T6/form`, `GET /tasks/T7/form`, and `GET /tasks/T5/form` by a caller of another tenant.
+- **Then:** `T5` answers `form.data` with `idNumber = "***"` and `decision = APPROVE`, never the national id number; the `ETag` is the task's `lockVersion`. `T6` answers `link: /loans/review/T6` and no `form`; a task declared with a link is completed by the host's screen through `:complete`, which checks no form. `T7` answers `404 FORM_NOT_DECLARED`, and so does a task whose registered form the host no longer provides. The other tenant's caller gets `404 TASK_NOT_FOUND`. A `422 FORM_VALIDATION_FAILED` carries `violations` and `errors` with one JSON Pointer per failing field (`/reason`), and never a submitted value.
+- **Example:** `GET /tasks/T5/form -> data { idNumber: "***", decision: APPROVE }`.
+- **Test ID:** `PRE_220_a_masked_field_is_a_placeholder_in_the_prefilled_data_and_never_its_value`, `PRE_220_a_link_has_its_placeholders_replaced` (`TaskFormsTest`), `PRE_031_a_link_task_returns_the_link_and_a_task_without_a_form_is_not_declared`, `PRE_031_another_tenant_cannot_read_the_form_of_a_task` (`TaskFormTest`), `PRE_031_the_task_form_body_matches_the_contract_and_carries_the_task_etag`, `PRE_031_a_task_without_a_form_is_404_and_a_result_that_breaks_the_form_is_422_with_pointers` (`ProcessRestContractTest`)
 
 ---
 
@@ -1010,11 +1030,14 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Milestone:** M3
 - **Kind:** other
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `dataObject` `do-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` with a compensation definition on line 42 (stage `S2`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` with `instantiate="true"` on line 63 (`S3`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
-  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
+  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 4 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
   - `camunda:class` is a foreign extension and is not refused. It is listed under `warnings` as `FOREIGN_EXTENSION_IGNORED` with its namespace and line, and the stored source keeps it byte for byte. Warnings keep the item fields of a problem (`code`, `message`, `element`, `elementId`, `line`).
-  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `parallelMultiple="true"` (`S3`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
+  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
   - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
   - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` throw is `S2` (a message throw is supported, `PRE-235`), an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
@@ -1861,7 +1884,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Kind:** semantics
 - **Given:** Process `loan-booking-embedded`: `register-loan` (undone by `cancel-loan`) in the root scope, then a `subProcess` `disburse` with `reserve-funds` (undone by `release-funds`), `open-account` (undone by `close-account`) and `notify-partner` with `onFailure: compensate`, which the partner refuses. A second process `fund` with `hold` (undone by `release-hold`) and `debit` (`onFailure: compensate`) inside a sub-process, after `open` (undone by `close-account`) in the root scope.
 - **When:** `notify-partner` fails for good; and, in the second process, `debit` answers the business error `INSUFFICIENT_FUNDS`.
-- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are not walked by a later undo of the enclosing scope until S2 (DESIGN section 4.2).
+- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are walked by a later undo of the enclosing scope, with the sub-processes nested in it (`PRE-289`).
 - **Example:** `disburse fails -> close-account, release-funds run; cancel-loan does not`.
 - **Test ID:** `PRE_262_an_undo_started_inside_the_sub_process_walks_that_scope_and_never_the_enclosing_one` (`SubProcessScopeTest`), `PRE_262_an_embedded_sub_process_is_a_scope_whose_failure_undoes_only_its_own_steps` (`SagaCompensationTest`)
 
@@ -1873,7 +1896,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** Each file is imported and compiled.
 - **Then:** The first reads with the steps and flows of `onboard` nested under it, and its canonical form holds a step of type `subProcess` with its own `steps`; the BPMN export reads back to the same canonical form. The second is refused as `422 BPMN_UNSUPPORTED_ELEMENT` for `subProcess with triggeredByEvent`, stage `S1`. The third is refused at activation with `FLOW_CROSSES_SAGA` naming the flow, because a flow never crosses the boundary of a scope. The fourth is refused with `NO_END_EVENT` naming `onboard`.
 - **Example:** `flow fraud -> end across the boundary -> FLOW_CROSSES_SAGA`.
-- **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_is_refused_with_its_stage_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)
+- **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_with_a_flow_in_or_out_is_refused_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)
 
 ### PRE-280 An interrupting timer boundary cancels the task it sits on and runs its own flow
 - **Traces to:** `TR-STD-04`, `PRE-006`, #489
@@ -1954,6 +1977,66 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip; the export carries the root `error` and `escalation` elements the definitions refer to.
 - **Example:** `over-limit` -> `<bpmn:error errorCode="REFUND_LIMIT_EXCEEDED"/>` and an `errorRef`.
 - **Test ID:** `PRE_287_the_new_events_export_and_read_back_to_the_same_definition` (`BoundaryAndThrowEventsTest`)
+### PRE-290 An interrupting message boundary cancels the task it sits on when the message of its key arrives; the subscription never outlives the task
+- **Traces to:** `TR-STD-04`, `PRE-230`, #490
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-review` with a user task `review` for role `PAYMENT_OFFICER` and an interrupting boundary `cancelled-by-customer` on the message `payment-cancelled` with `horus:correlationKey="paymentId"`; two instances, with `paymentId` `PAY-9001` and `PAY-9002`.
+- **When:** The message `payment-cancelled` with key `PAY-9001` is correlated; separately, an instance's task completes before any message.
+- **Then:** At start each instance holds one `MESSAGE` subscription of its own key and the boundary's token waits in `WAITING_EVENT`. The correlation finds the boundary's subscription, cancels the task and its work item, deletes the subscription, runs the boundary's flow, and records `BOUNDARY_FIRED` with `trigger` `MESSAGE` and the message name. `PAY-9002` is untouched. A second delivery to the same subscription is refused. When the task completes first, the boundary token is cancelled and its subscription deleted in the same transaction.
+- **Example:** `payment-cancelled` for `PAY-9001` -> `review` `CANCELLED`, `withdrawn` reached, one subscription left.
+- **Test ID:** `PRE_290_an_interrupting_message_boundary_cancels_the_task_when_the_message_of_its_key_arrives`, `PRE_290_the_subscription_of_a_boundary_is_removed_when_the_task_completes_first` (`EventBoundariesAndGatewayTest`), `PRE_290_a_message_correlated_into_a_boundary_cancels_the_task_and_removes_the_subscription` (`EventBoundariesAndGatewayPostgresIT`)
+
+### PRE-291 A non-interrupting message or signal boundary leaves the task open and stays armed; an interrupting signal boundary cancels the task
+- **Traces to:** `TR-STD-04`, `PRE-271`, #490
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The review of `PRE-290` with `cancelActivity="false"` on the message boundary; and the same review with an interrupting boundary on the signal `account-frozen`.
+- **When:** The message arrives twice for the same key; then the task completes. In the second file the signal is delivered.
+- **Then:** Each message runs the boundary's flow once and records `BOUNDARY_FIRED` with `interrupting: false`; the task stays `WAITING_USER`, the subscription is not deleted between them, and it is deleted when the task completes. The signal boundary cancels the task, deletes its subscription and records `trigger` `SIGNAL` with the signal name.
+- **Example:** two `payment-cancelled` messages -> two runs of the flow, task still open.
+- **Test ID:** `PRE_291_a_non_interrupting_message_or_signal_boundary_leaves_the_task_open_and_stays_armed` (`EventBoundariesAndGatewayTest`)
+
+### PRE-292 A conditional boundary fires once when a variable change makes its condition true, under the instance lock
+- **Traces to:** `TR-STD-04`, `PRE-274`, #490
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A review that a boundary on `risk.score >= 80` interrupts, in parallel with a scoring task whose result variable is `risk`; the same file with `cancelActivity="false"`.
+- **When:** The scoring task completes with a score of 60, in another instance with a score of 90, and in the non-interrupting file a later task completes.
+- **Then:** At 60 the condition is false, the review stays open and nothing fails. At 90 the boundary fires in the same transaction as the completion: the review is cancelled with its work item and `BOUNDARY_FIRED` records `trigger` `CONDITION`. The non-interrupting boundary fires once, leaves the review open, and a later change of variables does not fire it again. A condition already true when the step is entered fires on the next change, not on arrival.
+- **Example:** `risk.score` 90 -> review cancelled, `escalated` reached.
+- **Test ID:** `PRE_292_a_conditional_boundary_fires_once_when_a_variable_change_makes_its_condition_true`, `PRE_292_a_non_interrupting_conditional_boundary_fires_once_and_leaves_the_task_open` (`EventBoundariesAndGatewayTest`)
+
+### PRE-293 An event-based gateway runs the first event that arrives and cancels the others with their subscriptions and timers
+- **Traces to:** `TR-STD-04`, `PRE-006`, `PRE-230`, #495
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-wait`: after the gateway `gw`, the message `payment-received` (key `orderId`), a timer of two hours and the signal `account-frozen`, each to its own end event; a second file with a conditional catch and a receive task.
+- **When:** The message arrives first; separately the timer fires first; the instance is cancelled while it waits; and in the second file the condition is true on arrival.
+- **Then:** At the gateway one token waits on each catch, with one subscription for the message, one for the signal and one timer job. When the message arrives, the timer job and the signal subscription are removed and the settled branch runs; a timer job that is still delivered is refused. When the timer fires, the subscriptions go. History records `EVENT_GATEWAY_RESOLVED` with the winner and the cancelled catches. A cancelled instance loses every subscription and job. A condition true on arrival wins before the other catches wait and creates no subscription.
+- **Example:** `payment-received` for `ORD-20481` at 02:30 -> timer cancelled, `settled` reached.
+- **Test ID:** `PRE_293_an_event_based_gateway_runs_the_first_event_and_cancels_the_others_with_their_subscriptions_and_timers`, `PRE_293_cancelling_an_instance_that_waits_at_the_gateway_removes_every_subscription_and_timer`, `PRE_293_a_condition_that_is_true_on_arrival_wins_at_once_and_the_other_catches_never_wait` (`EventBoundariesAndGatewayTest`), `PRE_293_cancelling_an_instance_that_waits_at_the_gateway_removes_every_subscription_and_timer` (`EventBoundariesAndGatewayPostgresIT`)
+
+### PRE-294 Two events that arrive at the same moment on two replicas run exactly one branch
+- **Traces to:** `TR-STD-04`, `TR-ASY-02`, #495
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-wait` with messages `payment-received` and `payment-reversed` and a two-hour timer; two replicas on one database; six rounds of one instance each.
+- **When:** In each round the two messages are correlated at the same moment, one on each replica (a barrier releases both); in a second test the message and the timer poller of the other replica race after the two hours have passed.
+- **Then:** Exactly one delivery succeeds and the other is refused as not correlated; exactly one end token is `COMPLETED`, the one of the winner; one `EVENT_GATEWAY_RESOLVED` entry is written; no subscription and no due job is left.
+- **Example:** `payment-received` and `payment-reversed` for `ORD-70` together -> one of `settled` or `refunded`, never both.
+- **Test ID:** `PRE_294_two_messages_that_arrive_together_on_two_replicas_run_exactly_one_branch`, `PRE_294_a_message_and_the_timer_that_fall_due_together_run_exactly_one_branch` (`EventBoundariesAndGatewayPostgresIT`)
+
+### PRE-295 The new boundaries and the gateway export and read back to the same definition; a malformed one is refused with its reason
+- **Traces to:** `TR-STD-04`, `TR-STD-05`, #490, #495
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The files of `PRE-290` to `PRE-293`; a message boundary without `horus:correlationKey`; a gateway that leads to a task, one whose catch event has a second incoming flow, and one with `instantiate="true"`.
+- **When:** Each is read, exported and read again, or imported.
+- **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip. A message boundary without a key is refused (`CORRELATION_KEY_REQUIRED`); a gateway to a task or to a shared catch event is refused at compile; the instantiating form is refused as unsupported with stage `S3`. The cockpit draws the new boundaries and the gateway as known symbols and the timeline names the entries, read only.
+- **Example:** `instantiate="true"` -> `422 BPMN_UNSUPPORTED_ELEMENT`, stage `S3`.
+- **Test ID:** `PRE_295_the_new_boundaries_and_the_gateway_export_and_read_back_to_the_same_definition`, `PRE_295_a_message_boundary_needs_its_key_and_a_gateway_must_lead_to_catch_events_that_only_it_enters`, `PRE_295_an_instantiating_event_based_gateway_is_refused_with_its_stage` (`EventBoundariesAndGatewayTest`), `PRE_295_the_new_boundaries_and_the_gateway_are_known_symbols_that_say_whether_they_interrupt` (`eventBoundaries.test.ts`)
+
 ### PRE-270 A broadcast wakes every waiter of its own tenant, by job, and never a waiter of another tenant
 - **Traces to:** `TR-TEN-01`, `TR-STD-11`, `TR-STD-14`, #492
 - **Milestone:** M3
@@ -2098,3 +2181,386 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
 - **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
 - **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)
+### PRE-337 A parallel multi-instance step opens every repetition at once and the flow continues once, with the output in item order
+- **Traces to:** `TR-STD-29`, `PRE-044`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `loan-cosigning`: a user task `step` over the list `cosigners` (Lan, Minh, Huong, Nam), element variable `cosigner`, output collection `verdicts` taken from `verdict.decision`, then the service task `book`. A second process screens the owners Tran Van An, Le Thi Binh and Pham Quoc Cuong with a sequential service task that passes the owner as input. A third runs a sub-process per branch HCM-01 and HN-02.
+- **When:** The parallel loan starts and the four tasks complete out of order (Huong, Lan, Nam, then Minh). The sequential screening starts and each call is answered in turn. The branches start and each branch's two steps are answered.
+- **Then:** Four tasks open together, one per co-signer in list order, under one `MI_BODY` token with four `SCOPE` tokens whose `loopCounter` is 1 to 4 and whose local `cosigner` is that co-signer. `book` has no token until the fourth completes, then exactly one. `verdicts` is in co-signer order (`APPROVE`, `APPROVE`, `APPROVE`, `REJECT`), not in completion order. The sequential step opens one call at a time; each call's input `party` is that repetition's owner; the next starts only after the previous ends; `flags` is in owner order. The sub-process runs its own steps once per branch under its own scope and the loan is booked once after the last.
+- **Example:** `4 co-signers, completed 3, 1, 4, 2 -> verdicts in order 1, 2, 3, 4; book once`.
+- **Test ID:** `PRE_290_a_parallel_step_opens_every_instance_at_once_and_continues_once_after_the_last`, `PRE_290_a_sequential_step_runs_one_instance_at_a_time_with_its_own_element_as_input`, `PRE_290_a_multi_instance_sub_process_runs_its_own_steps_once_per_item_and_continues_after_the_last` (`MultiInstanceTest`); `PRE_290_one_task_per_co_signer_is_written_under_a_body_and_the_decisions_keep_co_signer_order` (`MultiInstanceStoreTest`)
+
+### PRE-338 A completion condition that holds ends the loop and cancels the repetitions still running
+- **Traces to:** `TR-STD-29`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-cosigning` with four co-signers and the completion condition `nrOfCompletedInstances >= 2`; a process that checks three accounts with a called process under the same kind of condition (`>= 1`).
+- **When:** The second task completes; the second called process ends.
+- **Then:** The two tasks still open are cancelled (`CancelUserTask` for each) and their repetitions are `CANCELLED`; `book` has a token; `verdicts` holds `null` where nobody answered; history records `MI_INSTANCE_CANCELLED` for each repetition stopped and `MI_COMPLETED`. For the call activity, the other two children are cancelled by `CancelChildInstance` for their tokens, and the status list has `CLEAR` only at the position of the account that answered.
+- **Example:** `4 co-signers, 2 approvals -> the other 2 tasks cancelled, book starts`.
+- **Test ID:** `PRE_291_a_completion_condition_that_holds_cancels_the_instances_still_running`, `PRE_291_a_completion_condition_on_a_call_activity_cancels_the_children_still_running` (`MultiInstanceTest`)
+
+### PRE-339 The counters count repetitions, a condition can read them, and an empty collection continues at once
+- **Traces to:** `TR-STD-29`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-cosigning` with four co-signers and the condition `nrOfCompletedInstances * 2 >= nrOfInstances`; the same process with no co-signers.
+- **When:** The loan starts; one task completes; a second completes; and, in the other case, it starts with an empty list.
+- **Then:** After the start, the body has `nrOfInstances` 4, `nrOfActiveInstances` 4 and `nrOfCompletedInstances` 0, and each repetition has its own `loopCounter`. After one completion: 3 active and 1 completed, and the loan has not moved on. After the second, `2 * 2 >= 4` holds and the loop ends; the history entry of that repetition carries `loopCounter` 2, `nrOfInstances` 4 and `nrOfCompletedInstances` 2. The task context holds `loopCounter` and never the element. With an empty list no task opens, `verdicts` is `[]` and `book` starts.
+- **Example:** `1 of 4 done -> 3 active, 1 completed`.
+- **Test ID:** `PRE_292_the_counters_count_instances_active_and_completed_and_a_condition_can_read_them`, `PRE_292_an_empty_collection_continues_at_once_with_an_empty_output` (`MultiInstanceTest`)
+
+### PRE-340 A collection over the cap, or one that is not a list, opens an incident and creates nothing
+- **Traces to:** `TR-STD-29`, `PRE-040`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `multi-instance.max` is 3 (and, on PostgreSQL, 2), and `loan-cosigning` has four co-signers (three, on PostgreSQL); a loan whose `cosigners` is the text `Lan, Minh`.
+- **When:** Each loan starts.
+- **Then:** The first raises `MULTI_INSTANCE_LIMIT` on `step` and the second `MULTI_INSTANCE_COLLECTION_INVALID`. No task, job, body or repetition token is created, the instance stays `RUNNING`, and the token waits on the step so a retry enters it again. On PostgreSQL the incident row is `OPEN` with no `pre_task` row.
+- **Example:** `4 co-signers, cap 3 -> MULTI_INSTANCE_LIMIT, no task`.
+- **Test ID:** `PRE_293_a_collection_over_the_cap_opens_an_incident_and_creates_no_task`, `PRE_293_a_collection_that_is_not_a_list_opens_an_incident_and_a_retry_after_the_fix_starts_the_step` (`MultiInstanceTest`); `PRE_293_a_collection_over_the_cap_opens_an_incident_and_writes_no_task` (`MultiInstanceStoreTest`)
+
+### PRE-341 A failure inside one repetition holds the loop, not the others
+- **Traces to:** `TR-STD-29`, `PRE-040`, `PRE-077`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Three owners (An, Binh, Cuong) screened by a parallel service task; and two owners screened by a sequential one.
+- **When:** The screening of Binh answers the business error `SCREENING_UNAVAILABLE` while the other two complete; in the sequential case the first answers the error.
+- **Then:** The incident is on Binh's own token and the other two repetitions complete (2 completed, 1 active); the loop has not ended and `book` has no token. When Binh's step is retried and answers, the loan is booked and `flags` is in owner order. In the sequential case an incident opens and the second owner is never screened.
+- **Example:** `Binh fails, An and Cuong done -> loop held; retry, Binh done -> book`.
+- **Test ID:** `PRE_294_a_failure_in_one_parallel_instance_holds_the_loop_and_the_others_still_finish`, `PRE_294_a_failure_in_a_sequential_instance_keeps_the_next_one_from_starting` (`MultiInstanceTest`)
+
+### PRE-342 A standard loop repeats while its condition holds, up to its maximum, and may be tested before its first run
+- **Traces to:** `TR-STD-29`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A card payment step `charge` with a standard loop, `loopMaximum` 3 and the condition `payment.status != 'PAID'`; a second loop tested before each run, with the condition `amountDue > 0`.
+- **When:** The first payment is DECLINED, then PAID; another is DECLINED three times; the second loop starts with `amountDue` 0, and then with 1,200,000.
+- **Then:** After DECLINED a second try starts, and after PAID the loop ends with two repetitions. A payment DECLINED three times stops at the maximum and the process goes on, with the repetitions numbered 1, 2, 3. The tested-before loop with nothing due makes no call and goes on; with 1,200,000 due it makes the first call.
+- **Example:** `DECLINED, PAID -> 2 tries; DECLINED x3 -> stops at 3`.
+- **Test ID:** `PRE_295_a_standard_loop_repeats_while_its_condition_holds_and_stops_at_its_maximum`, `PRE_295_a_loop_tested_before_its_first_run_may_not_run_at_all` (`MultiInstanceTest`)
+
+### PRE-343 A loop imports and exports with its settings; one that cannot end, has no source or declares an undo is refused
+- **Traces to:** `TR-STD-04`, `PRE-033`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The loop files of `PRE-290` to `PRE-295`; the payment loop without `loopMaximum`; the co-signing step without `horus:collection`; the payment loop with `horus:compensate`; the payment loop with a condition in FEEL.
+- **When:** Each is imported and compiled, and each valid one is exported and read back.
+- **Then:** The canonical form states the loop (`kind` `loop`, `parallel` or `sequential`, with the collection, element, cardinality, output and conditions as declared) and the BPMN export reads back to the same canonical form, so the hash is unchanged. The files without a maximum, without a source and with an undo are refused with `LOOP_UNBOUNDED`, `MULTI_INSTANCE_SOURCE` and `LOOP_COMPENSATION_UNSUPPORTED`. The FEEL condition is refused as `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`.
+- **Example:** `standardLoopCharacteristics without loopMaximum -> LOOP_UNBOUNDED`.
+- **Test ID:** `PRE_296_a_loop_reads_with_its_settings_and_exports_back_to_the_same_definition`, `PRE_296_a_loop_that_cannot_end_or_has_no_source_is_refused_at_import`, `PRE_296_a_loop_condition_in_another_language_is_refused_with_its_stage` (`MultiInstanceTest`)
+
+
+### PRE-288 A cancel end event compensates its transaction newest first, and the cancel boundary event leaves the flow
+- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04`, `PRE-073`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `fund-transfer-cancel`: the transaction `transfer` holds `hold-funds` (local, with a compensation boundary event whose compensation activity runs `release-hold`) and `debit-source` (remote, with a compensation boundary event whose compensation activity runs the adapter `credit-back`), then an exclusive gateway that takes a cancel end event when the target account `0099-887766` is closed. A cancel boundary event on `transfer` leads to `notify-customer`. An instance moves `25,000,000 VND` from `0011-223344` and the target is closed.
+- **When:** `debit-source` is accepted and the flow reaches the cancel end event.
+- **Then:**
+  - The other live tokens of the transaction are cancelled, the instance is `COMPENSATING` and cannot be cancelled, and `processes.compensation.started.v1` carries the transaction's scope token, `depth` 2 and `cause` `CANCEL`. The customer has not been told.
+  - `credit-back` runs first as a `COMPENSATION` job keyed by its own id, with the forward job and attempt of the debit; `release-hold` runs second with the attempt of the hold; nothing else runs.
+  - With every entry `DONE` the transaction's scope token is `COMPENSATED`, the instance is `RUNNING` again, history records `COMPENSATED` and `BOUNDARY_FIRED` with trigger `CANCEL`, `notify-customer` runs once, and the instance ends `COMPLETED`: a cancelled transaction is a business outcome and no `processes.instance.failed.v1` is published.
+  - A cancel end event outside a transaction, or in a transaction with no cancel boundary event, a compensation boundary event with no compensation activity, and a compensation activity with a flow, are refused when the definition is compiled (`CANCEL_END_OUTSIDE_TRANSACTION`, `CANCEL_BOUNDARY_REQUIRED`, `COMPENSATION_ACTIVITY_MISSING`, `COMPENSATION_ACTIVITY_HAS_FLOW`).
+- **Example:** `debit 25,000,000 VND accepted, target closed -> credit-back, release-hold, then notify-customer; instance COMPLETED`.
+- **Test ID:** `PRE_288_a_cancel_end_compensates_the_transaction_newest_first_and_the_cancel_boundary_leaves_the_flow` (`SagaCompensationTest`), `PRE_288_the_cancel_end_waits_for_the_undo_and_the_cancel_boundary_then_takes_the_flow`, `PRE_288_a_compensation_boundary_without_its_activity_and_a_cancel_end_without_its_boundary_are_refused` (`TransactionCompensationTest`)
+
+### PRE-289 A compensation of the enclosing scope walks into the sub-processes completed in it
+- **Traces to:** `TR-COMP-01`, `PRE-044`, `PRE-262`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-booking-nested`: `register-loan` (undone by `cancel-loan`) in the root scope, then the sub-process `disburse` with `reserve-funds` (undone by `release-funds`), the sub-process `fees` with `charge-fee` (undone by `refund-fee`) and `open-account` (undone by `close-account`), all completed; then `notify-partner` in the root scope with `onFailure: compensate`, which the partner refuses.
+- **When:** `notify-partner` fails for good.
+- **Then:** The compensation is that of the root scope token and takes the entries of the root scope and of every scope token under it, newest pushed first across scopes: `close-account`, `refund-fee`, `release-funds`, `cancel-loan`, each once. Every entry is `DONE`, the root scope token is `COMPENSATED`, the instance ends `FAILED`, and the timeline lists the four undos under the one compensation of the root scope. An undo started inside a sub-process still walks only that sub-process and the scopes under it (`PRE-262`).
+- **Example:** `refused at notify-partner -> close-account, refund-fee, release-funds, cancel-loan`.
+- **Test ID:** `PRE_289_a_compensation_of_the_enclosing_scope_walks_into_the_sub_processes_completed_in_it` (`SagaCompensationTest`)
+
+### PRE-344 A failed undo is retried under its own job, and every undo runs once before the flow resumes
+- **Traces to:** `TR-COMP-02`, `TR-IDEM-04`, `PRE-074`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The cancelled transfer of `PRE-288`, where core banking refuses the first `credit-back` with `ACCOUNT_FROZEN`.
+- **When:** The first undo fails for good, and then operator `ops.lan` retries the incident after the account is unfrozen.
+- **Then:** After the failure the entry of `debit-source` is `FAILED`, an incident `COMPENSATION_FAILED` holds the walk, `release-hold` has not run, the instance is `COMPENSATING` and the cancel boundary has not fired. The retry runs `credit-back` again under the same job id with a new attempt id, so core banking sees one idempotency key; `release-hold` then runs exactly once, `notify-customer` runs once, both entries are `DONE`, the instance is `COMPLETED`, and nothing is left to run.
+- **Example:** `credit-back refused, retried -> one key, two attempts; release-hold once`.
+- **Test ID:** `PRE_290_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes` (`SagaCompensationTest`)
+
+### PRE-345 A compensation throw that names an activity undoes only that activity, and a second throw undoes nothing
+- **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, #488
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-undo-one`: `register-loan`, `reserve-funds` and `open-account` complete in the root scope, each with an undo; then two compensation throw events with `activityRef="reserve-funds"` in a row, then the end.
+- **When:** The first throw runs, its undo completes, and the second throw runs.
+- **Then:** Only `release-funds` runs, once; the entries of `open-account` and `register-loan` stay `PENDING`; the second throw finds nothing `PENDING` for `reserve-funds` and the flow goes on at once; the instance ends `COMPLETED`, and history records `COMPENSATION_STARTED` on each throw. A compensation throw event or compensation end event with no `activityRef` undoes the whole scope the same way; one with no outgoing flow keeps the behaviour of `PRE-076`.
+- **Example:** `throw reserve-funds twice -> release-funds once`.
+- **Test ID:** `PRE_291_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing` (`SagaCompensationTest`)
+
+### PRE-320 An interrupting event sub-process cancels the other work of its scope and ends the scope when it ends
+- **Traces to:** `TR-STD-04`, `TR-STD-13`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `loan-application` with the task `assess` for an underwriter, and the event sub-process `withdrawal` whose start event is a message start for `applicant-withdrew`, keyed by the variable `applicationId`, interrupting; its one step is `close-file`.
+- **When:** The instance `LA-2026-0042` is waiting at `assess`, and `applicant-withdrew` arrives for that key.
+- **Then:**
+  - The task `assess` is `CANCELLED` with its work item, `close-file` runs, and history records `EVENT_SUBPROCESS_STARTED` with trigger `MESSAGE` and `interrupting` true. A completion of the cancelled task is refused.
+  - The instance is `RUNNING` until `close-file` ends and then `COMPLETED`: the scope ends with the event sub-process. A message after that finds no subscription.
+- **Example:** `applicant-withdrew for LA-2026-0042 -> assess cancelled, close-file, COMPLETED`.
+- **Test ID:** `PRE_320_an_interrupting_message_event_sub_process_cancels_the_other_work_and_the_scope_ends_with_it` (`EventSubProcessTest`), `PRE_320_an_interrupting_message_event_sub_process_cancels_the_wait_and_leaves_no_subscription` (`EventSubProcessPostgresIT`)
+
+### PRE-321 A non-interrupting event sub-process runs beside the main flow, and again for the next trigger where the trigger can come again
+- **Traces to:** `TR-STD-04`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a reminder event sub-process on a timer of 24 hours, `isInterrupting="false"`, and a repricing event sub-process on the signal `rate-card-updated`, `isInterrupting="false"`.
+- **When:** The timer fires while `assess` is open; the underwriter completes `assess` before the reminder ends; the signal is broadcast twice.
+- **Then:**
+  - The task stays open and the reminder runs once. No second timer is scheduled: a timer fires once. The instance is `RUNNING` until both the main flow and the reminder have ended.
+  - Each broadcast starts the repricing once. Its old subscription is deleted and a new one is written in the same transaction, so a delivery for the first subscription is refused after it was used.
+  - A message start behaves as the signal does: each message of its key starts the handler.
+- **Example:** `timer after 24 h -> reminder runs, assess still open; two rate changes -> two repricings`.
+- **Test ID:** `PRE_321_a_non_interrupting_timer_event_sub_process_runs_once_beside_the_main_flow`, `PRE_321_a_non_interrupting_signal_event_sub_process_starts_again_for_every_broadcast` (`EventSubProcessTest`), `PRE_321_a_non_interrupting_timer_event_sub_process_runs_beside_the_wait_and_the_scope_ends_over_nothing` (`EventSubProcessPostgresIT`)
+
+### PRE-322 Each start of an event sub-process triggers when its event happens: timer, message, signal and condition
+- **Traces to:** `TR-STD-04`, `TR-STD-11`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a conditional event sub-process `assessment.score >= 80` that notifies compliance.
+- **When:** The instance starts with no score; the underwriter completes `assess` with a score of 85. Another instance starts with a score of 90 and an interrupting handler. A third has four reviews that write the score 85, 90, 60 and 95, with a non-interrupting handler.
+- **Then:**
+  - The condition is asked in the transaction that changes the variables, never by polling; at 85 the handler starts, in the same transaction as the completion, before the scope ends. A condition that cannot be read yet, because the variable is not set, is false and fails nothing.
+  - A condition that is true when the scope opens starts the handler at once, and an interrupting one cancels the task.
+  - A non-interrupting condition starts the handler at 85 and at 95 only: at 90 it still held, and at 60 it was reset.
+  - The timer start (`PRE-321`), the message start (`PRE-320`) and the signal start (`PRE-321`) trigger as shown there; a timer is the same job kind and lease as an intermediate timer.
+- **Example:** `score 85 -> notify-compliance; 90 -> nothing; 60, 95 -> notify-compliance again`.
+- **Test ID:** `PRE_322_a_conditional_event_sub_process_starts_when_the_variables_make_its_condition_true`, `PRE_322_a_conditional_event_sub_process_that_is_true_when_its_scope_opens_starts_at_once`, `PRE_322_a_non_interrupting_conditional_starts_again_only_after_its_condition_has_been_false` (`EventSubProcessTest`)
+
+### PRE-323 An error or an escalation raised inside a scope is caught by the event sub-process of that scope, the nearest catcher first
+- **Traces to:** `TR-STD-04`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A disbursement sub-process whose `check-limit` ends with the error `LIMIT_EXCEEDED` while `manual-review` is open, and an error event sub-process inside it; a debit whose business error `INSUFFICIENT_FUNDS` has a boundary event on the step and a catch-all error event sub-process in the process; a KYC sub-process that raises the escalation `AML_HIT` and goes on, with an escalation event sub-process in the process around it, interrupting or not.
+- **When:** Each is raised.
+- **Then:**
+  - The error ends the other work of the scope: the review is cancelled with its work item, the handler runs and no incident opens. When the handler ends the sub-process is complete and the parent goes on.
+  - Walking outwards, an event sub-process of a scope is tried before the boundary events on that scope's own activity, a specific code before a catch-all, and the event sub-process a handler stands in is skipped, so a handler's own error is not caught by itself. A boundary on the step wins over the event sub-process of the scope.
+  - A non-interrupting escalation handler runs beside the KYC, which goes on to `verify`; an interrupting one cancels the thrower and the sub-process. An error start event is always interrupting (`EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING`).
+- **Example:** `LIMIT_EXCEEDED in disburse -> review cancelled, notify-limit; INSUFFICIENT_FUNDS -> the boundary, not the process handler`.
+- **Test ID:** `PRE_323_an_error_raised_inside_a_sub_process_is_caught_by_its_error_event_sub_process`, `PRE_323_a_business_error_of_a_step_is_caught_by_an_error_event_sub_process_of_the_process`, `PRE_323_a_boundary_on_the_step_wins_over_an_event_sub_process_of_the_scope_and_a_specific_code_over_a_catch_all`, `PRE_323_an_escalation_from_a_sub_process_starts_the_event_sub_process_of_the_process_around_it`, `PRE_323_an_interrupting_escalation_handler_cancels_the_sub_process_that_raised_it` (`EventSubProcessTest`), `PRE_323_a_business_error_of_a_step_is_taken_by_the_error_event_sub_process_and_opens_no_incident` (`EventSubProcessPostgresIT`)
+
+### PRE-324 An event sub-process waits only while its scope is open, and its timer or subscription goes when the scope ends
+- **Traces to:** `TR-STD-04`, `TR-STD-13`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a timer, a signal and a message event sub-process, all waiting; a screening sub-process with its own message event sub-process.
+- **When:** The main flow ends; the screening ends.
+- **Then:**
+  - The waits do not count as work: the instance completes, the timer job is cancelled and the signal subscription deleted, and no live token is left. A running event sub-process does count, so a non-interrupting handler keeps its scope open.
+  - A sub-process arms its event sub-processes when it opens and drops them when it ends. The start event of an event sub-process holds one token that is never shown as work on the timeline.
+- **Example:** `assess completes -> COMPLETED, timer cancelled, subscription deleted`.
+- **Test ID:** `PRE_324_a_scope_that_ends_removes_the_timer_and_the_subscriptions_of_its_waiting_event_sub_processes`, `PRE_324_an_event_sub_process_of_a_sub_process_is_armed_when_it_opens_and_dropped_when_it_ends` (`EventSubProcessTest`), `PRE_324_a_non_interrupting_signal_event_sub_process_starts_for_each_broadcast_and_its_subscription_goes_with_the_scope` (`EventSubProcessPostgresIT`)
+
+### PRE-325 Event sub-processes import, export to the same definition and are refused with a code when they are misplaced or unfinished
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #487
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example `loan-application-event-subprocesses.bpmn` (message, timer and signal event sub-processes); a process with a timer start event; an event sub-process with a flow in, one whose start event has no trigger, a message one without `horus:correlationKey`, an error one with `isInterrupting="false"`, and a boundary event on one.
+- **When:** Each is imported, and the valid ones are exported and imported again.
+- **Then:** The valid files read, compile and export to the same canonical definition: `triggeredByEvent` on the sub-process, the trigger kind with its duration, code or signal, and `interrupting` false on the start step when declared; definitions without them keep their hash. The others are `422 VALIDATION_FAILED` with `START_TRIGGER_MISPLACED`, `EVENT_SUBPROCESS_HAS_FLOW`, `EVENT_SUBPROCESS_TRIGGER_REQUIRED`, `CORRELATION_KEY_REQUIRED`, `EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING` and `BOUNDARY_ATTACHED_INVALID`; nothing is stored. A message start event inside an event sub-process never starts a process: only the start event of the process itself does.
+- **Example:** `timer start event on the process -> START_TRIGGER_MISPLACED`.
+- **Test ID:** `PRE_325_event_sub_processes_export_and_read_back_to_the_same_definition`, `PRE_325_a_misplaced_or_unfinished_event_sub_process_is_refused_with_its_code` (`EventSubProcessTest`)
+
+### PRE-326 A completed sub-process, transaction or call activity is undone by the handler its compensation event sub-process or compensation boundary event names
+- **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, `PRE-289`, #487
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Process `loan-booking` with the sub-process `disburse`, whose step `reserve-funds` is undone by `release-funds`, and a compensation event sub-process inside it holding one service task `reverse-disbursement` with `horus:input account=${instance.account}`; the same sub-process with a compensation boundary event and compensation activity instead; and a call activity `check-credit` with a compensation boundary event whose activity is `cancel-credit-hold`.
+- **When:** The step completes and `disburse` ends; the child of `check-credit` completes.
+- **Then:**
+  - On the end of the sub-process one entry is pushed on the stack of the scope it stands in, after the entries of its steps, so a later compensation of that scope runs `reverse-disbursement` first, with `account` read when the sub-process ended and nothing else of the variables. Each entry still runs once (`PRE-290`).
+  - The handler adds to the undo of the steps inside: they are undone after it. A sub-process that is cancelled or interrupted before it ends pushes nothing.
+  - A call activity pushes the entry of its boundary's compensation activity when the child completes, with the child's id, as a `horus:compensate` handler does. A compensation event sub-process needs a sub-process or transaction, one service task with `horus:handler`, and no compensation boundary event beside it (`COMPENSATION_HANDLER_SCOPE`, `COMPENSATION_EVENT_SUBPROCESS_SHAPE`, `COMPENSATION_DUPLICATE`).
+- **Example:** `disburse ends -> push release-funds, then reverse-disbursement; a later undo runs reverse-disbursement, release-funds`.
+- **Test ID:** `PRE_326_a_compensation_event_sub_process_pushes_the_undo_of_its_sub_process_when_it_completes`, `PRE_326_a_compensation_boundary_event_on_a_sub_process_or_a_call_activity_names_its_undo`, `PRE_326_a_compensation_event_sub_process_has_one_undo_task_in_a_sub_process_that_has_no_other_undo` (`EventSubProcessTest`)
+### PRE-300 An inclusive split takes every outgoing flow whose condition is true
+- **Traces to:** `TR-STD-04`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `payment-screening` with an `inclusiveGateway` `screen` whose flows go to `aml-review` (condition `amount >= 100000000 VND`), `sanctions-review` (condition `crossBorder == true`) and `standard-check` (the default flow); an instance started with `amount = 150000000 VND` and `crossBorder = true`.
+- **When:** The token reaches `screen`.
+- **Then:** One token waits at `aml-review` and one at `sanctions-review`; `standard-check` is never entered. `NODE_COMPLETED` on `screen` lists the flows taken, `screen__aml` and `screen__sanctions`, with reason `conditions`. A flow with no condition is always taken. A condition that is not a boolean fails the step with `CONDITION_ERROR`.
+- **Example:** `150,000,000 VND, cross-border -> two tokens`.
+- **Test ID:** `PRE_300_a_split_takes_every_flow_whose_condition_is_true`, `PRE_300_an_inclusive_gateway_with_its_default_imports_and_exports_to_the_same_definition` (`InclusiveGatewayBpmnTest`)
+
+### PRE-301 An inclusive split takes the default flow only when no condition is true
+- **Traces to:** `TR-STD-04`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The same process; an instance started with `amount = 25000000 VND` and `crossBorder = false`. A second process whose gateway has no default flow; a third whose default flow carries a condition.
+- **When:** The token reaches `screen`.
+- **Then:** Only `standard-check` is entered, and `NODE_COMPLETED` records reason `default`. With no true condition and no default flow the step fails with `NO_PATH`. A default flow that carries a condition, or is not an outgoing flow of the gateway, is refused at activation (`DEFAULT_FLOW_HAS_CONDITION`, `DEFAULT_FLOW_INVALID`).
+- **Example:** `25,000,000 VND, domestic -> standard-check only`.
+- **Test ID:** `PRE_301_when_no_condition_is_true_only_the_default_flow_is_taken`, `PRE_301_no_true_condition_and_no_default_flow_is_no_path`, `PRE_301_a_default_flow_that_carries_a_condition_or_is_not_an_outgoing_flow_is_refused_at_activation`
+
+### PRE-302 An inclusive join waits for the tokens that can still arrive and fires once
+- **Traces to:** `TR-STD-04`, `TR-ASY-03`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-screening` with `aml-review` and `sanctions-review` open, both leading to the inclusive gateway `settle` (several incoming flows), which leads to `release`.
+- **When:** One review is completed, then the other, in either order. In a second instance only `aml-review` was started, and it is completed.
+- **Then:** The first arrival becomes `JOINED` and `TOKEN_JOINED` lists in `waitingFor` the steps a token can still arrive from. The second arrival completes both arrivals and creates one token to `release`, with one `JOIN_FIRED` row. In the second instance the join fires at the first arrival, because no other token can reach it: the number of arrivals is whatever the split started, not the number of incoming flows. Tokens of other scope tokens are never counted.
+- **Example:** `AML done, sanctions open -> waiting for sanctions-review; both done -> one release task`.
+- **Test ID:** `PRE_302_the_join_waits_for_exactly_the_tokens_the_split_started_in_either_order`, `PRE_302_a_join_with_one_started_branch_fires_when_that_branch_arrives`
+
+### PRE-303 An inclusive join does not wait for a path that can never reach it
+- **Traces to:** `TR-STD-04`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The split also starts `compliance-log`, which ends in its own end event; and a process where `sanctions-review` leads to an exclusive gateway, a hit to the join and a clear to an end event.
+- **When:** `aml-review` and `sanctions-review` are completed while the log is open; or `aml-review` is completed first and the sanctions review then ends with no hit.
+- **Then:** The join fires while the log is still open, because `compliance-log` has no path to the join. In the second process the join waits for the sanctions review, and fires when that token ends elsewhere: the check runs after every command, so a token ending on another branch releases a waiting join, and the instance does not complete while a token waits at the join.
+- **Example:** `sanctions cleared (no hit) -> the waiting join releases the payment`.
+- **Test ID:** `PRE_303_a_join_does_not_wait_for_a_path_that_can_never_arrive`, `PRE_303_a_token_that_leaves_for_another_end_releases_a_join_that_is_already_waiting`
+
+### PRE-304 An inclusive join counts tokens in loops and scopes, and two branches ending together fire it once
+- **Traces to:** `TR-STD-04`, `TR-ASY-03`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan process whose income check loops back until the income is confirmed while the credit check waits at the join; an onboarding process whose split starts a `saga` block (its own scope token) and a service step, both leading to the join; two joins that wait for a token that sits at the other; and on PostgreSQL two replicas completing `aml-review` and `sanctions-review` of 300 payments at the same moment.
+- **When:** The income check is sent round the loop once; the service step ends before the block; the deadlocked ring starts; the two reviews end together.
+- **Then:** A token that can still reach the join through a loop holds it until it arrives. A scope token on a block that reaches the join counts as one token that can still arrive, whatever is inside it. A ring of joins fails the command with `JOIN_DEADLOCK` and writes nothing. Under the instance lock the two simultaneous completions apply one after the other, and every payment has exactly one `release` task, no `JOINED` token left and one `JOIN_FIRED` row.
+- **Example:** `income not confirmed -> join waits; confirmed -> join fires once`.
+- **Test ID:** `PRE_304_a_token_in_a_loop_that_can_still_arrive_holds_the_join_until_it_does`, `PRE_304_a_block_that_can_still_reach_the_join_is_one_token_that_holds_it` (`InclusiveGatewayBpmnTest`), `PRE_304_two_joins_that_wait_for_each_other_fail_the_command_and_leave_the_state_unchanged`, `PRE_304_inclusive_join_prevents_concurrent_lost_wakeup` (`InclusiveJoinPostgresIT`)
+
+### PRE-296 Each executable pool of a collaboration is a definition of its own; a pool with no process is kept for display
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, `TR-TEN-01`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example `order-payment-pools.bpmn`: a collaboration of the pools `Order desk` (process `order-desk`), `Payment desk` (process `payment-desk`) and `Auditor` (no process), imported by `bank-a` with `Idempotency-Key: imp-1`.
+- **When:** The file is imported, then imported again with the same key.
+- **Then:** `order-desk` and `payment-desk` are two definitions of `bank-a`, both version 1; the answer is the first and names the other in `alsoImported`. The replay returns the same answer and stores nothing more. `Auditor` is not a definition. `bank-b` has neither. A file of several processes with no collaboration is `422 VALIDATION_FAILED` with `PROCESS_NOT_IN_COLLABORATION`.
+- **Example:** `3 pools, 2 with a process -> order-desk v1 and payment-desk v1`
+- **Test ID:** `PRE_296_each_executable_pool_is_a_definition_and_the_black_box_is_not` (`CollaborationImportTest`), `PRE_296_two_pools_become_two_definitions_and_a_replay_stores_nothing_more` (`CollaborationPostgresIT`)
+
+### PRE-297 A lane names the work group of a user task that has no assignee, and never overrides an assignee
+- **Traces to:** `TR-STD-04`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** In `payment-desk`, the lane `Back office` holds the user task `confirm-payment`, which has no `horus:assignee`; a second file where the task has `horus:assignee="role:cashier"`; a third where the task is in no lane.
+- **When:** Each file is imported, and a message starts `payment-desk` for key `ORD-90001`.
+- **Then:** The task is assigned to `group:back-office` (the lane's name in lower case, other characters as hyphens) and the task list shows that group. In the second file the assignee stays `role:cashier`. In the third the import is refused with `ASSIGNEE_INVALID`. The lanes are kept as written.
+- **Example:** `lane "Back office" -> group:back-office`
+- **Test ID:** `PRE_297_a_lane_names_the_group_of_a_user_task_with_no_assignee_and_never_overrides_one`, `PRE_297_a_user_task_with_no_assignee_and_no_lane_is_still_refused` (`CollaborationImportTest`), `PRE_297_the_lane_names_the_work_group_of_a_task_started_by_the_message_start_of_its_pool` (`CollaborationPostgresIT`)
+
+### PRE-298 Message flows between pools are kept, document the correlation of their target, and survive the export
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example: `mf-received` from `report-payment` in `payment-desk` to the receive task `wait-for-payment` of `order-desk` (correlation key `orderId`), and `mf-audit` from `audited` to the black box `Auditor`.
+- **When:** `order-desk` is read, and each definition is exported and read again.
+- **Then:** The three message flows are kept with their message names and the pool at each end; `mf-received` records the correlation variable `orderId` of the step it targets, and `mf-audit` ends at the pool. The export of one pool is a file that stands alone: this pool with its lanes, every other pool as a participant with no process, and each message flow retargeted to that pool. Reading it gives the same canonical definition, the same lanes and the same three message flows. A message flow runs nothing: messages are delivered by `POST /messages:correlate`.
+- **Example:** `mf-received -> orderId; export of payment-desk keeps pool-order as a black box`
+- **Test ID:** `PRE_298_message_flows_are_kept_with_their_pools_and_the_correlation_of_the_catching_step`, `PRE_298_export_keeps_the_pools_lanes_and_message_flows_and_reads_back_to_the_same_definition` (`CollaborationImportTest`), `PRE_298_the_export_of_a_pool_keeps_the_message_flows_and_the_lanes` (`CollaborationPostgresIT`)
+
+### PRE-299 A choreography is kept as received with a warning and is never run
+- **Traces to:** `TR-STD-04`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example with a `choreography` element added to `definitions`.
+- **When:** The file is imported.
+- **Then:** The import succeeds, the stored source keeps the element, and the answer lists `CHOREOGRAPHY_KEPT_AS_RECEIVED` in `warnings` with the line. No definition comes from it.
+- **Example:** `choreography c -> warning, 2 definitions as before`
+- **Test ID:** `PRE_299_a_choreography_is_kept_as_received_with_a_warning_and_a_second_process_needs_a_collaboration` (`CollaborationImportTest`)
+### PRE-346 Pending migration plans and calendar changes appear in the approvals queue, bound to the reviewed hash
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`, PD-139, #473
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a `thu` proposes the execution of the plan loan-origination v1 to v2 at 02:00 and the holiday 1 January 2028 for `vn-banking-hours` at 03:00; `lan` holds `processes:migration:manage` and `processes:calendar:manage`; `dan` holds `processes:read` only; `eve` is at bank-b.
+- **When:** each lists `GET /approvals`; `lan` approves the plan and the change with a wrong hash, then with the `contentHash` of the item; `thu` approves with the right hash.
+- **Then:**
+  - `lan` sees `MIGRATION_PLAN` then `CALENDAR_CHANGE`, oldest first, with `contentHash` (the plan hash; the change hash), `reason` and `approve`, `reject` allowed. A cursor continues across the two kinds. `thu` has no `approve` on either (`SELF_APPROVAL_FORBIDDEN`); she may withdraw her calendar change with `reject`. `dan` sees the calendar change with `PERMISSION_REQUIRED` and no migration plan. `eve` sees nothing.
+  - A hash other than the item's is `409 CONTENT_CHANGED` and nothing is written; the item stays in the list. With the item's hash both are approved and leave the list. `thu` is `403 SELF_APPROVAL_FORBIDDEN` with the right hash.
+- **Example:** `GET /approvals -> [{kind: MIGRATION_PLAN, contentHash: <planHash>}, {kind: CALENDAR_CHANGE, contentHash: <changeHash>}]; approve with another hash -> 409 CONTENT_CHANGED`
+- **Test IDs:** `PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash`, `PRE_254_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required`, `PRE_254_the_cursor_continues_across_kinds`, `PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing`, `PRE_254_the_proposer_cannot_approve_with_the_right_hash`
+
+### PRE-330 A complex gateway joins on its activation condition, fires once, absorbs the late token, and splits on its outgoing conditions
+- **Traces to:** `TR-STD-04`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A payment of VND 2,500,000,000 that three approvers (`branch-a`, `branch-b`, `branch-c`) may sign after a parallel fork, joined by a complex gateway with the activation condition `_activationCount >= 2` and one outgoing flow to the task `release`; and a transfer routed by a complex gateway with the condition `amount > 1000000000` to `review` and a default flow to `auto`.
+- **When:** `branch-a`, then `branch-b`, then `branch-c` complete; a transfer of VND 2,500,000,000 and one of VND 5,000,000 start; a join whose condition is `_activationCount > 3` receives its third token.
+- **Then:**
+  - Each arriving token is held `JOINED` and counted; `_activationCount` is the number held. After `branch-a` nothing leaves; after `branch-b` the condition holds and one token leaves, so `release` opens once; the token of `branch-c` is absorbed and opens nothing. When every incoming flow has delivered its token the gateway resets for the next round.
+  - A gateway without an activation condition fires when every incoming flow has delivered, like a parallel join. A gateway with one incoming flow only splits.
+  - The split takes every outgoing flow whose condition holds, else the default flow; the large transfer opens `review`, the small one `auto`. No true condition and no default is `NO_PATH`.
+  - A join whose condition is still false when every incoming flow has delivered fails the step with `ACTIVATION_CONDITION_FALSE` instead of waiting for ever.
+- **Example:** `two of three signatures -> release once; the third is absorbed`.
+- **Test ID:** `PRE_330_a_complex_join_fires_once_when_its_condition_is_met_and_absorbs_the_late_token`, `PRE_330_a_complex_gateway_splits_on_its_outgoing_conditions_and_falls_back_to_the_default_flow`, `PRE_330_a_complex_join_whose_condition_never_holds_fails_the_step_instead_of_stalling` (`ComplexAdHocMultipleTest`)
+
+### PRE-331 An ad-hoc sub-process runs the activities its host starts, in any order its `ordering` allows, until its completion condition holds
+- **Traces to:** `TR-STD-04`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding` with the ad-hoc sub-process `onboarding` holding the activities `collect-id`, `screen-sanctions` and `call-referee`, no sequence flow between them, the completion condition `idCheck.passed == true`, and the task `open-account` after it.
+- **When:** The instance enters `onboarding`; the host starts `collect-id` and `screen-sanctions` side by side (Parallel) and `collect-id` completes with `passed` true; or completes with `passed` false and is started again; or, with ordering Sequential, a second activity is started while one runs; or the condition is left out and each activity completes once.
+- **Then:**
+  - Entering the sub-process opens a scope and runs nothing. An activity runs only when the host starts it, with `StartAdHocActivity`; an activity that does not stand in the sub-process is `ACTIVITY_NOT_FOUND`.
+  - With Parallel ordering any number of activities may run; with Sequential one at a time, and a start while another runs is `ACTIVITY_NOT_ENABLED`.
+  - When an activity ends the condition is asked. True cancels the activities still running with their work items (`cancelRemainingInstances`, true by default; false lets them finish first) and the token leaves by the outgoing flow. False leaves the sub-process open and an activity may run again.
+  - Without a completion condition the sub-process ends when nothing runs and every activity has completed once.
+  - An ad-hoc sub-process holds activities and no sequence flow, event, gateway or boundary event (`AD_HOC_HAS_FLOW`, `AD_HOC_CONTENT_INVALID`, `AD_HOC_EMPTY`).
+- **Example:** `identity check passed -> screening cancelled, account opening starts`.
+- **Test ID:** `PRE_331_an_ad_hoc_sub_process_starts_nothing_until_the_host_starts_an_activity`, `PRE_331_with_parallel_ordering_the_condition_cancels_the_remaining_activities_and_the_flow_goes_on`, `PRE_331_a_false_condition_leaves_the_sub_process_open_and_an_activity_may_run_again`, `PRE_331_with_sequential_ordering_a_second_activity_is_not_enabled_while_one_runs`, `PRE_331_without_a_condition_the_sub_process_ends_when_every_activity_has_completed_once` (`ComplexAdHocMultipleTest`)
+
+### PRE-332 A multiple event fires on any one of its definitions, a parallel multiple event on all of them
+- **Traces to:** `TR-STD-04`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A payment that waits at an intermediate catch event for the signal `rate-card-updated` or the message `funds-received`; the same event with `parallelMultiple="true"`; a service task `charge` with a boundary event holding a timer of one hour and an error; an event sub-process whose start event holds a timer of 24 hours and the message `funds-received`.
+- **When:** The funds arrive; only the signal arrives and then the funds; the timer of the boundary falls due; the timer of the event sub-process falls due.
+- **Then:**
+  - The event waits with one token per definition, each parked by the behaviour of that definition: a subscription for the signal and the message, a job for a timer, the condition asked again when variables change. A multiple event moves on at the first occurrence and drops the other waits (the signal subscription is deleted); a parallel multiple event holds each occurrence and moves on when the last one has occurred.
+  - A boundary event with a timer and an error fires on either: the timer interrupts the activity, and an error is found when it is thrown. An event sub-process with several triggers starts on the first one and the other waits go.
+  - A multiple event holds timer, message, signal or conditional definitions (a process start event: message and signal only, and never parallel, because no instance exists to wait in; a boundary event: timer, error and escalation, and parallel only with timers) and one message at most (`MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`).
+- **Example:** `funds received -> the payment moves on, the signal wait is deleted`.
+- **Test ID:** `PRE_332_a_multiple_catch_event_fires_on_the_first_definition_and_drops_the_other_wait`, `PRE_332_a_parallel_multiple_catch_event_waits_until_every_definition_has_occurred`, `PRE_332_a_multiple_boundary_event_fires_on_its_timer_and_interrupts_the_activity`, `PRE_332_a_multiple_start_of_an_event_sub_process_fires_on_one_trigger_and_drops_the_other` (`ComplexAdHocMultipleTest`)
+
+### PRE-333 A timer cycle on the start event of an event sub-process repeats a non-interrupting one for its count
+- **Traces to:** `TR-STD-04`, #487, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a reminder event sub-process, `isInterrupting="false"`, started by `timeCycle` `R2/PT24H`.
+- **When:** The first timer fires, then the second.
+- **Then:** Each firing starts the reminder; the first schedules the next timer one interval later, the second schedules none. `R/PT1H` has no end. An interrupting one fires once. A `timeCycle` anywhere else is refused (`TIMER_CYCLE_MISPLACED`; on a catch or boundary event `S1`).
+- **Example:** `R2/PT24H -> reminder at +24 h and +48 h, then no timer`.
+- **Test ID:** `PRE_333_a_timer_cycle_start_repeats_a_non_interrupting_event_sub_process_for_its_count` (`ComplexAdHocMultipleTest`)
+
+### PRE-334 A misplaced ad-hoc sub-process or multiple event is refused with its code
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** An ad-hoc sub-process with a sequence flow between two activities; a process start event with `parallelMultiple="true"`; a multiple catch event with two message definitions.
+- **When:** Each is imported.
+- **Then:** `AD_HOC_HAS_FLOW` naming the flow, `MULTIPLE_EVENT_DEFINITION_INVALID` naming the start event, `MULTIPLE_EVENT_MESSAGE_ONCE` naming the catch event; nothing is stored.
+- **Example:** `parallel multiple process start -> MULTIPLE_EVENT_DEFINITION_INVALID`.
+- **Test ID:** `PRE_334_a_misplaced_ad_hoc_sub_process_or_multiple_event_is_refused_with_its_code` (`ComplexAdHocMultipleTest`)
+
+### PRE-335 A complex gateway, an ad-hoc sub-process and a multiple event export and read back to the same definition
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process with a complex gateway and its activation condition, one with a Sequential ad-hoc sub-process with `cancelRemainingInstances="false"`, and one with a parallel multiple catch event.
+- **When:** Each is read, exported as BPMN and read again.
+- **Then:** The canonical definition, and so the hash, is the same: the activation condition, the ordering, the completion condition and the cancel flag, and every definition of a multiple event with `parallelMultiple`, are part of it.
+- **Example:** `ordering Sequential survives the export`.
+- **Test ID:** `PRE_335_the_export_of_each_element_reads_back_to_the_same_definition` (`ComplexAdHocMultipleTest`)
+
+### PRE-336 Starting an ad-hoc activity needs `processes:task:manage`, is idempotent, and cancels what the completion condition leaves
+- **Traces to:** `TR-SEC-02`, `TR-IDEM-01`, #500
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `customer-onboarding` entered by an officer who holds `processes:start` and `processes:task:work`, and a branch manager who holds `processes:task:manage`.
+- **When:** The officer starts `collect-id`; the manager starts `collect-id` twice with the same `Idempotency-Key` and then `screen-sanctions`; the officer completes the identity check as passed.
+- **Then:** The officer is refused with `403 PERMISSION_DENIED` and nothing changes. The manager's replay returns the first answer and opens one task. The completion cancels the screening task in the same transaction and opens `open-account`. The REST action is `POST /instances/{id}:start-ad-hoc-activity` with `If-Match` and `Idempotency-Key`; a missing one is `428`.
+- **Example:** `officer-lan -> 403; manager-hoa -> collect-id opens once`.
+- **Test ID:** `PRE_336_the_operator_starts_activities_with_task_manage_and_the_condition_cancels_the_rest` (`AdHocPostgresIT`)

@@ -159,7 +159,7 @@ function PlanView({ plan, pageLimit }: { plan: MigrationPlan; pageLimit: number 
         <MigrationDock step={step} plan={plan} dryRun={dryRun}
           check={{ start: () => { check.mutate(); }, isPending: check.isPending, error: check.error }}
           propose={{ start: ({ reason }) => { proposal.mutate({ reason }); }, isPending: proposal.isPending, error: proposal.error }}
-          approve={{ start: () => { if (seenLock !== undefined) approval.mutate({ lockVersion: seenLock }); }, isPending: approval.isPending, error: approval.error }}
+          approve={{ start: () => { if (seenLock !== undefined) approval.mutate({ lockVersion: seenLock, planHash: plan.planHash }); }, isPending: approval.isPending, error: approval.error }}
           reject={{ start: ({ reason }) => { if (seenLock !== undefined) rejection.mutate({ lockVersion: seenLock, reason }); }, isPending: rejection.isPending, error: rejection.error }}
           onReviewAgain={() => { approval.reset(); rejection.reset(); setSeenLock(stored?.lockVersion); void execution.refetch(); }} />
       ) : null}

@@ -38,6 +38,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [DEFINITION_NOT_FOUND](#definition_not_found) | processes | M2 |
 | 404 | [INSTANCE_NOT_FOUND](#instance_not_found) | processes | M2 |
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
+| 404 | [FORM_NOT_DECLARED](#form_not_declared) | processes | 0.3.0 |
 | 404 | [REPLAY_NOT_FOUND](#replay_not_found) | processes | M3 |
 | 404 | [MIGRATION_NOT_FOUND](#migration_not_found) | processes | 0.3.0 |
 | 404 | [LAYOUT_NOT_FOUND](#layout_not_found) | processes | 0.3.0 |
@@ -46,6 +47,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
 | 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
 | 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
+| 422 | [EFFECTIVE_DATE_IN_PAST](#effective_date_in_past) | rules | 0.3.0 |
 | 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | 0.3.0 |
 | 422 | [MIGRATION_PLAN_INVALID](#migration_plan_invalid) | processes | 0.3.0 |
@@ -156,6 +158,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 ### SIMULATION_REPORT_NOT_FOUND
 `404`. The version has no report with that id in your tenant. It is the same answer for a report of another tenant, another rule set or another version, so the code never says whether one exists.
 
+### EFFECTIVE_DATE_IN_PAST
+`422`. The `:request-publish` body asks for an `effectiveFrom` before the time of the request. Nothing was written and the draft stays a draft. Send the current time or a later one, or leave the date out so the version takes effect at approval.
+
 ### AUTHOR_UNKNOWN
 `409`. The pending rule set version has no recorded author, so four eyes cannot tell whether the approver made it (PD-105). Only versions written before the author was recorded (schema V2) have none. Nobody can approve it, and the engine never assigns an author. Import the change again, which records you as its author, and have someone else approve that version; reject or withdraw the old one.
 
@@ -173,7 +178,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 For rule sets every entry is `{ "ruleId", "column", "message", "code", "position" }`: `ruleId` is the rule (row), `column` the input or output name, and either is `null` when the problem is outside them; `message` carries no location prefix; `code` is stable and `position` is the zero-based character in the cell text as written, both `null` when they do not apply. Every cell problem of the document is listed at once, in document order, up to 100 entries (`violationsTruncated: true` when there were more), so an editor can mark each cell; a structural problem (an unknown property, a missing key) stops reading and is the only entry. Example: `[{ "ruleId": "R3", "column": "fee", "message": "output fee is money and needs a currency: write 30000 followed by its ISO 4217 currency code", "code": "TYPE_MISMATCH", "position": null }]`.
 
-For process definitions, a request for approval and an approval also name each step whose binding the host cannot satisfy: `HANDLER_NOT_REGISTERED`, `ADAPTER_NOT_REGISTERED`, and `ESCALATION_ROLE_UNKNOWN` (an escalation `role:` the tenant's `RoleCatalogue` does not list; the problem names the step and the role, for example `review-application -> role:RISK_HEAD`). Nothing is written and the version keeps its status.
+For process definitions, a request for approval and an approval also name each step whose binding the host cannot satisfy: `HANDLER_NOT_REGISTERED`, `ADAPTER_NOT_REGISTERED`, and `ESCALATION_ROLE_UNKNOWN` (an escalation `role:` the tenant's `RoleCatalogue` does not list; the problem names the step and the role, for example `review-application -> role:RISK_HEAD`). A declared task form is checked at import, request-approval and approval too: `FORM_NOT_REGISTERED` (your `FormRegistry` has no form of that name), `FORM_SCHEMA_INVALID` (a keyword or field type outside the task-form subset), `FORM_HINTS_INVALID` (a hint names a field the schema lacks), `FORM_INVALID` (two form declarations on one step, or a name that is not a plain relative one) and `FORM_LINK_NOT_ALLOWED` (a link that is neither relative nor on `tasks.form-link-origins`). Nothing is written and the version keeps its status.
 
 Codes of expression problems, in `when` and `then` cells. Each is refused at import, at draft replacement, by `VersionService.validate` and at `:request-publish`, which checks a stored draft again so a draft stored before a check existed stays a draft:
 
@@ -261,6 +266,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### INSTANCE_NOT_FOUND
 `404`. Unknown instance id, or an instance of another tenant.
 
+### FORM_NOT_DECLARED
+`404`. `GET /tasks/{id}/form` for a task whose step declares no form, or whose registered form your host no longer provides. Complete the task with `:complete` without a form, or register the form. A task declared with a link answers `200` with `link`, not this code.
+
 ### TASK_NOT_FOUND
 `404`. Unknown task id, or a task of another tenant.
 
@@ -294,6 +302,9 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 ### Step failures of a process call
 A step that calls another process (0.3.0) raises an incident, not an HTTP error, when the call cannot run or the child does not complete: `NO_EFFECTIVE_VERSION` (the called definition has no effective version, or the pinned version is not active, in the tenant), `CALL_DEPTH_EXCEEDED` (the call would sit deeper than `calls.max-depth`, at most 5), `CHILD_FAILED`, `CHILD_CANCELLED` (the cause names the child's cancellation reason) and `OUTPUT_VARIABLE_MISSING` (the child did not set a declared output). Retry the incident to start a new child. A migration outcome `SKIPPED` with the code `STEP_IN_FLIGHT` means a call was in flight at a removed step; a later plan moves the instance.
 
+### Step failures of a loop
+A step that repeats (0.3.0) raises an incident, not an HTTP error, when it cannot start: `MULTI_INSTANCE_LIMIT` (its collection, cardinality or `loopMaximum` is over `multi-instance.max`, at most 1,000) and `MULTI_INSTANCE_COLLECTION_INVALID` (the variable named by `horus:collection` is missing or not a list, or the cardinality is not a whole number of 0 or more). No task, job or child is created. Correct the variable, then retry the step. A repetition that fails has the incident of its own step, and the other repetitions go on.
+
 ### LAYOUT_NOT_FOUND
 `404`. The version has no such layout revision (`GET .../layout?revision=n`). A version with no layout at all answers `204`, not an error.
 
@@ -310,7 +321,7 @@ A step that calls another process (0.3.0) raises an incident, not an HTTP error,
 `422`. An `agentTask` names a guardrail rule set that does not meet the contract: it exists in your tenant with a version in effect, has hit policy `first` or `unique`, declares the output `allow: boolean`, may declare `reasons: string`, and reads only inputs the step's `outputSchema` declares with a compatible type. Checked at import, at request-approval and at approval, against the version in effect then; nothing is written. `detail` and each entry of `problems` name the step id and the failed check, for example `step assess-documents: guardrail rule set agent-output-guardrails v1 declares no output allow: boolean (outputs decision: string)`. Publish a compliant version of the rule set, then deploy again. An agent replay checks its candidate version against the same contract before it creates a run (`POST /agent-replays`).
 
 ### FORM_VALIDATION_FAILED
-`422`. A task completion does not match the task's form schema. The body carries a JSON Pointer to each failing field, for example `/reason`. Correct the field and complete again. Since 0.2.0 the review task of a refused agent result checks the reviewer's answer against the step's output schema; its body carries `violations`, each a path and a rule such as `$.riskScore: expected integer`, and the task stays claimed.
+`422`. A task completion does not match the task's form schema. The body carries `violations` (`$.reason: required`) and `errors`, one `{ pointer, rule }` per failing field with its JSON Pointer, for example `/reason`; a submitted value is never in it. Nothing is written and the task stays claimed. Correct the field and complete again. Since 0.2.0 the review task of a refused agent result checks the reviewer's answer against the step's output schema; its body carries `violations`, each a path and a rule such as `$.riskScore: expected integer`, and the task stays claimed.
 
 ### LAYOUT_INVALID
 `422`. A layout save names a node id that is not in the definition, or exceeds 256 KB. Remove the unknown node or reduce the layout. Layout saves need no approval.

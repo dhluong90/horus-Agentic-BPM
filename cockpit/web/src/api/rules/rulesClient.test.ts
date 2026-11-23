@@ -97,7 +97,7 @@ describe('rules client', () => {
     const asMinh = await allVersions(createRulesClient('', engineFetch('minh').fetchImpl), 'card-fee');
     expect(asMinh.map((v) => [v.version, v.status, v.allowedActions])).toEqual([[2, 'PENDING_APPROVAL', ['approve', 'reject']], [1, 'PUBLISHED', []]]);
     const asLan = await allVersions(createRulesClient('', engineFetch('lan').fetchImpl), 'card-fee');
-    expect(asLan[0]?.allowedActions).toEqual([]);
+    expect(asLan[0]?.allowedActions).toEqual(['withdraw']);
     const missing: unknown = await allVersions(createRulesClient('', engineFetch().fetchImpl), 'nothing-here').catch((e: unknown) => e);
     expect(missing instanceof HostCallError ? missing.hostError : undefined).toMatchObject({ status: 404, code: 'RULE_SET_NOT_FOUND' });
   });

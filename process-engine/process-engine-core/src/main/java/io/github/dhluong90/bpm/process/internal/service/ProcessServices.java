@@ -83,6 +83,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.AgentTaskSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.GuardrailSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
@@ -230,12 +231,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    /** The host's task forms (PRE-031); none until the starter installs them, so no declared form is accepted. */
+    private volatile TaskForms forms = TaskForms.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue =
             io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
     /** The host's port for the messages a process sends (#491); none until the starter installs one. */
     private volatile io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
     /** {@code calls.max-depth} (#92). */
     private volatile int maxCallDepth = EngineDefaults.MAX_CALL_DEPTH;
+    private volatile int maxLoopInstances = DefaultExecutionKernel.DEFAULT_MAX_INSTANCES;
     private volatile io.github.dhluong90.bpm.process.internal.store.LayoutStore importedLayouts;
     private volatile Map<SourceFormat, java.util.function.BiFunction<byte[], Process, String>> layoutExtractors =
             Map.of();
@@ -632,69 +636,88 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         // Parse, validate and hash before any transaction opens (DESIGN section 4).
         List<DefinitionProblem> warnings = List.of();
-        Process process;
+        List<Process> processes;
         if (reader instanceof DefinitionReader withWarnings) {
             DefinitionReader.Result read = withWarnings.readWithWarnings(bytes);
-            process = read.process();
+            processes = read.processes();
             warnings = read.warnings();
         } else {
-            process = reader.apply(bytes);
+            processes = List.of(reader.apply(bytes));
         }
         final List<DefinitionProblem> importWarnings = warnings;
-        compiler.compile("validation", process);
-        checkBindings(process);
-        checkGuardrailContracts(tenant, process);
-        String canonical = CanonicalProcessWriter.canonicalText(process);
-        String hash = Hashes.sha256(canonical);
-        int nodeCount = (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count();
+        record Prepared(Process process, String canonical, String hash, int nodeCount, String layout) { }
+        List<Prepared> prepared = new java.util.ArrayList<>();
+        for (Process process : processes) {
+            compiler.compile("validation", process);
+            checkBindings(process);
+            checkForms(tenant, process);
+            checkGuardrailContracts(tenant, process);
+            String canonical = CanonicalProcessWriter.canonicalText(process);
+            prepared.add(new Prepared(process, canonical, Hashes.sha256(canonical),
+                    (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count(),
+                    importedLayout(request, process)));
+        }
         String requestHash = Hashes.sha256Parts("import", caller, request.format().name(), Hashes.sha256(bytes));
-        String layout = importedLayout(request, process);
         return transactions.inTransaction(() -> idempotent(tenant, "import", request.idempotencyKey(), requestHash,
                 () -> {
-                    // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
-                    List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
-                    StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
-                    if (latest != null && latest.definitionHash().equals(hash)) {
-                        return view(latest).withWarnings(importWarnings);
+                    // #497: every executable pool of a collaboration is a definition of its own, stored together.
+                    List<DefinitionVersion> stored = new java.util.ArrayList<>();
+                    for (Prepared p : prepared) {
+                        stored.add(storeImported(tenant, caller, request, source, text, p.process(), p.canonical(),
+                                p.hash(), p.nodeCount(), p.layout()));
                     }
-                    Instant now = clock.instant();
-                    boolean active = settings.definitionsAutoApprove();
-                    StoredDefinition stored = new StoredDefinition(tenant, Ulid.next(now), process.id(),
-                            latest == null ? 1 : latest.version() + 1, active ? "ACTIVE" : "DRAFT", process.name(),
-                            canonical, hash, request.format().name(), text,
-                            Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
-                            active ? DEV_APPROVER : null, active ? now : null);
-                    store.insertDefinition(stored);
-                    if (layout != null) {
-                        // #445: revision 1, from the file's own diagram, in the transaction of the import.
-                        importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
-                                1, layout, Hashes.sha256(layout), hash, "BPMN", caller, now));
-                    }
-                    lifecycleHistory(stored, "IMPORTED", null, caller, null, Map.of("source", source), now);
-                    // One event per stored version, so its id is derived from the version id.
-                    Map<String, Object> payload = new LinkedHashMap<>();
-                    payload.put("definitionKey", stored.key());
-                    payload.put("version", stored.version());
-                    payload.put("definitionHash", hash);
-                    if (active) {
-                        payload.put("approvedBy", DEV_APPROVER);
-                        payload.put("approvedAt", now.toString());
-                        payload.put("effectiveFrom", now.toString());
-                        payload.put("sourceHash", stored.sourceHash());
-                        payload.put("readerVersion", READER_VERSION);
-                        payload.put("source", source);
-                    }
-                    publishDefinition(stored, active ? "processes.definition.approved.v1"
-                            : "processes.definition.imported.v1", payload, now);
-                    if (active) {
-                        // PRE-022 (c): every auto-approved import is named in the log, with tenant and key.
-                        LOG.log(System.Logger.Level.WARNING, "process.definition.auto-approved tenant={0} key={1} "
-                                + "version={2} (definitions.auto-approve, dev profile)", tenant, stored.key(),
-                                stored.version());
-                        retireSuperseded(versions, stored, now);
-                    }
-                    return view(stored).withWarnings(importWarnings);
+                    DefinitionVersion first = stored.get(0);
+                    List<DefinitionRef> also = stored.stream().skip(1)
+                            .map(v -> new DefinitionRef(v.key(), v.version())).toList();
+                    return first.withWarnings(importWarnings).withAlsoImported(also);
                 }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    private DefinitionVersion storeImported(String tenant, String caller, ImportRequest request, String source,
+            String text, Process process, String canonical, String hash, int nodeCount, String layout) {
+        // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
+        List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
+        StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
+        if (latest != null && latest.definitionHash().equals(hash)) {
+            return view(latest);
+        }
+        Instant now = clock.instant();
+        boolean active = settings.definitionsAutoApprove();
+        StoredDefinition stored = new StoredDefinition(tenant, Ulid.next(now), process.id(),
+                latest == null ? 1 : latest.version() + 1, active ? "ACTIVE" : "DRAFT", process.name(),
+                canonical, hash, request.format().name(), text,
+                Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
+                active ? DEV_APPROVER : null, active ? now : null);
+        store.insertDefinition(stored);
+        if (layout != null) {
+            // #445: revision 1, from the file's own diagram, in the transaction of the import.
+            importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
+                    1, layout, Hashes.sha256(layout), hash, "BPMN", caller, now));
+        }
+        lifecycleHistory(stored, "IMPORTED", null, caller, null, Map.of("source", source), now);
+        // One event per stored version, so its id is derived from the version id.
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("definitionKey", stored.key());
+        payload.put("version", stored.version());
+        payload.put("definitionHash", hash);
+        if (active) {
+            payload.put("approvedBy", DEV_APPROVER);
+            payload.put("approvedAt", now.toString());
+            payload.put("effectiveFrom", now.toString());
+            payload.put("sourceHash", stored.sourceHash());
+            payload.put("readerVersion", READER_VERSION);
+            payload.put("source", source);
+        }
+        publishDefinition(stored, active ? "processes.definition.approved.v1"
+                : "processes.definition.imported.v1", payload, now);
+        if (active) {
+            // PRE-022 (c): every auto-approved import is named in the log, with tenant and key.
+            LOG.log(System.Logger.Level.WARNING, "process.definition.auto-approved tenant={0} key={1} "
+                    + "version={2} (definitions.auto-approve, dev profile)", tenant, stored.key(),
+                    stored.version());
+            retireSuperseded(versions, stored, now);
+        }
+        return view(stored);
     }
 
     // ---- definition lifecycle (ADR-0012, DESIGN section 3.2) -------------------------------------------------
@@ -1355,6 +1378,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#pendingApprovals(PageRequest)}. */
     public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page) {
+        return pendingApprovals(page, List.of());
+    }
+
+    /**
+     * The pending approvals list with other kinds of proposal beside the definition versions (#473): each source is
+     * read after the same keyset position and the results are merged on {@code (requestedAt, id)}, so a page is the
+     * oldest {@code limit} proposals of all kinds and the cursor is the position of the last one.
+     *
+     * @param page the page request
+     * @param sources the other kinds, in any order
+     * @return the page
+     */
+    public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page,
+            List<PendingApprovalSource> sources) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_READ);
         PageRequest request = page == null ? PageRequest.first() : page;
@@ -1380,12 +1417,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         java.util.Set<String> held = callers.currentPermissions();
         List<ProcessStore.PendingApprovalRow> rows = transactions.inTransaction(() -> store.pendingApprovals(tenant,
                 lastAt, lastId, limit + 1));
-        List<io.github.dhluong90.bpm.process.api.PendingApproval> items = rows.stream().limit(limit)
-                .map(r -> pendingApproval(r, caller, held)).toList();
-        if (rows.size() <= limit) {
+        List<io.github.dhluong90.bpm.process.api.PendingApproval> all = new ArrayList<>(rows.stream()
+                .map(r -> pendingApproval(r, caller, held)).toList());
+        for (PendingApprovalSource source : sources) {
+            all.addAll(transactions.inTransaction(() -> source.pending(tenant, caller, held, lastAt, lastId,
+                    limit + 1)));
+        }
+        if (!sources.isEmpty()) {
+            all.sort(java.util.Comparator.comparing(io.github.dhluong90.bpm.process.api.PendingApproval::requestedAt)
+                    .thenComparing(io.github.dhluong90.bpm.process.api.PendingApproval::id));
+        }
+        List<io.github.dhluong90.bpm.process.api.PendingApproval> items = all.stream().limit(limit).toList();
+        if (all.size() <= limit) {
             return new Page<>(items, null);
         }
-        ProcessStore.PendingApprovalRow last = rows.get(limit - 1);
+        io.github.dhluong90.bpm.process.api.PendingApproval last = items.get(limit - 1);
         return new Page<>(items, cursors().sign(tenant, "", "pending-approvals", last.requestedAt() + "|" + last.id()));
     }
 
@@ -1419,9 +1465,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 allowed.add(reject);
             }
         }
-        return new io.github.dhluong90.bpm.process.api.PendingApproval(row.key(), row.name(), row.version(),
-                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied,
-                displayName(row.requestedBy()));
+        return io.github.dhluong90.bpm.process.api.PendingApproval.definition(row.id(), row.key(), row.name(),
+                row.version(), row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed,
+                denied, displayName(row.requestedBy()));
     }
 
     /** A user's readable name from the host (#442); a lookup that fails leaves the id to show. */
@@ -1595,6 +1641,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void checkServiceRegistrations(String tenant, Process process) {
         List<DefinitionProblem> problems = serviceRegistrationProblems(process);
         problems.addAll(escalationRoleProblems(tenant, process));
+        problems.addAll(forms.check(tenant, process));
+        if (!problems.isEmpty()) {
+            throw new ValidationFailedException(problems);
+        }
+    }
+
+    /**
+     * PRE-031, PRE-219: every form a user task declares is usable in this host: a link is relative or on an allowed
+     * origin, a key or schema path is registered and its schema and hints are in the task-form subset. Refused as
+     * {@code 422 VALIDATION_FAILED} before anything is written.
+     */
+    private void checkForms(String tenant, Process process) {
+        List<DefinitionProblem> problems = forms.check(tenant, process);
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
         }
@@ -2022,7 +2081,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private static boolean startsOn(CompiledProcess process, String name) {
+        // Only the start event of the process itself: one in an event sub-process (#487) waits inside an instance.
         return process.nodes().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
+                && process.containerOf(s.id()).equals(process.process().id())
                 && s.eventDefinitions().stream().anyMatch(d -> d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition m
                 && name.equals(m.messageRef())));
     }
@@ -3136,6 +3197,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Sets the most repetitions one looped activity may have ({@code multi-instance.max}, #496): a collection or a
+     * loop maximum over it opens an incident and creates no task. Set before the first instance runs.
+     *
+     * @param instances 1 to {@link EngineDefaults#MAX_LOOP_INSTANCES}
+     */
+    public void useMaxLoopInstances(int instances) {
+        if (instances < 1 || instances > EngineDefaults.MAX_LOOP_INSTANCES) {
+            throw new IllegalArgumentException("multi-instance.max must be 1 to " + EngineDefaults.MAX_LOOP_INSTANCES);
+        }
+        this.maxLoopInstances = instances;
+    }
+
+    /**
      * Sets how deep one call may sit above another ({@code calls.max-depth}).
      *
      * @param depth 1 to {@link EngineDefaults#MAX_CALL_DEPTH}
@@ -3423,7 +3497,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * abandoned half way.
      */
     private void cancelChildren(String tenant, String parentId, String actor) {
+        cancelChildren(tenant, parentId, actor, null);
+    }
+
+    /**
+     * As {@link #cancelChildren(String, String, String)}, for the children started by some of the parent's tokens only
+     * (#496: a multi-instance loop ended while those children still ran); null means every child.
+     */
+    private void cancelChildren(String tenant, String parentId, String actor, java.util.Set<String> parentTokens) {
         for (String childId : store.activeChildren(tenant, parentId, EngineDefaults.MAX_PAGE_SIZE)) {
+            if (parentTokens != null && store.parentLink(tenant, childId)
+                    .map(link -> !parentTokens.contains(link.parentTokenId())).orElse(true)) {
+                continue;
+            }
             InstanceRow child = store.lockInstance(tenant, childId).orElse(null);
             if (child == null || !"RUNNING".equals(child.status())) {
                 continue;
@@ -3651,6 +3737,38 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
 
+    @Override
+    public ProcessInstance startAdHocActivity(String instanceId, long expectedLockVersion, String scopeTokenId,
+            String activityId, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_TASK_MANAGE);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("Starting an activity needs an Idempotency-Key");
+        }
+        if (scopeTokenId == null || scopeTokenId.isBlank() || activityId == null || activityId.isBlank()) {
+            throw new InputInvalidException("scopeTokenId and activityId are required");
+        }
+        String requestHash = Hashes.sha256Parts("start-ad-hoc", caller, instanceId, scopeTokenId, activityId,
+                String.valueOf(expectedLockVersion));
+        return transactions.inTransaction(() -> idempotent(tenant, "start-ad-hoc", idempotencyKey, requestHash, () -> {
+            InstanceRow row = store.lockInstance(tenant, instanceId)
+                    .orElseThrow(() -> new InstanceNotFoundException("No instance " + instanceId));
+            if (row.lockVersion() != expectedLockVersion) {
+                throw new VersionConflictException("Instance " + instanceId + " is at lock version " + row.lockVersion());
+            }
+            if (!"RUNNING".equals(row.status())) {
+                throw new InvalidStateException("Instance " + instanceId + " is " + row.status());
+            }
+            StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+            InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
+                    InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
+                    participants(tenant, row), row.sequence());
+            // A refusal (ACTIVITY_NOT_ENABLED, ACTIVITY_NOT_FOUND) reaches the caller as 422 STEP_FAILED with its code.
+            run(definition, row, state, new Command.StartAdHocActivity(scopeTokenId, activityId, caller), RunAs.REQUEST);
+            return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
+        }, Views::instanceToJson, Views::instanceFromJson));
+    }
+
     // ---- saga compensation (#67, ADR-0007, DESIGN section 4.2) ------------------------------------------------
 
     /** Payload key of an undo job: the job the forward step ran under. */
@@ -3675,7 +3793,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * step's attempt id is its job id, whose accepted attempt is the job's current one; a local step has no job.
      */
     private ProcessStore.CompensationEntry entryOf(Effect.PushCompensation push, String tenant, String instanceId,
-            FlowNode node, Instant now) {
+            FlowNode forwardNode, FlowNode compensationActivity, Instant now) {
+        // #488: an undo that a compensation boundary event names runs as its compensation activity says (local or
+        // remote); a horus:compensate undo runs as the step itself does.
+        FlowNode node = compensationActivity != null ? compensationActivity : forwardNode;
         JobRow forward = jobs.findJob(tenant, push.attemptId()).filter(j -> JobStore.isAsync(j.jobKind()))
                 .orElse(null);
         String forwardJobId = forward == null ? null : forward.id();
@@ -3686,15 +3807,62 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String mode = MANUAL.equals(push.handler()) ? MANUAL : remote ? "remote" : "local";
         return new ProcessStore.CompensationEntry(tenant, Ulid.next(now), instanceId, push.scopeTokenId(), 0,
                 push.nodeId(), forwardJobId, forwardAttemptId, push.handler(), mode, Values.write(push.inputSnapshot()),
-                ProcessStore.CompensationEntry.PENDING, null, now, null);
+                ProcessStore.CompensationEntry.PENDING, null, now, null, 0);
     }
 
-    /** The entries of one scope token, newest first. */
-    private List<ProcessStore.CompensationEntry> scopeStack(String tenant, String instanceId, String scopeTokenId) {
+    /**
+     * The entries a walk of {@code walkScope} takes, newest pushed first (#488): those of the scope token itself and of
+     * every scope token under it, the sub-processes completed in it, so an enclosing scope's undo reaches what its
+     * sub-processes did. With a throw that names an activity, only the entries of that activity: its own step, or
+     * the steps run in a sub-process of that id.
+     */
+    private List<ProcessStore.CompensationEntry> walkStack(StoredDefinition definition, String tenant,
+            String instanceId, String walkScope) {
+        List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = store.tokens(tenant, instanceId);
+        java.util.Map<String, io.github.dhluong90.bpm.process.internal.exec.Token> byId = new java.util.HashMap<>();
+        tokens.forEach(t -> byId.put(t.id(), t));
+        java.util.Set<String> scopes = new java.util.HashSet<>(java.util.Set.of(walkScope));
+        boolean grew = true;
+        while (grew) {
+            grew = false;
+            for (io.github.dhluong90.bpm.process.internal.exec.Token t : tokens) {
+                if (t.kind() == io.github.dhluong90.bpm.process.internal.exec.TokenKind.SCOPE
+                        && t.scopeTokenId() != null && scopes.contains(t.scopeTokenId()) && scopes.add(t.id())) {
+                    grew = true;
+                }
+            }
+        }
+        String target = tokens.stream().filter(t -> walkScope.equals(t.scopeTokenId())
+                && t.status() == TokenStatus.WAITING_EVENT).findFirst()
+                .flatMap(t -> compiled(definition).process().node(t.nodeId()))
+                .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event)
+                .map(n -> ((io.github.dhluong90.bpm.process.internal.model.bpmn.Event) n).eventDefinitions())
+                .filter(d -> d.size() == 1 && d.get(0) instanceof
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition)
+                .map(d -> ((io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition) d.get(0))
+                        .activityRef())
+                .orElse(null);
         return store.compensationEntries(tenant, instanceId).stream()
-                .filter(e -> e.scopeTokenId().equals(scopeTokenId))
-                .sorted(java.util.Comparator.comparingInt(ProcessStore.CompensationEntry::seq).reversed())
+                .filter(e -> scopes.contains(e.scopeTokenId()))
+                .filter(e -> target == null || undoesActivity(e, target, byId, walkScope))
+                .sorted(java.util.Comparator.comparingInt(ProcessStore.CompensationEntry::instanceSeq).reversed())
                 .toList();
+    }
+
+    /** Whether an entry belongs to the activity: its own step, or a step run inside that sub-process's scope. */
+    private static boolean undoesActivity(ProcessStore.CompensationEntry entry, String activityId,
+            java.util.Map<String, io.github.dhluong90.bpm.process.internal.exec.Token> byId, String walkScope) {
+        if (entry.stepId().equals(activityId)) {
+            return true;
+        }
+        io.github.dhluong90.bpm.process.internal.exec.Token scope = byId.get(entry.scopeTokenId());
+        while (scope != null && !scope.id().equals(walkScope)) {
+            if (scope.nodeId().equals(activityId)) {
+                return true;
+            }
+            scope = scope.scopeTokenId() == null ? null : byId.get(scope.scopeTokenId());
+        }
+        return false;
     }
 
     /**
@@ -3703,7 +3871,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private void startCompensation(StoredDefinition definition, String tenant, String instanceId,
             Effect.StartCompensation started) {
-        long depth = scopeStack(tenant, instanceId, started.scopeTokenId()).stream()
+        long depth = walkStack(definition, tenant, instanceId, started.scopeTokenId()).stream()
                 .filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).count();
         InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
         Instant now = clock.instant();
@@ -3734,7 +3902,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * incident; with none left the scope is {@code COMPENSATED} and the instance {@code FAILED} (PRE-013).
      */
     private void advanceWalk(StoredDefinition definition, String tenant, String instanceId, String scopeTokenId) {
-        List<ProcessStore.CompensationEntry> stack = scopeStack(tenant, instanceId, scopeTokenId);
+        List<ProcessStore.CompensationEntry> stack = walkStack(definition, tenant, instanceId, scopeTokenId);
         if (stack.stream().anyMatch(e -> !ProcessStore.CompensationEntry.PENDING.equals(e.status())
                 && !ProcessStore.CompensationEntry.DONE.equals(e.status()))) {
             return;
@@ -3857,11 +4025,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 details.put("jobId", job.id());
                 details.put("attempt", job.attempt());
                 store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
-                        "COMPENSATION_STEP_COMPLETED", entry.stepId(), entry.scopeTokenId(), attemptId, reportedBy, now,
+                        "COMPENSATION_STEP_COMPLETED", entry.stepId(), job.tokenId(), attemptId, reportedBy, now,
                         details)));
-                closeRetried(tenant, row.id(), entry.scopeTokenId(), now);
+                closeRetried(tenant, row.id(), job.tokenId(), now);
                 advanceWalk(store.definition(tenant, row.definitionId()).orElseThrow(), tenant, row.id(),
-                        entry.scopeTokenId());
+                        job.tokenId());
             }
             case StepResult.BusinessError error -> giveBack(job, attemptId, error.code(), false, true, reportedBy);
             case StepResult.Failed failed -> giveBack(job, attemptId, failed.errorCode(), failed.retryable(), false,
@@ -3882,9 +4050,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("jobId", job.id());
         details.put("errorCode", cause);
         store.appendHistory(job.tenantId(), job.instanceId(), job.definitionId(), List.of(new HistoryEntry(
-                "COMPENSATION_STEP_FAILED", entry.stepId(), entry.scopeTokenId(),
+                "COMPENSATION_STEP_FAILED", entry.stepId(), job.tokenId(),
                 attemptId(job.id(), Math.max(1, job.attempt())), COMPENSATION_ACTOR, now, details)));
-        raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), entry.scopeTokenId(),
+        raiseIncident(new IncidentSite(job.tenantId(), job.instanceId(), job.definitionId(), job.tokenId(),
                 entry.stepId(), job.id(), attemptId(job.id(), Math.max(1, job.attempt())), Math.max(0, job.attempt() - 1),
                 COMPENSATION_FAILED, cause, "Undo " + entry.handler() + " of " + entry.stepId() + " (entry "
                         + entry.id() + ", forward job " + (entry.forwardJobId() == null ? "-" : entry.forwardJobId())
@@ -3924,8 +4092,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /** The entry an undo incident holds: on its scope token and step, {@code FAILED} or {@code MANUAL}. */
     private ProcessStore.CompensationEntry heldEntry(ProcessStore.IncidentRow incident) {
-        return store.compensationEntries(incident.tenantId(), incident.instanceId()).stream()
-                .filter(e -> e.scopeTokenId().equals(incident.tokenId()) && e.stepId().equals(incident.nodeId())
+        return walkStack(store.definition(incident.tenantId(), store.findInstance(incident.tenantId(),
+                incident.instanceId()).orElseThrow().definitionId()).orElseThrow(), incident.tenantId(),
+                incident.instanceId(), incident.tokenId()).stream()
+                .filter(e -> e.stepId().equals(incident.nodeId())
                         && (ProcessStore.CompensationEntry.FAILED.equals(e.status())
                                 || ProcessStore.CompensationEntry.MANUAL.equals(e.status())))
                 .findFirst()
@@ -3985,7 +4155,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("resolvedBy", approver);
         details.put("manual", true);
         store.appendHistory(tenant, pending.instanceId(), pending.definitionId(), List.of(new HistoryEntry(
-                "COMPENSATION_STEP_COMPLETED", entry.stepId(), entry.scopeTokenId(), null, approver, now, details)));
+                "COMPENSATION_STEP_COMPLETED", entry.stepId(), pending.tokenId(), null, approver, now, details)));
         ProcessStore.IncidentRow current = store.lockIncident(tenant, pending.id()).orElseThrow();
         ProcessStore.IncidentRow resolved = current.resolved(COMPLETED_MANUALLY, approver, now);
         writeIncident(resolved);
@@ -3999,7 +4169,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             extra.put("comment", comment);
         }
         recordResolved(resolved, approver, null, extra, now);
-        advanceWalk(locked.definition(), tenant, pending.instanceId(), entry.scopeTokenId());
+        advanceWalk(locked.definition(), tenant, pending.instanceId(), pending.tokenId());
         return resolved;
     }
 
@@ -4014,6 +4184,58 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             InstanceRow row = store.findInstance(tenant, task.instanceId()).orElseThrow();
             return withActions(taskView(task, row), caller, participants(tenant, row));
         });
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.process.api.TaskForm form(String taskId) {
+        String tenant = tenant();
+        callerWith(PERMISSION_TASK_WORK);
+        return transactions.inTransaction(() -> {
+            TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
+            InstanceRow row = store.findInstance(tenant, task.instanceId()).orElseThrow();
+            TaskForms.Resolved resolved = resolveForm(tenant, row, task).orElseThrow(
+                    () -> new io.github.dhluong90.bpm.process.api.FormNotDeclaredException(
+                            "The step of task " + taskId + " declares no form"));
+            return switch (resolved) {
+                case TaskForms.Resolved.Form f -> new io.github.dhluong90.bpm.process.api.TaskForm(task.id(),
+                        task.lockVersion(), f.schema(), f.hints(),
+                        TaskForms.prefill(f.schema(), Values.readMap(row.variablesJson())), null);
+                case TaskForms.Resolved.Link l -> new io.github.dhluong90.bpm.process.api.TaskForm(task.id(),
+                        task.lockVersion(), null, null, null, TaskForms.link(l.template(), task.id(), row.id()));
+            };
+        });
+    }
+
+    /** What the task's step declares, or empty for a review task and for a step without a form. */
+    private java.util.Optional<TaskForms.Resolved> resolveForm(String tenant, InstanceRow row, TaskRow task) {
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        if (!(compiled(definition).process().node(task.nodeId()).orElse(null) instanceof UserTask node)) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return forms.resolve(tenant, node);
+        } catch (TaskForms.FormUnavailableException e) {
+            throw new io.github.dhluong90.bpm.process.api.FormNotDeclaredException(e.getMessage());
+        }
+    }
+
+    /** PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen. */
+    private void checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
+        java.util.Optional<TaskForms.Resolved> resolved;
+        try {
+            resolved = resolveForm(tenant, row, task);
+        } catch (io.github.dhluong90.bpm.process.api.FormNotDeclaredException e) {
+            // Fail closed: a form that cannot be evaluated is never skipped.
+            throw new io.github.dhluong90.bpm.process.api.FormValidationException(
+                    "The form of this task cannot be used", List.of("$: the form is not available"));
+        }
+        if (resolved.orElse(null) instanceof TaskForms.Resolved.Form form) {
+            List<String> violations = forms.validate(form.schema(), result);
+            if (!violations.isEmpty()) {
+                throw new io.github.dhluong90.bpm.process.api.FormValidationException(
+                        "The result does not meet the task's form", violations);
+            }
+        }
     }
 
     @Override
@@ -4175,6 +4397,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Installs the host's task forms (PRE-031): the registry that resolves a declared form key or schema path, and
+     * the origins a form link may point to besides relative links. Called once while the engine is wired; without
+     * it every definition that declares a form is refused at import.
+     *
+     * @param registry the host's forms, or null for none
+     * @param linkOrigins allowed link origins such as {@code https://loans.example}, or null for none
+     */
+    public void useFormRegistry(io.github.dhluong90.bpm.process.spi.FormRegistry registry,
+            java.util.Collection<String> linkOrigins) {
+        this.forms = new TaskForms(registry, outputSchemas, linkOrigins);
+    }
+
+    /**
      * Installs the host's role list, which approval asks about the target role of every escalation level (PRE-180).
      * Called once while the engine is wired; without it no role is checked.
      *
@@ -4283,6 +4518,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + " task of it cannot complete this four-eyes task");
             }
             java.util.Optional<JobRow> reviewed = checkReviewResult(tenant, row, taskId, values);
+            if (reviewed.isEmpty()) {
+                checkForm(tenant, row, task, values);
+            }
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
                 throw new VersionConflictException("Task " + taskId + " changed concurrently");
@@ -4925,7 +5163,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // After the tokens: an entry references its scope token.
         for (Effect.PushCompensation push : pushes) {
             FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
-            store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, now));
+            FlowNode viaBoundary = node.extensions().first(CompensateHandlerRef.class).isPresent() ? null
+                    : compiled.process().compensationActivityOf(node.id()).orElse(null);
+            store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, viaBoundary, now));
         }
         for (Effect.StartChildInstance call : childStarts) {
             startChild(definition, row, state, call, newIncidents, now);
@@ -5108,11 +5348,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
             Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
-            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions),
+            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances),
                     AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
                             n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
-                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent c
-                            && c.eventDefinitions().stream().anyMatch(
+                            || (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent)
+                            && ((io.github.dhluong90.bpm.process.internal.model.bpmn.Event) n).eventDefinitions()
+                            .stream().anyMatch(
                             io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition.class::isInstance)));
         });
     }
@@ -5140,7 +5383,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
                     + ": the stored source does not match its source hash");
         }
-        Process process = reader.apply(source);
+        Process process = reader instanceof DefinitionReader keyed ? keyed.readKey(source, definition.key())
+                : reader.apply(source);
         if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
             throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
                     + ": the stored source no longer gives the recorded definition hash");

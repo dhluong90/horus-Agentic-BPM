@@ -58,6 +58,12 @@ public class ApprovalController {
         node.put("requestedAt", a.requestedAt().toString());
         // #442: the requester as the screen shows them; the id when the host knows no name
         node.put("requestedByName", a.requestedByName());
+        // #470: the date the requester asked for, so the approver sees it before approving; null means at approval
+        if (a.effectiveFrom() == null) {
+            node.putNull("effectiveFrom");
+        } else {
+            node.put("effectiveFrom", a.effectiveFrom().toString());
+        }
         ArrayNode actions = node.putArray("allowedActions");
         a.allowedActions().forEach(actions::add);
         ObjectNode denied = node.putObject("deniedActions");

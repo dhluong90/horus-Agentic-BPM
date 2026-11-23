@@ -48,7 +48,7 @@ export interface HostAnswer {
    * Tenant switching on this host (CKP-022): /meta reports it, /me lists `allowed` (the token's claim), and an
    * `X-Tenant-Id` outside it is 403 TENANT_NOT_ALLOWED. Each tenant has its own rule sets.
    */
-  tenants?: { allowed: string[]; ruleSets: Record<string, string> };
+  tenants?: { allowed: string[]; ruleSets: Record<string, string>; names?: Record<string, string> };
   /** A test proxy: after a switch, rewrites the X-Tenant-Id of the rule set list to this tenant. */
   forgeTenant?: string;
 }
@@ -156,7 +156,7 @@ export async function mockStandalone(page: Page, options: { registry?: unknown; 
         }) });
       }
       const tenant = asked ?? baseMe.tenant.current;
-      const me: BpmMeV1 = { ...baseMe, tenant: { current: tenant, allowed: answer.tenants ? allowed : baseMe.tenant.allowed } };
+      const me: BpmMeV1 = { ...baseMe, tenant: { current: tenant, allowed: answer.tenants ? allowed : baseMe.tenant.allowed, ...(answer.tenants?.names !== undefined ? { names: answer.tenants.names } : {}) } };
       if (url.pathname === '/api/bpm/meta') return route.fulfill({ status: 200, contentType: 'application/json', headers: CORS, body: JSON.stringify(meta(id, hostMeta)) });
       if (url.pathname === '/api/bpm/me') {
         if (answer.meProblem) {

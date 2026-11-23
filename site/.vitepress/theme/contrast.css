@@ -1,0 +1,11 @@
+/* Contrast fixes found by the axe check (cockpit/web/scripts/axe-site.mjs): WCAG 2 AA, 4.5:1 for text. */
+:root {
+  --vp-code-lang-color: #595960;
+}
+.dark {
+  --vp-code-lang-color: #a8a8b0;
+}
+.dark .mermaid .edgeLabel p,
+.dark .mermaid .edgeLabel span {
+  color: #ffffff !important;
+}

@@ -34,6 +34,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,7 +49,7 @@ import java.util.regex.Pattern;
  * default (PD-131): a proposal applies only when a second holder of {@code processes:calendar:manage} approves it,
  * and the database refuses an approved four-eyes row whose approver is its proposer. Thread-safe.
  */
-public final class Calendars implements CalendarService {
+public final class Calendars implements CalendarService, PendingApprovalSource {
 
     /** Whether a calendar change needs a second person. */
     public enum Approval {
@@ -200,16 +201,36 @@ public final class Calendars implements CalendarService {
 
     @Override
     public CalendarChange approve(String changeId, String comment, String idempotencyKey) {
+        return approve(changeId, comment, idempotencyKey, null);
+    }
+
+    @Override
+    public CalendarChange approve(String changeId, String comment, String idempotencyKey,
+            String expectedChangeHash) {
         String tenant = tenant();
         String caller = caller(PERMISSION_MANAGE);
         String note = text(comment, "comment", false);
-        String requestHash = Hashes.sha256Parts("calendar-approve", caller, String.valueOf(changeId),
-                String.valueOf(note));
+        if (expectedChangeHash != null && !expectedChangeHash.matches("[0-9a-f]{64}")) {
+            throw new InputInvalidException("expectedChangeHash must be 64 lower-case hexadecimal characters, the "
+                    + "contentHash of the change as the approvals list shows it");
+        }
+        // The hash joins the request hash only when named, so a key used before the hash existed still replays.
+        String requestHash = expectedChangeHash == null
+                ? Hashes.sha256Parts("calendar-approve", caller, String.valueOf(changeId), String.valueOf(note))
+                : Hashes.sha256Parts("calendar-approve", caller, String.valueOf(changeId), String.valueOf(note),
+                        expectedChangeHash);
         return transactions.inTransaction(() -> idempotent(tenant, "calendar-approve", idempotencyKey, requestHash,
                 () -> {
             ChangeRow change = pending(tenant, changeId);
             if (change.proposedBy().equals(caller)) {
                 throw new SelfApprovalForbiddenException("The proposer of a calendar change cannot approve it");
+            }
+            // PD-139: only the change the approver reviewed; a refusal names the hash stored now.
+            String stored = changeHash(change);
+            if (expectedChangeHash != null && !expectedChangeHash.equals(stored)) {
+                throw new io.github.dhluong90.bpm.process.api.ContentChangedException("Calendar change " + change.id()
+                        + " is not the change reviewed: expected hash " + expectedChangeHash + " but it is " + stored,
+                        stored, change.baseVersion());
             }
             StoredCalendar current = store.lockCalendar(tenant, change.calendarKey()).orElse(null);
             long version = current == null ? 0 : current.version();
@@ -219,6 +240,66 @@ public final class Calendars implements CalendarService {
             }
             return view(apply(change, current, caller, note, clock.instant()));
         }));
+    }
+
+    /**
+     * The hash of what an approver reviews in a calendar change: the calendar key, the version it was proposed against
+     * and the whole proposed calendar (zone, weekly hours, holidays). A change cannot be edited, so the hash is stable
+     * (PD-139, #473).
+     *
+     * @param change the change
+     * @return 64 lower-case hexadecimal characters
+     */
+    static String changeHash(ChangeRow change) {
+        return changeHash(change.calendarKey(), change.baseVersion(), change.proposed());
+    }
+
+    /**
+     * The hash of a change from its parts, for a screen that reads the change on its own (#473).
+     *
+     * @param calendarKey the calendar key
+     * @param baseVersion the version the change was proposed against
+     * @param proposed the calendar as it should be
+     * @return 64 lower-case hexadecimal characters
+     */
+    public static String changeHash(String calendarKey, long baseVersion, WorkingCalendar proposed) {
+        return Hashes.sha256Parts("calendar-change", calendarKey, Long.toString(baseVersion), proposed.zone().getId(),
+                String.valueOf(proposed.week()), String.valueOf(proposed.holidays()));
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.process.api.PendingApproval> pending(String tenant, String caller,
+            java.util.Set<String> held, Instant afterAt, String afterId, int limit) {
+        return store.pendingChangesOldestFirst(tenant, afterAt, afterId, limit).stream().map(c -> {
+            List<String> allowed = new ArrayList<>(2);
+            Map<String, String> denied = new LinkedHashMap<>(2);
+            String approve = io.github.dhluong90.bpm.process.api.PendingApproval.APPROVE;
+            String reject = io.github.dhluong90.bpm.process.api.PendingApproval.REJECT;
+            if (!held.contains(PERMISSION_MANAGE)) {
+                denied.put(approve, io.github.dhluong90.bpm.process.api.PendingApproval.PERMISSION_REQUIRED);
+                denied.put(reject, io.github.dhluong90.bpm.process.api.PendingApproval.PERMISSION_REQUIRED);
+            } else {
+                if (c.proposedBy().equals(caller)) {
+                    denied.put(approve, io.github.dhluong90.bpm.process.api.PendingApproval.SELF_APPROVAL_FORBIDDEN);
+                } else {
+                    allowed.add(approve);
+                }
+                // The proposer may withdraw their own change with reject (PRE-182).
+                allowed.add(reject);
+            }
+            return new io.github.dhluong90.bpm.process.api.PendingApproval(
+                    io.github.dhluong90.bpm.process.api.PendingApproval.CALENDAR_CHANGE, c.id(), c.calendarKey(), null,
+                    (int) c.baseVersion() + 1, null, null, changeHash(c), c.baseVersion(), c.proposedBy(),
+                    c.proposedAt(), c.reason(), allowed, denied, displayName(c.proposedBy()));
+        }).toList();
+    }
+
+    private String displayName(String userId) {
+        try {
+            return callers.displayNameOf(userId).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     @Override

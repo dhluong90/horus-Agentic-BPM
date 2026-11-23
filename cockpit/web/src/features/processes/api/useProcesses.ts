@@ -22,10 +22,13 @@ export function useKeys() {
     graph: (key: string, version: number) => [...base, 'graph', key, version] as const,
     diff: (key: string, version: number) => [...base, 'diff', key, version] as const,
     task: (id: string) => [...base, 'task', id] as const,
+    taskForm: (id: string) => [...base, 'task', id, 'form'] as const,
     instance: (id: string) => [...base, 'instance', id] as const,
     activities: (id: string) => [...base, 'instance', id, 'activities'] as const,
     instances: (key: string) => [...base, 'instances', key] as const,
     migration: (id: string) => [...base, 'migration', id] as const,
+    calendarChanges: [...base, 'calendar-changes'] as const,
+    calendarChange: (id: string) => [...base, 'calendar-changes', id] as const,
     migrationOutcomes: (id: string) => [...base, 'migration', id, 'outcomes'] as const,
   };
 }
@@ -124,6 +127,13 @@ export function useTask(id: string) {
   return useQuery({ queryKey: keys.task(id), queryFn: ({ signal }) => client.getTask(id, signal) });
 }
 
+/** The form a task is completed through; a task whose step declares none answers 404 FORM_NOT_DECLARED (CKP-021). */
+export function useTaskForm(id: string, enabled: boolean) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  return useQuery({ queryKey: keys.taskForm(id), queryFn: ({ signal }) => client.getTaskForm(id, signal), enabled, retry: false });
+}
+
 /** The task's instance, for who started it. A reviewer without processes:read gets no answer; four eyes then rests on the engine. */
 export function useInstance(id: string | undefined, live = false) {
   const { client, can } = useProcessesSession();
@@ -185,6 +195,19 @@ export function useClaimTask(task: Task) {
   });
 }
 
+/** Start one enabled activity of an ad-hoc sub-process (#500); the case and its timeline are read again. */
+export function useStartAdHocActivity(instance: { id: string; lockVersion: number }) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  const queryClient = useQueryClient();
+  const keyFor = useActionKey();
+  return useMutation({
+    mutationFn: ({ scopeTokenId, activityId }: { scopeTokenId: string; activityId: string }) =>
+      client.startAdHocActivity(instance.id, instance.lockVersion, scopeTokenId, activityId, keyFor(`ad-hoc:${instance.id}:${String(instance.lockVersion)}:${scopeTokenId}:${activityId}`)),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: keys.instance(instance.id) }); },
+  });
+}
+
 /** Complete the review task with the reviewer's answer and reason; the task is read again for its completed state. */
 export function useCompleteTask(task: Task) {
   const { client } = useProcessesSession();
@@ -194,5 +217,26 @@ export function useCompleteTask(task: Task) {
   return useMutation({
     mutationFn: (answer: TaskAnswer) => client.completeTask(task.id, task.lockVersion, answer, keyFor(`complete:${task.id}:${String(task.lockVersion)}:${JSON.stringify(answer)}`)),
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: keys.task(task.id) }); },
+  });
+}
+
+/**
+ * Complete the task through its form: `If-Match` is the lock version the form was read at, and one Idempotency-Key
+ * serves every retry of the same result, so a double click or a retried request completes once. Settled either way,
+ * the task and its form are read again: after a 200 the task is done; after a 409 the screen shows where it is now.
+ */
+export function useCompleteForm(taskId: string, lockVersion: number) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  const queryClient = useQueryClient();
+  const keyFor = useActionKey();
+  return useMutation({
+    mutationFn: (result: Readonly<Record<string, unknown>>) => client.completeTask(taskId, lockVersion, { result }, keyFor(`complete-form:${taskId}:${String(lockVersion)}:${JSON.stringify(result)}`)),
+    onSettled: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: keys.task(taskId) }),
+        queryClient.invalidateQueries({ queryKey: [keys.task(taskId)[0], keys.task(taskId)[1], 'processes', 'tasks'] }),
+      ]);
+    },
   });
 }

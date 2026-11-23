@@ -112,7 +112,7 @@ final class ProcessListQueries {
 
     /** The columns of a compensation stack entry (#67, V31). */
     static final String COMPENSATION_COLUMNS = "tenant_id, id, instance_id, scope_token_id, seq, step_id, forward_job_id, "
-            + "forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, completed_at";
+            + "forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, completed_at, instance_seq";
 
     /**
      * The compensation stack of one instance (#67), by scope token and newest first, on
@@ -338,6 +338,15 @@ final class ProcessListQueries {
     /** A later page of calendar changes, after the last change of the previous page. */
     static final ListQuery CALENDAR_CHANGES_AFTER = calendarChanges(true);
 
+    /** The first page of pending calendar changes, oldest first, for the approvals queue (#473). */
+    static final ListQuery PENDING_CALENDAR_CHANGES = pendingCalendarChanges(false);
+    /** A later page of them. */
+    static final ListQuery PENDING_CALENDAR_CHANGES_AFTER = pendingCalendarChanges(true);
+    /** The first page of proposed migration executions, oldest first, for the approvals queue (#473). */
+    static final ListQuery PROPOSED_MIGRATIONS = proposedMigrations(false);
+    /** A later page of them. */
+    static final ListQuery PROPOSED_MIGRATIONS_AFTER = proposedMigrations(true);
+
     /** The first page of definition keys. */
     static final ListQuery DEFINITION_KEYS = definitionKeys(false);
     /** A later page of definition keys, after the last key of the previous page. */
@@ -498,7 +507,8 @@ final class ProcessListQueries {
                 MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,
-                CALENDAR_CHANGES_AFTER,
+                CALENDAR_CHANGES_AFTER, PENDING_CALENDAR_CHANGES, PENDING_CALENDAR_CHANGES_AFTER, PROPOSED_MIGRATIONS,
+                PROPOSED_MIGRATIONS_AFTER,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true)));
         all.addAll(DATED.values());
@@ -556,6 +566,34 @@ final class ProcessListQueries {
                 "SELECT " + CALENDAR_CHANGE_COLUMNS + " FROM pre_calendar_change WHERE tenant_id = ? AND status = ? "
                         + (after ? "AND (proposed_at, id) < (?, ?) " : "")
                         + "ORDER BY proposed_at DESC, id DESC LIMIT ?");
+    }
+
+    /**
+     * The pending calendar changes, oldest proposal first on {@code idx_pre_calendar_change_pending_page (tenant_id,
+     * proposed_at, id)} (V49); keyset on {@code (proposed_at, id)}. Parameters: tenant, [after proposed at, after id],
+     * limit.
+     */
+    private static ListQuery pendingCalendarChanges(boolean after) {
+        return new ListQuery(after ? "pending-calendar-changes-after" : "pending-calendar-changes",
+                new Bound.Page("oldest proposal first on idx_pre_calendar_change_pending_page (tenant_id, "
+                        + "proposed_at, id)"),
+                "SELECT " + CALENDAR_CHANGE_COLUMNS + " FROM pre_calendar_change WHERE tenant_id = ? "
+                        + "AND status = 'PENDING' " + (after ? "AND (proposed_at, id) > (?, ?) " : "")
+                        + "ORDER BY proposed_at, id LIMIT ?");
+    }
+
+    /**
+     * The proposed migration executions, oldest proposal first on {@code idx_pre_migration_proposed_page (tenant_id,
+     * proposed_at, id)} (V49); keyset on {@code (proposed_at, id)}. The plan's mappings are not read. Parameters:
+     * tenant, [after proposed at, after id], limit.
+     */
+    private static ListQuery proposedMigrations(boolean after) {
+        return new ListQuery(after ? "proposed-migrations-after" : "proposed-migrations",
+                new Bound.Page("oldest proposal first on idx_pre_migration_proposed_page (tenant_id, proposed_at, id)"),
+                "SELECT id, definition_key, source_version, target_version, plan_hash, lock_version, proposed_by, "
+                        + "proposed_at, reason FROM pre_migration WHERE tenant_id = ? AND status = 'PROPOSED' "
+                        + (after ? "AND (proposed_at, id) > (?, ?) " : "")
+                        + "ORDER BY proposed_at, id LIMIT ?");
     }
 
     /** The columns of a calendar change, as {@link JdbcCalendarStore} reads them. */

@@ -13,6 +13,7 @@ import { DisplayNamesProvider } from '../features/processes/api/displayNames';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { MigrationBuilder } from '../features/processes/migration/MigrationBuilder';
+import { CalendarChangesPage } from '../features/processes/calendars/CalendarChangesPage';
 import { MigrationPage } from '../features/processes/migration/MigrationPage';
 import { InstancePage } from '../features/processes/InstancePage';
 import { ProcessesPage } from '../features/processes/ProcessesPage';
@@ -63,6 +64,7 @@ export function reportHostOf(meta: BpmMetaV1): ReportHostSettings {
     templates: module?.features.includes('rules.templates') === true,
     simulationReports: module?.features.includes('rules.simulation-reports') === true,
     historyReadings: module?.features.includes('rules.history-readings') === true,
+    conditionBuilder: module?.features.includes('rules.condition-builder') === true,
     requireReport: typeof required === 'string' ? required.split(',').map((name) => name.trim()).filter((name) => name !== '') : [],
   };
 }
@@ -142,6 +144,9 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
       return <MigrationBuilder definitionKey={route.key} target={route.version} from={route.from} />;
     case 'migration':
       return <MigrationPage migrationId={route.migrationId} pageLimit={pageLimit} />;
+    case 'calendar-changes':
+    case 'calendar-change':
+      return <CalendarChangesPage changeId={route.name === 'calendar-change' ? route.changeId : undefined} pageLimit={pageLimit} />;
     case 'instance':
       return <InstancePage instanceId={route.instanceId} />;
     case 'tasks':

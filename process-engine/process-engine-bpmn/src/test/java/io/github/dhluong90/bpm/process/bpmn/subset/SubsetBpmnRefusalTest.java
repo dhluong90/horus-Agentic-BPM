@@ -66,7 +66,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage() {
-        // Given loan.bpmn with a message boundary event (42), inclusive gateway (57), send task (63), ad-hoc sub-process (70)
+        // Given loan.bpmn with a data object (57), event-based gateway with instantiate (63)
         // and an XPath condition (88), and camunda:class on a service task (30)
         byte[] file = bytes("loan.bpmn");
 
@@ -74,12 +74,10 @@ class SubsetBpmnRefusalTest {
             assertThat(e.code()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
             assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
-                    tuple("boundaryEvent with messageEventDefinition", "be-timeout", 42, "S2"),
-                    tuple("inclusiveGateway", "ig-1", 57, "S1"),
-                    tuple("eventBasedGateway", "notify", 63, "S2"),
-                    tuple("adHocSubProcess", "adhoc-1", 70, "S3"),
+                    tuple("dataObject", "do-1", 57, "S1"),
+                    tuple("eventBasedGateway with instantiate", "notify", 63, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
-            assertThat(e.problems().get(4).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
+            assertThat(e.problems().get(2).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
             assertThat(e.truncated()).isFalse();
         });
     }
@@ -143,13 +141,13 @@ class SubsetBpmnRefusalTest {
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
-                        tuple("cnc", "S2"), tuple("err", "not planned"), tuple("none", "S0")));
+                        tuple("cnc", "not planned"), tuple("err", "not planned"), tuple("none", "S0")));
     }
 
     @Test
     void PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:serviceTask id=\"undo\" isForCompensation=\"true\" horus:handler=\"h\"/>"
+                + "<bpmn:task id=\"undo\" isForCompensation=\"true\"/>"
                 + "<bpmn:serviceTask id=\"batch\" completionQuantity=\"2\" horus:handler=\"h\"/>"
                 + "<bpmn:serviceTask id=\"ws\" implementation=\"##WebService\" horus:handler=\"h\"/>"
                 + TAIL).getBytes(StandardCharsets.UTF_8);
@@ -157,7 +155,7 @@ class SubsetBpmnRefusalTest {
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                         DefinitionProblem::stage).containsExactly(
-                        tuple("isForCompensation", "undo", "S2"),
+                        tuple("isForCompensation", "undo", "not planned"),
                         tuple("completionQuantity", "batch", "not planned"),
                         tuple("implementation", "ws", "not planned")));
     }
@@ -166,7 +164,7 @@ class SubsetBpmnRefusalTest {
     void PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag() {
         StringBuilder body = new StringBuilder("<bpmn:startEvent id=\"s\"/>");
         for (int i = 0; i < 130; i++) {
-            body.append("<bpmn:inclusiveGateway id=\"g").append(i).append("\"/>");
+            body.append("<bpmn:dataObject id=\"g").append(i).append("\"/>");
         }
 
         assertThatThrownBy(() -> reader.read((HEAD + body + TAIL).getBytes(StandardCharsets.UTF_8)))
@@ -179,7 +177,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters() {
         String id = "g".repeat(250) + "&#13;&#10;y";
-        byte[] file = (HEAD + "<bpmn:inclusiveGateway id=\"a&#13;&#10;b\"/><bpmn:inclusiveGateway id=\"" + id + "\"/>"
+        byte[] file = (HEAD + "<bpmn:dataObject id=\"a&#13;&#10;b\"/><bpmn:dataObject id=\"" + id + "\"/>"
                 + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {
@@ -191,12 +189,12 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:subProcess id=\"sc\" triggeredByEvent=\"true\"/><bpmn:choreographyTask id=\"ch\"/>"
-                + "<bpmn:eventBasedGateway id=\"eg\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
+                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:choreographyTask id=\"ch\"/>"
+                + "<bpmn:eventBasedGateway id=\"eg\" instantiate=\"true\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {
             assertThat(e.problems()).extracting(DefinitionProblem::stage)
-                    .containsExactly("S0", "S1", "not planned", "S2");
+                    .containsExactly("S0", "not planned", "S3");
             assertThat(e.problems()).extracting(DefinitionProblem::message)
                     .allSatisfy(m -> assertThat(m).doesNotContainIgnoringCase("sprint").doesNotContain("next")
                             .doesNotContain("later").doesNotContainPattern("20\\d\\d"));
@@ -205,14 +203,16 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_event_definitions_take_the_stage_of_their_kind() {
+        // A compensation, timer, error or escalation start event reads: it starts an event sub-process (#487).
         byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:compensateEventDefinition/></bpmn:startEvent>"
-                + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition/></bpmn:startEvent>"
+                + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition><bpmn:timeDuration>PT1H</bpmn:timeDuration>"
+                + "</bpmn:timerEventDefinition></bpmn:startEvent>"
                 + "<bpmn:endEvent id=\"c\"><bpmn:conditionalEventDefinition/></bpmn:endEvent>"
-                + "<bpmn:endEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:endEvent>" + TAIL)
+                + "<bpmn:startEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:startEvent>" + TAIL)
                 .getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
-                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "S1", "S2", "S2"));
+                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "not planned"));
     }
 
     private static byte[] bytes(String name) {

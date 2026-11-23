@@ -60,6 +60,16 @@ public interface ExecutionContext {
     void complete(Token token);
 
     /**
+     * Cancels one flow token with the work it waits on: its task, job or subscription (#500). A token that already
+     * ended, or that was held back by a join, is left as it is or marked {@code CANCELLED}.
+     *
+     * @param token the token
+     */
+    default void cancelToken(Token token) {
+        throw new UnsupportedOperationException("cancelToken");
+    }
+
+    /**
      * Cancels a scope token and everything under it: tokens, tasks, jobs and subscriptions.
      *
      * @param scope the scope token
@@ -85,6 +95,30 @@ public interface ExecutionContext {
      * @param cause the code that started it, for example a business error code
      */
     void compensate(Token failing, String cause);
+
+    /**
+     * A compensation throw event that the flow goes on after (#488): intermediate with an outgoing flow, or an end
+     * event. Every other live token under the thrower's scope is cancelled, the thrower waits, the instance is
+     * {@code COMPENSATING}, and the shell walks the undo entries of the scope and of the sub-processes completed in it,
+     * newest first. When the walk is done the instance is {@code RUNNING} again and the thrower leaves.
+     *
+     * @param thrower the token on the throw event
+     * @param targetActivityId the activity to undo (an {@code activityRef}), or null for the whole scope
+     */
+    default void compensateAndResume(Token thrower, String targetActivityId) {
+        throw new UnsupportedOperationException("compensateAndResume");
+    }
+
+    /**
+     * A cancel end event inside a transaction (#488): the transaction is compensated as for
+     * {@link #compensateAndResume}, and when the walk is done its cancel boundary event leaves the flow in the
+     * enclosing scope.
+     *
+     * @param end the token on the cancel end event
+     */
+    default void cancelTransaction(Token end) {
+        throw new UnsupportedOperationException("cancelTransaction");
+    }
 
     /**
      * Raises a BPMN error from a token (#489, #493). The nearest error boundary that matches the code, on the step
@@ -146,6 +180,47 @@ public interface ExecutionContext {
      */
     default void fireBoundary(Token boundaryToken, io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent
             boundary) {
+        throw new UnsupportedOperationException("fireBoundary");
+    }
+
+    /**
+     * The trigger of an event sub-process fired (#487). An interrupting one first cancels every other live token of the
+     * scope, with their tasks, jobs, called children and waits; a non-interrupting one leaves them. Then it opens a
+     * {@code SCOPE} token for the event sub-process under the scope and a flow token at its start event. The caller
+     * ends or keeps its own listener token before it calls.
+     *
+     * @param scope the scope token the event sub-process stands in
+     * @param start the start event of the event sub-process, which carries the trigger
+     * @param trigger {@code TIMER}, {@code MESSAGE}, {@code SIGNAL}, {@code CONDITIONAL}, {@code ERROR} or
+     *     {@code ESCALATION}, for the timeline
+     * @param details more for the timeline, for example the error code
+     * @param exceptWorkOf a token whose job or task is not cancelled because it already ended, or null
+     */
+    default void startEventSubProcess(Token scope, io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent start,
+            String trigger, java.util.Map<String, Object> details, String exceptWorkOf) {
+        throw new UnsupportedOperationException("startEventSubProcess");
+    }
+
+    /** Records that a conditional event sub-process was armed, so the kernel asks its condition once after this apply. */
+    default void conditionArmed() {
+        throw new UnsupportedOperationException("conditionArmed");
+    }
+
+    /**
+     * A boundary event of a message, a signal or a condition fired (#490): the same as {@link #fireBoundary(Token,
+     * io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent)} with the trigger and its details named in
+     * the timeline. An interrupting boundary cancels its host. A non-interrupting one that {@code keepWaiting} leaves
+     * its own token armed on the same subscription, so the next message or signal fires it again, and runs its flow on
+     * a new token.
+     *
+     * @param boundaryToken the token that waited on the boundary event
+     * @param boundary the boundary event
+     * @param trigger {@code MESSAGE}, {@code SIGNAL} or {@code CONDITION}
+     * @param details what fired it, for the timeline
+     * @param keepWaiting whether a non-interrupting boundary stays armed
+     */
+    default void fireBoundary(Token boundaryToken, io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent
+            boundary, String trigger, java.util.Map<String, Object> details, boolean keepWaiting) {
         throw new UnsupportedOperationException("fireBoundary");
     }
 

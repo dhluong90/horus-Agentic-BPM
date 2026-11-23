@@ -2,6 +2,9 @@ package io.github.dhluong90.bpm.process.bpmn.subset;
 
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
@@ -11,6 +14,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Collaboration;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Lane;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LaneSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Participant;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
@@ -22,7 +30,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocOrdering;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
@@ -41,6 +53,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceLoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.StandardLoopCharacteristics;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TextAnnotation;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
@@ -55,6 +72,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.nio.charset.StandardCharsets;
@@ -134,10 +152,23 @@ public final class SubsetBpmnWriter {
                 messages.put(messageName(node), unique(taken, "Message_" + messageName(node).replace(':', '_')));
             }
         }
+        Collaboration collaboration = process.collaboration();
+        if (collaboration != null) {
+            for (MessageFlow flow : collaboration.messageFlows()) {
+                if (flow.messageRef() != null && !messages.containsKey(flow.messageRef())) {
+                    messages.put(flow.messageRef(), unique(taken, "Message_" + flow.messageRef().replace(':', '_')));
+                }
+            }
+        }
         messages.forEach((name, id) -> xml.line(1, "<bpmn:message id=" + attr(id) + " name=" + attr(name) + "/>"));
         Refs refs = new Refs(signalIds, messages);
+        Set<String> collaborationIds = new HashSet<>();
+        if (collaboration != null) {
+            collaboration(xml, process, collaboration, messages, collaborationIds);
+        }
         xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
                 + " isExecutable=\"true\">");
+        process.laneSets().forEach(set -> laneSet(xml, set, 2, collaborationIds));
         for (FlowElement element : process.flowElements()) {
             flowElement(xml, element, 2, refs);
         }
@@ -150,10 +181,62 @@ public final class SubsetBpmnWriter {
         ids.addAll(signalIds.values());
         ids.addAll(messages.values());
         ids.add("Definitions_" + process.id());
+        ids.addAll(collaborationIds);
         categories(xml, process, ids);
         diagram(xml, process, ids);
         xml.line(0, "</bpmn:definitions>");
         return xml.out.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The collaboration of the file (#497). This process is its own pool; every other pool is written as a black box,
+     * and a message flow to a step of another pool is drawn to that pool, so the file is complete on its own and reads
+     * back to the same definition, lanes and message flows.
+     */
+    private static void collaboration(Xml xml, Process process, Collaboration c, Map<String, String> messages,
+            Set<String> ids) {
+        String own = c.participants().stream().filter(x -> process.id().equals(x.processRef()))
+                .map(Participant::id).findFirst().orElse(null);
+        Set<String> pools = new HashSet<>();
+        c.participants().forEach(x -> pools.add(x.id()));
+        xml.line(1, "<bpmn:collaboration id=" + attr(c.id()) + optional("name", c.name()) + ">");
+        ids.add(c.id());
+        for (Participant participant : c.participants()) {
+            ids.add(participant.id());
+            xml.line(2, "<bpmn:participant id=" + attr(participant.id()) + optional("name", participant.name())
+                    + (participant.id().equals(own) ? " processRef=" + attr(process.id()) : "") + "/>");
+        }
+        for (MessageFlow flow : c.messageFlows()) {
+            ids.add(flow.id());
+            Map<javax.xml.namespace.QName, String> extra = flow.info().otherAttributes();
+            String key = extra.get(SubsetBpmnReader.CORRELATION_KEY);
+            xml.line(2, "<bpmn:messageFlow id=" + attr(flow.id()) + optional("name", flow.name())
+                    + " sourceRef=" + attr(end(flow.sourceRef(), extra.get(SubsetBpmnReader.SOURCE_POOL), own, pools))
+                    + " targetRef=" + attr(end(flow.targetRef(), extra.get(SubsetBpmnReader.TARGET_POOL), own, pools))
+                    + (flow.messageRef() == null ? "" : " messageRef=" + attr(messages.get(flow.messageRef())))
+                    + (key == null ? "" : " horus:correlationKey=" + attr(key)) + "/>");
+        }
+        xml.line(1, "</bpmn:collaboration>");
+    }
+
+    private static String end(String ref, String pool, String own, Set<String> pools) {
+        return ref == null || pools.contains(ref) || pool == null || pool.equals(own) ? ref : pool;
+    }
+
+    private static void laneSet(Xml xml, LaneSet set, int lvl, Set<String> ids) {
+        ids.add(set.id());
+        xml.line(lvl, "<bpmn:laneSet id=" + attr(set.id()) + optional("name", set.name()) + ">");
+        for (Lane lane : set.lanes()) {
+            ids.add(lane.id());
+            xml.line(lvl + 1, "<bpmn:lane id=" + attr(lane.id()) + optional("name", lane.name()) + ">");
+            lane.flowNodeRefs().forEach(ref -> xml.line(lvl + 2, "<bpmn:flowNodeRef>" + text(ref)
+                    + "</bpmn:flowNodeRef>"));
+            if (lane.childLaneSet() != null) {
+                laneSet(xml, lane.childLaneSet(), lvl + 2, ids);
+            }
+            xml.line(lvl + 1, "</bpmn:lane>");
+        }
+        xml.line(lvl, "</bpmn:laneSet>");
     }
 
     /** The root {@code error} and {@code escalation} elements the event definitions of the process refer to (#489, #493). */
@@ -191,6 +274,9 @@ public final class SubsetBpmnWriter {
                     if (t.timeDate() != null && t.timeDate().text() != null) {
                         xml.line(lvl + 1, "<bpmn:timeDate>" + text(t.timeDate().text()) + "</bpmn:timeDate>");
                     }
+                    if (t.timeCycle() != null && t.timeCycle().text() != null) {
+                        xml.line(lvl + 1, "<bpmn:timeCycle>" + text(t.timeCycle().text()) + "</bpmn:timeCycle>");
+                    }
                     xml.line(lvl, "</bpmn:timerEventDefinition>");
                 }
                 case ErrorEventDefinition e -> xml.line(lvl, "<bpmn:errorEventDefinition"
@@ -206,6 +292,9 @@ public final class SubsetBpmnWriter {
                 case MessageEventDefinition m -> xml.line(lvl, "<bpmn:messageEventDefinition messageRef="
                         + attr(refs.messages().get(m.messageRef())) + "/>");
                 case TerminateEventDefinition t -> xml.line(lvl, "<bpmn:terminateEventDefinition/>");
+                case CompensateEventDefinition c -> xml.line(lvl, "<bpmn:compensateEventDefinition"
+                        + optional("activityRef", c.activityRef()) + "/>");
+                case CancelEventDefinition c -> xml.line(lvl, "<bpmn:cancelEventDefinition/>");
                 case LinkEventDefinition l -> xml.line(lvl, "<bpmn:linkEventDefinition" + optional("name", l.name())
                         + "/>");
                 default -> throw new IllegalArgumentException("Element " + node.id() + " has an event definition ("
@@ -252,17 +341,25 @@ public final class SubsetBpmnWriter {
         GuardrailSpec guardrail = node.extensions().first(GuardrailSpec.class).orElse(null);
         String messageName = messageName(node);
         switch (node) {
-            case StartEvent s -> tag = "bpmn:startEvent";
+            case StartEvent s -> {
+                tag = "bpmn:startEvent";
+                attributes.append(s.isInterrupting() ? "" : " isInterrupting=\"false\"")
+                        .append(s.parallelMultiple() ? " parallelMultiple=\"true\"" : "");
+            }
             case EndEvent e -> {
                 tag = "bpmn:endEvent";
                 inputs = e.extensions().all(InputMapping.class);
             }
             case BoundaryEvent b -> {
                 tag = "bpmn:boundaryEvent";
-                attributes.append(optional("attachedToRef", b.attachedToRef()))
+                attributes.append(b.parallelMultiple() ? " parallelMultiple=\"true\"" : "")
+                        .append(optional("attachedToRef", b.attachedToRef()))
                         .append(b.cancelActivity() ? "" : " cancelActivity=\"false\"");
             }
-            case IntermediateCatchEvent c -> tag = "bpmn:intermediateCatchEvent";
+            case IntermediateCatchEvent c -> {
+                tag = "bpmn:intermediateCatchEvent";
+                attributes.append(c.parallelMultiple() ? " parallelMultiple=\"true\"" : "");
+            }
             case IntermediateThrowEvent t -> {
                 tag = "bpmn:intermediateThrowEvent";
                 inputs = t.extensions().all(InputMapping.class);
@@ -278,12 +375,14 @@ public final class SubsetBpmnWriter {
             }
             case ServiceTask t when agent != null -> {
                 tag = "bpmn:serviceTask";
+                attributes.append(t.activity().isForCompensation() ? " isForCompensation=\"true\"" : "");
                 attributes.append(" horus:type=\"agentTask\"").append(optional("horus:agent", agent.agent()))
                         .append(optional("horus:timeout", agent.timeout() == null ? null : agent.timeout().toString()));
                 inputs = t.extensions().all(InputMapping.class);
             }
             case ServiceTask t -> {
                 tag = "bpmn:serviceTask";
+                attributes.append(t.activity().isForCompensation() ? " isForCompensation=\"true\"" : "");
                 t.extensions().first(HandlerRef.class).ifPresent(h -> attributes.append(optional("horus:handler",
                         h.handler())).append(optional("horus:mode", h.mode()))
                         .append(optional("horus:timeout", h.timeout() == null ? null : h.timeout().toString())));
@@ -309,6 +408,11 @@ public final class SubsetBpmnWriter {
                 t.extensions().first(SlaSpec.class).ifPresent(sla -> attributes
                         .append(optional("horus:sla", sla.duration().toString()))
                         .append(optional("horus:calendar", sla.calendar())));
+                t.extensions().first(FormSpec.class).ifPresent(f -> attributes
+                        .append(optional("horus:form", f.formKey()))
+                        .append(optional("horus:formSchema", f.schema()))
+                        .append(optional("horus:formHints", f.hints()))
+                        .append(optional("horus:formLink", f.link())));
                 t.extensions().first(EscalationSpec.class).ifPresent(e -> attributes
                         .append(optional("horus:escalation", e.levels().stream().map(l -> l.after().isZero() ? l.to()
                                 : l.to() + "|" + l.after()).collect(java.util.stream.Collectors.joining(";"))))
@@ -321,10 +425,28 @@ public final class SubsetBpmnWriter {
                         optional("horus:calledVersion", String.valueOf(v.version()))));
                 inputs = c.extensions().all(InputMapping.class);
             }
-            case SubProcess s -> tag = "bpmn:subProcess";
+            case SubProcess s -> {
+                tag = "bpmn:subProcess";
+                attributes.append(s.triggeredByEvent() ? " triggeredByEvent=\"true\"" : "");
+            }
+            case Transaction t -> tag = "bpmn:transaction";
             case ParallelGateway g -> tag = "bpmn:parallelGateway";
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> tag = "bpmn:eventBasedGateway";
+            case ComplexGateway g -> {
+                tag = "bpmn:complexGateway";
+                attributes.append(optional("default", g.defaultFlow()));
+            }
+            case AdHocSubProcess a -> {
+                tag = "bpmn:adHocSubProcess";
+                attributes.append(a.ordering() == AdHocOrdering.SEQUENTIAL ? " ordering=\"Sequential\"" : "")
+                        .append(a.cancelRemainingInstances() ? "" : " cancelRemainingInstances=\"false\"");
+            }
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";
+                attributes.append(optional("default", g.defaultFlow()));
+            }
+            case InclusiveGateway g -> {
+                tag = "bpmn:inclusiveGateway";
                 attributes.append(optional("default", g.defaultFlow()));
             }
             default -> throw new IllegalArgumentException("Element " + node.id() + " ("
@@ -340,8 +462,11 @@ public final class SubsetBpmnWriter {
         node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
                 f.action())));
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
+        LoopCharacteristics loop = node instanceof Activity activity ? activity.activity().loopCharacteristics() : null;
         if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
-                && node.outgoing().isEmpty() && !(node instanceof SubProcess)
+                && node.outgoing().isEmpty() && !(node instanceof SubProcess) && loop == null && !(node instanceof Transaction)
+                && !(node instanceof AdHocSubProcess) && !(node instanceof ComplexGateway cg
+                        && cg.activationCondition() != null)
                 && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event e
                         && !e.eventDefinitions().isEmpty())) {
             xml.line(lvl, "<" + tag + attributes + "/>");
@@ -383,18 +508,80 @@ public final class SubsetBpmnWriter {
             }
             xml.line(lvl + 1, "</bpmn:extensionElements>");
         }
+        node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
+        node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
+        if (loop != null) {
+            loopCharacteristics(xml, loop, lvl + 1);
+        }
+        // The script follows the activity's own content in the schema's order (#496: after a loop marker).
         if (script != null) {
             xml.line(lvl + 1, "<bpmn:script>" + text(script) + "</bpmn:script>");
         }
-        node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
-        node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
         definitions(xml, node, lvl + 1, refs);
-        if (node instanceof SubProcess sub) {
-            // #486: the steps and flows of the scope, nested one level deeper; the diagram is generated for the top level only.
+        if (node instanceof ComplexGateway g && g.activationCondition() != null) {
+            xml.line(lvl + 1, "<bpmn:activationCondition xsi:type=\"bpmn:tFormalExpression\" language="
+                    + attr(language(g.activationCondition())) + ">" + text(g.activationCondition().text())
+                    + "</bpmn:activationCondition>");
+        }
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer sub) {
+            // #486, #488: the steps and flows of a sub-process or a transaction, nested one level deeper; the diagram is
+            // generated for the top level only.
             sub.flowElements().forEach(inner -> flowElement(xml, inner, lvl + 1, refs));
             sub.artifacts().forEach(inner -> artifact(xml, inner, lvl + 1));
         }
+        if (node instanceof AdHocSubProcess a && a.completionCondition() != null) {
+            xml.line(lvl + 1, "<bpmn:completionCondition xsi:type=\"bpmn:tFormalExpression\" language="
+                    + attr(language(a.completionCondition())) + ">" + text(a.completionCondition().text())
+                    + "</bpmn:completionCondition>");
+        }
         xml.line(lvl, "</" + tag + ">");
+    }
+
+    /** #496: the loop or multi-instance marker of an activity, read back to the same definition hash. */
+    private static void loopCharacteristics(Xml xml, LoopCharacteristics loop, int lvl) {
+        switch (loop) {
+            case StandardLoopCharacteristics standard -> {
+                String start = "<bpmn:standardLoopCharacteristics" + (standard.testBefore() ? " testBefore=\"true\"" : "")
+                        + optional("loopMaximum", standard.loopMaximum() == null ? null
+                                : String.valueOf(standard.loopMaximum()));
+                if (standard.loopCondition() == null) {
+                    xml.line(lvl, start + "/>");
+                } else {
+                    xml.line(lvl, start + ">");
+                    expression(xml, "loopCondition", standard.loopCondition(), lvl + 1);
+                    xml.line(lvl, "</bpmn:standardLoopCharacteristics>");
+                }
+            }
+            case MultiInstanceLoopCharacteristics mi -> {
+                String start = "<bpmn:multiInstanceLoopCharacteristics" + (mi.isSequential() ? " isSequential=\"true\"" : "")
+                        + optional("horus:collection", mi.loopDataInputRef())
+                        + optional("horus:elementVariable", mi.inputDataItem() == null ? null : mi.inputDataItem().name())
+                        + optional("horus:outputCollection", mi.loopDataOutputRef())
+                        + optional("horus:outputElement", mi.outputDataItem() == null ? null : mi.outputDataItem().name());
+                if (mi.loopCardinality() == null && mi.completionCondition() == null) {
+                    xml.line(lvl, start + "/>");
+                } else {
+                    xml.line(lvl, start + ">");
+                    if (mi.loopCardinality() != null) {
+                        expression(xml, "loopCardinality", mi.loopCardinality(), lvl + 1);
+                    }
+                    if (mi.completionCondition() != null) {
+                        expression(xml, "completionCondition", mi.completionCondition(), lvl + 1);
+                    }
+                    xml.line(lvl, "</bpmn:multiInstanceLoopCharacteristics>");
+                }
+            }
+        }
+    }
+
+    private static void expression(Xml xml, String tag, Expression expression, int lvl) {
+        String language = expression.language() == null ? BpmnNamespaces.EXPR_V1 : expression.language();
+        xml.line(lvl, "<bpmn:" + tag + " xsi:type=\"bpmn:tFormalExpression\" language=" + attr(language) + ">"
+                + text(expression.text()) + "</bpmn:" + tag + ">");
+    }
+
+    private static String language(io.github.dhluong90.bpm.process.internal.model.bpmn.Expression e) {
+        return e.language() == null ? BpmnNamespaces.EXPR_V1 : e.language();
     }
 
     private static void artifact(Xml xml, Artifact artifact, int lvl) {
@@ -617,6 +804,9 @@ public final class SubsetBpmnWriter {
             case IntermediateCatchEvent c -> new int[] {36, 36};
             case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
+            case InclusiveGateway g -> new int[] {50, 50};
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> new int[] {50, 50};
+            case ComplexGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };
     }

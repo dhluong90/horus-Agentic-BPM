@@ -53,6 +53,9 @@ public final class EngineDefaults {
     /** {@code calls.max-depth}: most calls one above another (#92); may be lowered, never raised. */
     public static final int MAX_CALL_DEPTH = 5;
 
+    /** Highest {@code multi-instance.max}: the most repetitions one looped activity may be set to allow (#496). */
+    public static final int MAX_LOOP_INSTANCES = 1_000;
+
     /** Longest business key. */
     public static final int MAX_BUSINESS_KEY_LENGTH = 200;
 

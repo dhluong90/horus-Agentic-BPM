@@ -17,6 +17,7 @@ export const KNOWN_NODE_TYPES = [
   'userTask',
   'serviceTask',
   'serviceTask:agentTask',
+  'serviceTask:compensation',
   'businessRuleTask',
   'task',
   'manualTask',
@@ -24,14 +25,35 @@ export const KNOWN_NODE_TYPES = [
   'exclusiveGateway',
   'parallelGateway',
   'inclusiveGateway',
+  'complexGateway',
+  'adHocSubProcess',
+  'intermediateCatchEvent:multiple',
+  'intermediateCatchEvent:parallelMultiple',
+  'startEvent:multiple',
+  'startEvent:parallelMultiple',
+  'boundaryEvent:multiple',
+  'boundaryEvent:parallelMultiple',
   'intermediateCatchEvent:timer',
   'callActivity',
   'transaction',
   'subProcess',
+  'subProcess:event',
+  'startEvent:timer',
+  'startEvent:error',
+  'startEvent:escalation',
+  'startEvent:compensate',
   'intermediateThrowEvent:compensate',
   'boundaryEvent:timer',
   'boundaryEvent:error',
   'boundaryEvent:escalation',
+  'boundaryEvent:compensate',
+  'boundaryEvent:cancel',
+  'endEvent:compensate',
+  'endEvent:cancel',
+  'boundaryEvent:message',
+  'boundaryEvent:signal',
+  'boundaryEvent:conditional',
+  'eventBasedGateway',
   'endEvent:error',
   'endEvent:escalation',
   'endEvent:terminate',
@@ -62,17 +84,29 @@ export interface DiagramNode {
   name: string | undefined;
   /** The BPMN element type with the HORUS subtype, for example `serviceTask:agentTask` or `boundaryEvent:timer`. */
   type: string;
-  /** The variable a script task stores its result in, shown beside the step in the timeline. */
-  resultVariable?: string;
   /** The id of the sub-process or saga block this step stands in; absent for a step of the process itself (#486). */
   parentId?: string;
   /** For a boundary event (#489): the id of the task, call activity or sub-process it sits on. */
   attachedTo?: string;
-  /** For a boundary event: whether it cancels what it sits on when it fires; false is drawn with a dashed ring. */
+  /**
+   * For a boundary event: whether it cancels what it sits on when it fires. For the start event of an event sub-process
+   * (#487) and the event sub-process itself: whether it cancels the rest of its scope. False is drawn with a dashed ring.
+   */
   interrupting?: boolean;
+  /** For an event sub-process (#487): what starts it, the name of its start event's definition: `timer`, `message`, `signal`, `conditional`, `error`, `escalation` or `compensate`. */
+  trigger?: string;
   /** For a link throw or catch (#493): the name that pairs the two. */
   linkName?: string;
+  /**
+   * How the step repeats (#496): `loop` for a standard loop, `parallel` or `sequential` for a multi-instance step.
+   * Absent for a step that runs once. Read from the BPMN export; the cockpit draws the marker and never edits it.
+   */
+  loop?: LoopKind;
+  /** For an ad-hoc sub-process (#500): whether its activities may run side by side or one at a time. */
+  ordering?: 'parallel' | 'sequential';
 }
+
+export type LoopKind = 'loop' | 'parallel' | 'sequential';
 
 export interface DiagramEdge {
   id: string;
@@ -83,18 +117,31 @@ export interface DiagramEdge {
   isDefault: boolean;
   /** A link between a throw and its catch of the same name (#493), drawn dashed; not a sequence flow. */
   isLink?: boolean;
+  /** An association from a compensation boundary event to its compensation activity (#488), drawn dotted; not a sequence flow. */
+  isAssociation?: boolean;
 }
+
+/** A pool of the collaboration (#497). `self` is the pool of the process this graph shows; the others are black boxes. */
+export interface DiagramPool { id: string; name: string | undefined; self: boolean }
+/** A lane of the process: a name and the steps it holds. Display only. */
+export interface DiagramLane { id: string; name: string | undefined; nodes: string[] }
+/** A message flow. Each end is a step of this process or a pool; `correlationKey` is the variable the target step reads. */
+export interface DiagramMessageFlow { id: string; label: string | undefined; source: string; target: string; correlationKey: string | undefined }
+export interface DiagramCollaboration { pools: DiagramPool[]; lanes: DiagramLane[]; messageFlows: DiagramMessageFlow[] }
 
 export interface DiagramGraph {
   name: string | undefined;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  /** Pools, lanes and message flows, read only (#497); absent for a process with none. */
+  collaboration?: DiagramCollaboration;
 }
 
 /** Children of a process that are not steps: flows, artefacts, data and lanes. */
 const NOT_A_STEP = new Set([
   'sequenceFlow', 'laneSet', 'textAnnotation', 'association', 'group', 'dataObject', 'dataObjectReference',
   'dataStoreReference', 'documentation', 'extensionElements', 'property', 'ioSpecification', 'category',
+  'standardLoopCharacteristics', 'multiInstanceLoopCharacteristics',
 ]);
 
 export class DiagramReadError extends Error {
@@ -136,9 +183,14 @@ export function nodeType(element: Element): string {
   const local = element.localName;
   if (local === 'serviceTask') {
     const subtype = nonEmpty(element.getAttributeNS(HORUS, 'type'));
+    // #488: a task that is the undo of another step, run by compensation and never by a flow.
+    if (subtype === undefined && element.getAttribute('isForCompensation') === 'true') return `${local}:compensation`;
     return subtype === undefined ? local : `${local}:${subtype}`;
   }
   if (local.endsWith('Event')) {
+    // #500: several definitions make a multiple event, or a parallel multiple one that waits for all of them.
+    const definitions = elementChildren(element).filter((child) => child.namespaceURI === BPMN && child.localName.endsWith('EventDefinition'));
+    if (definitions.length > 1) return `${local}:${element.getAttribute('parallelMultiple') === 'true' ? 'parallelMultiple' : 'multiple'}`;
     const kind = eventKind(element);
     return kind === undefined ? local : `${local}:${kind}`;
   }
@@ -146,9 +198,25 @@ export function nodeType(element: Element): string {
   return local;
 }
 
-/** Elements that hold steps of their own: a sub-process (not an event sub-process) and a saga block. */
+/** The loop marker of an activity: its own `standardLoopCharacteristics` or `multiInstanceLoopCharacteristics` child. */
+export function loopKind(element: Element): LoopKind | undefined {
+  for (const child of elementChildren(element)) {
+    if (child.namespaceURI !== BPMN) continue;
+    if (child.localName === 'standardLoopCharacteristics') return 'loop';
+    if (child.localName === 'multiInstanceLoopCharacteristics') return child.getAttribute('isSequential') === 'true' ? 'sequential' : 'parallel';
+  }
+  return undefined;
+}
+
+/** Elements that hold steps of their own: a sub-process, an event sub-process (#487) and a saga block. */
 function isContainer(element: Element): boolean {
-  return (element.localName === 'subProcess' && element.getAttribute('triggeredByEvent') !== 'true') || element.localName === 'transaction';
+  return element.localName === 'subProcess' || element.localName === 'transaction' || element.localName === 'adHocSubProcess';
+}
+
+/** The start event of an event sub-process, which carries what starts it (#487). */
+function triggerOf(element: Element): { trigger: string | undefined; interrupting: boolean } {
+  const start = elementChildren(element).find((child) => child.namespaceURI === BPMN && child.localName === 'startEvent');
+  return { trigger: start === undefined ? undefined : eventKind(start), interrupting: start?.getAttribute('isInterrupting') !== 'false' };
 }
 
 /** Nested sub-processes the cockpit follows; a deeper one is drawn as a plain box, never skipped. */
@@ -166,24 +234,74 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false });
       continue;
     }
+    if (child.localName === 'association') {
+      // #488: only the line from a compensation boundary event to its compensation activity is drawn; the ends decide below.
+      const source = nonEmpty(child.getAttribute('sourceRef'));
+      const target = nonEmpty(child.getAttribute('targetRef'));
+      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: undefined, isDefault: false, isAssociation: true });
+      continue;
+    }
     if (NOT_A_STEP.has(child.localName)) continue;
     const defaultFlow = nonEmpty(child.getAttribute('default'));
     if (defaultFlow !== undefined) defaults.add(defaultFlow);
     const boundary = child.localName === 'boundaryEvent';
     const attachedTo = boundary ? nonEmpty(child.getAttribute('attachedToRef')) : undefined;
     const link = child.localName.startsWith('intermediate') ? linkNameOf(child) : undefined;
-    const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
+    const byEvent = child.localName === 'subProcess' && child.getAttribute('triggeredByEvent') === 'true' ? triggerOf(child) : undefined;
+    const loop = loopKind(child);
     nodes.push({
       id,
       name: nonEmpty(child.getAttribute('name')),
       type: nodeType(child),
-      ...(resultVariable !== undefined ? { resultVariable } : {}),
+      ...(loop !== undefined ? { loop } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
       ...(attachedTo !== undefined ? { attachedTo, interrupting: child.getAttribute('cancelActivity') !== 'false' } : {}),
+      ...(child.localName === 'startEvent' && child.getAttribute('isInterrupting') === 'false' ? { interrupting: false } : {}),
+      ...(byEvent !== undefined ? { interrupting: byEvent.interrupting, ...(byEvent.trigger !== undefined ? { trigger: byEvent.trigger } : {}) } : {}),
       ...(link !== undefined ? { linkName: link } : {}),
+      ...(child.localName === 'adHocSubProcess' ? { ordering: child.getAttribute('ordering') === 'Sequential' ? ('sequential' as const) : ('parallel' as const) } : {}),
     });
     if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);
   }
+}
+
+function readLanes(set: Element, out: DiagramLane[]): void {
+  for (const lane of elementChildren(set)) {
+    if (lane.namespaceURI !== BPMN || lane.localName !== 'lane') continue;
+    const refs = elementChildren(lane).filter((c) => c.namespaceURI === BPMN && c.localName === 'flowNodeRef').map((c) => c.textContent.trim()).filter((r) => r !== '');
+    out.push({ id: nonEmpty(lane.getAttribute('id')) ?? '', name: nonEmpty(lane.getAttribute('name')), nodes: refs });
+    for (const child of elementChildren(lane)) if (child.namespaceURI === BPMN && child.localName === 'childLaneSet') readLanes(child, out);
+  }
+}
+
+/** Pools, lanes and message flows of a document (#497), or undefined when it has none. */
+function readCollaboration(document: Document, process: Element): DiagramCollaboration | undefined {
+  const lanes: DiagramLane[] = [];
+  for (const child of elementChildren(process)) if (child.namespaceURI === BPMN && child.localName === 'laneSet') readLanes(child, lanes);
+  const collaboration = Array.from(document.getElementsByTagNameNS(BPMN, 'collaboration'))[0];
+  const pools: DiagramPool[] = [];
+  const messageFlows: DiagramMessageFlow[] = [];
+  const processId = process.getAttribute('id');
+  const messageNames = new Map(Array.from(document.getElementsByTagNameNS(BPMN, 'message')).map((m) => [m.getAttribute('id') ?? '', nonEmpty(m.getAttribute('name'))]));
+  if (collaboration !== undefined) {
+    for (const child of elementChildren(collaboration)) {
+      if (child.namespaceURI !== BPMN) continue;
+      const id = nonEmpty(child.getAttribute('id'));
+      if (id === undefined) continue;
+      if (child.localName === 'participant') pools.push({ id, name: nonEmpty(child.getAttribute('name')), self: child.getAttribute('processRef') === processId });
+      if (child.localName === 'messageFlow') {
+        const source = nonEmpty(child.getAttribute('sourceRef'));
+        const target = nonEmpty(child.getAttribute('targetRef'));
+        if (source === undefined || target === undefined) continue;
+        messageFlows.push({
+          id, source, target,
+          label: nonEmpty(child.getAttribute('name')) ?? messageNames.get(child.getAttribute('messageRef') ?? ''),
+          correlationKey: nonEmpty(child.getAttributeNS(HORUS, 'correlationKey')),
+        });
+      }
+    }
+  }
+  return pools.length === 0 && lanes.length === 0 ? undefined : { pools, lanes, messageFlows };
 }
 
 /**
@@ -208,9 +326,11 @@ export function readBpmnGraph(xml: string): DiagramGraph {
     const caught = nodes.find((node) => node.type === 'intermediateCatchEvent:link' && node.linkName === thrown.linkName && node.parentId === thrown.parentId);
     if (caught !== undefined) edges.push({ id: `link:${thrown.id}`, source: thrown.id, target: caught.id, label: thrown.linkName, isDefault: false, isLink: true });
   }
+  const collaboration = readCollaboration(document, process);
   return {
     name: nonEmpty(process.getAttribute('name')),
     nodes,
+    ...(collaboration !== undefined ? { collaboration } : {}),
     // A flow to an element that is not drawn (an artefact, a lane) is left out rather than drawn to nowhere.
     edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, isDefault: defaults.has(edge.id) })),
   };

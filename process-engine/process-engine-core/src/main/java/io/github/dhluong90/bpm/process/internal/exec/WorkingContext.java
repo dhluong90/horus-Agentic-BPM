@@ -8,6 +8,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -28,6 +29,7 @@ final class WorkingContext implements ExecutionContext {
     private final InstanceState initial;
     private final CompiledProcess process;
     private final ExpressionEvaluator expressions;
+    private final Loops loops;
     private final Instant now;
     private final String actor;
     private final List<Token> tokens;
@@ -36,11 +38,18 @@ final class WorkingContext implements ExecutionContext {
     private final List<Effect> effects = new ArrayList<>();
     private final List<HistoryEntry> history = new ArrayList<>();
     private final Deque<String> agenda = new ArrayDeque<>();
+    private final ScopeArming arming;
     private InstanceStatus status;
     private long sequence;
+    private boolean conditionArmed;
+    private long variableVersion;
+    private final java.util.Set<String> deferred = new java.util.LinkedHashSet<>();
+    private boolean conditionsSettled;
 
     WorkingContext(InstanceState state, CompiledProcess process, ExpressionEvaluator expressions, Clock clock,
-            String actor) {
+            String actor, int maxInstances, ScopeArming arming) {
+        this.arming = arming;
+        this.loops = new Loops(this, maxInstances);
         this.initial = state;
         this.process = process;
         this.expressions = expressions;
@@ -76,6 +85,10 @@ final class WorkingContext implements ExecutionContext {
         return status;
     }
 
+    Loops loops() {
+        return loops;
+    }
+
     boolean isParticipant(String identity) {
         return identity != null && participants.contains(identity);
     }
@@ -92,6 +105,7 @@ final class WorkingContext implements ExecutionContext {
     }
 
     void putAllVariables(Map<String, Object> values) {
+        variableVersion++;
         variables.putAll(values);
     }
 
@@ -108,6 +122,12 @@ final class WorkingContext implements ExecutionContext {
     void endCompensation(String scopeTokenId) {
         Token scope = tree().get(scopeTokenId).orElseThrow(() -> new ExecutionException("TOKEN_NOT_FOUND", null,
                 "No scope token " + scopeTokenId));
+        Optional<Token> waiting = tree().children(scopeTokenId).stream()
+                .filter(t -> t.kind() == TokenKind.FLOW && t.status() == TokenStatus.WAITING_EVENT).findFirst();
+        if (waiting.isPresent()) {
+            resumeAfterCompensation(scope, waiting.get());
+            return;
+        }
         for (Token live : tree().all()) {
             if (live.status().live() && !live.id().equals(scopeTokenId)) {
                 update(live.withStatus(TokenStatus.CANCELLED));
@@ -120,6 +140,49 @@ final class WorkingContext implements ExecutionContext {
         history("INSTANCE_ENDED", null, Map.of("status", "FAILED"));
         effect(new Effect.EmitEvent(nextId(), "processes.instance.failed.v1",
                 Map.of("instanceId", initial.instanceId())));
+    }
+
+    /**
+     * The walk of a throw or a cancel reached the bottom (#488): the instance runs again, the thrower leaves. A
+     * compensation throw event goes on by its outgoing flow or, as an end event, ends its token; a cancel end event
+     * leaves the transaction through its cancel boundary event.
+     */
+    private void resumeAfterCompensation(Token scope, Token thrower) {
+        status = InstanceStatus.RUNNING;
+        history.add(new HistoryEntry("COMPENSATED", scope.nodeId(), scope.id(), null, actor, now,
+                Map.of("scopeTokenId", scope.id())));
+        FlowNode node = process.node(thrower.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
+                thrower.nodeId(), "No node " + thrower.nodeId()));
+        Token active = thrower.withStatus(TokenStatus.ACTIVE);
+        update(active);
+        boolean cancel = node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent e
+                && e.eventDefinitions().size() == 1 && e.eventDefinitions().get(0) instanceof
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
+        history("NODE_COMPLETED", active, Map.of());
+        if (cancel) {
+            update(active.withStatus(TokenStatus.COMPLETED));
+            update(scope.withStatus(TokenStatus.COMPENSATED));
+            disarmBoundaries(scope.nodeId(), scope.scopeTokenId(), null);
+            BoundaryEvent boundary = process.boundariesOf(scope.nodeId()).stream().filter(b ->
+                    b.eventDefinitions().size() == 1 && b.eventDefinitions().get(0) instanceof
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition).findFirst()
+                    .orElseThrow(() -> new ExecutionException("CANCEL_BOUNDARY_MISSING", scope.nodeId(),
+                            "Transaction " + scope.nodeId() + " has no cancel boundary event"));
+            Token flow = createToken(TokenKind.FLOW, boundary.id(), scope.scopeTokenId());
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("boundaryId", boundary.id());
+            details.put("attachedTo", boundary.attachedToRef());
+            details.put("trigger", "CANCEL");
+            details.put("interrupting", true);
+            history("NODE_ENTERED", flow, Map.of());
+            history("BOUNDARY_FIRED", flow, details);
+            history("NODE_COMPLETED", flow, Map.of());
+            takeOutgoing(flow, boundary);
+        } else if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent) {
+            complete(active);
+        } else {
+            takeOutgoing(active, node);
+        }
     }
 
     // ---- ExecutionContext ---------------------------------------------------------------------------------
@@ -185,6 +248,7 @@ final class WorkingContext implements ExecutionContext {
 
             @Override
             public void set(String name, Object value) {
+                variableVersion++;
                 variables.put(name, value);
             }
 
@@ -207,9 +271,19 @@ final class WorkingContext implements ExecutionContext {
 
     @Override
     public void takeOutgoing(Token token, FlowNode from) {
+        if (loops.endsInstance(token, from)) {
+            // One repetition of a loop ended (#496); the loop, not the repetition, leaves the activity.
+            return;
+        }
         // #489: the activity is left, so the timers of its boundary events never fire.
         disarmBoundaries(from.id(), token.scopeTokenId(), null);
+        resolveEventGateway(token, from);
         List<SequenceFlow> outgoing = process.outgoing(from.id());
+        if (outgoing.isEmpty() && process.adHoc(process.containerOf(from.id())).isPresent()) {
+            // #500: an activity of an ad-hoc sub-process has no flow out; its end is the end of that activity.
+            complete(token);
+            return;
+        }
         if (outgoing.isEmpty()) {
             throw new ExecutionException("NO_OUTGOING_FLOW", from.id(), from.id() + " has no outgoing sequence flow");
         }
@@ -250,6 +324,12 @@ final class WorkingContext implements ExecutionContext {
 
     private static String defaultFlowOf(FlowNode node) {
         if (node instanceof ExclusiveGateway gateway) {
+            return gateway.defaultFlow();
+        }
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway gateway) {
+            return gateway.defaultFlow();
+        }
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway gateway) {
             return gateway.defaultFlow();
         }
         if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
@@ -293,21 +373,181 @@ final class WorkingContext implements ExecutionContext {
             return;
         }
         Token scope = tree().get(token.scopeTokenId()).orElseThrow();
-        if (tree().live(scope.id()).isEmpty()) {
-            update(scope.withStatus(TokenStatus.COMPLETED));
-            if (scope.scopeTokenId() == null) {
-                status = InstanceStatus.COMPLETED;
-                history("INSTANCE_ENDED", null, Map.of("status", "COMPLETED"));
-                effect(new Effect.EmitEvent(nextId(), "processes.instance.completed.v1", Map.of("instanceId", initial.instanceId())));
+        if (process.adHoc(scope.nodeId()).isPresent()) {
+            adHocProgress(scope);
+            return;
+        }
+        settle(scope);
+    }
+
+    /** The local that marks an ad-hoc sub-process whose completion condition holds while activities still run. */
+    static final String AD_HOC_DONE = "$adHocDone";
+
+    /**
+     * An activity of an ad-hoc sub-process ended (#500). With a completion condition it is asked now; true cancels the
+     * activities still running ({@code cancelRemainingInstances}) or waits for them. Without one the sub-process ends
+     * when nothing runs and every activity has completed once.
+     */
+    private void adHocProgress(Token scope) {
+        io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess node = process.adHoc(scope.nodeId())
+                .orElseThrow();
+        List<Token> running = tree().live(scope.id());
+        boolean done;
+        Expression condition = node.completionCondition();
+        if (Boolean.TRUE.equals(scope.locals().get(AD_HOC_DONE))) {
+            done = running.isEmpty();
+        } else if (condition != null && condition.text() != null) {
+            Object value = evaluate(condition.text(), condition.language(), scope);
+            if (!(value instanceof Boolean met)) {
+                throw new ExecutionException("CONDITION_ERROR", node.id(), "The completion condition of " + node.id()
+                        + " did not produce a boolean");
+            }
+            if (met) {
+                history("AD_HOC_CONDITION_MET", scope, Map.of("running", running.size()));
+                if (node.cancelRemainingInstances()) {
+                    running.forEach(t -> cancelTree(t, null));
+                    done = true;
+                } else {
+                    Map<String, Object> locals = new LinkedHashMap<>(scope.locals());
+                    locals.put(AD_HOC_DONE, true);
+                    update(new Token(scope.id(), scope.kind(), scope.status(), scope.scopeTokenId(), scope.nodeId(),
+                            scope.activityInstanceId(), locals));
+                    done = running.isEmpty();
+                }
             } else {
-                // A saga block ended (#67): a new flow token leaves the block in the enclosing scope.
-                FlowNode block = process.node(scope.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
-                        scope.nodeId(), "No saga block " + scope.nodeId()));
-                Token next = createToken(TokenKind.FLOW, block.id(), scope.scopeTokenId());
-                history("NODE_COMPLETED", next, Map.of("scopeTokenId", scope.id()));
-                takeOutgoing(next, block);
+                done = false;
+            }
+        } else {
+            done = running.isEmpty() && node.flowElements().stream()
+                    .filter(e -> e instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity)
+                    .allMatch(a -> tree().children(scope.id()).stream().anyMatch(t -> t.nodeId().equals(a.id())
+                            && t.status() == TokenStatus.COMPLETED));
+        }
+        if (done) {
+            update(scope.withStatus(TokenStatus.COMPLETED));
+            leaveBlock(tree().get(scope.id()).orElseThrow());
+        }
+    }
+
+    /**
+     * Ends a scope that has no work left (#487). A token that waits on the start event of an event sub-process is not
+     * work: the scope ends over it, and its timer or subscription goes with it. A running event sub-process is work, so
+     * a non-interrupting one keeps its scope open, and an interrupting one that ends lets its scope end.
+     */
+    private void settle(Token scope) {
+        List<Token> live = tree().live(scope.id());
+        if (live.stream().anyMatch(t -> !isListener(t))) {
+            return;
+        }
+        if (waitsAtInclusiveJoin(scope)) {
+            return;
+        }
+        if (!conditionsSettled && live.stream().anyMatch(this::isConditionalListener) && variablesChanged()) {
+            // The variables changed in this apply, so a conditional event sub-process is asked before its scope ends.
+            deferred.add(scope.id());
+            return;
+        }
+        live.forEach(this::dropListener);
+        update(scope.withStatus(TokenStatus.COMPLETED));
+        if (scope.scopeTokenId() != null && loops.endsInstanceScope(scope)) {
+            // One repetition of a looped sub-process ended (#496).
+            return;
+        }
+        if (scope.scopeTokenId() == null) {
+            status = InstanceStatus.COMPLETED;
+            history("INSTANCE_ENDED", null, Map.of("status", "COMPLETED"));
+            effect(new Effect.EmitEvent(nextId(), "processes.instance.completed.v1", Map.of("instanceId", initial.instanceId())));
+        } else if (process.isEventSubProcess(scope.nodeId())) {
+            // An event sub-process has no flow out: the scope it stands in may be done now.
+            settle(tree().get(scope.scopeTokenId()).orElseThrow());
+        } else {
+            leaveBlock(scope);
+        }
+    }
+
+    /** A saga block, sub-process or ad-hoc sub-process ended (#67, #486, #500): a new flow token leaves it. */
+    private void leaveBlock(Token scope) {
+        FlowNode block = process.node(scope.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
+                scope.nodeId(), "No saga block " + scope.nodeId()));
+        arming.completed(this, scope, block);
+        Token next = createToken(TokenKind.FLOW, block.id(), scope.scopeTokenId());
+        history("NODE_COMPLETED", next, Map.of("scopeTokenId", scope.id()));
+        takeOutgoing(next, block);
+    }
+
+    /** @return whether the token waits on the start event of an event sub-process of the scope it stands in (#487) */
+    private boolean isListener(Token token) {
+        if (token.kind() != TokenKind.FLOW || !token.status().live()) {
+            return false;
+        }
+        String owner = process.containerOf(token.nodeId());
+        return process.isEventSubProcess(owner) && process.node(token.nodeId())
+                .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent).isPresent()
+                && tree().get(token.scopeTokenId()).map(s -> !s.nodeId().equals(owner)).orElse(false);
+    }
+
+    private boolean isConditionalListener(Token token) {
+        return process.node(token.nodeId()).filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
+                .StartEvent && MultipleWaits.waitsOnCondition(n, token)).isPresent();
+    }
+
+    /**
+     * Ends the scopes whose end was held back for their conditional event sub-processes, now that those were asked
+     * (#487).
+     *
+     * @return whether a scope was settled, which may have moved tokens
+     */
+    boolean settleDeferred() {
+        List<String> ids = List.copyOf(deferred);
+        deferred.clear();
+        conditionsSettled = true;
+        boolean any = false;
+        for (String id : ids) {
+            Token scope = tree().get(id).orElse(null);
+            if (scope != null && scope.status().live()) {
+                settle(scope);
+                any = true;
             }
         }
+        conditionsSettled = false;
+        return any;
+    }
+
+    /** Stops the wait of a listener, silently: its scope ended, so nothing was interrupted. */
+    private void dropListener(Token listener) {
+        update(listener.withStatus(TokenStatus.CANCELLED));
+        if (listener.status() == TokenStatus.WAITING_TIMER && listener.activityInstanceId() != null) {
+            effect(new Effect.CancelJob(listener.activityInstanceId()));
+        } else if (listener.status() == TokenStatus.WAITING_EVENT && listener.activityInstanceId() != null) {
+            effect(new Effect.DeleteSubscription(listener.activityInstanceId()));
+        }
+    }
+
+    @Override
+    public void conditionArmed() {
+        conditionArmed = true;
+    }
+
+    /** @return whether a conditional event sub-process was armed in this apply, so its condition is asked once */
+    boolean takeConditionArmed() {
+        boolean armed = conditionArmed;
+        conditionArmed = false;
+        return armed;
+    }
+
+    /** @return a number that grows with every write to the instance variables, to tell whether a pass changed them */
+    long variableVersion() {
+        return variableVersion;
+    }
+
+    /**
+     * A token waiting at an inclusive join is not live, but the scope is not over while one waits: the join fires
+     * once the other tokens have ended, and its outgoing token ends the scope.
+     */
+    private boolean waitsAtInclusiveJoin(Token scope) {
+        return tree().children(scope.id()).stream().anyMatch(t -> t.status() == TokenStatus.JOINED
+                && process.node(t.nodeId()).orElse(null) instanceof
+                io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway);
     }
 
     @Override
@@ -317,6 +557,7 @@ final class WorkingContext implements ExecutionContext {
         Token scope = createToken(TokenKind.SCOPE, block.id(), token.scopeTokenId());
         update(token.withStatus(TokenStatus.COMPLETED));
         history("SCOPE_ENTERED", token, Map.of("scopeTokenId", scope.id()));
+        arming.arm(this, scope);
         Token flow = createToken(TokenKind.FLOW, start.id(), scope.id());
         enqueue(flow);
     }
@@ -341,6 +582,46 @@ final class WorkingContext implements ExecutionContext {
         effect(new Effect.StartCompensation(scope.id(), failing.nodeId(), cause));
     }
 
+    @Override
+    public void compensateAndResume(Token thrower, String targetActivityId) {
+        Token scope = tree().get(thrower.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                thrower.nodeId(), "Token " + thrower.id() + " has no scope"));
+        startResumable(thrower, scope, "THROW_COMPENSATION", targetActivityId);
+    }
+
+    @Override
+    public void cancelTransaction(Token end) {
+        Token scope = tree().get(end.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                end.nodeId(), "Token " + end.id() + " has no scope"));
+        startResumable(end, scope, "CANCEL", null);
+    }
+
+    /**
+     * Starts a compensation that the flow resumes after (#488). The other live tokens under the scope are cancelled
+     * with their work, as the BPMN cancel of a transaction does; the thrower waits ({@code WAITING_EVENT}) so the
+     * shell's walk can find it, and the instance is {@code COMPENSATING}.
+     */
+    private void startResumable(Token thrower, Token scope, String cause, String target) {
+        for (Token child : tree().children(scope.id())) {
+            if (child.status().live() && !child.id().equals(thrower.id())) {
+                cancelTree(child, null);
+            }
+        }
+        update(new Token(thrower.id(), thrower.kind(), TokenStatus.WAITING_EVENT, thrower.scopeTokenId(),
+                thrower.nodeId(), null, thrower.locals()));
+        status = InstanceStatus.COMPENSATING;
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("scopeTokenId", scope.id());
+        details.put("scope", scope.nodeId());
+        details.put("cause", cause);
+        if (target != null) {
+            details.put("activity", target);
+        }
+        history.add(new HistoryEntry("COMPENSATION_STARTED", thrower.nodeId(), thrower.id(), null, actor, now,
+                details));
+        effect(new Effect.StartCompensation(scope.id(), thrower.nodeId(), cause));
+    }
+
     /** Cancels one live flow token with the task, job or timer it waits on. */
     private void cancelFlow(Token child, boolean cancelWork) {
         update(child.withStatus(TokenStatus.CANCELLED));
@@ -358,6 +639,15 @@ final class WorkingContext implements ExecutionContext {
             effect(new Effect.CancelJob(child.activityInstanceId()));
         }
         history("TOKEN_CANCELLED", child, Map.of());
+    }
+
+    @Override
+    public void cancelToken(Token token) {
+        if (token.status().live()) {
+            cancelFlow(token, true);
+        } else if (token.status() == TokenStatus.JOINED) {
+            update(token.withStatus(TokenStatus.CANCELLED));
+        }
     }
 
     @Override
@@ -393,7 +683,8 @@ final class WorkingContext implements ExecutionContext {
     /** @return whether a live token already waits on this boundary event in the scope (a retry enters the step again) */
     boolean hasLiveBoundaryToken(BoundaryEvent boundary, String scopeTokenId) {
         return tokens.stream().anyMatch(t -> t.nodeId().equals(boundary.id()) && t.kind() == TokenKind.FLOW
-                && t.status().live() && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId));
+                && (t.status().live() || t.status() == TokenStatus.JOINED)
+                && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId));
     }
 
     /**
@@ -403,15 +694,49 @@ final class WorkingContext implements ExecutionContext {
     private void disarmBoundaries(String activityId, String scopeTokenId, String exceptTokenId) {
         for (BoundaryEvent boundary : process.boundariesOf(activityId)) {
             for (Token t : List.copyOf(tokens)) {
-                if (t.kind() == TokenKind.FLOW && t.nodeId().equals(boundary.id()) && t.status().live()
+                if (t.kind() == TokenKind.FLOW && t.nodeId().equals(boundary.id())
+                        && (t.status().live() || t.status() == TokenStatus.JOINED)
                         && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId) && !t.id().equals(exceptTokenId)) {
                     update(t.withStatus(TokenStatus.CANCELLED));
                     if (t.status() == TokenStatus.WAITING_TIMER && t.activityInstanceId() != null) {
                         effect(new Effect.CancelJob(t.activityInstanceId()));
                     }
+                    if (t.status() == TokenStatus.WAITING_EVENT && t.activityInstanceId() != null) {
+                        // #490: a message or signal boundary leaves a subscription; a conditional one has none.
+                        effect(new Effect.DeleteSubscription(t.activityInstanceId()));
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * #495: an event of an event-based gateway arrived, so its token leaves the catch event. The other catch events of
+     * the same gateway are cancelled in this apply, which the shell runs under the instance row lock: of two events
+     * that reach two replicas at the same moment, the second finds its token cancelled and is refused as stale.
+     */
+    private void resolveEventGateway(Token winner, FlowNode from) {
+        Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> gateway =
+                process.eventGatewayOf(from.id());
+        if (gateway.isEmpty()) {
+            return;
+        }
+        List<String> targets = process.outgoing(gateway.get().id()).stream().map(SequenceFlow::targetRef).toList();
+        List<String> lost = new ArrayList<>();
+        for (Token other : List.copyOf(tokens)) {
+            if (other.kind() == TokenKind.FLOW && other.status().live() && !other.id().equals(winner.id())
+                    && targets.contains(other.nodeId())
+                    && java.util.Objects.equals(other.scopeTokenId(), winner.scopeTokenId())) {
+                cancelTree(other, null);
+                disarmBoundaries(other.nodeId(), other.scopeTokenId(), null);
+                lost.add(other.nodeId());
+            }
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("gatewayId", gateway.get().id());
+        details.put("winner", from.id());
+        details.put("cancelled", lost);
+        history("EVENT_GATEWAY_RESOLVED", winner, details);
     }
 
     /** Cancels a token and everything under it, with the work each waits on. */
@@ -426,6 +751,7 @@ final class WorkingContext implements ExecutionContext {
             update(token.withStatus(TokenStatus.CANCELLED));
             return cancelled;
         }
+        boolean listener = isListener(token);
         update(token.withStatus(TokenStatus.CANCELLED));
         boolean work = !token.id().equals(exceptWorkOf) && token.activityInstanceId() != null;
         if (work && token.status() == TokenStatus.WAITING_USER) {
@@ -434,8 +760,13 @@ final class WorkingContext implements ExecutionContext {
             effect(new Effect.CancelJob(token.activityInstanceId()));
         } else if (work && token.status() == TokenStatus.WAITING_CHILD) {
             effect(new Effect.CancelChildInstance(token.id(), token.activityInstanceId()));
+        } else if (token.status() == TokenStatus.WAITING_EVENT && token.activityInstanceId() != null) {
+            // A signal or message wait is a subscription row; a conditional wait has none and the delete is a no-op.
+            effect(new Effect.DeleteSubscription(token.activityInstanceId()));
         }
-        history("TOKEN_CANCELLED", token, Map.of());
+        if (!listener) {
+            history("TOKEN_CANCELLED", token, Map.of());
+        }
         return 1;
     }
 
@@ -454,26 +785,39 @@ final class WorkingContext implements ExecutionContext {
 
     @Override
     public void fireBoundary(Token boundaryToken, BoundaryEvent boundary) {
+        fireBoundary(boundaryToken, boundary, "TIMER", Map.of(), false);
+    }
+
+    @Override
+    public void fireBoundary(Token boundaryToken, BoundaryEvent boundary, String trigger, Map<String, Object> extra,
+            boolean keepWaiting) {
         Optional<Token> host = hostOf(boundary.attachedToRef(), boundaryToken.scopeTokenId());
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("boundaryId", boundary.id());
         details.put("attachedTo", boundary.attachedToRef());
-        details.put("trigger", "TIMER");
+        details.put("trigger", trigger);
         details.put("interrupting", boundary.cancelActivity());
+        details.putAll(extra);
         if (boundary.cancelActivity()) {
             host.ifPresent(h -> interrupt(h, null, boundaryToken.id()));
         }
+        // A non-interrupting message or signal boundary stays armed; its flow runs on a token of its own.
+        Token flow = keepWaiting && !boundary.cancelActivity()
+                ? createToken(TokenKind.FLOW, boundary.id(), boundaryToken.scopeTokenId()) : boundaryToken;
         // The boundary is entered when it fires, not when it is armed, so an unfired one never shows as running.
-        history("NODE_ENTERED", boundaryToken, Map.of());
-        history("BOUNDARY_FIRED", boundaryToken, details);
-        Token active = boundaryToken.withStatus(TokenStatus.ACTIVE);
+        history("NODE_ENTERED", flow, Map.of());
+        history("BOUNDARY_FIRED", flow, details);
+        Token active = flow.withStatus(TokenStatus.ACTIVE);
         update(active);
-        history("NODE_COMPLETED", boundaryToken, Map.of());
+        history("NODE_COMPLETED", flow, Map.of());
         takeOutgoing(active, boundary);
     }
 
-    /** A boundary that catches a thrown error or escalation, and the activity token it is attached to. */
-    private record Catcher(BoundaryEvent boundary, Token host) {
+    /**
+     * What catches a thrown error or escalation: a boundary event and the activity token it is attached to, or an event
+     * sub-process (#487) and the scope token it stands in.
+     */
+    private record Catcher(BoundaryEvent boundary, SubProcess eventSubProcess, Token host) {
     }
 
     private static String codeOf(EventDefinition definition, boolean error) {
@@ -486,15 +830,22 @@ final class WorkingContext implements ExecutionContext {
         return null;
     }
 
-    private static boolean isKind(BoundaryEvent boundary, boolean error) {
-        if (boundary.eventDefinitions().size() != 1) {
-            return false;
+    /** The definition of the kind a throw looks for on a boundary event, a multiple one (#500) included. */
+    private static Optional<EventDefinition> catching(BoundaryEvent boundary, boolean error) {
+        if (boundary.parallelMultiple()) {
+            return Optional.empty();
         }
-        EventDefinition d = boundary.eventDefinitions().get(0);
-        return error ? d instanceof ErrorEventDefinition : d instanceof EscalationEventDefinition;
+        return boundary.eventDefinitions().stream()
+                .filter(d -> error ? d instanceof ErrorEventDefinition : d instanceof EscalationEventDefinition)
+                .findFirst();
     }
 
-    /** Walks from the raising token outward and returns the nearest matching boundary (specific code before catch-all). */
+    /**
+     * Walks from the raising token outward and returns the nearest catcher. At each level the event sub-processes of a
+     * scope come before the boundary events on that scope's own activity, because they stand inside it (#487); and a
+     * specific code comes before a catch-all. The event sub-process the walk comes out of is skipped, so the error
+     * thrown by a handler is not caught by the handler itself.
+     */
     private Optional<Catcher> findCatcher(Token source, String code, boolean error, boolean fromStep) {
         Token host;
         if (fromStep) {
@@ -502,31 +853,77 @@ final class WorkingContext implements ExecutionContext {
         } else {
             host = source.scopeTokenId() == null ? null : tree().get(source.scopeTokenId()).orElse(null);
         }
-        while (host != null && host.scopeTokenId() != null) {
-            BoundaryEvent specific = null;
-            BoundaryEvent any = null;
-            for (BoundaryEvent b : process.boundariesOf(host.nodeId())) {
-                if (!isKind(b, error)) {
-                    continue;
-                }
-                String declared = codeOf(b.eventDefinitions().get(0), error);
-                if (declared == null && any == null) {
-                    any = b;
-                } else if (declared != null && declared.equals(code) && specific == null) {
-                    specific = b;
+        String leaving = null;
+        while (host != null) {
+            if (host.kind() == TokenKind.SCOPE) {
+                SubProcess caught = matchEventSubProcess(host, code, error, leaving);
+                if (caught != null) {
+                    return Optional.of(new Catcher(null, caught, host));
                 }
             }
-            BoundaryEvent caught = specific != null ? specific : any;
-            if (caught != null) {
-                return Optional.of(new Catcher(caught, host));
+            if (host.scopeTokenId() != null) {
+                BoundaryEvent specific = null;
+                BoundaryEvent any = null;
+                for (BoundaryEvent b : process.boundariesOf(host.nodeId())) {
+                    Optional<EventDefinition> definition = catching(b, error);
+                    if (definition.isEmpty()) {
+                        continue;
+                    }
+                    String declared = codeOf(definition.get(), error);
+                    if (declared == null && any == null) {
+                        any = b;
+                    } else if (declared != null && declared.equals(code) && specific == null) {
+                        specific = b;
+                    }
+                }
+                BoundaryEvent caught = specific != null ? specific : any;
+                if (caught != null) {
+                    return Optional.of(new Catcher(caught, null, host));
+                }
             }
-            host = tree().get(host.scopeTokenId()).orElse(null);
+            leaving = host.nodeId();
+            host = host.scopeTokenId() == null ? null : tree().get(host.scopeTokenId()).orElse(null);
         }
         return Optional.empty();
     }
 
+    /** The event sub-process of a scope whose error or escalation start matches the code, or null. */
+    private SubProcess matchEventSubProcess(Token scope, String code, boolean error, String leaving) {
+        SubProcess specific = null;
+        SubProcess any = null;
+        for (SubProcess esp : process.eventSubProcessesOf(scope.nodeId())) {
+            if (esp.id().equals(leaving)) {
+                continue;
+            }
+            io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent start = process.triggerOf(esp.id())
+                    .orElse(null);
+            if (start == null || start.eventDefinitions().size() != 1) {
+                continue;
+            }
+            EventDefinition d = start.eventDefinitions().get(0);
+            if (error ? !(d instanceof ErrorEventDefinition) : !(d instanceof EscalationEventDefinition)) {
+                continue;
+            }
+            String declared = codeOf(d, error);
+            if (declared == null && any == null) {
+                any = esp;
+            } else if (declared != null && declared.equals(code) && specific == null) {
+                specific = esp;
+            }
+        }
+        return specific != null ? specific : any;
+    }
+
     /** Runs the flow of a catching boundary in the scope of its host. */
     private void runCatch(Catcher found, Token source, String code, String trigger, boolean fromStep) {
+        if (found.eventSubProcess() != null) {
+            SubProcess esp = found.eventSubProcess();
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("code", code == null ? "-" : code);
+            startEventSubProcess(found.host(), process.triggerOf(esp.id()).orElseThrow(), trigger, details,
+                    fromStep ? source.id() : null);
+            return;
+        }
         BoundaryEvent boundary = found.boundary();
         Token host = found.host();
         if (boundary.cancelActivity()) {
@@ -550,7 +947,8 @@ final class WorkingContext implements ExecutionContext {
         Optional<Catcher> found = findCatcher(source, code, true, fromStep);
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("code", code == null ? "-" : code);
-        found.ifPresent(c -> details.put("caughtBy", c.boundary().id()));
+        found.ifPresent(c -> details.put("caughtBy", c.boundary() != null ? c.boundary().id()
+                : c.eventSubProcess().id()));
         history("ERROR_THROWN", source, details);
         if (found.isEmpty()) {
             return false;
@@ -564,13 +962,39 @@ final class WorkingContext implements ExecutionContext {
         Optional<Catcher> found = findCatcher(thrower, code, false, false);
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("code", code == null ? "-" : code);
-        found.ifPresent(c -> details.put("caughtBy", c.boundary().id()));
+        found.ifPresent(c -> details.put("caughtBy", c.boundary() != null ? c.boundary().id()
+                : c.eventSubProcess().id()));
         history("ESCALATION_THROWN", thrower, details);
         if (found.isEmpty()) {
             return false;
         }
         runCatch(found.get(), thrower, code, "ESCALATION", false);
-        return found.get().boundary().cancelActivity();
+        Catcher caught = found.get();
+        return caught.boundary() != null ? caught.boundary().cancelActivity()
+                : process.triggerOf(caught.eventSubProcess().id()).map(
+                        io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent::isInterrupting).orElse(true);
+    }
+
+    @Override
+    public void startEventSubProcess(Token scope, io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent start,
+            String trigger, Map<String, Object> details, String exceptWorkOf) {
+        SubProcess esp = (SubProcess) process.node(process.containerOf(start.id())).orElseThrow();
+        boolean interrupting = start.isInterrupting();
+        if (interrupting) {
+            // The other work of the scope is cancelled with its tasks, jobs, called children and waits; the scope stays.
+            for (Token child : tree().live(scope.id())) {
+                cancelTree(child, exceptWorkOf);
+            }
+        }
+        Token inner = createToken(TokenKind.SCOPE, esp.id(), scope.id());
+        Map<String, Object> entry = new LinkedHashMap<>(details);
+        entry.put("eventSubProcessId", esp.id());
+        entry.put("trigger", trigger);
+        entry.put("interrupting", interrupting);
+        entry.put("scopeTokenId", inner.id());
+        history("EVENT_SUBPROCESS_STARTED", inner, entry);
+        arming.arm(this, inner);
+        enqueue(createToken(TokenKind.FLOW, start.id(), inner.id()));
     }
 
     @Override

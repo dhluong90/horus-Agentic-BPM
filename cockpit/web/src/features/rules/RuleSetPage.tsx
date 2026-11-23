@@ -196,10 +196,14 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
   const editing = lens === 'edit' && block === undefined;
   const [matched, setMatched] = useState<ReadonlySet<string>>(new Set());
   const newDraft = useCopyVersion(version.ruleSet, (created) => {
-    say(t('editor.created', { version: String(created.version) }));
+    say(t('editor.createdFrom', { version: String(created.version), from: String(version.version) }));
     navigate({ name: 'rule-set', ruleSet: created.ruleSet, version: created.version, lens: 'edit' });
   });
-  const requestPublish = useRequestPublish((updated) => { say(t('dock.requested', { version: String(updated.version) })); });
+  const requestPublish = useRequestPublish((updated) => {
+    say(t('dock.requested', { version: String(updated.version) }));
+    // Simulate and Replay run on drafts only: the request moves the author to the table, never to an empty view.
+    if (lens === 'simulate' || lens === 'replay') navigate({ name: 'rule-set', ruleSet: updated.ruleSet, version: updated.version, lens: 'table' });
+  });
   const approve = useApprove((updated) => { say(t('dock.approved', { version: String(updated.version) })); }, onConflict);
 
   const reject = useReject((updated) => { say(t('dock.rejected', { version: String(updated.version) })); }, onConflict);
@@ -283,8 +287,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
                   // Back to where the author came from: the rule set's version in front, or the list when none is left.
                   navigate(versions.some((v) => v.version !== discarded.version) ? { name: 'rule-set', ruleSet: discarded.ruleSet, version: undefined, lens: undefined } : { name: 'rule-sets' });
                 }}
+                onWithdrawn={(message) => { say(message); }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
-                requestPublish={{ start: (report) => { requestPublish.start({ version, report }); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
+                requestPublish={{ start: ({ report, effectiveFrom }) => { requestPublish.start({ version, report, effectiveFrom }); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
           ) : null}
         </div>

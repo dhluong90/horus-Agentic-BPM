@@ -8,7 +8,7 @@ import { useProcessesSession } from '../processes/api/processesContext';
 import { useRulesSession } from '../rules/api/rulesContext';
 import { StatusPill } from '../rules/components/StatusPill';
 import { formatDateTime } from '../rules/model/dates';
-import { denialMessage, inView, itemKey, reviewRoute, type ApprovalItem, type Engine, type QueueView } from './queue';
+import { denialMessage, inView, itemKey, itemTitle, kindLabel, reviewRoute, type ApprovalItem, type Engine, type QueueView } from './queue';
 import { useApprovalQueue, type ApprovalQueue } from './useApprovalQueue';
 import { WithdrawDialog } from './WithdrawDialog';
 
@@ -128,8 +128,8 @@ function QueueBody({ queue, engines, items, view, current, onSelect }: {
           return (
             <li key={itemKey(item)} ref={selected ? selectedRow : undefined}>
               <button type="button" className={selected ? 'queue-card is-selected' : 'queue-card'} aria-pressed={selected} onClick={() => { onSelect(item); }}>
-                <span className="queue-card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</span>
-                <span className="tag tag--kind">{item.engine === 'rules' ? t('approvals.kind.rules') : t('approvals.kind.processes')}</span>
+                <span className="queue-card__title">{itemTitle(item, t)}</span>
+                <span className="tag tag--kind">{t(kindLabel(item))}</span>
                 <span className="queue-card__meta tnum">{who} · {formatDateTime(item.requestedAt, locale)}</span>
               </button>
             </li>
@@ -158,13 +158,15 @@ function Preview({ item, onWithdraw }: { item: ApprovalItem; onWithdraw: (item: 
   return (
     <article className="card queue__preview" aria-labelledby="approval-preview">
       <div className="card__head">
-        <h2 id="approval-preview" className="card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</h2>
+        <h2 id="approval-preview" className="card__title">{itemTitle(item, t)}</h2>
         <StatusPill status="PENDING_APPROVAL" />
       </div>
       <dl className="facts-list">
-        <div><dt>{t('approvals.kindLabel')}</dt><dd>{item.engine === 'rules' ? t('approvals.kind.rules') : t('approvals.kind.processes')}</dd></div>
+        <div><dt>{t('approvals.kindLabel')}</dt><dd>{t(kindLabel(item))}</dd></div>
         <div><dt>{t('rulesArea.col.requestedBy')}</dt><dd>{requester}</dd></div>
         <div><dt>{t('approvals.sent')}</dt><dd className="tnum">{formatDateTime(item.requestedAt, locale)}</dd></div>
+        {item.effectiveFrom !== undefined ? <div><dt>{t('approvals.effectiveFrom')}</dt><dd className="tnum">{formatDateTime(item.effectiveFrom, locale)}</dd></div> : null}
+        {item.reason !== undefined ? <div><dt>{t('approvals.reasonLabel')}</dt><dd>{item.reason}</dd></div> : null}
       </dl>
       {item.canApprove ? (
         <div className="queue__preview-actions">

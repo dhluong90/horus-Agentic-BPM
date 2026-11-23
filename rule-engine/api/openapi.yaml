@@ -72,6 +72,7 @@ paths:
                     requestedBy: lan
                     requestedByName: Trần Thị Lan
                     requestedAt: '2026-12-15T01:30:00Z'
+                    effectiveFrom: '2027-01-01T00:00:00Z'
                     allowedActions: []
                     deniedActions: { approve: SELF_APPROVAL_FORBIDDEN, reject: SELF_APPROVAL_FORBIDDEN }
                 nextCursor: null
@@ -1122,6 +1123,15 @@ paths:
         draft stays a draft; a rule set not listed needs none. The attachment is recorded with the request and the
         `simulationReportId` is a member of the `rules.version.publish-requested.v1` event. A body without the member,
         or no body, changes nothing for a client written before reports existed.
+
+        The optional body member `effectiveFrom` (ISO 8601 instant with an offset, `RLE-210`, #470) is the date
+        the version should take effect once approved. It replaces any `effectiveFrom` of the document, is stored with
+        the request, is returned in the version, in `GET /approvals` and in `rules.version.publish-requested.v1`, and
+        cannot be changed afterwards: only a draft can be replaced, so a different date needs a withdrawal and a new
+        request. A date before the request time is `422 EFFECTIVE_DATE_IN_PAST` and the draft stays a draft. Without
+        it the document's date applies, else the version takes effect at approval. The date is not part of the
+        content hash. A date that has passed by the time of approval puts the version in effect at once; the
+        approver sees the date before approving.
       parameters:
         - $ref: '#/components/parameters/RuleSetName'
         - $ref: '#/components/parameters/VersionNumber'
@@ -1136,6 +1146,7 @@ paths:
               $ref: '#/components/schemas/RequestPublishRequest'
             example:
               simulationReportId: 01KB2R6Q3C0000000000000001
+              effectiveFrom: '2027-01-01T00:00:00Z'
       responses:
         '200':
           $ref: '#/components/responses/Version'
@@ -2991,7 +3002,7 @@ components:
           type: boolean
     PendingApproval:
       type: object
-      required: [ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedByName, requestedAt, allowedActions, deniedActions]
+      required: [ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedByName, requestedAt, effectiveFrom, allowedActions, deniedActions]
       properties:
         ruleSet: { type: string }
         version: { type: integer, minimum: 1 }
@@ -3007,6 +3018,10 @@ components:
             The requester as a screen shows them, from the host's `DisplayNames` in the caller's language (#442,
             `RLE-196`); the user id when the host knows no name. A label only.
         requestedAt: { type: string, format: date-time }
+        effectiveFrom:
+          type: [string, 'null']
+          format: date-time
+          description: The date the requester asked the version to take effect (`RLE-210`, #470); null means at approval
         allowedActions:
           type: array
           items: { type: string, enum: [approve, reject, withdraw] }
@@ -3936,6 +3951,12 @@ components:
             A simulation report of this version to attach to the request (`RLE-201`). It must have been run on the
             content the version has now; required when the host lists the rule set in
             `rules.lifecycle.require-simulation-report`.
+        effectiveFrom:
+          type: string
+          format: date-time
+          description: |
+            When the version should take effect once approved (`RLE-210`). Not before the request time, else
+            `422 EFFECTIVE_DATE_IN_PAST`. Replaces the document's `effectiveFrom`; fixed once requested.
     SimulationReportRequest:
       type: object
       required: [source]
@@ -4553,7 +4574,8 @@ components:
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
             EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE, READINGS_TOO_LARGE,
-            SIMULATION_REPORT_REQUIRED, SIMULATION_REPORT_OUT_OF_DATE, SIMULATION_REPORT_NOT_FOUND]
+            SIMULATION_REPORT_REQUIRED, SIMULATION_REPORT_OUT_OF_DATE, SIMULATION_REPORT_NOT_FOUND,
+            EFFECTIVE_DATE_IN_PAST]
         detail: { type: string }
         correlationId: { type: string }
         currentCanonicalHash:

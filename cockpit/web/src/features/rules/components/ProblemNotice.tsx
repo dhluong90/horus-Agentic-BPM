@@ -24,6 +24,7 @@ const KNOWN_CODES = [
   'SIMULATION_REPORT_REQUIRED',
   'SIMULATION_REPORT_OUT_OF_DATE',
   'SIMULATION_REPORT_NOT_FOUND',
+  'EFFECTIVE_DATE_IN_PAST',
 ] as const;
 
 function messageKey(error: HostError): MessageKey {

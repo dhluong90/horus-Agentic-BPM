@@ -48,4 +48,24 @@ public interface ProcessEngine {
      * @throws InputInvalidException when the reason is missing, blank or too long
      */
     ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey);
+
+    /**
+     * Starts one activity of an open ad-hoc sub-process of a running instance (#500). Needs
+     * {@code processes:task:manage}. The activity must stand in the sub-process, and with {@code ordering} Sequential
+     * no other activity of it may be running.
+     *
+     * @param instanceId the instance id
+     * @param expectedLockVersion the instance's lock version, sent as {@code If-Match}
+     * @param scopeTokenId the scope token of the ad-hoc sub-process, from the instance's tokens
+     * @param activityId the activity to start
+     * @param idempotencyKey required; a replay with the same key and request returns the original result
+     * @return the instance after the start
+     * @throws InstanceNotFoundException when no such instance exists in the tenant
+     * @throws VersionConflictException when {@code expectedLockVersion} is stale
+     * @throws InvalidStateException when the instance is not running, the scope is not an open ad-hoc sub-process, or
+     *     the activity is not enabled
+     * @throws PreconditionRequiredException when {@code idempotencyKey} is null
+     */
+    ProcessInstance startAdHocActivity(String instanceId, long expectedLockVersion, String scopeTokenId,
+            String activityId, String idempotencyKey);
 }

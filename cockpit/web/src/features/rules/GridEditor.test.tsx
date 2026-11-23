@@ -279,7 +279,7 @@ describe('grid editor', () => {
     expect(await screen.findByText('Approved versions never change. Start a new draft.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'New draft' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start from this version' })).toBeEnabled();
   });
 
   it('CKP_006_the_reviewer_reads_a_pending_version_without_any_editor', async () => {

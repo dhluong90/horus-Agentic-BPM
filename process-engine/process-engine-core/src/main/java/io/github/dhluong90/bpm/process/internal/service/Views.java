@@ -53,6 +53,10 @@ public final class Views {
         if (!v.warnings().isEmpty()) {
             o.set("warnings", problems(v.warnings()));
         }
+        if (!v.alsoImported().isEmpty()) {
+            ArrayNode also = o.putArray("alsoImported");
+            v.alsoImported().forEach(r -> also.addObject().put("key", r.key()).put("version", r.version()));
+        }
         return o;
     }
 
@@ -85,7 +89,18 @@ public final class Views {
                 text(n, "requestedBy"), instant(n, "requestedAt"), instant(n, "approvedAt"), text(n, "decisionComment"),
                 text(n, "retiredBy"), instant(n, "retiredAt"),
                 n.has("supersededBy") && !n.get("supersededBy").isNull() ? n.get("supersededBy").intValue() : null,
-                warningsFromJson(n.get("warnings")));
+                warningsFromJson(n.get("warnings")), alsoFromJson(n.get("alsoImported")));
+    }
+
+    private static List<io.github.dhluong90.bpm.process.api.DefinitionRef> alsoFromJson(JsonNode array) {
+        List<io.github.dhluong90.bpm.process.api.DefinitionRef> out = new java.util.ArrayList<>();
+        if (array != null && array.isArray()) {
+            for (JsonNode r : array) {
+                out.add(new io.github.dhluong90.bpm.process.api.DefinitionRef(r.get("key").stringValue(),
+                        r.get("version").intValue()));
+            }
+        }
+        return out;
     }
 
     private static List<DefinitionProblem> warningsFromJson(JsonNode array) {
@@ -251,6 +266,25 @@ public final class Views {
         return o;
     }
 
+    /**
+     * @param f a resolved task form
+     * @return JSON tree of {@code task-form.v1.schema.json}: {@code schemaVersion}, {@code taskId},
+     *     {@code lockVersion}, then {@code form} (schema, hints, data) or {@code link}
+     */
+    public static ObjectNode taskForm(io.github.dhluong90.bpm.process.api.TaskForm f) {
+        ObjectNode o = EngineJson.NODES.objectNode();
+        o.put("schemaVersion", 1).put("taskId", f.taskId()).put("lockVersion", f.lockVersion());
+        if (f.isLink()) {
+            o.put("link", f.link());
+        } else {
+            ObjectNode form = o.putObject("form");
+            form.set("schema", Values.toJson(f.schema()));
+            form.set("hints", Values.toJson(f.hints()));
+            form.set("data", Values.toJson(f.data()));
+        }
+        return o;
+    }
+
     /** The stored answer of a claim or unclaim: the task without the caller's actions. */
     static String taskToJson(TaskView t) {
         ObjectNode o = task(t);
@@ -335,10 +369,20 @@ public final class Views {
 
     /** @param a pending approval @return JSON tree: hashes and identities, never the definition (#31) */
     public static ObjectNode pendingApproval(io.github.dhluong90.bpm.process.api.PendingApproval a) {
-        ObjectNode o = EngineJson.NODES.objectNode().put("key", a.key());
+        ObjectNode o = EngineJson.NODES.objectNode().put("kind", a.kind());
+        putNullable(o, "id", a.id());
+        o.put("key", a.key());
         putNullable(o, "name", a.name());
-        o.put("version", a.version()).put("definitionHash", a.definitionHash()).put("lockVersion", a.lockVersion())
-                .put("requestedBy", a.requestedBy()).put("requestedAt", a.requestedAt().toString());
+        o.put("version", a.version());
+        if (a.sourceVersion() == null) {
+            o.putNull("sourceVersion");
+        } else {
+            o.put("sourceVersion", a.sourceVersion());
+        }
+        putNullable(o, "definitionHash", a.definitionHash());
+        o.put("contentHash", a.contentHash()).put("lockVersion", a.lockVersion()).put("requestedBy", a.requestedBy())
+                .put("requestedAt", a.requestedAt().toString());
+        putNullable(o, "reason", a.reason());
         // #442: the requester as the screen shows them; the id when the host knows no name
         putNullable(o, "requestedByName", a.requestedByName());
         ArrayNode actions = o.putArray("allowedActions");

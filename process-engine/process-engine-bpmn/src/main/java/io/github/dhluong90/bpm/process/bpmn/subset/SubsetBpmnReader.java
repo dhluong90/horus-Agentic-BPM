@@ -18,10 +18,16 @@ import io.github.dhluong90.bpm.process.internal.expr.Script;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
-import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataInput;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataOutput;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceBehavior;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MultiInstanceLoopCharacteristics;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.StandardLoopCharacteristics;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
@@ -30,21 +36,32 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.AssociationDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
-import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SendTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Collaboration;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Lane;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LaneSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Participant;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocOrdering;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
@@ -52,6 +69,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.service.DefinitionReader;
@@ -76,6 +94,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.io.StringReader;
@@ -97,7 +116,8 @@ import javax.xml.stream.XMLStreamReader;
  * {@code endEvent}, {@code serviceTask} ({@code horus:handler}, or {@code horus:type="agentTask"} with
  * {@code horus:agent}, {@code <horus:outputSchema>} and {@code <horus:guardrail>}), {@code businessRuleTask}
  * ({@code horus:ruleSet}),
- * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, {@code parallelGateway},
+ * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} and {@code inclusiveGateway} with
+ * {@code default}, {@code parallelGateway},
  * an intermediate timer catch event with {@code timeDuration} or {@code timeDate}, and
  * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1} or FEEL. Inputs are
  * {@code horus:input} elements and the result variable is {@code horus:resultVariable}.
@@ -151,9 +171,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /** The {@code horus:type} of an agent step. */
     static final String AGENT_TASK = "agentTask";
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
-    /** The event definitions an end event may carry (#493). */
+    /** The event definitions an end event may carry (#493, #488). */
     private static final Set<String> END_DEFINITIONS = Set.of("errorEventDefinition", "escalationEventDefinition",
-            "terminateEventDefinition");
+            "terminateEventDefinition", "compensateEventDefinition", "cancelEventDefinition");
     /** Where a group carries the label of the category value it refers to; the process model has no root elements. */
     static final QName CATEGORY_VALUE_LABEL = new QName(BpmnNamespaces.BPMN, "categoryValue");
     /** Where a group carries the id of the category that holds its category value. */
@@ -165,6 +185,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
             BpmnNamespaces.XSI, BpmnNamespaces.BPMNDI, BpmnNamespaces.DC, BpmnNamespaces.DI,
             "http://www.w3.org/XML/1998/namespace");
     private static final int MAX_WARNINGS = 100;
+    /** Root elements of a choreography, kept as received (#497). */
+    private static final Set<String> CHOREOGRAPHY_ROOTS = Set.of("choreography", "globalChoreographyTask",
+            "globalConversation");
+    /** Where a message flow carries the ids of the pools at its ends, and the correlation variable of its target. */
+    static final QName SOURCE_POOL = new QName(BpmnNamespaces.HORUS, "sourcePool");
+    static final QName TARGET_POOL = new QName(BpmnNamespaces.HORUS, "targetPool");
+    static final QName CORRELATION_KEY = new QName(BpmnNamespaces.HORUS, "correlationKey");
 
     private final Limits limits;
 
@@ -219,8 +246,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
             try {
                 XmlHardening.requireUtf8Declaration(xml);
                 Pass pass = new Pass(xml);
-                Process process = pass.document();
-                return new Result(process, pass.warnings);
+                List<Process> all = pass.document();
+                return new Result(all.get(0), all, pass.warnings);
             } finally {
                 xml.close();
             }
@@ -265,7 +292,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             this.xml = xml;
         }
 
-        Process document() throws XMLStreamException {
+        List<Process> document() throws XMLStreamException {
             nextStart();
             // CMMN is refused at the root, before any other check (PRE-107): the XML hardening has already run.
             if (xml.getNamespaceURI() != null && xml.getNamespaceURI().startsWith(CMMN_NAMESPACE_PREFIX)) {
@@ -276,17 +303,24 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         "The root element must be definitions in namespace " + BPMN, xml.getLocalName(), null, line())));
             }
             documentLanguage = attr("expressionLanguage");
-            Process process = null;
             while (nextChild()) {
                 String ns = xml.getNamespaceURI();
                 String local = xml.getLocalName();
                 if (BPMN.equals(ns) && "process".equals(local)) {
-                    if (process != null) {
-                        unsupported(local, attr("id"), BpmnStages.S1);
+                    processes.add(process());
+                } else if (BPMN.equals(ns) && "collaboration".equals(local)) {
+                    if (collaboration != null) {
+                        invalid.add(new DefinitionProblem("COLLABORATION_DUPLICATE", "A file has one collaboration",
+                                "collaboration", safe(attr("id")), line()));
                         skip();
                     } else {
-                        process = process();
+                        collaboration();
                     }
+                } else if (BPMN.equals(ns) && CHOREOGRAPHY_ROOTS.contains(local)) {
+                    // #497: a choreography is kept as received, in the stored source, and never run.
+                    warn("CHOREOGRAPHY_KEPT_AS_RECEIVED", "A choreography is kept as received and is not run: model each"
+                            + " participant as an executable process", local, attr("id"));
+                    skip();
                 } else if (BPMN.equals(ns) && "category".equals(local)) {
                     category();
                 } else if (BPMN.equals(ns) && "error".equals(local)) {
@@ -314,27 +348,108 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
-            process = withMessageNames(process);
+            List<Process> executable = executableProcesses();
             for (DefinitionProblem ref : unresolvedRefs) {
                 if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
                     invalid.add(ref);
                 }
             }
-            if (process != null) {
+            List<Process> resolved = new ArrayList<>();
+            for (Process process : executable) {
+                process = withMessageNames(process);
                 process = resolveCodes(process);
                 process = withSignalNames(process);
+                resolved.add(process);
             }
+            Collaboration resolvedCollaboration = collaboration == null ? null : resolveCollaboration(resolved);
             if (!unsupported.isEmpty()) {
                 throw new BpmnUnsupportedElementException(unsupported, warnings, unsupportedTruncated);
             }
-            if (process == null) {
-                invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no process", null));
+            if (resolved.isEmpty()) {
+                invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no executable process", null));
             }
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
-            return withCategoryLabels(process);
+            List<Process> out = new ArrayList<>();
+            for (Process process : resolved) {
+                Process labelled = withCategoryLabels(process);
+                out.add(resolvedCollaboration != null && ownsPool(resolvedCollaboration, labelled)
+                        ? labelled.withCollaboration(resolvedCollaboration) : labelled);
+            }
+            return out;
+        }
+
+        private void warn(String code, String message, String element, String id) {
+            if (warnings.size() < MAX_WARNINGS) {
+                warnings.add(new DefinitionProblem(code, message, element, safe(id), line()));
+            }
+        }
+
+        private static boolean ownsPool(Collaboration c, Process p) {
+            return c.participants().stream().anyMatch(x -> p.id().equals(x.processRef()));
+        }
+
+        /** A process as read: executable or not, with where its key was written. */
+        private record Read(Process process, boolean executable, int line) { }
+
+        private final List<Read> processes = new ArrayList<>();
+        private Collaboration collaboration;
+        /** Lane sets of the process being read; null outside a process. */
+        private List<LaneSet> laneSink;
+        private int nesting;
+        private boolean codeRefsChecked;
+
+        /**
+         * The processes that become definitions. Alone in its file a process must be executable, as before. In a
+         * collaboration each participant that points to an executable process is one, the others are pools kept for
+         * display (#497).
+         */
+        private List<Process> executableProcesses() {
+            if (collaboration == null) {
+                if (processes.size() > 1) {
+                    invalid.add(new DefinitionProblem("PROCESS_NOT_IN_COLLABORATION", "A file with several processes needs"
+                            + " a collaboration whose participants point to them", "process",
+                            safe(processes.get(1).process().id()), processes.get(1).line()));
+                }
+                for (Read read : processes.stream().limit(1).toList()) {
+                    checkKey(read);
+                    if (!read.executable()) {
+                        invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
+                                "process", safe(read.process().id()), read.line()));
+                    }
+                }
+                return processes.isEmpty() ? List.of() : List.of(processes.get(0).process());
+            }
+            Set<String> pointed = new HashSet<>();
+            for (Participant participant : collaboration.participants()) {
+                if (participant.processRef() == null) {
+                    continue;
+                }
+                pointed.add(participant.processRef());
+                if (processes.stream().noneMatch(r -> r.process().id().equals(participant.processRef()))) {
+                    invalid.add(new DefinitionProblem("PARTICIPANT_PROCESS_MISSING", "The participant points to process '"
+                            + safe(participant.processRef()) + "', which this file does not hold", "participant",
+                            safe(participant.id()), 1));
+                }
+            }
+            List<Process> out = new ArrayList<>();
+            for (Read read : processes) {
+                if (read.executable()) {
+                    checkKey(read);
+                    out.add(read.process());
+                }
+            }
+            return out;
+        }
+
+        private void checkKey(Read read) {
+            if (!KEY.matcher(read.process().id()).matches()) {
+                invalid.add(new DefinitionProblem("KEY_INVALID", "The process id is the definition key and must be"
+                        + " kebab-case, for example card-fee-review", "process", safe(read.process().id()),
+                        read.line()));
+            }
         }
 
         /** A {@code signalEventDefinition}; its {@code signalRef} is resolved to the signal's name at the end. */
@@ -408,8 +523,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), t.incoming(),
                             t.outgoing(), signalsOf("intermediateThrowEvent", t.id(), t.eventDefinitions()),
                             t.eventDefinitionRefs(), t.data(), t.info());
+                    case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), b.incoming(), b.outgoing(),
+                            signalsOf("boundaryEvent", b.id(), b.eventDefinitions()), b.eventDefinitionRefs(), b.data(),
+                            b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(), b.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), a.incoming(), a.outgoing(), a.activity(),
+                            a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), resolveSignals(a.flowElements()), a.artifacts(),
+                            a.laneSets(), a.info());
                     default -> e;
                 });
             }
@@ -486,8 +609,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.operationRef(), t.info());
                     case SendTask t -> new SendTask(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.implementation(), nameOf(t.messageRef(), t.id(), "sendTask"), t.operationRef(), t.info());
+                    case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), b.incoming(), b.outgoing(),
+                            named(b.eventDefinitions(), b.id(), "boundaryEvent"), b.eventDefinitionRefs(), b.data(),
+                            b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(), b.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), a.incoming(), a.outgoing(), a.activity(),
+                            a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), resolveMessages(a.flowElements()), a.artifacts(),
+                            a.laneSets(), a.info());
                     default -> e;
                 });
             }
@@ -554,33 +685,242 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     artifacts, p.laneSets(), p.info());
         }
 
-        private Process process() throws XMLStreamException {
+        private Read process() throws XMLStreamException {
             String key = attr("id");
             String name = attr("name");
             int line = line();
-            if (key == null || !KEY.matcher(key).matches()) {
-                invalid.add(new DefinitionProblem("KEY_INVALID", "The process id is the definition key and must be"
-                        + " kebab-case, for example card-fee-review", "process", safe(key), line));
-            }
-            if (!"true".equals(attr("isExecutable"))) {
-                invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
-                        "process", safe(key), line));
-            }
+            boolean executable = "true".equals(attr("isExecutable"));
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            container(elements, artifacts, false);
-            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
+            laneSink = new ArrayList<>();
+            nesting = 0;
+            container(elements, artifacts);
+            elements = withLaneAssignees(elements, laneSink);
+            pendingAssignee.forEach((taskId, at) -> invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
+                    "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>, or a named lane to"
+                            + " take the group from", "userTask", safe(taskId), at)));
+            pendingAssignee.clear();
+            Process read = withRefs(new Process(key == null ? "_missing_" + line : key, name, ProcessType.NONE,
+                    executable, false, elements, artifacts, laneSink, null));
+            laneSink = null;
+            return new Read(read, executable, line);
         }
 
+        /** User tasks of the process being read that name no assignee: id to line. */
+        private final Map<String, Integer> pendingAssignee = new HashMap<>();
 
         /**
-         * The flow elements and artifacts of a process or of a {@code saga} block ({@code transaction}), read into
-         * the given lists.
-         *
-         * @param inSaga whether the container is a {@code saga}, where {@code throwCompensation} may stand
+         * #497: a user task with no {@code horus:assignee} that stands in a named lane is assigned to the group of
+         * that lane, the lane's name in lower case with other characters as hyphens; an author's own assignee is
+         * never changed.
          */
-        private void container(List<FlowElement> elements, List<Artifact> artifacts, boolean inSaga)
+        private List<FlowElement> withLaneAssignees(List<FlowElement> elements, List<LaneSet> sets) {
+            if (pendingAssignee.isEmpty() || sets.isEmpty()) {
+                return elements;
+            }
+            Map<String, String> groupOfNode = new HashMap<>();
+            sets.forEach(set -> laneGroups(set, groupOfNode));
+            List<FlowElement> out = new ArrayList<>();
+            for (FlowElement element : elements) {
+                if (element instanceof UserTask task && pendingAssignee.containsKey(task.id())
+                        && groupOfNode.containsKey(task.id())) {
+                    pendingAssignee.remove(task.id());
+                    List<HorusExtension> ext = new ArrayList<>();
+                    for (HorusExtension e : task.info().extensions().horus()) {
+                        ext.add(e instanceof TaskAssignment a
+                                ? new TaskAssignment("group:" + groupOfNode.get(task.id()), a.fourEyes()) : e);
+                    }
+                    out.add(new UserTask(task.id(), task.name(), task.incoming(), task.outgoing(), task.activity(),
+                            task.implementation(), info(ext, task.info().extensions().foreign())));
+                } else {
+                    out.add(element);
+                }
+            }
+            return out;
+        }
+
+        private static void laneGroups(LaneSet set, Map<String, String> groupOfNode) {
+            for (Lane lane : set.lanes()) {
+                String group = lane.name() == null ? "" : lane.name().toLowerCase(java.util.Locale.ROOT)
+                        .replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+                for (String ref : lane.flowNodeRefs()) {
+                    if (group.isEmpty() || group.length() > 100) {
+                        groupOfNode.remove(ref);
+                    } else {
+                        groupOfNode.put(ref, group);
+                    }
+                }
+                if (lane.childLaneSet() != null) {
+                    laneGroups(lane.childLaneSet(), groupOfNode);
+                }
+            }
+        }
+
+        /** A {@code laneSet}: kept for display and as a work group hint, never as an assignment (#497). */
+        private LaneSet laneSet() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            List<Lane> lanes = new ArrayList<>();
+            while (nextChild()) {
+                if (BPMN.equals(xml.getNamespaceURI()) && "lane".equals(xml.getLocalName())) {
+                    lanes.add(lane());
+                } else {
+                    skip();
+                }
+            }
+            return new LaneSet(id, name, lanes, null);
+        }
+
+        private Lane lane() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            List<String> refs = new ArrayList<>();
+            LaneSet child = null;
+            while (nextChild()) {
+                boolean bpmn = BPMN.equals(xml.getNamespaceURI());
+                if (bpmn && "flowNodeRef".equals(xml.getLocalName())) {
+                    String ref = text().strip();
+                    if (!ref.isEmpty()) {
+                        refs.add(ref);
+                    }
+                } else if (bpmn && "childLaneSet".equals(xml.getLocalName())) {
+                    child = laneSet();
+                } else {
+                    skip();
+                }
+            }
+            return new Lane(id, name, null, refs, child, null);
+        }
+
+        /** The {@code collaboration}: its pools and message flows, read as written and resolved at the end. */
+        private void collaboration() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            List<Participant> participants = new ArrayList<>();
+            List<MessageFlow> flows = new ArrayList<>();
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (!BPMN.equals(xml.getNamespaceURI())) {
+                    skip();
+                } else if ("participant".equals(local)) {
+                    String pid = id();
+                    participants.add(new Participant(pid, attr("name"), attr("processRef"), null, null, null));
+                    skip();
+                } else if ("messageFlow".equals(local)) {
+                    String fid = id();
+                    int at = line();
+                    flows.add(new MessageFlow(fid, attr("name"), attr("sourceRef"), attr("targetRef"),
+                            attr("messageRef"), null));
+                    if (attr("sourceRef") == null || attr("targetRef") == null) {
+                        invalid.add(new DefinitionProblem("MESSAGE_FLOW_ENDS_MISSING", "A message flow needs sourceRef"
+                                + " and targetRef", "messageFlow", safe(fid), at));
+                    }
+                    skip();
+                } else if (CHOREOGRAPHY_ROOTS.contains(local) || local.endsWith("Conversation")
+                        || "conversation".equals(local) || "conversationLink".equals(local)
+                        || "choreographyRef".equals(local) || "conversationAssociation".equals(local)) {
+                    warn("CHOREOGRAPHY_KEPT_AS_RECEIVED", "A choreography or conversation is kept as received and is not"
+                            + " run", local, attr("id"));
+                    skip();
+                } else {
+                    // text annotations, associations, groups, documentation and extensions are not run
+                    skip();
+                }
+            }
+            collaboration = new Collaboration(id, name, false, participants, flows, List.of(), null);
+        }
+
+        /**
+         * Resolves the message flows once every process is read: each end is a pool or a step of a pool, the
+         * message is named, and a flow into a message start, catch or receive step of an executable pool records the
+         * correlation variable the step reads (#497, documentation only; the run goes through #491).
+         */
+        private Collaboration resolveCollaboration(List<Process> executable) {
+            Map<String, String> poolOfNode = new HashMap<>();
+            Map<String, String> poolOfProcess = new HashMap<>();
+            for (Participant participant : collaboration.participants()) {
+                if (participant.processRef() != null) {
+                    poolOfProcess.put(participant.processRef(), participant.id());
+                }
+            }
+            Map<String, FlowNode> nodes = new HashMap<>();
+            for (Read read : processes) {
+                String pool = poolOfProcess.get(read.process().id());
+                for (FlowElement element : read.process().allFlowElements()) {
+                    if (element instanceof FlowNode node && pool != null) {
+                        poolOfNode.put(node.id(), pool);
+                        nodes.put(node.id(), node);
+                    }
+                }
+            }
+            Set<String> poolIds = new HashSet<>();
+            collaboration.participants().forEach(x -> poolIds.add(x.id()));
+            List<MessageFlow> out = new ArrayList<>();
+            for (MessageFlow flow : collaboration.messageFlows()) {
+                String source = poolIds.contains(flow.sourceRef()) ? flow.sourceRef() : poolOfNode.get(flow.sourceRef());
+                String target = poolIds.contains(flow.targetRef()) ? flow.targetRef() : poolOfNode.get(flow.targetRef());
+                if (flow.sourceRef() != null && source == null) {
+                    invalid.add(new DefinitionProblem("MESSAGE_FLOW_END_UNRESOLVED", "sourceRef '" + safe(flow.sourceRef())
+                            + "' is neither a participant nor a step of one", "messageFlow", safe(flow.id()), 1));
+                }
+                if (flow.targetRef() != null && target == null) {
+                    invalid.add(new DefinitionProblem("MESSAGE_FLOW_END_UNRESOLVED", "targetRef '" + safe(flow.targetRef())
+                            + "' is neither a participant nor a step of one", "messageFlow", safe(flow.id()), 1));
+                }
+                String message = null;
+                if (flow.messageRef() != null) {
+                    message = messageNames.get(flow.messageRef());
+                    if (message == null) {
+                        invalid.add(new DefinitionProblem("MESSAGE_REF_UNRESOLVED", "messageRef '" + safe(flow.messageRef())
+                                + "' does not resolve to a message of this document", "messageFlow", safe(flow.id()), 1));
+                    }
+                }
+                Map<QName, String> extra = new HashMap<>();
+                if (source != null) {
+                    extra.put(SOURCE_POOL, source);
+                }
+                if (target != null) {
+                    extra.put(TARGET_POOL, target);
+                }
+                FlowNode catcher = nodes.get(flow.targetRef());
+                if (catcher != null && executable.stream().anyMatch(p -> p.allFlowElements().stream()
+                        .anyMatch(e -> e.id().equals(catcher.id())))) {
+                    catcher.info().extensions().first(CorrelationKey.class)
+                            .ifPresent(k -> extra.put(CORRELATION_KEY, k.variable()));
+                }
+                out.add(new MessageFlow(flow.id(), flow.name(), flow.sourceRef(), flow.targetRef(), message,
+                        new ElementInfo(List.of(), null, extra)));
+            }
+            return new Collaboration(collaboration.id(), collaboration.name(), false, collaboration.participants(), out,
+                    List.of(), null);
+        }
+
+        /**
+         * The flow elements and artifacts of a process, a {@code saga} block ({@code transaction}) or a sub-process,
+         * read into the given lists.
+         */
+        private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts)
                 throws XMLStreamException {
+            return container(elements, artifacts, null);
+        }
+
+        /**
+         * Reads a container. {@code completion}, when not null, receives the {@code completionCondition} of an ad-hoc
+         * sub-process (#500); anywhere else that child is named as unsupported.
+         */
+        private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts,
+                Expression[] completion) throws XMLStreamException {
+            nesting++;
+            try {
+                return containerChildren(elements, artifacts, completion);
+            } finally {
+                nesting--;
+            }
+        }
+
+        private LoopCharacteristics containerChildren(List<FlowElement> elements, List<Artifact> artifacts,
+                Expression[] completion) throws XMLStreamException {
+            LoopCharacteristics own = null;
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (!BPMN.equals(xml.getNamespaceURI())) {
@@ -588,7 +928,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     continue;
                 }
                 behaviourAttributes();
+                lastLoop = null;
+                int before = elements.size();
                 switch (local) {
+                    case "standardLoopCharacteristics", "multiInstanceLoopCharacteristics" ->
+                            own = loopCharacteristics(local, "the enclosing sub-process");
                     case "startEvent" -> elements.add(event(true));
                     case "endEvent" -> elements.add(event(false));
                     case "serviceTask" -> elements.add(serviceTask());
@@ -612,7 +956,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case "receiveTask" -> elements.add(messageTask(true));
                     case "sendTask" -> elements.add(messageTask(false));
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
-                    case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
+                    case "intermediateThrowEvent" -> elements.add(throwEvent());
                     case "transaction" -> elements.add(saga());
                     case "subProcess" -> elements.add(subProcess());
                     case "exclusiveGateway" -> {
@@ -623,12 +967,31 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         elements.add(new ExclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
                                 defaultFlow, children.info()));
                     }
+                    case "inclusiveGateway" -> {
+                        String id = id();
+                        String gwName = attr("name");
+                        String defaultFlow = attr("default");
+                        Node children = children(local, id, false);
+                        elements.add(new InclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
+                                defaultFlow, children.info()));
+                    }
                     case "parallelGateway" -> {
                         String id = id();
                         String gwName = attr("name");
                         Node children = children(local, id, false);
                         elements.add(new ParallelGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
                                 children.info()));
+                    }
+                    case "eventBasedGateway" -> elements.add(eventBasedGateway());
+                    case "complexGateway" -> elements.add(complexGateway());
+                    case "adHocSubProcess" -> elements.add(adHocSubProcess());
+                    case "completionCondition" -> {
+                        if (completion == null) {
+                            unsupported(local, attr("id"), BpmnStages.NOT_PLANNED, "belongs to an adHocSubProcess");
+                            skip();
+                        } else {
+                            completion[0] = expression();
+                        }
                     }
                     case "sequenceFlow" -> elements.add(sequenceFlow());
                     case "textAnnotation" -> artifacts.add(textAnnotation());
@@ -640,12 +1003,237 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         artifacts.add(new Group(id, ref, null));
                     }
                     case "documentation", "extensionElements", "incoming", "outgoing" -> skip();
+                    case "laneSet" -> {
+                        LaneSet set = laneSet();
+                        if (nesting == 1 && laneSink != null) {
+                            laneSink.add(set);
+                        } else {
+                            unsupported("laneSet", set.id(), BpmnStages.NOT_PLANNED, "inside a sub-process or a saga is not"
+                                    + " supported; put the lanes on the process");
+                        }
+                    }
                     default -> {
                         unsupported(local, attr("id"), BpmnStages.of(local));
                         skip();
                     }
                 }
+                if (lastLoop != null) {
+                    attachLoop(elements, before, lastLoop);
+                    lastLoop = null;
+                }
             }
+            return own;
+        }
+
+        /** The loop characteristics read from the activity just read, handed to {@link #container}. */
+        private LoopCharacteristics lastLoop;
+
+        /** Puts the loop characteristics on the activity {@code container} just added; any other element refuses them. */
+        private void attachLoop(List<FlowElement> elements, int before, LoopCharacteristics loop) {
+            if (elements.size() > before && elements.get(elements.size() - 1) instanceof Activity activity) {
+                elements.set(elements.size() - 1, withLoop(activity, loop));
+            } else if (elements.size() > before) {
+                invalid.add(new DefinitionProblem("LOOP_ON_UNSUPPORTED_ACTIVITY", "Loop characteristics are on a task, a"
+                        + " call activity or an embedded sub-process", "loopCharacteristics",
+                        safe(elements.get(elements.size() - 1).id()), line()));
+            }
+        }
+
+        private static FlowElement withLoop(Activity activity, LoopCharacteristics loop) {
+            ActivityAttributes a = activity.activity();
+            ActivityAttributes looped = new ActivityAttributes(a.isForCompensation(), a.startQuantity(),
+                    a.completionQuantity(), a.defaultFlow(), a.ioSpecification(), a.dataInputAssociations(),
+                    a.dataOutputAssociations(), a.resources(), loop);
+            return switch (activity) {
+                case Task t -> new Task(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.info());
+                case ManualTask t -> new ManualTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.info());
+                case UserTask t -> new UserTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.implementation(),
+                        t.info());
+                case ServiceTask t -> new ServiceTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.operationRef(), t.info());
+                case BusinessRuleTask t -> new BusinessRuleTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.info());
+                case ScriptTask t -> new ScriptTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.scriptFormat(), t.script(), t.info());
+                case CallActivity t -> new CallActivity(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.calledElement(), t.info());
+                case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.triggeredByEvent(), t.flowElements(), t.artifacts(), t.laneSets(), t.info());
+                default -> activity;
+            };
+        }
+
+        /**
+         * {@code standardLoopCharacteristics} or {@code multiInstanceLoopCharacteristics} (#496). A loop has a
+         * {@code loopMaximum} and a {@code loopCondition}; a multi-instance step takes its repetitions from
+         * {@code horus:collection} (a list variable, with {@code horus:elementVariable} naming the item) or from a
+         * {@code loopCardinality}, runs them in parallel or, with {@code isSequential="true"}, one after another, puts
+         * what each yields in {@code horus:outputCollection} (from {@code horus:outputElement}, else the step's result
+         * variable), and ends early when its {@code completionCondition} holds.
+         */
+        private LoopCharacteristics loopCharacteristics(String local, String owner) throws XMLStreamException {
+            String loopId = attr("id");
+            if ("standardLoopCharacteristics".equals(local)) {
+                boolean testBefore = "true".equals(attr("testBefore"));
+                Integer max = integer(attr("loopMaximum"), "loopMaximum", owner);
+                Expression condition = null;
+                while (nextChild()) {
+                    if (BPMN.equals(xml.getNamespaceURI()) && "loopCondition".equals(xml.getLocalName())) {
+                        condition = loopExpression("loopCondition", owner);
+                    } else {
+                        loopChild(local, owner);
+                    }
+                }
+                return new StandardLoopCharacteristics(loopId, testBefore, max, condition, null);
+            }
+            boolean sequential = "true".equals(attr("isSequential"));
+            String collection = horus("collection");
+            String element = horus("elementVariable");
+            String outputCollection = horus("outputCollection");
+            String outputElement = horus("outputElement");
+            Expression cardinality = null;
+            Expression completion = null;
+            while (nextChild()) {
+                String child = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "loopCardinality".equals(child)) {
+                    cardinality = loopExpression("loopCardinality", owner);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "completionCondition".equals(child)) {
+                    completion = loopExpression("completionCondition", owner);
+                } else {
+                    loopChild(local, owner);
+                }
+            }
+            return new MultiInstanceLoopCharacteristics(loopId, sequential, MultiInstanceBehavior.NONE, cardinality,
+                    collection, outputCollection, element == null ? null : new DataInput(null, element, null, false,
+                            null), outputElement == null ? null : new DataOutput(null, outputElement, null, false,
+                            null), completion, null, null, null);
+        }
+
+        /** Any other child of a loop element is named as unsupported, never ignored. */
+        private void loopChild(String element, String owner) throws XMLStreamException {
+            if (BPMN.equals(xml.getNamespaceURI())) {
+                unsupported(element + " child " + xml.getLocalName(), owner, BpmnStages.of(xml.getLocalName()));
+            }
+            skip();
+        }
+
+        private Integer integer(String text, String attribute, String owner) {
+            if (text == null) {
+                return null;
+            }
+            try {
+                return Integer.valueOf(text);
+            } catch (NumberFormatException e) {
+                invalid.add(new DefinitionProblem("LOOP_INVALID", attribute + " is a whole number", "loopCharacteristics",
+                        safe(owner), line()));
+                return null;
+            }
+        }
+
+        /** The text of a loop expression, in the language of the document; any language but v1 is refused. */
+        private Expression loopExpression(String element, String owner) throws XMLStreamException {
+            String language = attr("language") != null ? attr("language") : documentLanguage;
+            int at = line();
+            String text = text();
+            if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
+                String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language " + safe(language)
+                        + " is not supported; use " + BpmnNamespaces.EXPR_V1, element, safe(owner), at, stage));
+            }
+            return new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
+        }
+
+        /**
+         * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to. The
+         * instantiating form and the parallel type are named as unsupported with stage S3.
+         */
+        private FlowElement eventBasedGateway() throws XMLStreamException {
+            String id = id();
+            String gwName = attr("name");
+            boolean instantiate = "true".equals(attr("instantiate"));
+            boolean parallel = "Parallel".equals(attr("eventGatewayType"));
+            if (instantiate) {
+                unsupported("eventBasedGateway with instantiate", id, BpmnStages.S3, "is not supported in this release;"
+                        + " stage S3 adds the instantiating event-based gateway");
+            }
+            if (parallel) {
+                unsupported("eventBasedGateway with eventGatewayType Parallel", id, BpmnStages.S3, "is not supported in"
+                        + " this release; stage S3 adds the parallel event-based gateway");
+            }
+            Node children = children("eventBasedGateway", id, false);
+            return new EventBasedGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED, instantiate,
+                    parallel ? EventBasedGatewayType.PARALLEL : EventBasedGatewayType.EXCLUSIVE, children.info());
+        }
+
+        /** The current element read as a condition: its text, in its own language or the document's (#500). */
+        private Expression expression() throws XMLStreamException {
+            String language = attr("language") != null ? attr("language") : documentLanguage;
+            int at = line();
+            String id = attr("id");
+            String local = xml.getLocalName();
+            String text = text();
+            if (language != null && !Condition.isSupportedLanguage(language)) {
+                addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language " + safe(language)
+                        + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " or FEEL (" + BpmnNamespaces.FEEL + ")",
+                        local, safe(id), at, BpmnStages.NOT_PLANNED));
+            }
+            return new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
+        }
+
+        /**
+         * A {@code complexGateway} (#500): {@code default} names the flow taken when no outgoing condition holds, and
+         * {@code activationCondition} says when a join fires; the split is read from the outgoing flows as for any other
+         * gateway.
+         */
+        private FlowElement complexGateway() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            String defaultFlow = attr("default");
+            Expression activation = null;
+            List<HorusExtension> horus = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
+            while (nextChild()) {
+                String ns = xml.getNamespaceURI();
+                String local = xml.getLocalName();
+                if (BPMN.equals(ns) && "activationCondition".equals(local)) {
+                    activation = expression();
+                } else if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
+                    skip();
+                } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
+                    extensions("complexGateway", id, false, horus, foreign);
+                } else if (BPMN.equals(ns)) {
+                    unsupported("complexGateway child " + local, id, BpmnStages.of(local));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            return new ComplexGateway(id, name, List.of(), List.of(), GatewayDirection.UNSPECIFIED, defaultFlow,
+                    activation, info(horus, foreign));
+        }
+
+        /**
+         * An {@code adHocSubProcess} (#500): activities with no sequence flow between them, started one at a time by
+         * the host. {@code ordering} is {@code Parallel} (the default) or {@code Sequential}; {@code completionCondition}
+         * ends it; {@code cancelRemainingInstances} (true by default) cancels what still runs when it ends.
+         */
+        private FlowElement adHocSubProcess() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            int at = line();
+            String ordering = attr("ordering");
+            if (ordering != null && !"Parallel".equals(ordering) && !"Sequential".equals(ordering)) {
+                invalid.add(new DefinitionProblem("AD_HOC_ORDERING_INVALID", "ordering is Parallel or Sequential",
+                        "adHocSubProcess", safe(id), at));
+            }
+            boolean cancelRemaining = !"false".equals(attr("cancelRemainingInstances"));
+            List<FlowElement> elements = new ArrayList<>();
+            List<Artifact> artifacts = new ArrayList<>();
+            Expression[] completion = new Expression[1];
+            container(elements, artifacts, completion);
+            return new AdHocSubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), completion[0],
+                    cancelRemaining, "Sequential".equals(ordering) ? AdHocOrdering.SEQUENTIAL : AdHocOrdering.PARALLEL,
+                    withRefs(elements), artifacts, List.of(), null);
         }
 
         /**
@@ -663,10 +1251,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            container(elements, artifacts, true);
+            if (container(elements, artifacts) != null) {
+                invalid.add(new DefinitionProblem("LOOP_ON_UNSUPPORTED_ACTIVITY", "A saga block cannot repeat; put the"
+                        + " loop on a sub-process inside it", "transaction", safe(id), line()));
+            }
             for (FlowElement e : elements) {
                 // PD-127: a completed child is never left silently in place, so a call inside a saga declares its undo.
-                if (e instanceof CallActivity c && c.info().extensions().first(CompensateHandlerRef.class).isEmpty()) {
+                if (e instanceof CallActivity c && c.info().extensions().first(CompensateHandlerRef.class).isEmpty()
+                        && elements.stream().noneMatch(b -> b instanceof BoundaryEvent boundary
+                                && c.id().equals(boundary.attachedToRef()) && boundary.eventDefinitions().size() == 1
+                                && boundary.eventDefinitions().get(0) instanceof CompensateEventDefinition)) {
                     invalid.add(new DefinitionProblem("COMPENSATION_REQUIRED", "A callProcess step inside a saga declares"
                             + " its undo with horus:compensate (a handler, another callProcess, or manual)",
                             "callActivity", safe(c.id()), line()));
@@ -678,29 +1272,30 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * An embedded {@code subProcess} (#486, ADR-0020): a scope with its own none start event, steps and end
-         * events, entered and left through its own node. An event sub-process ({@code triggeredByEvent}) is not
-         * supported yet, and a loop or multi-instance marker is named as unsupported like on any other activity.
+         * events, entered and left through its own node. An event sub-process ({@code triggeredByEvent}, #487) has no
+         * flow in or out: its own start event, which carries the trigger, starts it. A loop or multi-instance marker is
+         * named as unsupported like on any other activity.
          */
         private FlowElement subProcess() throws XMLStreamException {
             String id = id();
             String name = attr("name");
             boolean byEvent = "true".equals(attr("triggeredByEvent"));
-            if (byEvent) {
-                unsupported("subProcess with triggeredByEvent", id, BpmnStages.S1);
-            }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            container(elements, artifacts, false);
+            LoopCharacteristics own = container(elements, artifacts);
+            // Read after the nested steps, which reset it: the marker of this sub-process, if any, goes to its container.
+            lastLoop = own;
             return new SubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), byEvent,
                     withRefs(elements), artifacts, List.of(), null);
         }
 
         /**
-         * {@code throwCompensation} (#67, PRE-076): an {@code intermediateThrowEvent} with one
-         * {@code compensateEventDefinition} and no {@code activityRef}, inside a {@code saga} block. It undoes the
-         * completed steps of its {@code saga} newest first. Every other throw event is named as unsupported.
+         * {@code throwCompensation} (#67, PRE-076, #488): an {@code intermediateThrowEvent} with one
+         * {@code compensateEventDefinition}, with or without an {@code activityRef}. It undoes the completed steps of its
+         * scope newest first, or the one activity. Where it may stand and what it needs is checked when the definition
+         * is compiled. Every other throw event is named as unsupported.
          */
-        private FlowElement throwEvent(boolean inSaga) throws XMLStreamException {
+        private FlowElement throwEvent() throws XMLStreamException {
             String element = "intermediateThrowEvent";
             String id = id();
             String name = attr("name");
@@ -728,10 +1323,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
                     definitions++;
-                    if (attr("activityRef") != null) {
-                        unsupported(element + " with compensateEventDefinition activityRef", id, BpmnStages.S2);
-                    }
-                    compensate = new CompensateEventDefinition(attr("id"), null, true, null);
+                    compensate = compensateDefinition(id);
                     children(local, id, false);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
@@ -755,10 +1347,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (definitions == 0) {
                 unsupported(element, id, BpmnStages.S0, BpmnStages.message(BpmnStages.S0));
             } else if (definitions > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
-            } else if (compensate != null && !inSaga) {
-                invalid.add(new DefinitionProblem("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
-                        + " steps of its saga block; put it inside a transaction", element, safe(id), line));
+                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; a throw event throws"
+                        + " exactly one");
             }
             List<EventDefinition> defs = compensate != null ? List.<EventDefinition>of(compensate)
                     : message != null ? List.<EventDefinition>of(message)
@@ -793,14 +1383,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * Names the attributes of the current element that change how it runs and that this release does not honour:
-         * a compensation activity, a quantity other than one, a non-interrupting start, a parallel multiple event or
+         * a compensation activity other than a service task, a quantity other than one, a non-interrupting start, or
          * an implementation other than a registered handler. Ignoring them would run the element differently from
          * what the model says.
          */
         private void behaviourAttributes() {
             String id = attr("id");
-            if ("true".equals(attr("isForCompensation"))) {
-                unsupported("isForCompensation", id, BpmnStages.S2);
+            if ("true".equals(attr("isForCompensation")) && !"serviceTask".equals(xml.getLocalName())) {
+                unsupported("isForCompensation", id, BpmnStages.NOT_PLANNED, "applies to a service task: the undo of a"
+                        + " step is a handler");
             }
             for (String quantity : List.of("startQuantity", "completionQuantity")) {
                 String value = attr(quantity);
@@ -808,11 +1399,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     unsupported(quantity, id, BpmnStages.NOT_PLANNED);
                 }
             }
-            if ("false".equals(attr("isInterrupting"))) {
-                unsupported("isInterrupting", id, BpmnStages.S1);
+            if ("false".equals(attr("isInterrupting")) && !"startEvent".equals(xml.getLocalName())) {
+                unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to the start event of an event"
+                        + " sub-process; a boundary event uses cancelActivity");
             }
-            if ("true".equals(attr("parallelMultiple"))) {
-                unsupported("parallelMultiple", id, BpmnStages.S3);
+            if ("true".equals(attr("parallelMultiple")) && !xml.getLocalName().endsWith("Event")) {
+                unsupported("parallelMultiple", id, BpmnStages.NOT_PLANNED, "applies to an event that has several event"
+                        + " definitions");
             }
             String implementation = attr("implementation");
             if (implementation != null && !"##unspecified".equals(implementation)) {
@@ -867,6 +1460,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             int line = line();
             String key = horus("correlationKey");
+            boolean interrupting = !"false".equals(attr("isInterrupting"));
+            boolean parallel = "true".equals(attr("parallelMultiple"));
             List<EventDefinition> definitions = new ArrayList<>();
             List<HorusExtension> ext = new ArrayList<>();
             List<ForeignFragment> foreign = new ArrayList<>();
@@ -887,6 +1482,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions.add(signalDefinition(id, element));
                 } else if (start && BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
                     definitions.add(conditionalDefinition(id, element));
+                } else if (start && BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
+                    // #487: the trigger of an event sub-process; where a start event may carry it is checked at compile.
+                    // #500: a timeCycle repeats a non-interrupting one.
+                    TimerEventDefinition timer = timer(id);
+                    definitions.add(timer);
+                    TimerSchedule.problem(timer).ifPresent(problem ->
+                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
+                } else if (start && BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
+                        || "escalationEventDefinition".equals(local) || "compensateEventDefinition".equals(local))) {
+                    definitions.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
                     definitions.add(messageDefinition(id));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
@@ -901,19 +1506,32 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
-            if (definitions.size() > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+            if (definitions.size() > 1 && !start) {
+                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; an end event raises"
+                        + " exactly one");
             }
-            if (start && !definitions.isEmpty() && key != null) {
-                invalid.add(new DefinitionProblem("CORRELATION_KEY_UNEXPECTED", "A message start event has no instance"
-                        + " yet; the message's key becomes the business key", element, safe(id), line));
-                key = null;
-            }
+            // A message start event of a process has no instance yet, so its key becomes the business key; one of an event
+            // sub-process has the instance, so it names its key variable like a message catch (#487, checked at compile).
             messageExtras(element, id, line, definitions, key, false, ext);
             ElementInfo info = definitions.isEmpty() ? null : info(ext, foreign);
             return start
-                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, true, info)
+                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, parallel, interrupting,
+                            info)
                     : new EndEvent(id, name, List.of(), List.of(), definitions, List.of(), null, info);
+        }
+
+        /**
+         * A {@code compensateEventDefinition} (#488), at the current element: {@code activityRef} names the one activity
+         * to undo, none means the whole scope. {@code waitForCompletion="false"} is refused: the flow goes on after the
+         * undo is done.
+         */
+        private CompensateEventDefinition compensateDefinition(String eventId) {
+            if ("false".equals(attr("waitForCompletion"))) {
+                unsupported("compensateEventDefinition waitForCompletion", eventId, BpmnStages.NOT_PLANNED,
+                        "false is not supported: the flow goes on after the undo is done");
+            }
+            String ref = attr("activityRef");
+            return new CompensateEventDefinition(attr("id"), ref == null || ref.isBlank() ? null : ref, true, null);
         }
 
         /**
@@ -938,6 +1556,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
                 case "linkEventDefinition" -> result = new LinkEventDefinition(definitionId, attr("name"), List.of(), null,
                         null);
+                case "compensateEventDefinition" -> result = compensateDefinition(eventId);
+                case "cancelEventDefinition" -> result = new CancelEventDefinition(definitionId, null);
                 default -> result = new TerminateEventDefinition(definitionId, null);
             }
             skip();
@@ -945,9 +1565,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * A {@code boundaryEvent} (#489): attached to a task, a call activity or a sub-process, with a timer, an error
-         * or an escalation definition, interrupting ({@code cancelActivity} true, the default) or not. Message, signal
-         * and conditional boundaries are named as unsupported with their stage.
+         * A {@code boundaryEvent} (#489, #488, #490): attached to a task, a call activity, a sub-process or a transaction,
+         * with a timer, an error, an escalation, a compensation, a cancel, a message, a signal or a conditional
+         * definition, interrupting ({@code cancelActivity} true, the default) or not. A message boundary names its
+         * correlation key with {@code horus:correlationKey} and may map payload fields with {@code horus:output}, as a
+         * message catch does.
          */
         private FlowElement boundaryEvent() throws XMLStreamException {
             String element = "boundaryEvent";
@@ -955,31 +1577,42 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             String attachedTo = attr("attachedToRef");
             boolean cancel = !"false".equals(attr("cancelActivity"));
+            String key = horus("correlationKey");
+            boolean parallel = "true".equals(attr("parallelMultiple"));
             int line = line();
             List<EventDefinition> definitions = new ArrayList<>();
+            List<HorusExtension> ext = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     TimerEventDefinition timer = timer(id);
                     definitions.add(timer);
-                    TimerSchedule.problem(timer).ifPresent(problem -> {
-                        if (problem.startsWith("timeCycle")) {
-                            addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                    "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                    BpmnStages.S1));
-                        } else {
-                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
-                        }
-                    });
+                    if (timer.timeCycle() != null) {
+                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
+                                BpmnStages.S1));
+                    } else {
+                        TimerSchedule.problem(timer).ifPresent(problem ->
+                                invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
+                    }
                 } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
-                        || "escalationEventDefinition".equals(local))) {
+                        || "escalationEventDefinition".equals(local) || "compensateEventDefinition".equals(local)
+                        || "cancelEventDefinition".equals(local))) {
                     definitions.add(definition(local, id, element, line));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
+                    definitions.add(messageDefinition(id));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
+                    definitions.add(signalDefinition(id, element));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
+                    definitions.add(conditionalDefinition(id, element));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
+                    extensions(element, id, false, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions.add(null);
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
-                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
-                        && !"extensionElements".equals(local)) {
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)) {
                     unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
@@ -988,22 +1621,22 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions.isEmpty()) {
                 unsupported(element, id, BpmnStages.NOT_PLANNED, "has no event definition; a boundary event needs a"
-                        + " timer, an error or an escalation");
-            } else if (definitions.size() > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+                        + " timer, an error, an escalation, a compensation, a cancel, a message, a signal or a condition");
             }
             if (attachedTo == null || attachedTo.isBlank()) {
                 invalid.add(new DefinitionProblem("BOUNDARY_ATTACHED_INVALID", "A boundary event names the activity it is"
                         + " attached to with attachedToRef", element, safe(id), line));
             }
             definitions.removeIf(java.util.Objects::isNull);
-            return new BoundaryEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, attachedTo,
-                    cancel, null);
+            messageExtras(element, id, line, definitions, key, true, ext);
+            return new BoundaryEvent(id, name, List.of(), List.of(), definitions, List.of(), null, parallel, attachedTo,
+                    cancel, definitions.isEmpty() || !(definitions.get(0) instanceof MessageEventDefinition) ? null
+                            : info(ext, foreign));
         }
 
         /** Fills in the code of each error and escalation definition from the root elements, once all are read. */
         private Process resolveCodes(Process process) {
-            for (DefinitionProblem ref : codeRefs) {
+            for (DefinitionProblem ref : codeRefsChecked ? List.<DefinitionProblem>of() : codeRefs) {
                 boolean error = "ERROR_REF".equals(ref.code());
                 String refId = ref.message();
                 if (refId.isEmpty()) {
@@ -1021,6 +1654,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             ref.line()));
                 }
             }
+            codeRefsChecked = true;
             Process resolved = new Process(process.id(), process.name(), process.processType(), process.isExecutable(),
                     process.isClosed(), resolveCodes(process.flowElements()), process.artifacts(), process.laneSets(),
                     process.info());
@@ -1050,6 +1684,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                 } else if (e instanceof SubProcess sub) {
                     checkLinks(sub.flowElements());
+                } else if (e instanceof AdHocSubProcess adHoc) {
+                    checkLinks(adHoc.flowElements());
                 } else if (e instanceof Transaction saga) {
                     checkLinks(saga.flowElements());
                 }
@@ -1071,6 +1707,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.method(), resolveCodes(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.triggeredByEvent(), resolveCodes(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), a.incoming(), a.outgoing(), a.activity(),
+                            a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), resolveCodes(a.flowElements()), a.artifacts(),
+                            a.laneSets(), a.info());
                     default -> e;
                 });
             }
@@ -1109,7 +1748,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
          */
         private void messageExtras(String element, String id, int line, List<EventDefinition> definitions, String key,
                 boolean keyRequired, List<HorusExtension> ext) {
-            boolean message = !definitions.isEmpty() && definitions.get(0) instanceof MessageEventDefinition;
+            boolean message = definitions.stream().anyMatch(MessageEventDefinition.class::isInstance);
             if (!message) {
                 if (key != null || ext.stream().anyMatch(e -> e instanceof InputMapping || e instanceof OutputMapping)) {
                     invalid.add(new DefinitionProblem("MESSAGE_EXTENSION_MISPLACED", "horus:correlationKey, horus:input"
@@ -1163,18 +1802,18 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * An intermediate catch event with one {@code timerEventDefinition}: {@code timeDuration} or {@code timeDate}.
-         * Every other event definition, and {@code timeCycle}, is named as unsupported.
+         * An intermediate catch event with a timer ({@code timeDuration} or {@code timeDate}), link, signal, conditional
+         * or message definition. Several timer, message, signal or conditional definitions make a multiple event (#500):
+         * it fires on any one, or on all of them with {@code parallelMultiple="true"}. Every other event definition, and
+         * {@code timeCycle}, is named as unsupported.
          */
         private FlowElement catchEvent() throws XMLStreamException {
             String element = "intermediateCatchEvent";
             String id = id();
             String name = attr("name");
             int line = line();
-            TimerEventDefinition timer = null;
-            EventDefinition link = null;
-            EventDefinition other = null;
-            MessageEventDefinition message = null;
+            boolean parallel = "true".equals(attr("parallelMultiple"));
+            List<EventDefinition> defs = new ArrayList<>();
             String key = horus("correlationKey");
             List<HorusExtension> ext = new ArrayList<>();
             List<ForeignFragment> foreign = new ArrayList<>();
@@ -1183,20 +1822,29 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     definitions++;
-                    timer = timer(id);
+                    TimerEventDefinition timer = timer(id);
+                    defs.add(timer);
+                    if (timer.timeCycle() != null) {
+                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
+                                BpmnStages.S1));
+                    } else {
+                        TimerSchedule.problem(timer).ifPresent(problem ->
+                                invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
+                    }
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "linkEventDefinition".equals(local)) {
                     // #493: the catch half of a link pair.
                     definitions++;
-                    link = definition(local, id, element, line);
+                    defs.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
-                    other = signalDefinition(id, element);
+                    defs.add(signalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
                     definitions++;
-                    other = conditionalDefinition(id, element);
+                    defs.add(conditionalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
                     definitions++;
-                    message = messageDefinition(id);
+                    defs.add(messageDefinition(id));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
                     extensions(element, id, false, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
@@ -1216,27 +1864,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions == 0) {
                 unsupported(element, id, BpmnStages.S1, "has no event definition; a none catch event is not supported");
-            } else if (definitions > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
-            if (timer != null && definitions == 1) {
-                TimerSchedule.problem(timer).ifPresent(problem -> {
-                    if (problem.startsWith("timeCycle")) {
-                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; stage S1 adds it", "timeCycle",
-                                safe(id), line, BpmnStages.S1));
-                    } else {
-                        invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
-                    }
-                });
-            }
-            List<EventDefinition> defs = timer != null ? List.<EventDefinition>of(timer)
-                    : message != null ? List.<EventDefinition>of(message)
-                    : link != null ? List.<EventDefinition>of(link)
-                    : other != null ? List.<EventDefinition>of(other) : List.of();
             messageExtras(element, id, line, defs, key, true, ext);
-            return new IntermediateCatchEvent(id, name, List.of(), List.of(), defs, List.of(), null, false,
-                    message == null ? null : info(ext, foreign));
+            boolean hasMessage = defs.stream().anyMatch(MessageEventDefinition.class::isInstance);
+            return new IntermediateCatchEvent(id, name, List.of(), List.of(), defs, List.of(), null, parallel,
+                    hasMessage ? info(ext, foreign) : null);
         }
 
         private TimerEventDefinition timer(String eventId) throws XMLStreamException {
@@ -1264,16 +1896,24 @@ public final class SubsetBpmnReader implements DefinitionReader {
             return new TimerEventDefinition(definitionId, date, duration, cycle, null);
         }
 
+        /** The activity attributes of a service task: {@code isForCompensation} (#488) is the only one this release reads. */
+        private ActivityAttributes serviceTaskAttributes() {
+            return "true".equals(attr("isForCompensation"))
+                    ? new ActivityAttributes(true, 1, 1, null, null, List.of(), List.of(), List.of(), null)
+                    : ActivityAttributes.defaults();
+        }
+
         private FlowElement serviceTask() throws XMLStreamException {
             String id = id();
             int line = line();
+            ActivityAttributes activity = serviceTaskAttributes();
             String handler = horus("handler");
             String mode = horus("mode");
             String type = horus("type");
             String name = attr("name");
             String result = horus("resultVariable");
             if (AGENT_TASK.equals(type)) {
-                return agentTask(id, line, name, result, handler, mode);
+                return agentTask(id, line, name, result, handler, mode, activity);
             }
             if (type != null) {
                 unsupported("horus:type", id, BpmnStages.NOT_PLANNED, "\"" + safe(type) + "\" is not a service task type; only agentTask is");
@@ -1313,7 +1953,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             compensation(id, line, ext);
             Node children = children("serviceTask", id, true);
             ext.addAll(children.horus());
-            return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
+            return new ServiceTask(id, name, List.of(), List.of(), activity, null, null,
                     info(ext, children.foreign()));
         }
 
@@ -1322,8 +1962,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
          * bounded inputs, the output schema as a JSON object and the guardrail. The guard spec is checked here, so an
          * invalid one never becomes a draft; each fault is one {@code GUARD_SPEC_INVALID} problem naming the step.
          */
-        private FlowElement agentTask(String id, int line, String name, String result, String handler, String mode)
-                throws XMLStreamException {
+        private FlowElement agentTask(String id, int line, String name, String result, String handler, String mode,
+                ActivityAttributes activity) throws XMLStreamException {
             String agent = horus("agent");
             String timeoutText = horus("timeout");
             // Read while the reader is on the start tag; added after the agent parts (#67).
@@ -1377,7 +2017,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             ext.addAll(undo);
             ext.addAll(horusParts);
-            return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
+            return new ServiceTask(id, name, List.of(), List.of(), activity, null, null,
                     info(ext, foreign));
         }
 
@@ -1742,6 +2382,70 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     : java.util.Optional.empty();
         }
 
+        /**
+         * The form of a user task (PRE-031): at most one of {@code horus:form} (a key the host registered),
+         * {@code horus:formSchema} (a schema path, with optional {@code horus:formHints} as a JSON object) and
+         * {@code horus:formLink} (a URL template). Keys and paths are plain relative names; whether they are
+         * registered, and whether a link's origin is allowed, is the host's check at import.
+         */
+        private java.util.Optional<FormSpec> form(String id, int line) {
+            String key = horus("form");
+            String schema = horus("formSchema");
+            String hints = horus("formHints");
+            String link = horus("formLink");
+            if (key == null && schema == null && hints == null && link == null) {
+                return java.util.Optional.empty();
+            }
+            if ((key == null ? 0 : 1) + (schema == null ? 0 : 1) + (link == null ? 0 : 1) != 1) {
+                formProblem("A userTask declares exactly one of horus:form, horus:formSchema and horus:formLink", id,
+                        line);
+                return java.util.Optional.empty();
+            }
+            if (hints != null && schema == null) {
+                formProblem("horus:formHints goes with horus:formSchema", id, line);
+                return java.util.Optional.empty();
+            }
+            String reference = key != null ? key : schema;
+            if (reference != null && (!FORM_REFERENCE.matcher(reference).matches() || reference.contains(".."))) {
+                formProblem("The form key or schema path is a relative name of letters, digits and . _ - /, without ..",
+                        id, line);
+                return java.util.Optional.empty();
+            }
+            String canonicalHints = null;
+            if (hints != null) {
+                canonicalHints = canonicalObject(hints);
+                if (canonicalHints == null) {
+                    formProblem("horus:formHints is a JSON object of at most " + MAX_FORM_HINTS + " characters", id,
+                            line);
+                    return java.util.Optional.empty();
+                }
+            }
+            return java.util.Optional.of(new FormSpec(key, schema, canonicalHints, link));
+        }
+
+        private static final int MAX_FORM_HINTS = 20_000;
+        private static final java.util.regex.Pattern FORM_REFERENCE = java.util.regex.Pattern.compile(
+                "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}(/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}){0,9}$");
+
+        /** The RFC 8785 form of a JSON object, or null for anything else. */
+        private static String canonicalObject(String text) {
+            if (text.length() > MAX_FORM_HINTS) {
+                return null;
+            }
+            try {
+                tools.jackson.databind.JsonNode node = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON
+                        .readTree(text);
+                return node != null && node.isObject()
+                        ? io.github.dhluong90.bpm.process.internal.json.CanonicalJson.write(node) : null;
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        private void formProblem(String message, String id, int line) {
+            invalid.add(new DefinitionProblem("FORM_INVALID", message, "userTask", safe(id), line));
+        }
+
         private void escalationProblem(String message, String id, int line) {
             invalid.add(new DefinitionProblem("ESCALATION_INVALID", message, "userTask", safe(id), line));
         }
@@ -1872,7 +2576,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             boolean fourEyes = "true".equals(horus("fourEyes"));
             String name = attr("name");
             String result = horus("resultVariable");
-            if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
+            if (assignee == null && nesting == 1) {
+                // #497: a lane may name the work group; decided once the lanes of the process are read.
+                pendingAssignee.put(id, line);
+            } else if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
                 invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
                         "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", safe(id), line));
             }
@@ -1888,6 +2595,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             java.util.Optional<SlaSpec> sla = sla(id, line);
             sla.ifPresent(ext::add);
             escalation(id, line, assignee, sla.isPresent()).ifPresent(ext::add);
+            form(id, line).ifPresent(ext::add);
             Node children = children("userTask", id, false);
             return new UserTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
                     info(ext, children.foreign()));
@@ -1943,6 +2651,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 String local = xml.getLocalName();
                 if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
                     skip();
+                } else if (BPMN.equals(ns) && ("standardLoopCharacteristics".equals(local)
+                        || "multiInstanceLoopCharacteristics".equals(local))) {
+                    lastLoop = loopCharacteristics(local, id);
                 } else if (BPMN.equals(ns) && "script".equals(local) && "scriptTask".equals(element)) {
                     scriptLine = line();
                     scriptText = text();
@@ -2268,11 +2979,20 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), in, o, b.eventDefinitions(),
                         b.eventDefinitionRefs(), b.data(), b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(),
                         b.info());
+                case InclusiveGateway g -> new InclusiveGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.defaultFlow(), g.info());
                 case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
+                case EventBasedGateway g -> new EventBasedGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.instantiate(), g.eventGatewayType(), g.info());
                 case Transaction t -> new Transaction(t.id(), t.name(), in, o, t.activity(), t.method(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 case SubProcess t -> new SubProcess(t.id(), t.name(), in, o, t.activity(), t.triggeredByEvent(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());
+                case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), in, o, a.activity(),
+                        a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), a.flowElements(),
+                        a.artifacts(), a.laneSets(), a.info());
+                case ComplexGateway g -> new ComplexGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.defaultFlow(), g.activationCondition(), g.info());
                 default -> e;
             });
         }

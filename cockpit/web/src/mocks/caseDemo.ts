@@ -45,9 +45,9 @@ const node = (step: Step) => ({
 });
 
 let entrySeq = 0;
-const entry = (type: string, occurredAt: string, nodeId: string | null = null, actor: string | null = null) => {
+const entry = (type: string, occurredAt: string, nodeId: string | null = null, actor: string | null = null, resultVariable?: string) => {
   entrySeq += 1;
-  return { id: `01JD4H${String(entrySeq).padStart(20, '0')}`, type, nodeId, actor, occurredAt };
+  return { id: `01JD4H${String(entrySeq).padStart(20, '0')}`, type, nodeId, actor, occurredAt, ...(resultVariable !== undefined ? { resultVariable } : {}) };
 };
 
 type UndoFields = { scope?: string; compensates?: string; handler?: string; attempt?: number; errorCode?: string; cause?: string };
@@ -131,6 +131,7 @@ function loanBooked(): DemoCase {
     { nodeId: 'credit-decision', state: 'COMPLETED', enteredAt: '2026-11-18T08:06:20Z', completedAt: '2026-11-18T08:06:20Z', durationMs: 0 },
     { nodeId: 'approved', state: 'COMPLETED', enteredAt: '2026-11-18T08:06:20Z', completedAt: '2026-11-18T08:06:20Z', durationMs: 0 },
     { nodeId: 'book-loan', state: 'COMPLETED', enteredAt: '2026-11-18T08:06:20Z', completedAt: '2026-11-18T08:06:21Z', durationMs: 1_000, actor: 'svc-loans' },
+    { nodeId: 'compute-offer', state: 'COMPLETED', enteredAt: '2026-11-18T08:06:21Z', completedAt: '2026-11-18T08:06:21Z', durationMs: 0 },
     { nodeId: 'send-offer', state: 'COMPLETED', enteredAt: '2026-11-18T08:06:21Z', completedAt: '2026-11-18T08:06:22Z', durationMs: 1_000, actor: 'svc-loans' },
     { nodeId: 'booked', state: 'COMPLETED', enteredAt: '2026-11-18T08:06:22Z', completedAt: '2026-11-18T08:06:22Z', durationMs: 0 },
   ];
@@ -145,6 +146,7 @@ function loanBooked(): DemoCase {
         entry('INSTANCE_STARTED', '2026-11-18T08:00:00Z', null, 'lan'),
         entry('DECISION_EVALUATED', '2026-11-18T08:06:20Z', 'credit-decision'),
         entry('NODE_COMPLETED', '2026-11-18T08:06:21Z', 'book-loan', 'svc-loans'),
+        entry('NODE_COMPLETED', '2026-11-18T08:06:21Z', 'compute-offer', null, 'offerTerms'),
         entry('INSTANCE_ENDED', '2026-11-18T08:06:22Z'),
       ],
     },

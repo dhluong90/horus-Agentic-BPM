@@ -135,7 +135,9 @@ class SagaCompensationTest {
                 handler("open-account", call -> done("accountNo", "0011-998877")),
                 handler("fx-buy", call -> done("dealId", "FX-B")),
                 handler("fx-sell", call -> done("dealId", "FX-S")),
-                handler("fx-confirm", call -> fxConfirm.get())));
+                handler("fx-confirm", call -> fxConfirm.get()),
+                handler("charge-fee", call -> done("feeId", "FEE-1")),
+                handler("notify-customer", call -> done("notified", true))));
         if (withUndoHandlers) {
             handlers.addAll(List.of(
                     handler("release-hold", call -> {
@@ -148,7 +150,8 @@ class SagaCompensationTest {
                     handler("release-funds", call -> done("released", true)),
                     handler("close-account", call -> done("closed", true)),
                     handler("fx-unbuy", call -> done("reversed", true)),
-                    handler("fx-unsell", call -> done("reversed", true))));
+                    handler("fx-unsell", call -> done("reversed", true)),
+                    handler("refund-fee", call -> done("refunded", true))));
         }
         TestEngine engine = TestEngine.replica("pod-1", clock).autoApprove(autoApprove)
                 .handlers(handlers.toArray(ServiceTaskHandler[]::new))
@@ -788,5 +791,156 @@ class SagaCompensationTest {
         assertThat(undos.get(1).getValue().forwardAttemptId()).isEqualTo(reserve);
         assertThat(undos.get(0).getValue().attemptId()).isNotEqualTo(undos.get(1).getValue().attemptId());
         assertThat(status(id)).isEqualTo("FAILED");
+    }
+
+    // ---- #488: transaction, cancel and full compensation ---------------------------------------------------------
+
+    private static ProcessInstance cancelledTransfer(TestEngine engine, String reference) {
+        engine.identity.as("bank-a", "teller.hoa", "processes:start", "processes:read");
+        return engine.services.start(new StartRequest("fund-transfer-cancel", reference, Map.of("amountMinor",
+                AMOUNT_VND, "currency", "VND", "sourceAccount", SOURCE, "targetAccount", TARGET, "targetClosed", 1),
+                null));
+    }
+
+    @Test
+    void PRE_288_a_cancel_end_compensates_the_transaction_newest_first_and_the_cancel_boundary_leaves_the_flow() {
+        // Given fund-transfer-cancel: hold-funds (local) and debit-source (remote) inside the transaction, each undone
+        // by a compensation boundary event and its compensation activity; the target account 0099-887766 is closed
+        TestEngine engine = engine();
+        deploy(engine, "fund-transfer-cancel");
+        ProcessInstance started = cancelledTransfer(engine, "TRF-2026-0200");
+        String id = started.id();
+        String hold = local.get(0).getValue().attemptId();
+
+        // When the debit is accepted and the flow reaches the cancel end event
+        Claim debit = step(engine);
+        String j1 = debit.job().id();
+
+        // Then the instance is COMPENSATING, the cancelled transaction waits for its undo, and no customer notice went out
+        String transferScope = scopeToken(id, "transfer");
+        assertThat(status(id)).isEqualTo("COMPENSATING");
+        assertThat(stack(id)).containsExactly("debit-source:RUNNING", "hold-funds:PENDING");
+        assertThat(local.stream().map(Map.Entry::getKey)).doesNotContain("notify-customer");
+        assertThat(events(engine, "processes.compensation.started.v1")).singleElement().satisfies(e ->
+                assertThat(e.payload()).containsEntry("scopeId", transferScope).containsEntry("depth", 2L)
+                        .containsEntry("nodeId", "transfer-cancel").containsEntry("cause", "CANCEL"));
+
+        // When both undos have run
+        Claim creditBack = step(engine);
+        Claim releaseHold = step(engine);
+
+        // Then the debit was credited back first under its own job id with the forward keys, the hold was released
+        // second with the hold's attempt id, and nothing else ran
+        assertThat(creditBack.job().jobKind()).isEqualTo("COMPENSATION");
+        AdapterCall undo = core.get(core.size() - 1);
+        assertThat(undo.isUndo()).isTrue();
+        assertThat(undo.nodeId()).isEqualTo("debit-source");
+        assertThat(undo.idempotencyKey()).isEqualTo(creditBack.job().id()).isNotEqualTo(j1);
+        assertThat(undo.forwardJobId()).isEqualTo(j1);
+        assertThat(undo.forwardAttemptId()).isEqualTo(ProcessServices.attemptId(j1, 1));
+        assertThat(releaseHold.job().jobKind()).isEqualTo("COMPENSATION");
+        assertThat(undoCalls()).containsExactly("credit-back:debit-source", "release-hold:hold-funds");
+        assertThat(local.stream().filter(c -> c.getKey().equals("release-hold")).findFirst().orElseThrow().getValue()
+                .forwardAttemptId()).isEqualTo(hold);
+        assertThat(count("SELECT count(*) FROM host_hold WHERE instance_id = ? AND status = 'RELEASED'", id)).isOne();
+
+        // And the transaction scope is COMPENSATED, the cancel boundary took the flow, the customer was told once,
+        // and the instance completed: a cancelled transaction is a business outcome, not a failure
+        assertThat(stack(id)).containsExactly("debit-source:DONE", "hold-funds:DONE");
+        assertThat(tokenStatus(transferScope)).isEqualTo("COMPENSATED");
+        assertThat(local.stream().filter(c -> c.getKey().equals("notify-customer")).count()).isOne();
+        assertThat(status(id)).isEqualTo("COMPLETED");
+        assertThat(events(engine, "processes.instance.failed.v1")).isEmpty();
+        assertThat(events(engine, "processes.instance.completed.v1")).hasSize(1);
+        assertThat(history(id, "COMPENSATION_STARTED", "COMPENSATION_STEP_COMPLETED", "COMPENSATED", "BOUNDARY_FIRED",
+                "INSTANCE_ENDED")).containsExactly("COMPENSATION_STARTED:transfer-cancel",
+                "COMPENSATION_STEP_COMPLETED:debit-source", "COMPENSATION_STEP_COMPLETED:hold-funds",
+                "COMPENSATED:transfer", "BOUNDARY_FIRED:transfer-cancelled", "INSTANCE_ENDED:-");
+        assertThat(drain(engine)).isEmpty();
+    }
+
+    @Test
+    void PRE_289_a_compensation_of_the_enclosing_scope_walks_into_the_sub_processes_completed_in_it() {
+        // Given loan-booking-nested: the loan registered in the root scope, then the sub-process disburse (the funds
+        // reserved, the sub-process fees charging a fee, the account opened), all completed; the partner refuses
+        TestEngine engine = engine();
+        deploy(engine, "loan-booking-nested");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read");
+
+        // When notify-partner in the root scope fails and the undo runs
+        String id = engine.services.start(new StartRequest("loan-booking-nested", "LN-2026-0201", Map.of(), null)).id();
+        step(engine);
+        drain(engine);
+
+        // Then every completed step is undone once, newest first across the scopes: the account, the fee in the inner
+        // sub-process, the funds, then the registration of the root scope
+        assertThat(undoCalls()).containsExactly("close-account:open-account", "refund-fee:charge-fee",
+                "release-funds:reserve-funds", "cancel-loan:register-loan");
+        assertThat(stack(id)).containsExactly("open-account:DONE", "reserve-funds:DONE", "charge-fee:DONE",
+                "register-loan:DONE");
+        assertThat(status(id)).isEqualTo("FAILED");
+        assertThat(tokenStatus(scopeToken(id, "loan-booking-nested"))).isEqualTo("COMPENSATED");
+        assertThat(drain(engine)).isEmpty();
+    }
+
+    @Test
+    void PRE_344_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes() {
+        // Given the cancelled transfer, where credit-back is refused with ACCOUNT_FROZEN the first time
+        TestEngine engine = engine();
+        creditBack.add(new AdapterResult.BusinessError("ACCOUNT_FROZEN", "account 0011-223344 is frozen"));
+        deploy(engine, "fund-transfer-cancel");
+        String id = cancelledTransfer(engine, "TRF-2026-0202").id();
+        step(engine);
+
+        // When the first undo fails for good
+        Claim first = step(engine);
+
+        // Then the walk stops with an incident, the hold is not released, and the flow has not resumed
+        assertThat(stack(id)).containsExactly("debit-source:FAILED", "hold-funds:PENDING");
+        assertThat(status(id)).isEqualTo("COMPENSATING");
+        assertThat(drain(engine)).isEmpty();
+        assertThat(local.stream().map(Map.Entry::getKey)).doesNotContain("release-hold", "notify-customer");
+
+        // When ops.lan retries and core banking accepts the credit-back
+        creditBack.clear();
+        Incident open = incident(engine, id);
+        engine.services.retry(open.id(), open.lockVersion(), "Account unfrozen by operations", "retry-290");
+        Claim again = step(engine);
+        drain(engine);
+
+        // Then the credit-back ran again under the same job id with a new attempt id, the hold was released exactly
+        // once, the transaction left by its cancel boundary, and a second drain finds nothing to run
+        assertThat(again.job().id()).isEqualTo(first.job().id());
+        List<AdapterCall> credits = core.stream().filter(AdapterCall::isUndo).toList();
+        assertThat(credits).hasSize(2);
+        assertThat(credits.get(1).idempotencyKey()).isEqualTo(credits.get(0).idempotencyKey());
+        assertThat(credits.get(1).attemptId()).isNotEqualTo(credits.get(0).attemptId());
+        assertThat(local.stream().filter(c -> c.getKey().equals("release-hold")).count()).isOne();
+        assertThat(local.stream().filter(c -> c.getKey().equals("notify-customer")).count()).isOne();
+        assertThat(stack(id)).containsExactly("debit-source:DONE", "hold-funds:DONE");
+        assertThat(status(id)).isEqualTo("COMPLETED");
+        assertThat(drain(engine)).isEmpty();
+    }
+
+    @Test
+    void PRE_345_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing() {
+        // Given loan-undo-one: the loan registered, the funds reserved and the account opened, then two throws that
+        // name reserve-funds
+        TestEngine engine = engine();
+        deploy(engine, "loan-undo-one");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read");
+
+        // When the instance starts and the undo job runs
+        String id = engine.services.start(new StartRequest("loan-undo-one", "LN-2026-0203", Map.of(), null)).id();
+        assertThat(status(id)).isEqualTo("COMPENSATING");
+        drain(engine);
+
+        // Then only the funds reservation was undone, once, the other two entries are untouched, and the flow went on
+        // through the second throw to the end
+        assertThat(undoCalls()).containsExactly("release-funds:reserve-funds");
+        assertThat(stack(id)).containsExactly("open-account:PENDING", "reserve-funds:DONE", "register-loan:PENDING");
+        assertThat(status(id)).isEqualTo("COMPLETED");
+        assertThat(history(id, "COMPENSATION_STARTED")).containsExactly("COMPENSATION_STARTED:withdraw-reservation",
+                "COMPENSATION_STARTED:withdraw-again");
     }
 }

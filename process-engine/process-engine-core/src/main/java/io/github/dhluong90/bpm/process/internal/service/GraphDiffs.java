@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.process.internal.json.Values;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -199,6 +200,8 @@ public final class GraphDiffs {
                 String kind = switch (source) {
                     case ExclusiveGateway g when flow.id().equals(g.defaultFlow()) -> DEFAULT;
                     case ExclusiveGateway g -> "branch[" + (branchIndex.merge(g.id(), 1, Integer::sum) - 1) + "]";
+                    case InclusiveGateway g when flow.id().equals(g.defaultFlow()) -> DEFAULT;
+                    case InclusiveGateway g -> "branch[" + (branchIndex.merge(g.id(), 1, Integer::sum) - 1) + "]";
                     case ParallelGateway g when outgoing(flows, g.id()) > 1 -> FORK;
                     case null, default -> NEXT;
                 };

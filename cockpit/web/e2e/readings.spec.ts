@@ -25,7 +25,7 @@ const problem = (status: number, code: string) => ({
 const tab = (name: Words) => async (page: Page, locale: Locale) => { await page.getByRole('tab', { name: name[locale], exact: true }).click(); };
 const READINGS: Words = { en: 'Readings', vi: 'Diễn giải' };
 const SIMULATE: Words = { en: 'Simulate', vi: 'Mô phỏng' };
-const NEW_DRAFT: Words = { en: 'New draft', vi: 'Tạo bản nháp' };
+const NEW_DRAFT: Words = { en: 'Start from this version', vi: 'Bắt đầu từ phiên bản này' };
 const APPROVE: Words = { en: 'Approve and publish', vi: 'Phê duyệt và xuất bản' };
 
 async function simulate(page: Page, locale: Locale, fill: (page: Page) => Promise<void>) {

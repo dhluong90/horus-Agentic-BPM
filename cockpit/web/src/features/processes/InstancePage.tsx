@@ -13,7 +13,8 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { Tabs } from '../rules/components/Tabs';
 import { formatDateTime } from '../rules/model/dates';
 import { useProcessesSession } from './api/processesContext';
-import { useDefinitionGraph, useDefinitionVersion, useInstance, useInstanceActivities } from './api/useProcesses';
+import { useDefinitionGraph, useDefinitionVersion, useInstance, useInstanceActivities, useStartAdHocActivity } from './api/useProcesses';
+import { adHocScope } from './model/adHoc';
 import type { DiagramOverlay, StepBadge } from './diagram/DefinitionDiagram';
 import { InstanceStatusPill } from './InstanceStatusPill';
 import { ancestorsOf, flowOrder, type DiagramGraph, type DiagramNode } from './model/bpmnGraph';
@@ -25,7 +26,9 @@ import {
   firstStep,
   incidentKey,
   isProblemEntry,
+  loopProgress,
   nodeMarks,
+  routingWords,
   scopeState,
   undoEntryType,
   wordsOf,
@@ -33,6 +36,7 @@ import {
   openTaskAt,
   TOKEN_ICON,
   TOKEN_KEY,
+  type LoopProgress,
   type NodeMark,
 } from './model/instanceView';
 import { nodeTypeLabel } from './model/nodeLabels';
@@ -136,12 +140,25 @@ function ActivitiesError({ error, onRetry }: { error: unknown; onRetry: () => vo
   return <AreaError error={error} onRetry={onRetry} />;
 }
 
-function badgeOf(mark: NodeMark, t: T): StepBadge {
+/** The counters an entry of a repeating step carries, in words: "3 of 5 done", or "2 done" for a standard loop. */
+function progressWords(counters: { nrOfInstances?: number | undefined; nrOfCompletedInstances?: number | undefined }, t: T): string {
+  const done = String(counters.nrOfCompletedInstances ?? 0);
+  return counters.nrOfInstances !== undefined ? t('instance.badge.loopProgress', { done, total: String(counters.nrOfInstances) }) : t('instance.badge.loopCount', { done });
+}
+
+function badgeOf(mark: NodeMark, t: T, progress: LoopProgress | undefined): StepBadge {
   switch (mark.kind) {
     case 'incident':
       return { tone: 'incident', icon: '✕', text: t('instance.badge.incident'), label: t('instance.badge.incidentLabel', { what: t(incidentKey(mark.code)) }) };
     case 'token': {
       const words = t(TOKEN_KEY[mark.status]);
+      if (progress !== undefined) {
+        // A step that repeats says how many repetitions are done, as the engine counted them (#496).
+        const text = progress.total !== undefined
+          ? t('instance.badge.loopProgress', { done: String(progress.done), total: String(progress.total) })
+          : t('instance.badge.loopCount', { done: String(progress.done) });
+        return { tone: 'token', icon: TOKEN_ICON[mark.status], text, label: `${text}, ${words}` };
+      }
       const text = mark.count > 1 ? t('instance.badge.tokens', { what: words, count: String(mark.count) }) : words;
       return { tone: 'token', icon: TOKEN_ICON[mark.status], text, label: text };
     }
@@ -172,7 +189,8 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
   const marks = useMemo(() => nodeMarks(instance, activities), [instance, activities]);
   const order = useMemo(() => flowOrder(graph).map((node) => node.id), [graph]);
   const selected = picked ?? firstStep(marks, order);
-  const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t)])), [marks, t]);
+  const progress = useMemo(() => loopProgress(activities), [activities]);
+  const badges = useMemo(() => new Map([...marks].map(([id, mark]) => [id, badgeOf(mark, t, progress.get(id))])), [marks, t, progress]);
   const node = graph.nodes.find((item) => item.id === selected);
   // Collapsed until the viewer opens it or picks a step, unless they chose before; their choice is remembered.
   const [open, setOpen] = useState(() => readInstancePanelOpen() ?? false);
@@ -204,7 +222,7 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
         {node === undefined ? (
           <p className="inspector__hint">{t('instance.pick')}</p>
         ) : (
-          <StepDetails instance={instance} node={node} mark={marks.get(node.id)} activities={activities} load={load} />
+          <StepDetails instance={instance} graph={graph} node={node} mark={marks.get(node.id)} activities={activities} load={load} />
         )}
       </aside>
     </div>
@@ -251,8 +269,9 @@ const peopleOf = (actors: readonly (string | null | undefined)[]): string[] => [
   return who.engine ? [] : [who.login];
 }))];
 
-function StepDetails({ instance, node, mark, activities, load }: {
+function StepDetails({ instance, graph, node, mark, activities, load }: {
   instance: ProcessInstance;
+  graph: DiagramGraph;
   node: DiagramNode;
   mark: NodeMark | undefined;
   activities: InstanceActivities | undefined;
@@ -302,6 +321,7 @@ function StepDetails({ instance, node, mark, activities, load }: {
           </dl>
         )}
       </div>
+      {node.type === 'adHocSubProcess' ? <AdHocActions instance={instance} graph={graph} node={node} /> : null}
       {activity?.incident || task !== undefined || engineNode !== undefined ? (
         <div className="inspector__col inspector__col--end">
           {activity?.incident ? <IncidentBox code={activity.incident.code} openedAt={activity.incident.openedAt} replica={engineNode} /> : null}
@@ -309,6 +329,34 @@ function StepDetails({ instance, node, mark, activities, load }: {
           {!activity?.incident && engineNode !== undefined ? <EngineNode replica={engineNode} /> : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * An open ad-hoc sub-process (#500): the activities the operator may start now, each one button. The action needs
+ * processes:task:manage; without it the buttons are disabled and say why. The engine checks again on every start.
+ */
+function AdHocActions({ instance, graph, node }: { instance: ProcessInstance; graph: DiagramGraph; node: DiagramNode }) {
+  const { t } = useI18n();
+  const { can } = useProcessesSession();
+  const reasonId = useId();
+  const start = useStartAdHocActivity(instance);
+  const scope = adHocScope(graph, instance, node.id);
+  if (scope === undefined) return null;
+  const allowed = can('processes:task:manage');
+  return (
+    <div className="inspector__col inspector__col--end" role="group" aria-label={t('instance.adHoc.title')}>
+      <p className="inspector__type">{t('instance.adHoc.title')}</p>
+      {scope.enabled.length === 0 ? <p className="muted inspector__hint">{t('instance.adHoc.none')}</p> : scope.enabled.map((activity) => (
+        <button key={activity.id} type="button" className="btn btn--primary inspector__action" disabled={start.isPending}
+          aria-disabled={!allowed} aria-describedby={allowed ? undefined : reasonId}
+          onClick={() => { if (allowed) start.mutate({ scopeTokenId: scope.scopeTokenId, activityId: activity.id }); }}>
+          {t('instance.adHoc.start', { name: activity.name ?? activity.id })}
+        </button>
+      ))}
+      {!allowed ? <p id={reasonId} className="inspector__reason"><span aria-hidden="true">ⓘ</span> {t('instance.adHoc.blocked')}</p> : null}
+      {start.isError ? <p role="alert" className="inspector__reason">{t('instance.adHoc.failed')}</p> : null}
     </div>
   );
 }
@@ -395,6 +443,59 @@ function MessageDetail({ message }: { message: NonNullable<ActivityEntry['messag
   );
 }
 
+const TRIGGERS = ['timer', 'message', 'signal', 'conditional', 'error', 'escalation', 'compensate'] as const;
+
+/** What started an event sub-process and whether it interrupted its scope, read from the definition's own start event (#487). */
+function TriggerDetail({ node }: { node: DiagramNode | undefined }) {
+  const { t } = useI18n();
+  if (node?.trigger === undefined) return null;
+  const known = (TRIGGERS as readonly string[]).includes(node.trigger);
+  return (
+    <span className="muted">
+      {known ? <>{' · '}{t(`instance.timeline.trigger.${node.trigger}` as MessageKey)}</> : null}
+      {' · '}{t(node.interrupting === false ? 'instance.timeline.beside' : 'instance.timeline.interrupted')}
+    </span>
+  );
+}
+
+/** Which branches a gateway took and why a join waits, beside its timeline row (#494). */
+function RoutingNote({ entry, graph }: { entry: InstanceActivities['entries'][number]; graph: DiagramGraph }) {
+  const { t } = useI18n();
+  const routing = routingWords(entry, graph);
+  if (routing === undefined) return null;
+  const steps = routing.steps.join(', ');
+  const key = routing.kind === 'waiting' ? 'instance.timeline.waitingFor' : routing.kind === 'tookDefault' ? 'instance.timeline.tookDefault' : 'instance.timeline.took';
+  return <span className="muted"> · {t(key, { steps })}</span>;
+}
+
+const FIRED_TRIGGERS = ['timer', 'message', 'signal', 'condition', 'error', 'escalation'] as const;
+
+/**
+ * A boundary event that fired names its trigger (the message, the signal or the condition) and whether it stopped the
+ * step; an event-based gateway names the catch that came first and the ones it stopped (#490, #495). Names come from the
+ * diagram, never the ids the engine sent.
+ */
+function EventDetail({ event, stepName }: { event: NonNullable<ActivityEntry['event']>; stepName: (id: string) => string }) {
+  const { t } = useI18n();
+  if (event.winner !== undefined) {
+    const others = (event.cancelled ?? []).map(stepName).join(', ');
+    return (
+      <span className="muted">
+        {' · '}{t('instance.timeline.gateway.won', { winner: stepName(event.winner) })}
+        {others !== '' ? <>{' · '}{t('instance.timeline.gateway.stopped', { others })}</> : null}
+      </span>
+    );
+  }
+  const trigger = event.trigger?.toLowerCase();
+  const known = FIRED_TRIGGERS.find((item) => item === trigger);
+  return (
+    <span className="muted">
+      {known !== undefined ? <>{' · '}{t(`instance.timeline.fired.${known}` as MessageKey, { name: event.name ?? '' })}</> : null}
+      {event.interrupting !== undefined ? <>{' · '}{t(event.interrupting ? 'instance.timeline.fired.interrupting' : 'instance.timeline.fired.beside')}</> : null}
+    </span>
+  );
+}
+
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
 function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
@@ -402,7 +503,6 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
   useWantNames({ users: peopleOf(activities.entries.map((entry) => entry.actor)) });
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
   const stepName = (id: string) => names.get(id) ?? wordsOf(id);
-  const results = new Map(graph.nodes.flatMap((node) => (node.resultVariable !== undefined ? [[node.id, node.resultVariable] as const] : [])));
   // A step inside a sub-process names the sub-processes around it, outermost first, so the timeline nests its steps (#486).
   const trail = (id: string | null): string[] => (id === null ? [] : ancestorsOf(graph, id).map((node) => node.name ?? node.id));
   const scopes = activities.compensations ?? [];
@@ -433,16 +533,20 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                 <tr key={entry.id}>
                   <td className="tnum muted">{formatDateTime(entry.occurredAt, locale)}</td>
                   <td className={isProblemEntry(entry) ? 'timeline__what timeline__what--bad' : 'timeline__what'}>
-                    {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type))}
+                    {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type), { counter: String(entry.instances?.loopCounter ?? '') })}
+                    {entry.instances !== undefined ? <span className="muted timeline__note"> · {progressWords(entry.instances, t)}</span> : null}
                   </td>
                   <td className={trail(entry.nodeId).length > 0 ? 'timeline__step timeline__step--nested' : 'timeline__step'} data-depth={trail(entry.nodeId).length}>
                     {trail(entry.nodeId).length > 0 ? <span className="muted timeline__trail">{trail(entry.nodeId).join(' › ')} › </span> : null}
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
-                    {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
-                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
+                    {entry.type === 'NODE_COMPLETED' && entry.resultVariable !== undefined
+                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: entry.resultVariable })}</span> : null}
                     {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
+                    {entry.type === 'EVENT_SUBPROCESS_STARTED' ? <TriggerDetail node={graph.nodes.find((node) => node.id === entry.nodeId)} /> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
+                    <RoutingNote entry={entry} graph={graph} />
+                    {entry.event !== undefined ? <EventDetail event={entry.event} stepName={stepName} /> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

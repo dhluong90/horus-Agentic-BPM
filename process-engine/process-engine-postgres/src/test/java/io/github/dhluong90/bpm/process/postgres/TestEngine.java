@@ -171,7 +171,8 @@ final class TestEngine {
                 tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval);
         JdbcProcessStore processStore = new JdbcProcessStore(ds);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
-                Map.of(SourceFormat.BPMN_XML, reader::read), Map.of(),
+                Map.of(SourceFormat.BPMN_XML, reader),
+                Map.of(SourceFormat.BPMN_XML, new io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
                         decisions, Duration.ofSeconds(5)),
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings,
@@ -182,6 +183,9 @@ final class TestEngine {
                 b.outputSchemas, b.inputMasker, b.labelLimits, b.memoryLimits, calendars.businessCalendar());
         if (b.roleCatalogue != null) {
             services.useRoleCatalogue(b.roleCatalogue);
+        }
+        if (b.forms != null) {
+            services.useFormRegistry(b.forms, b.formLinkOrigins);
         }
         services.useMessageAdapter(b.messageAdapter);
         if (b.importedLayouts) {
@@ -335,6 +339,8 @@ final class TestEngine {
                 io.github.dhluong90.bpm.process.internal.service.AsyncSettings.DEFAULTS;
         private DataSource dataSource;
         private io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue;
+        private io.github.dhluong90.bpm.process.spi.FormRegistry forms;
+        private List<String> formLinkOrigins = List.of();
         private boolean importedLayouts;
         private io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
@@ -356,6 +362,13 @@ final class TestEngine {
         /** The host's role list that approval asks about escalation targets (PRE-180); none by default. */
         Builder roleCatalogue(io.github.dhluong90.bpm.process.spi.RoleCatalogue value) {
             this.roleCatalogue = value;
+            return this;
+        }
+
+        /** The host's task forms and the origins a form link may point to besides relative links (PRE-031). */
+        Builder forms(io.github.dhluong90.bpm.process.spi.FormRegistry registry, String... linkOrigins) {
+            this.forms = registry;
+            this.formLinkOrigins = List.of(linkOrigins);
             return this;
         }
 

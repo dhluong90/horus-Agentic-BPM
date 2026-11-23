@@ -75,3 +75,47 @@ export const DIRECTORY: Readonly<Record<string, { roles: readonly string[]; grou
   lan: { roles: ['COMPLIANCE_REVIEWER'], groups: [] },
   minh: { roles: [], groups: [] },
 };
+
+/** What the engine returns for `GET /tasks/{id}/form` (CKP-021): a declared form with its hints and prefilled data, or a link. */
+export type QueueForm =
+  | { schema: Record<string, unknown>; hints: Record<string, unknown>; data: Record<string, unknown> }
+  | { link: string };
+
+const CREDIT_REVIEW_FORM: QueueForm = {
+  schema: {
+    type: 'object',
+    required: ['decision', 'approvedLimit', 'reviewDate'],
+    properties: {
+      decision: { enum: ['APPROVE', 'REJECT'] },
+      approvedLimit: { type: 'object', properties: { currency: { const: 'VND' }, amount: { type: 'integer' } } },
+      reviewDate: { type: 'string', format: 'date' },
+      dependants: { type: 'integer' },
+      collateralVerified: { type: 'boolean' },
+      idNumber: { type: 'string', mask: true },
+      reason: { type: 'string', maxLength: 500 },
+    },
+    if: { required: ['decision'], properties: { decision: { const: 'REJECT' } } },
+    then: { required: ['reason'] },
+  },
+  hints: {
+    order: ['decision', 'approvedLimit', 'reviewDate', 'dependants', 'collateralVerified', 'idNumber', 'reason'],
+    widgets: { reason: 'textarea' },
+    labels: {
+      decision: { en: 'Decision', vi: 'Quyết định' },
+      approvedLimit: { en: 'Approved limit', vi: 'Hạn mức duyệt' },
+      reviewDate: { en: 'Review date', vi: 'Ngày thẩm định' },
+      dependants: { en: 'Dependants', vi: 'Người phụ thuộc' },
+      collateralVerified: { en: 'Collateral verified', vi: 'Đã xác minh tài sản bảo đảm' },
+      idNumber: { en: 'National ID number', vi: 'Số CCCD' },
+      reason: { en: 'Reason', vi: 'Lý do' },
+    },
+  },
+  data: { idNumber: '***', approvedLimit: { currency: 'VND', amount: 250000000 }, dependants: 2 },
+};
+
+/** The forms the demo engine declares: a credit review through a form, and the offer letter through the host's own screen. */
+export const QUEUE_FORMS: Readonly<Record<string, QueueForm>> = {
+  [QUEUE_TASKS.myCreditReview]: CREDIT_REVIEW_FORM,
+  [QUEUE_TASKS.creditReview]: CREDIT_REVIEW_FORM,
+  [QUEUE_TASKS.offerLetter]: { link: '/loans/offers/{taskId}' },
+};

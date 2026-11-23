@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
-import { ancestorsOf, isKnownNodeType, type DiagramGraph } from '../model/bpmnGraph';
+import { ancestorsOf, isKnownNodeType, type DiagramGraph, type LoopKind } from '../model/bpmnGraph';
 import {
   CAPTION_GAP,
   CAPTION_LINE_HEIGHT,
@@ -24,6 +24,7 @@ import {
 } from '../model/layout';
 import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
+import { placeCollaboration, POOL_HEADER, type CollaborationDrawing } from '../model/collaborationLayout';
 import { Minimap, type View } from './Minimap';
 import { NodeIcon } from './NodeIcon';
 
@@ -141,12 +142,54 @@ function MarkBadge({ mark, x, y }: { mark: Mark; x: number; y: number }) {
   );
 }
 
+/** The pool frame, the lane bands and the black-box pools behind the steps (#497). */
+function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
+  return (
+    <g className="dg-collab" data-collaboration="true">
+      {drawing.pool !== undefined ? (
+        <g className="dg-pool" data-pool={drawing.pool.id}>
+          <rect x={drawing.pool.x} y={drawing.pool.y} width={drawing.pool.width} height={drawing.pool.height} rx={4} />
+          <text className="dg-pool__name" x={drawing.pool.x + 12} y={drawing.pool.y + POOL_HEADER - 9}>{drawing.pool.label}</text>
+        </g>
+      ) : null}
+      {drawing.lanes.map((lane) => (
+        <g key={lane.id} className="dg-lane" data-lane={lane.id}>
+          <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} rx={6} />
+          <text className="dg-lane__name" x={lane.x + 10} y={lane.y + 14}>{lane.label}</text>
+        </g>
+      ))}
+      {drawing.blackBoxes.map((box) => (
+        <g key={box.id} className="dg-pool dg-pool--black-box" data-pool={box.id}>
+          <rect x={box.x} y={box.y} width={box.width} height={box.height} rx={4} />
+          <text className="dg-pool__name" x={box.x + box.width / 2} y={box.y + box.height / 2 + 4} textAnchor="middle">{box.label}</text>
+        </g>
+      ))}
+    </g>
+  );
+}
+
+/** A message flow: a dashed line with an arrow and, when it has one, a label (#497). */
+function MessageFlowLine({ flow, marker }: { flow: { id: string; label: string | undefined; points: readonly Point[]; labelAt: Point }; marker: string }) {
+  const pill = flow.label !== undefined ? Math.ceil(flow.label.length * LABEL_CHAR) + 14 : 0;
+  return (
+    <g className="dg-edge dg-edge--message" data-message-flow={flow.id}>
+      <path d={path(flow.points)} markerEnd={`url(#${marker})`} />
+      {flow.label !== undefined ? (
+        <g className="dg-edge__label">
+          <rect x={flow.labelAt.x - pill / 2} y={flow.labelAt.y - 10} width={pill} height={20} rx={10} />
+          <text x={flow.labelAt.x} y={flow.labelAt.y + 4} textAnchor="middle">{flow.label}</text>
+        </g>
+      ) : null}
+    </g>
+  );
+}
+
 function Edge({ edge, marker, defaultLabel, mark }: { edge: PlacedEdge; marker: string; defaultLabel: string; mark: Mark | undefined }) {
   const tick = edge.isDefault ? defaultMark(edge.points) : undefined;
   const at = edge.labelAt;
   const pill = edge.label !== undefined ? Math.ceil(edge.label.length * LABEL_CHAR) + 14 : 0;
   return (
-    <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
+    <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}${edge.isAssociation === true ? ' dg-edge--association' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
       <path d={path(edge.points)} markerEnd={`url(#${marker}${mark !== undefined ? `-${mark}` : ''})`} />
       {tick !== undefined ? <path className="dg-edge__default" d={tick}><title>{defaultLabel}</title></path> : null}
       {edge.label !== undefined && at ? (
@@ -208,11 +251,28 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
       <text aria-hidden="true" className="dg-node__type" x={node.x + padX + TYPE_INDENT} y={typeTop + 13}>
         {node.typeLines.map((line, index) => <tspan key={index} x={node.x + padX + TYPE_INDENT} dy={index === 0 ? 0 : typeRow}>{index < node.typeLines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
+      {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width / 2} cy={node.y + node.height - 11} /> : null}
+      <TriggerMark node={node} x={node.x + node.width - 28} y={node.y + 4} />
       {steps !== undefined ? <text aria-hidden="true" className="dg-node__steps" x={node.x + padX} y={node.y + node.height - 9}>{steps}</text> : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
       {onToggle !== undefined && toggleLabel !== undefined ? <Toggle x={node.x + node.width - 26} y={node.y + node.height - 24} open={false} label={toggleLabel} onToggle={onToggle} /> : null}
     </g>
   );
+}
+
+/**
+ * The BPMN marker of a step that repeats (#496), centred on the foot of its box: three vertical bars for a parallel
+ * multi-instance step, three horizontal bars for a sequential one, a circular arrow for a standard loop. The words
+ * are in the step's accessible name; the marker itself is decoration and never the only sign.
+ */
+function LoopMarker({ kind, cx, cy }: { kind: LoopKind; cx: number; cy: number }) {
+  const half = 7;
+  const path = kind === 'parallel'
+    ? [-4, 0, 4].map((dx) => `M${(cx + dx).toFixed(1)} ${(cy - half).toFixed(1)}V${(cy + half).toFixed(1)}`).join('')
+    : kind === 'sequential'
+      ? [-4, 0, 4].map((dy) => `M${(cx - half).toFixed(1)} ${(cy + dy).toFixed(1)}H${(cx + half).toFixed(1)}`).join('')
+      : `M${(cx + 6).toFixed(1)} ${(cy - 2).toFixed(1)}A6.5 6.5 0 1 0 ${(cx + 4).toFixed(1)} ${(cy + 5).toFixed(1)}M${(cx + 6).toFixed(1)} ${(cy - 7).toFixed(1)}V${(cy - 2).toFixed(1)}H${(cx + 1).toFixed(1)}`;
+  return <path className={`dg-loop dg-loop--${kind}`} data-loop={kind} aria-hidden="true" d={path} />;
 }
 
 /** The control that opens or closes a sub-process in place: a small square with a plus or a minus, reachable by keyboard. */
@@ -234,6 +294,19 @@ function Toggle({ x, y, open, label, onToggle }: { x: number; y: number; open: b
   );
 }
 
+/** The start symbol of an event sub-process, in the corner of its box or frame: what starts it, ringed dashed when it does not interrupt (#487). */
+function TriggerMark({ node, x, y }: { node: PlacedNode; x: number; y: number }) {
+  if (node.type !== 'subProcess:event' || node.trigger === undefined) return null;
+  const kind = `startEvent:${node.trigger}`;
+  if (!isKnownNodeType(kind)) return null;
+  return (
+    <g className="dg-trigger" aria-hidden="true" data-trigger={node.trigger} data-interrupting={String(node.interrupting !== false)}>
+      <circle cx={x + 10} cy={y + 10} r={11} strokeDasharray={node.interrupting === false ? '3 2.5' : undefined} />
+      <NodeIcon type={kind} x={x + 2} y={y + 2} />
+    </g>
+  );
+}
+
 /** An open sub-process: a frame with its name, drawn behind its steps. */
 function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: PlacedNode; label: string; interaction: Interaction; onToggle: () => void; toggleLabel: string }) {
   return (
@@ -241,6 +314,8 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={12} />
       <text aria-hidden="true" className="dg-frame__name" x={node.x + FRAME_PAD} y={node.y + FRAME_HEADER - 11}>{node.name ?? node.id}</text>
+      {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width - FRAME_PAD - 38} cy={node.y + 15} /> : null}
+      <TriggerMark node={node} x={node.x + node.width - FRAME_PAD - 18 - 30} y={node.y + 2} />
       <Toggle x={node.x + node.width - FRAME_PAD - 18} y={node.y + 6} open label={toggleLabel} onToggle={onToggle} />
     </g>
   );
@@ -248,17 +323,17 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
 
 function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const centre = symbolCentre(node);
-  const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : undefined;
+  const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : node.type === 'complexGateway' ? '✳' : undefined;
   // #489, #493: a boundary event sits on its activity with a double ring, dashed when it does not interrupt; an end event
   // that raises or terminates carries its symbol inside the thick ring.
   const boundary = node.type.startsWith('boundaryEvent');
   const intermediate = node.type.startsWith('intermediate') || boundary;
-  const soft = boundary && node.interrupting === false;
+  const soft = (boundary || node.type.startsWith('startEvent')) && node.interrupting === false;
   const marked = intermediate || node.type.includes(':');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
   return (
-    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
+    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary || node.type.startsWith('startEvent') ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
       {node.shape === 'event' ? (
         <>
@@ -270,6 +345,14 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
         <>
           <path d={`M${String(centre.x)} ${String(centre.y - GATEWAY_HALF)} L${String(centre.x + GATEWAY_HALF)} ${String(centre.y)} L${String(centre.x)} ${String(centre.y + GATEWAY_HALF)} L${String(centre.x - GATEWAY_HALF)} ${String(centre.y)} Z`} />
           {glyph !== undefined ? <text x={centre.x} y={centre.y + 7} textAnchor="middle" className="dg-node__glyph" aria-hidden="true">{glyph}</text> : null}
+          {node.type === 'eventBasedGateway' ? (
+            // #495: a double ring around a pentagon, the symbol of a gateway that waits for the first of several events.
+            <g className="dg-node__event-gateway" aria-hidden="true">
+              <circle cx={centre.x} cy={centre.y} r={11} />
+              <circle cx={centre.x} cy={centre.y} r={8.5} />
+              <path d={`M${String(centre.x)} ${String(centre.y - 5.5)} L${String(centre.x + 5.2)} ${String(centre.y - 1.7)} L${String(centre.x + 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 5.2)} ${String(centre.y - 1.7)} Z`} />
+            </g>
+          ) : null}
         </>
       )}
       {node.lines.length > 0 ? (
@@ -282,16 +365,16 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   );
 }
 
-function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
-  node: PlacedNode; typeLabel: string; badge: StepBadge | undefined; interaction: Interaction;
+function Node({ node, typeLabel, loopLabel, badge, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
+  node: PlacedNode; typeLabel: string; loopLabel: string | undefined; badge: StepBadge | undefined; interaction: Interaction;
   mark: Mark | undefined; markLabel: ((mark: Mark) => string) | undefined; picked: boolean;
   steps: string | undefined; onToggle: (() => void) | undefined; toggleLabel: string | undefined;
 }) {
   const known = isKnownNodeType(node.type);
   // A selectable step's name starts with the words drawn on it, in order, so speech input can name it (WCAG 2.5.3).
   const label = interaction.onSelect !== undefined
-    ? `${node.name ?? node.id} ${typeLabel}${[badge?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
-    : `${node.name ?? node.id}, ${typeLabel}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
+    ? `${node.name ?? node.id} ${typeLabel}${[loopLabel, badge?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
+    : `${node.name ?? node.id}, ${typeLabel}${loopLabel !== undefined ? `, ${loopLabel}` : ''}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
   if (node.shape === 'task' || !known) {
     // A type this cockpit does not draw is laid out and drawn as a dashed box, named in words.
     const kind = node.type === 'serviceTask:agentTask' ? 'agent' : known ? 'task' : 'generic';
@@ -342,7 +425,10 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   const toggle = useCallback((id: string) => {
     setToggled((current) => new Map(current).set(id, !open.has(id)));
   }, [open]);
-  const layout = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges, open }), [graph, t, withBadges, open]);
+  const plain = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges, open }), [graph, t, withBadges, open]);
+  // #497: pools, lanes and message flows are drawn around the laid-out steps, read only.
+  const collaboration = useMemo(() => placeCollaboration(plain, graph), [plain, graph]);
+  const layout = collaboration?.layout ?? plain;
   const [zoom, setZoom] = useState<Zoom>('fit');
   const frame = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<{ width: number; height: number } | undefined>(undefined);
@@ -490,14 +576,18 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
                 </marker>
               )) : null}
             </defs>
+            {collaboration !== undefined ? <Collaboration drawing={collaboration} /> : null}
             <g>{layout.nodes.filter((node) => node.container?.open === true).map((node) => (
-              <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}`}
+              <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}${node.loop !== undefined ? `, ${t(`diagram.loop.${node.loop}`)}` : ''}`}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
                 onToggle={() => { toggle(node.id); }} toggleLabel={t('diagram.collapse', { name: node.name ?? node.id })} />
             ))}</g>
+            {collaboration !== undefined ? (
+              <g>{collaboration.flows.map((flow) => <MessageFlowLine key={flow.id} flow={flow} marker={marker} />)}</g>
+            ) : null}
             <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
             <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (
-              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} badge={overlay?.badges.get(node.id)}
+              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} loopLabel={node.loop !== undefined ? t(`diagram.loop.${node.loop}`) : undefined} badge={overlay?.badges.get(node.id)}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
                 mark={marks?.nodes.get(node.id)} markLabel={markLabel} picked={picked === node.id}
                 steps={node.container !== undefined ? t('diagram.stepCount', { count: String(node.container.steps) }) : undefined}

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
 import { currentProcessEngine, resetProcessEngine } from '../../mocks/handlers';
 import { setScenario } from '../../mocks/node';
-import { INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INCIDENT_ID, STUCK_UNDO_INSTANCE_ID, UNDONE_INSTANCE_ID } from '../../mocks/caseDemo';
+import { BOOKED_INSTANCE_ID, INCIDENT_INSTANCE_ID, KYC_INSTANCE_ID, STUCK_UNDO_INCIDENT_ID, STUCK_UNDO_INSTANCE_ID, UNDONE_INSTANCE_ID } from '../../mocks/caseDemo';
 import { FORM_TASK_ID, INSTANCE_ID, MASKED_TASK_ID, REVIEW_TASK_ID } from '../../mocks/processDemo';
 
 function open(hash: string) {
@@ -26,7 +26,7 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Loan origination' })).toBeInTheDocument();
     expect(screen.getByText('Version 3, laid out automatically')).toBeInTheDocument();
-    const diagram = await screen.findByRole('group', { name: 'Diagram of Loan origination, 13 steps' });
+    const diagram = await screen.findByRole('group', { name: 'Diagram of Loan origination, 14 steps' });
     expect(diagram).toHaveAttribute('data-layout', 'auto');
     expect(within(diagram).getByRole('img', { name: 'Assess documents, Agent task' })).toBeInTheDocument();
     expect(within(diagram).getByRole('img', { name: 'Capture application, Person task' })).toBeInTheDocument();
@@ -36,10 +36,10 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
     expect(within(crumbs).getByText('Loan origination')).toBeInTheDocument();
     expect(within(crumbs).queryByText('loan-origination')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Steps (13)' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Steps (14)' }));
     const steps = within(screen.getByRole('list', { name: 'Steps in flow order' })).getAllByRole('listitem');
     expect(steps[0]).toHaveTextContent('Application receivedStart');
-    expect(steps).toHaveLength(13);
+    expect(steps).toHaveLength(14);
   });
 
   it('CKP_BOUNDARY_a_boundary_event_is_drawn_on_its_step_and_named_in_words', async () => {
@@ -220,6 +220,19 @@ async function openTimeline(instanceId: string) {
 }
 
 const rowTexts = (table: HTMLElement) => within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
+
+describe('#518 the result variable of a script step comes from the history', () => {
+  it('CKP_033_the_timeline_names_the_variable_a_script_step_set_from_its_history_entry', async () => {
+    const table = await openTimeline(BOOKED_INSTANCE_ID);
+    const rows = within(table).getAllByRole('row').slice(1);
+    const scripted = rows.find((row) => row.textContent.includes('Compute offer terms'));
+    // The history entry says what the step set; the diagram is not read for it.
+    expect(scripted).toHaveTextContent('Step completed');
+    expect(scripted).toHaveTextContent('sets offerTerms');
+    // Other steps that completed set nothing.
+    expect(rows.filter((row) => row.textContent.includes('sets '))).toHaveLength(1);
+  });
+});
 
 describe('CKP-033 and CKP-049 undo steps in the timeline', () => {
   it('CKP_033_compensation_runs_in_instance_timeline', async () => {
@@ -427,10 +440,10 @@ describe('CKP-007 agent task inspector', () => {
     expect(within(editor).getByLabelText('Risk score')).toHaveAttribute('aria-invalid', 'true');
   });
 
-  it('CKP_007_a_task_without_an_agent_answer_says_so', async () => {
+  it('CKP_007_a_task_with_neither_an_agent_answer_nor_a_form_says_so', async () => {
     setScenario('processes-reviewer');
     open(`#/tasks/${FORM_TASK_ID}`);
 
-    expect(await screen.findByText(/Only escalated agent steps open here/)).toBeInTheDocument();
+    expect(await screen.findByText(/has no form to complete here/)).toBeInTheDocument();
   });
 });

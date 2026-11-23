@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loan co-signing (#496): every co-signer approves in a task of their own, in parallel; the loan goes on as soon as two
+     of them have approved, and the tasks of the others are cancelled. The decisions are collected in co-signer order. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-cosigning"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-cosigning" name="Loan co-signing" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:userTask id="cosign" name="Co-signer approval" horus:assignee="role:CREDIT_OFFICER" horus:resultVariable="verdict">
+      <bpmn:incoming>f1</bpmn:incoming>
+      <bpmn:outgoing>f2</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"
+                                             horus:outputCollection="verdicts" horus:outputElement="verdict.decision">
+        <bpmn:completionCondition>nrOfCompletedInstances &gt;= 2</bpmn:completionCondition>
+      </bpmn:multiInstanceLoopCharacteristics>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="book" name="Book the loan" horus:handler="book-loan" horus:resultVariable="booking"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="cosign"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="cosign" targetRef="book"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="book" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -11,6 +11,7 @@ import io.github.dhluong90.bpm.process.api.ProcessQueryService;
 import io.github.dhluong90.bpm.process.api.TaskQuery;
 import io.github.dhluong90.bpm.process.api.TaskSummary;
 import io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -26,6 +27,7 @@ public final class ProcessQueries implements ProcessQueryService {
     private final NodeWindowStatsService windowStats;
     private final InstanceActivityService activities;
     private final TaskQueries tasks;
+    private List<PendingApprovalSource> pendingSources = List.of();
 
     /**
      * Without the task list; {@link #tasks} is refused.
@@ -60,6 +62,18 @@ public final class ProcessQueries implements ProcessQueryService {
         this.tasks = lists.taskQueries(Objects.requireNonNull(taskStore));
     }
 
+    /**
+     * Adds the other kinds of proposal the pending approvals list shows beside definition versions (#473): migration
+     * plans and calendar changes, when the host runs those features.
+     *
+     * @param sources the sources, possibly empty
+     * @return this
+     */
+    public ProcessQueries withPendingSources(List<? extends PendingApprovalSource> sources) {
+        this.pendingSources = List.copyOf(sources);
+        return this;
+    }
+
     @Override
     public Page<TaskSummary> tasks(TaskQuery query) {
         if (tasks == null) {
@@ -75,7 +89,7 @@ public final class ProcessQueries implements ProcessQueryService {
 
     @Override
     public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page) {
-        return lists.pendingApprovals(page);
+        return lists.pendingApprovals(page, pendingSources);
     }
 
     @Override

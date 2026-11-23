@@ -4,8 +4,8 @@ import {
   localiseDemo, VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
 } from './processDemo';
 import { demoCases } from './caseDemo';
-import { DIRECTORY, QUEUE_NOW, QUEUE_SEED, type QueueSeedTask } from './taskQueueDemo';
-import { MIGRATION_DEFINITIONS } from './migrationDemo';
+import { DIRECTORY, QUEUE_NOW, QUEUE_SEED, QUEUE_FORMS, type QueueSeedTask } from './taskQueueDemo';
+import { fakeHash, MIGRATION_DEFINITIONS } from './migrationDemo';
 import { createMigrationApi, type MigrationSeed } from './migrationEngine';
 import { demoIncidents, type StoredIncident } from './incidentDemo';
 
@@ -64,6 +64,15 @@ export interface RecordedHandOver {
   reason: string;
 }
 
+/** A task completed through its declared form, as the engine received it (CKP-021). */
+export interface RecordedCompletion {
+  taskId: string;
+  actor: string;
+  result: Record<string, unknown>;
+  ifMatch: string | undefined;
+  idempotencyKey: string | undefined;
+}
+
 export interface RecordedOverride {
   taskId: string;
   reviewedBy: string;
@@ -113,6 +122,8 @@ export interface ProcessSeed {
   resolveApproval?: 'four-eyes' | 'single';
   /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
   unclassified?: boolean;
+  /** A pending change of the `vn-banking-hours` calendar, proposed by lan (#473): in the approvals list and under Calendar changes. */
+  calendar?: boolean;
 }
 
 /** A command on an incident, as the engine received it. */
@@ -170,6 +181,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const handOvers: RecordedHandOver[] = [];
   const replies = new Map<string, ProcessAnswer>();
   const overrides: RecordedOverride[] = [];
+  const completions: RecordedCompletion[] = [];
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
   const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
   const incidentCommands: RecordedIncidentCommand[] = [];
@@ -288,6 +300,27 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     return out;
   };
 
+  /** The checks of a declared form the demo engine makes: required fields, the conditional rule, enums, integers and the mask. */
+  const formViolations = (schema: Record<string, unknown>, result: Record<string, unknown>) => {
+    const properties = (schema['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+    const required = new Set((schema['required'] ?? []) as string[]);
+    const rule = schema['if'] as { properties?: Record<string, { const?: unknown }> } | undefined;
+    if (rule?.properties !== undefined && Object.entries(rule.properties).every(([name, check]) => result[name] === check.const)) {
+      for (const name of ((schema['then'] as { required?: string[] } | undefined)?.required ?? [])) required.add(name);
+    }
+    const out: { pointer: string; rule: string }[] = [];
+    for (const [name, property] of Object.entries(properties)) {
+      const value = result[name];
+      if (value === undefined || value === null) {
+        if (required.has(name)) out.push({ pointer: `/${name}`, rule: 'required' });
+      } else if (property['mask'] === true && value === '***') out.push({ pointer: `/${name}`, rule: 'masked value' });
+      else if (Array.isArray(property['enum']) && !property['enum'].includes(value)) out.push({ pointer: `/${name}`, rule: `must be one of ${property['enum'].join(', ')}` });
+      else if (property['type'] === 'integer' && !Number.isInteger(value)) out.push({ pointer: `/${name}`, rule: 'expected integer' });
+      else if (property['type'] === 'string' && typeof value === 'string' && typeof property['maxLength'] === 'number' && value.length > property['maxLength']) out.push({ pointer: `/${name}`, rule: `must be at most ${String(property['maxLength'])} characters` });
+    }
+    return out;
+  };
+
   function effectiveOf(key: string): number | null {
     const active = definitions.filter((d) => d.key === key && d.status === 'ACTIVE').map((d) => d.version);
     return active.length > 0 ? Math.max(...active) : null;
@@ -364,28 +397,73 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
    * listPendingApprovals (PRE-190): every pending version of the tenant, oldest request first, with what this caller
    * may send and why approve or reject is not offered. One page holds the demo; `limit` is checked as the engine does.
    */
+  /** The demo calendar change (#473): lan proposes the holiday 1 January 2028 for the banking hours calendar. */
+  const calendarChange = seed.calendar !== true ? undefined : {
+    id: '01KB2R6Q3C0000000000000CAL', calendarKey: 'vn-banking-hours', status: 'PENDING', approval: 'FOUR_EYES', baseVersion: 3,
+    previous: { zone: 'Asia/Ho_Chi_Minh', week: { MONDAY: ['08:00-17:00'], FRIDAY: ['08:00-17:00'] }, holidays: {} },
+    proposed: { zone: 'Asia/Ho_Chi_Minh', week: { MONDAY: ['08:00-17:00'], FRIDAY: ['08:00-17:00'] }, holidays: { '2028-01-01': 'New Year' } },
+    reason: 'New Year 2028 is a public holiday', proposedBy: 'lan', proposedAt: '2026-11-21T02:00:00Z', decidedBy: null as string | null, decidedAt: null as string | null, comment: null as string | null,
+  };
+  const calendarHash = () => (calendarChange === undefined ? '' : fakeHash(JSON.stringify([calendarChange.calendarKey, calendarChange.baseVersion, calendarChange.proposed])));
+  const calendarBody = () => ({ ...calendarChange, contentHash: calendarHash() });
+  /** Approvals sent to the calendar-change endpoints, as the engine received them. */
+  const calendarDecisions: { id: string; command: 'approve' | 'reject'; actor: string; body: Record<string, unknown> }[] = [];
+  function calendarRoute(request: ProcessRequest, path: string): ProcessAnswer | undefined {
+    const m = /^\/api\/bpm\/processes\/v1\/calendar-changes(?:\/([^/:]+)(:approve|:reject)?)?$/.exec(path);
+    if (m === null) return undefined;
+    if (calendarChange === undefined) return problem(404, 'CALENDAR_NOT_FOUND');
+    if (m[1] === undefined) {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      return json(200, { data: calendarChange.status === 'PENDING' ? [calendarBody()] : [], nextCursor: null, hasNext: false });
+    }
+    if (m[1] !== calendarChange.id) return problem(404, 'CALENDAR_NOT_FOUND');
+    if (m[2] === undefined) return request.permissions.includes('processes:read') ? json(200, calendarBody()) : problem(403, 'PERMISSION_DENIED');
+    if (!request.permissions.includes('processes:calendar:manage')) return problem(403, 'PERMISSION_DENIED');
+    if (calendarChange.status !== 'PENDING') return problem(409, 'INVALID_STATE');
+    const body = request.body === '' ? {} : (JSON.parse(request.body) as Record<string, unknown>);
+    const command = m[2] === ':approve' ? 'approve' : 'reject';
+    calendarDecisions.push({ id: calendarChange.id, command, actor: request.user, body });
+    if (command === 'approve') {
+      if (request.user === calendarChange.proposedBy) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
+      if (body['expectedChangeHash'] !== undefined && body['expectedChangeHash'] !== calendarHash()) return problem(409, 'CONTENT_CHANGED');
+    }
+    Object.assign(calendarChange, { status: command === 'approve' ? 'APPROVED' : 'REJECTED', decidedBy: request.user, decidedAt: '2026-11-21T03:00:00Z', comment: typeof body['comment'] === 'string' ? body['comment'] : null });
+    return json(200, calendarBody());
+  }
+
   function pendingApprovals(url: URL, request: ProcessRequest): ProcessAnswer {
     if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
     const limitText = url.searchParams.get('limit');
     const limit = limitText === null ? 50 : Number(limitText);
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) return problem(400, 'QUERY_INVALID');
     const approver = request.permissions.includes('processes:approve');
-    const data = definitions
+    const data: (Record<string, unknown> & { requestedAt: string; key: string })[] = definitions
       .filter((d) => d.status === 'PENDING_APPROVAL')
       .map((d) => {
         const requestedBy = d.requestedBy ?? d.createdBy ?? 'lan';
         const self = request.user === requestedBy || request.user === (d.createdBy ?? 'lan');
         const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : undefined;
         return {
+          kind: 'DEFINITION', id: null, sourceVersion: null, reason: null, contentHash: d.definitionHash ?? DEFAULT_HASH,
           key: d.key, name: d.name, version: d.version, definitionHash: d.definitionHash ?? DEFAULT_HASH, lockVersion: d.lockVersion,
           requestedBy, requestedByName: DEMO_NAMES[locale].users[requestedBy] ?? requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
           allowedActions: denial === undefined ? ['approve', 'reject'] : [],
           deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
         };
-      })
-      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key))
-      .slice(0, limit);
-    return json(200, { data, nextCursor: null, hasNext: false });
+      });
+    if (calendarChange?.status === 'PENDING') {
+      const self = request.user === calendarChange.proposedBy;
+      const manager = request.permissions.includes('processes:calendar:manage');
+      data.push({
+        kind: 'CALENDAR_CHANGE', id: calendarChange.id, sourceVersion: null, reason: calendarChange.reason, contentHash: calendarHash(),
+        key: calendarChange.calendarKey, name: null, version: calendarChange.baseVersion + 1, definitionHash: null, lockVersion: calendarChange.baseVersion,
+        requestedBy: calendarChange.proposedBy, requestedByName: DEMO_NAMES[locale].users[calendarChange.proposedBy] ?? calendarChange.proposedBy, requestedAt: calendarChange.proposedAt,
+        allowedActions: !manager ? [] : [...(self ? [] : ['approve']), 'reject'],
+        deniedActions: !manager ? { approve: 'PERMISSION_REQUIRED', reject: 'PERMISSION_REQUIRED' } : self ? { approve: 'SELF_APPROVAL_FORBIDDEN' } : {},
+      });
+    }
+    data.sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key));
+    return json(200, { data: data.slice(0, limit), nextCursor: null, hasNext: false });
   }
 
   /** allowedActions of an incident for this caller (PRE-077, PRE-078): empty without processes:incident:manage. */
@@ -494,6 +572,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return json(200, { data, nextCursor: null, hasNext: false });
     }
     if (request.method === 'GET' && path === `${BASE}/approvals`) return pendingApprovals(url, request);
+    const calendar = calendarRoute(request, path);
+    if (calendar !== undefined) return calendar;
     if (seed.migration !== undefined) {
       const migration = migrations.handle(request, path, url);
       if (migration !== undefined) return migration;
@@ -544,6 +624,17 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return incidentCommand(item, command, request, header);
     }
     if (request.method === 'GET' && path === `${BASE}/tasks`) return listTasks(url, request);
+    const formMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)\/form$/.exec(path);
+    if (formMatch && request.method === 'GET') {
+      const task = tasks.get(formMatch[1] ?? '');
+      if (!request.permissions.includes('processes:task:work')) return problem(403, 'PERMISSION_DENIED');
+      if (!task) return problem(404, 'TASK_NOT_FOUND');
+      const declared = QUEUE_FORMS[task.id];
+      if (declared === undefined) return problem(404, 'FORM_NOT_DECLARED');
+      const base = { schemaVersion: 1, taskId: task.id, lockVersion: task.lockVersion };
+      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: declared };
+      return json(200, body, { ETag: `"${String(task.lockVersion)}"` });
+    }
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete|reassign|delegate))?$/.exec(path);
     if (taskMatch) {
       const task = tasks.get(taskMatch[1] ?? '');
@@ -599,6 +690,12 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         if (violations.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations });
         overrides.push({ taskId: task.id, reviewedBy: request.user, reason: body.reason ?? '', result, idempotencyKey: header('Idempotency-Key') });
       }
+      const declared = QUEUE_FORMS[task.id];
+      if (declared !== undefined && 'schema' in declared) {
+        const errors = formViolations(declared.schema, result);
+        if (errors.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations: errors.map((e) => `$.${e.pointer.slice(1)}: ${e.rule}`), errors });
+        completions.push({ taskId: task.id, actor: request.user, result, ifMatch, idempotencyKey });
+      }
       Object.assign(task, { status: 'COMPLETED', completedBy: request.user, completedAt: '2026-11-20T03:20:00Z', lockVersion: task.lockVersion + 1 });
       return json(200, instance(), { ETag: '"5"' });
     }
@@ -617,5 +714,5 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (item) item.lockVersion += 1;
   };
 
-  return { handle, overrides, requests, decisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
+  return { handle, overrides, completions, requests, decisions, calendarDecisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
 }

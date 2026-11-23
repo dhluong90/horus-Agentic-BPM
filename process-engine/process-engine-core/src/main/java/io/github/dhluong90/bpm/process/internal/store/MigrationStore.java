@@ -85,6 +85,36 @@ public interface MigrationStore {
             Instant startedAt, Instant finishedAt) {
     }
 
+    /**
+     * A proposed execution waiting for a second person, as the pending approvals list shows it (#473).
+     *
+     * @param migrationId the plan id, the tie-break of the keyset
+     * @param definitionKey the definition key
+     * @param sourceVersion the version the instances run on
+     * @param targetVersion the version they would move to
+     * @param planHash the plan hash, the value an approver sends back as the expected plan hash
+     * @param lockVersion the lock version an approval names in {@code If-Match}
+     * @param proposedBy who proposed
+     * @param proposedAt when
+     * @param reason why the instances move
+     */
+    record ProposedRow(String migrationId, String definitionKey, int sourceVersion, int targetVersion,
+            String planHash, long lockVersion, String proposedBy, Instant proposedAt, String reason) {
+    }
+
+    /**
+     * A page of the tenant's plans in {@code PROPOSED}, oldest proposal first on {@code (proposed_at, id)} (#473).
+     *
+     * @param tenant tenant
+     * @param afterAt keyset: {@code proposedAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id, or null
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<ProposedRow> proposedExecutions(String tenant, Instant afterAt, String afterId, int limit) {
+        throw new UnsupportedOperationException("proposed executions are not supported by this store");
+    }
+
     /** A live token of an instance: its id and the step it waits at. */
     record LiveToken(String id, String nodeId) {
     }

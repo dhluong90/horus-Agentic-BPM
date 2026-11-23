@@ -13,8 +13,14 @@ export interface TenantRefusal {
  */
 export function switchableTenants(meta: BpmMetaV1, me: BpmMeV1): readonly string[] {
   if (!meta.tenancy.switching) return [];
-  const tenants = [...new Set([me.tenant.current, ...me.tenant.allowed])];
-  return tenants.length > 1 ? tenants : [];
+  // Only what the token allows: the cockpit never adds a tenant of its own, so a development tenant the token does
+  // not list (the host fixes it in the dev profile only) is never offered.
+  return me.tenant.allowed.length > 1 ? me.tenant.allowed : [];
+}
+
+/** The host's display name of a tenant from /me (#474); the id itself when the host gives none. */
+export function tenantLabel(me: BpmMeV1, tenant: string): string {
+  return me.tenant.names?.[tenant] ?? tenant;
 }
 
 /**

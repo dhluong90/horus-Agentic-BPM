@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A card payment is reviewed by an officer. The customer's cancellation message stops the review, a freeze signal for the
+     account only notifies the officer, and a high risk score raises the case. Meanwhile the order waits for the payment
+     message or the reversal message, or two hours, whichever comes first. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_payment-review"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="Message_payment_cancelled" name="payment-cancelled"/>
+  <bpmn:message id="Message_payment_received" name="payment-received"/>
+  <bpmn:message id="Message_payment_reversed" name="payment-reversed"/>
+  <bpmn:signal id="Signal_account_frozen" name="account-frozen"/>
+  <bpmn:process id="payment-review" name="Review a card payment" isExecutable="true">
+    <bpmn:startEvent id="start" name="Payment received for review"/>
+    <bpmn:userTask id="review" name="Review the payment" horus:assignee="role:CARD_OFFICER" horus:resultVariable="outcome"/>
+    <bpmn:boundaryEvent id="cancelled-by-customer" name="Customer cancels" attachedToRef="review" horus:correlationKey="paymentId">
+      <bpmn:messageEventDefinition messageRef="Message_payment_cancelled"/>
+    </bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="account-frozen" name="Account frozen" attachedToRef="review" cancelActivity="false">
+      <bpmn:signalEventDefinition signalRef="Signal_account_frozen"/>
+    </bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="high-risk" name="Risk score 80 or more" attachedToRef="review" cancelActivity="false">
+      <bpmn:conditionalEventDefinition>
+        <bpmn:condition>riskScore &gt;= 80</bpmn:condition>
+      </bpmn:conditionalEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:eventBasedGateway id="wait-payment" name="Payment, reversal or two hours"/>
+    <bpmn:intermediateCatchEvent id="paid" name="Payment received" horus:correlationKey="paymentId">
+      <bpmn:messageEventDefinition messageRef="Message_payment_received"/>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="reversed" name="Payment reversed" horus:correlationKey="paymentId">
+      <bpmn:messageEventDefinition messageRef="Message_payment_reversed"/>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="two-hours" name="Two hours passed">
+      <bpmn:timerEventDefinition><bpmn:timeDuration>PT2H</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:endEvent id="settled" name="Payment settled"/>
+    <bpmn:endEvent id="refunded" name="Payment reversed"/>
+    <bpmn:endEvent id="expired" name="Payment expired"/>
+    <bpmn:endEvent id="withdrawn" name="Review withdrawn"/>
+    <bpmn:endEvent id="noted" name="Freeze noted"/>
+    <bpmn:endEvent id="raised" name="Risk raised"/>
+    <bpmn:sequenceFlow id="start__review" sourceRef="start" targetRef="review"/>
+    <bpmn:sequenceFlow id="review__wait-payment" sourceRef="review" targetRef="wait-payment"/>
+    <bpmn:sequenceFlow id="cancelled__withdrawn" sourceRef="cancelled-by-customer" targetRef="withdrawn"/>
+    <bpmn:sequenceFlow id="frozen__noted" sourceRef="account-frozen" targetRef="noted"/>
+    <bpmn:sequenceFlow id="risk__raised" sourceRef="high-risk" targetRef="raised"/>
+    <bpmn:sequenceFlow id="gw__paid" sourceRef="wait-payment" targetRef="paid"/>
+    <bpmn:sequenceFlow id="gw__reversed" sourceRef="wait-payment" targetRef="reversed"/>
+    <bpmn:sequenceFlow id="gw__two-hours" sourceRef="wait-payment" targetRef="two-hours"/>
+    <bpmn:sequenceFlow id="paid__settled" sourceRef="paid" targetRef="settled"/>
+    <bpmn:sequenceFlow id="reversed__refunded" sourceRef="reversed" targetRef="refunded"/>
+    <bpmn:sequenceFlow id="two-hours__expired" sourceRef="two-hours" targetRef="expired"/>
+  </bpmn:process>
+</bpmn:definitions>

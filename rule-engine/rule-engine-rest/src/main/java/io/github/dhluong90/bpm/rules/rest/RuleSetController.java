@@ -271,7 +271,8 @@ public class RuleSetController {
 
     /**
      * {@code POST /rule-sets/{name}/versions/{v}:request-publish}, optional body
-     * {@code {"simulationReportId": "..."}} that attaches a simulation report of this version (PD-115, RLE-201).
+     * {@code {"simulationReportId": "...", "effectiveFrom": "..."}}: a simulation report of this version to attach
+     * (PD-115, RLE-201) and the date the version should take effect (RLE-210, #470).
      */
     @PostMapping("/{name}/versions/{version:\\d+}:request-publish")
     public ResponseEntity<byte[]> requestPublish(
@@ -286,10 +287,19 @@ public class RuleSetController {
         RestSupport.require(callers, "rules:author");
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         String reportId = null;
+        java.time.Instant effectiveFrom = null;
         if (body.length > 0) {
             JsonNode node = EngineValues.readRequest(body);
             if (!node.isObject()) {
                 throw new InputInvalidException("Request body must be a JSON object");
+            }
+            JsonNode date = node.get("effectiveFrom");
+            if (date != null && !date.isNull()) {
+                try {
+                    effectiveFrom = java.time.OffsetDateTime.parse(date.isString() ? date.stringValue() : "").toInstant();
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new InputInvalidException("effectiveFrom must be an ISO 8601 instant with an offset");
+                }
             }
             JsonNode value = node.get("simulationReportId");
             if (value != null && !value.isNull()) {
@@ -300,7 +310,7 @@ public class RuleSetController {
             }
         }
         WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), null,
-                ProblemDetails.correlationId(correlationId)).withSimulationReport(reportId);
+                ProblemDetails.correlationId(correlationId)).withSimulationReport(reportId).withEffectiveFrom(effectiveFrom);
         return RestSupport.version(HttpStatus.OK, versions.requestPublish(name, version, options), callers);
     }
 

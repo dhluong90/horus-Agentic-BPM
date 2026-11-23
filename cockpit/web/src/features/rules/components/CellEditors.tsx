@@ -24,12 +24,12 @@ const DECIMAL: Record<Locale, string> = { en: '.', vi: ',' };
 const GROUP: Record<Locale, string> = { en: ',', vi: '.' };
 
 /** Canonical decimal text ("50000000.5") as the user sees it while typing ("50,000,000.5"). */
-function shownAmount(canonical: string, locale: Locale): string {
+export function shownAmount(canonical: string, locale: Locale): string {
   return groupWhileTyping(canonical.replace('.', DECIMAL[locale]), locale);
 }
 
 /** What the user typed back to canonical decimal text; anything but digits and one separator is dropped. */
-function canonicalAmount(typed: string, locale: Locale): string {
+export function canonicalAmount(typed: string, locale: Locale): string {
   const plain = typed.split(GROUP[locale]).join('').replace(DECIMAL[locale], '.');
   return plain.replace(/[^\d.-]/g, '');
 }

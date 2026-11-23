@@ -42,7 +42,7 @@ import java.util.regex.Pattern;
  * its event in one transaction. Only an approval makes a plan runnable; the {@link MigrationRunner} reads no other
  * state. The tenant and the caller come from the resolvers. Thread-safe.
  */
-public final class MigrationExecutions implements MigrationExecutionService {
+public final class MigrationExecutions implements MigrationExecutionService, PendingApprovalSource {
 
     private static final System.Logger LOG = System.getLogger(MigrationExecutions.class.getName());
     private static final Pattern ID = Pattern.compile("^[0-9A-Za-z]{1,26}$");
@@ -144,22 +144,42 @@ public final class MigrationExecutions implements MigrationExecutionService {
 
     @Override
     public MigrationExecution approve(String migrationId, long expectedLockVersion, String idempotencyKey) {
+        return approve(migrationId, expectedLockVersion, idempotencyKey, null);
+    }
+
+    @Override
+    public MigrationExecution approve(String migrationId, long expectedLockVersion, String idempotencyKey,
+            String expectedPlanHash) {
         String tenant = tenant();
         String caller = caller(Migrations.PERMISSION_MANAGE);
-        String requestHash = Hashes.sha256Parts("migration-approve", caller, String.valueOf(migrationId),
-                Long.toString(expectedLockVersion));
+        if (expectedPlanHash != null && !expectedPlanHash.matches("[0-9a-f]{64}")) {
+            throw new InputInvalidException("expectedPlanHash must be 64 lower-case hexadecimal characters, the "
+                    + "contentHash of the plan as the approvals list shows it");
+        }
+        // The hash joins the request hash only when named, so a key used before the hash existed still replays.
+        String requestHash = expectedPlanHash == null
+                ? Hashes.sha256Parts("migration-approve", caller, String.valueOf(migrationId),
+                        Long.toString(expectedLockVersion))
+                : Hashes.sha256Parts("migration-approve", caller, String.valueOf(migrationId),
+                        Long.toString(expectedLockVersion), expectedPlanHash);
         return transactions.inTransaction(() -> idempotency.run(tenant, "migration-approve", idempotencyKey,
                 requestHash, () -> {
                     Execution e = locked(tenant, migrationId);
                     requireProposed(e);
                     secondPerson(e, caller);
                     requireLock(e, expectedLockVersion);
+                    StoredPlan plan = store.findPlan(tenant, migrationId).orElseThrow();
+                    // PD-139: only the plan the approver reviewed; a refusal names the hash stored now.
+                    if (expectedPlanHash != null && !expectedPlanHash.equals(plan.view().planHash())) {
+                        throw new io.github.dhluong90.bpm.process.api.ContentChangedException("Migration " + migrationId
+                                + " is not the plan reviewed: expected hash " + expectedPlanHash + " but it is "
+                                + plan.view().planHash(), plan.view().planHash(), e.lockVersion());
+                    }
                     Instant now = clock.instant();
                     if (!fresh(e.dryRunCheckedAt(), now)) {
                         throw new DryRunRequiredException("The dry run of this proposal is older than "
                                 + settings.dryRunValidity() + "; propose the execution again");
                     }
-                    StoredPlan plan = store.findPlan(tenant, migrationId).orElseThrow();
                     MigrationDryRun report = dryRun(tenant, plan);
                     Execution approved = new Execution(tenant, migrationId, APPROVED, e.approval(), e.lockVersion(),
                             e.proposedBy(), e.proposedAt(), e.reason(), e.dryRunCheckedAt(), caller, now, null, null,
@@ -181,6 +201,38 @@ public final class MigrationExecutions implements MigrationExecutionService {
                             report.instances().running());
                     return view(store.findExecution(tenant, migrationId).orElseThrow());
                 }, MigrationExecutions::toJson, MigrationExecutions::fromJson));
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.process.api.PendingApproval> pending(String tenant, String caller,
+            Set<String> held, Instant afterAt, String afterId, int limit) {
+        // Only a holder of the migration permission sees plans: a plan names versions and instances' definition.
+        if (!held.contains(Migrations.PERMISSION_MANAGE)) {
+            return List.of();
+        }
+        return store.proposedExecutions(tenant, afterAt, afterId, limit).stream().map(r -> {
+            java.util.List<String> allowed = new java.util.ArrayList<>(2);
+            Map<String, String> denied = new LinkedHashMap<>(2);
+            String approve = io.github.dhluong90.bpm.process.api.PendingApproval.APPROVE;
+            String reject = io.github.dhluong90.bpm.process.api.PendingApproval.REJECT;
+            if (caller.equals(r.proposedBy())) {
+                denied.put(approve, io.github.dhluong90.bpm.process.api.PendingApproval.SELF_APPROVAL_FORBIDDEN);
+                denied.put(reject, io.github.dhluong90.bpm.process.api.PendingApproval.SELF_APPROVAL_FORBIDDEN);
+            } else {
+                allowed.add(approve);
+                allowed.add(reject);
+            }
+            String name;
+            try {
+                name = callers.displayNameOf(r.proposedBy()).orElse(null);
+            } catch (RuntimeException e) {
+                name = null;
+            }
+            return new io.github.dhluong90.bpm.process.api.PendingApproval(
+                    io.github.dhluong90.bpm.process.api.PendingApproval.MIGRATION_PLAN, r.migrationId(),
+                    r.definitionKey(), null, r.targetVersion(), r.sourceVersion(), null, r.planHash(), r.lockVersion(),
+                    r.proposedBy(), r.proposedAt(), r.reason(), allowed, denied, name);
+        }).toList();
     }
 
     @Override

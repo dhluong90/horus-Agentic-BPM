@@ -58,7 +58,7 @@ const hash = (text: string) => Array.from({ length: 8 }, (_, seed) => {
   return h.toString(16).padStart(8, '0');
 }).join('');
 
-interface Violation { ruleId: string | null; column: string | null; message: string; code: string }
+interface Violation { ruleId: string | null; column: string | null; message: string; code: string; position?: number }
 
 /**
  * The engine's problem catalogue (explain_en / explain_vi.properties): one sentence per code, never the cell's text.
@@ -94,10 +94,15 @@ function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   const can = (permission: string) => request.permissions.includes(permission);
   // RLE-098: the author of a draft may also discard it.
   if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish', ...(v.createdBy === request.user ? ['discard'] : [])] : [];
-  if (v.status !== 'PENDING_APPROVAL' || !can('rules:approve')) return [];
-  // PD-089: neither the requester nor the author may approve or reject; withdrawing is its own action.
-  const self = v.requestedBy === request.user || v.createdBy === request.user;
-  return self ? [] : ['approve', 'reject'];
+  if (v.status !== 'PENDING_APPROVAL') return [];
+  // PD-089: neither the requester nor the author may approve or reject; the requester withdraws instead (VersionActions).
+  const actions: string[] = [];
+  if (can('rules:approve') && v.requestedBy !== request.user) {
+    if (v.createdBy !== request.user) actions.push('approve');
+    actions.push('reject');
+  }
+  if (can('rules:author') && v.requestedBy === request.user) actions.push('withdraw');
+  return actions;
 }
 
 /** The requester as the host's `DisplayNames` gives them in the caller's language; the login when none is known (#442). */
@@ -116,7 +121,7 @@ function pendingItem(v: StoredVersion, request: FakeRequest) {
   const withdraw = v.requestedBy === request.user && request.permissions.includes('rules:author');
   return {
     ruleSet: v.ruleSet, version: v.version, canonicalHash: hash(JSON.stringify(v.definition)), lockVersion: v.lockVersion,
-    requestedBy: v.requestedBy ?? '', requestedByName: namedUser(v.requestedBy ?? '', request), requestedAt: v.requestedAt ?? v.createdAt,
+    requestedBy: v.requestedBy ?? '', requestedByName: namedUser(v.requestedBy ?? '', request), requestedAt: v.requestedAt ?? v.createdAt, effectiveFrom: v.effectiveFrom,
     allowedActions: [...(denial === undefined ? ['approve', 'reject'] : []), ...(withdraw ? ['withdraw'] : [])],
     deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
   };
@@ -216,6 +221,30 @@ function view(v: StoredVersion, request: FakeRequest, marks: Marker, withSource 
   return json(body, { ETag: `"${String(v.lockVersion)}"` });
 }
 
+const SHORTHAND_START = /^(==|!=|<|>|in\s|in\[|not in|is\s|between\s)/;
+const WORDS_OF_THE_LANGUAGE = new Set(['and', 'or', 'not', 'in', 'is', 'null', 'true', 'false', 'between']);
+
+/**
+ * The first problem of a full expression (not a shorthand), as the engine places it: an unknown name at its first
+ * character, a money input compared with a bare number at the operator. A stand-in for the engine's parser, enough
+ * for the condition builder's screens; positions count characters of the cell as written.
+ */
+function fullExpressionProblem(text: string, types: ReadonlyMap<string, string>): { code: string; message: string; position: number } | undefined {
+  if (SHORTHAND_START.test(text.trim()) || !/\b(and|or|not)\b|==|!=|<|>/.test(text)) return undefined;
+  const names = /'(?:[^'\\]|\\.)*'|[A-Za-z_]\w*|\d+(?:\.\d+)?(?:\s+[A-Z]{3}\b)?|(?:==|!=|<=|>=|<|>)|\S/g;
+  const tokens = [...text.matchAll(names)].map((m) => ({ text: m[0], at: m.index }));
+  for (const [index, token] of tokens.entries()) {
+    if (/^[A-Za-z_]\w*$/.test(token.text) && !WORDS_OF_THE_LANGUAGE.has(token.text) && !types.has(token.text)) {
+      return { code: 'UNKNOWN_INPUT', message: `Unknown input '${token.text}'`, position: token.at };
+    }
+    const name = tokens[index - 1]?.text ?? '';
+    if (/^(==|!=|<=|>=|<|>)$/.test(token.text) && types.get(name) === 'money' && /^\d+(\.\d+)?$/.test(tokens[index + 1]?.text ?? '')) {
+      return { code: 'TYPE_MISMATCH', message: 'compares a money with a number', position: token.at };
+    }
+  }
+  return undefined;
+}
+
 const MONEY_TEXT = /^-?\d+(\.\d+)?\s+[A-Z]{3}$/;
 
 /** The engine's static checks that the screens show, every cell at once, in the engine's words. */
@@ -236,6 +265,11 @@ function validate(definition: Definition): Violation[] {
       // Arithmetic on a money input with a plain number ("balance + 100 > 0") is a type error in the engine.
       if (types.get(input) === 'money' && /[A-Za-z_]\w*\s*[-+*/]\s*\d/.test(condition)) {
         found.push({ ruleId: rule.id, column: input, message: 'adds a number to a money', code: 'TYPE_MISMATCH' });
+        continue;
+      }
+      const full = fullExpressionProblem(condition, types);
+      if (full !== undefined) {
+        found.push({ ruleId: rule.id, column: input, message: full.message, code: full.code, position: full.position });
         continue;
       }
       const bare = /^(==|!=)\s*([A-Za-z_]\w*)$/.exec(condition);
@@ -596,7 +630,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     }
     const found = validate(checked.document);
     const problems = found.slice(0, PROBLEM_LIMIT).map((f) => ({
-      ruleId: f.ruleId, column: f.column, code: f.code, position: null,
+      ruleId: f.ruleId, column: f.column, code: f.code, position: f.position ?? null,
       message: PROBLEM_CATALOGUE[f.code] ?? PROBLEM_CATALOGUE[f.column !== null ? 'RULE_INVALID' : 'DOCUMENT_INVALID'],
     }));
     // The engine reads a valid draft with the reader of RLE-091 and answers each row's full sentence.
@@ -644,14 +678,17 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (action === 'request-publish') {
       if (v.status !== 'DRAFT') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
       // RLE-201: an optional report to attach, required for the rule sets the host lists; it must have been run on this content.
-      const sent = request.body === '' ? {} : (JSON.parse(request.body) as { simulationReportId?: string });
+      const sent = request.body === '' ? {} : (JSON.parse(request.body) as { simulationReportId?: string; effectiveFrom?: string });
+      // RLE-210: a date asked for is an ISO 8601 instant with an offset, and not before the request.
+      if (sent.effectiveFrom !== undefined && Number.isNaN(Date.parse(sent.effectiveFrom))) return problem(400, 'INPUT_INVALID', 'effectiveFrom must be an ISO 8601 instant with an offset');
+      if (sent.effectiveFrom !== undefined && Date.parse(sent.effectiveFrom) < Date.parse(now())) return problem(422, 'EFFECTIVE_DATE_IN_PAST', `${v.ruleSet} v${String(v.version)} cannot take effect before now`);
       if (sent.simulationReportId === undefined && (reportOptions.required ?? []).includes(v.ruleSet)) return problem(409, 'SIMULATION_REPORT_REQUIRED', `${v.ruleSet} needs a simulation report with the request`);
       if (sent.simulationReportId !== undefined) {
         const attached = reports.find((r) => r.id === sent.simulationReportId && r.ruleSet === v.ruleSet && r.version === v.version);
         if (!attached) return problem(404, 'SIMULATION_REPORT_NOT_FOUND', `Report ${sent.simulationReportId} not found on ${v.ruleSet} v${String(v.version)}`);
         if (attached.canonicalHash !== hash(JSON.stringify(v.definition))) return problem(409, 'SIMULATION_REPORT_OUT_OF_DATE', 'The draft changed after the report was run');
       }
-      Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1, simulationReportId: sent.simulationReportId ?? null });
+      Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1, simulationReportId: sent.simulationReportId ?? null, ...(sent.effectiveFrom !== undefined ? { effectiveFrom: new Date(sent.effectiveFrom).toISOString() } : {}) });
       record(v, 'REQUESTED', from, request.user, null);
       return view(v, request, marks);
     }
@@ -690,7 +727,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return { ...refusal, body: JSON.stringify({ ...(JSON.parse(refusal.body) as object), ...extra }) };
     }
     for (const other of versionsOf(v.ruleSet)) if (other.status === 'PUBLISHED') other.status = 'RETIRED';
-    Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: now(), lockVersion: v.lockVersion + 1 });
+    Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: v.effectiveFrom ?? now(), lockVersion: v.lockVersion + 1 });
     record(v, 'APPROVED', from, request.user, body.comment ?? null);
     return view(v, request, marks);
   }

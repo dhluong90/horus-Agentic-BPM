@@ -24,7 +24,6 @@ final class BpmnStages {
             Map.entry("intermediateCatchEvent", S1),
             Map.entry("boundaryEvent", S1),
             Map.entry("subProcess", S1),
-            Map.entry("inclusiveGateway", S1),
             Map.entry("dataObject", S1),
             Map.entry("dataObjectReference", S1),
             Map.entry("dataStore", S1),
@@ -32,19 +31,11 @@ final class BpmnStages {
             Map.entry("dataInputAssociation", S1),
             Map.entry("dataOutputAssociation", S1),
             Map.entry("ioSpecification", S1),
-            Map.entry("laneSet", S1),
-            Map.entry("collaboration", S1),
-            Map.entry("participant", S1),
-            Map.entry("messageFlow", S1),
             Map.entry("loopCharacteristics", S1),
-            Map.entry("standardLoopCharacteristics", S1),
-            Map.entry("multiInstanceLoopCharacteristics", S1),
             Map.entry("error", S1),
             Map.entry("escalation", S1),
             Map.entry("signal", S2),
-            Map.entry("eventBasedGateway", S2),
-            Map.entry("complexGateway", S3),
-            Map.entry("adHocSubProcess", S3));
+            Map.entry("eventBasedGateway", S2));
 
     private static final Map<String, String> EVENT_DEFINITIONS = Map.of(
             "timerEventDefinition", S1,
@@ -55,8 +46,8 @@ final class BpmnStages {
             "messageEventDefinition", S2,
             "signalEventDefinition", S2,
             "conditionalEventDefinition", S2,
-            "compensateEventDefinition", S2,
-            "cancelEventDefinition", S2);
+            "compensateEventDefinition", S1,
+            "cancelEventDefinition", NOT_PLANNED);
 
     private BpmnStages() {
     }
