@@ -50,6 +50,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
@@ -156,9 +157,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /** The {@code horus:type} of an agent step. */
     static final String AGENT_TASK = "agentTask";
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
-    /** The event definitions an end event may carry (#493). */
+    /** The event definitions an end event may carry (#493, #488). */
     private static final Set<String> END_DEFINITIONS = Set.of("errorEventDefinition", "escalationEventDefinition",
-            "terminateEventDefinition");
+            "terminateEventDefinition", "compensateEventDefinition", "cancelEventDefinition");
     /** Where a group carries the label of the category value it refers to; the process model has no root elements. */
     static final QName CATEGORY_VALUE_LABEL = new QName(BpmnNamespaces.BPMN, "categoryValue");
     /** Where a group carries the id of the category that holds its category value. */
@@ -573,18 +574,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            container(elements, artifacts, false);
+            container(elements, artifacts);
             return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
         }
 
 
         /**
-         * The flow elements and artifacts of a process or of a {@code saga} block ({@code transaction}), read into
-         * the given lists.
-         *
-         * @param inSaga whether the container is a {@code saga}, where {@code throwCompensation} may stand
+         * The flow elements and artifacts of a process, a {@code saga} block ({@code transaction}) or a sub-process,
+         * read into the given lists.
          */
-        private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts, boolean inSaga)
+        private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts)
                 throws XMLStreamException {
             LoopCharacteristics own = null;
             while (nextChild()) {
@@ -622,7 +621,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case "receiveTask" -> elements.add(messageTask(true));
                     case "sendTask" -> elements.add(messageTask(false));
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
-                    case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
+                    case "intermediateThrowEvent" -> elements.add(throwEvent());
                     case "transaction" -> elements.add(saga());
                     case "subProcess" -> elements.add(subProcess());
                     case "exclusiveGateway" -> {
@@ -796,7 +795,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            if (container(elements, artifacts, true) != null) {
+            if (container(elements, artifacts) != null) {
                 invalid.add(new DefinitionProblem("LOOP_ON_UNSUPPORTED_ACTIVITY", "A saga block cannot repeat; put the"
                         + " loop on a sub-process inside it", "transaction", safe(id), line()));
             }
@@ -826,7 +825,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            LoopCharacteristics own = container(elements, artifacts, false);
+            LoopCharacteristics own = container(elements, artifacts);
             // Read after the nested steps, which reset it: the marker of this sub-process, if any, goes to its container.
             lastLoop = own;
             return new SubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), byEvent,
@@ -834,11 +833,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * {@code throwCompensation} (#67, PRE-076): an {@code intermediateThrowEvent} with one
-         * {@code compensateEventDefinition} and no {@code activityRef}, inside a {@code saga} block. It undoes the
-         * completed steps of its {@code saga} newest first. Every other throw event is named as unsupported.
+         * {@code throwCompensation} (#67, PRE-076, #488): an {@code intermediateThrowEvent} with one
+         * {@code compensateEventDefinition}, with or without an {@code activityRef}. It undoes the completed steps of its
+         * scope newest first, or the one activity. Where it may stand and what it needs is checked when the definition
+         * is compiled. Every other throw event is named as unsupported.
          */
-        private FlowElement throwEvent(boolean inSaga) throws XMLStreamException {
+        private FlowElement throwEvent() throws XMLStreamException {
             String element = "intermediateThrowEvent";
             String id = id();
             String name = attr("name");
@@ -866,10 +866,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
                     definitions++;
-                    if (attr("activityRef") != null) {
-                        unsupported(element + " with compensateEventDefinition activityRef", id, BpmnStages.S2);
-                    }
-                    compensate = new CompensateEventDefinition(attr("id"), null, true, null);
+                    compensate = compensateDefinition(id);
                     children(local, id, false);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
@@ -894,9 +891,6 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 unsupported(element, id, BpmnStages.S0, BpmnStages.message(BpmnStages.S0));
             } else if (definitions > 1) {
                 unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
-            } else if (compensate != null && !inSaga) {
-                invalid.add(new DefinitionProblem("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
-                        + " steps of its saga block; put it inside a transaction", element, safe(id), line));
             }
             List<EventDefinition> defs = compensate != null ? List.<EventDefinition>of(compensate)
                     : message != null ? List.<EventDefinition>of(message)
@@ -931,14 +925,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * Names the attributes of the current element that change how it runs and that this release does not honour:
-         * a compensation activity, a quantity other than one, a non-interrupting start, a parallel multiple event or
+         * a compensation activity other than a service task, a quantity other than one, a non-interrupting start, a parallel multiple event or
          * an implementation other than a registered handler. Ignoring them would run the element differently from
          * what the model says.
          */
         private void behaviourAttributes() {
             String id = attr("id");
-            if ("true".equals(attr("isForCompensation"))) {
-                unsupported("isForCompensation", id, BpmnStages.S2);
+            if ("true".equals(attr("isForCompensation")) && !"serviceTask".equals(xml.getLocalName())) {
+                unsupported("isForCompensation", id, BpmnStages.NOT_PLANNED, "applies to a service task: the undo of a"
+                        + " step is a handler");
             }
             for (String quantity : List.of("startQuantity", "completionQuantity")) {
                 String value = attr(quantity);
@@ -1055,6 +1050,20 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
+         * A {@code compensateEventDefinition} (#488), at the current element: {@code activityRef} names the one activity
+         * to undo, none means the whole scope. {@code waitForCompletion="false"} is refused: the flow goes on after the
+         * undo is done.
+         */
+        private CompensateEventDefinition compensateDefinition(String eventId) {
+            if ("false".equals(attr("waitForCompletion"))) {
+                unsupported("compensateEventDefinition waitForCompletion", eventId, BpmnStages.NOT_PLANNED,
+                        "false is not supported: the flow goes on after the undo is done");
+            }
+            String ref = attr("activityRef");
+            return new CompensateEventDefinition(attr("id"), ref == null || ref.isBlank() ? null : ref, true, null);
+        }
+
+        /**
          * One error, escalation, terminate or link event definition of #489 and #493, at the current element. An error
          * or escalation reference is checked against the root elements once they have been read.
          */
@@ -1076,6 +1085,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
                 case "linkEventDefinition" -> result = new LinkEventDefinition(definitionId, attr("name"), List.of(), null,
                         null);
+                case "compensateEventDefinition" -> result = compensateDefinition(eventId);
+                case "cancelEventDefinition" -> result = new CancelEventDefinition(definitionId, null);
                 default -> result = new TerminateEventDefinition(definitionId, null);
             }
             skip();
@@ -1083,9 +1094,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * A {@code boundaryEvent} (#489): attached to a task, a call activity or a sub-process, with a timer, an error
-         * or an escalation definition, interrupting ({@code cancelActivity} true, the default) or not. Message, signal
-         * and conditional boundaries are named as unsupported with their stage.
+         * A {@code boundaryEvent} (#489, #488): attached to a task, a call activity, a sub-process or a transaction, with a
+         * timer, an error, an escalation, a compensation or a cancel definition, interrupting ({@code cancelActivity}
+         * true, the default) or not. Message, signal and conditional boundaries are named as unsupported with their
+         * stage.
          */
         private FlowElement boundaryEvent() throws XMLStreamException {
             String element = "boundaryEvent";
@@ -1110,7 +1122,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         }
                     });
                 } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
-                        || "escalationEventDefinition".equals(local))) {
+                        || "escalationEventDefinition".equals(local) || "compensateEventDefinition".equals(local)
+                        || "cancelEventDefinition".equals(local))) {
                     definitions.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions.add(null);
@@ -1126,7 +1139,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions.isEmpty()) {
                 unsupported(element, id, BpmnStages.NOT_PLANNED, "has no event definition; a boundary event needs a"
-                        + " timer, an error or an escalation");
+                        + " timer, an error, an escalation, a compensation or a cancel");
             } else if (definitions.size() > 1) {
                 unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
@@ -1402,16 +1415,24 @@ public final class SubsetBpmnReader implements DefinitionReader {
             return new TimerEventDefinition(definitionId, date, duration, cycle, null);
         }
 
+        /** The activity attributes of a service task: {@code isForCompensation} (#488) is the only one this release reads. */
+        private ActivityAttributes serviceTaskAttributes() {
+            return "true".equals(attr("isForCompensation"))
+                    ? new ActivityAttributes(true, 1, 1, null, null, List.of(), List.of(), List.of(), null)
+                    : ActivityAttributes.defaults();
+        }
+
         private FlowElement serviceTask() throws XMLStreamException {
             String id = id();
             int line = line();
+            ActivityAttributes activity = serviceTaskAttributes();
             String handler = horus("handler");
             String mode = horus("mode");
             String type = horus("type");
             String name = attr("name");
             String result = horus("resultVariable");
             if (AGENT_TASK.equals(type)) {
-                return agentTask(id, line, name, result, handler, mode);
+                return agentTask(id, line, name, result, handler, mode, activity);
             }
             if (type != null) {
                 unsupported("horus:type", id, BpmnStages.NOT_PLANNED, "\"" + safe(type) + "\" is not a service task type; only agentTask is");
@@ -1451,7 +1472,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             compensation(id, line, ext);
             Node children = children("serviceTask", id, true);
             ext.addAll(children.horus());
-            return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
+            return new ServiceTask(id, name, List.of(), List.of(), activity, null, null,
                     info(ext, children.foreign()));
         }
 
@@ -1460,8 +1481,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
          * bounded inputs, the output schema as a JSON object and the guardrail. The guard spec is checked here, so an
          * invalid one never becomes a draft; each fault is one {@code GUARD_SPEC_INVALID} problem naming the step.
          */
-        private FlowElement agentTask(String id, int line, String name, String result, String handler, String mode)
-                throws XMLStreamException {
+        private FlowElement agentTask(String id, int line, String name, String result, String handler, String mode,
+                ActivityAttributes activity) throws XMLStreamException {
             String agent = horus("agent");
             String timeoutText = horus("timeout");
             // Read while the reader is on the start tag; added after the agent parts (#67).
@@ -1515,7 +1536,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             ext.addAll(undo);
             ext.addAll(horusParts);
-            return new ServiceTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, null,
+            return new ServiceTask(id, name, List.of(), List.of(), activity, null, null,
                     info(ext, foreign));
         }
 

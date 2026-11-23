@@ -53,8 +53,8 @@ final class BpmnStages {
             "messageEventDefinition", S2,
             "signalEventDefinition", S2,
             "conditionalEventDefinition", S2,
-            "compensateEventDefinition", S2,
-            "cancelEventDefinition", S2);
+            "compensateEventDefinition", S1,
+            "cancelEventDefinition", NOT_PLANNED);
 
     private BpmnStages() {
     }

@@ -106,12 +106,27 @@ final class InvocationSupport {
      */
     private static void pushUndo(FlowNode node, Token token, String forwardAttempt, Map<String, Object> output,
             ExecutionContext ctx) {
-        node.extensions().first(CompensateHandlerRef.class).ifPresent(undo -> {
+        undoHandler(node, ctx).ifPresent(handler -> {
             Map<String, Object> snapshot = new java.util.LinkedHashMap<>(StepSupport.inputs(node, token, ctx));
             snapshot.put(FORWARD_RESULT, output);
-            ctx.effect(new Effect.PushCompensation(token.scopeTokenId(), node.id(), forwardAttempt, undo.handler(),
+            ctx.effect(new Effect.PushCompensation(token.scopeTokenId(), node.id(), forwardAttempt, handler,
                     snapshot));
         });
+    }
+
+    /**
+     * The undo of a step (#67, #488): its {@code horus:compensate} handler, or the handler of the compensation activity
+     * that a compensation boundary event on the step points at.
+     */
+    static java.util.Optional<String> undoHandler(FlowNode node, ExecutionContext ctx) {
+        java.util.Optional<String> declared = node.extensions().first(CompensateHandlerRef.class)
+                .map(CompensateHandlerRef::handler);
+        if (declared.isPresent()) {
+            return declared;
+        }
+        return ctx.process().compensationActivityOf(node.id()).flatMap(a -> a.extensions()
+                .first(io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef.class)
+                .map(io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef::handler));
     }
 
     /** The token waits on the same step for a person; the review task is its activity instance. */

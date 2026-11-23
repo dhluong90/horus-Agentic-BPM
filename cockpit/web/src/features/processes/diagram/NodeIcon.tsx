@@ -9,6 +9,8 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <><circle cx="8" cy="5" r="3" {...common} /><path d="M2.5 14.5c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5" {...common} /></>;
       case 'serviceTask':
         return <><circle cx="8" cy="8" r="2.5" {...common} /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" {...common} /></>;
+      case 'serviceTask:compensation':
+        return <><circle cx="8" cy="8" r="2.5" {...common} /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" {...common} /><path d="M5.5 14.5l-2-1.8 2-1.8M3.5 12.7h4" {...common} /></>;
       case 'serviceTask:agentTask':
         return <path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" {...common} />;
       case 'businessRuleTask':
@@ -63,8 +65,15 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'sendTask':
         // A filled envelope: the message is sent.
         return <><rect className="icon--filled" x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path className="icon--knockout" d="M2 4.5L8 9l6-4.5" {...common} /></>;
+      case 'boundaryEvent:compensate':
       case 'intermediateThrowEvent:compensate':
         return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} />;
+      case 'endEvent:compensate':
+        return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} fill="currentColor" />;
+      case 'boundaryEvent:cancel':
+        return <path d="M4 4l8 8M12 4l-8 8" {...common} />;
+      case 'endEvent:cancel':
+        return <path d="M4 4l8 8M12 4l-8 8" {...common} strokeWidth={2.4} />;
       case 'generic':
         return <><rect x="2" y="2" width="12" height="12" rx="2" {...common} strokeDasharray="2 2" /><path d="M6.5 6.2a1.6 1.6 0 113 .8c-.6.4-1.5.8-1.5 1.8M8 11.3v.1" {...common} /></>;
       default:

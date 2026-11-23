@@ -179,7 +179,9 @@ public interface ProcessStore {
     /**
      * One undo on the compensation stack of a scope token (#67, V31).
      *
-     * @param seq push order within the scope token, from 1; the walk takes the highest {@code PENDING} entry
+     * @param seq push order within the scope token, from 1
+     * @param instanceSeq push order within the instance, from 1, assigned by the store: a compensation of an enclosing
+     *     scope walks the entries of its sub-processes too, and takes the highest {@code PENDING} one first (#488)
      * @param forwardJobId the forward step's job, or null for a local step
      * @param forwardAttemptId the accepted forward attempt
      * @param handler the handler or adapter that undoes the step, or {@code manual}
@@ -190,7 +192,7 @@ public interface ProcessStore {
      */
     record CompensationEntry(String tenantId, String id, String instanceId, String scopeTokenId, int seq, String stepId,
             String forwardJobId, String forwardAttemptId, String handler, String mode, String inputSnapshotJson,
-            String status, String jobId, Instant pushedAt, Instant completedAt) {
+            String status, String jobId, Instant pushedAt, Instant completedAt, int instanceSeq) {
 
         /** Status of an entry not yet undone. */
         public static final String PENDING = "PENDING";
@@ -206,7 +208,8 @@ public interface ProcessStore {
         /** @return a copy with this status, job and completion time */
         public CompensationEntry with(String newStatus, String newJobId, Instant newCompletedAt) {
             return new CompensationEntry(tenantId, id, instanceId, scopeTokenId, seq, stepId, forwardJobId,
-                    forwardAttemptId, handler, mode, inputSnapshotJson, newStatus, newJobId, pushedAt, newCompletedAt);
+                    forwardAttemptId, handler, mode, inputSnapshotJson, newStatus, newJobId, pushedAt, newCompletedAt,
+                    instanceSeq);
         }
     }
 
@@ -620,7 +623,7 @@ public interface ProcessStore {
      * Pushes an undo onto the stack of its scope token, with the next {@code seq} of that scope (#67). The caller holds
      * the instance row lock, so pushes of one instance never race.
      *
-     * @param entry the entry; its {@code seq} is ignored and assigned here
+     * @param entry the entry; its {@code seq} and {@code instanceSeq} are ignored and assigned here
      */
     default void pushCompensation(CompensationEntry entry) {
         throw new UnsupportedOperationException("compensation is not supported by this store");

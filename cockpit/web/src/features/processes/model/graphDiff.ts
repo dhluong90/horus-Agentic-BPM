@@ -160,6 +160,8 @@ const CANONICAL_TYPES: Readonly<Record<string, string>> = {
   callProcess: 'callActivity',
   saga: 'transaction',
   throwCompensation: 'intermediateThrowEvent:compensate',
+  compensationEnd: 'endEvent:compensate',
+  cancelEnd: 'endEvent:cancel',
 };
 
 export function diagramType(canonical: string | null | undefined): string {
