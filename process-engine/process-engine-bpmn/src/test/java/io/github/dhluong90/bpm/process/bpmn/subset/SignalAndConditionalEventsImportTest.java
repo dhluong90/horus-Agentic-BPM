@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
+import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalProcessWriter;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
@@ -100,5 +101,22 @@ class SignalAndConditionalEventsImportTest {
         assertThat(CanonicalProcessWriter.canonicalText(again)).isEqualTo(CanonicalProcessWriter.canonicalText(source));
         assertThat(CanonicalProcessWriter.canonicalText(source)).contains("\"type\":\"signalCatch\"")
                 .contains("\"signal\":\"rate-card-updated\"").contains("\"type\":\"conditionalCatch\"");
+    }
+
+    @Test
+    void PRE_275_a_conditional_event_in_feel_reads_hashes_as_its_v1_spelling_and_exports_back() {
+        String feel = WATCHER.replace("<bpmn:condition xsi:type=\"bpmn:tFormalExpression\">limit &gt; 0",
+                "<bpmn:condition xsi:type=\"bpmn:tFormalExpression\" language=\"" + BpmnNamespaces.FEEL
+                        + "\">limit &gt; 0 and limit != 5");
+        String v1 = WATCHER.replace("limit &gt; 0", "limit &gt; 0 and limit != 5");
+
+        Process source = read(HEAD + feel + SIGNAL + TAIL);
+
+        assertThat(CanonicalProcessWriter.canonicalText(source))
+                .isEqualTo(CanonicalProcessWriter.canonicalText(read(HEAD + v1 + SIGNAL + TAIL)));
+        assertThat(CanonicalProcessWriter.canonicalText(reader.read(writer.write(source))))
+                .isEqualTo(CanonicalProcessWriter.canonicalText(source));
+        assertThatThrownBy(() -> read(HEAD + WATCHER.replace("limit &gt; 0", "limit &gt; 0 and (") + SIGNAL + TAIL))
+                .isInstanceOf(ValidationFailedException.class);
     }
 }

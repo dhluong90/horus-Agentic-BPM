@@ -180,7 +180,8 @@ public final class SubsetBpmnWriter {
                 case SignalEventDefinition s -> xml.line(lvl, "<bpmn:signalEventDefinition signalRef="
                         + attr(signalIds.get(s.signalRef())) + "/>");
                 case ConditionalEventDefinition c -> xml.line(lvl, "<bpmn:conditionalEventDefinition><bpmn:condition"
-                        + " xsi:type=\"bpmn:tFormalExpression\" language=\"" + BpmnNamespaces.EXPR_V1 + "\">"
+                        + " xsi:type=\"bpmn:tFormalExpression\" language=" + attr(c.condition().language() == null
+                        ? BpmnNamespaces.EXPR_V1 : c.condition().language()) + ">"
                         + text(c.condition().text()) + "</bpmn:condition></bpmn:conditionalEventDefinition>");
                 case TerminateEventDefinition t -> xml.line(lvl, "<bpmn:terminateEventDefinition/>");
                 case LinkEventDefinition l -> xml.line(lvl, "<bpmn:linkEventDefinition" + optional("name", l.name())

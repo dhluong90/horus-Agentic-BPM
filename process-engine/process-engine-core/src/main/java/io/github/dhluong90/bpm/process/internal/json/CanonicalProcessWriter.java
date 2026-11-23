@@ -303,7 +303,7 @@ public final class CanonicalProcessWriter {
                 case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
                         && c.eventDefinitions().get(0) instanceof ConditionalEventDefinition conditional -> {
                     step.put("type", "conditionalCatch");
-                    step.put("condition", conditional.condition().text().strip());
+                    step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
                         && t.eventDefinitions().get(0) instanceof SignalEventDefinition signal -> {
@@ -368,7 +368,7 @@ public final class CanonicalProcessWriter {
         }
         switch (definitions.get(0)) {
             case SignalEventDefinition signal -> step.put("signal", signal.signalRef());
-            case ConditionalEventDefinition conditional -> step.put("condition", conditional.condition().text().strip());
+            case ConditionalEventDefinition conditional -> step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
             default -> { }
         }
     }

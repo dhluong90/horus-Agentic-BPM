@@ -347,11 +347,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 if (BPMN.equals(xml.getNamespaceURI()) && "condition".equals(local)) {
                     String language = attr("language") != null ? attr("language") : documentLanguage;
                     String text = text().strip();
-                    if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
-                        String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                    if (language != null && !Condition.isSupportedLanguage(language)) {
                         addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
-                                + safe(language) + " is not supported; use " + BpmnNamespaces.EXPR_V1, "condition",
-                                safe(eventId), line, stage));
+                                + safe(language) + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " or FEEL ("
+                                + BpmnNamespaces.FEEL + ")", "condition", safe(eventId), line, BpmnStages.NOT_PLANNED));
                     }
                     condition = new Expression(text, language == null ? BpmnNamespaces.EXPR_V1 : language, null);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)
@@ -367,7 +366,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         + " expression", element, safe(eventId), line));
             } else {
                 try {
-                    Condition.parse(condition.text());
+                    Condition.parse(condition.text(), condition.language());
                 } catch (ConditionException e) {
                     invalid.add(new DefinitionProblem("CONDITION_INVALID", e.getMessage(), element, safe(eventId), line));
                 }
