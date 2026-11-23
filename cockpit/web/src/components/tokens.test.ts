@@ -58,6 +58,12 @@ describe('design tokens', () => {
     for (const [fg, bg] of pairs) expect(ratio(fg, bg), `${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
   });
 
+  it('TR_UI_03_light_chart_marks_are_at_least_3_to_1_on_white', () => {
+    for (const name of ['--spark-max', '--rel-1', '--rel-2', '--rel-3', '--rel-later', '--ref', '--gain', '--loss']) {
+      expect(ratio(name, '--surface'), name).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it('TR_UI_03_done_warning_and_error_keep_their_own_hue', () => {
     expect(new Set([token('--ok'), token('--warn'), token('--bad'), token('--accent')]).size).toBe(4);
   });
