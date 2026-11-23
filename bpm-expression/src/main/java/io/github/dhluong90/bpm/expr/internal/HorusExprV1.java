@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.ToIntFunction;
 
 /**
  * {@code urn:horus-bpm:expr:v1} through the {@link ExpressionLanguage} SPI: the same parser and evaluator the Rule
@@ -37,9 +38,16 @@ public final class HorusExprV1 implements ExpressionLanguage {
     /** The language id. */
     public static final String ID = "urn:horus-bpm:expr:v1";
 
+    /**
+     * The id of the FEEL dialect, the OMG namespace of DMN 1.2 FEEL that BPMN files carry as {@code language}; the
+     * other DMN versions' FEEL URIs and {@code feel} are aliases of it, resolved by the language factory.
+     */
+    public static final String FEEL_ID = "https://www.omg.org/spec/DMN/20191111/FEEL/";
+
     private final Evaluator evaluator;
     private final Evaluator strictEvaluator;
     private final ZoneId zone;
+    private final boolean feel;
 
     /** Half-even money rounding, the default string bound and regex limits, {@code today()} in UTC. */
     public HorusExprV1() {
@@ -51,6 +59,23 @@ public final class HorusExprV1 implements ExpressionLanguage {
      * @param zone the zone of {@code today()}
      */
     public HorusExprV1(Evaluator evaluator, ZoneId zone) {
+        this(evaluator, zone, false);
+    }
+
+    /**
+     * The FEEL dialect of a condition or a script (see {@link Parser#parseFeelWithPaths}): the same tree, the same
+     * evaluator and the same null, number and money rules, with FEEL's spelling.
+     *
+     * @param evaluator the evaluator, with the host's rounding and bounds
+     * @param zone the zone of {@code today()}
+     * @return the language, with the id {@link #FEEL_ID}
+     */
+    public static HorusExprV1 feel(Evaluator evaluator, ZoneId zone) {
+        return new HorusExprV1(evaluator, zone, true);
+    }
+
+    private HorusExprV1(Evaluator evaluator, ZoneId zone, boolean feel) {
+        this.feel = feel;
         this.evaluator = Objects.requireNonNull(evaluator, "evaluator must not be null");
         this.strictEvaluator = evaluator.strict();
         this.zone = Objects.requireNonNull(zone, "zone must not be null");
@@ -58,7 +83,7 @@ public final class HorusExprV1 implements ExpressionLanguage {
 
     @Override
     public String id() {
-        return ID;
+        return feel ? FEEL_ID : ID;
     }
 
     @Override
@@ -82,13 +107,19 @@ public final class HorusExprV1 implements ExpressionLanguage {
         Expr tree;
         try {
             if (types.isDeclared()) {
+                if (feel) {
+                    throw new ExpressionInvalidException("FEEL is read over process variables only; a rule set"
+                            + " declares its inputs and uses horus-expr-v1 or DMN tables", 0);
+                }
                 tree = Parser.parse(source, name -> clockSlot(name, today, now, names.size(), slots));
             } else {
-                tree = Parser.parseWithPaths(source, name -> {
+                java.util.function.Function<ToIntFunction<String>, Expr> parse = resolver -> feel
+                        ? Parser.parseFeelWithPaths(source, resolver) : Parser.parseWithPaths(source, resolver);
+                tree = parse.apply(name -> {
                     if (name.equals(today) || name.equals(now)) {
                         return clockSlot(name, today, now, -1, slots);
                     }
-                    if (name.matches("[A-Z]{3}")) {
+                    if (!feel && name.matches("[A-Z]{3}")) {
                         return -1;
                     }
                     return slots.computeIfAbsent(name, n -> {

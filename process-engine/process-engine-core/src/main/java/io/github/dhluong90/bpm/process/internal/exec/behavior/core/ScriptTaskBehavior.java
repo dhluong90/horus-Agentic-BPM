@@ -12,7 +12,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import java.util.Map;
 
 /**
- * Script task: runs the script, an expression in {@code urn:horus-bpm:expr:v1}, over the visible variables in the
+ * Script task: runs the script, an expression in {@code urn:horus-bpm:expr:v1} or FEEL, over the visible variables in the
  * caller's transaction and stores its value in {@code horus:resultVariable}. A script reads variables and sets that one
  * result; it cannot call host code, loop, or run past its step budget ({@link Script}).
  */
@@ -32,7 +32,7 @@ final class ScriptTaskBehavior implements FlowNodeBehavior<ScriptTask> {
                 .orElseThrow(() -> new NotExecutableException(node));
         Object value;
         try {
-            value = Script.parse(node.script()).run(ctx.variables().visible(token));
+            value = Script.parse(node.script(), node.scriptFormat()).run(ctx.variables().visible(token));
         } catch (ConditionException e) {
             throw new ExecutionException("SCRIPT_ERROR", node.id(), e.getMessage());
         }

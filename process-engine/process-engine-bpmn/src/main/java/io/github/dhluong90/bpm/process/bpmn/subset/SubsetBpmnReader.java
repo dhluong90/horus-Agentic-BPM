@@ -9,6 +9,7 @@ import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
+import io.github.dhluong90.bpm.process.internal.expr.Condition;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
 import io.github.dhluong90.bpm.process.internal.expr.Script;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
@@ -83,7 +84,7 @@ import javax.xml.stream.XMLStreamReader;
  * ({@code horus:ruleSet}),
  * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, {@code parallelGateway},
  * an intermediate timer catch event with {@code timeDuration} or {@code timeDate}, and
- * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1}. Inputs are
+ * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1} or FEEL. Inputs are
  * {@code horus:input} elements and the result variable is {@code horus:resultVariable}.
  *
  * <p>Every other BPMN element is listed with its id, line and the stage that adds it, in one
@@ -1221,7 +1222,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private int scriptLine;
 
         /**
-         * A {@code scriptTask}: the script is an expression in {@code urn:horus-bpm:expr:v1} and its value goes to
+         * A {@code scriptTask}: the script is an expression in {@code urn:horus-bpm:expr:v1} or FEEL and its value goes to
          * {@code horus:resultVariable}. Any other {@code scriptFormat} is refused with its stage; a script that does not
          * parse is refused with the line of the {@code script} element.
          */
@@ -1237,16 +1238,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String script = scriptText;
             int scriptAt = scriptLine;
             String language = format != null ? format : documentLanguage;
-            if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
-                String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+            if (language != null && !Condition.isSupportedLanguage(language)) {
                 addProblem(new DefinitionProblem("BPMN_SCRIPT_FORMAT_UNSUPPORTED", "scriptFormat " + safe(language)
-                        + " is not supported; use " + BpmnNamespaces.EXPR_V1, "scriptTask", safe(id), line, stage));
+                        + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " or FEEL (" + BpmnNamespaces.FEEL + ")",
+                        "scriptTask", safe(id), line, BpmnStages.NOT_PLANNED));
             } else if (script == null || script.isBlank()) {
                 invalid.add(new DefinitionProblem("SCRIPT_MISSING", "A scriptTask needs a script element with an"
                         + " expression", "scriptTask", safe(id), line));
             } else {
                 try {
-                    Script.parse(script);
+                    Script.parse(script, language);
                 } catch (ConditionException e) {
                     invalid.add(new DefinitionProblem("SCRIPT_INVALID", e.getMessage(), "scriptTask", safe(id),
                             scriptAt));
@@ -1264,8 +1265,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 ext.add(new ResultVariable(result));
             }
             ext.addAll(children.horus());
-            return new ScriptTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), BpmnNamespaces.EXPR_V1,
-                    script == null ? null : script.strip(), info(ext, children.foreign()));
+            return new ScriptTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(),
+                    language == null ? BpmnNamespaces.EXPR_V1 : language, script == null ? null : script.strip(), info(ext, children.foreign()));
         }
 
         private FlowElement businessRuleTask() throws XMLStreamException {
@@ -1334,12 +1335,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     String language = attr("language") != null ? attr("language") : documentLanguage;
                     int line = line();
                     String text = text();
-                    if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
-                        // FEEL is stage S1; XPath, JavaScript, Groovy and the rest are deviations (principle 4).
-                        String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                    if (language != null && !Condition.isSupportedLanguage(language)) {
+                        // XPath, JavaScript, Groovy and the rest are deviations (principle 4).
                         addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language "
-                                + safe(language) + " is not supported; use " + BpmnNamespaces.EXPR_V1,
-                                "conditionExpression", safe(id), line, stage));
+                                + safe(language) + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " or FEEL ("
+                                + BpmnNamespaces.FEEL + ")", "conditionExpression", safe(id), line,
+                                BpmnStages.NOT_PLANNED));
                     }
                     condition = new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && !"documentation".equals(local)

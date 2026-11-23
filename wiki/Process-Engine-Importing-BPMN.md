@@ -53,7 +53,7 @@ The body may also be sent as `text/xml` or `application/bpmn+xml`.
 
 ## 2. Write a file the engine accepts
 
-The engine reads standard BPMN 2.0 XML. Engine settings are attributes and elements in the namespace `urn:horus-bpm:bpmn:extensions:v1`, with the prefix `horus`. Conditions are written in the expression language `urn:horus-bpm:expr:v1`. A BPMN modeller can open and save the file; add the `horus` attributes in its XML or properties view.
+The engine reads standard BPMN 2.0 XML. Engine settings are attributes and elements in the namespace `urn:horus-bpm:bpmn:extensions:v1`, with the prefix `horus`. Conditions are written in the expression language `urn:horus-bpm:expr:v1` or in FEEL. A BPMN modeller can open and save the file; add the `horus` attributes in its XML or properties view.
 
 The root element must declare the namespaces, and the process must be executable:
 
@@ -95,7 +95,7 @@ Inputs to a service or rule step are `horus:input` elements inside `extensionEle
 
 ### Script tasks
 
-A script is one expression, not a program. It reads the process variables, has at most 1,000 characters and 500 evaluation steps, and its value is stored in `horus:resultVariable`. It cannot call host code, name a Java class, assign a variable or loop. A script that does not parse is refused at import with `SCRIPT_INVALID` and its line; a script over the step budget fails its step with `SCRIPT_ERROR`. The language is the one the gateway conditions use ([[Rule Engine Expression Language|Rule-Engine-Expression-Language]]); FEEL scripts come later. A worked file is [`card-welcome.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-welcome.bpmn).
+A script is one expression, not a program. It reads the process variables, has at most 1,000 characters and 500 evaluation steps, and its value is stored in `horus:resultVariable`. It cannot call host code, name a Java class, assign a variable or loop. A script that does not parse is refused at import with `SCRIPT_INVALID` and its line; a script over the step budget fails its step with `SCRIPT_ERROR`. The language is the one the gateway conditions use ([[Rule Engine Expression Language|Rule-Engine-Expression-Language]]); a script may also be FEEL (`scriptFormat` the FEEL URI). A worked file is [`card-welcome.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-welcome.bpmn).
 
 ### Calling another process (0.3.0)
 
@@ -128,6 +128,8 @@ These parts of a file are accepted and never executed. They do not change the de
 BPMN modellers add notes, their lines and groups to a diagram, so a file saved from a modeller imports without removing them first. Each note, line and group needs an `id` that no other element in the file uses.
 
 A gateway takes a flow only when its condition is true. A condition that is null or false is not taken; then the `default` flow is taken, and without a `default` the step fails. Money compares only within one currency. The full rules are on [[Rule Engine Expression Language|Rule-Engine-Expression-Language]].
+
+**FEEL conditions.** Write `language` on the `conditionExpression` (or `expressionLanguage` on the definitions) as the FEEL URI of DMN 1.2, 1.3 or 1.5 (`https://www.omg.org/spec/DMN/20191111/FEEL/`), and the condition reads as FEEL: `amount > 1000 and tier = "gold"`. FEEL equality is `=` and strings use double quotes; `==`, single quotes and `is null` belong to `urn:horus-bpm:expr:v1` and are refused in FEEL at import with their position (`CONDITION_INVALID`). The parts of FEEL a condition or script needs are read: comparisons, `and`, `or`, `not(...)`, `in [...]`, `between`, `null`, arithmetic, `date("...")`, `date and time("...")`, `matches(x, "...")` and the HORUS extension `money(12.50, "USD")`. Null, number and money rules are the same as in the other language. A FEEL condition is hashed in the normal form of `urn:horus-bpm:expr:v1`, so the same meaning written in either language is one `definitionHash`, and the cockpit shows the normal form. A worked file is [`fee-routing-feel.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/fee-routing-feel.bpmn).
 
 A complete working file is [`card-fee-review.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-fee-review.bpmn).
 
@@ -174,7 +176,7 @@ These are refused in 0.2.0:
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
-| Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1`, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` (FEEL is `S1`; XPath and the others are `not planned`) |
+| Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |
 
 An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
 

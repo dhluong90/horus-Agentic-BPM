@@ -115,7 +115,8 @@ public final class ProcessCompiler {
             }
             if (flow.conditionExpression() != null && flow.conditionExpression().text() != null) {
                 try {
-                    io.github.dhluong90.bpm.process.internal.expr.Condition.parse(flow.conditionExpression().text());
+                    io.github.dhluong90.bpm.process.internal.expr.Condition.parse(flow.conditionExpression().text(),
+                            flow.conditionExpression().language());
                 } catch (ConditionException e) {
                     problems.add(DefinitionProblem.of("CONDITION_INVALID", e.getMessage(), flow.id()));
                 }
