@@ -385,6 +385,44 @@ public interface ProcessStore {
     }
 
     /**
+     * A token waiting for a message (#491).
+     *
+     * @param tenantId the tenant
+     * @param id the subscription id, the waiting token's activity instance id
+     * @param instanceId the instance
+     * @param tokenId the waiting token
+     * @param nodeId the step
+     * @param messageName the message it waits for
+     * @param correlationKey the key the message must carry
+     * @param createdAt when the token began to wait
+     */
+    record MessageSubscriptionRow(String tenantId, String id, String instanceId, String tokenId, String nodeId,
+            String messageName, String correlationKey, Instant createdAt) {
+    }
+
+    /** Stores a subscription; called after the instance's tokens are saved. */
+    default void insertSubscription(MessageSubscriptionRow row) {
+        throw new UnsupportedOperationException("messages need a store that implements insertSubscription");
+    }
+
+    /**
+     * Deletes the subscriptions of an instance whose id is not in {@code keep}: the tokens that waited have left.
+     *
+     * @param keep the subscription ids of the tokens that still wait
+     */
+    default void retainSubscriptions(String tenant, String instanceId, java.util.Collection<String> keep) {
+    }
+
+    /**
+     * @param limit the most rows read; one more than the caller tolerates tells it the match is not unique
+     * @return the subscriptions of the tenant for the message and key, in id order
+     */
+    default List<MessageSubscriptionRow> subscriptions(String tenant, String messageName, String correlationKey,
+            int limit) {
+        return List.of();
+    }
+
+    /**
      * Instances newest first ({@code started_at DESC, id DESC}), strictly after the keyset position when
      * {@code afterStartedAt} is not null.
      *

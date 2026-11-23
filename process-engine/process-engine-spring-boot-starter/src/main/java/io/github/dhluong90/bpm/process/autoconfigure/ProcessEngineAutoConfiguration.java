@@ -117,7 +117,7 @@ public class ProcessEngineAutoConfiguration {
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
             "processes:step:complete", "processes:agent:replay", "processes:task:manage", "processes:calendar:manage",
-            "processes:migration:manage", "processes:incident:manage");
+            "processes:migration:manage", "processes:incident:manage", "processes:message:correlate");
     /** Setting published in {@code /api/bpm/meta}: the approval a migration plan's execution needs (PD-131). */
     static final String MIGRATION_APPROVAL_SETTING = "migration.approval";
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
@@ -336,7 +336,7 @@ public class ProcessEngineAutoConfiguration {
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
             OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
             ObjectProvider<AssigneeDirectory> directory, ObjectProvider<RoleCatalogue> roles,
-            JdbcLayoutStore layoutStore) {
+            JdbcLayoutStore layoutStore, ObjectProvider<io.github.dhluong90.bpm.process.spi.MessageAdapter> messageAdapter) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -363,6 +363,8 @@ public class ProcessEngineAutoConfiguration {
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
         // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
         services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        // #491: the host's outbox port for the messages a process sends; none when the host sends no messages.
+        services.useMessageAdapter(messageAdapter.getIfUnique());
         // PRE-180: approval asks the host's role list whether an escalation target role exists. The default accepts
         // every role; outside the dev profile that is worth a warning, because a misspelt role is then not caught.
         RoleCatalogue catalogue = roles.getIfUnique(() -> RoleCatalogue.ACCEPT_ALL);

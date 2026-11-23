@@ -198,6 +198,7 @@ class ListQueryPlanCheckTest {
         samples.put("migration-movable-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-review"}, 100));
         samples.put("migration-in-flight-instances", List.of("bank-a", DEFINITION, new String[] {"legacy-score"}, 100));
         samples.put("instance-children", List.of("bank-a", INSTANCE, 100));
+        samples.put("message-subscriptions", List.of("bank-a", "payment-received", "ORD-20481", 2));
         samples.put("migration-batch", List.of("bank-a", DEFINITION, "AIN" + "%023d".formatted(1000), 100));
         samples.put("migration-instance-tokens", List.of("bank-a", INSTANCE));
         samples.put("migration-outcomes", List.of("bank-a", "AMG" + "%023d".formatted(1), "", 100));

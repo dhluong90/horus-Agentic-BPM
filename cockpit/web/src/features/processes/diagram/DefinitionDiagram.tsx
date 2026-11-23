@@ -207,6 +207,7 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const centre = symbolCentre(node);
   const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : undefined;
   const intermediate = node.type.startsWith('intermediate');
+  const marked = intermediate || node.type.includes(':');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
   return (
@@ -216,7 +217,7 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
         <>
           <circle cx={centre.x} cy={centre.y} r={EVENT_RADIUS} />
           {intermediate ? <circle cx={centre.x} cy={centre.y} r={EVENT_RADIUS - 4} /> : null}
-          {intermediate ? <NodeIcon type={nodeIconKind(node.type)} x={centre.x - 8} y={centre.y - 8} /> : null}
+          {marked ? <NodeIcon type={nodeIconKind(node.type)} x={centre.x - 8} y={centre.y - 8} /> : null}
         </>
       ) : (
         <>

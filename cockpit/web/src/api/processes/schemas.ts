@@ -282,6 +282,8 @@ export const activityEntry = z
     errorCode: z.string().optional(),
     handler: z.string().optional(),
     cause: z.string().optional(),
+    /** Message steps only (#491): the name, the key as the host masked it, and the delivery result. */
+    message: z.object({ name: z.string(), correlationKey: z.string().optional(), result: z.string() }).loose().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

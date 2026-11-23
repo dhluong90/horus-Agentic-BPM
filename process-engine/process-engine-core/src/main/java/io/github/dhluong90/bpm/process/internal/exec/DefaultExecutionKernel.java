@@ -49,6 +49,14 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.JobDue due -> trigger(due.tokenId(), TokenStatus.WAITING_TIMER, due.jobId(), due, ctx);
             case Command.ChildEnded ended -> trigger(ended.tokenId(), TokenStatus.WAITING_CHILD, ended.attemptId(),
                     ended, ctx);
+            case Command.CorrelateMessage message -> {
+                // The subscription id is the activity instance id of the waiting token.
+                Token waiting = ctx.tree().all().stream().filter(t -> t.status() == TokenStatus.WAITING_EVENT
+                        && message.subscriptionId().equals(t.activityInstanceId())).findFirst().orElseThrow(() ->
+                        new ExecutionException("STALE_SUBSCRIPTION", null, "No token waits on subscription "
+                                + message.subscriptionId()));
+                trigger(waiting.id(), TokenStatus.WAITING_EVENT, message.subscriptionId(), message, ctx);
+            }
             case Command.MoveToken move -> moveToken(move, ctx);
             case Command.RouteToReview review -> trigger(review.tokenId(), TokenStatus.WAITING_ASYNC, review.attemptId(),
                     review, ctx);
@@ -75,7 +83,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                 Map.of("instanceId", ctx.snapshot().instanceId(), "definitionId", process.definitionId())));
         StartEvent startEvent = process.nodes().stream().filter(StartEvent.class::isInstance)
                 .map(StartEvent.class::cast).filter(s -> s.eventDefinitions().isEmpty()).findFirst()
-                .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No none start event"));
+                // A process started by a message has one message start event in place of the none start event.
+                .or(() -> process.nodes().stream().filter(StartEvent.class::isInstance).map(StartEvent.class::cast)
+                        .findFirst())
+                .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No start event"));
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
     }

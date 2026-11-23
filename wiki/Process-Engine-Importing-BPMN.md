@@ -162,15 +162,15 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` |
 
-Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `eventBasedGateway`, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused in 0.2.0:
 
 | Kind | Elements |
 |---|---|
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
-| Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
-| Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
+| Events | `boundaryEvent`, an `intermediateThrowEvent` that is not a `throwCompensation` or a message throw, a catch event that is neither a timer nor a message, and any start or end event with an event definition other than message (timer, signal, error, terminate) |
+| Activities | `subProcess`, `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
@@ -243,3 +243,22 @@ All codes are on [[Common Error Codes]].
 ## Outside the `dev` profile
 
 The same import works, and the answer has `"status":"DRAFT"`. In 0.1.0 nothing can approve a process draft, so it cannot start. Use the preview on `dev` for evaluation. The approval flow for process definitions comes in a later release ([[Roadmap]]).
+
+## Messages
+
+A process can send and wait for messages. Declare each message once at the top of the file, then name it from the step:
+
+```xml
+<bpmn:message id="m-paid" name="payment-received"/>
+<bpmn:receiveTask id="wait-for-payment" messageRef="m-paid" horus:correlationKey="orderId">
+  <bpmn:extensionElements><horus:output name="paymentRef" from="reference"/></bpmn:extensionElements>
+</bpmn:receiveTask>
+```
+
+| Element | What it does |
+|---|---|
+| Message start event | A message of that name starts an instance; the message key becomes the business key and the payload the variables |
+| Intermediate message catch event, receive task | The token waits until a message with the name and the key in `horus:correlationKey` arrives; `horus:output` copies named fields into variables |
+| Intermediate message throw event, message end event, send task | Hand a message to the host's `MessageAdapter`; `horus:input` names the values it carries and `horus:correlationKey` the key |
+
+`horus:correlationKey` names an instance variable. A catch event or receive task needs it (`CORRELATION_KEY_REQUIRED`); a message that the file does not declare is `MESSAGE_REF_UNRESOLVED`. The host's consumer delivers each message it receives with `POST /messages:correlate` (permission `processes:message:correlate`, `Idempotency-Key` required). A message with no waiting instance is refused with `422 MESSAGE_NOT_CORRELATED` and is not kept; two waiting instances with one key give `409 MESSAGE_CORRELATION_AMBIGUOUS` and nothing runs. A message boundary event is still refused. A worked file is [`order-payment.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/order-payment.bpmn).

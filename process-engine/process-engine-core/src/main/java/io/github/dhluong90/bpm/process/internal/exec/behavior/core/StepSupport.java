@@ -12,7 +12,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Bounded inputs and result variables of task steps. */
-final class StepSupport {
+public final class StepSupport {
 
     /** A whole-string reference {@code ${instance.a.b}}; no interpolation inside longer strings. */
     static final Pattern REFERENCE =
@@ -26,7 +26,7 @@ final class StepSupport {
      *
      * @return input name to value, in declaration order
      */
-    static Map<String, Object> inputs(FlowNode node, Token token, ExecutionContext ctx) {
+    public static Map<String, Object> inputs(FlowNode node, Token token, ExecutionContext ctx) {
         Map<String, Object> visible = ctx.variables().visible(token);
         Map<String, Object> out = new LinkedHashMap<>();
         for (InputMapping input : node.extensions().all(InputMapping.class)) {

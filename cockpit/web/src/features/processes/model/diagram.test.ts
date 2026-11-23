@@ -122,6 +122,19 @@ describe('CKP-070 diagram nodes are keyed by BPMN element type; unknown types re
     expect(layoutGraph(graph).nodes.find((node) => node.id === 'no-documents')).toBeDefined();
   });
 
+  it('CKP_070_message_steps_are_known_nodes_with_envelope_icons_hollow_to_wait_and_filled_to_send', () => {
+    const xml = `<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"><bpmn:process id="p" isExecutable="true">
+      <bpmn:startEvent id="s"/><bpmn:sendTask id="ask"/><bpmn:receiveTask id="wait"/>
+      <bpmn:intermediateCatchEvent id="c"><bpmn:messageEventDefinition/></bpmn:intermediateCatchEvent>
+      <bpmn:intermediateThrowEvent id="t"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>
+      <bpmn:endEvent id="e"><bpmn:messageEventDefinition/></bpmn:endEvent>
+      <bpmn:sequenceFlow id="f1" sourceRef="s" targetRef="ask"/><bpmn:sequenceFlow id="f2" sourceRef="ask" targetRef="wait"/>
+    </bpmn:process></bpmn:definitions>`;
+    const types = Object.fromEntries(readBpmnGraph(xml).nodes.map((node) => [node.id, node.type]));
+    expect(types).toEqual({ s: 'startEvent', ask: 'sendTask', wait: 'receiveTask', c: 'intermediateCatchEvent:message', t: 'intermediateThrowEvent:message', e: 'endEvent:message' });
+    for (const type of Object.values(types)) expect(isKnownNodeType(type)).toBe(true);
+  });
+
   it('CKP_070_a_document_with_a_doctype_or_no_process_is_refused_not_guessed', () => {
     expect(() => readBpmnGraph('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><x/>')).toThrow(DiagramReadError);
     expect(() => readBpmnGraph('<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"/>')).toThrow(DiagramReadError);

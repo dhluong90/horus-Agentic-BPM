@@ -11,6 +11,9 @@ import io.github.dhluong90.bpm.process.internal.exec.StepResult;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.api.EventListenerFailedException;
 import io.github.dhluong90.bpm.process.api.IdempotencyInFlightException;
+import io.github.dhluong90.bpm.process.api.MessageAmbiguousException;
+import io.github.dhluong90.bpm.process.api.MessageNotCorrelatedException;
+import io.github.dhluong90.bpm.process.api.MessageService.MessageDelivery;
 import io.github.dhluong90.bpm.process.api.DefinitionIntegrityException;
 import io.github.dhluong90.bpm.process.api.TenantNotAllowedException;
 import io.github.dhluong90.bpm.process.api.SelfApprovalForbiddenException;
@@ -117,7 +120,7 @@ import java.util.function.Function;
  * {@link #recordAttempt} in a fresh one (ADR-0008). Thread-safe.
  */
 public final class ProcessServices implements DefinitionService, ProcessEngine, TaskService, AsyncStepService,
-        io.github.dhluong90.bpm.process.api.IncidentService {
+        io.github.dhluong90.bpm.process.api.IncidentService, io.github.dhluong90.bpm.process.api.MessageService {
 
     /**
      * The result of a start: the instance, and whether this request created it ({@code false} when an instance with
@@ -133,6 +136,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     static final String PERMISSION_START = "processes:start";
     static final String PERMISSION_CANCEL = "processes:cancel";
     static final String PERMISSION_READ = "processes:read";
+    static final String PERMISSION_MESSAGE_CORRELATE = "processes:message:correlate";
     static final String PERMISSION_TASK_WORK = "processes:task:work";
     static final String PERMISSION_TASK_MANAGE = "processes:task:manage";
     static final String PERMISSION_AUTHOR = "processes:author";
@@ -224,6 +228,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
     private volatile io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue =
             io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
+    /** The host's port for the messages a process sends (#491); none until the starter installs one. */
+    private volatile io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
     /** {@code calls.max-depth} (#92). */
     private volatile int maxCallDepth = EngineDefaults.MAX_CALL_DEPTH;
     private volatile io.github.dhluong90.bpm.process.internal.store.LayoutStore importedLayouts;
@@ -239,7 +245,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     /**
      * @param memorySources the steps a later agent step reads as memory (#101); only their results are kept
      */
-    private record Compiled(CompiledProcess process, ExecutionKernel kernel, java.util.Set<String> memorySources) {
+    private record Compiled(CompiledProcess process, ExecutionKernel kernel, java.util.Set<String> memorySources,
+            boolean messageWaits) {
     }
 
     /**
@@ -1855,6 +1862,188 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return true;
     }
 
+
+    // ---- messages (#491) -------------------------------------------------------------------------------------
+
+    /** The kinds of history entry whose {@code correlationKey} detail is masked before it is stored. */
+    private static final java.util.Set<String> KEYED_HISTORY = java.util.Set.of("MESSAGE_WAITING", "MESSAGE_SENT");
+
+    /**
+     * History keeps a correlation key only as the host's {@link io.github.dhluong90.bpm.process.spi.InputMasker}
+     * makes it (the tenant's keyed fingerprint, or {@code ***}), the rule of masked agent inputs (TR-SEC-05). The
+     * subscription row keeps the plain key, as the instance variables do, because correlation compares it.
+     */
+    private HistoryEntry maskedCorrelation(String tenant, HistoryEntry entry) {
+        if (!KEYED_HISTORY.contains(entry.type()) || !(entry.details().get("correlationKey") instanceof String key)) {
+            return entry;
+        }
+        Map<String, Object> details = new LinkedHashMap<>(entry.details());
+        details.put("correlationKey", inputMasker.mask(tenant, key));
+        return new HistoryEntry(entry.type(), entry.nodeId(), entry.tokenId(), entry.attemptId(), entry.actor(),
+                entry.occurredAt(), details);
+    }
+
+    /** Hands a message a step sends to the host's adapter, in the step transaction. */
+    private void sendMessage(InstanceState state, Effect.ThrowMessage message) {
+        io.github.dhluong90.bpm.process.spi.MessageAdapter adapter = messageAdapter;
+        if (adapter == null) {
+            throw new ExecutionException("MESSAGE_ADAPTER_MISSING", message.nodeId(),
+                    "The host registers no MessageAdapter; a step that sends a message needs one");
+        }
+        adapter.send(new io.github.dhluong90.bpm.process.spi.MessageAdapter.OutgoingMessage(state.tenantId(),
+                message.messageId(), message.messageName(), message.correlationKey(), message.payload(),
+                state.instanceId(), message.nodeId()));
+    }
+
+    /**
+     * Makes the stored subscriptions match the tokens that wait: the rows of tokens that left are deleted, the rows of
+     * tokens that began to wait are inserted. Skipped for a definition without a message wait.
+     */
+    private void syncSubscriptions(InstanceState state, Compiled compiled,
+            List<Effect.CreateSubscription> created, Instant now) {
+        if (!compiled.messageWaits()) {
+            return;
+        }
+        List<String> waiting = state.tokens().stream().filter(t -> t.status() == TokenStatus.WAITING_EVENT
+                && t.activityInstanceId() != null).map(io.github.dhluong90.bpm.process.internal.exec.Token::activityInstanceId)
+                .toList();
+        store.retainSubscriptions(state.tenantId(), state.instanceId(), waiting);
+        for (Effect.CreateSubscription c : created) {
+            if (waiting.contains(c.subscriptionId())) {
+                store.insertSubscription(new ProcessStore.MessageSubscriptionRow(state.tenantId(), c.subscriptionId(),
+                        state.instanceId(), c.tokenId(), c.nodeId(), c.name(), c.correlationKey(), now));
+            }
+        }
+    }
+
+    @Override
+    public MessageDelivery correlate(String messageName, String correlationKey, Map<String, Object> payload,
+            String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_MESSAGE_CORRELATE);
+        if (messageName == null || !messageName.matches("^[A-Za-z][A-Za-z0-9_.:-]{0,99}$")) {
+            throw new InputInvalidException("messageName is 1 to 100 letters, digits, '_', '.', ':' or '-', starting"
+                    + " with a letter");
+        }
+        if (correlationKey != null && (correlationKey.isBlank() || correlationKey.length() > MAX_CORRELATION_KEY)) {
+            throw new InputInvalidException("correlationKey is 1 to " + MAX_CORRELATION_KEY + " characters");
+        }
+        requireKey(idempotencyKey, "Correlating a message");
+        Map<String, Object> fields = payload == null ? Map.of() : payload;
+        String payloadJson = boundedJson(fields, "payload");
+        String requestHash = Hashes.sha256Parts("message-correlate", caller, messageName, correlationKey, payloadJson);
+        // A refusal throws, so the transaction rolls back with the idempotency claim: nothing is stored (#491).
+        return transactions.inTransaction(() -> idempotent(tenant, "message-correlate", idempotencyKey, requestHash,
+                () -> correlateOnce(tenant, caller, messageName, correlationKey, fields),
+                d -> Values.write(java.util.Map.of("outcome", d.outcome().name(), "instanceId", d.instanceId(),
+                        "nodeId", d.nodeId() == null ? "" : d.nodeId())),
+                json -> {
+                    Map<String, Object> m = Values.readMap(json);
+                    String node = String.valueOf(m.get("nodeId"));
+                    return new MessageDelivery(MessageDelivery.Outcome.valueOf(String.valueOf(m.get("outcome"))),
+                            String.valueOf(m.get("instanceId")), node.isEmpty() ? null : node);
+                }));
+    }
+
+    /** Most characters of a correlation key. */
+    static final int MAX_CORRELATION_KEY = 200;
+    /** Most definition keys read when a message looks for the process it starts. */
+    private static final int MAX_START_SCAN = 1_000;
+
+    private MessageDelivery correlateOnce(String tenant, String caller, String name, String key,
+            Map<String, Object> payload) {
+        if (key != null) {
+            List<ProcessStore.MessageSubscriptionRow> waiting = store.subscriptions(tenant, name, key, 2);
+            if (waiting.size() > 1) {
+                throw new MessageAmbiguousException("Two or more instances wait for message " + name
+                        + " with this key; nothing was delivered");
+            }
+            if (waiting.size() == 1) {
+                return deliverMessage(tenant, waiting.get(0), name, payload);
+            }
+        }
+        StoredDefinition starting = messageStartDefinition(tenant, name);
+        if (starting == null) {
+            throw new MessageNotCorrelatedException("No instance waits for message " + name
+                    + " with this key and no process starts on it");
+        }
+        return startByMessage(tenant, caller, starting, key, payload);
+    }
+
+    private MessageDelivery deliverMessage(String tenant, ProcessStore.MessageSubscriptionRow subscription,
+            String name, Map<String, Object> payload) {
+        InstanceRow row = store.lockInstance(tenant, subscription.instanceId()).orElse(null);
+        List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = row == null ? List.of()
+                : store.tokens(tenant, row.id());
+        boolean waiting = row != null && "RUNNING".equals(row.status()) && tokens.stream().anyMatch(t ->
+                t.id().equals(subscription.tokenId()) && t.status() == TokenStatus.WAITING_EVENT
+                && subscription.id().equals(t.activityInstanceId()));
+        if (!waiting) {
+            // Consumed by a concurrent delivery between the lookup and the lock.
+            throw new MessageNotCorrelatedException("No instance waits for message " + name + " with this key");
+        }
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        InstanceState state = new InstanceState(row.id(), row.tenantId(), row.definitionId(), row.businessKey(),
+                InstanceStatus.valueOf(row.status()), tokens, Values.readMap(row.variablesJson()),
+                participants(tenant, row), row.sequence());
+        run(definition, row, state, new Command.CorrelateMessage(subscription.id(), name, payload), RunAs.REQUEST);
+        return new MessageDelivery(MessageDelivery.Outcome.DELIVERED, row.id(), subscription.nodeId());
+    }
+
+    /** The one effective definition whose message start event has the name, or null; two of them are ambiguous. */
+    private StoredDefinition messageStartDefinition(String tenant, String name) {
+        Instant now = clock.instant();
+        StoredDefinition found = null;
+        String after = null;
+        int read = 0;
+        while (read < MAX_START_SCAN) {
+            List<DefinitionSummary> page = store.definitionKeys(tenant, after, Math.min(100, MAX_START_SCAN - read), now);
+            if (page.isEmpty()) {
+                break;
+            }
+            for (DefinitionSummary summary : page) {
+                after = summary.key();
+                read++;
+                StoredDefinition effective = store.effectiveDefinition(tenant, summary.key(), now).orElse(null);
+                if (effective != null && startsOn(compiled(effective).process(), name)) {
+                    if (found != null) {
+                        throw new MessageAmbiguousException("Two processes start on message " + name
+                                + "; nothing was started");
+                    }
+                    found = effective;
+                }
+            }
+        }
+        return found;
+    }
+
+    private static boolean startsOn(CompiledProcess process, String name) {
+        return process.nodes().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
+                && s.eventDefinitions().stream().anyMatch(d -> d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition m
+                && name.equals(m.messageRef())));
+    }
+
+    private MessageDelivery startByMessage(String tenant, String caller, StoredDefinition definition, String key,
+            Map<String, Object> payload) {
+        if (key != null) {
+            InstanceRow existing = store.findInstanceByBusinessKey(tenant, definition.key(), key).orElse(null);
+            if (existing != null) {
+                return new MessageDelivery(MessageDelivery.Outcome.STARTED, existing.id(), null);
+            }
+        }
+        Instant now = clock.instant();
+        String instanceId = Ulid.next(now);
+        InstanceRow row = new InstanceRow(tenant, instanceId, definition.id(), definition.key(), definition.version(),
+                key, "RUNNING", "{}", 0, 0, caller, now, null);
+        if (!store.insertInstance(row)) {
+            InstanceRow existing = store.findInstanceByBusinessKey(tenant, definition.key(), key).orElseThrow();
+            return new MessageDelivery(MessageDelivery.Outcome.STARTED, existing.id(), null);
+        }
+        run(definition, row, InstanceState.created(instanceId, tenant, definition.id(), key),
+                new Command.Start(payload, caller), RunAs.REQUEST);
+        return new MessageDelivery(MessageDelivery.Outcome.STARTED, instanceId, null);
+    }
+
     // ---- async steps (ADR-0008) ------------------------------------------------------------------------------
 
     /** Error code recorded when a job is claimed more often than {@code jobs.max-attempts} allows. */
@@ -2931,6 +3120,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private static final String CALL_ACTOR = "system:call";
     /** Sequence of a child's end job in the id space of the child's own ids, far above any kernel id. */
     private static final long CALL_RESULT_SEQUENCE = 2_000_000L;
+
+    /**
+     * Installs the host's port for the messages a process sends. Called once while the engine is wired; without it a
+     * step that sends a message fails with {@code MESSAGE_ADAPTER_MISSING}.
+     *
+     * @param adapter the adapter, or null for none
+     */
+    public void useMessageAdapter(io.github.dhluong90.bpm.process.spi.MessageAdapter adapter) {
+        this.messageAdapter = adapter;
+    }
 
     /**
      * Sets how deep one call may sit above another ({@code calls.max-depth}).
@@ -4317,6 +4516,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Effect.StartCompensation[] compensation = new Effect.StartCompensation[1];
         // #92: children are started after this instance's own rows are saved, in the same transaction.
         List<Effect.StartChildInstance> childStarts = new ArrayList<>();
+        // #491: subscriptions of tokens that began to wait for a message, and the messages steps send.
+        List<Effect.CreateSubscription> subscriptions = new ArrayList<>();
         Deque<Command> queue = new ArrayDeque<>();
         queue.add(first);
         int applied = 0;
@@ -4340,7 +4541,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 String commandKind = stepKind(command);
                 transactions.afterCommit(() -> metrics.stepApplied(commandKind, "OK", kernelTime));
                 state = t.state();
-                history.addAll(t.history());
+                for (HistoryEntry entry : t.history()) {
+                    history.add(maskedCorrelation(state.tenantId(), entry));
+                }
                 for (Effect effect : t.effects()) {
                     switch (effect) {
                         case Effect.CreateUserTask task -> {
@@ -4385,6 +4588,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         case Effect.PushCompensation push -> pushes.add(push);
                         case Effect.StartCompensation started -> compensation[0] = started;
                         case Effect.StartChildInstance child -> childStarts.add(child);
+                        case Effect.CreateSubscription subscription -> subscriptions.add(subscription);
+                        case Effect.ThrowMessage message -> sendMessage(state, message);
                         case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
                             DecisionCaller decisionCaller = switch (as) {
                                 case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
@@ -4558,6 +4763,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         Instant now = clock.instant();
         store.saveTokens(state.tenantId(), state.instanceId(), definition.id(), state.tokens(), now);
+        syncSubscriptions(state, compiled, subscriptions, now);
         store.updateInstance(new InstanceRow(row.tenantId(), row.id(), row.definitionId(), row.definitionKey(),
                 row.definitionVersion(), row.businessKey(), state.status().name(), variablesJson,
                 state.sequence(), row.lockVersion(), row.startedBy(), row.startedAt(),
@@ -4745,7 +4951,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
             return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions),
-                    AgentMemory.sources(process));
+                    AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
+                            n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent c
+                            && c.eventDefinitions().stream().anyMatch(
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition.class::isInstance)));
         });
     }
 

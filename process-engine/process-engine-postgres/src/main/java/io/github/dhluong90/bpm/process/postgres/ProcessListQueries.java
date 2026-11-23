@@ -178,6 +178,14 @@ final class ProcessListQueries {
      * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent} (V43).
      * A cancel of the parent reads them to cancel them (#92, PRE-213). Parameters: tenant, parent instance, limit.
      */
+    static final ListQuery MESSAGE_SUBSCRIPTIONS = new ListQuery("message-subscriptions",
+            new Bound.ParentKey("correlation_key", "the waiting tokens of one message and key; the caller reads at most"
+                    + " two, one to deliver to and one to prove the match is not unique, on idx_pre_message_subscription_lookup"
+                    + " (V46)"),
+            "SELECT id, instance_id, token_id, node_id, message_name, correlation_key, created_at "
+                    + "FROM pre_message_subscription WHERE tenant_id = ? AND message_name = ? AND correlation_key = ? "
+                    + "ORDER BY id LIMIT ?");
+
     static final ListQuery INSTANCE_CHILDREN = new ListQuery("instance-children",
             new Bound.ParentKey("parent_instance_id", "the calls of one instance, bounded by its definition's steps "
                     + "and the retries of each; read a page at a time"),
@@ -474,7 +482,7 @@ final class ProcessListQueries {
                 NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES, MIGRATION_IN_FLIGHT_INSTANCES,
-                INSTANCE_CHILDREN,
+                INSTANCE_CHILDREN, MESSAGE_SUBSCRIPTIONS,
                 MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,

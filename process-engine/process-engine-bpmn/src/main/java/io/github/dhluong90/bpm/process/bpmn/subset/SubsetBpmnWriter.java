@@ -15,6 +15,13 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Event;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SendTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
@@ -93,12 +100,23 @@ public final class SubsetBpmnWriter {
         xml.line(0, "                  targetNamespace=\"urn:horus-bpm:definitions\"");
         xml.line(0, "                  expressionLanguage=\"" + BpmnNamespaces.EXPR_V1 + "\"");
         xml.line(0, "                  exporter=\"HORUS Process Engine\">");
+        // #491: the messages the process names, each once, with ids that collide with no element.
+        Map<String, String> messages = new LinkedHashMap<>();
+        Set<String> taken = new HashSet<>();
+        process.flowElements().forEach(e -> taken.add(e.id()));
+        taken.add(process.id());
+        for (FlowElement element : process.flowElements()) {
+            if (element instanceof FlowNode node && messageName(node) != null && !messages.containsKey(messageName(node))) {
+                messages.put(messageName(node), unique(taken, "Message_" + messageName(node).replace(':', '_')));
+            }
+        }
+        messages.forEach((name, id) -> xml.line(1, "<bpmn:message id=" + attr(id) + " name=" + attr(name) + "/>"));
         xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
                 + " isExecutable=\"true\">");
         for (FlowElement element : process.flowElements()) {
             switch (element) {
                 case SequenceFlow flow -> sequenceFlow(xml, flow);
-                case FlowNode node -> node(xml, node);
+                case FlowNode node -> node(xml, node, messages);
                 default -> throw new IllegalArgumentException("Element " + element.id() + " ("
                         + element.getClass().getSimpleName() + ") is outside the exportable subset");
             }
@@ -116,16 +134,45 @@ public final class SubsetBpmnWriter {
         return xml.out.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private static void node(Xml xml, FlowNode node) {
+    /** @return the message name of a message event or task, or null */
+    private static String messageName(FlowNode node) {
+        return switch (node) {
+            case ReceiveTask t -> t.messageRef();
+            case SendTask t -> t.messageRef();
+            case Event e -> e.eventDefinitions().stream().filter(MessageEventDefinition.class::isInstance)
+                    .map(d -> ((MessageEventDefinition) d).messageRef()).findFirst().orElse(null);
+            default -> null;
+        };
+    }
+
+    private static void node(Xml xml, FlowNode node, Map<String, String> messages) {
         String tag;
         StringBuilder attributes = new StringBuilder(" id=" + attr(node.id()) + optional("name", node.name()));
         List<InputMapping> inputs = List.of();
         String script = null;
         AgentTaskSpec agent = node.extensions().first(AgentTaskSpec.class).orElse(null);
         GuardrailSpec guardrail = node.extensions().first(GuardrailSpec.class).orElse(null);
+        String messageName = messageName(node);
         switch (node) {
             case StartEvent s -> tag = "bpmn:startEvent";
-            case EndEvent e -> tag = "bpmn:endEvent";
+            case EndEvent e -> {
+                tag = "bpmn:endEvent";
+                inputs = e.extensions().all(InputMapping.class);
+            }
+            case IntermediateCatchEvent c when messageName != null -> tag = "bpmn:intermediateCatchEvent";
+            case IntermediateThrowEvent t when messageName != null -> {
+                tag = "bpmn:intermediateThrowEvent";
+                inputs = t.extensions().all(InputMapping.class);
+            }
+            case ReceiveTask t -> {
+                tag = "bpmn:receiveTask";
+                attributes.append(optional("messageRef", messages.get(messageName)));
+            }
+            case SendTask t -> {
+                tag = "bpmn:sendTask";
+                attributes.append(optional("messageRef", messages.get(messageName)));
+                inputs = t.extensions().all(InputMapping.class);
+            }
             case ServiceTask t when agent != null -> {
                 tag = "bpmn:serviceTask";
                 attributes.append(" horus:type=\"agentTask\"").append(optional("horus:agent", agent.agent()))
@@ -180,14 +227,17 @@ public final class SubsetBpmnWriter {
         }
         node.extensions().first(ResultVariable.class).ifPresent(r -> attributes.append(optional("horus:resultVariable",
                 r.name())));
+        node.extensions().first(CorrelationKey.class).ifPresent(k -> attributes.append(optional("horus:correlationKey",
+                k.variable())));
         // #67: the undo and the failure action are part of the step, so the export reads back to the same hash.
         node.extensions().first(CompensateHandlerRef.class).ifPresent(c -> attributes.append(optional(
                 "horus:compensate", c.handler())));
         node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
                 f.action())));
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
-        if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
-                && node.outgoing().isEmpty()) {
+        String eventMessage = node instanceof Event && messageName != null ? messages.get(messageName) : null;
+        if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && eventMessage == null
+                && node.incoming().isEmpty() && node.outgoing().isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;
         }
@@ -232,6 +282,9 @@ public final class SubsetBpmnWriter {
         }
         node.incoming().forEach(id -> xml.line(3, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(3, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
+        if (eventMessage != null) {
+            xml.line(3, "<bpmn:messageEventDefinition messageRef=" + attr(eventMessage) + "/>");
+        }
         xml.line(2, "</" + tag + ">");
     }
 
@@ -431,6 +484,8 @@ public final class SubsetBpmnWriter {
         return switch (node) {
             case StartEvent s -> new int[] {36, 36};
             case EndEvent e -> new int[] {36, 36};
+            case IntermediateCatchEvent c -> new int[] {36, 36};
+            case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };

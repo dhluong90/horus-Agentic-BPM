@@ -66,7 +66,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage() {
-        // Given loan.bpmn with a boundary event (42), inclusive gateway (57), send task (63), ad-hoc sub-process (70)
+        // Given loan.bpmn with a boundary event (42), inclusive gateway (57), event-based gateway (63), ad-hoc sub-process (70)
         // and an XPath condition (88), and camunda:class on a service task (30)
         byte[] file = bytes("loan.bpmn");
 
@@ -76,7 +76,7 @@ class SubsetBpmnRefusalTest {
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
                     tuple("boundaryEvent", "be-timeout", 42, "S1"),
                     tuple("inclusiveGateway", "ig-1", 57, "S1"),
-                    tuple("sendTask", "notify", 63, "S2"),
+                    tuple("eventBasedGateway", "notify", 63, "S2"),
                     tuple("adHocSubProcess", "adhoc-1", 70, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
             assertThat(e.problems().get(4).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
@@ -138,13 +138,12 @@ class SubsetBpmnRefusalTest {
     void PRE_108_a_throw_event_takes_its_stage_from_its_event_definition() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
                 + "<bpmn:intermediateThrowEvent id=\"sig\"><bpmn:signalEventDefinition/></bpmn:intermediateThrowEvent>"
-                + "<bpmn:intermediateThrowEvent id=\"msg\"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"esc\"><bpmn:escalationEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"none\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
-                        tuple("sig", "S2"), tuple("msg", "S2"), tuple("esc", "S1"), tuple("none", "S0")));
+                        tuple("sig", "S2"), tuple("esc", "S1"), tuple("none", "S0")));
     }
 
     @Test
@@ -206,7 +205,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_event_definitions_take_the_stage_of_their_kind() {
-        byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:messageEventDefinition/></bpmn:startEvent>"
+        byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:signalEventDefinition/></bpmn:startEvent>"
                 + "<bpmn:endEvent id=\"b\"><bpmn:terminateEventDefinition/></bpmn:endEvent>"
                 + "<bpmn:endEvent id=\"c\"><bpmn:errorEventDefinition/></bpmn:endEvent>" + TAIL)
                 .getBytes(StandardCharsets.UTF_8);

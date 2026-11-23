@@ -39,6 +39,8 @@
 .dg-node:hover rect, .dg-node:hover circle, .dg-node:hover > path { filter: var(--node-hover); }
 .dg-node:focus-visible rect, .dg-node:focus-visible circle, .dg-node:focus-visible > path { stroke: var(--focus); stroke-width: 3; }
 .dg-node g path, .dg-node g circle, .dg-node g rect { fill: none; stroke: currentColor; filter: none; }
+.dg-node g .icon--filled { fill: currentColor; }
+.dg-node g .icon--knockout { stroke: var(--node); }
 .dg-node--endEvent circle { stroke-width: 3.5; }
 .dg-node--agent { color: var(--violet); }
 .dg-node--agent rect { stroke: var(--violet); fill: var(--violet-soft); }
