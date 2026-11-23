@@ -74,3 +74,12 @@ export function CheckIcon() {
     </svg>
   );
 }
+
+export function ClockIcon() {
+  return (
+    <svg className="area-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="10" cy="10" r="7" />
+      <path d="M10 6v4.2l2.6 1.6" />
+    </svg>
+  );
+}

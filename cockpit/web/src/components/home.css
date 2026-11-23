@@ -1,0 +1,72 @@
+/* Home (CK-F-17, #507): the key figures are the one focal row; everything else is a white card. Tokens only. */
+
+.home { display: flex; flex-direction: column; gap: var(--gap); }
+.home__head { margin-bottom: -16px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: var(--gap); }
+
+.tile {
+  position: relative; display: grid; grid-template-columns: auto 1fr; grid-template-areas: "icon status" "value value" "label label" "note note";
+  align-items: start; row-gap: 0; padding: 14px 18px 12px; border-radius: var(--radius-xl); color: var(--ink); text-decoration: none;
+  border: 1px solid transparent; background: var(--tile-bg); transition: box-shadow .15s ease;
+}
+.tile:hover { box-shadow: var(--sh-2); }
+.tile--on-track { --tile-bg: var(--ok-soft); --tile-disc: var(--teal); --tile-ink: var(--ok); }
+.tile--act-now { --tile-bg: var(--warn-soft); --tile-disc: var(--warn); --tile-ink: var(--warn); }
+.tile--urgent { --tile-bg: var(--bad-soft); --tile-disc: var(--bad); --tile-ink: var(--bad); }
+.tile--waiting { --tile-bg: var(--teal-soft); --tile-disc: var(--accent-fill); --tile-ink: var(--accent); }
+.tile__icon { grid-area: icon; display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-pill); background: var(--tile-disc); color: var(--surface); }
+.tile__icon .area-icon { width: 20px; height: 20px; }
+.tile__status { grid-area: status; justify-self: end; font: var(--type-label); font-weight: 650; color: var(--tile-ink); }
+.tile__value { grid-area: value; margin-top: 4px; font-size: 34px; line-height: 1.1; font-weight: 750; letter-spacing: -.02em; color: var(--ink); }
+.tile__label { grid-area: label; margin-top: 2px; font: var(--type-body); color: var(--ink); }
+.tile__note { grid-area: note; font: var(--type-caption); color: var(--ink-2); }
+
+.home__grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); grid-template-areas: "tasks approvals" "chart approvals"; gap: var(--gap); align-items: start; }
+.home__grid--wide { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tasks" "chart"; }
+.home__tasks { grid-area: tasks; }
+.home__chart { grid-area: chart; }
+.home__approvals { grid-area: approvals; }
+.home__grid > .card { gap: 0; }
+.home__grid .card__head { min-height: 40px; padding-bottom: 6px; }
+.card__sub { font: var(--type-caption); color: var(--muted); }
+
+.hrow { display: flex; align-items: center; gap: 12px; min-height: 54px; padding: 7px 0; border-top: 1px solid var(--line); }
+.hrow:first-child { border-top: 0; }
+.hrow--stack { align-items: flex-start; padding: 10px 0; }
+.hrow__text { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.hrow__main { font: var(--type-body); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow__meta { font: var(--type-caption); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hrow__actions { display: flex; gap: 8px; margin-top: 6px; }
+.home__all { align-self: flex-start; margin-top: 4px; }
+
+.avatar { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 700; }
+.avatar--mint { background: var(--ok-soft); color: var(--teal); }
+.avatar--amber { background: var(--warn-soft); color: var(--warn); }
+
+.pill { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 650; background: var(--surface-3); color: var(--ink-2); white-space: nowrap; }
+.pill--today { background: var(--ok-soft); color: var(--ok); }
+.pill--late { background: var(--warn-soft); color: var(--warn); }
+.btn--soft { background: var(--ok-soft); border-color: transparent; color: var(--teal); font-weight: 650; min-width: 64px; justify-content: center; }
+.btn--soft:hover { background: var(--teal-soft); }
+
+.home__chart-head { align-items: flex-start; }
+.bars { display: flex; align-items: flex-end; gap: 10px; padding: 4px 4px 0; border-bottom: 1px solid var(--line); }
+.bars__item { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.bars__value { font: var(--type-caption); color: var(--ink-2); }
+.bars__track { display: block; width: 100%; max-width: 46px; height: auto; aspect-ratio: 46 / 84; }
+.bars__bar { fill: var(--chart-bar); }
+.bars__item--peak .bars__bar { fill: var(--chart-peak); }
+.bars__item--peak .bars__value, .bars__item--peak .bars__hour { color: var(--ink); font-weight: 700; }
+.bars__hour { font: var(--type-caption); color: var(--muted); padding-bottom: 4px; white-space: nowrap; }
+
+.home__more { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
+.home__more--single { grid-template-columns: minmax(0, 1fr); }
+
+@media (max-width: 1100px) {
+  .home__grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tasks" "approvals" "chart"; }
+  .home__more { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .bars { gap: 4px; }
+  .tile__value { font-size: 30px; }
+}

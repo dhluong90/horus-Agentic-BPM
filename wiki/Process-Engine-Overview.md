@@ -253,6 +253,7 @@ The engine never embeds a model and never calls the network itself (`TR-AGT-03`,
 | `processes:task:work` | Claim, unclaim and complete tasks in the caller's own queues |
 | `processes:task:manage` | List every task of the tenant, and reassign an open task or delegate a claimed one to a named user, with a reason (0.3.0, PD-110) |
 | `processes:incident:manage` | Retry an incident, propose its resolution, and approve or reject another person's proposal (0.3.0, PD-126) |
+| `processes:signal:broadcast` | Broadcast a signal in the caller's tenant; it wakes waiting instances and starts the definitions with a signal start event (0.3.0, #492) |
 | `processes:migration:manage` | Create, validate and execute migration plans |
 | `processes:calendar:manage` | Propose, approve and reject changes of business calendars and holidays; a proposer never approves their own |
 

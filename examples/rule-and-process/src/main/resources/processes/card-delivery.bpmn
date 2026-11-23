@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Card delivery: the steps of the hand-over are one sub-process. A script works out the yearly fee inside it and
+     writes it to the process variable yearlyFee, a clerk posts the card (a manual task, done outside the engine), and
+     the process goes on to the welcome call only after the sub-process ends. Not loaded at start-up; import it with
+     the steps in the Process Engine import guide. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-delivery"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-delivery" name="Card delivery" isExecutable="true">
+    <bpmn:startEvent id="start" name="Card approved"/>
+    <bpmn:subProcess id="hand-over" name="Hand the card over">
+      <bpmn:startEvent id="hand-over-start"/>
+      <bpmn:scriptTask id="yearly-fee" name="Work out the yearly fee" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="yearlyFee">
+        <bpmn:script>monthlyFee * 12</bpmn:script>
+      </bpmn:scriptTask>
+      <bpmn:manualTask id="post-card" name="Post the card to the customer"/>
+      <bpmn:endEvent id="hand-over-end"/>
+      <bpmn:sequenceFlow id="h1" sourceRef="hand-over-start" targetRef="yearly-fee"/>
+      <bpmn:sequenceFlow id="h2" sourceRef="yearly-fee" targetRef="post-card"/>
+      <bpmn:sequenceFlow id="h3" sourceRef="post-card" targetRef="hand-over-end"/>
+    </bpmn:subProcess>
+    <bpmn:task id="welcome-call" name="Welcome call"/>
+    <bpmn:endEvent id="end" name="Delivery complete"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="hand-over"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="hand-over" targetRef="welcome-call"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="welcome-call" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

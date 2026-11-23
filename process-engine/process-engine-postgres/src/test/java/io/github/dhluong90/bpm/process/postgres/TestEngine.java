@@ -186,6 +186,7 @@ final class TestEngine {
         if (b.forms != null) {
             services.useFormRegistry(b.forms, b.formLinkOrigins);
         }
+        services.useMessageAdapter(b.messageAdapter);
         if (b.importedLayouts) {
             // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
             this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
@@ -340,6 +341,7 @@ final class TestEngine {
         private io.github.dhluong90.bpm.process.spi.FormRegistry forms;
         private List<String> formLinkOrigins = List.of();
         private boolean importedLayouts;
+        private io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -493,6 +495,12 @@ final class TestEngine {
             return this;
         }
 
+        /** The host's outbox port for the messages a process sends (#491); none by default. */
+        Builder messageAdapter(io.github.dhluong90.bpm.process.spi.MessageAdapter value) {
+            messageAdapter = value;
+            return this;
+        }
+
         Builder publisher(ProcessEventPublisher value) {
             publisher = value;
             return this;
@@ -594,7 +602,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_compensation_stack, pre_node_stats_hourly, pre_engine_watermark, pre_migration_instance, pre_migration_history, pre_migration, pre_definition_layout, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
+                + "TRUNCATE pre_signal, pre_event_subscription, pre_compensation_stack, pre_node_stats_hourly, pre_engine_watermark, pre_migration_instance, pre_migration_history, pre_migration, pre_definition_layout, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
                 + "pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();

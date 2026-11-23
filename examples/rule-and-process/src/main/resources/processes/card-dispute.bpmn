@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Card dispute: an officer assesses a dispute and, if it is not done in two days, a reminder goes to the officer
+     while the task stays open (a timer boundary that does not interrupt). The refund step answers the business error
+     REFUND_LIMIT_EXCEEDED when the amount is above the officer's limit; an error boundary takes that code to a senior
+     approval instead of opening an incident. Both paths end at one customer notification through a link, so the
+     notification is modelled once. Not loaded at start-up; import it with the steps in the Process Engine import
+     guide. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-dispute"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:error id="Err_limit" name="Refund limit exceeded" errorCode="REFUND_LIMIT_EXCEEDED"/>
+  <bpmn:process id="card-dispute" name="Card dispute" isExecutable="true">
+    <bpmn:startEvent id="start" name="Dispute received"/>
+    <bpmn:userTask id="assess" name="Assess the dispute" horus:assignee="role:DISPUTES_OFFICER" horus:resultVariable="assessment"/>
+    <bpmn:boundaryEvent id="assess-overdue" name="Two days passed" attachedToRef="assess" cancelActivity="false">
+      <bpmn:timerEventDefinition><bpmn:timeDuration>P2D</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="remind-officer" name="Remind the officer" horus:handler="disputes.remind"/>
+    <bpmn:endEvent id="reminded" name="Reminder sent"/>
+    <bpmn:serviceTask id="post-refund" name="Post the refund" horus:handler="disputes.refund"/>
+    <bpmn:boundaryEvent id="over-limit" name="Above the officer's limit" attachedToRef="post-refund">
+      <bpmn:errorEventDefinition errorRef="Err_limit"/>
+    </bpmn:boundaryEvent>
+    <bpmn:userTask id="senior-approval" name="Senior approval" horus:assignee="role:DISPUTES_SENIOR" horus:resultVariable="approval"/>
+    <bpmn:intermediateThrowEvent id="refund-done" name="Refund settled">
+      <bpmn:linkEventDefinition name="notify"/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:intermediateThrowEvent id="approval-done" name="Approval settled">
+      <bpmn:linkEventDefinition name="notify"/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:intermediateCatchEvent id="notify-entry" name="Notify the customer">
+      <bpmn:linkEventDefinition name="notify"/>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:serviceTask id="notify-customer" name="Notify the customer" horus:handler="disputes.notify"/>
+    <bpmn:endEvent id="closed" name="Dispute closed"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="assess"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="assess" targetRef="post-refund"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="assess-overdue" targetRef="remind-officer"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="remind-officer" targetRef="reminded"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="post-refund" targetRef="refund-done"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="over-limit" targetRef="senior-approval"/>
+    <bpmn:sequenceFlow id="f7" sourceRef="senior-approval" targetRef="approval-done"/>
+    <bpmn:sequenceFlow id="f8" sourceRef="notify-entry" targetRef="notify-customer"/>
+    <bpmn:sequenceFlow id="f9" sourceRef="notify-customer" targetRef="closed"/>
+  </bpmn:process>
+</bpmn:definitions>

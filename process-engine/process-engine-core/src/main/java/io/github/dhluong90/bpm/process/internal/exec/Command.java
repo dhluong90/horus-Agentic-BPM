@@ -117,15 +117,17 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
     }
 
     /**
-     * A signal was broadcast to a subscription of this instance.
+     * A signal was broadcast in the tenant and this instance waits for it (#492). A signal carries no data into the
+     * instance; the catching step only moves on.
      *
-     * @param subscriptionId subscription id
+     * @param tokenId the waiting token
+     * @param subscriptionId the subscription the token waits on, which is the token's activity instance id
      * @param signalName signal name
-     * @param payload signal payload
      */
-    record DeliverSignal(String subscriptionId, String signalName, Map<String, Object> payload) implements Command {
+    record DeliverSignal(String tokenId, String subscriptionId, String signalName) implements Command {
         public DeliverSignal {
-            payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
+            Objects.requireNonNull(subscriptionId, "subscriptionId must not be null");
         }
     }
 

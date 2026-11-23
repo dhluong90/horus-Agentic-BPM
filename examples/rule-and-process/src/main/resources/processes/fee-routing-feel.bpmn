@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fee routing in FEEL: a gold customer paying a card fee over 1,000 goes to a card officer, everyone else takes the
+     default flow and a script records whether the fee is waived. The conditions and the script are FEEL (DMN FEEL URI);
+     "=" is equality and strings use double quotes. Not loaded at start-up; import it with the steps in the Process
+     Engine import guide. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_fee-routing-feel"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="https://www.omg.org/spec/DMN/20191111/FEEL/">
+  <bpmn:process id="fee-routing-feel" name="Fee routing in FEEL" isExecutable="true">
+    <bpmn:startEvent id="start" name="Fee priced"/>
+    <bpmn:exclusiveGateway id="fee-check" name="Gold and over 1,000?" default="fee-check__waive"/>
+    <bpmn:userTask id="officer-review" name="Officer reviews the fee" horus:assignee="role:CARD_OFFICER" horus:resultVariable="review"/>
+    <bpmn:scriptTask id="waive-note" name="Record the waiver" scriptFormat="https://www.omg.org/spec/DMN/20191111/FEEL/" horus:resultVariable="waived">
+      <bpmn:script>fee &lt;= 1000 and tier != "gold"</bpmn:script>
+    </bpmn:scriptTask>
+    <bpmn:endEvent id="end" name="Done"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="fee-check"/>
+    <bpmn:sequenceFlow id="fee-check__review" sourceRef="fee-check" targetRef="officer-review">
+      <bpmn:conditionExpression language="https://www.omg.org/spec/DMN/20191111/FEEL/">fee &gt; 1000 and tier = "gold"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="fee-check__waive" sourceRef="fee-check" targetRef="waive-note"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="officer-review" targetRef="end"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="waive-note" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

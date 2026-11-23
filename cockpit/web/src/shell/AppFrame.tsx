@@ -23,7 +23,7 @@ import { MergedIncidentsPage } from '../features/federation/MergedIncidentsPage'
 import { MergedInboxPage } from '../features/federation/MergedInboxPage';
 import { IncidentsPage } from '../features/incidents/IncidentsPage';
 import { resolveMode } from '../features/incidents/model/incidents';
-import { RulesProvider } from '../features/rules/api/rulesContext';
+import { RulesProvider, type ReportHostSettings } from '../features/rules/api/rulesContext';
 import { RulesArea } from '../features/rules/RulesArea';
 import { useI18n } from '../i18n/I18nProvider';
 import { PeopleProvider } from '../app/people';
@@ -33,6 +33,7 @@ import { NavRail } from './NavRail';
 import { hostReadingStyle } from '../preferences/readingStyle';
 import type { ReadingStyle } from '../preferences/storage';
 import '../components/frame.css';
+import '../components/lists.css';
 
 /**
  * The host's authoring.cockpit-drafts setting from the rules module of /meta (PD-075, PD-036, PD-094).
@@ -51,6 +52,21 @@ export function readingStyleOf(meta: BpmMetaV1): ReadingStyle {
   return hostReadingStyle(meta.modules.find((module) => module.module === 'rules')?.settings ?? {});
 }
 
+/**
+ * What the rules module of /meta says about templates and reports (PD-112, PD-115): the features the screens wait for,
+ * and `lifecycle.require-simulation-report`, the comma-separated rule sets whose publication request must carry a report.
+ */
+export function reportHostOf(meta: BpmMetaV1): ReportHostSettings {
+  const module = meta.modules.find((entry) => entry.module === 'rules');
+  const required = module?.settings?.['lifecycle.require-simulation-report'];
+  return {
+    templates: module?.features.includes('rules.templates') === true,
+    simulationReports: module?.features.includes('rules.simulation-reports') === true,
+    historyReadings: module?.features.includes('rules.history-readings') === true,
+    requireReport: typeof required === 'string' ? required.split(',').map((name) => name.trim()).filter((name) => name !== '') : [],
+  };
+}
+
 export interface FrameProps {
   host: RegistryHost;
   meta: BpmMetaV1;
@@ -65,7 +81,7 @@ export interface FrameProps {
 /** The signed-in cockpit: the menu of the areas this user may use and the current area beside it. */
 export function AppFrame({ host, meta, me, fetchImpl, inboxSeconds = 30, incidentsSeconds = 60 }: FrameProps) {
   return (
-    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} fetchImpl={fetchImpl}>
+    <RulesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} cockpitDrafts={cockpitDraftsOn(meta)} readingStyle={readingStyleOf(meta)} host={reportHostOf(meta)} fetchImpl={fetchImpl}>
       <ProcessesProvider baseUrl={host.baseUrl} hostId={host.id} me={me} fetchImpl={fetchImpl}>
         <PeopleProvider me={me.user}>
           <DisplayNamesProvider>
@@ -108,7 +124,7 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
   const merged = useFederation() !== undefined && (route.name === 'tasks' || route.name === 'incidents') && route.scope === 'all';
   switch (route.name) {
     case 'home':
-      return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} />;
+      return <HomePage pageLimit={pageLimit} me={me} areas={areas} engines={engines} refresh={refresh} />;
     case 'rule-sets':
     case 'rule-set':
       return <RulesArea route={route} pageLimit={pageLimit} />;

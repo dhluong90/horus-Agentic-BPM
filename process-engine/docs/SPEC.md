@@ -1029,7 +1029,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
 - **Kind:** other
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
   - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
@@ -1037,7 +1037,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
   - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `parallelMultiple="true"` (`S3`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
   - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
-  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` or `messageEventDefinition` throw is `S2`, an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
+  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` throw is `S2` (a message throw is supported, `PRE-235`), an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
 - **Example:** `5 unsupported -> 422 with stages S1, S1, S2, S3, not planned; camunda:class -> warning`.
 - **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_throw_event_takes_its_stage_from_its_event_definition`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`
 
@@ -1800,9 +1800,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Traces to:** `TR-STD-04`, `PRE-033`, #485
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** A `scriptTask` whose script `amount *` is on line 5; a `scriptTask` with no script or no `horus:resultVariable`; a `scriptTask` with `scriptFormat` FEEL, and one with `javascript`.
+- **Given:** A `scriptTask` whose script `amount *` is on line 5; a `scriptTask` with no script or no `horus:resultVariable`; a `scriptTask` with `scriptFormat` `javascript`.
 - **When:** Each file is imported.
-- **Then:** The first is `422 VALIDATION_FAILED` with problem `SCRIPT_INVALID`, the element id and line 5. The second lists `SCRIPT_MISSING` and `RESULT_VARIABLE_REQUIRED`. FEEL is `422 BPMN_SCRIPT_FORMAT_UNSUPPORTED` with stage `S1`, and `javascript` the same code with stage `not planned`. Nothing is stored.
+- **Then:** The first is `422 VALIDATION_FAILED` with problem `SCRIPT_INVALID`, the element id and line 5. The second lists `SCRIPT_MISSING` and `RESULT_VARIABLE_REQUIRED`. `javascript` is `422 BPMN_SCRIPT_FORMAT_UNSUPPORTED` with stage `not planned` and its name in the message (FEEL is accepted since #498, PRE-256). Nothing is stored.
 - **Example:** `scriptFormat javascript -> BPMN_SCRIPT_FORMAT_UNSUPPORTED, not planned`.
 - **Test ID:** `PRE_252_a_script_that_is_not_valid_is_refused_with_the_line_of_the_script`, `PRE_252_a_script_task_needs_a_script_and_a_result_variable`, `PRE_252_a_script_in_another_language_is_refused_with_its_stage`
 
@@ -1815,3 +1815,306 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
 - **Example:** `System.exit(0) -> refused at activation`.
 - **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`
+
+### PRE-254 A FEEL condition takes the flow it matches
+- **Traces to:** `TR-STD-04`, `TR-STD-02`, #498
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** An exclusive gateway whose flow `tier-check__gold` has the FEEL condition `amount > 1000 and tier = "gold"` and a default flow `tier-check__standard`.
+- **When:** An instance starts with `amount` 5,000 and `tier` gold; with `amount` 1,000 and gold; with `amount` 5,000 and silver.
+- **Then:** The first takes `tier-check__gold`; the other two take the default. A FEEL list test (`country in ["VN", "SG"]`) and a date literal (`date("2027-01-01")`) read as in FEEL.
+- **Example:** `amount = 1000` is not `> 1000`, so the default flow is taken.
+- **Test ID:** `PRE_254_a_feel_condition_takes_the_flow_it_matches_and_the_default_otherwise`, `PRE_254_feel_chooses_the_branch_of_a_gold_loan_over_1000`, `PRE_254_list_membership_and_dates_read_as_in_feel`
+
+### PRE-255 A FEEL condition follows the null and money rules of the Rule Engine
+- **Traces to:** `RLE-006`, `PRE-004`, #498
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The condition `amount > 1000 and tier = "gold"` with `amount` null; `tier != "gold"` with `tier` null; `amount >= money(100000000, "VND")` with a USD amount.
+- **When:** The gateway runs.
+- **Then:** An ordering with null is null, so the first does not hold and the default flow is taken; `tier != "gold"` with a null tier is true (two-valued equality); `false and null` is false and `true and null` is null, which does not hold. Money compared with another currency fails the step with `CONDITION_ERROR`, never a silent false.
+- **Example:** `null > 1000` is null, so the gold flow is not taken.
+- **Test ID:** `PRE_255_a_null_in_a_feel_comparison_does_not_hold_and_the_default_flow_is_taken`, `PRE_255_null_follows_feel_three_valued_logic_and_only_true_holds`, `PRE_255_a_feel_condition_over_money_compares_only_within_one_currency`, `PRE_255_money_compares_within_one_currency_and_a_mismatch_is_an_error_not_false`
+
+### PRE-256 Import accepts the FEEL URI, names any other language, and hashes one meaning once
+- **Traces to:** `PRE-033`, `PRE-252`, `ADR-0026`, #498
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A `conditionExpression` and a `scriptTask` in FEEL under the DMN FEEL URI of any version; a condition in `http://www.w3.org/1999/XPath`; the FEEL condition `tier == "gold"` (v1 equality); and the same script written in FEEL and in `urn:horus-bpm:expr:v1`.
+- **When:** Each file is imported and compiled.
+- **Then:** The FEEL files import and the text is kept as written on export. XPath is `422 BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` naming `http://www.w3.org/1999/XPath`. The v1 equality in FEEL is `CONDITION_INVALID` with the position and the hint that FEEL writes `=`. The FEEL and v1 scripts have one `definitionHash`, because a FEEL text is hashed in the normal form of `urn:horus-bpm:expr:v1`; a v1 text hashes as authored, so no earlier hash changes. The v1 language still refuses FEEL spelling.
+- **Example:** `amount > 1000 and tier = "gold"` and `amount > 1000 and tier == 'gold'` hash the same.
+- **Test ID:** `PRE_256_a_feel_condition_imports_and_a_language_other_than_the_two_is_refused_by_name`, `PRE_256_a_feel_script_and_its_v1_spelling_are_one_definition`, `PRE_256_an_invalid_feel_condition_is_refused_at_activation_with_the_position`, `PRE_256_a_language_other_than_v1_and_feel_fails_with_its_name`, `PRE_256_a_condition_in_v1_spelling_is_a_problem_in_feel_with_a_hint_and_a_position`, `PRE_256_the_same_meaning_in_either_language_has_one_normal_form`, `PRE_256_every_dmn_feel_uri_names_feel_and_nothing_else_does`, `PRE_256_the_v1_language_still_reads_its_own_spelling_and_refuses_feels`, `PRE_256_the_worked_feel_example_reads_and_compiles`
+
+### PRE-257 A script budget is set through the expression API and holds in either language
+- **Traces to:** `TR-SEC-01`, `PRE-253`, #517
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `ExpressionLanguages.withBudget(language, stepBudget, timeoutMillis)` in `bpm-expression`, a script of 41 terms (`1 + 1 + ...`), and the Process Engine core.
+- **When:** The script runs with a budget of 20 steps and with 500; the kernel contract rule is checked.
+- **Then:** With 500 it gives 41; with 20 it fails with `EVALUATION_BUDGET_EXCEEDED`, in v1 and in FEEL; a bound out of range or an unknown language is refused. No class of `core` depends on `io.github.dhluong90.bpm.expr.internal`: the script step uses the factory, and the earlier exemption for `Evaluator`, `EvaluationLimits` and `RegexLimits` is gone.
+- **Example:** 41 terms need about 83 nodes, over a budget of 20.
+- **Test ID:** `PRE_257_a_budgeted_language_stops_a_script_past_its_step_budget_in_both_languages`, `PRE_257_a_bound_out_of_range_or_an_unknown_language_is_refused`, `PRE_257_core_reaches_the_expression_library_only_through_its_api_spi_and_languages`
+### PRE-260 An embedded sub-process runs from its own start to its own end inside its own scope, and the parent continues only after that end
+- **Traces to:** `TR-STD-29`, `PRE-044`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `customer-onboarding` with a `subProcess` `onboard` between `start` and the service task `open-account`. Inside `onboard`: a script task `score` (`amount * 2` into `risk`), a `parallelGateway` that forks a service task `bureau` and a service task `fraud`, and a join. An instance starts with `amount = 1500000`.
+- **When:** The instance starts; `bureau` completes first; then `fraud` completes.
+- **Then:** Entering `onboard` opens a `SCOPE` token under the root scope token, and the first flow token runs under it. `score` reads the parent's `amount` and writes `risk` to the instance variables, which stay readable after the sub-process ends. The tokens on `bureau` and `fraud` carry the scope token of `onboard`. When `bureau` completes first, its token waits at the join and `open-account` has no token; the join counts only the tokens of the scope of `onboard` (`PRE-044`). When `fraud` completes, the scope token is `COMPLETED`, no token under it is live, and one flow token continues at `open-account` in the root scope. History records `SCOPE_ENTERED` for `onboard`. The instance completes when `open-account` completes.
+- **Example:** `amount 1500000 -> risk 3000000, open-account starts after the inner end`.
+- **Test ID:** `PRE_260_the_parent_continues_only_after_the_inner_end_and_the_scope_closes`
+
+### PRE-261 A cancel while the instance is inside a sub-process cancels every token, task and job in every scope
+- **Traces to:** `TR-STD-29`, `PRE-041`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding` with `bureau` and `fraud` waiting for their results inside `onboard`.
+- **When:** The instance is cancelled with the reason `customer withdrew`.
+- **Then:** The instance is `CANCELLED`; the scope token of `onboard` and every flow token under it are `CANCELLED`; each of the two calls in flight is cancelled by its job id; no token of any scope is live. A later result for either call is discarded (`PRE-041`).
+- **Example:** `cancel with bureau and fraud in flight -> two jobs cancelled, scope CANCELLED`.
+- **Test ID:** `PRE_261_a_cancel_inside_the_sub_process_cancels_every_inner_token_and_job`
+
+### PRE-262 A failure with `onFailure: compensate` inside a sub-process undoes only the steps of that sub-process
+- **Traces to:** `TR-COMP-01`, `PRE-044`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `loan-booking-embedded`: `register-loan` (undone by `cancel-loan`) in the root scope, then a `subProcess` `disburse` with `reserve-funds` (undone by `release-funds`), `open-account` (undone by `close-account`) and `notify-partner` with `onFailure: compensate`, which the partner refuses. A second process `fund` with `hold` (undone by `release-hold`) and `debit` (`onFailure: compensate`) inside a sub-process, after `open` (undone by `close-account`) in the root scope.
+- **When:** `notify-partner` fails for good; and, in the second process, `debit` answers the business error `INSUFFICIENT_FUNDS`.
+- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are not walked by a later undo of the enclosing scope until S2 (DESIGN section 4.2).
+- **Example:** `disburse fails -> close-account, release-funds run; cancel-loan does not`.
+- **Test ID:** `PRE_262_an_undo_started_inside_the_sub_process_walks_that_scope_and_never_the_enclosing_one` (`SubProcessScopeTest`), `PRE_262_an_embedded_sub_process_is_a_scope_whose_failure_undoes_only_its_own_steps` (`SagaCompensationTest`)
+
+### PRE-263 A sub-process imports and exports with its own steps; a scope that is not well formed, or an element not yet supported, is refused
+- **Traces to:** `TR-STD-04`, `PRE-033`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding` as above; the same file with `triggeredByEvent="true"` on `onboard`; the same file with a flow from `fraud` to the root `end`; the same file without the end event of `onboard`.
+- **When:** Each file is imported and compiled.
+- **Then:** The first reads with the steps and flows of `onboard` nested under it, and its canonical form holds a step of type `subProcess` with its own `steps`; the BPMN export reads back to the same canonical form. The second is refused as `422 BPMN_UNSUPPORTED_ELEMENT` for `subProcess with triggeredByEvent`, stage `S1`. The third is refused at activation with `FLOW_CROSSES_SAGA` naming the flow, because a flow never crosses the boundary of a scope. The fourth is refused with `NO_END_EVENT` naming `onboard`.
+- **Example:** `flow fraud -> end across the boundary -> FLOW_CROSSES_SAGA`.
+- **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_is_refused_with_its_stage_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)
+
+### PRE-280 An interrupting timer boundary cancels the task it sits on and runs its own flow
+- **Traces to:** `TR-STD-04`, `PRE-006`, #489
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `claim-flow` with a user task `review` for role `CLAIM_OFFICER` and a boundary timer `overdue` of `PT4H` that interrupts, started at 03:00 UTC; the boundary's flow leads to the service task `remind` (handler `send-reminder`).
+- **When:** The instance starts; then the four hours pass and the timer job falls due.
+- **Then:** At start the task is open and the boundary holds one `TIMER` job due at 07:00 UTC, the job kind and lease of any timer; the boundary's token waits in `WAITING_TIMER` under the same scope as the task. When the job fires, the token on `review` and its work item are `CANCELLED`, `remind` runs, and history records `BOUNDARY_FIRED` with the boundary id, the step it sits on and `interrupting: true`. A completion of the cancelled task is refused. The instance completes when the reminder's flow ends. A boundary on a call activity cancels the running child with the reason `parent step cancelled`, and the child's later end finds no waiting token and is dropped.
+- **Example:** `overdue` fires at 07:00 -> task `CANCELLED`, `remind` runs, history `BOUNDARY_FIRED`.
+- **Test ID:** `PRE_280_an_interrupting_timer_boundary_cancels_the_task_and_runs_its_own_flow` (`BoundaryAndThrowEventsTest`), `PRE_280_a_timer_boundary_on_a_call_activity_cancels_the_child_and_runs_its_flow` (`BoundaryEventsPostgresIT`)
+
+### PRE-281 A non-interrupting timer boundary runs its flow once and leaves the task open; a timer never outlives its task
+- **Traces to:** `TR-STD-04`, #489
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The same `claim-flow` with `cancelActivity="false"` on `overdue`.
+- **When:** The timer fires; then the officer completes the task. In a second run the officer completes the task before the timer fires.
+- **Then:** On firing the task stays `WAITING_USER`, no work item is cancelled, `remind` runs once and no second timer is scheduled; the instance goes on waiting for the officer and completes when both the task and the boundary's flow have ended. When the task completes before the timer, the timer job is cancelled in the same transaction, the boundary has no live token, and a late firing of that job is refused as stale.
+- **Example:** `overdue` fires with the task open -> reminder sent once, task still open.
+- **Test ID:** `PRE_281_a_non_interrupting_timer_boundary_runs_its_flow_once_and_leaves_the_task_open`, `PRE_281_the_timer_is_cancelled_when_the_task_completes_before_it_fires` (`BoundaryAndThrowEventsTest`)
+
+### PRE-282 An error boundary takes a business error by its code before it becomes an incident; a code no boundary matches still opens one
+- **Traces to:** `TR-STD-04`, `PRE-040`, #489
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A debit `post-debit` with an error boundary `no-funds` for the error code `INSUFFICIENT_FUNDS` and a boundary `any-error` that names no error and so catches every code; the same debit without `any-error`.
+- **When:** The handler answers the business error `INSUFFICIENT_FUNDS`, then `ACCOUNT_FROZEN`.
+- **Then:** With both boundaries, `INSUFFICIENT_FUNDS` takes `no-funds` (the boundary that names the code wins over the catch-all), the step's token is `CANCELLED` and no incident opens; `ACCOUNT_FROZEN` takes `any-error`. Without the catch-all, `ACCOUNT_FROZEN` leaves the token on `debit` and opens the incident `UNHANDLED_BUSINESS_ERROR` with the code, as before this release. A failed call activity matches with the code `CHILD_FAILED` or `CHILD_CANCELLED`. History records `ERROR_THROWN` with the code and, when caught, `caughtBy`.
+- **Example:** `INSUFFICIENT_FUNDS` -> boundary `no-funds`, 0 incidents; `ACCOUNT_FROZEN` with no catch-all -> 1 incident.
+- **Test ID:** `PRE_282_an_error_boundary_takes_the_business_error_with_its_code_and_no_incident_opens`, `PRE_282_an_error_code_no_boundary_matches_opens_an_incident_as_before` (`BoundaryAndThrowEventsTest`), `PRE_282_a_business_error_with_a_matching_boundary_opens_no_incident`, `PRE_282_a_business_error_with_another_code_still_opens_an_incident` (`BoundaryEventsPostgresIT`)
+
+### PRE-283 An error end event is caught by the nearest matching boundary around it; one nothing catches opens an incident on the end event
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A disbursement sub-process `disburse` whose check ends in an error end event for `LIMIT_EXCEEDED`; one file with a boundary on `disburse` for that code, and one whose boundary is for `INSUFFICIENT_FUNDS`.
+- **When:** The check completes and the token reaches the error end event.
+- **Then:** With the matching boundary, the scope token of `disburse` and everything under it is `CANCELLED`, the boundary's flow runs in the enclosing scope and no incident opens; history records `ERROR_THROWN` with `caughtBy`. With the other boundary, the token stays on the end event, an incident `UNHANDLED_BUSINESS_ERROR` names the code, and the sub-process is not cancelled. An error that is not caught inside a sub-process is looked for on the sub-process, then on the scope around it, up to the process. An error throw is an end event only: an intermediate throw with an error definition is not BPMN and is refused at import.
+- **Example:** `LIMIT_EXCEEDED` thrown in `disburse` -> boundary `limit` runs `notify-limit`.
+- **Test ID:** `PRE_283_an_error_end_inside_a_sub_process_is_caught_by_the_boundary_on_the_sub_process`, `PRE_283_an_error_end_that_no_boundary_catches_opens_an_incident_on_the_end_event` (`BoundaryAndThrowEventsTest`)
+
+### PRE-284 An escalation is caught by an interrupting or non-interrupting boundary; one nothing catches is recorded and the flow goes on
+- **Traces to:** `TR-STD-04`, #489, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A KYC sub-process `kyc` that throws the escalation `AML_HIT` and then verifies the customer; three files: a boundary for `AML_HIT` that does not interrupt, one that interrupts, and none.
+- **When:** The instance starts and the throw event is reached.
+- **Then:** Non-interrupting: the AML review runs beside the sub-process, whose own flow goes on to the identity check. Interrupting: the sub-process scope is `CANCELLED`, the identity check never runs, and only the AML review runs. No boundary: the throw is recorded in history as `ESCALATION_THROWN` without `caughtBy`, the flow goes on to the identity check, and no incident opens. An escalation end event ends its token whether it was caught or not.
+- **Example:** `AML_HIT` with no boundary -> `ESCALATION_THROWN`, identity check runs.
+- **Test ID:** `PRE_284_a_non_interrupting_escalation_boundary_runs_beside_the_sub_process_which_goes_on`, `PRE_284_an_interrupting_escalation_boundary_cancels_the_sub_process`, `PRE_284_an_escalation_nothing_catches_is_recorded_and_the_flow_goes_on` (`BoundaryAndThrowEventsTest`)
+
+### PRE-285 A terminate end event cancels every other token of its scope: the instance at the top level, the sub-process inside one
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A screening with a service task `screen` and a user task `manual-check` in parallel, where `screen` ends in a terminate end event; and an onboarding sub-process with a bureau call that ends in a terminate and a review task in parallel, followed by `open-account` in the parent.
+- **When:** `screen` completes and the terminate is reached; in the second file the bureau call completes.
+- **Then:** At the top level the open work item of `manual-check` is cancelled, no token is live, the instance is `COMPLETED` and history records `TERMINATED` with the scope and the number of tokens cancelled. Inside the sub-process the review is cancelled and the sub-process completes, and the parent goes on with `open-account`: a terminate ends its own scope only.
+- **Example:** `screen` ends in a terminate -> `manual-check` cancelled, instance `COMPLETED`.
+- **Test ID:** `PRE_285_a_terminate_end_cancels_the_other_branches_and_the_instance_completes`, `PRE_285_a_terminate_end_inside_a_sub_process_ends_only_that_sub_process` (`BoundaryAndThrowEventsTest`)
+
+### PRE-286 A link throw jumps to the link catch of its name in the same scope; a throw with no catch is refused at import with its element id
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A card registration where the link throw `to-fees` is named `fees`, jumping over the optional step to the link catch `from-fees`; and the same file whose catch is named `charges`.
+- **When:** The registration completes and the token reaches the throw; the second file is imported.
+- **Then:** The token moves to `from-fees` with no sequence flow, the fee is charged next, the optional step never runs, and history records `LINK_JUMPED` with the name and the catch. The second file is refused as `422 VALIDATION_FAILED` with the problem `LINK_CATCH_MISSING` and the element id `to-fees`. A catch named twice in one scope is `LINK_CATCH_DUPLICATE`, and a link whose throw and catch are in different scopes is not a pair.
+- **Example:** `fees` thrown -> `charge-fee` runs; catch `charges` -> `LINK_CATCH_MISSING` on `to-fees`.
+- **Test ID:** `PRE_286_a_link_throw_jumps_to_the_link_catch_of_the_same_name`, `PRE_286_a_link_throw_without_a_catch_of_its_name_is_refused_at_import_with_its_element_id` (`BoundaryAndThrowEventsTest`)
+
+### PRE-287 Boundary, error, escalation, terminate and link events export and read back to the same definition
+- **Traces to:** `TR-STD-04`, #489, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The files of `PRE-280` to `PRE-286`.
+- **When:** Each is read, exported as BPMN and read again.
+- **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip; the export carries the root `error` and `escalation` elements the definitions refer to.
+- **Example:** `over-limit` -> `<bpmn:error errorCode="REFUND_LIMIT_EXCEEDED"/>` and an `errorRef`.
+- **Test ID:** `PRE_287_the_new_events_export_and_read_back_to_the_same_definition` (`BoundaryAndThrowEventsTest`)
+### PRE-270 A broadcast wakes every waiter of its own tenant, by job, and never a waiter of another tenant
+- **Traces to:** `TR-TEN-01`, `TR-STD-11`, `TR-STD-14`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Three `rate-watcher` instances of `bank-a` and one of `bank-b` wait at the signal catch `wait-rate-card` for `rate-card-updated`; a `rate-publisher` instance of `bank-a` reaches a signal throw of the same name; another `rate-watcher` of `bank-a` is cancelled while it waits.
+- **When:** The publisher throws, then the due jobs fire; a broadcast follows the cancel.
+- **Then:**
+  - The throw is a write in the publisher's transaction: the publisher continues and ends, and three `SIGNAL_DELIVERY` jobs of `bank-a` are due while the three waiters still wait. The waiters are not locked by the thrower. The publisher's history has `SIGNAL_THROWN` with `waiters` 3.
+  - When the jobs fire, each waiter continues to its repricing task in a transaction of its own and its subscription is gone. The `bank-b` waiter has no job, no task and still waits.
+  - A waiter cancelled before the broadcast has no subscription and is not counted.
+- **Example:** `bank-a throws rate-card-updated -> 3 jobs, 3 repricing tasks; bank-b waiter unchanged`.
+- **Test ID:** `PRE_270_a_throw_wakes_every_waiter_of_its_tenant_by_job_and_never_a_waiter_of_another_tenant`, `PRE_270_a_cancelled_waiter_leaves_no_subscription_and_is_not_woken` (`SignalEventsPostgresIT`)
+
+### PRE-271 A signal catch waits on one subscription and is woken once, by its own subscription only
+- **Traces to:** `TR-STD-11`, `TR-STD-13`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** An instance at `wait-rate-card`, with the subscription `S1` the kernel asked the shell to store.
+- **When:** A delivery names another subscription; then one names `S1`; then `S1` is delivered again.
+- **Then:** The first is `STALE_ATTEMPT` and changes nothing. The second moves the token to the next step and asks the shell to delete `S1`. The third is `INVALID_STATE`: a second delivery never moves the token again.
+- **Example:** `deliver(S1) twice -> second INVALID_STATE`.
+- **Test ID:** `PRE_271_a_signal_catch_waits_on_one_subscription_and_a_delivery_moves_it_on`, `PRE_271_a_delivery_for_another_subscription_or_a_second_delivery_is_refused` (`SignalAndConditionalEventsTest`)
+
+### PRE-272 A signal throw or signal end event broadcasts once and does not wait
+- **Traces to:** `TR-STD-11`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `rate-publisher` with an intermediate signal throw `announce` before a task, and `rate-closer` whose end event is a signal end.
+- **When:** Each instance starts.
+- **Then:** Each asks the shell for exactly one broadcast of its signal name. The publisher's token passes to the task at once; the closer's instance completes. Neither carries data from its variables into the signal.
+- **Example:** `announce -> BroadcastSignal(rate-card-updated), token at archive`.
+- **Test ID:** `PRE_272_a_signal_throw_broadcasts_once_and_the_thrower_goes_on`, `PRE_272_a_signal_end_broadcasts_and_ends_the_instance` (`SignalAndConditionalEventsTest`)
+
+### PRE-273 A broadcast needs its permission and an idempotency key; a retry wakes and starts nobody twice
+- **Traces to:** `TR-IDEM-01`, `TR-TEN-01`, `TR-SEC-04`, #492
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `bank-b` has a waiting `rate-watcher`, `bank-a` has one too and an active `repricing-on-signal` whose start event is a signal start for `rate-card-updated`.
+- **When:** `bank-b`'s operator broadcasts with the key `K1` and again with `K1`; a caller without `processes:signal:broadcast` broadcasts; a caller with it sends no key; `bank-a` broadcasts with `K1`, twice, and `bank-b` once more with `K2`.
+- **Then:**
+  - The `bank-b` retry returns the first answer and writes no second signal and no second job; only the `bank-b` waiter is woken, the `bank-a` waiter still waits.
+  - The caller without the permission is `403 PERMISSION_DENIED`; the caller without a key is `428 PRECONDITION_REQUIRED`; neither writes a signal.
+  - `bank-a`'s broadcast starts one `repricing-on-signal` instance on the version effective now, its retry starts none, and `bank-b`'s broadcast starts none. The tenant is never read from the request.
+- **Example:** `bank-a K1 twice -> 1 instance, same signalId`.
+- **Test ID:** `PRE_273_a_broadcast_from_the_api_reaches_its_own_tenant_only_and_a_retry_wakes_nobody_twice`, `PRE_273_a_broadcast_needs_its_permission_and_an_idempotency_key`, `PRE_273_a_signal_start_event_starts_one_instance_for_a_broadcast_of_its_tenant_and_a_retry_starts_none` (`SignalEventsPostgresIT`)
+
+### PRE-274 A conditional catch passes at once when true, otherwise waits for a change of the variables, and never fails the step that changed them
+- **Traces to:** `TR-STD-11`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A conditional catch `limit > 0` with `limit` 5000 on arrival; a conditional catch `decision.approved == true` after the task `set-limit`; a conditional start `amount >= 1000000`.
+- **When:** The first instance arrives; the task is completed with `approved` false, then true; the conditional start receives `amount` 500000.
+- **Then:** The first passes at once and records `CONDITION_MET` with `onArrival` true. The second stays waiting after `false`, and moves on in the completion transaction that makes the condition true; a condition that cannot be evaluated yet is not true and never fails the completion. The start is refused with `START_CONDITION_FALSE` and stores nothing.
+- **Example:** `approved false -> waits; approved true -> issue-card`.
+- **Test ID:** `PRE_274_a_conditional_catch_whose_condition_is_true_on_arrival_passes_at_once`, `PRE_274_a_conditional_catch_waits_until_a_completed_task_makes_its_condition_true`, `PRE_274_a_conditional_catch_stays_while_the_condition_is_false_and_never_fails_the_step_that_changes_variables`, `PRE_274_a_conditional_start_whose_condition_is_false_is_refused` (`SignalAndConditionalEventsTest`)
+
+### PRE-275 Signal and conditional events import with their signal names, are refused when broken, and export back to the same definition
+- **Traces to:** `TR-STD-11`, `TR-STD-05`, #492
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A file with a `signal` element named `rate-card-updated` declared after the process, a signal catch, a signal end and a conditional catch; a file whose `signalRef` names no signal and whose condition does not parse; a signal named `rate card!`.
+- **When:** Each is imported, and the first is exported and imported again.
+- **Then:** The first reads with the signal name on both signal events. The second is `422 VALIDATION_FAILED` with `SIGNAL_REF_INVALID` and `CONDITION_INVALID`; the third with `SIGNAL_NAME_INVALID`; nothing is stored. The export reads back to the same canonical definition.
+- **Example:** `signalRef Signal_missing -> SIGNAL_REF_INVALID`.
+- **Test ID:** `PRE_275_a_signal_event_carries_the_name_of_the_signal_it_refers_to_wherever_the_signal_is_declared`, `PRE_275_a_signal_reference_to_no_signal_and_a_broken_condition_are_refused_by_name`, `PRE_275_a_signal_name_outside_the_allowed_characters_is_refused`, `PRE_275_the_export_of_signal_and_conditional_events_reads_back_to_the_same_definition`, `PRE_275_the_worked_example_reads_and_compiles` (`SignalAndConditionalEventsImportTest`), `PRE_275_signal_and_conditional_events_are_known_symbols_not_generic_nodes`, `PRE_275_the_timeline_names_the_signal_and_condition_entries` (cockpit `signalEvents.test.ts`)
+### PRE-230 A message continues exactly the instance whose key it carries
+- **Traces to:** `TR-STD-04`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `order-payment` with a receive task `wait-for-payment` for message `payment-received`, correlated by the variable `orderId`, and `<horus:output name="paymentRef" from="reference"/>`; instances for orders `ORD-20481` and `ORD-20482` are waiting there.
+- **When:** The host calls `POST /messages:correlate` with `messageName` `payment-received`, `correlationKey` `ORD-20481` and payload `reference: TT-77120, ignored: x`.
+- **Then:** The answer is `DELIVERED` with the instance of `ORD-20481` and node `wait-for-payment`. That instance completes with `paymentRef = TT-77120` and no variable `ignored`; its subscription row is gone. The instance of `ORD-20482` still waits with its subscription.
+- **Example:** ``payment-received` for `ORD-20481` -> only that order continues`
+- **Test ID:** `PRE_230_a_message_continues_exactly_the_instance_with_its_key` (`MessageCorrelationPostgresIT`)
+
+### PRE-231 A message that matches two waiting instances is a conflict and nothing runs
+- **Traces to:** `TR-STD-13`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Two instances of `order-payment` wait at `wait-for-payment` with the same `orderId` `ORD-30001`.
+- **When:** `payment-received` for `ORD-30001` arrives.
+- **Then:** The answer is `409 MESSAGE_CORRELATION_AMBIGUOUS`, which does not echo the key. Both instances stay `RUNNING`, no `MESSAGE_RECEIVED` is written, and no idempotency record is kept.
+- **Example:** `two orders with `ORD-30001` -> 409, both still waiting`
+- **Test ID:** `PRE_231_two_waiting_instances_with_the_same_key_are_a_conflict_and_nothing_runs` (`MessageCorrelationPostgresIT`)
+
+### PRE-232 A message with no waiting instance is refused with a problem code and nothing is stored
+- **Traces to:** `TR-STD-13`, `TR-TEN-01`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** One order `ORD-40001` waits at `wait-for-payment`, and no process starts on `payment-received`.
+- **When:** `payment-received` for `ORD-99999` arrives.
+- **Then:** The answer is `422 MESSAGE_NOT_CORRELATED`. No history row, instance or idempotency record is written, so a retry after the receiver starts is a fresh call. Messages are not buffered.
+- **Example:** `key `ORD-99999` -> 422 MESSAGE_NOT_CORRELATED`
+- **Test ID:** `PRE_232_a_message_with_no_waiting_instance_is_refused_and_nothing_is_stored` (`MessageCorrelationPostgresIT`)
+
+### PRE-233 A message never reaches an instance of another tenant
+- **Traces to:** `TR-TEN-01`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `bank-a` has an order `ORD-50001` waiting for `payment-received`.
+- **When:** A caller of `bank-b` sends `payment-received` for `ORD-50001`.
+- **Then:** The answer is `422 MESSAGE_NOT_CORRELATED`. The tenant is the resolver's, never read from the body; the `bank-a` instance is unchanged and no `MESSAGE_RECEIVED` is written.
+- **Example:** ``bank-b` sends `ORD-50001` -> not correlated`
+- **Test ID:** `PRE_233_a_message_never_reaches_an_instance_of_another_tenant` (`MessageCorrelationPostgresIT`)
+
+### PRE-234 Delivering the same message twice with one Idempotency-Key runs it once
+- **Traces to:** `TR-STD-13`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Order `ORD-60001` waits at `wait-for-payment`; `payment-received` was delivered with `Idempotency-Key` `pay-5`.
+- **When:** The same request is sent again with `pay-5`; then the same key with another payload; then the same message with the new key `pay-6`.
+- **Then:** The first repeat returns the first answer, and `MESSAGE_RECEIVED` was written once. The other payload is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The new key finds nothing waiting and is `422 MESSAGE_NOT_CORRELATED`.
+- **Example:** ``pay-5` twice -> one delivery`
+- **Test ID:** `PRE_234_delivering_the_same_message_twice_with_one_key_runs_it_once` (`MessageCorrelationPostgresIT`)
+
+### PRE-235 A send step hands its message to the host once, with only the named values and a masked key
+- **Traces to:** `TR-STD-12`, `TR-SEC-05`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `order-payment` has a send task `request-payment` for `payment-requested`, key variable `orderId`, and `<horus:input name="amount" value="${instance.amount}"/>`; the host registers a `MessageAdapter`.
+- **When:** An instance starts with `orderId` `ORD-70001` and `amount` `1250000`; the same state is run again after a rollback.
+- **Then:** The adapter receives one message of tenant `bank-a`, name `payment-requested`, key `ORD-70001`, payload `amount: 1250000` only, and a 26-character message id. A repeat from the same state carries the same id, so the host's outbox keeps one row. History keeps the key only as the `InputMasker` makes it, never `ORD-70001`.
+- **Example:** `send once, same id on retry`
+- **Test ID:** `PRE_235_a_send_step_hands_its_message_to_the_host_once_with_only_the_named_values_and_a_masked_key` (`MessageCorrelationPostgresIT`), `PRE_235_a_retried_send_step_hands_over_the_same_message_id` (`MessageElementsImportTest`)
+
+### PRE-236 A message starts the process with a message start event
+- **Traces to:** `TR-STD-04`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `order-intake` whose start event is a message start event for `order-submitted`.
+- **When:** `order-submitted` arrives for key `ORD-80001` with payload `customer: C-778`, twice with different Idempotency-Keys; then a caller of `bank-b` sends it.
+- **Then:** The first answer is `STARTED`: one instance with business key `ORD-80001` and the payload as variables. The second returns the same instance and creates no other. `bank-b` has no such process and is `422 MESSAGE_NOT_CORRELATED`.
+- **Example:** ``order-submitted` + `ORD-80001` -> one instance`
+- **Test ID:** `PRE_236_a_message_starts_the_process_with_a_message_start_event_and_the_same_key_finds_the_same_instance` (`MessageCorrelationPostgresIT`)
+
+### PRE-237 Message elements import and export to the same definition; a missing message or key is refused with its code
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example `order-payment.bpmn` (send task, receive task, message end event); a receive task naming a message the file does not declare; a receive task with no `horus:correlationKey`.
+- **When:** Each file is imported; the example is exported and imported again.
+- **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
+- **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
+- **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)

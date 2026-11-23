@@ -80,11 +80,11 @@ class SubsetBpmnReaderTimerTest {
     }
 
     @Test
-    void PRE_006_a_message_catch_event_is_still_named_as_unsupported() {
-        assertThatThrownBy(() -> reader.read(waitFor("<bpmn:messageEventDefinition/>")))
+    void PRE_006_a_cancel_catch_event_is_still_named_as_unsupported() {
+        assertThatThrownBy(() -> reader.read(waitFor("<bpmn:cancelEventDefinition/>")))
                 .isInstanceOf(BpmnUnsupportedElementException.class)
                 .satisfies(e -> assertThat(((BpmnUnsupportedElementException) e).problems())
                         .extracting(DefinitionProblem::element)
-                        .containsExactly("intermediateCatchEvent with messageEventDefinition"));
+                        .containsExactly("intermediateCatchEvent with cancelEventDefinition"));
     }
 }

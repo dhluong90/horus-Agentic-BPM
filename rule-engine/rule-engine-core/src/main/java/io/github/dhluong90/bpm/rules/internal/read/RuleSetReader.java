@@ -63,7 +63,7 @@ public final class RuleSetReader {
     private static final Pattern RULE_SET_NAME = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     private static final Pattern IDENTIFIER = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]*$");
     private static final Pattern RULE_ID = Pattern.compile("^[A-Za-z][A-Za-z0-9_-]*$");
-    private static final Set<String> ROOT_KEYS = Set.of("schemaVersion", "ruleSet", "description",
+    private static final Set<String> ROOT_KEYS = Set.of("schemaVersion", "ruleSet", "displayName", "description",
             "expressionLanguage", "timeZone", "hitPolicy", "errorMode", "effectiveFrom", "moneyRounding", "explanations",
             "inputs", "outputs", "rules");
 
@@ -195,6 +195,11 @@ public final class RuleSetReader {
         String name = text(root, "ruleSet");
         if (!RULE_SET_NAME.matcher(name).matches() || name.length() > 100) {
             throw invalid("ruleSet must be kebab-case, at most 100 characters");
+        }
+        JsonNode displayName = root.get("displayName");
+        if (displayName != null && (!displayName.isString() || displayName.stringValue().isBlank()
+                || displayName.stringValue().length() > 100)) {
+            throw invalid("displayName must be text of 1 to 100 characters");
         }
         String language = optionalText(root, "expressionLanguage", EXPR_V1);
         if (!EXPR_V1.equals(language)) {

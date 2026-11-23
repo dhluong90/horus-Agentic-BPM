@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A loan booking (PRE-044): the loan is registered in the root scope, then the embedded sub-process "disburse" reserves the
+     funds and opens the account in parallel and notifies the partner. When the partner refuses, only the two steps of
+     "disburse" are undone, newest first; the registration stays. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-booking-embedded"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-booking-embedded" name="Loan booking with an embedded sub-process" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="register-loan" horus:handler="register-loan" horus:compensate="cancel-loan"
+                      horus:resultVariable="registration"/>
+    <bpmn:subProcess id="disburse" name="Disburse">
+      <bpmn:startEvent id="disburse-start"/>
+      <bpmn:parallelGateway id="fork"/>
+      <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"
+                        horus:resultVariable="reservation"/>
+      <bpmn:serviceTask id="open-account" horus:handler="open-account" horus:compensate="close-account"
+                        horus:resultVariable="account"/>
+      <bpmn:parallelGateway id="join"/>
+      <bpmn:serviceTask id="notify-partner" horus:handler="partner-hub" horus:mode="remote"
+                        horus:onFailure="compensate" horus:resultVariable="notice"/>
+      <bpmn:endEvent id="disburse-end"/>
+      <bpmn:sequenceFlow id="d1" sourceRef="disburse-start" targetRef="fork"/>
+      <bpmn:sequenceFlow id="d2" sourceRef="fork" targetRef="reserve-funds"/>
+      <bpmn:sequenceFlow id="d3" sourceRef="fork" targetRef="open-account"/>
+      <bpmn:sequenceFlow id="d4" sourceRef="reserve-funds" targetRef="join"/>
+      <bpmn:sequenceFlow id="d5" sourceRef="open-account" targetRef="join"/>
+      <bpmn:sequenceFlow id="d6" sourceRef="join" targetRef="notify-partner"/>
+      <bpmn:sequenceFlow id="d7" sourceRef="notify-partner" targetRef="disburse-end"/>
+    </bpmn:subProcess>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="register-loan"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="register-loan" targetRef="disburse"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="disburse" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

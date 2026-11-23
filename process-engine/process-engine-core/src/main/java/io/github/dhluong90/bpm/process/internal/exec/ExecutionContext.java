@@ -86,6 +86,69 @@ public interface ExecutionContext {
      */
     void compensate(Token failing, String cause);
 
+    /**
+     * Raises a BPMN error from a token (#489, #493). The nearest error boundary that matches the code, on the step
+     * itself or on an enclosing sub-process, call activity or saga block, catches it: the host activity and
+     * everything under it is cancelled and the boundary's flow runs. A boundary without an error code catches every
+     * code; a boundary with one catches only that code and wins over a catch-all at the same level.
+     *
+     * @param source the token that raised it: the failing step, or the error end event
+     * @param code the error code
+     * @param fromStep true when {@code source} is the step that failed, so its own boundaries are searched first; false
+     *     for an error end event, whose search starts at the enclosing scope
+     * @return true when a boundary caught it, and the caller must stop; false when nothing catches it
+     */
+    default boolean throwError(Token source, String code, boolean fromStep) {
+        throw new UnsupportedOperationException("throwError");
+    }
+
+    /**
+     * Raises an escalation from a token (#493). It is recorded in history either way. An interrupting escalation
+     * boundary that matches cancels the host, including the thrower, and runs its flow; a non-interrupting one runs
+     * its flow beside the host. An escalation nothing catches is only recorded, and the flow goes on.
+     *
+     * @param thrower the token on the throw event
+     * @param code the escalation code
+     * @return true when an interrupting boundary caught it and cancelled the thrower, so the caller must stop; false
+     *     when the thrower may go on
+     */
+    default boolean throwEscalation(Token thrower, String code) {
+        throw new UnsupportedOperationException("throwEscalation");
+    }
+
+    /**
+     * A terminate end event (#493): cancels every other live token of the scope, with their tasks, jobs and called
+     * children, and ends the token itself, so the scope completes: the instance at the top level, the sub-process
+     * otherwise.
+     *
+     * @param token the token on the terminate end event
+     */
+    default void terminate(Token token) {
+        throw new UnsupportedOperationException("terminate");
+    }
+
+    /**
+     * Moves a token to another node of the same scope without a sequence flow, as a link throw does (#493).
+     *
+     * @param token the token
+     * @param nodeId the node to enter
+     */
+    default void jump(Token token, String nodeId) {
+        throw new UnsupportedOperationException("jump");
+    }
+
+    /**
+     * A boundary event's own trigger fired (#489): an interrupting one cancels its host activity first, and the token
+     * then leaves by the boundary's outgoing flow.
+     *
+     * @param boundaryToken the token that waited on the boundary event
+     * @param boundary the boundary event
+     */
+    default void fireBoundary(Token boundaryToken, io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent
+            boundary) {
+        throw new UnsupportedOperationException("fireBoundary");
+    }
+
     /** @param effect an effect for the shell */
     void effect(Effect effect);
 

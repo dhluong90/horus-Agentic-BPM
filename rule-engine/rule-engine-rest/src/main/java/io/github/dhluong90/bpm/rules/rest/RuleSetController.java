@@ -269,17 +269,38 @@ public class RuleSetController {
         return against;
     }
 
-    /** {@code POST /rule-sets/{name}/versions/{v}:request-publish}. */
+    /**
+     * {@code POST /rule-sets/{name}/versions/{v}:request-publish}, optional body
+     * {@code {"simulationReportId": "..."}} that attaches a simulation report of this version (PD-115, RLE-201).
+     */
     @PostMapping("/{name}/versions/{version:\\d+}:request-publish")
     public ResponseEntity<byte[]> requestPublish(
             @PathVariable("name") String name,
             @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) {
+            @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId)
+            throws IOException {
         RestSupport.require(callers, "rules:author");
+        byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
+        String reportId = null;
+        if (body.length > 0) {
+            JsonNode node = EngineValues.readRequest(body);
+            if (!node.isObject()) {
+                throw new InputInvalidException("Request body must be a JSON object");
+            }
+            JsonNode value = node.get("simulationReportId");
+            if (value != null && !value.isNull()) {
+                if (!value.isString() || value.stringValue().isBlank()) {
+                    throw new InputInvalidException("simulationReportId must be a non-blank string");
+                }
+                reportId = value.stringValue();
+            }
+        }
         WriteOptions options = new WriteOptions(idempotencyKey, RestSupport.ifMatch(ifMatch), null,
-                ProblemDetails.correlationId(correlationId));
+                ProblemDetails.correlationId(correlationId)).withSimulationReport(reportId);
         return RestSupport.version(HttpStatus.OK, versions.requestPublish(name, version, options), callers);
     }
 

@@ -22,6 +22,12 @@ export interface PlacedNode extends DiagramNode {
   lines: string[];
   /** A box's type in words, broken into lines; empty for events and gateways, whose type is their symbol. */
   typeLines: string[];
+  /**
+   * Set on a sub-process that holds steps of its own (#486): how many steps it holds, counting every level but not
+   * start and end events, and whether it is drawn open. An open one is a frame around its steps, which are placed
+   * inside it; a closed one is a box with a count.
+   */
+  container?: { steps: number; open: boolean };
 }
 
 export interface Point { x: number; y: number }
@@ -32,6 +38,8 @@ export interface PlacedEdge {
   target: string;
   label: string | undefined;
   isDefault: boolean;
+  /** A link between a throw and its catch (#493), drawn dashed. */
+  isLink?: boolean;
   points: Point[];
   /** Centre of the edge's label, in the space dagre kept free for it. */
   labelAt: Point | undefined;
@@ -60,6 +68,10 @@ export const CAPTION_GAP = 10;
 const CAPTION_LINE = 17;
 export const EVENT_RADIUS = 20;
 export const GATEWAY_HALF = 24;
+/** Boundary events (#489): the first sits this far in from the left of its activity, the next ones this far apart, and a flow drops this far under the symbol before it runs on. */
+const BOUNDARY_INSET = 24;
+const BOUNDARY_STEP = 44;
+const BOUNDARY_DROP = 14;
 /** Room kept on each side of an edge label, so it never touches the node or the edge it names. */
 const LABEL_PAD = 10;
 const LABEL_HEIGHT = 22;
@@ -131,6 +143,8 @@ function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
 }
 
 export interface LayoutOptions {
+  /** The sub-processes drawn open, by id; the others are drawn as one box with a count of their steps. */
+  open?: ReadonlySet<string>;
   /**
    * Leave room for status badges on the steps of an instance (CKP-017): a badge sits on a box's top edge and may be
    * wider than the box, so ranks and rows are spaced to keep it clear of the next step.
@@ -142,41 +156,113 @@ export interface LayoutOptions {
 const BADGE_RANKSEP = 56;
 const BADGE_NODESEP = 64;
 
+/** Frame of an open sub-process: a header with its name and the room kept around its steps. */
+export const FRAME_HEADER = 30;
+/** Extra height of a closed sub-process: a row at its foot for the count of its steps and the control that opens it. */
+export const CLOSED_CONTAINER_EXTRA = 26;
+export const FRAME_PAD = 14;
+
+interface Level { width: number; height: number; nodes: PlacedNode[]; edges: PlacedEdge[] }
+
+function shift(level: Level, dx: number, dy: number): void {
+  for (const node of level.nodes) { node.x += dx; node.y += dy; }
+  for (const edge of level.edges) {
+    for (const point of edge.points) { point.x += dx; point.y += dy; }
+    if (edge.labelAt) { edge.labelAt.x += dx; edge.labelAt.y += dy; }
+  }
+}
+
+/** Counts the steps under a container at every level, leaving out start and end events. */
+function stepCount(graph: DiagramGraph, id: string): number {
+  return graph.nodes.filter((node) => node.parentId === id).reduce(
+    (sum, node) => sum + (node.type === 'startEvent' || node.type === 'endEvent' ? 0 : 1) + stepCount(graph, node.id), 0);
+}
+
 /**
- * Lays the graph out. `typeLabel` gives each node's type in words in the user's language, so a box is sized to the
- * words it shows.
+ * Lays one container's own steps out with dagre. An open sub-process is laid out first, on its own, and then takes
+ * its place as one box sized to its steps, so a flow never crosses a frame; a closed one is a task box.
  */
-export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
-  const g = new dagre.graphlib.Graph({ multigraph: true });
+function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: (type: string) => string, options: LayoutOptions): Level {
   const badges = options.badges === true;
+  const everyoneHere = graph.nodes.filter((node) => node.parentId === scope);
+  const hereIds = new Set(everyoneHere.map((node) => node.id));
+  // A boundary event (#489) sits on the lower edge of its activity, so it takes no place of its own in the ranks.
+  const boundaries = everyoneHere.filter((node) => node.attachedTo !== undefined && hereIds.has(node.attachedTo));
+  const boundaryIds = new Set(boundaries.map((node) => node.id));
+  const hostOf = new Map(boundaries.map((node) => [node.id, node.attachedTo ?? '']));
+  const nodesHere = everyoneHere.filter((node) => !boundaryIds.has(node.id));
+  const inner = new Map<string, Level>();
+  const sizes = new Map<string, Size>();
+  const containers = new Map<string, { steps: number; open: boolean }>();
+  for (const node of nodesHere) {
+    const steps = stepCount(graph, node.id);
+    const holds = graph.nodes.some((other) => other.parentId === node.id);
+    if (holds) containers.set(node.id, { steps, open: options.open?.has(node.id) === true });
+    const base = sized(node, shapeOf(node.type), typeLabel(node.type));
+    if (holds && options.open?.has(node.id) === true) {
+      const level = layoutLevel(graph, node.id, typeLabel, options);
+      inner.set(node.id, level);
+      sizes.set(node.id, { ...base, width: Math.max(base.width, level.width + 2 * FRAME_PAD), height: level.height + FRAME_HEADER + FRAME_PAD, lines: base.lines, typeLines: [] });
+    } else if (holds) {
+      sizes.set(node.id, { ...base, height: base.height + CLOSED_CONTAINER_EXTRA });
+    } else {
+      sizes.set(node.id, base);
+    }
+  }
+  const g = new dagre.graphlib.Graph({ multigraph: true });
   g.setGraph({ rankdir: 'LR', nodesep: badges ? BADGE_NODESEP : 28, ranksep: badges ? BADGE_RANKSEP : 24, marginx: 4, marginy: badges ? 36 : 12 });
   g.setDefaultEdgeLabel(() => ({}));
-  const sizes = new Map(graph.nodes.map((node) => [node.id, sized(node, shapeOf(node.type), typeLabel(node.type))]));
-  for (const node of graph.nodes) {
+  for (const node of nodesHere) {
     const size = sizes.get(node.id);
     if (size) g.setNode(node.id, { width: size.width, height: size.height });
   }
-  for (const edge of graph.edges) {
+  const edgesHere = graph.edges.filter((edge) => hereIds.has(edge.source) && hereIds.has(edge.target));
+  for (const edge of edgesHere) {
     const label = edge.label === undefined ? {} : { width: Math.ceil(edge.label.length * CAPTION_CHAR) + 2 * LABEL_PAD, height: LABEL_HEIGHT, labelpos: 'c' };
-    g.setEdge(edge.source, edge.target, label, edge.id);
+    // A flow that leaves a boundary event is ranked as if it left the activity the boundary sits on.
+    g.setEdge(hostOf.get(edge.source) ?? edge.source, edge.target, label, edge.id);
   }
   dagre.layout(g);
 
-  const nodes: PlacedNode[] = graph.nodes.map((node) => {
+  const nodes: PlacedNode[] = nodesHere.map((node) => {
     const shape = shapeOf(node.type);
     const size = sizes.get(node.id) ?? { width: TASK_WIDTH, height: TASK_MIN_HEIGHT, lines: [node.id], typeLines: [] };
     const placed = g.node(node.id) as { x: number; y: number };
     // Symbols sit at the top of their box; shift the box so the symbol centre lies on dagre's centre line and edges stay straight.
     const lift = shape === 'task' ? 0 : size.height / 2 - SYMBOL_SIZE / 2;
-    return { ...node, shape, width: size.width, height: size.height, lines: size.lines, typeLines: size.typeLines, x: placed.x - size.width / 2, y: placed.y - size.height / 2 + lift };
+    const container = containers.get(node.id);
+    return { ...node, shape, width: size.width, height: size.height, lines: size.lines, typeLines: size.typeLines, x: placed.x - size.width / 2, y: placed.y - size.height / 2 + lift, ...(container !== undefined ? { container } : {}) };
   });
+  // Boundary events: on the lower edge of the activity, side by side when there are several (#489).
+  const placedPerHost = new Map<string, number>();
+  for (const node of boundaries) {
+    const host = nodes.find((candidate) => candidate.id === node.attachedTo);
+    if (host === undefined) continue;
+    const index = placedPerHost.get(host.id) ?? 0;
+    placedPerHost.set(host.id, index + 1);
+    const centreX = host.x + BOUNDARY_INSET + index * BOUNDARY_STEP;
+    const centreY = host.y + host.height;
+    const shape = shapeOf(node.type);
+    nodes.push({ ...node, shape, width: SYMBOL_SIZE, height: SYMBOL_SIZE, lines: [], typeLines: [], x: centreX - SYMBOL_SIZE / 2, y: centreY - SYMBOL_SIZE / 2 });
+  }
   const byId = new Map(nodes.map((node) => [node.id, node]));
-  const edges: PlacedEdge[] = graph.edges.map((edge) => {
-    const laid = g.edge({ v: edge.source, w: edge.target, name: edge.id }) as { points?: Point[]; x?: number; y?: number } | undefined;
+  const edges: PlacedEdge[] = edgesHere.map((edge) => {
+    const laid = g.edge({ v: hostOf.get(edge.source) ?? edge.source, w: edge.target, name: edge.id }) as { points?: Point[]; x?: number; y?: number } | undefined;
     const points = (laid?.points ?? []).map((p) => ({ x: p.x, y: p.y }));
     const source = byId.get(edge.source);
     const target = byId.get(edge.target);
-    if (source && points.length > 1) {
+    const leavesBoundary = boundaryIds.has(edge.source);
+    if (leavesBoundary && source && points.length > 1) {
+      // Down from the boundary symbol, along under the activity, then on as dagre routed the flow.
+      const start = symbolCentre(source);
+      const first = points[1];
+      const lane = start.y + EVENT_RADIUS + BOUNDARY_DROP;
+      const rest = points.slice(1);
+      points.length = 0;
+      points.push({ x: start.x, y: start.y + EVENT_RADIUS }, { x: start.x, y: lane });
+      if (first) points.push({ x: first.x, y: lane });
+      points.push(...rest);
+    } else if (source && points.length > 1) {
       const first = points[0];
       const second = points[1];
       if (first && second) points[0] = onOutline(first, second, source);
@@ -196,14 +282,29 @@ export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => st
   const minX = Math.min(0, ...symbols.map((n) => n.x - overhang));
   const maxX = Math.max(box.width ?? 0, ...symbols.map((n) => n.x + n.width + overhang));
   const maxY = Math.max(box.height ?? 0, ...nodes.map((n) => n.y + n.height + 12));
-  if (minX < 0) {
-    for (const node of nodes) node.x -= minX;
-    for (const edge of edges) {
-      for (const point of edge.points) point.x -= minX;
-      if (edge.labelAt) edge.labelAt.x -= minX;
-    }
+  const level: Level = { width: Math.ceil(maxX - minX), height: Math.ceil(maxY), nodes, edges };
+  if (minX < 0) shift(level, -minX, 0);
+  // An open sub-process holds its own level, moved into the frame below the header.
+  const placedInner: PlacedNode[] = [];
+  const placedInnerEdges: PlacedEdge[] = [];
+  for (const node of nodes) {
+    const content = inner.get(node.id);
+    if (content === undefined) continue;
+    shift(content, node.x + FRAME_PAD, node.y + FRAME_HEADER);
+    placedInner.push(...content.nodes);
+    placedInnerEdges.push(...content.edges);
   }
-  return { width: Math.ceil(maxX - minX), height: Math.ceil(maxY), nodes, edges };
+  return { ...level, nodes: [...nodes, ...placedInner], edges: [...edges, ...placedInnerEdges] };
+}
+
+/**
+ * Lays the graph out. `typeLabel` gives each node's type in words in the user's language, so a box is sized to the
+ * words it shows. A sub-process is one box with a count of its steps, or, when `options.open` names it, a frame with
+ * its steps laid out inside (#486).
+ */
+export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
+  const level = layoutLevel(graph, undefined, typeLabel, options);
+  return { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
 }
 
 /** True when two placed nodes' boxes intersect. */
@@ -213,6 +314,9 @@ export function overlaps(a: Pick<PlacedNode, 'x' | 'y' | 'width' | 'height'>, b:
 
 /** The scale "100 %" draws at, and the smallest Fit uses for a definition: its smallest text is then the 12 px caption stop. */
 export const MIN_SCALE = 1;
+
+/** The scale a case's Fit never goes below: the smallest text, the 12 px caption, is then 13 px (#509). */
+export const READABLE_SCALE = 13 / 12;
 
 /** The smallest scale of the "Whole case" overview; below it the drawing scrolls rather than become unreadable. */
 export const WHOLE_FIT_MIN_SCALE = 0.4;

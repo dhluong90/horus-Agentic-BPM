@@ -303,11 +303,11 @@ Source: [`diagrams/message-correlation.mmd`](diagrams/message-correlation.mmd).
 
 | Topic | Design |
 |---|---|
-| API | `MessageService.correlate(CorrelateRequest)` with `name`, `correlationKey`, `messageId`, `variables`; REST `POST /messages:correlate` (`processes:message:correlate`). Result is sealed: `Correlated(instanceId)`, `Started(instanceId)`, `NotCorrelated` |
+| API | As built (#491): `MessageService.correlate(messageName, correlationKey, payload, idempotencyKey)`; REST `POST /messages:correlate` (`processes:message:correlate`). It answers `DELIVERED` or `STARTED`; no waiting instance and no start definition is `422 MESSAGE_NOT_CORRELATED` |
 | Transaction | Sync in-transaction: runs in the caller's transaction and does no network I/O. The host's consumer commits its offset or acknowledgement after the commit |
-| Idempotency | `messageId` is the idempotency key (operation `correlate`, ADR-0006): a redelivery returns the stored result and has no second effect (`TR-STD-13`) |
+| Idempotency | As built (#491): the `Idempotency-Key` header is the key (operation `message-correlate`, ADR-0006): a redelivery returns the stored result and has no second effect (`TR-STD-13`). A refused message stores nothing, not even the key |
 | Matching | One unique index probe on `(tenant_id, event_name, correlation_key)`. The correlation key is evaluated with FEEL or `horus-expr-v1` when the subscription is created, so correlation never evaluates expressions per waiting instance |
-| One receiver per key | The unique index allows one waiting instance subscription per message name and key. Two instances waiting for the same key is a modelling defect reported at the second subscription as incident `MESSAGE_KEY_AMBIGUOUS`, never a silent choice |
+| One receiver per key | As built (#491): `pre_message_subscription` (V47) holds one row per waiting token, found by `(tenant_id, message_name, correlation_key)`. Two waiting tokens for one name and key are not refused when they subscribe; the correlate call answers `409 MESSAGE_CORRELATION_AMBIGUOUS` and nothing runs, never a silent choice. The boundary event stage keeps the unique-index design of the table above |
 | Message start | A definition-level subscription of the effective version starts an instance; the business key can come from the message |
 | Early messages | BPMN does not define buffering. Default: `NotCorrelated` with nothing stored, so the host retries or parks it. Optional per-host buffer with a time to live is an S3 feature (`messages.buffer-ttl`, default off) |
 | Across services | Each pool runs in the service that deployed it. A message flow between pools in different services is a throw through `MessageAdapter` (outbox in the same transaction) and a correlate in the receiving host. The engine never consumes from a broker (section 7.5) |
@@ -318,7 +318,7 @@ Source: [`diagrams/message-correlation.mmd`](diagrams/message-correlation.mmd).
 
 Source: [`diagrams/signal-broadcast.mmd`](diagrams/signal-broadcast.mmd).
 
-A broadcast writes `pre_signal` and one `SIGNAL_DELIVERY` job in the caller's transaction and returns. The poller delivers to the subscriptions that existed at `thrown_at`, in batches of at most 100 instance locks per transaction, with a keyset cursor in the job payload, so a broadcast to 100,000 waiting instances never becomes one long transaction. Delivery is exactly once per subscription: the subscription row is deleted (catch) or the boundary token created (non-interrupting) in the transaction that holds that instance's lock. Signal start events start one instance per definition subscribed, idempotent by `(signalId, definition)`. The signal scope is the tenant within one host; across hosts the host forwards the signal (section 7.5).
+A broadcast writes `pre_signal` and, in one `INSERT .. SELECT` over the tenant's subscriptions of that name, one `SIGNAL_DELIVERY` job for each waiter in the caller's transaction, and returns (as built in #492; the job id is the subscription id, so a waiter is woken once). The poller fires each job in a transaction of its own that locks only that waiter, on any replica, so a broadcast to 100,000 waiting instances never becomes one long transaction and the thrower locks none of them. The batched keyset cursor in a single job, first designed here, trades one job row per waiter for one job per signal; it stays the option if the job rows of a very large broadcast become the cost. Delivery is exactly once per subscription: the subscription row is deleted (catch) or the boundary token created (non-interrupting) in the transaction that holds that instance's lock. Signal start events start one instance per definition subscribed, idempotent by `(signalId, definition)`. The signal scope is the tenant within one host; across hosts the host forwards the signal (section 7.5).
 
 ### 5.6 Event subprocesses
 
@@ -366,7 +366,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Conditional events | Evaluated in the transaction that changes the instance's variables, for that instance's conditional subscriptions only; never by polling |
 | Terminate end event | Cancels every token of its scope under the instance lock |
 | Manual task, none task | Pass through, with a history row |
-| Receive task, send task | As message catch and message throw (S2) |
+| Receive task, send task | As message catch and message throw (#491) |
 | Script task | FEEL or `horus-expr-v1` only (section 7.1) |
 | Lanes and pools | Display; lanes have no execution semantics in BPMN and assignment stays on the task |
 | Ad-hoc subprocess (S3) | Activities available in the scope; started by the host through `startAdHocActivity` or all at once for `ordering="Parallel"` with `cancelRemainingInstances` and `completionCondition` |
@@ -381,14 +381,20 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 |---|---|---|---|---|
 | Start, end (none), user, service, business rule tasks, exclusive and parallel gateways, timer catch, call activity, transaction as `saga`, compensate throw | Import, execute (ADR-0013 subset) | | | |
 | Manual and none tasks | Execute (#485) | | | |
-| Embedded subprocess, terminate end, link events, standard loop | Refused | Execute | | |
-| Boundary timer, error, escalation (interrupting and non-interrupting); error and escalation end and throw events | Refused | Execute | | |
+| Embedded subprocess | Execute (#486) | | | |
+| Terminate end, link events (#493) | Execute (#493) | | | |
+| Standard loop | Refused | Execute | | |
+| Boundary timer, error, escalation (interrupting and non-interrupting); error and escalation end events, escalation throw event | Execute (#489, #493) | | | |
 | Event subprocess with timer, error, escalation start | Refused | Execute | | |
 | Inclusive gateway | Refused | Execute | | |
 | Multi-instance (parallel, sequential) on tasks and subprocesses | Refused | Execute | | |
 | Data objects, data associations, data stores (references) | Refused | Execute | | |
 | Script task (FEEL or `horus-expr-v1`) | Execute with `horus-expr-v1` (#485) | Execute with FEEL | | |
 | Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | |
+| Signal start, catch, boundary, throw and end | Refused | Import | Execute | Start, intermediate catch, intermediate throw and end execute since 0.3.0 (#492); boundary with the boundary events |
+| Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | Intermediate catch and a process-level start execute since 0.3.0 (#492); the start of an event subprocess and the boundary come with them |
+| Message start, intermediate catch and throw, end; receive and send tasks (#491) | Execute | | | |
+| Message boundary | Refused | Execute | | |
 | Signal start, catch, boundary, throw and end | Refused | Import | Execute | |
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |

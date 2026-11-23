@@ -1,22 +1,36 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Event;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SendTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -83,8 +97,81 @@ public final class CanonicalProcessWriter {
             }
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
             switch (node) {
-                case StartEvent s -> step.put("type", "start");
-                case EndEvent e -> step.put("type", "end");
+                case StartEvent s -> {
+                    step.put("type", "start");
+                    writeEventDefinition(step, s.eventDefinitions());
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof ErrorEventDefinition d -> {
+                    // #493: an end event that raises an error; the code is part of the hash.
+                    step.put("type", "errorEnd");
+                    step.put("errorCode", d.errorCode());
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof EscalationEventDefinition d -> {
+                    step.put("type", "escalationEnd");
+                    if (d.escalationCode() != null) {
+                        step.put("escalationCode", d.escalationCode());
+                    }
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof TerminateEventDefinition ->
+                        step.put("type", "terminateEnd");
+                case EndEvent e -> {
+                    step.put("type", "end");
+                    writeEventDefinition(step, e.eventDefinitions());
+                }
+                case BoundaryEvent b -> {
+                    // #489: a boundary event, with its trigger, what it is attached to and whether it interrupts.
+                    step.put("type", "boundaryEvent");
+                    step.put("attachedTo", b.attachedToRef());
+                    if (!b.cancelActivity()) {
+                        step.put("interrupting", false);
+                    }
+                    if (b.eventDefinitions().size() == 1) {
+                        switch (b.eventDefinitions().get(0)) {
+                            case TimerEventDefinition t -> {
+                                step.put("trigger", "timer");
+                                if (t.timeDuration() != null && t.timeDuration().text() != null) {
+                                    step.put("duration", t.timeDuration().text().strip());
+                                }
+                                if (t.timeDate() != null && t.timeDate().text() != null) {
+                                    step.put("until", t.timeDate().text().strip());
+                                }
+                            }
+                            case ErrorEventDefinition e -> {
+                                step.put("trigger", "error");
+                                if (e.errorCode() != null) {
+                                    step.put("errorCode", e.errorCode());
+                                }
+                            }
+                            case EscalationEventDefinition e -> {
+                                step.put("trigger", "escalation");
+                                if (e.escalationCode() != null) {
+                                    step.put("escalationCode", e.escalationCode());
+                                }
+                            }
+                            default -> step.put("trigger", "other");
+                        }
+                    }
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof EscalationEventDefinition d -> {
+                    step.put("type", "escalationThrow");
+                    if (d.escalationCode() != null) {
+                        step.put("escalationCode", d.escalationCode());
+                    }
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof LinkEventDefinition d -> {
+                    step.put("type", "linkThrow");
+                    step.put("link", d.name());
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof LinkEventDefinition d -> {
+                    step.put("type", "linkCatch");
+                    step.put("link", d.name());
+                }
                 case ServiceTask t when t.extensions().first(AgentTaskSpec.class).isPresent() -> {
                     // process-definition.v1 agentTaskStep: the whole guard spec is part of the hash (#52).
                     AgentTaskSpec agent = t.extensions().first(AgentTaskSpec.class).orElseThrow();
@@ -158,7 +245,7 @@ public final class CanonicalProcessWriter {
                 case ManualTask t -> step.put("type", "manualTask");
                 case ScriptTask t -> {
                     step.put("type", "scriptTask");
-                    step.put("script", t.script() == null ? "" : t.script().strip());
+                    step.put("script", t.script() == null ? "" : normal(t.scriptFormat(), t.script().strip()));
                 }
                 case BusinessRuleTask t -> {
                     step.put("type", "decision");
@@ -210,7 +297,8 @@ public final class CanonicalProcessWriter {
                             continue;
                         }
                         branches.addObject().put("when", f.conditionExpression() == null ? "true"
-                                : f.conditionExpression().text()).put("next", f.targetRef());
+                                : normal(f.conditionExpression().language(), f.conditionExpression().text()))
+                                .put("next", f.targetRef());
                     }
                     flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
                             .ifPresent(f -> step.put("default", f.targetRef()));
@@ -225,6 +313,21 @@ public final class CanonicalProcessWriter {
                     if (timer.timeDate() != null && timer.timeDate().text() != null) {
                         step.put("until", timer.timeDate().text().strip());
                     }
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof SignalEventDefinition signal -> {
+                    step.put("type", "signalCatch");
+                    step.put("signal", signal.signalRef());
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof ConditionalEventDefinition conditional -> {
+                    step.put("type", "conditionalCatch");
+                    step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof SignalEventDefinition signal -> {
+                    step.put("type", "signalThrow");
+                    step.put("signal", signal.signalRef());
                 }
                 case ParallelGateway g -> {
                     step.put("type", "parallelGateway");
@@ -249,9 +352,19 @@ public final class CanonicalProcessWriter {
                     step.put("type", "saga");
                     writeSteps(step.putArray("steps"), saga.flowElements());
                 }
+                case SubProcess sub -> {
+                    // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
+                    step.put("type", "subProcess");
+                    writeSteps(step.putArray("steps"), sub.flowElements());
+                }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
                         && t.eventDefinitions().get(0) instanceof CompensateEventDefinition ->
                         step.put("type", "throwCompensation");
+                // #491: message steps. The message name, the key variable and the mappings follow below.
+                case IntermediateCatchEvent c when messageOf(c) != null -> step.put("type", "messageCatch");
+                case IntermediateThrowEvent t when messageOf(t) != null -> step.put("type", "messageThrow");
+                case ReceiveTask t -> step.put("type", "receiveTask");
+                case SendTask t -> step.put("type", "sendTask");
                 default -> step.put("type", node.getClass().getSimpleName());
             }
             // #67: only when declared, so the hash of a step without them is unchanged.
@@ -263,10 +376,46 @@ public final class CanonicalProcessWriter {
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
-            if (!(node instanceof ExclusiveGateway) && !(node instanceof IntermediateThrowEvent) && out.size() == 1) {
+            boolean ends = node instanceof IntermediateThrowEvent t && (t.eventDefinitions().isEmpty()
+                    || t.eventDefinitions().get(0) instanceof CompensateEventDefinition
+                    || t.eventDefinitions().get(0) instanceof LinkEventDefinition);
+            String message = messageOf(node);
+            if (message != null) {
+                step.put("message", message);
+                node.extensions().first(CorrelationKey.class).ifPresent(k -> step.put("correlationKey", k.variable()));
+                List<OutputMapping> mapped = node.extensions().all(OutputMapping.class);
+                if (!mapped.isEmpty() && !(node instanceof CallActivity)) {
+                    ObjectNode received = step.putObject("outputs");
+                    mapped.forEach(o -> received.put(o.name(), o.from()));
+                }
+            }
+            if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
+    }
+
+    /** A start or end event's signal or condition, written only when declared so other definitions keep their hash. */
+    private static void writeEventDefinition(ObjectNode step, List<EventDefinition> definitions) {
+        if (definitions.size() != 1) {
+            return;
+        }
+        switch (definitions.get(0)) {
+            case SignalEventDefinition signal -> step.put("signal", signal.signalRef());
+            case ConditionalEventDefinition conditional -> step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
+            default -> { }
+        }
+    }
+
+    /** @return the message name of a message event or task, or null for any other node */
+    private static String messageOf(FlowNode node) {
+        return switch (node) {
+            case ReceiveTask t -> t.messageRef();
+            case SendTask t -> t.messageRef();
+            case Event e -> e.eventDefinitions().stream().filter(MessageEventDefinition.class::isInstance)
+                    .map(d -> ((MessageEventDefinition) d).messageRef()).findFirst().orElse(null);
+            default -> null;
+        };
     }
 
     /**
@@ -275,5 +424,22 @@ public final class CanonicalProcessWriter {
      */
     public static String canonicalText(Process process) {
         return CanonicalJson.write(write(process));
+    }
+
+    /**
+     * The text a condition or script hashes as. A FEEL text is written in the normal form of
+     * {@code urn:horus-bpm:expr:v1}, so the same meaning in either language is one hash (ADR-0026); a v1 text stays as
+     * authored, so no earlier hash changes. A text that does not compile is kept as written; it never reaches a hash,
+     * because import refuses it first.
+     */
+    private static String normal(String languageId, String text) {
+        if (text == null || !io.github.dhluong90.bpm.expr.languages.ExpressionLanguages.isFeel(languageId)) {
+            return text;
+        }
+        try {
+            return io.github.dhluong90.bpm.expr.languages.ExpressionLanguages.normalForm(languageId, text.strip());
+        } catch (io.github.dhluong90.bpm.expr.api.ExpressionInvalidException e) {
+            return text;
+        }
     }
 }

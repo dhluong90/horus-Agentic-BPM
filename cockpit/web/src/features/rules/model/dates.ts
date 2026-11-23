@@ -26,3 +26,9 @@ export function agoText(elapsedMs: number, locale: Locale): string | undefined {
   const format = new Intl.RelativeTimeFormat(locale === 'vi' ? 'vi-VN' : 'en-GB', { numeric: 'auto' });
   return minutes < 60 ? format.format(-minutes, 'minute') : format.format(-Math.floor(minutes / 60), 'hour');
 }
+
+/** "19 Nov 2026" in English, "19/11/2026" in Vietnamese: the day alone, for a dense list. */
+export function formatDate(iso: string | null | undefined, locale: Locale, timeZone?: string): string | undefined {
+  const full = formatDateTime(iso, locale, timeZone);
+  return full === undefined ? undefined : full.slice(0, full.lastIndexOf(' '));
+}

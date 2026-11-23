@@ -93,6 +93,25 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         String node = rs.getString("node_id");
         String actor = rs.getString("actor_id");
         Instant at = instant(rs, "occurred_at");
+        if ("SIGNAL_THROWN".equals(type)) {
+            Object waiters = Values.readMap(rs.getString("details")).get("waiters");
+            return InstanceActivities.Entry.signalThrown(id, node, actor, at, waiters instanceof Number n ? n.intValue() : null);
+        }
+        if (type.startsWith("MESSAGE_")) {
+            // #491: the name and the already masked key, never the plain key; the result is the entry's meaning.
+            Map<String, Object> details = Values.readMap(rs.getString("details"));
+            Map<String, String> message = new java.util.LinkedHashMap<>();
+            message.put("name", String.valueOf(details.get("message")));
+            if (details.get("correlationKey") != null) {
+                message.put("correlationKey", String.valueOf(details.get("correlationKey")));
+            }
+            message.put("result", switch (type) {
+                case "MESSAGE_RECEIVED" -> "DELIVERED";
+                case "MESSAGE_SENT" -> "HANDED_OVER";
+                default -> "WAITING";
+            });
+            return new InstanceActivities.Entry(id, type, node, actor, at).withMessage(message);
+        }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
             return new InstanceActivities.Entry(id, type, node, actor, at);
         }
@@ -205,6 +224,46 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public List<StoredDefinition> activeDefinitions(int limit) {
         // Engine-internal, across tenants on purpose: the start-up summary of unclassified fields (PD-146).
         return ProcessListQueries.ACTIVE_DEFINITIONS.list(jdbc, List.of(limit), JdbcProcessStore::definition);
+    }
+
+    @Override
+    public List<StoredDefinition> signalStartDefinitions(String tenant, String name, int limit) {
+        return ProcessListQueries.SIGNAL_START_DEFINITIONS.list(jdbc, List.of(tenant, name, limit),
+                JdbcProcessStore::definition);
+    }
+
+    @Override
+    public boolean insertSignal(String tenant, String id, String name, String thrownBy, Instant now) {
+        return jdbc.sql("INSERT INTO pre_signal (tenant_id, id, name, thrown_by, thrown_at) VALUES (?, ?, ?, ?, ?) "
+                        + "ON CONFLICT (tenant_id, id) DO NOTHING")
+                .params(tenant, id, name, thrownBy, ts(now)).update() == 1;
+    }
+
+    @Override
+    public void insertSignalSubscription(String tenant, String id, String name, String definitionId, String instanceId,
+            String tokenId, String nodeId, Instant now) {
+        jdbc.sql("INSERT INTO pre_event_subscription (tenant_id, id, kind, event_name, definition_id, instance_id, "
+                        + "token_id, node_id, created_at) VALUES (?, ?, 'SIGNAL', ?, ?, ?, ?, ?, ?)")
+                .params(tenant, id, name, definitionId, instanceId, tokenId, nodeId, ts(now)).update();
+    }
+
+    @Override
+    public void deleteSubscription(String tenant, String id) {
+        jdbc.sql("DELETE FROM pre_event_subscription WHERE tenant_id = ? AND id = ?").params(tenant, id).update();
+    }
+
+    @Override
+    public int wakeSignalWaiters(String tenant, String name, String signalId, java.time.Duration lease,
+            int maxAttempts, Instant now) {
+        // One statement, one tenant: it reads the waiters of the broadcaster's tenant only and locks no instance.
+        return jdbc.sql("INSERT INTO pre_timer (tenant_id, id, instance_id, definition_id, token_id, job_kind, node_id, "
+                        + "status, next_fire_at, lease_duration, attempt, max_attempts, payload, created_at) "
+                        + "SELECT s.tenant_id, s.id, s.instance_id, s.definition_id, s.token_id, 'SIGNAL_DELIVERY', "
+                        + "s.node_id, 'DUE', ?, make_interval(secs => ?), 0, ?, "
+                        + "jsonb_build_object('signal', s.event_name, 'signalId', ?::text), ? "
+                        + "FROM pre_event_subscription s WHERE s.tenant_id = ? AND s.kind = 'SIGNAL' AND s.event_name = ? "
+                        + "ON CONFLICT (tenant_id, id) DO NOTHING")
+                .params(ts(now), lease.toMillis() / 1000.0, maxAttempts, signalId, ts(now), tenant, name).update();
     }
 
     @Override
@@ -372,6 +431,32 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 throw new IllegalStateException("Token " + t.id() + " belongs to another instance");
             }
         }
+    }
+
+    // ---- message subscriptions (#491) ----------------------------------------------------------------------
+
+    @Override
+    public void insertSubscription(MessageSubscriptionRow r) {
+        jdbc.sql("INSERT INTO pre_message_subscription (tenant_id, id, instance_id, token_id, node_id, message_name, "
+                        + "correlation_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                .params(r.tenantId(), r.id(), r.instanceId(), r.tokenId(), r.nodeId(), r.messageName(),
+                        r.correlationKey(), ts(r.createdAt()))
+                .update();
+    }
+
+    @Override
+    public void retainSubscriptions(String tenant, String instanceId, java.util.Collection<String> keep) {
+        jdbc.sql("DELETE FROM pre_message_subscription WHERE tenant_id = ? AND instance_id = ? "
+                        + "AND NOT (id = ANY (?::text[]))")
+                .params(tenant, instanceId, keep.toArray(new String[0])).update();
+    }
+
+    @Override
+    public List<MessageSubscriptionRow> subscriptions(String tenant, String messageName, String correlationKey,
+            int limit) {
+        return ProcessListQueries.MESSAGE_SUBSCRIPTIONS.list(jdbc, List.of(tenant, messageName, correlationKey, limit),
+                (rs, n) -> new MessageSubscriptionRow(tenant, rs.getString(1), rs.getString(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5), rs.getString(6), instant(rs, "created_at")));
     }
 
     // ---- tasks --------------------------------------------------------------------------------------------

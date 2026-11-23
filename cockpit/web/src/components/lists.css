@@ -1,0 +1,60 @@
+/* Summary tiles, initial discs and the list-with-activity layout of the Processes and Rules lists (Green style). */
+
+.tint-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); margin-bottom: var(--gap); }
+.tint-tile { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: var(--radius-l); background: var(--surface-3); color: var(--ink); min-width: 0; }
+.tint-tile__label { font: var(--type-label); color: var(--ink-2); }
+.tint-tile__value { font: 700 28px/1.2 var(--font-ui); color: var(--ink); }
+.tint-tile--lime { background: var(--surface-contrast); }
+.tint-tile--mint { background: var(--teal-soft); }
+.tint-tile--amber { background: var(--warn-soft); }
+.tint-tile--amber .tint-tile__label { color: var(--warn); }
+.tint-tile--neutral { background: var(--surface-3); }
+
+.disc { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font: 700 12px/1 var(--font-ui); color: var(--teal); }
+.disc--lime { background: var(--ok-soft); }
+.disc--mint { background: var(--teal-soft); }
+.disc--sage { background: var(--accent-soft); }
+
+.listing { display: flex; flex-direction: column; gap: var(--gap); }
+
+.dense th, .dense td { padding: 8px 12px; white-space: nowrap; }
+.dense th:first-child, .dense td:first-child { padding-left: 16px; }
+.dense tbody th { min-width: 200px; white-space: normal; }
+.dense .qtable__action { width: 1%; }
+.dense__name { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dense__text { display: flex; flex-direction: column; min-width: 0; }
+.dense__text .qtable__key { margin-top: 0; }
+.dense .qtable__action { padding-right: 16px; }
+.dense .btn--small { white-space: nowrap; }
+
+.recent { display: flex; flex-direction: column; gap: 4px; }
+.recent__title { font: var(--type-h2); margin: 0 0 4px; }
+.recent__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0 24px; }
+.recent__item { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.recent__text { display: flex; flex-direction: column; min-width: 0; }
+.recent__name { font-weight: 600; overflow-wrap: anywhere; }
+.recent__name a { color: var(--ink); text-decoration: none; }
+.recent__name a:hover { text-decoration: underline; }
+.recent__meta { color: var(--muted); font: var(--type-caption); }
+
+/* Replay of logged decisions (RLE-202). */
+.replay__form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; }
+.replay__form .field__input { min-height: var(--target-min); }
+.replay__cap { width: 120px; }
+.replay__bar { width: 100%; height: 8px; border-radius: var(--radius-pill); overflow: hidden; }
+.replay__bar-same { fill: var(--surface-3); }
+.replay__bar-changed { fill: var(--teal); }
+.replay__tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.replay__table { border: 1px solid var(--line); border-radius: var(--radius-l); overflow: hidden; table-layout: fixed; }
+.replay__table thead th:first-child { width: 240px; }
+.replay__table td, .replay__table th { vertical-align: top; padding: 10px 16px; }
+.replay__table tbody th { font-weight: 400; }
+.replay__table tbody tr:hover > * { background: transparent; }
+.replay__row--changed > th { box-shadow: inset 3px 0 0 var(--indigo); }
+.replay__id { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-weight: 600; }
+.replay__when { color: var(--muted); font: var(--type-caption); font-weight: 400; }
+.replay__why { margin: 0; }
+.replay__progress { height: 6px; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
+.replay__progress > span { display: block; width: 40%; height: 100%; background: var(--teal); border-radius: var(--radius-pill); animation: replay-run 1.4s ease-in-out infinite; }
+@keyframes replay-run { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) { .replay__progress > span { animation: none; width: 100%; opacity: .5; } }

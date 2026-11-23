@@ -17,14 +17,34 @@ import java.util.List;
  * @param acknowledgedWarnings on {@code approve} only: the warnings the approver was shown and accepts, as
  *     {@code { code, input }} pairs, for example {@code UNMASKED_PERSONAL_DATA} on {@code nationalId} (RLE-053, PD-104);
  *     empty when none, never null. The approval is accepted only when this set equals the set the engine recomputes
+ * @param simulationReportId on {@code request-publish} only: the id of a simulation report of this version to attach to
+ *     the request (PD-115, RLE-201); optional, but required for a rule set the host lists in
+ *     {@code lifecycle.require-simulation-report}
  */
 public record WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId,
-        String expectedCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings) {
+        String expectedCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings,
+        String simulationReportId) {
 
     private static final WriteOptions NONE = new WriteOptions(null, null, null);
 
     public WriteOptions {
         acknowledgedWarnings = acknowledgedWarnings == null ? List.of() : List.copyOf(acknowledgedWarnings);
+    }
+
+    /**
+     * Creates options without a simulation report.
+     *
+     * @param idempotencyKey see the record
+     * @param expectedLockVersion see the record
+     * @param comment see the record
+     * @param correlationId see the record
+     * @param expectedCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     */
+    public WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId,
+            String expectedCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings) {
+        this(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash, acknowledgedWarnings,
+                null);
     }
 
     /**
@@ -91,7 +111,7 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions withCorrelationId(String id) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, id, expectedCanonicalHash,
-                acknowledgedWarnings);
+                acknowledgedWarnings, simulationReportId);
     }
 
     /**
@@ -102,7 +122,7 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions acknowledging(List<AcknowledgedWarning> warnings) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash,
-                warnings);
+                warnings, simulationReportId);
     }
 
     /**
@@ -113,6 +133,17 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions expectingContent(String canonicalHash) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, canonicalHash,
-                acknowledgedWarnings);
+                acknowledgedWarnings, simulationReportId);
+    }
+
+    /**
+     * Returns a copy that attaches a simulation report to a publication request (PD-115, RLE-201).
+     *
+     * @param reportId the id of a report run on this version as it is now
+     * @return the options
+     */
+    public WriteOptions withSimulationReport(String reportId) {
+        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash,
+                acknowledgedWarnings, reportId);
     }
 }

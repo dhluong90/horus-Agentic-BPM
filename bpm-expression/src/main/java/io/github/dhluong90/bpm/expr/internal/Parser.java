@@ -72,13 +72,17 @@ public final class Parser {
     private final Map<Expr, Integer> heights = new IdentityHashMap<>();
     private int index;
     private int depth;
+    /** True for the FEEL dialect: the same tree, written with FEEL's operators and double-quoted strings. */
+    private final boolean feel;
 
-    private Parser(String source, ToIntFunction<String> slots, String column, boolean paths, FunctionLibrary functions) {
+    private Parser(String source, ToIntFunction<String> slots, String column, boolean paths, FunctionLibrary functions,
+            boolean feel) {
         this.source = source;
         this.slots = slots;
         this.functions = functions;
         this.column = column;
-        this.tokens = lex(source, paths);
+        this.feel = feel;
+        this.tokens = lex(source, paths, feel);
     }
 
     /**
@@ -118,7 +122,7 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Located parseLocated(String source, ToIntFunction<String> slots, String column) {
-        return parseLocated(source, slots, column, false, FunctionLibrary.empty());
+        return parseLocated(source, slots, column, false, FunctionLibrary.empty(), false);
     }
 
     /**
@@ -134,7 +138,8 @@ public final class Parser {
      */
     public static Located parseLocated(String source, ToIntFunction<String> slots, String column,
             FunctionLibrary functions) {
-        return parseLocated(source, slots, column, false, java.util.Objects.requireNonNull(functions, "functions must not be null"));
+        return parseLocated(source, slots, column, false,
+                java.util.Objects.requireNonNull(functions, "functions must not be null"), false);
     }
 
     /**
@@ -148,16 +153,32 @@ public final class Parser {
      * @throws ExpressionException when the text is not a valid expression
      */
     public static Expr parseWithPaths(String source, ToIntFunction<String> slots) {
-        return parseLocated(source, slots, null, true, FunctionLibrary.empty()).expr();
+        return parseLocated(source, slots, null, true, FunctionLibrary.empty(), false).expr();
+    }
+
+    /**
+     * Parses a FEEL expression whose names may be dotted paths, into the same tree as {@link #parseWithPaths}. The
+     * dialect is the part of FEEL a condition or a script needs: {@code =} and {@code !=}, {@code and}, {@code or},
+     * {@code not(x)}, {@code x in [..]}, {@code x between a and b}, double-quoted strings, {@code null}, arithmetic,
+     * {@code date("..")}, {@code date and time("..")}, {@code money(12.50, "USD")} and {@code matches(x, "..")}.
+     * What is not listed is refused with its position, never read as something else.
+     *
+     * @param source the FEEL text
+     * @param slots maps a name or path to its slot index, or -1 when there is no such name
+     * @return the tree
+     * @throws ExpressionException when the text is not a valid expression
+     */
+    public static Expr parseFeelWithPaths(String source, ToIntFunction<String> slots) {
+        return parseLocated(source, slots, null, true, FunctionLibrary.empty(), true).expr();
     }
 
     private static Located parseLocated(String source, ToIntFunction<String> slots, String column, boolean paths,
-            FunctionLibrary functions) {
+            FunctionLibrary functions, boolean feel) {
         if (source.length() > MAX_LENGTH) {
             throw new ExpressionException(ExpressionError.EXPRESSION_TOO_LONG,
                     "Expression longer than " + MAX_LENGTH + " characters", MAX_LENGTH);
         }
-        Parser parser = new Parser(source, slots, column, paths, functions);
+        Parser parser = new Parser(source, slots, column, paths, functions, feel);
         Expr expr = parser.or();
         Token rest = parser.peek();
         if (rest.kind() != Kind.EOF) {
@@ -266,7 +287,7 @@ public final class Parser {
         Token token = peek();
         if (token.kind() == Kind.OP) {
             Expr.BinaryOp op = switch (token.text()) {
-                case "==" -> Expr.BinaryOp.EQ;
+                case "==", "=" -> Expr.BinaryOp.EQ;
                 case "!=" -> Expr.BinaryOp.NE;
                 case "<" -> Expr.BinaryOp.LT;
                 case "<=" -> Expr.BinaryOp.LE;
@@ -287,7 +308,7 @@ public final class Parser {
         if (acceptWord("in")) {
             return at(new Expr.InList(left, list(), false), token.position());
         }
-        if (acceptWord("is")) {
+        if (!feel && acceptWord("is")) {
             boolean negated = acceptWord("not");
             expectWord("null");
             return at(new Expr.IsNull(left, negated), token.position());
@@ -377,6 +398,15 @@ public final class Parser {
                         return at(new Expr.Literal(null), token.position());
                     }
                     default -> {
+                        if (feel && token.text().equals("date") && peekWord("and") && peekWordAt(1, "time")
+                                && tokens.get(Math.min(index + 2, tokens.size() - 1)).kind() == Kind.LPAREN) {
+                            next();
+                            next();
+                            return temporal(new Token(Kind.IDENT, "datetime", token.position()));
+                        }
+                        if (feel && token.text().equals("money") && peek().kind() == Kind.LPAREN) {
+                            return money(token);
+                        }
                         if (peek().kind() == Kind.LPAREN && (token.text().equals("date") || token.text().equals("datetime"))) {
                             return temporal(token);
                         }
@@ -441,7 +471,7 @@ public final class Parser {
     private Expr call(Token name) {
         Expr.Function function = null;
         for (Expr.Function candidate : Expr.Function.values()) {
-            if (candidate.text().equals(name.text())) {
+            if (!feel && candidate.text().equals(name.text())) {
                 function = candidate;
             }
         }
@@ -489,6 +519,31 @@ public final class Parser {
     public static boolean isScale(BigDecimal scale) {
         return (scale.signum() == 0 || scale.stripTrailingZeros().scale() <= 0)
                 && scale.abs().compareTo(BigDecimal.valueOf(MAX_SCALE)) <= 0;
+    }
+
+    /** FEEL {@code money(12.50, "USD")}, the HORUS money extension: a constant, checked here. */
+    private Expr money(Token function) {
+        expect(Kind.LPAREN, "(");
+        boolean negative = acceptOp("-");
+        Token amount = next();
+        if (amount.kind() != Kind.NUMBER) {
+            throw new ExpressionException(SyntaxHint.LITERAL_ARGUMENT, "money(amount, \"CUR\") takes a number first",
+                    amount.position());
+        }
+        expect(Kind.COMMA, ",");
+        Token currency = next();
+        if (currency.kind() != Kind.STRING) {
+            throw new ExpressionException(SyntaxHint.LITERAL_ARGUMENT,
+                    "money(amount, \"CUR\") takes the currency as a string literal", currency.position());
+        }
+        expect(Kind.RPAREN, ")");
+        try {
+            return at(new Expr.Literal(Money.ofMajor(currency.text(),
+                    (negative ? "-" : "") + new BigDecimal(amount.text()).toPlainString())), function.position());
+        } catch (IllegalArgumentException | ArithmeticException e) {
+            throw new ExpressionException(ExpressionError.INVALID_LITERAL, "Invalid money literal: " + e.getMessage(),
+                    function.position());
+        }
     }
 
     /** {@code today()} or {@code now()}: no argument, bound to the clock slot the resolver gives. */
@@ -660,7 +715,7 @@ public final class Parser {
      * written in a host language, so they are {@link ExpressionError#FORBIDDEN_CONSTRUCT} (TR-SEC-01); the rest is a
      * syntax error, with a hint for the two common slips.
      */
-    private static ExpressionException unexpectedCharacter(String source, int at) {
+    private static ExpressionException unexpectedCharacter(String source, int at, boolean feel) {
         char c = source.charAt(at);
         if (c == '.' && at + 1 < source.length() && isAsciiDigit(source.charAt(at + 1))) {
             return new ExpressionException(SyntaxHint.NUMBER_START, "A number starts with a digit, for example 0.5", at);
@@ -669,6 +724,9 @@ public final class Parser {
             return new ExpressionException(ExpressionError.FORBIDDEN_CONSTRUCT, "'" + c
                     + "' is not part of the expression language: there is no member access, method call, class"
                     + " reference or statement", at);
+        }
+        if (c == '\'' && feel) {
+            return new ExpressionException("FEEL strings are written in double quotes, for example \"gold\"", at);
         }
         if (c == '"') {
             return new ExpressionException(SyntaxHint.SINGLE_QUOTES, "Strings are written in single quotes, for example 'GOLD'", at);
@@ -685,7 +743,7 @@ public final class Parser {
     /** Characters that write member access or statements in a host language: {@code a.b}, {@code x; y}, {@code {}}. */
     private static final String FORBIDDEN_CHARACTERS = ".;{}#@$`\\";
 
-    private static List<Token> lex(String source, boolean paths) {
+    private static List<Token> lex(String source, boolean paths, boolean feel) {
         List<Token> tokens = new ArrayList<>();
         int i = 0;
         int n = source.length();
@@ -708,7 +766,8 @@ public final class Parser {
                     throw new ExpressionException(SyntaxHint.NUMBER_DIGITS, "Only the digits 0 to 9 are allowed in numbers", i);
                 }
                 tokens.add(new Token(Kind.NUMBER, source.substring(start, i), start));
-            } else if (c == '\'') {
+            } else if (c == (feel ? '"' : '\'')) {
+                char quote = c;
                 int start = i++;
                 StringBuilder text = new StringBuilder();
                 boolean closed = false;
@@ -726,11 +785,11 @@ public final class Parser {
                             i += 4;
                             continue;
                         }
-                        if (escaped != '\'' && escaped != '\\') {
+                        if (escaped != quote && escaped != '\\') {
                             throw new ExpressionException(SyntaxHint.STRING_ESCAPE, "Unknown escape '\\" + escaped + "'", i - 2);
                         }
                         text.append(escaped);
-                    } else if (s == '\'') {
+                    } else if (s == quote) {
                         closed = true;
                         break;
                     } else {
@@ -753,7 +812,15 @@ public final class Parser {
                 int start = i;
                 String two = i + 1 < n ? source.substring(i, i + 2) : "";
                 switch (two) {
-                    case "==", "!=", "<=", ">=" -> {
+                    case "==" -> {
+                        if (feel) {
+                            throw new ExpressionException("FEEL equality is written =, for example tier = \"gold\"", start);
+                        }
+                        tokens.add(new Token(Kind.OP, two, start));
+                        i += 2;
+                        continue;
+                    }
+                    case "!=", "<=", ">=" -> {
                         tokens.add(new Token(Kind.OP, two, start));
                         i += 2;
                         continue;
@@ -764,12 +831,18 @@ public final class Parser {
                 }
                 Kind kind = switch (c) {
                     case '<', '>', '+', '-', '*', '/' -> Kind.OP;
+                    case '=' -> {
+                        if (!feel) {
+                            throw unexpectedCharacter(source, start, false);
+                        }
+                        yield Kind.OP;
+                    }
                     case '(' -> Kind.LPAREN;
                     case ')' -> Kind.RPAREN;
                     case '[' -> Kind.LBRACK;
                     case ']' -> Kind.RBRACK;
                     case ',' -> Kind.COMMA;
-                    default -> throw unexpectedCharacter(source, start);
+                    default -> throw unexpectedCharacter(source, start, feel);
                 };
                 tokens.add(new Token(kind, String.valueOf(c), start));
                 i++;

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { nameOf } from '../../app/names';
 import { toHostError } from '../../api/hostError';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useWithdraw, type WithdrawTarget } from './useWithdraw';
@@ -16,7 +17,7 @@ export function WithdrawDialog({ request, onClose, onDone }: { request: Withdraw
   const reasonId = useId();
   const [reason, setReason] = useState('');
   const version = request;
-  const name = { name: version.ruleSet, version: String(version.version) };
+  const name = { name: nameOf('rule set', version.ruleSet, version), version: String(version.version) };
   const withdraw = useWithdraw(() => {
     onDone(t('approvals.withdrawn', name));
   });

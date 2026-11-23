@@ -81,6 +81,10 @@ final class CallActivityBehavior implements FlowNodeBehavior<CallActivity> {
                 String code = ended.outcome() == Command.ChildOutcome.FAILED ? CHILD_FAILED : CHILD_CANCELLED;
                 ctx.history("CHILD_ENDED", token, Map.of("childInstanceId", ended.childInstanceId(), "outcome",
                         ended.outcome().name(), "code", code));
+                if (ctx.throwError(token, code, true)) {
+                    // #489: an error boundary on the call, with this code or none, takes the failed child.
+                    return;
+                }
                 if (InvocationSupport.compensates(node)) {
                     ctx.compensate(token, code);
                     return;

@@ -147,6 +147,72 @@ public final class BpmnModelBuilder {
                 new Expression(duration, null, null), null, null)), null, null, false, null));
     }
 
+    /**
+     * @param id node id
+     * @param signal the signal name
+     * @return this
+     */
+    public BpmnModelBuilder signalCatch(String id, String signal) {
+        return node(new IntermediateCatchEvent(id, null, null, null, List.of(
+                new io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition(id + "-signal", signal, null)),
+                null, null, false, null));
+    }
+
+    /**
+     * @param id node id
+     * @param signal the signal name
+     * @return this
+     */
+    public BpmnModelBuilder signalThrow(String id, String signal) {
+        return node(new io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent(id, null, null, null,
+                List.of(new io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition(id + "-signal", signal,
+                        null)), null, null, null));
+    }
+
+    /**
+     * @param id node id
+     * @param signal the signal name
+     * @return this
+     */
+    public BpmnModelBuilder signalEnd(String id, String signal) {
+        return node(new EndEvent(id, null, null, null, List.of(
+                new io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition(id + "-signal", signal, null)),
+                null, null, null));
+    }
+
+    /**
+     * @param id node id
+     * @param signal the signal name
+     * @return this
+     */
+    public BpmnModelBuilder signalStart(String id, String signal) {
+        return node(new StartEvent(id, null, null, null, List.of(
+                new io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition(id + "-signal", signal, null)),
+                null, null, false, true, null));
+    }
+
+    /**
+     * @param id node id
+     * @param condition a condition in {@value #EXPR_V1}
+     * @return this
+     */
+    public BpmnModelBuilder conditionalCatch(String id, String condition) {
+        return node(new IntermediateCatchEvent(id, null, null, null, List.of(
+                new io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition(id + "-condition",
+                        new Expression(condition, EXPR_V1, null), null)), null, null, false, null));
+    }
+
+    /**
+     * @param id node id
+     * @param condition a condition in {@value #EXPR_V1}
+     * @return this
+     */
+    public BpmnModelBuilder conditionalStart(String id, String condition) {
+        return node(new StartEvent(id, null, null, null, List.of(
+                new io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition(id + "-condition",
+                        new Expression(condition, EXPR_V1, null), null)), null, null, false, true, null));
+    }
+
     /** @param id node id @return this */
     public BpmnModelBuilder parallelGateway(String id) {
         return node(new ParallelGateway(id, null, null, null, GatewayDirection.UNSPECIFIED, null));
@@ -183,6 +249,19 @@ public final class BpmnModelBuilder {
      */
     public BpmnModelBuilder flow(String flowId, String source, String target, String condition) {
         flows.add(new SequenceFlow(flowId, null, source, target, new Expression(condition, EXPR_V1, null), null, null));
+        return this;
+    }
+
+    /**
+     * @param flowId flow id
+     * @param source source node id
+     * @param target target node id
+     * @param condition condition text
+     * @param language the language id of the condition, for example the FEEL URI
+     * @return this
+     */
+    public BpmnModelBuilder flow(String flowId, String source, String target, String condition, String language) {
+        flows.add(new SequenceFlow(flowId, null, source, target, new Expression(condition, language, null), null, null));
         return this;
     }
 

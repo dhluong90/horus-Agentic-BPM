@@ -24,16 +24,25 @@ final class RuleEngineModule {
             "rules:masked:search", "rules:pin");
 
     /**
-     * Feature flags turned on in this build. None yet: a flag is added with the feature it announces, so a
-     * client never offers a screen whose endpoints are missing.
+     * Feature flags turned on in this build. A flag is added with the feature it announces, so a client never offers
+     * a screen whose endpoints are missing: {@code rules.templates} (GET /rule-set-templates),
+     * {@code rules.simulation-reports} (the report endpoints and {@code simulationReportId}) and
+     * {@code rules.history-readings} ({@code :simulate-history-readings}).
      */
-    static final List<String> FEATURES = List.of();
+    static final List<String> FEATURES = List.of("rules.history-readings", "rules.simulation-reports",
+            "rules.templates");
 
     /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
     /** The warning codes an approval must acknowledge (PD-104, RLE-053), comma-separated; empty when none. */
     static final String ACKNOWLEDGE_WARNINGS = "lifecycle.acknowledge-warnings";
+
+    /**
+     * The rule sets whose publication request must carry a simulation report (PD-115, RLE-201), comma-separated; empty
+     * when none. Clients read it to offer Request publish only after a report was run.
+     */
+    static final String REQUIRE_SIMULATION_REPORT = "lifecycle.require-simulation-report";
 
     /** Whether an approval or rejection must name the reviewed content hash (RLE-084), published for clients. */
     static final String REQUIRE_CONTENT_HASH = "approval.require-content-hash";
@@ -100,6 +109,26 @@ final class RuleEngineModule {
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
             String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings,
             boolean requireContentHash) {
+        return descriptor(rolePermissions, cockpitDrafts, retireApproval, retireLastVersion, acknowledgeWarnings,
+                requireContentHash, io.github.dhluong90.bpm.rules.internal.service.EngineDefaults.REQUIRE_SIMULATION_REPORT);
+    }
+
+    /**
+     * The descriptor for this host.
+     *
+     * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
+     * @param acknowledgeWarnings the validated {@code lifecycle.acknowledge-warnings}
+     * @param requireContentHash the validated {@code approval.require-content-hash}
+     * @param requireSimulationReport the validated {@code lifecycle.require-simulation-report}, published
+     *     comma-separated
+     * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
+     */
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings,
+            boolean requireContentHash, List<String> requireSimulationReport) {
         // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
         // the retirement mode in force (PD-080). The approver rule is always makers here, whatever the host sets
         // (#273): V2 rle_version_four_eyes refuses an approval by the author in the database.
@@ -110,6 +139,7 @@ final class RuleEngineModule {
         settings.put(RETIRE_LAST_VERSION, retireLastVersion);
         settings.put(ACKNOWLEDGE_WARNINGS, String.join(",", acknowledgeWarnings));
         settings.put(REQUIRE_CONTENT_HASH, requireContentHash);
+        settings.put(REQUIRE_SIMULATION_REPORT, String.join(",", requireSimulationReport));
         return ModuleDescriptor.builder("rules", engineVersion(), "v1")
                 .features(FEATURES)
                 .settings(settings)

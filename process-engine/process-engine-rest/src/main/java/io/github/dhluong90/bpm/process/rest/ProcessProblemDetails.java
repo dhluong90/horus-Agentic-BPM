@@ -55,6 +55,8 @@ public class ProcessProblemDetails {
             Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("ASYNC_STEP_NOT_FOUND", HttpStatus.NOT_FOUND),
+            Map.entry("MESSAGE_NOT_CORRELATED", UNPROCESSABLE),
+            Map.entry("MESSAGE_CORRELATION_AMBIGUOUS", HttpStatus.CONFLICT),
             Map.entry("TASK_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("FORM_NOT_DECLARED", HttpStatus.NOT_FOUND),
             Map.entry("REPLAY_NOT_FOUND", HttpStatus.NOT_FOUND),

@@ -28,6 +28,9 @@ import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
 import io.github.dhluong90.bpm.rules.api.RetirementRequest;
 import io.github.dhluong90.bpm.rules.api.RuleSetVersion;
 import io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException;
+import io.github.dhluong90.bpm.rules.api.SimulationReportNotFoundException;
+import io.github.dhluong90.bpm.rules.api.SimulationReportOutOfDateException;
+import io.github.dhluong90.bpm.rules.api.SimulationReportRequiredException;
 import io.github.dhluong90.bpm.rules.api.SourceFormat;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
 import io.github.dhluong90.bpm.rules.api.Violation;
@@ -508,6 +511,49 @@ public final class DefaultVersionService implements VersionService {
         });
     }
 
+    @Override
+    public RuleReadings.HistoryReadings readHistorySimulation(io.github.dhluong90.bpm.rules.api.HistorySimulationResult result) {
+        Objects.requireNonNull(result, "result must not be null");
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_READ);
+        if (result.items().size() > EngineDefaults.READINGS_MAX) {
+            throw new ReadingsTooLargeException("decisions", result.items().size(), EngineDefaults.READINGS_MAX);
+        }
+        return context.withoutDooming(() -> {
+            ReadingBuilder.Table simulated = table(tenant, result.ruleSet(), result.version());
+            java.util.Map<Integer, java.util.Optional<ReadingBuilder.Table>> loggedTables = new java.util.HashMap<>();
+            List<RuleReadings.HistoryItemReading> items = new java.util.ArrayList<>(result.items().size());
+            for (var item : result.items()) {
+                java.util.Optional<ReadingBuilder.Table> logged = item.simulated() == null || item.logged() == null
+                        ? java.util.Optional.empty()
+                        : loggedTables.computeIfAbsent(item.loggedVersion(),
+                                v -> loggedTable(tenant, result.ruleSet(), v));
+                // Fail closed: a decision that was not evaluated, or whose logged version cannot be read again, gets
+                // no sentence at all, only the code and the names of the masked inputs.
+                if (!item.replayable() || logged.isEmpty()) {
+                    items.add(new RuleReadings.HistoryItemReading(item.decisionId(), item.loggedVersion(),
+                            item.evalClock(), false, RuleReadings.REPLAY_NOT_POSSIBLE, item.maskedInputs(), null,
+                            null));
+                    continue;
+                }
+                items.add(new RuleReadings.HistoryItemReading(item.decisionId(), item.loggedVersion(),
+                        item.evalClock(), item.changed(), null, List.of(),
+                        reader.outcome(item.simulated(), simulated), reader.outcome(item.logged(), logged.get())));
+            }
+            return new RuleReadings.HistoryReadings(result.ruleSet(), result.version(), result.status(), result.from(),
+                    result.to(), result.truncated(), reader.languages(), items);
+        });
+    }
+
+    /** The table of the version a decision was logged with, or empty when it can no longer be read. */
+    private java.util.Optional<ReadingBuilder.Table> loggedTable(String tenant, String ruleSet, int version) {
+        try {
+            return java.util.Optional.of(table(tenant, ruleSet, version));
+        } catch (RuntimeException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
     private ReadingBuilder.Table table(String tenant, String ruleSet, int version) {
         StoredVersion stored = existing(tenant, ruleSet, version);
         return reader.table(ruleSet, version, stored.canonicalJson(), context.masking().maskByDefault(tenant));
@@ -520,20 +566,53 @@ public final class DefaultVersionService implements VersionService {
                         : new RuleSetNotFoundException(ruleSet));
     }
 
+    /** The longest {@code simulationReportId} accepted; a report id is a 26-character ULID. */
+    private static final int MAX_REPORT_ID_LENGTH = 64;
+
+    /**
+     * Checks the simulation report of a publication request (PD-115, RLE-201): a rule set the host lists needs one, and a
+     * report named must be of this version and run on the content the version has now.
+     */
+    private void requireSimulationReport(String tenant, StoredVersion current, String reportId) {
+        if (reportId == null) {
+            if (context.settings().requireSimulationReport().contains(current.ruleSet())) {
+                throw new SimulationReportRequiredException(current.ruleSet(), current.version());
+            }
+            return;
+        }
+        var report = context.reports().find(tenant, current.ruleSet(), current.version(), reportId)
+                .orElseThrow(() -> new SimulationReportNotFoundException(current.ruleSet(), current.version(),
+                        reportId));
+        if (!report.canonicalHash().equals(current.canonicalHash())) {
+            throw new SimulationReportOutOfDateException(current.ruleSet(), current.version(), reportId);
+        }
+    }
+
     @Override
     public RuleSetVersion requestPublish(String ruleSet, int version, WriteOptions options) {
         WriteOptions opts = options == null ? WriteOptions.none() : options;
         EventEnvelope.requireValidCorrelationId(opts.correlationId());
         String tenant = context.tenant();
         String actor = context.callerWith(PERMISSION_AUTHOR);
-        String requestHash = Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
-                String.valueOf(opts.expectedLockVersion()));
+        String reportId = opts.simulationReportId();
+        if (reportId != null && (reportId.isBlank() || reportId.length() > MAX_REPORT_ID_LENGTH)) {
+            throw new InputInvalidException("simulationReportId must be 1 to " + MAX_REPORT_ID_LENGTH + " characters");
+        }
+        // The report joins the request hash only when named, so a request stored before this field existed replays.
+        String requestHash = reportId == null
+                ? Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()))
+                : Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
+                        String.valueOf(opts.expectedLockVersion()), reportId);
         return context.idempotent(tenant, "request-publish", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.DRAFT) {
                 throw new InvalidStateException(ruleSet, version, current.status(), "request-publish");
             }
             checkLock(current, opts);
+            // RLE-201: a report of this version, run on the content it has now, and one for every rule set the host
+            // lists; checked before anything is written.
+            requireSimulationReport(tenant, current, reportId);
             // RLE-004: the draft is checked again with today's checker, so a draft stored before a check existed
             // cannot reach an approver; a refusal leaves it DRAFT.
             recheck(current);
@@ -543,10 +622,16 @@ public final class DefaultVersionService implements VersionService {
             StoredVersion updated = current.requested(actor, now);
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REQUESTED, current.status(), actor, null, now);
+            if (reportId != null) {
+                context.reports().attach(tenant, ruleSet, version, reportId, actor, now);
+            }
             // DESIGN 3.3: the request names the behaviour hash and the date it asks for (null means at approval).
             event(tenant, EVENT_PUBLISH_REQUESTED, updated, actor, now, opts.correlationId(), payload -> {
                 payload.put("canonicalHash", updated.canonicalHash());
                 payload.put("requestedBy", actor);
+                if (reportId != null) {
+                    payload.put("simulationReportId", reportId);
+                }
                 payload.set("effectiveFrom", EngineValues.value(updated.effectiveFrom()));
             });
             return view(updated, false);

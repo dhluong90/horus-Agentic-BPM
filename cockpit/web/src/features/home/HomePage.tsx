@@ -1,44 +1,58 @@
 import { useState, type ReactNode } from 'react';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
-import type { VersionSummary } from '../../api/rules/schemas';
-import { usePersonName } from '../../app/people';
+import type { TaskSummary } from '../../api/processes/schemas';
 import { formatRoute, type Area } from '../../app/route';
-import { AreaError, EmptyState, LoadingRows, type NextAction } from '../../components/PageParts';
+import { EmptyState } from '../../components/PageParts';
 import type { MessageKey } from '../../i18n/en';
 import { useI18n } from '../../i18n/I18nProvider';
-import { PendingList } from '../approvals/PendingList';
-import { QueueRows } from '../approvals/QueueRows';
-import { itemKey, reviewRoute, type ApprovalItem, type Engine } from '../approvals/queue';
+import { type ApprovalItem, type Engine } from '../approvals/queue';
 import { useApprovalQueue, type QueueState } from '../approvals/useApprovalQueue';
+import { useIncidentList } from '../incidents/api/useIncidents';
 import { useRetryRules } from '../overview/useRetryRules';
-import { mapLoadable, ownWork, useEveryRuleSet, useOpenVersions, type Loadable, type OwnWork } from '../overview/useRuleOverview';
-import { RuleSetTable } from '../rules/RuleSetTable';
-import { formatDateTime } from '../rules/model/dates';
+import { mapLoadable, ownWork, useEveryRuleSet, useOpenVersions, type Loadable } from '../overview/useRuleOverview';
+import { useProcessesSession } from '../processes/api/processesContext';
 import { useRulesSession } from '../rules/api/rulesContext';
+import { useQueue } from '../tasks/api/useTasks';
+import { WORK } from '../tasks/model/queue';
+import { useOverdueText } from '../tasks/parts';
+import { ApprovalsCard, AuthorCard, DecisionsCard, RecentCard, Tile, TasksCard, type TileModel } from './HomeParts';
+import { dueToday, longestOverdue } from './model';
+import { useDecisionsToday } from './useDecisionsToday';
+import '../../components/home.css';
 
-/** Rows of the recent rule sets card; the full list is one click away. */
-const RECENT_ROWS = 5;
+/** How often the task and incident figures are read again when the host gives no period (seconds). */
+const REFRESH = { tasks: 30, incidents: 60 } as const;
+
+export interface HomeRefresh { inboxSeconds?: number | undefined; incidentsSeconds?: number | undefined }
 
 /**
- * Home, the landing page for every role (PD-092). Its content follows what /me allows: an approver sees the
- * requests waiting for them across both engines, an author their own drafts and requests, anyone who reads rules
- * the recent rule sets, and a user with nothing to do here one line saying so. Every number comes from the engines.
+ * Home, the landing page for every role (PD-092). What it shows follows the host's modules and what /me allows: key
+ * figures for tasks, incidents and approvals, the user's tasks, the requests they may approve, and today's decisions.
+ * A figure whose API the host lacks is left out, never invented. Every number comes from the engines.
  */
-export function HomePage({ pageLimit, me, areas, engines }: { pageLimit: number; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[] }) {
+export function HomePage({ pageLimit, me, areas, engines, refresh }: { pageLimit: number; me: BpmMeV1; areas: readonly Area[]; engines: readonly Engine[]; refresh?: HomeRefresh }) {
   const { t } = useI18n();
+  const [now] = useState(() => new Date());
   const rules = areas.includes('rules');
   const approver = mayApprove(me.permissions, engines);
+  const { can } = useProcessesSession();
+  const tasksOn = areas.includes('tasks') && can(WORK);
+  const incidentsOn = areas.includes('incidents');
   const name = me.user.displayName ?? me.user.id;
+  const headline = <h1 id="home-title">{t(greeting(now.getHours()), { name })}</h1>;
   return (
     <section className="workspace" aria-labelledby="home-title">
-      <div className="page-head">
-        <h1 id="home-title">{t(greeting(new Date().getHours()), { name })}</h1>
-        <p className="page-head__sub">{t(subtitle(me.permissions, rules, approver))}</p>
-      </div>
-      {rules || approver ? <RoleContent pageLimit={pageLimit} me={me} engines={engines} rules={rules} approver={approver} /> : (
-        <article className="card">
-          <EmptyState icon="home" text={t('home.nothingForRole')} />
-        </article>
+      {rules || approver || tasksOn || incidentsOn ? (
+        <Dashboard pageLimit={pageLimit} me={me} engines={engines} rules={rules} approver={approver} tasksOn={tasksOn} incidentsOn={incidentsOn}
+          decisionsOn={areas.includes('decisions')} now={now} refresh={refresh} title={headline} />
+      ) : (
+        <>
+          <div className="page-head">
+            {headline}
+            <p className="page-head__sub">{t(subtitle(me.permissions, rules, approver))}</p>
+          </div>
+          <article className="card"><EmptyState icon="home" text={t('home.nothingForRole')} /></article>
+        </>
       )}
     </section>
   );
@@ -77,136 +91,101 @@ function approvable(state: QueueState): Loadable<ApprovalItem[]> {
   }
 }
 
-function RoleContent({ pageLimit, me, engines, rules, approver }: { pageLimit: number; me: BpmMeV1; engines: readonly Engine[]; rules: boolean; approver: boolean }) {
+interface TaskList { tasks: TaskSummary[]; more: boolean }
+
+/** A task list query as one async value; a list that failed is a failure, never a zero. Undefined when it is off. */
+function loaded(query: { isError: boolean; error: unknown; data: { data: TaskSummary[]; hasNext: boolean } | undefined }, enabled: boolean): Loadable<TaskList> | undefined {
+  if (!enabled) return undefined;
+  if (query.isError) return { status: 'error', error: query.error };
+  if (query.data === undefined) return { status: 'loading' };
+  return { status: 'ready', data: { tasks: query.data.data, more: query.data.hasNext } };
+}
+
+function Dashboard({ pageLimit, me, engines, rules, approver, tasksOn, incidentsOn, decisionsOn, now, refresh, title }: {
+  pageLimit: number; me: BpmMeV1; engines: readonly Engine[]; rules: boolean; approver: boolean; tasksOn: boolean; incidentsOn: boolean; decisionsOn: boolean;
+  now: Date; refresh: HomeRefresh | undefined; title: ReactNode;
+}) {
   const { t } = useI18n();
   const { userId } = useRulesSession();
+  const overdueText = useOverdueText();
+  const taskSeconds = refresh?.inboxSeconds ?? REFRESH.tasks;
+  const mineQuery = useQueue('mine', tasksOn, taskSeconds);
+  const lateQuery = useQueue('mine', tasksOn, taskSeconds, true);
+  const incidentQuery = useIncidentList('OPEN', refresh?.incidentsSeconds ?? REFRESH.incidents, incidentsOn);
   const queue = useApprovalQueue(engines, pageLimit);
   const retryRules = useRetryRules();
   const ruleSets = useEveryRuleSet(pageLimit, rules);
-  const versions = useOpenVersions(ruleSets);
   const author = rules && me.permissions.includes('rules:author');
+  const versions = useOpenVersions(ruleSets);
+  const myWork = mapLoadable(versions, (data) => ownWork(data, userId));
+  const hourly = useDecisionsToday(pageLimit, decisionsOn && me.permissions.includes('rules:log:read'), now);
+
+  const mine = loaded(mineQuery, tasksOn);
+  const late = loaded(lateQuery, tasksOn);
+  const incidents = incidentsOn && !incidentQuery.isError ? incidentQuery.data : undefined;
   const toReview = approvable(queue.state);
-  const mine = mapLoadable(versions, (data) => ownWork(data, userId));
-  const focus = focalItem(toReview, author ? mine : undefined);
-  // The focal request is not repeated in the list, and the list shows requests only, never drafts.
-  const focusKey = focus?.kind === 'review' ? itemKey(focus.item) : undefined;
-  const otherReviews = mapLoadable(toReview, (data) => data.filter((item) => itemKey(item) !== focusKey));
-  const focusDraft = focus?.kind === 'draft' ? `${focus.version.ruleSet}/${String(focus.version.version)}` : undefined;
-  // Approvers see "Pending approvals", which holds requests only. Authors who cannot approve see their drafts
-  // and requests together, under a title that says so (the focal draft is not repeated).
-  const myRequests = mapLoadable(mine, (data) => data.filter((item) => item.kind === 'request'));
-  const myWork = mapLoadable(mine, (data) => data.filter((item) => `${item.version.ruleSet}/${String(item.version.version)}` !== focusDraft));
+  const count = (more: boolean, n: number) => (more ? t('tasks.more', { count: String(n) }) : String(n));
+
+  const dueNow = mine?.status === 'ready' ? dueToday(mine.data.tasks, now).length : undefined;
+  const lateNow = late?.status === 'ready' ? late.data.tasks.length : undefined;
+  const tiles: TileModel[] = [];
+  if (tasksOn && mine?.status !== 'error') {
+    tiles.push({
+      id: 'due', tone: 'on-track', icon: 'tasks', value: dueNow === undefined ? undefined : String(dueNow), label: t('home.tile.due'),
+      status: t('home.status.onTrack'), note: t('home.tile.dueNote'), href: formatRoute({ name: 'tasks', view: 'mine' }),
+    });
+  }
+  if (tasksOn && late?.status !== 'error') {
+    const longest = late?.status === 'ready' ? overdueText(longestOverdue(late.data.tasks)) : undefined;
+    tiles.push({
+      id: 'overdue', tone: lateNow === undefined || lateNow === 0 ? 'on-track' : 'act-now', icon: 'clock',
+      value: late?.status === 'ready' ? count(late.data.more, late.data.tasks.length) : undefined, label: t('home.tile.overdue'),
+      status: lateNow === 0 ? t('home.status.none') : t('home.status.actNow'),
+      note: lateNow === 0 ? t('home.tile.overdueNone') : longest !== undefined ? t('home.tile.overdueLongest', { time: longest }) : t('home.tile.overdueNote'),
+      href: formatRoute({ name: 'tasks', view: 'mine', overdue: true }),
+    });
+  }
+  if (incidentsOn && !incidentQuery.isError) {
+    const open = incidents?.data.length;
+    tiles.push({
+      id: 'incidents', tone: open === 0 ? 'on-track' : 'urgent', icon: 'incidents', value: incidents === undefined ? undefined : count(incidents.hasNext, incidents.data.length), label: t('home.tile.incidents'),
+      status: open === 0 ? t('home.status.clear') : t('home.status.urgent'), note: open === 0 ? t('home.tile.incidentsNone') : t('home.tile.incidentsNote'),
+      href: formatRoute({ name: 'incidents', view: 'open' }),
+    });
+  }
+  if (approver && toReview.status !== 'error') {
+    const waiting = toReview.status === 'ready' ? toReview.data.length : undefined;
+    tiles.push({
+      id: 'approvals', tone: 'waiting', icon: 'approvals', value: waiting === undefined ? undefined : String(waiting), label: t('home.tile.approvals'),
+      status: waiting === 0 ? t('home.status.clear') : t('home.status.waiting'), note: t('home.tile.approvalsNote'), href: formatRoute({ name: 'approvals' }),
+    });
+  }
+
+  const attention = (dueNow ?? 0) + (lateNow ?? 0) + (toReview.status === 'ready' ? toReview.data.length : 0);
+  const sub = attention > 0 ? t('home.subtitle.attention', { count: String(attention) }) : t(subtitle(me.permissions, rules, approver));
+  const tasksCard = tasksOn && mine !== undefined;
+  const chart = hourly.status !== 'unavailable';
   return (
     <div className="home">
-      {(author || approver) ? (
-        <div className={focus === undefined ? 'home__top home__top--single' : 'home__top'}>
-          {focus !== undefined ? <FocusCard focus={focus} /> : null}
-          {approver
-            ? <PendingCard toReview={otherReviews} mine={author ? myRequests : undefined} onRetryReview={queue.retry} onRetryMine={retryRules} />
-            : <PendingCard toReview={undefined} mine={myWork} title={t('home.yourDraftsAndRequests')} onRetryReview={queue.retry} onRetryMine={retryRules} />}
+      <div className="page-head home__head">
+        {title}
+        <p className="page-head__sub">{sub}</p>
+      </div>
+      {tiles.length > 0 ? <div className="tiles">{tiles.map((tile) => <Tile key={tile.id} tile={tile} />)}</div> : null}
+      {tasksCard || approver || chart ? (
+        <div className={approver ? 'home__grid' : 'home__grid home__grid--wide'}>
+          {tasksCard ? <TasksCard tasks={mapLoadable(mine, (data) => data.tasks)} now={now} onRetry={() => { void mineQuery.refetch(); }} /> : null}
+          {chart ? <DecisionsCard hourly={hourly} /> : null}
+          {approver ? <ApprovalsCard items={toReview} now={now} onRetry={queue.retry} /> : null}
         </div>
       ) : null}
-      {rules ? <RecentCard ruleSets={ruleSets} /> : null}
+      {rules ? (
+        <div className={author ? 'home__more' : 'home__more home__more--single'}>
+          {author ? <AuthorCard mine={myWork} onRetry={retryRules} /> : null}
+          <RecentCard ruleSets={ruleSets} />
+        </div>
+      ) : null}
     </div>
   );
 }
 
-type Focus = { kind: 'review'; item: ApprovalItem; waiting: number } | { kind: 'draft'; version: VersionSummary };
-
-/** The one next step: the request that has waited longest (as Approvals' Review next), else the author's latest draft. */
-function focalItem(toReview: Loadable<ApprovalItem[]>, mine: Loadable<OwnWork[]> | undefined): Focus | undefined {
-  if (toReview.status === 'ready' && toReview.data.length > 0) {
-    const next = toReview.data[0];
-    if (next !== undefined) return { kind: 'review', item: next, waiting: toReview.data.length };
-  }
-  if (mine?.status === 'ready') {
-    const draft = mine.data.find((item) => item.kind === 'draft');
-    if (draft !== undefined) return { kind: 'draft', version: draft.version };
-  }
-  return undefined;
-}
-
-/** The single contrast card of the screen (styleguide: one focal point). */
-function FocusCard({ focus }: { focus: Focus }) {
-  const { t, locale } = useI18n();
-  const personName = usePersonName();
-  if (focus.kind === 'review') {
-    const { item } = focus;
-    return (
-      <article className="focus-card" aria-labelledby="focus-title">
-        <p className="focus-card__eyebrow">{t('home.focus.review')}</p>
-        <h2 id="focus-title" className="focus-card__title">{t('rules.nameVersion', { name: item.title, version: String(item.version) })}</h2>
-        <p className="focus-card__meta tnum">{t('home.sentBy', { date: formatDateTime(item.requestedAt, locale) ?? '', name: personName(item.requestedBy, item.requesterName) })}</p>
-        <div className="focus-card__actions">
-          <a className="btn btn--contrast" href={formatRoute(reviewRoute(item))}>{t('approvals.review')}</a>
-          <a className="link-action link-action--contrast" href={formatRoute({ name: 'approvals' })}>{t('home.focus.allWaiting', { count: String(focus.waiting) })} <span aria-hidden="true">→</span></a>
-        </div>
-      </article>
-    );
-  }
-  const { version } = focus;
-  return (
-    <article className="focus-card" aria-labelledby="focus-title">
-      <p className="focus-card__eyebrow">{t('home.focus.continue')}</p>
-      <h2 id="focus-title" className="focus-card__title">{t('rules.nameDraft', { name: version.ruleSet, version: String(version.version) })}</h2>
-      <p className="focus-card__meta tnum">{t('home.savedAt', { date: formatDateTime(version.createdAt, locale) ?? '' })}</p>
-      <div className="focus-card__actions">
-        <a className="btn btn--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' })}>{t('home.focus.continueEditing')}</a>
-        <a className="link-action link-action--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: undefined, lens: undefined })}>{t('home.focus.openRuleSet')} <span aria-hidden="true">→</span></a>
-      </div>
-    </article>
-  );
-}
-
-/** Pending approvals: the user's own requests and drafts, and the requests they may review, one view at a time. */
-function PendingCard({ toReview, mine, title, onRetryReview, onRetryMine }: {
-  toReview: Loadable<ApprovalItem[]> | undefined; mine: Loadable<OwnWork[]> | undefined; title?: string; onRetryReview: () => void; onRetryMine: () => void;
-}) {
-  const { t } = useI18n();
-  const [view, setView] = useState<'review' | 'mine'>(toReview !== undefined ? 'review' : 'mine');
-  const count = (value: Loadable<unknown[]> | undefined) => (value?.status === 'ready' ? value.data.length : undefined);
-  return (
-    <article className="card card--list" aria-labelledby="home-pending">
-      <div className="card__head">
-        <h2 id="home-pending" className="card__title">{title ?? t('home.pending')}</h2>
-        {toReview !== undefined && mine !== undefined ? (
-          <div className="seg seg--small" role="group" aria-label={t('home.pending')}>
-            <button type="button" className="hit" aria-pressed={view === 'mine'} onClick={() => { setView('mine'); }}>
-              {t('home.yourWork')} <span className="seg__count tnum">{count(mine) ?? ''}</span>
-            </button>
-            <button type="button" className="hit" aria-pressed={view === 'review'} onClick={() => { setView('review'); }}>
-              {t('home.toReview')} <span className="seg__count tnum">{count(toReview) ?? ''}</span>
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {view === 'review' && toReview !== undefined ? (
-        <PendingBody items={toReview} empty={t('home.noOtherReviews')} action={{ label: t('menu.approvals'), href: formatRoute({ name: 'approvals' }) }} onRetry={onRetryReview} render={(items) => <QueueRows items={items} />} />
-      ) : mine !== undefined ? (
-        <PendingBody items={mine} empty={t('home.noOwnWork')} action={{ label: t('home.openRules'), href: formatRoute({ name: 'rule-sets' }) }} onRetry={onRetryMine} render={(items) => <PendingList items={items} />} />
-      ) : null}
-    </article>
-  );
-}
-
-function PendingBody<T>({ items, empty, action, onRetry, render }: { items: Loadable<T[]>; empty: string; action: NextAction; onRetry: () => void; render: (items: T[]) => ReactNode }) {
-  if (items.status === 'loading') return <LoadingRows rows={2} />;
-  if (items.status === 'error') return <AreaError error={items.error} onRetry={onRetry} />;
-  if (items.data.length === 0) {
-    return <EmptyState icon="approvals" text={empty} action={action} />;
-  }
-  return <>{render(items.data.slice(0, RECENT_ROWS))}</>;
-}
-
-function RecentCard({ ruleSets }: { ruleSets: ReturnType<typeof useEveryRuleSet> }) {
-  const { t } = useI18n();
-  return (
-    <article className="card card--table" aria-labelledby="home-recent">
-      <div className="card__head card__head--padded">
-        <h2 id="home-recent" className="card__title">{t('home.recentRuleSets')}</h2>
-        <a className="link-action" href={formatRoute({ name: 'rule-sets' })}>{t('home.allRuleSets')} <span aria-hidden="true">→</span></a>
-      </div>
-      <RuleSetTable ruleSets={ruleSets} limit={RECENT_ROWS} recentFirst emptyText={t('rulesArea.empty')} />
-    </article>
-  );
-}

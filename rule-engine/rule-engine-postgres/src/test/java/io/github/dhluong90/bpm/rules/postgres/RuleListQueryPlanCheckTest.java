@@ -135,6 +135,8 @@ class RuleListQueryPlanCheckTest {
         samples.put("live-version-inputs", ListQuery.params());
         samples.put("published-version-inputs", ListQuery.params());
         samples.put("version-functions", ListQuery.params("tenant", "bank-a", "versionId", VERSION));
+        samples.put("simulation-reports", ListQuery.params("tenant", "bank-a", "ruleSet", "rule-set-0007", "version", 1,
+                "limit", 50));
         samples.put("published-function-uses", ListQuery.params());
         samples.put("settings-seen", ListQuery.params("setting", "x"));
         samples.put("decision-partitions", ListQuery.params());

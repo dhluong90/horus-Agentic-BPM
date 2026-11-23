@@ -26,7 +26,11 @@ describe('CKP-069 a definition without stored layout is laid out automatically',
 
     expect(layout.nodes).toHaveLength(13);
     for (const [index, a] of layout.nodes.entries()) {
-      for (const b of layout.nodes.slice(index + 1)) expect(overlaps(a, b), `${a.id} overlaps ${b.id}`).toBe(false);
+      for (const b of layout.nodes.slice(index + 1)) {
+        // A boundary event sits on the edge of its own step by design (#489).
+        if (a.attachedTo === b.id || b.attachedTo === a.id) continue;
+        expect(overlaps(a, b), `${a.id} overlaps ${b.id}`).toBe(false);
+      }
     }
     // Left to right: every flow ends further right than it starts, so the diagram reads in flow order.
     const byId = new Map(layout.nodes.map((node) => [node.id, node]));
@@ -114,12 +118,29 @@ describe('CKP-070 diagram nodes are keyed by BPMN element type; unknown types re
   });
 
   it('CKP_070_an_unknown_type_stays_in_the_graph_with_its_type_name_and_the_rest_is_intact', () => {
-    const graph = readBpmnGraph(LOAN_ORIGINATION_BPMN);
+    // A message boundary is not drawn by this cockpit yet; the timer boundary of the loan demo is (#489).
+    const graph = readBpmnGraph(LOAN_ORIGINATION_BPMN.replace(
+      '<bpmn:timerEventDefinition><bpmn:timeDuration>P2D</bpmn:timeDuration></bpmn:timerEventDefinition>',
+      '<bpmn:messageEventDefinition/>'));
     const boundary = graph.nodes.find((node) => node.id === 'no-documents');
-    expect(boundary).toEqual({ id: 'no-documents', name: 'No documents in 2 days', type: 'boundaryEvent:timer' });
-    expect(isKnownNodeType('boundaryEvent:timer')).toBe(false);
+    expect(boundary).toEqual({ id: 'no-documents', name: 'No documents in 2 days', type: 'boundaryEvent:message', attachedTo: 'capture', interrupting: false });
+    expect(isKnownNodeType('boundaryEvent:message')).toBe(false);
+    expect(isKnownNodeType('boundaryEvent:timer')).toBe(true);
     expect(graph.edges.some((edge) => edge.source === 'no-documents' && edge.target === 'remind')).toBe(true);
     expect(layoutGraph(graph).nodes.find((node) => node.id === 'no-documents')).toBeDefined();
+  });
+
+  it('CKP_070_message_steps_are_known_nodes_with_envelope_icons_hollow_to_wait_and_filled_to_send', () => {
+    const xml = `<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"><bpmn:process id="p" isExecutable="true">
+      <bpmn:startEvent id="s"/><bpmn:sendTask id="ask"/><bpmn:receiveTask id="wait"/>
+      <bpmn:intermediateCatchEvent id="c"><bpmn:messageEventDefinition/></bpmn:intermediateCatchEvent>
+      <bpmn:intermediateThrowEvent id="t"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>
+      <bpmn:endEvent id="e"><bpmn:messageEventDefinition/></bpmn:endEvent>
+      <bpmn:sequenceFlow id="f1" sourceRef="s" targetRef="ask"/><bpmn:sequenceFlow id="f2" sourceRef="ask" targetRef="wait"/>
+    </bpmn:process></bpmn:definitions>`;
+    const types = Object.fromEntries(readBpmnGraph(xml).nodes.map((node) => [node.id, node.type]));
+    expect(types).toEqual({ s: 'startEvent', ask: 'sendTask', wait: 'receiveTask', c: 'intermediateCatchEvent:message', t: 'intermediateThrowEvent:message', e: 'endEvent:message' });
+    for (const type of Object.values(types)) expect(isKnownNodeType(type)).toBe(true);
   });
 
   it('CKP_070_a_document_with_a_doctype_or_no_process_is_refused_not_guessed', () => {

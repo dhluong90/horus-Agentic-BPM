@@ -21,6 +21,19 @@ export const metaRulesOnly: BpmMetaV1 = {
   limits: { maxPageSize: 200 },
 };
 
+/**
+ * A host with rule set templates and simulation reports (PD-112, PD-115): it announces both as features and asks for a
+ * report with every publication request of card-fee.
+ */
+export const metaWithReports: BpmMetaV1 = {
+  ...metaRulesOnly,
+  modules: [{
+    module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1',
+    features: ['rules.history-readings', 'rules.simulation-reports', 'rules.templates'],
+    settings: { 'authoring.cockpit-drafts': true, 'lifecycle.require-simulation-report': 'card-fee' },
+  }],
+};
+
 /** A module name no cockpit of this release knows: what a newer host with a third engine module reports. */
 export const UNKNOWN_MODULE = 'cases';
 
@@ -45,7 +58,7 @@ export const META_MODULES = { rules: rulesModule, processes: processesModule, un
 export const meLan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'lan', displayName: 'Nguyễn Thị Lan' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'rules:author'],
   roles: ['PRICING_AUTHOR'],
 };
@@ -54,7 +67,7 @@ export const meLan: BpmMeV1 = {
 export const meDan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'dan', displayName: 'Đỗ Văn Dân' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read'],
   roles: ['PRICING_READER'],
 };
@@ -62,7 +75,7 @@ export const meDan: BpmMeV1 = {
 export const meMinh: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'minh', displayName: 'Trần Văn Minh' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'rules:approve', 'rules:log:read'],
   roles: ['PRICING_APPROVER'],
 };
@@ -71,7 +84,7 @@ export const meMinh: BpmMeV1 = {
 export const meHoa: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'hoa', displayName: 'Phạm Thị Hoa' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'processes:read', 'processes:task:work'],
   roles: ['COMPLIANCE_REVIEWER'],
 };
@@ -80,7 +93,7 @@ export const meHoa: BpmMeV1 = {
 export const meAn: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'an', displayName: 'Lê Thị An' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:task:work'],
   roles: ['credit-officer'],
   groups: ['loans-operations'],
@@ -90,7 +103,7 @@ export const meAn: BpmMeV1 = {
 export const meSau: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'sau', displayName: 'Võ Thị Sáu' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:task:work', 'processes:task:manage'],
   roles: ['credit-officer', 'credit-approver', 'operations-supervisor'],
   groups: ['loans-operations'],
@@ -100,7 +113,7 @@ export const meSau: BpmMeV1 = {
 export const meTuan: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'tuan', displayName: 'Trần Minh Tuấn' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:read', 'processes:incident:manage'],
   roles: ['operations-officer'],
 };
@@ -109,9 +122,18 @@ export const meTuan: BpmMeV1 = {
 export const meLinh: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'linh', displayName: 'Đặng Thùy Linh' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['processes:read', 'processes:incident:manage'],
   roles: ['operations-officer'],
+};
+
+/** An operations lead: works her own tasks, reads incidents and the decision log, approves rule and process changes (Home). */
+export const meDaniel: BpmMeV1 = {
+  schemaVersion: 1,
+  user: { id: 'daniel', displayName: 'Daniel Reed' },
+  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  permissions: ['rules:read', 'rules:approve', 'rules:log:read', 'processes:read', 'processes:approve', 'processes:task:work'],
+  roles: ['operations-lead'],
 };
 
 /** The example host with the Process Engine beside the Rule Engine. */
@@ -124,7 +146,7 @@ export const metaWithProcesses: BpmMetaV1 = {
 export const meHa: BpmMeV1 = {
   schemaVersion: 1,
   user: { id: 'ha', displayName: 'Phạm Thu Hà' },
-  tenant: { current: 'bank-a', allowed: ['bank-a'] },
+  tenant: { current: 'bank-a', allowed: ['bank-a'], names: { 'bank-a': 'Sao Mai retail' } },
   permissions: ['rules:read', 'rules:log:read'],
   roles: ['INTERNAL_AUDITOR'],
 };
@@ -167,7 +189,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report', 'rules-author-replay', 'rules-author-replay-no-log'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -208,6 +230,16 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
         meta: json({ ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'authoring.cockpit-drafts': false } }] }),
         me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
       };
+    case 'rules-author-templates':
+      // An author who may simulate, on a host with templates and required reports.
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate'] }) };
+    case 'rules-author-replay':
+      // An author who may simulate and read the decision log, on a host that announces replay.
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate', 'rules:log:read'] }) };
+    case 'rules-author-replay-no-log':
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate'] }) };
+    case 'rules-approver-report':
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate', 'rules:simulate'] }) };
     case 'rules-reader':
       return { ...ok, me: json(meDan) };
     case 'processes-reviewer':
@@ -232,6 +264,9 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, meta: json(metaWithProcesses), me: json({ ...meHoa, permissions: ['processes:read'] }) };
     case 'rules-auditor':
       return { ...ok, me: json(meHa) };
+    case 'home-operations':
+      // The dev server only (?scenario=home-operations): an operations lead with both engines, for the Home screenshots.
+      return { ...ok, meta: json(metaWithProcesses), me: json(meDaniel) };
     case 'tasks-operator':
       return { ...ok, meta: json(metaWithProcesses), me: json(meAn) };
     case 'tasks-supervisor':
@@ -315,9 +350,10 @@ export function scenarioUser(scenario: Scenario): string {
   if (scenario === 'rules-auditor' || scenario === 'rules-auditor-no-log') return meHa.user.id;
   if (scenario === 'tasks-operator') return meAn.user.id;
   if (scenario === 'tasks-supervisor') return meSau.user.id;
+  if (scenario === 'home-operations') return meDaniel.user.id;
   if (scenario === 'incidents-operator') return meTuan.user.id;
   if (scenario === 'incidents-proposer') return meLinh.user.id;
-  return scenario === 'ready-approver' || scenario === 'rules-approver' || scenario === 'processes-approver' || scenario === 'migration-approver' ? meMinh.user.id : meLan.user.id;
+  return scenario === 'ready-approver' || scenario === 'rules-approver' || scenario === 'rules-approver-report' || scenario === 'processes-approver' || scenario === 'migration-approver' ? meMinh.user.id : meLan.user.id;
 }
 
 /** The permissions /me lists in a scenario, which the mock Rule Engine uses for allowedActions and checks. */
