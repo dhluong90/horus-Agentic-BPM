@@ -1780,9 +1780,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Traces to:** `TR-STD-04`, `PRE-033`, #485
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** A `scriptTask` whose script `amount *` is on line 5; a `scriptTask` with no script or no `horus:resultVariable`; a `scriptTask` with `scriptFormat` FEEL, and one with `javascript`.
+- **Given:** A `scriptTask` whose script `amount *` is on line 5; a `scriptTask` with no script or no `horus:resultVariable`; a `scriptTask` with `scriptFormat` `javascript`.
 - **When:** Each file is imported.
-- **Then:** The first is `422 VALIDATION_FAILED` with problem `SCRIPT_INVALID`, the element id and line 5. The second lists `SCRIPT_MISSING` and `RESULT_VARIABLE_REQUIRED`. FEEL is `422 BPMN_SCRIPT_FORMAT_UNSUPPORTED` with stage `S1`, and `javascript` the same code with stage `not planned`. Nothing is stored.
+- **Then:** The first is `422 VALIDATION_FAILED` with problem `SCRIPT_INVALID`, the element id and line 5. The second lists `SCRIPT_MISSING` and `RESULT_VARIABLE_REQUIRED`. `javascript` is `422 BPMN_SCRIPT_FORMAT_UNSUPPORTED` with stage `not planned` and its name in the message (FEEL is accepted since #498, PRE-256). Nothing is stored.
 - **Example:** `scriptFormat javascript -> BPMN_SCRIPT_FORMAT_UNSUPPORTED, not planned`.
 - **Test ID:** `PRE_252_a_script_that_is_not_valid_is_refused_with_the_line_of_the_script`, `PRE_252_a_script_task_needs_a_script_and_a_result_variable`, `PRE_252_a_script_in_another_language_is_refused_with_its_stage`
 
@@ -1795,3 +1795,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
 - **Example:** `System.exit(0) -> refused at activation`.
 - **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`
+
+### PRE-254 A FEEL condition takes the flow it matches
+- **Traces to:** `TR-STD-04`, `TR-STD-02`, #498
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** An exclusive gateway whose flow `tier-check__gold` has the FEEL condition `amount > 1000 and tier = "gold"` and a default flow `tier-check__standard`.
+- **When:** An instance starts with `amount` 5,000 and `tier` gold; with `amount` 1,000 and gold; with `amount` 5,000 and silver.
+- **Then:** The first takes `tier-check__gold`; the other two take the default. A FEEL list test (`country in ["VN", "SG"]`) and a date literal (`date("2027-01-01")`) read as in FEEL.
+- **Example:** `amount = 1000` is not `> 1000`, so the default flow is taken.
+- **Test ID:** `PRE_254_a_feel_condition_takes_the_flow_it_matches_and_the_default_otherwise`, `PRE_254_feel_chooses_the_branch_of_a_gold_loan_over_1000`, `PRE_254_list_membership_and_dates_read_as_in_feel`
+
+### PRE-255 A FEEL condition follows the null and money rules of the Rule Engine
+- **Traces to:** `RLE-006`, `PRE-004`, #498
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The condition `amount > 1000 and tier = "gold"` with `amount` null; `tier != "gold"` with `tier` null; `amount >= money(100000000, "VND")` with a USD amount.
+- **When:** The gateway runs.
+- **Then:** An ordering with null is null, so the first does not hold and the default flow is taken; `tier != "gold"` with a null tier is true (two-valued equality); `false and null` is false and `true and null` is null, which does not hold. Money compared with another currency fails the step with `CONDITION_ERROR`, never a silent false.
+- **Example:** `null > 1000` is null, so the gold flow is not taken.
+- **Test ID:** `PRE_255_a_null_in_a_feel_comparison_does_not_hold_and_the_default_flow_is_taken`, `PRE_255_null_follows_feel_three_valued_logic_and_only_true_holds`, `PRE_255_a_feel_condition_over_money_compares_only_within_one_currency`, `PRE_255_money_compares_within_one_currency_and_a_mismatch_is_an_error_not_false`
+
+### PRE-256 Import accepts the FEEL URI, names any other language, and hashes one meaning once
+- **Traces to:** `PRE-033`, `PRE-252`, `ADR-0026`, #498
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A `conditionExpression` and a `scriptTask` in FEEL under the DMN FEEL URI of any version; a condition in `http://www.w3.org/1999/XPath`; the FEEL condition `tier == "gold"` (v1 equality); and the same script written in FEEL and in `urn:horus-bpm:expr:v1`.
+- **When:** Each file is imported and compiled.
+- **Then:** The FEEL files import and the text is kept as written on export. XPath is `422 BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` naming `http://www.w3.org/1999/XPath`. The v1 equality in FEEL is `CONDITION_INVALID` with the position and the hint that FEEL writes `=`. The FEEL and v1 scripts have one `definitionHash`, because a FEEL text is hashed in the normal form of `urn:horus-bpm:expr:v1`; a v1 text hashes as authored, so no earlier hash changes. The v1 language still refuses FEEL spelling.
+- **Example:** `amount > 1000 and tier = "gold"` and `amount > 1000 and tier == 'gold'` hash the same.
+- **Test ID:** `PRE_256_a_feel_condition_imports_and_a_language_other_than_the_two_is_refused_by_name`, `PRE_256_a_feel_script_and_its_v1_spelling_are_one_definition`, `PRE_256_an_invalid_feel_condition_is_refused_at_activation_with_the_position`, `PRE_256_a_language_other_than_v1_and_feel_fails_with_its_name`, `PRE_256_a_condition_in_v1_spelling_is_a_problem_in_feel_with_a_hint_and_a_position`, `PRE_256_the_same_meaning_in_either_language_has_one_normal_form`, `PRE_256_every_dmn_feel_uri_names_feel_and_nothing_else_does`, `PRE_256_the_v1_language_still_reads_its_own_spelling_and_refuses_feels`, `PRE_256_the_worked_feel_example_reads_and_compiles`
+
+### PRE-257 A script budget is set through the expression API and holds in either language
+- **Traces to:** `TR-SEC-01`, `PRE-253`, #517
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `ExpressionLanguages.withBudget(language, stepBudget, timeoutMillis)` in `bpm-expression`, a script of 41 terms (`1 + 1 + ...`), and the Process Engine core.
+- **When:** The script runs with a budget of 20 steps and with 500; the kernel contract rule is checked.
+- **Then:** With 500 it gives 41; with 20 it fails with `EVALUATION_BUDGET_EXCEEDED`, in v1 and in FEEL; a bound out of range or an unknown language is refused. No class of `core` depends on `io.github.dhluong90.bpm.expr.internal`: the script step uses the factory, and the earlier exemption for `Evaluator`, `EvaluationLimits` and `RegexLimits` is gone.
+- **Example:** 41 terms need about 83 nodes, over a budget of 20.
+- **Test ID:** `PRE_257_a_budgeted_language_stops_a_script_past_its_step_budget_in_both_languages`, `PRE_257_a_bound_out_of_range_or_an_unknown_language_is_refused`, `PRE_257_core_reaches_the_expression_library_only_through_its_api_spi_and_languages`

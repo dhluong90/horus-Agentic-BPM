@@ -144,6 +144,98 @@ class ExclusiveGatewayTest {
                         .contains(org.assertj.core.groups.Tuple.tuple("CONDITION_MISSING", "amount-check__auto")));
     }
 
+    private static final String FEEL = "https://www.omg.org/spec/DMN/20191111/FEEL/";
+
+    private static Process feelLoan() {
+        return BpmnModelBuilder.process("loan-origination")
+                .startEvent("start")
+                .exclusiveGateway("tier-check", "tier-check__standard")
+                .userTask("gold-desk", "role:GOLD_DESK", "goldReview")
+                .userTask("standard-desk", "role:CREDIT_OFFICER", "review")
+                .endEvent("end")
+                .chain("start", "tier-check")
+                .flow("tier-check__gold", "tier-check", "gold-desk", "amount > 1000 and tier = \"gold\"", FEEL)
+                .flow("tier-check__standard", "tier-check", "standard-desk")
+                .chain("gold-desk", "end")
+                .chain("standard-desk", "end").build();
+    }
+
+    private static String choice(ScenarioRunner run) {
+        return run.history().stream()
+                .filter(h -> "NODE_COMPLETED".equals(h.type()) && "tier-check".equals(h.nodeId()))
+                .map(h -> String.valueOf(h.details().get("flow"))).findFirst().orElseThrow();
+    }
+
+    @Test
+    void PRE_254_a_feel_condition_takes_the_flow_it_matches_and_the_default_otherwise() {
+        // Given a FEEL condition amount > 1000 and tier = "gold"
+        // When a gold customer asks for 5,000 Then the gold flow is taken
+        assertThat(choice(run(feelLoan(), Map.of("amount", new java.math.BigDecimal("5000"), "tier", "gold"))))
+                .isEqualTo("tier-check__gold");
+        // When the same customer asks for exactly 1,000, or a silver customer asks for 5,000, the default is taken
+        assertThat(choice(run(feelLoan(), Map.of("amount", new java.math.BigDecimal("1000"), "tier", "gold"))))
+                .isEqualTo("tier-check__standard");
+        assertThat(choice(run(feelLoan(), Map.of("amount", new java.math.BigDecimal("5000"), "tier", "silver"))))
+                .isEqualTo("tier-check__standard");
+    }
+
+    @Test
+    void PRE_255_a_null_in_a_feel_comparison_does_not_hold_and_the_default_flow_is_taken() {
+        // amount is null: an ordering with null is null, and only true holds
+        java.util.HashMap<String, Object> noAmount = new java.util.HashMap<>();
+        noAmount.put("amount", null);
+        noAmount.put("tier", "gold");
+        assertThat(choice(run(feelLoan(), noAmount))).isEqualTo("tier-check__standard");
+    }
+
+    @Test
+    void PRE_255_a_feel_condition_over_money_compares_only_within_one_currency() {
+        Process money = BpmnModelBuilder.process("loan-origination")
+                .startEvent("start")
+                .exclusiveGateway("tier-check", "tier-check__standard")
+                .userTask("gold-desk", "role:GOLD_DESK", "goldReview")
+                .userTask("standard-desk", "role:CREDIT_OFFICER", "review")
+                .endEvent("end")
+                .chain("start", "tier-check")
+                .flow("tier-check__gold", "tier-check", "gold-desk", "amount >= money(100000000, \"VND\")", FEEL)
+                .flow("tier-check__standard", "tier-check", "standard-desk")
+                .chain("gold-desk", "end")
+                .chain("standard-desk", "end").build();
+
+        assertThat(choice(run(money, Map.of("amount", Money.ofMinor("VND", 150_000_000)))))
+                .isEqualTo("tier-check__gold");
+        assertThatThrownBy(() -> run(money, Map.of("amount", Money.ofMinor("USD", 150_00))))
+                .isInstanceOf(ExecutionException.class)
+                .satisfies(e -> assertThat(((ExecutionException) e).code()).isEqualTo("CONDITION_ERROR"));
+    }
+
+    @Test
+    void PRE_256_a_language_other_than_v1_and_feel_fails_with_its_name() {
+        Process xpath = BpmnModelBuilder.process("p").startEvent("start").exclusiveGateway("g", "g__b")
+                .endEvent("a").endEvent("b").chain("start", "g")
+                .flow("g__a", "g", "a", "amount > 1", "http://www.w3.org/1999/XPath")
+                .flow("g__b", "g", "b").build();
+
+        assertThatThrownBy(() -> run(xpath, Map.of("amount", 5)))
+                .hasMessageContaining("http://www.w3.org/1999/XPath");
+    }
+
+    @Test
+    void PRE_256_an_invalid_feel_condition_is_refused_at_activation_with_the_position() {
+        Process bad = BpmnModelBuilder.process("p").startEvent("start").exclusiveGateway("g", "g__b")
+                .endEvent("a").endEvent("b").chain("start", "g")
+                .flow("g__a", "g", "a", "tier == \"gold\"", FEEL)
+                .flow("g__b", "g", "b").build();
+
+        assertThatThrownBy(() -> new ProcessCompiler(BehaviorCatalog.registry(), 500).compile("D1", bad))
+                .isInstanceOf(ValidationFailedException.class)
+                .satisfies(e -> assertThat(((ValidationFailedException) e).problems())
+                        .anySatisfy(p -> {
+                            assertThat(p.code()).isEqualTo("CONDITION_INVALID");
+                            assertThat(p.message()).contains("FEEL equality is written =", "position 5");
+                        }));
+    }
+
     private static Process withElements(List<FlowElement> elements) {
         Process p = loanOrigination(null).flow("amount-check__auto", "amount-check", "auto-approve").build();
         return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(), elements,

@@ -187,6 +187,19 @@ public final class BpmnModelBuilder {
     }
 
     /**
+     * @param flowId flow id
+     * @param source source node id
+     * @param target target node id
+     * @param condition condition text
+     * @param language the language id of the condition, for example the FEEL URI
+     * @return this
+     */
+    public BpmnModelBuilder flow(String flowId, String source, String target, String condition, String language) {
+        flows.add(new SequenceFlow(flowId, null, source, target, new Expression(condition, language, null), null, null));
+        return this;
+    }
+
+    /**
      * Connects nodes in order with flows named {@code <from>__<to>}.
      *
      * @param nodeIds node ids

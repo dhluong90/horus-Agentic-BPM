@@ -155,6 +155,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-251 | `PRE_251_*` in `TaskElementsTest` | Unit on the kernel, a plain and a manual task | M3 | `TR-STD-04` | Done (#485) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
+| PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |
+| PRE-255 | `PRE_255_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Null and money rules in FEEL | M3 | `RLE-006` | Done (#498) |
+| PRE-256 | `PRE_256_*` in `TaskElementsImportTest`, `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Import of the FEEL URI, a refused language, one hash per meaning | M3 | `TR-STD-04` | Done (#498) |
+| PRE-257 | `PRE_257_*` in `ExpressionLanguagesTest` and `KernelContractArchitectureTest` | Script budget through the factory; strict kernel contract rule | M3 | `TR-SEC-01` | Done (#517) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

@@ -157,7 +157,7 @@ public final class CanonicalProcessWriter {
                 case ManualTask t -> step.put("type", "manualTask");
                 case ScriptTask t -> {
                     step.put("type", "scriptTask");
-                    step.put("script", t.script() == null ? "" : t.script().strip());
+                    step.put("script", t.script() == null ? "" : normal(t.scriptFormat(), t.script().strip()));
                 }
                 case BusinessRuleTask t -> {
                     step.put("type", "decision");
@@ -196,7 +196,8 @@ public final class CanonicalProcessWriter {
                             continue;
                         }
                         branches.addObject().put("when", f.conditionExpression() == null ? "true"
-                                : f.conditionExpression().text()).put("next", f.targetRef());
+                                : normal(f.conditionExpression().language(), f.conditionExpression().text()))
+                                .put("next", f.targetRef());
                     }
                     flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
                             .ifPresent(f -> step.put("default", f.targetRef()));
@@ -261,5 +262,22 @@ public final class CanonicalProcessWriter {
      */
     public static String canonicalText(Process process) {
         return CanonicalJson.write(write(process));
+    }
+
+    /**
+     * The text a condition or script hashes as. A FEEL text is written in the normal form of
+     * {@code urn:horus-bpm:expr:v1}, so the same meaning in either language is one hash (ADR-0026); a v1 text stays as
+     * authored, so no earlier hash changes. A text that does not compile is kept as written; it never reaches a hash,
+     * because import refuses it first.
+     */
+    private static String normal(String languageId, String text) {
+        if (text == null || !io.github.dhluong90.bpm.expr.languages.ExpressionLanguages.isFeel(languageId)) {
+            return text;
+        }
+        try {
+            return io.github.dhluong90.bpm.expr.languages.ExpressionLanguages.normalForm(languageId, text.strip());
+        } catch (io.github.dhluong90.bpm.expr.api.ExpressionInvalidException e) {
+            return text;
+        }
     }
 }

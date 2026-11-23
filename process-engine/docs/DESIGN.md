@@ -549,7 +549,7 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | `businessRuleTask` | `decision` | `horus:ruleSet` |
 | `task` | `task` | Passes through; history records it as done by the engine (`PRE-251`, #485) |
 | `manualTask` | `manualTask` | Passes through, as `task`. The engine opens no work item: the work happens outside it |
-| `scriptTask` | `scriptTask` | The `<bpmn:script>` is one expression in `urn:horus-bpm:expr:v1` (at most 1,000 characters, 500 evaluation steps); its value goes to the required `horus:resultVariable`. Any other `scriptFormat` is `BPMN_SCRIPT_FORMAT_UNSUPPORTED` (FEEL: stage S1). Runs in the step transaction with no host code (`PRE-250`, `PRE-253`, #485) |
+| `scriptTask` | `scriptTask` | The `<bpmn:script>` is one expression in `urn:horus-bpm:expr:v1` or FEEL (at most 1,000 characters, 500 evaluation steps); its value goes to the required `horus:resultVariable`. Any other `scriptFormat` is `BPMN_SCRIPT_FORMAT_UNSUPPORTED` (FEEL: stage S1). Runs in the step transaction with no host code (`PRE-250`, `PRE-253`, #485) |
 | `exclusiveGateway` with `conditionExpression` and `default` | `exclusiveGateway` | Conditions in our expression language, `language="urn:horus-bpm:expr:v1"` |
 | `parallelGateway` | `parallelGateway` | |
 | `intermediateCatchEvent` with `timerEventDefinition` (`timeDuration` or `timeDate`) | `timer` | |

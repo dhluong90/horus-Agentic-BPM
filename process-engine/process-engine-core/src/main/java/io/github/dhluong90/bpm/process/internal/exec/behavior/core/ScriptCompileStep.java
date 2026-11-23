@@ -14,7 +14,7 @@ final class ScriptCompileStep implements CompileStep {
     public void compile(Process process, CompiledProcess.Builder builder) {
         for (FlowElement element : process.allFlowElements()) {
             if (element instanceof ScriptTask task && task.script() != null) {
-                Script.parse(task.script());
+                Script.parse(task.script(), task.scriptFormat());
             }
         }
     }
