@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.time.YearMonth;
@@ -35,8 +36,8 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("32");
-        assertThat(result.migrationsExecuted()).isEqualTo(24);
+        assertThat(result.currentVersion()).isEqualTo("1");
+        assertThat(result.migrationsExecuted()).isEqualTo(1);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -53,6 +54,20 @@ class RuleEngineSchemaMigratorIT {
                 "rle_version_function",
                 "rle_simulation_report",
                 "rle_simulation_report_attachment");
+    }
+
+    @Test
+    void a_database_made_by_a_build_before_the_baseline_is_refused_with_a_request_to_reset() {
+        DataSource db = freshDatabase();
+        new RuleEngineSchemaMigrator(db).migrate();
+        // Given a history written by an earlier build: the one recorded migration has another checksum
+        JdbcClient.create(db).sql("UPDATE rle_schema_history SET checksum = 1 WHERE version = '1'").update();
+
+        // When the engine starts, Then it stops, says to reset, and changes nothing
+        assertThatThrownBy(() -> new RuleEngineSchemaMigrator(db).migrate())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("drop the schema and start again");
+        assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single()).isEqualTo(1L);
     }
 
     @Test
@@ -127,10 +142,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("32");
-        assertThat(result.migrationsExecuted()).isEqualTo(24);
+        assertThat(result.currentVersion()).isEqualTo("1");
+        assertThat(result.migrationsExecuted()).isEqualTo(1);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4", "5", "6", "10", "11", "12", "14", "15", "16", "17", "18", "19", "20", "21", "24", "25", "26", "28", "30", "31", "32");
+                .containsExactly("0", "1");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -143,136 +158,12 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("32");
-        assertThat(second.currentVersion()).isEqualTo("32");
+        assertThat(second.initialVersion()).isEqualTo("1");
+        assertThat(second.currentVersion()).isEqualTo("1");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("32");
+        assertThat(migrator.currentVersion()).contains("1");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(24L);
-    }
-
-    @Test
-    void RLE_026_V11_adds_retired_at_its_check_and_its_index_and_its_rollback_step_runs() {
-        // Given a migrated database with one published and one retired version
-        DataSource db = freshDatabase();
-        new RuleEngineSchemaMigrator(db).migrate();
-        JdbcClient jdbc = JdbcClient.create(db);
-        jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES ('bank-a', 'RS1', 'card-fee', now())")
-                .update();
-        String insert = "INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy,"
-                + " canonical_json, canonical_hash, source_format, source_document, source_hash, created_at, retired_at)"
-                + " VALUES ('bank-a', :id, 'RS1', :num, :status, 'FIRST', '{}', repeat('a', 64), 'YAML', '', repeat('b', 64),"
-                + " now(), CAST(:retiredAt AS TIMESTAMPTZ))";
-        jdbc.sql(insert).param("id", "V1").param("num", 1).param("status", "RETIRED")
-                .param("retiredAt", "2027-02-17T08:00:00Z").update();
-        jdbc.sql(insert).param("id", "V2").param("num", 2).param("status", "PUBLISHED").param("retiredAt", null).update();
-
-        // Then status and retired_at cannot disagree, and the sweep's partial index exists
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(insert).param("id", "V3").param("num", 3)
-                .param("status", "PUBLISHED").param("retiredAt", "2027-02-17T08:00:00Z").update())
-                .hasMessageContaining("rle_version_retired_at_check");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(insert).param("id", "V4").param("num", 4)
-                .param("status", "RETIRED").param("retiredAt", null).update())
-                .hasMessageContaining("rle_version_retired_at_check");
-        assertThat(jdbc.sql("SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_rle_version_published'")
-                .query(String.class).single()).contains("WHERE (status = 'PUBLISHED'::text)");
-
-        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE table_name = 'rle_version_history'"
-                + " AND column_name = 'no_version_in_effect'").query(Long.class).single()).isEqualTo(1L);
-
-        // When the documented rollback step of V11 runs
-        jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN no_version_in_effect").update();
-        jdbc.sql("ALTER TABLE rle_version DROP CONSTRAINT rle_version_retired_at_check").update();
-        jdbc.sql("DROP INDEX idx_rle_version_published").update();
-        jdbc.sql("ALTER TABLE rle_version DROP COLUMN retired_at").update();
-
-        // Then the table is back to its shape before V11, with its rows
-        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE table_name = 'rle_version'"
-                + " AND column_name = 'retired_at'").query(Long.class).single()).isZero();
-        assertThat(jdbc.sql("SELECT count(*) FROM rle_version").query(Long.class).single()).isEqualTo(2L);
-    }
-
-    @Test
-    void RLE_038_V18_holds_four_eyes_on_retirement_and_its_rollback_step_runs() throws java.io.IOException {
-        // Given a migrated database with tet-fee-waiver v1 PUBLISHED and v2 DRAFT
-        DataSource db = freshDatabase();
-        new RuleEngineSchemaMigrator(db).migrate();
-        JdbcClient jdbc = JdbcClient.create(db);
-        jdbc.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES ('bank-a', 'RS1', 'tet-fee-waiver',"
-                + " now())").update();
-        String insert = "INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy,"
-                + " canonical_json, canonical_hash, source_format, source_document, source_hash, created_at)"
-                + " VALUES ('bank-a', :id, 'RS1', :num, :status, 'FIRST', '{}', repeat('a', 64), 'YAML', '',"
-                + " repeat('b', 64), now())";
-        jdbc.sql(insert).param("id", "V1").param("num", 1).param("status", "PUBLISHED").update();
-        jdbc.sql(insert).param("id", "V2").param("num", 2).param("status", "DRAFT").update();
-        String request = "UPDATE rle_version SET retire_requested_by = :by, retire_requested_at = now(),"
-                + " retire_reason = :reason, retire_confirm_no_version = true WHERE tenant_id = 'bank-a' AND id = :id";
-
-        // Then a complete request is accepted on the published version only, and a partial one never
-        assertThat(jdbc.sql(request).param("by", "bob").param("reason", "Tet promotion ended").param("id", "V1").update())
-                .isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(request).param("by", "bob")
-                .param("reason", "Tet promotion ended").param("id", "V2").update())
-                .hasMessageContaining("rle_version_retire_request_published");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET retire_reason = NULL"
-                + " WHERE tenant_id = 'bank-a' AND id = 'V1'").update())
-                .hasMessageContaining("rle_version_retire_request_complete");
-        // and a retirement that leaves the request on the row is refused
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET status = 'RETIRED',"
-                + " retired_at = now() WHERE tenant_id = 'bank-a' AND id = 'V1'").update())
-                .hasMessageContaining("rle_version_retire_request_published");
-        // and a RETIRED history row confirmed by its own requester, or naming a requester outside four-eyes, is refused
-        String history = "INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status,"
-                + " actor, reason, approval_mode, lock_version, occurred_at, retire_requested_by) VALUES ('bank-a', :id,"
-                + " 'V1', 'RETIRED', 'PUBLISHED', 'RETIRED', :actor, 'Tet promotion ended', :mode, 3, now(), 'bob')";
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(history).param("id", "H1")
-                .param("actor", "bob").param("mode", "four-eyes").update())
-                .hasMessageContaining("rle_version_history_retire_four_eyes");
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.sql(history).param("id", "H2")
-                .param("actor", "carol").param("mode", "single").update())
-                .hasMessageContaining("rle_version_history_retire_four_eyes");
-        assertThat(jdbc.sql(history).param("id", "H3").param("actor", "carol").param("mode", "four-eyes").update())
-                .isEqualTo(1);
-
-        // When the documented rollback step of V18 runs, Then the columns are gone and the rows stay
-        jdbc.sql(rollbackStatements("V18__rle_version_retire_request.sql")).update();
-        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'retire_requested_by'")
-                .query(Long.class).single()).isZero();
-        assertThat(jdbc.sql("SELECT count(*) FROM rle_version").query(Long.class).single()).isEqualTo(2L);
-    }
-
-    /** The statements between {@code rollback-begin} and {@code rollback-end} of a migration, without the comment marks. */
-    private static String rollbackStatements(String migration) throws java.io.IOException {
-        String path = "io/github/dhluong90/bpm/rules/postgres/migration/" + migration;
-        try (java.io.InputStream in = RuleEngineSchemaMigratorIT.class.getClassLoader().getResourceAsStream(path)) {
-            assertThat(in).as(path).isNotNull();
-            String script = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            String block = script.substring(script.indexOf("-- rollback-begin\n") + "-- rollback-begin\n".length(),
-                    script.indexOf("-- rollback-end"));
-            return block.lines().map(line -> line.replaceFirst("^--\\s{0,3}", ""))
-                    .collect(java.util.stream.Collectors.joining("\n"));
-        }
-    }
-
-    @Test
-    void RLE_008_V10_adds_the_pinned_mark_to_every_partition_and_its_rollback_step_runs() {
-        DataSource db = freshDatabase();
-        new RuleEngineSchemaMigrator(db).migrate();
-        JdbcClient jdbc = JdbcClient.create(db);
-        insertDecision(jdbc, "01KCS3W1DQ0M8V6T2B9R5N7K4E", "2026-11-20T10:00:00Z");
-
-        // Then the column exists on the parent and the default partition, false for rows that did not pin
-        assertThat(jdbc.sql("SELECT pinned FROM rle_decision").query(Boolean.class).single()).isFalse();
-        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'pinned'"
-                + " AND table_name IN ('rle_decision', 'rle_decision_default')").query(Long.class).single())
-                .isEqualTo(2L);
-
-        // When the documented rollback step runs, Then the column is gone and the row stays
-        jdbc.sql("ALTER TABLE rle_decision DROP COLUMN pinned").update();
-        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE column_name = 'pinned'"
-                + " AND table_name = 'rle_decision'").query(Long.class).single()).isZero();
-        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision").query(Long.class).single()).isEqualTo(1L);
+                .isEqualTo(1L);
     }
 
     @Test
@@ -280,12 +171,12 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 24));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 1));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("32", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("1", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

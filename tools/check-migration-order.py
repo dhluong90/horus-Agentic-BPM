@@ -15,6 +15,12 @@ What:    per engine (rule-engine/, process-engine/), the files V<version>__<desc
            - two migrations of one engine share a version, on the branch or against BASE;
            - an added migration uses a retired version (tools/migration-retired-versions.txt);
            - a migration on BASE is edited, deleted, or moved with different content or file name.
+         One exception until the 1.0 release (BASELINE_OPEN, #479): the V1 baseline of an engine, V1__baseline.sql, may
+         be edited in place, because 1.0 is the first supported schema and no database has to survive it. It still
+         may not be deleted, renamed or moved. A change that adds or edits an engine's V1__baseline.sql is a squash of that
+         engine: the other released migrations of that engine may then be deleted (they are folded into the baseline),
+         and the baseline may take number 1 although higher ones were on BASE. Editing another released migration is
+         still refused. The 1.0 release commit sets BASELINE_OPEN to False.
 Exit:    0 when every check passes, 1 when one fails, 2 on a usage or git error.
 """
 
@@ -31,6 +37,9 @@ ENGINES = ("rule-engine", "process-engine")
 # rule-engine/<any>/migration/V12__x.sql or V1_1__x.sql; nothing under examples/ starts with an engine folder.
 MIGRATION = re.compile(r"^(?P<engine>rule-engine|process-engine)/(?:.+/)?migration/(?P<file>V(?P<version>\d+(?:[._]\d+)*)__[^/]+\.sql)$")
 RETIRED_FILE = Path(__file__).with_name("migration-retired-versions.txt")
+# Until the 1.0 release the V1 baseline of each engine may be edited in place (#479). Set to False when 1.0 is cut.
+BASELINE_OPEN = True
+BASELINE_FILE = "V1__baseline.sql"
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,10 @@ def parse(path: str) -> Migration | None:
         return None
     version = tuple(int(part) for part in re.split(r"[._]", match["version"]))
     return Migration(path, match["engine"], match["file"], version)
+
+
+def is_baseline(m: Migration) -> bool:
+    return m.file == BASELINE_FILE and m.version == (1,)
 
 
 def label(version: tuple[int, ...]) -> str:
@@ -96,13 +109,21 @@ def next_free(highest: tuple[int, ...] | None, retired: dict[tuple[int, ...], st
 
 
 def check(base: dict[str, str], merge_base: dict[str, str], head: dict[str, str],
-          retired: dict[str, dict[tuple[int, ...], str]]) -> list[str]:
+          retired: dict[str, dict[tuple[int, ...], str]], baseline_open: bool = BASELINE_OPEN) -> list[str]:
     """Each argument maps engine migration paths to blob ids. Returns the failures, one message each."""
     errors: list[str] = []
     added = sorted(path for path in head if path not in merge_base)
     changed = sorted(path for path in merge_base if path not in head or head[path] != merge_base[path])
     if not added and not changed:
         return errors
+
+    # Engines squashed by this change: the V1 baseline is added or its bytes changed (only while the baseline is open).
+    squashed: set[str] = set()
+    if baseline_open:
+        for path in head:
+            m = parse(path)
+            if is_baseline(m) and (path not in merge_base or head[path] != merge_base[path]):
+                squashed.add(m.engine)
 
     base_by_engine: dict[str, list[Migration]] = {engine: [] for engine in ENGINES}
     for path in base:
@@ -123,8 +144,12 @@ def check(base: dict[str, str], merge_base: dict[str, str], head: dict[str, str]
         old = parse(path)
         moved_intact = any(parse(p) and parse(p).file == old.file and head[p] == base[path] for p in added)
         if path in head:
+            if baseline_open and is_baseline(old):
+                continue  # the open V1 baseline may be edited until 1.0
             errors.append(f"{path}: {old.label} is on main and this change edits it. Released migrations never change; "
                           f"add a new migration instead ({context(old)}).")
+        elif old.engine in squashed:
+            continue  # folded into the engine's new V1 baseline
         elif not moved_intact:
             errors.append(f"{path}: {old.label} is on main and this change deletes it or moves it with other content "
                           f"or another file name. Released migrations never change.")
@@ -134,6 +159,8 @@ def check(base: dict[str, str], merge_base: dict[str, str], head: dict[str, str]
         m = parse(path)
         if any(path_b != path and blob == head[path] and parse(path_b).file == m.file for path_b, blob in base_blobs):
             continue  # a migration on main moved with identical bytes and file name
+        if m.engine in squashed and is_baseline(m):
+            continue  # the squashed baseline takes number 1
         if m.version in retired[m.engine]:
             errors.append(f"{path}: {m.label} is a retired {m.engine} version ({retired[m.engine][m.version]}); "
                           f"{context(m)}.")

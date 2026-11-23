@@ -49,7 +49,7 @@ public interface MigrationStore {
     /** @return up to {@code limit} running instance ids with no live token at any of the steps, in id order */
     List<String> movableInstanceIds(String tenant, String definitionId, Collection<String> blockedNodeIds, int limit);
 
-    // ---- execution (#90, V34) --------------------------------------------------------------------------------
+    // ---- execution (#90) --------------------------------------------------------------------------------
 
     /**
      * The execution columns of a plan row.

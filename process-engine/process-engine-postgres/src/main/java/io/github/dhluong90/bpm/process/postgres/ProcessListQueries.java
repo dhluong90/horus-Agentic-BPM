@@ -17,7 +17,7 @@ final class ProcessListQueries {
 
     /**
      * The live statuses, written exactly as in the predicates of {@code idx_pre_token_live} (V1) and
-     * {@code idx_pre_token_live_node_instance} (V24), so the planner can answer the count with an index-only scan of
+     * {@code idx_pre_token_live_node_instance}, so the planner can answer the count with an index-only scan of
      * a partial index and never touches {@code pre_history}.
      */
     static final String LIVE_STATUSES = "('ACTIVE','WAITING_USER','WAITING_ASYNC','WAITING_TIMER','WAITING_EVENT',"
@@ -50,20 +50,20 @@ final class ProcessListQueries {
 
     /**
      * The active versions of every tenant, read once at start-up for the unclassified-field summary (PD-146), through
-     * the partial index {@code idx_pre_definition_active} (V45).
+     * the partial index {@code idx_pre_definition_active}.
      */
     static final ListQuery ACTIVE_DEFINITIONS = new ListQuery("active-definition-versions",
-            new Bound.EngineSweep(null, "at most 1,000 active versions, over idx_pre_definition_active (V45)"),
+            new Bound.EngineSweep(null, "at most 1,000 active versions, over idx_pre_definition_active"),
             "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE status = 'ACTIVE' "
                     + "ORDER BY tenant_id, key_name, version_num LIMIT ?");
 
     /**
      * The active versions of one tenant whose start event is a signal start for a name (#492), found in the stored
-     * canonical form by JSON containment, over {@code idx_pre_definition_active} (V45); the caller keeps the effective
+     * canonical form by JSON containment, over {@code idx_pre_definition_active}; the caller keeps the effective
      * version of each key.
      */
     static final ListQuery SIGNAL_START_DEFINITIONS = new ListQuery("signal-start-definitions",
-            new Bound.Page("at most the requested number of active versions of one tenant, on idx_pre_definition_active (V45)"),
+            new Bound.Page("at most the requested number of active versions of one tenant, on idx_pre_definition_active"),
             "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND status = 'ACTIVE' "
                     + "AND (definition_json @> jsonb_build_object('steps', jsonb_build_array("
                     + "jsonb_build_object('type', 'start', 'signal', ?::text))) "
@@ -101,7 +101,7 @@ final class ProcessListQueries {
 
     /**
      * The unresolved incidents of one instance ({@code OPEN} and {@code RESOLUTION_PENDING}), oldest first (#58, #68),
-     * on {@code idx_pre_incident_unresolved} (V30).
+     * on {@code idx_pre_incident_unresolved}.
      */
     static final ListQuery OPEN_INCIDENTS = new ListQuery("instance-open-incidents",
             new Bound.ParentKey("instance_id", "the unresolved incidents of one instance, at most one per failed step"),
@@ -111,19 +111,19 @@ final class ProcessListQueries {
 
     /**
      * The first page of the definition versions waiting for a second person, oldest request first, of every key of one
-     * tenant (#31, PRE-190), on {@code idx_pre_definition_pending_page (tenant_id, requested_at, id)} (V35).
+     * tenant (#31, PRE-190), on {@code idx_pre_definition_pending_page (tenant_id, requested_at, id)}.
      */
     static final ListQuery PENDING_APPROVALS = pendingApprovals(false);
     /** A later page, after the last version of the previous page. */
     static final ListQuery PENDING_APPROVALS_AFTER = pendingApprovals(true);
 
-    /** The columns of a compensation stack entry (#67, V31). */
+    /** The columns of a compensation stack entry (#67). */
     static final String COMPENSATION_COLUMNS = "tenant_id, id, instance_id, scope_token_id, seq, step_id, forward_job_id, "
             + "forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, completed_at, instance_seq";
 
     /**
      * The compensation stack of one instance (#67), by scope token and newest first, on
-     * {@code uq_pre_compensation_stack_seq} (V31).
+     * {@code uq_pre_compensation_stack_seq}.
      */
     static final ListQuery COMPENSATION_STACK = new ListQuery("instance-compensation-stack",
             new Bound.ParentKey("instance_id", "the undo entries of one instance, one per completed step with an undo"),
@@ -135,7 +135,7 @@ final class ProcessListQueries {
     /** A later page, after the last incident of the previous page. */
     static final ListQuery INCIDENTS_AFTER = incidents(true);
 
-    /** The recorded results of some steps of one instance (V14), by the primary key; parameters: tenant, instance, nodes. */
+    /** The recorded results of some steps of one instance, by the primary key; parameters: tenant, instance, nodes. */
     static final ListQuery STEP_RESULTS = new ListQuery("instance-step-results",
             new Bound.ParentKey("instance_id", "one row per step of one instance, at most the nodes asked for"),
             "SELECT node_id, result_json::text AS result FROM pre_step_result WHERE tenant_id = ? AND instance_id = ? "
@@ -157,7 +157,7 @@ final class ProcessListQueries {
     /** A later page of recorded answers, after the last one of the previous page. */
     static final ListQuery RECORDED_ANSWERS_AFTER = recordedAnswers(true);
 
-    /** A page of the cases of one replay run (V17), on its primary key; parameters: tenant, run, after seq, limit. */
+    /** A page of the cases of one replay run, on its primary key; parameters: tenant, run, after seq, limit. */
     static final ListQuery REPLAY_CASES = new ListQuery("replay-cases",
             new Bound.Page("seq order on the (tenant_id, replay_id, seq) primary key"),
             "SELECT seq, attempt_id, instance_id, recorded_at, recorded_outcome, candidate_outcome, change, "
@@ -174,33 +174,32 @@ final class ProcessListQueries {
 
     /**
      * The instances with a live token at one step of a definition version, in id order, on
-     * {@code idx_pre_token_live_node_instance} (V24). Parameters: tenant, definition id, step id, limit.
+     * {@code idx_pre_token_live_node_instance}. Parameters: tenant, definition id, step id, limit.
      */
     static final ListQuery MIGRATION_INSTANCES_AT_NODE = new ListQuery("migration-instances-at-node",
-            new Bound.Page("keyset on instance_id of idx_pre_token_live_node_instance (V24)"),
+            new Bound.Page("keyset on instance_id of idx_pre_token_live_node_instance"),
             "SELECT DISTINCT instance_id FROM pre_token WHERE tenant_id = ? AND definition_id = ? "
                     + "AND current_node_id = ? AND status IN " + LIVE_STATUSES + " ORDER BY instance_id LIMIT ?");
 
     /**
      * The running instances of a definition version with no live token at any of the given steps, in id order, on
-     * {@code idx_pre_instance_running_definition} (V25); each candidate is checked through
+     * {@code idx_pre_instance_running_definition}; each candidate is checked through
      * {@code idx_pre_token_instance}. Parameters: tenant, definition id, the steps as a text array, limit.
      */
     static final ListQuery MIGRATION_MOVABLE_INSTANCES = new ListQuery("migration-movable-instances",
-            new Bound.Page("id order of idx_pre_instance_running_definition (V25)"),
+            new Bound.Page("id order of idx_pre_instance_running_definition"),
             "SELECT i.id FROM pre_instance i WHERE i.tenant_id = ? AND i.definition_id = ? AND i.status = 'RUNNING' "
                     + "AND NOT EXISTS (SELECT 1 FROM pre_token t WHERE t.tenant_id = i.tenant_id "
                     + "AND t.instance_id = i.id AND t.status IN " + LIVE_STATUSES + " "
                     + "AND t.current_node_id = ANY (?::text[])) ORDER BY i.id LIMIT ?");
 
     /**
-     * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent} (V43).
+     * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent}.
      * A cancel of the parent reads them to cancel them (#92, PRE-213). Parameters: tenant, parent instance, limit.
      */
     static final ListQuery MESSAGE_SUBSCRIPTIONS = new ListQuery("message-subscriptions",
             new Bound.ParentKey("correlation_key", "the waiting tokens of one message and key; the caller reads at most"
-                    + " two, one to deliver to and one to prove the match is not unique, on idx_pre_message_subscription_lookup"
-                    + " (V47)"),
+                    + " two, one to deliver to and one to prove the match is not unique, on idx_pre_message_subscription_lookup"),
             "SELECT id, instance_id, token_id, node_id, message_name, correlation_key, created_at "
                     + "FROM pre_message_subscription WHERE tenant_id = ? AND message_name = ? AND correlation_key = ? "
                     + "ORDER BY id LIMIT ?");
@@ -213,20 +212,20 @@ final class ProcessListQueries {
 
     /**
      * The instances with a remote call in flight at any of the given steps of a definition version, in id order, on
-     * {@code idx_pre_timer_inflight} (V41). Parameters: tenant, definition id, the steps as a text array, limit (#106).
+     * {@code idx_pre_timer_inflight}. Parameters: tenant, definition id, the steps as a text array, limit (#106).
      */
     static final ListQuery MIGRATION_IN_FLIGHT_INSTANCES = new ListQuery("migration-in-flight-instances",
-            new Bound.Page("instance id order of idx_pre_timer_inflight (V41), claimed jobs only"),
+            new Bound.Page("instance id order of idx_pre_timer_inflight, claimed jobs only"),
             "SELECT DISTINCT instance_id FROM pre_timer WHERE tenant_id = ? AND definition_id = ? "
                     + "AND node_id = ANY (?::text[]) AND status = 'CLAIMED' "
                     + "AND job_kind IN ('ASYNC_SERVICE','ASYNC_AGENT') ORDER BY instance_id LIMIT ?");
 
     /**
      * The next running instances of the source version of an approved migration, after the plan's cursor, in id order,
-     * on {@code idx_pre_instance_running_definition} (V25). Parameters: tenant, definition id, cursor, limit (#90).
+     * on {@code idx_pre_instance_running_definition}. Parameters: tenant, definition id, cursor, limit (#90).
      */
     static final ListQuery MIGRATION_BATCH = new ListQuery("migration-batch",
-            new Bound.Page("keyset on id of idx_pre_instance_running_definition (V25), one batch"),
+            new Bound.Page("keyset on id of idx_pre_instance_running_definition, one batch"),
             "SELECT id FROM pre_instance WHERE tenant_id = ? AND definition_id = ? AND status = 'RUNNING' "
                     + "AND id > ? ORDER BY id LIMIT ?");
 
@@ -236,32 +235,32 @@ final class ProcessListQueries {
             "SELECT id, current_node_id FROM pre_token WHERE tenant_id = ? AND instance_id = ? AND status IN "
                     + LIVE_STATUSES + " ORDER BY id");
 
-    /** The per-instance outcomes of a migration after an instance id, on the primary key (V34). Parameters: tenant, migration, after, limit. */
+    /** The per-instance outcomes of a migration after an instance id, on the primary key. Parameters: tenant, migration, after, limit. */
     static final ListQuery MIGRATION_OUTCOMES = new ListQuery("migration-outcomes",
-            new Bound.Page("keyset on instance_id of the primary key of pre_migration_instance (V34)"),
+            new Bound.Page("keyset on instance_id of the primary key of pre_migration_instance"),
             "SELECT instance_id, outcome, code, detail, incident_id, occurred_at FROM pre_migration_instance "
                     + "WHERE tenant_id = ? AND migration_id = ? AND instance_id > ? ORDER BY instance_id LIMIT ?");
 
     /** As {@link #MIGRATION_OUTCOMES}, of one outcome. Parameters: tenant, migration, after, outcome, limit. */
     static final ListQuery MIGRATION_OUTCOMES_OF = new ListQuery("migration-outcomes-of",
-            new Bound.Page("keyset on instance_id of the primary key of pre_migration_instance (V34)"),
+            new Bound.Page("keyset on instance_id of the primary key of pre_migration_instance"),
             "SELECT instance_id, outcome, code, detail, incident_id, occurred_at FROM pre_migration_instance "
                     + "WHERE tenant_id = ? AND migration_id = ? AND instance_id > ? AND outcome = ? "
                     + "ORDER BY instance_id LIMIT ?");
 
     /**
      * The failed instances of a migration that have no incident yet, in id order, on the partial index
-     * {@code idx_pre_migration_instance_failed} (V34). Parameters: tenant, migration, after, limit.
+     * {@code idx_pre_migration_instance_failed}. Parameters: tenant, migration, after, limit.
      */
     static final ListQuery MIGRATION_FAILURES_WITHOUT_INCIDENT = new ListQuery("migration-failures-without-incident",
-            new Bound.Page("keyset on instance_id of idx_pre_migration_instance_failed (V34)"),
+            new Bound.Page("keyset on instance_id of idx_pre_migration_instance_failed"),
             "SELECT instance_id, outcome, code, detail, incident_id, occurred_at FROM pre_migration_instance "
                     + "WHERE tenant_id = ? AND migration_id = ? AND instance_id > ? AND outcome = 'FAILED' "
                     + "AND incident_id IS NULL ORDER BY instance_id LIMIT ?");
 
     /** The revisions of the layout of one definition version after a revision (#102). Parameters: tenant, definition, after, limit. */
     static final ListQuery LAYOUT_REVISIONS = new ListQuery("layout-revisions",
-            new Bound.Page("keyset on revision of the primary key of pre_definition_layout (V33)"),
+            new Bound.Page("keyset on revision of the primary key of pre_definition_layout"),
             "SELECT revision, layout_hash, definition_hash, source, created_by, created_at FROM "
                     + "pre_definition_layout WHERE tenant_id = ? AND definition_id = ? AND revision > ? "
                     + "ORDER BY revision LIMIT ?");
@@ -274,7 +273,7 @@ final class ProcessListQueries {
     /**
      * One slice of the hourly step statistics rollup (#110), for every tenant: the events of the slice, each completed
      * step with the entry time of its token through {@code idx_pre_history_instance}. The range is at most
-     * {@code stats.rollup-max-slice}; it is read through {@code idx_pre_history_time_brin} on every partition (V27)
+     * {@code stats.rollup-max-slice}; it is read through {@code idx_pre_history_time_brin} on every partition
      * or, on PostgreSQL 18, a skip scan of the primary key. Parameters: from, to.
      */
     static final ListQuery ROLLUP_SLICE = new ListQuery("rollup-slice",
@@ -309,9 +308,9 @@ final class ProcessListQueries {
                     + "WHERE s.tenant_id = ? AND s.definition_id = ? AND s.bucket_start >= ? AND s.bucket_start < ? "
                     + "GROUP BY s.node_id, u.k");
 
-    /** The running instances of every tenant, for a gauge (#86): an index-only count of V25's partial index. */
+    /** The running instances of every tenant, for a gauge (#86): an index-only count of the baseline's partial index. */
     static final ListQuery GAUGE_ACTIVE_INSTANCES = new ListQuery("gauge-active-instances",
-            new Bound.EngineSweep(null, "one count over idx_pre_instance_running_definition (V25), running rows only"),
+            new Bound.EngineSweep(null, "one count over idx_pre_instance_running_definition, running rows only"),
             "SELECT count(*) FROM pre_instance WHERE status = 'RUNNING'");
 
     /** The open incidents of every tenant, for a gauge (#86): an index-only count of {@code idx_pre_incident_open}. */
@@ -326,11 +325,11 @@ final class ProcessListQueries {
 
     /**
      * The tasks whose next escalation level is due, for every tenant (#73, PRE-178): at most the sweep's batch size,
-     * oldest first, read through {@code idx_pre_task_escalation_due} (V32), whose predicate this one repeats exactly.
+     * oldest first, read through {@code idx_pre_task_escalation_due}, whose predicate this one repeats exactly.
      * Parameters: now, limit.
      */
     static final ListQuery ESCALATIONS_DUE = new ListQuery("escalations-due",
-            new Bound.EngineSweep(null, "the first sweep.batch-size entries of idx_pre_task_escalation_due (V32), "
+            new Bound.EngineSweep(null, "the first sweep.batch-size entries of idx_pre_task_escalation_due, "
                     + "oldest first"),
             "SELECT tenant_id, id, instance_id FROM pre_task WHERE status IN ('OPEN','CLAIMED') "
                     + "AND next_escalation_at IS NOT NULL AND next_escalation_at <= ? "
@@ -377,7 +376,7 @@ final class ProcessListQueries {
 
     /**
      * One range of the task query (#70, PRE-030; DESIGN section 8.2): the index that serves it and the predicate of
-     * that partial index, written exactly as in V22 so the planner can use it. The engine reads each range of a
+     * that partial index, written exactly as in the baseline so the planner can use it. The engine reads each range of a
      * caller (their user, their claims, each role, each group) separately and merges the pages.
      */
     enum TaskRange {
@@ -496,7 +495,7 @@ final class ProcessListQueries {
     static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
     static final ListQuery CLAIM_ASYNC = claim(ClaimKinds.ASYNC);
-    /** Due remote steps of one kind, for every tenant: the poll of that kind's runner, on the V9 index. */
+    /** Due remote steps of one kind, for every tenant: the poll of that kind's runner, on the baseline index. */
     static final ListQuery CLAIM_ASYNC_KIND = claim(ClaimKinds.ONE_KIND);
 
     private ProcessListQueries() {
@@ -563,7 +562,7 @@ final class ProcessListQueries {
 
     /**
      * The calendar changes of one status, newest first on {@code idx_pre_calendar_change_status (tenant_id, status,
-     * proposed_at DESC, id DESC)} (V32); keyset on {@code (proposed_at, id)}. Parameters: tenant, status,
+     * proposed_at DESC, id DESC)}; keyset on {@code (proposed_at, id)}. Parameters: tenant, status,
      * [after proposed at, after id], limit.
      */
     private static ListQuery calendarChanges(boolean after) {
@@ -577,7 +576,7 @@ final class ProcessListQueries {
 
     /**
      * The pending calendar changes, oldest proposal first on {@code idx_pre_calendar_change_pending_page (tenant_id,
-     * proposed_at, id)} (V49); keyset on {@code (proposed_at, id)}. Parameters: tenant, [after proposed at, after id],
+     * proposed_at, id)}; keyset on {@code (proposed_at, id)}. Parameters: tenant, [after proposed at, after id],
      * limit.
      */
     private static ListQuery pendingCalendarChanges(boolean after) {
@@ -591,7 +590,7 @@ final class ProcessListQueries {
 
     /**
      * The proposed migration executions, oldest proposal first on {@code idx_pre_migration_proposed_page (tenant_id,
-     * proposed_at, id)} (V49); keyset on {@code (proposed_at, id)}. The plan's mappings are not read. Parameters:
+     * proposed_at, id)}; keyset on {@code (proposed_at, id)}. The plan's mappings are not read. Parameters:
      * tenant, [after proposed at, after id], limit.
      */
     private static ListQuery proposedMigrations(boolean after) {
@@ -610,7 +609,7 @@ final class ProcessListQueries {
 
     /**
      * The incidents of one status, newest first on {@code idx_pre_incident_status (tenant_id, status, created_at DESC,
-     * id DESC)} (V30); keyset on {@code (created_at, id)}, never {@code OFFSET}. Parameters: tenant, status,
+     * id DESC)}; keyset on {@code (created_at, id)}, never {@code OFFSET}. Parameters: tenant, status,
      * [after created at, after id], limit.
      */
     private static ListQuery incidents(boolean after) {
@@ -705,8 +704,8 @@ final class ProcessListQueries {
         TIMERS("claim-timers", "job_kind NOT IN " + asyncKinds(), "idx_pre_timer_poll"),
         /** Both remote-step kinds, on {@code idx_pre_timer_poll}. */
         ASYNC("claim-async-steps", "job_kind IN " + asyncKinds(), "idx_pre_timer_poll"),
-        /** One remote-step kind, bound as a parameter, on {@code idx_pre_timer_poll_kind} (V9). */
-        ONE_KIND("claim-async-kind", "job_kind = ?", "idx_pre_timer_poll_kind (V9)");
+        /** One remote-step kind, bound as a parameter, on {@code idx_pre_timer_poll_kind}. */
+        ONE_KIND("claim-async-kind", "job_kind = ?", "idx_pre_timer_poll_kind");
 
         private final String queryName;
         private final String predicate;

@@ -4,6 +4,7 @@ import java.util.Map;
 import java.util.Objects;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.exception.FlywayValidateException;
 import org.flywaydb.core.api.MigrationInfo;
 import org.flywaydb.core.api.output.MigrateResult;
 
@@ -27,8 +28,14 @@ public final class ProcessEngineSchemaMigrator {
 
     /** @return the number of migrations applied */
     public int migrate() {
-        MigrateResult result = flyway().migrate();
-        return result.migrationsExecuted;
+        try {
+            MigrateResult result = flyway().migrate();
+            return result.migrationsExecuted;
+        } catch (FlywayValidateException e) {
+            throw new IllegalStateException("The pre_* tables were made by a build before the 1.0 schema baseline and "
+                    + "cannot be upgraded: drop the schema and start again (a database with real data needs a dump "
+                    + "and reload). Nothing was changed. " + e.getMessage().lines().findFirst().orElse(""), e);
+        }
     }
 
     /** @return the current schema version, or null before the first migration */

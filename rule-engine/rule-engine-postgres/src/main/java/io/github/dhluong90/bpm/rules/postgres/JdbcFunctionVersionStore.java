@@ -11,7 +11,7 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@code rle_version_function} (V26): the host function versions each rule set version was approved with, written in
+ * {@code rle_version_function}: the host function versions each rule set version was approved with, written in
  * the approval's transaction. Every statement names its tenant (TR-TEN-01), except the start-up read of
  * {@link #publishedUses()}, which spans tenants because functions belong to the host.
  */

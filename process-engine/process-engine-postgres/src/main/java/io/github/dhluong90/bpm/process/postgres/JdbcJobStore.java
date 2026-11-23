@@ -63,7 +63,7 @@ public final class JdbcJobStore implements JobStore {
         if (!JobStore.isAsync(jobKind)) {
             throw new IllegalArgumentException("Not an async job kind: " + jobKind);
         }
-        // One kind per statement, on idx_pre_timer_poll_kind (V9): a backlog of another kind is never scanned.
+        // One kind per statement, on idx_pre_timer_poll_kind: a backlog of another kind is never scanned.
         return limit < 1 ? List.of() : claim(ClaimKinds.ONE_KIND, jobKind, replicaId, now, limit);
     }
 

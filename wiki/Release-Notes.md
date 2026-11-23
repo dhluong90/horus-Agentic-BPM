@@ -279,8 +279,8 @@ All migrations are forward-only Flyway scripts in each engine's own history tabl
 
 | Engine | History table | Scripts |
 |---|---|---|
-| Rule Engine | `rle_schema_history` | `V1__rle_baseline.sql`, `V2__rle_version_created_by.sql`, `V3__rle_version_history.sql`, `V4__rle_version_history_append_only.sql`, `V5__rle_engine_key.sql` |
-| Process Engine | `pre_schema_history` | `V1__pre_baseline.sql`, `V2__pre_idempotency_claim.sql` |
+| Rule Engine | `rle_schema_history` | `V1__baseline.sql` |
+| Process Engine | `pre_schema_history` | `V1__baseline.sql` |
 
 `V4` adds triggers that refuse `UPDATE`, `DELETE` and `TRUNCATE` on `rle_version_history`. If your host separates the migration role from the runtime role, also revoke those rights from the runtime role. `V5` creates the list-cursor key table; the runtime role needs `SELECT` and `INSERT` on `rle_engine_key`.
 

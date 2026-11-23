@@ -13,7 +13,7 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@link LayoutStore} on PostgreSQL (#102, migration V33). The engine only inserts; the table's triggers refuse any
+ * {@link LayoutStore} on PostgreSQL (#102). The engine only inserts; the table's triggers refuse any
  * other write. Every statement names the tenant first.
  */
 public final class JdbcLayoutStore implements LayoutStore {
