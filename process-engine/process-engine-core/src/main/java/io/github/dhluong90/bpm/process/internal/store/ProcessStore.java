@@ -489,6 +489,36 @@ public interface ProcessStore {
     default void retainSubscriptions(String tenant, String instanceId, java.util.Collection<String> keep) {
     }
 
+    // ---- parallel multiple process start (PD-149) ----------------------------------------------------------
+
+    /**
+     * Holds one arrival for a process whose start event waits for all of several definitions; a second arrival of the
+     * same definition and key replaces the first.
+     *
+     * @param kind {@code MESSAGE} or {@code SIGNAL}
+     * @param correlationKey the message's key, or the empty string
+     */
+    default void putStartArrival(String tenant, String keyName, String kind, String eventName, String correlationKey,
+            String payloadJson, Instant now) {
+        throw new UnsupportedOperationException("a parallel multiple start needs a store that holds arrivals");
+    }
+
+    /** @return the payload JSON of the held arrival, or empty */
+    default java.util.Optional<String> startArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
+        return java.util.Optional.empty();
+    }
+
+    /** @return the correlation key of the oldest held arrival of a message, or empty */
+    default java.util.Optional<String> oldestStartArrivalKey(String tenant, String keyName, String eventName) {
+        return java.util.Optional.empty();
+    }
+
+    /** Drops the arrival an instance start has used. */
+    default void deleteStartArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
+    }
+
     /**
      * @param limit the most rows read; one more than the caller tolerates tells it the match is not unique
      * @return the subscriptions of the tenant for the message and key, in id order

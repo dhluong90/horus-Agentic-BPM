@@ -32,7 +32,15 @@ final class CompensationEndBehavior {
 
         @Override
         public void enter(EndEvent node, Token token, ExecutionContext ctx) {
-            ctx.compensateAndResume(token, ((CompensateEventDefinition) node.eventDefinitions().get(0)).activityRef());
+            CompensateEventDefinition definition = (CompensateEventDefinition) node.eventDefinitions().get(0);
+            if (!definition.waitForCompletion()) {
+                // PD-149: the token ends now; the undo goes on in the background and holds the scope open.
+                ctx.compensateInBackground(token, definition.activityRef());
+                ctx.history("NODE_COMPLETED", token, java.util.Map.of("background", true));
+                ctx.complete(token);
+                return;
+            }
+            ctx.compensateAndResume(token, definition.activityRef());
         }
     }
 

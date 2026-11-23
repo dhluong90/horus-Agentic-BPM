@@ -292,7 +292,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     @Override
     public List<StoredDefinition> signalStartDefinitions(String tenant, String name, int limit) {
-        return ProcessListQueries.SIGNAL_START_DEFINITIONS.list(jdbc, List.of(tenant, name, limit),
+        return ProcessListQueries.SIGNAL_START_DEFINITIONS.list(jdbc, List.of(tenant, name, name, limit),
                 JdbcProcessStore::definition);
     }
 
@@ -539,6 +539,41 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         return ProcessListQueries.MESSAGE_SUBSCRIPTIONS.list(jdbc, List.of(tenant, messageName, correlationKey, limit),
                 (rs, n) -> new MessageSubscriptionRow(tenant, rs.getString(1), rs.getString(2), rs.getString(3),
                         rs.getString(4), rs.getString(5), rs.getString(6), instant(rs, "created_at")));
+    }
+
+    // ---- parallel multiple process start (PD-149) ----------------------------------------------------------
+
+    @Override
+    public void putStartArrival(String tenant, String keyName, String kind, String eventName, String correlationKey,
+            String payloadJson, Instant now) {
+        jdbc.sql("INSERT INTO pre_start_arrival (tenant_id, key_name, trigger_kind, event_name, correlation_key, "
+                        + "payload, arrived_at) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?) "
+                        + "ON CONFLICT (tenant_id, key_name, trigger_kind, event_name, correlation_key) "
+                        + "DO UPDATE SET payload = EXCLUDED.payload, arrived_at = EXCLUDED.arrived_at")
+                .params(tenant, keyName, kind, eventName, correlationKey, payloadJson, ts(now)).update();
+    }
+
+    @Override
+    public java.util.Optional<String> startArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
+        return jdbc.sql("SELECT payload::text FROM pre_start_arrival WHERE tenant_id = ? AND key_name = ? "
+                        + "AND trigger_kind = ? AND event_name = ? AND correlation_key = ?")
+                .params(tenant, keyName, kind, eventName, correlationKey).query(String.class).optional();
+    }
+
+    @Override
+    public java.util.Optional<String> oldestStartArrivalKey(String tenant, String keyName, String eventName) {
+        return jdbc.sql("SELECT correlation_key FROM pre_start_arrival WHERE tenant_id = ? AND key_name = ? "
+                        + "AND trigger_kind = 'MESSAGE' AND event_name = ? ORDER BY arrived_at, correlation_key LIMIT 1")
+                .params(tenant, keyName, eventName).query(String.class).optional();
+    }
+
+    @Override
+    public void deleteStartArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
+        jdbc.sql("DELETE FROM pre_start_arrival WHERE tenant_id = ? AND key_name = ? AND trigger_kind = ? "
+                        + "AND event_name = ? AND correlation_key = ?")
+                .params(tenant, keyName, kind, eventName, correlationKey).update();
     }
 
     // ---- tasks --------------------------------------------------------------------------------------------

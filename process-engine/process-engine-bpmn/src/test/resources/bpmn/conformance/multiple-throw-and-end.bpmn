@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="Message_approved" name="loan-approved"/>
+  <bpmn:signal id="Signal_line" name="credit-line-opened"/>
+  <bpmn:signal id="Signal_done" name="booking-closed"/>
+  <bpmn:process id="loan-approval" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:intermediateThrowEvent id="announce">
+      <bpmn:messageEventDefinition messageRef="Message_approved"/>
+      <bpmn:signalEventDefinition signalRef="Signal_line"/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:endEvent id="close">
+      <bpmn:messageEventDefinition messageRef="Message_approved"/>
+      <bpmn:signalEventDefinition signalRef="Signal_done"/>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="announce"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="announce" targetRef="close"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="Message_request" name="account-opening-request"/>
+  <bpmn:signal id="Signal_kyc" name="kyc-cleared"/>
+  <bpmn:process id="account-opening" isExecutable="true">
+    <bpmn:startEvent id="start" parallelMultiple="true">
+      <bpmn:messageEventDefinition messageRef="Message_request"/>
+      <bpmn:signalEventDefinition signalRef="Signal_kyc"/>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="open-account" horus:handler="cards.open-account"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="open-account"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="open-account" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-booking" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"/>
+    <bpmn:intermediateThrowEvent id="withdraw">
+      <bpmn:compensateEventDefinition activityRef="reserve-funds" waitForCompletion="false"/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:serviceTask id="notify-customer" horus:handler="notify-customer"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="reserve-funds"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="reserve-funds" targetRef="withdraw"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="withdraw" targetRef="notify-customer"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="notify-customer" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

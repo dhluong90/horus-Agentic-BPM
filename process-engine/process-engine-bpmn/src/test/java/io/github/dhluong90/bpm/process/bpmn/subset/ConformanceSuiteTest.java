@@ -40,7 +40,7 @@ class ConformanceSuiteTest {
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-11-23T03:00:00Z"), ZoneOffset.UTC);
     private final SubsetBpmnReader reader = new SubsetBpmnReader(Limits.DEFAULTS);
 
-    private record Outcome(InstanceState state, Set<String> visited) { }
+    private record Outcome(InstanceState state, Set<String> visited, List<Effect> effects) { }
 
     private Process read(String file) throws IOException {
         try (InputStream in = getClass().getResourceAsStream("/bpmn/conformance/" + file)) {
@@ -59,6 +59,7 @@ class ConformanceSuiteTest {
         List<Effect> pending = new ArrayList<>(t.effects());
         record Seen(Set<String> done) { }
         Set<String> handled = new LinkedHashSet<>();
+        List<Effect> all = new ArrayList<>(t.effects());
         collect(t, visited);
         boolean progressed = true;
         while (progressed && t.state().status() == InstanceStatus.RUNNING) {
@@ -77,13 +78,14 @@ class ConformanceSuiteTest {
                 if (next != null) {
                     t = kernel.apply(t.state(), next, CLOCK);
                     pending.addAll(t.effects());
+                    all.addAll(t.effects());
                     collect(t, visited);
                     progressed = true;
                     break;
                 }
             }
         }
-        return new Outcome(t.state(), visited);
+        return new Outcome(t.state(), visited, all);
     }
 
     private static void collect(Transition t, Set<String> visited) {
@@ -137,9 +139,60 @@ class ConformanceSuiteTest {
     }
 
     @Test
+    void control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done()
+            throws IOException {
+        Process process = read("compensation-background.bpmn");
+
+        Outcome out = run(process, Map.of(), Map.of());
+
+        // The notice to the customer went out while the undo of the reservation was still to run, so the instance is
+        // not COMPENSATING and is not over: a background walk token holds it open
+        assertThat(out.visited()).contains("reserve-funds", "withdraw", "notify-customer", "end");
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        assertThat(out.effects()).filteredOn(Effect.StartCompensation.class::isInstance)
+                .singleElement().satisfies(e -> {
+                    Effect.StartCompensation started = (Effect.StartCompensation) e;
+                    assertThat(started.activityId()).isEqualTo("reserve-funds");
+                    assertThat(started.walkTokenId()).isNotNull();
+                });
+        String walk = ((Effect.StartCompensation) out.effects().stream()
+                .filter(Effect.StartCompensation.class::isInstance).findFirst().orElseThrow()).walkTokenId();
+        CompiledProcess compiled = new ProcessCompiler(BehaviorCatalog.registry(), 500).compile("D1", process);
+        DefaultExecutionKernel kernel = new DefaultExecutionKernel(compiled, BehaviorCatalog.registry(),
+                new V1ExpressionEvaluator(100));
+
+        // When the shell reports the walk done
+        Transition ended = kernel.apply(out.state(), new Command.EndBackgroundCompensation(walk), CLOCK);
+
+        // Then the instance completes
+        assertThat(ended.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+    }
+
+    @Test
+    void a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started() throws IOException {
+        Outcome out = run(read("parallel-multiple-start.bpmn"), Map.of("customer", "Tran Thi Mai"), Map.of());
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.visited()).contains("start", "open-account", "end");
+    }
+
+    @Test
+    void a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on() throws IOException {
+        Outcome out = run(read("multiple-throw-and-end.bpmn"), Map.of(), Map.of());
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.effects()).filteredOn(Effect.ThrowMessage.class::isInstance).hasSize(2);
+        assertThat(out.effects()).filteredOn(Effect.BroadcastSignal.class::isInstance)
+                .extracting(e -> ((Effect.BroadcastSignal) e).name())
+                .containsExactly("credit-line-opened", "booking-closed");
+        assertThat(out.visited()).contains("announce", "close");
+    }
+
+    @Test
     void every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import() throws IOException {
         for (String file : List.of("data-objects.bpmn", "gateways.bpmn", "parallel-join.bpmn",
-                "sub-process-and-timer.bpmn")) {
+                "sub-process-and-timer.bpmn", "compensation-background.bpmn", "parallel-multiple-start.bpmn",
+                "multiple-throw-and-end.bpmn")) {
             Process source = read(file);
 
             Process again = reader.read(new SubsetBpmnWriter().write(source));
