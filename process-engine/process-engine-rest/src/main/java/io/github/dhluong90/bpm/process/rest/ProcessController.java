@@ -877,7 +877,9 @@ public class ProcessController {
                 Views.variables(payload), idempotencyKey);
         tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
         body.put("outcome", delivery.outcome().name());
-        body.put("instanceId", delivery.instanceId());
+        if (delivery.instanceId() != null) {
+            body.put("instanceId", delivery.instanceId());
+        }
         if (delivery.nodeId() != null) {
             body.put("nodeId", delivery.nodeId());
         }

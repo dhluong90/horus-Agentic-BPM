@@ -877,7 +877,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
     const v = find(name, number);
     if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(number)} of rule set ${name} not found`);
-    let body: { from?: unknown; to?: unknown; limit?: unknown };
+    let body: { from?: unknown; to?: unknown; limit?: unknown; decisionIds?: unknown };
     try { body = JSON.parse(request.body || '{}') as typeof body; } catch { return problem(400, 'INPUT_INVALID', 'The body is not JSON'); }
     const from = typeof body.from === 'string' ? Date.parse(body.from) : Number.NaN;
     const to = typeof body.to === 'string' ? Date.parse(body.to) : Number.NaN;
@@ -889,10 +889,18 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (limit > READINGS_MAX) return problem(422, 'READINGS_TOO_LARGE', `One request reads at most ${String(READINGS_MAX)} decisions, this one asks for ${String(limit)}; read fewer at a time`);
     const logged = [...versionsOf(name)].reverse().find((candidate) => candidate.status === 'PUBLISHED' && candidate.version !== v.version);
     const maskedNames = v.definition.inputs.filter((input) => input.mask === true).map((input) => input.name);
-    const total = Math.min(limit, LOG_SIZE);
-    const step = (to - from) / (total + 1);
-    const results = syntheticInputs(v.definition.inputs, total).map((inputs, index) => {
-      const base = { decisionId: decisionIdOf(index), loggedVersion: logged?.version ?? Math.max(1, v.version - 1), evalClock: new Date(Math.round(to - (index + 1) * step)).toISOString() };
+    if (body.decisionIds !== undefined && body.decisionIds !== null && (!Array.isArray(body.decisionIds) || body.decisionIds.some((id) => typeof id !== 'string'))) return problem(400, 'QUERY_INVALID', 'decisionIds must be an array of decision ids');
+    const wanted = Array.isArray(body.decisionIds) && body.decisionIds.length > 0 ? new Set(body.decisionIds as string[]) : undefined;
+    // The log is a fixed grid, one decision every six hours back from the end of today, so a period read in
+    // windows gives the same decisions as the whole period read at once. Another tenant's or unknown ids are left out.
+    const gridEnd = (Math.floor(Date.now() / 86_400_000) + 1) * 86_400_000;
+    const inPeriod = Array.from({ length: LOG_SIZE }, (_, index) => ({ index, at: gridEnd - (index + 1) * 21_600_000 }))
+      .filter((entry) => entry.at >= from && entry.at < to && (wanted === undefined || wanted.has(decisionIdOf(entry.index))));
+    const picked = inPeriod.slice(0, limit);
+    const inputsAt = syntheticInputs(v.definition.inputs, LOG_SIZE);
+    const results = picked.map(({ index, at }) => {
+      const inputs = inputsAt[index] ?? {};
+      const base = { decisionId: decisionIdOf(index), loggedVersion: logged?.version ?? Math.max(1, v.version - 1), evalClock: new Date(at).toISOString() };
       // Every fourth decision held a value in a masked input: the log keeps only its fingerprint.
       const hadMasked = maskedNames.length > 0 && index % 4 === 1;
       if (logged === undefined || hadMasked) {
@@ -910,7 +918,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     return json({
       ruleSet: name, version: v.version, status: v.status, from: new Date(from).toISOString(), to: new Date(to).toISOString(),
       decisionCount: results.length, replayedCount: results.length - notReplayableCount, changedCount: results.filter((r) => r.changed).length, notReplayableCount,
-      truncated: limit < LOG_SIZE, languages: LANGUAGES, results,
+      truncated: inPeriod.length > limit, languages: LANGUAGES, results,
     });
   }
 

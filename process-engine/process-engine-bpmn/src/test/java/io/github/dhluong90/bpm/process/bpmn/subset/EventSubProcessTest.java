@@ -610,6 +610,54 @@ class EventSubProcessTest {
         assertThat(pushes.get(1).inputSnapshot()).containsEntry("account", "ACC-0001");
     }
 
+    private static final String UNDO_TWO_TASKS = """
+            <bpmn:subProcess id="undo-disbursement" triggeredByEvent="true">
+              <bpmn:startEvent id="undo-start"><bpmn:compensateEventDefinition/></bpmn:startEvent>
+              <bpmn:serviceTask id="reverse-disbursement" horus:handler="reverse-disbursement">
+                <bpmn:extensionElements><horus:input name="account" value="${instance.account}"/></bpmn:extensionElements>
+              </bpmn:serviceTask>
+              <bpmn:serviceTask id="notify-treasury" horus:handler="notify-treasury">
+                <bpmn:extensionElements><horus:input name="amount" value="${instance.amount}"/></bpmn:extensionElements>
+              </bpmn:serviceTask>
+              <bpmn:endEvent id="undo-end"/>
+              <bpmn:sequenceFlow id="u1" sourceRef="undo-start" targetRef="reverse-disbursement"/>
+              <bpmn:sequenceFlow id="u2" sourceRef="reverse-disbursement" targetRef="notify-treasury"/>
+              <bpmn:sequenceFlow id="u3" sourceRef="notify-treasury" targetRef="undo-end"/>
+            </bpmn:subProcess>""";
+
+    @Test
+    void PRE_353_a_compensation_event_sub_process_with_several_tasks_undoes_them_in_flow_order() {
+        // Given an undo of two service tasks: reverse the disbursement of 25,000,000 VND, then tell the treasury
+        DefaultExecutionKernel kernel = kernel(booking(UNDO_TWO_TASKS));
+        Transition started = start(kernel, Map.of("account", "0011-223344", "amount", 25_000_000));
+
+        // When the sub-process completes
+        Transition done = answer(kernel, started, started.state(), "reserve-funds");
+
+        // Then the stack takes the step, then the last task, then the first, so the walk (newest first) runs
+        // reverse-disbursement, then notify-treasury, then the step's own undo; each reads its own inputs
+        List<Effect.PushCompensation> pushes = effects(done, Effect.PushCompensation.class);
+        assertThat(pushes).extracting(Effect.PushCompensation::handler)
+                .containsExactly("release-funds", "notify-treasury", "reverse-disbursement");
+        assertThat(pushes.get(1).inputSnapshot()).containsEntry("amount", 25_000_000).doesNotContainKey("account");
+        assertThat(pushes.get(2).inputSnapshot()).containsEntry("account", "0011-223344")
+                .doesNotContainKey("amount");
+        assertThat(pushes).extracting(Effect.PushCompensation::nodeId).containsExactly("reserve-funds", "disburse",
+                "disburse");
+        assertThat(pushes.get(1).undoNodeId()).isEqualTo("notify-treasury");
+    }
+
+    @Test
+    void PRE_353_an_undo_that_branches_or_holds_anything_but_service_tasks_is_refused() {
+        // A user task in the line, a second flow out of the first task, and a task with no flow into the line
+        refused(booking(UNDO_TWO_TASKS.replaceAll("(?s)<bpmn:serviceTask id=\"notify-treasury\".*?</bpmn:serviceTask>",
+                "<bpmn:task id=\"notify-treasury\"/>")), "COMPENSATION_EVENT_SUBPROCESS_SHAPE", "undo-disbursement");
+        refused(booking(UNDO_TWO_TASKS.replace("<bpmn:sequenceFlow id=\"u3\"",
+                "<bpmn:sequenceFlow id=\"u4\" sourceRef=\"reverse-disbursement\" targetRef=\"undo-end\"/>"
+                        + "<bpmn:sequenceFlow id=\"u3\"")),
+                "COMPENSATION_EVENT_SUBPROCESS_SHAPE", "undo-disbursement");
+    }
+
     @Test
     void PRE_326_a_compensation_boundary_event_on_a_sub_process_or_a_call_activity_names_its_undo() {
         // Given a sub-process with a compensation boundary event and its compensation activity

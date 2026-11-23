@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-disbursement" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:subProcess id="disburse">
+      <bpmn:startEvent id="disburse-start"/>
+      <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"/>
+      <bpmn:endEvent id="disburse-end"/>
+      <bpmn:sequenceFlow id="d1" sourceRef="disburse-start" targetRef="reserve-funds"/>
+      <bpmn:sequenceFlow id="d2" sourceRef="reserve-funds" targetRef="disburse-end"/>
+      <bpmn:subProcess id="undo-disbursement" triggeredByEvent="true">
+        <bpmn:startEvent id="undo-start"><bpmn:compensateEventDefinition/></bpmn:startEvent>
+        <bpmn:serviceTask id="reverse-disbursement" horus:handler="reverse-disbursement"/>
+        <bpmn:serviceTask id="notify-treasury" horus:handler="notify-treasury"/>
+        <bpmn:endEvent id="undo-end"/>
+        <bpmn:sequenceFlow id="u1" sourceRef="undo-start" targetRef="reverse-disbursement"/>
+        <bpmn:sequenceFlow id="u2" sourceRef="reverse-disbursement" targetRef="notify-treasury"/>
+        <bpmn:sequenceFlow id="u3" sourceRef="notify-treasury" targetRef="undo-end"/>
+      </bpmn:subProcess>
+    </bpmn:subProcess>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="disburse"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="disburse" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

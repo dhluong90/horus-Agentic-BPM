@@ -113,6 +113,7 @@ Each engine is a functional core with an imperative shell. Domain code takes the
 | `RuleFunctionRegistry` | Outbound | Rule | Built-in pure functions | Yes, pure functions only |
 | `ExpressionLanguage` | Inbound to the Rule Engine core, used by the Process Engine | Rule (API), Process (caller) | `horus-expr-v1` (M1); FEEL from S1 (ADR-0019) | No; the Process Engine evaluates gateway conditions and, later, mappings and script tasks only through it |
 | `MessageAdapter` | Outbound | Process | Hands message throws to the host event publisher, so the host writes its own outbox in the same transaction | Yes; S2 ([`standards-compliance.md`](standards-compliance.md) section 5.4) |
+| `DataStoreAdapter` | Outbound | Process | Reads and writes the BPMN data store a data association names, in the step transaction, for the tenant of the instance only (default methods refuse the operation) | Yes; #499 |
 | `AgentAdapter`, `ServiceAdapter` | Outbound | Process | Stubs in `*-test` | Required for `agentTask` and remote `serviceTask` |
 | `BusinessCalendar` | Outbound | Process | Reads `pre_calendar`, `pre_holiday`; 24x7 built in | Yes |
 | `OutputSchemaValidator` | Outbound | Process | `networknt/json-schema-validator` in the starter | Yes |

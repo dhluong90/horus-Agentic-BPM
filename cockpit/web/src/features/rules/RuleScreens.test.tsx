@@ -190,6 +190,15 @@ describe('four eyes', () => {
     expect(approve).toHaveAccessibleDescription(/Approve is unavailable\. You requested this change\. Another approver must decide\./);
   });
 
+  it('CKP_511_a_disabled_approve_says_why_in_a_short_tooltip_and_no_amber_paragraph', async () => {
+    open('#/rules/card-fee/2');
+    const approve = await screen.findByRole('button', { name: 'Approve and publish' });
+    expect(approve.parentElement).toHaveAttribute('data-tip', 'You requested this. Another approver decides.');
+    expect(approve.closest('.decision')?.querySelector('.gate__reason')).toBeNull();
+    // The dock is the sticky one of the changes view: the decision card stays on screen while the diff scrolls.
+    expect(approve.closest('.decision')).toHaveClass('decision--dock');
+  });
+
   it('CKP_002_approver_sees_both_versions_side_by_side_before_the_approval_action', async () => {
     open('#/rules/card-fee/2', 'rules-approver');
     const table = await screen.findByRole('table', { name: 'Version 1 and version 2 of card-fee, side by side' });

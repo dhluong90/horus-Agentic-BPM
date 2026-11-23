@@ -18,24 +18,38 @@ const flow = (id: string, source: string, target: string, name?: string, conditi
 export const LOAN_ORIGINATION_BPMN = `${HEAD}
   <bpmn:process id="loan-origination" name="Loan origination" isExecutable="true">
     <bpmn:startEvent id="received" name="Application received"/>
-    <bpmn:userTask id="capture" name="Capture application" horus:assignee="role:LOAN_OFFICER"/>
+    <bpmn:userTask id="capture" name="Capture application" horus:assignee="role:LOAN_OFFICER">
+      <bpmn:dataOutputAssociation id="capture-out"><bpmn:sourceRef>capture-form</bpmn:sourceRef><bpmn:targetRef>application-ref</bpmn:targetRef></bpmn:dataOutputAssociation>
+    </bpmn:userTask>
     <bpmn:boundaryEvent id="no-documents" name="No documents in 2 days" attachedToRef="capture" cancelActivity="false">
       <bpmn:timerEventDefinition><bpmn:timeDuration>P2D</bpmn:timeDuration></bpmn:timerEventDefinition>
     </bpmn:boundaryEvent>
     <bpmn:serviceTask id="remind" name="Remind applicant" horus:handler="loans.remindApplicant"/>
     <bpmn:endEvent id="reminded" name="Reminder sent"/>
     <bpmn:serviceTask id="assess-documents" name="Assess documents" horus:type="agentTask" horus:agent="doc-assessor" horus:timeout="PT30S">
+      <bpmn:dataInputAssociation id="assess-in"><bpmn:sourceRef>application-ref</bpmn:sourceRef><bpmn:targetRef>application-input</bpmn:targetRef></bpmn:dataInputAssociation>
       <bpmn:extensionElements>
         <horus:input name="applicationId" value="\${instance.applicationId}"/>
         <horus:input name="nationalId" value="\${instance.nationalId}" mask="true"/>
         <horus:guardrail decision="agent-output-guardrails" onViolation="route-to-human" reviewer="role:COMPLIANCE_REVIEWER"/>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
-    <bpmn:businessRuleTask id="credit-decision" name="Credit decision" horus:ruleSet="credit-limit"/>
+    <bpmn:businessRuleTask id="credit-decision" name="Credit decision" horus:ruleSet="credit-limit">
+      <bpmn:dataInputAssociation id="decision-in"><bpmn:sourceRef>bureau-ref</bpmn:sourceRef><bpmn:targetRef>bureau-input</bpmn:targetRef></bpmn:dataInputAssociation>
+    </bpmn:businessRuleTask>
     <bpmn:exclusiveGateway id="approved" name="Approved?" default="to-decline"/>
     <bpmn:serviceTask id="book-loan" name="Book loan" horus:handler="loans.book"/>
-    <bpmn:scriptTask id="compute-offer" name="Compute offer terms" horus:resultVariable="offerTerms"><bpmn:script>decision.limit * 12</bpmn:script></bpmn:scriptTask>
-    <bpmn:serviceTask id="send-offer" name="Send offer" horus:handler="loans.sendOffer"/>
+    <bpmn:scriptTask id="compute-offer" name="Compute offer terms" horus:resultVariable="offerTerms"><bpmn:script>decision.limit * 12</bpmn:script>
+      <bpmn:dataOutputAssociation id="offer-out"><bpmn:sourceRef>offer-result</bpmn:sourceRef><bpmn:targetRef>offer-ref</bpmn:targetRef></bpmn:dataOutputAssociation>
+    </bpmn:scriptTask>
+    <bpmn:serviceTask id="send-offer" name="Send offer" horus:handler="loans.sendOffer">
+      <bpmn:dataInputAssociation id="send-in"><bpmn:sourceRef>offer-ref</bpmn:sourceRef><bpmn:targetRef>offer-input</bpmn:targetRef></bpmn:dataInputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:dataObject id="application" name="Loan application"/>
+    <bpmn:dataObject id="offer" name="Offer terms"/>
+    <bpmn:dataObjectReference id="application-ref" name="Loan application" dataObjectRef="application"/>
+    <bpmn:dataObjectReference id="offer-ref" name="Offer terms" dataObjectRef="offer"/>
+    <bpmn:dataStoreReference id="bureau-ref" name="Credit bureau"/>
     <bpmn:endEvent id="booked" name="Loan booked"/>
     <bpmn:serviceTask id="send-decline" name="Send decline letter" horus:handler="loans.sendDecline"/>
     <bpmn:endEvent id="declined" name="Declined"/>

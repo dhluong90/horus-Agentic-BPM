@@ -453,6 +453,8 @@ export interface ReplayRequest {
   from: string;
   to: string;
   limit?: number | undefined;
+  /** When not empty, only these decisions of the period are replayed (the engine leaves out ids that are not the tenant's). */
+  decisionIds?: readonly string[] | undefined;
 }
 
 /** One sample of a simulation request: its inputs by name, money as `Money`, and an optional name of 1 to 100 characters. */

@@ -234,6 +234,48 @@ describe('#518 the result variable of a script step comes from the history', () 
   });
 });
 
+describe('#499 data objects and data stores', () => {
+  it('CKP_499_the_diagram_draws_data_objects_and_stores_with_their_associations_read_only', async () => {
+    setScenario('processes-reviewer');
+    open('#/processes/loan-origination/3');
+    const diagram = await screen.findByRole('group', { name: /Diagram of Loan origination/ });
+    expect(within(diagram).getByRole('img', { name: 'Data object: Loan application' })).toBeInTheDocument();
+    expect(within(diagram).getByRole('img', { name: 'Data object: Offer terms' })).toBeInTheDocument();
+    expect(within(diagram).getByRole('img', { name: 'Data store: Credit bureau' })).toBeInTheDocument();
+    // Capture writes the application, assessing reads it; the bureau is read, the offer written then read.
+    const links = [...diagram.querySelectorAll('[data-data-link]')].map((el) => el.getAttribute('data-direction'));
+    expect(links.filter((d) => d === 'write')).toHaveLength(2);
+    expect(links.filter((d) => d === 'read')).toHaveLength(3);
+    // A symbol takes no focus and no click: the diagram stays read only, and steps are still counted without them.
+    for (const symbol of diagram.querySelectorAll('[data-data]')) expect(symbol).not.toHaveAttribute('tabindex');
+    expect(diagram).toHaveAttribute('aria-label', 'Diagram of Loan origination, 14 steps');
+  });
+
+  it('CKP_499_a_diagram_with_data_symbols_keeps_room_under_them_for_the_minimap', async () => {
+    // jsdom has no layout: report a canvas that is smaller than its drawing, so the minimap is shown.
+    const heights = { scrollHeight: 1200, clientHeight: 400 };
+    for (const [name, value] of Object.entries(heights)) {
+      Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get: () => value });
+    }
+    try {
+      setScenario('processes-reviewer');
+      open('#/processes/loan-origination/3');
+      const diagram = await screen.findByRole('group', { name: /Diagram of Loan origination/ });
+      await waitFor(() => { expect(document.querySelector('[data-minimap]')).not.toBeNull(); });
+      expect(diagram.closest('.dg__frame')).toHaveClass('dg__frame--clear-map');
+    } finally {
+      for (const name of Object.keys(heights)) Reflect.deleteProperty(HTMLElement.prototype, name);
+    }
+  });
+
+  it('CKP_499_the_timeline_names_the_data_a_step_read_and_wrote', async () => {
+    const table = await openTimeline(BOOKED_INSTANCE_ID);
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows.find((row) => row.textContent.includes('Data written'))).toHaveTextContent('wrote Offer terms');
+    expect(rows.find((row) => row.textContent.includes('Step started'))).toHaveTextContent('reads Offer terms');
+  });
+});
+
 describe('CKP-033 and CKP-049 undo steps in the timeline', () => {
   it('CKP_033_compensation_runs_in_instance_timeline', async () => {
     const table = await openTimeline(UNDONE_INSTANCE_ID);

@@ -352,7 +352,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Exclusive | As M2; default flow; error `NO_OUTGOING_FLOW` incident when no condition holds and there is no default |
 | Parallel | As M2 |
 | Inclusive (S1) | Split: every flow whose condition is true, the default when none. Join: fires when no live token of the same scope can still reach it. The compiler stores per join the set of nodes that reach it without passing through it; under the instance lock the check scans the live tokens of the scope (typically under 20). The check runs on every arrival and every token end in the scope, so a token ending elsewhere cannot leave a join waiting (no lost wakeup). Built in #494 as a settle step that runs when the agenda of an apply is empty; two joins that wait for each other fail the command with `JOIN_DEADLOCK` |
-| Event-based (S2) | Subscriptions and timer jobs for every following catch event in one transaction; the first to fire cancels the others under the instance lock; instantiating event-based gateways at process start in S3 |
+| Event-based (S2) | Subscriptions and timer jobs for every following catch event in one transaction; the first to fire cancels the others under the instance lock; an instantiating event-based gateway starts the process on the first message or signal of its catches (#499) |
 | Inclusive (S1) | Split: every flow whose condition is true, the default when none. Join: fires when no live token of the same scope can still reach it. The compiler stores per join the set of nodes that reach it without passing through it; under the instance lock the check scans the live tokens of the scope (typically under 20). The check runs on every arrival and every token end in the scope, so a token ending elsewhere cannot leave a join waiting (no lost wakeup) |
 | Event-based (S2) | As built (#495): one token for every following catch event, each with its subscription or timer job, in one transaction; the first to fire cancels the others in its own transaction under the instance lock, so a second event that arrives at the same moment finds its token cancelled and is refused as stale; instantiating event-based gateways at process start in S3 |
 | Complex (S3) | `activationCondition` over `_activationCount` evaluated under the instance lock; reset semantics as in BPMN 2.0.2 section 13.4.4 |
@@ -363,7 +363,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 |---|---|
 | Data objects | Variables of their scope token (`local_variables` on the token, S1, nullable column added then). Lookup walks the scope chain to the instance variables |
 | Data input and output associations | Input and output mappings evaluated by the expression SPI at activity start and end |
-| Data stores | References only; reading or writing host data is a service task through a host handler. The engine never touches host tables (ADR-0002) |
+| Data stores | A data association to a data store reads and writes through the host's `DataStoreAdapter` of that store, for the tenant of the instance (#499). The engine never touches host tables (ADR-0002) |
 | Timers | `timeDate`, `timeDuration` and `timeCycle` (ISO 8601 repeating intervals); expressions allowed; time zone from the definition (default `UTC`); due times use the database `now()` as today |
 | Conditional events | Evaluated in the transaction that changes the instance's variables, for that instance's conditional subscriptions only; never by polling |
 | Terminate end event | Cancels every token of its scope under the instance lock |
@@ -409,7 +409,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Execute (#488, #487) | | | A compensation boundary on a call activity, sub-process or transaction executes; `waitForCompletion="false"` is not planned |
-| Event-based gateway | Refused | Import | Execute | The exclusive form executes since 0.3.0 (#495); instantiating forms come in S3 |
+| Event-based gateway | Refused | Import | Execute | The exclusive form executes since 0.3.0 (#495), the instantiating one too (#499), and so does the parallel form (#499, PRE-355) |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
 | Collaboration: pools, lanes, message flows, artifacts | Import, display and export (#497): one definition per executable pool, black-box pools kept | | Message flows execute between pools through 5.4 | |
 | Complex gateway, ad-hoc subprocess, multiple and parallel multiple events | Refused | Import | Import | Execute |

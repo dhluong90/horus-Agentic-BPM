@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="kyc-parallel" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:parallelGateway id="fork"/>
+    <bpmn:userTask id="id-check" horus:assignee="role:KYC_OFFICER" horus:resultVariable="idResult"/>
+    <bpmn:userTask id="aml-check" horus:assignee="role:AML_OFFICER" horus:resultVariable="amlResult"/>
+    <bpmn:parallelGateway id="join"/>
+    <bpmn:manualTask id="open-account"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="fork"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="fork" targetRef="id-check"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="fork" targetRef="aml-check"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="id-check" targetRef="join"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="aml-check" targetRef="join"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="join" targetRef="open-account"/>
+    <bpmn:sequenceFlow id="f7" sourceRef="open-account" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_kyc-parallel">
+    <bpmndi:BPMNPlane id="Plane_kyc-parallel" bpmnElement="kyc-parallel">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fork_di" bpmnElement="fork"><dc:Bounds x="246" y="95" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="id-check_di" bpmnElement="id-check"><dc:Bounds x="356" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="aml-check_di" bpmnElement="aml-check"><dc:Bounds x="356" y="210" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="join_di" bpmnElement="join"><dc:Bounds x="516" y="95" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="open-account_di" bpmnElement="open-account"><dc:Bounds x="626" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="786" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="120"/><di:waypoint x="246" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="296" y="120"/><di:waypoint x="356" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="296" y="120"/><di:waypoint x="326" y="120"/><di:waypoint x="326" y="250"/><di:waypoint x="356" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="456" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="456" y="250"/><di:waypoint x="486" y="250"/><di:waypoint x="486" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f6_di" bpmnElement="f6"><di:waypoint x="566" y="120"/><di:waypoint x="626" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f7_di" bpmnElement="f7"><di:waypoint x="726" y="120"/><di:waypoint x="786" y="120"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

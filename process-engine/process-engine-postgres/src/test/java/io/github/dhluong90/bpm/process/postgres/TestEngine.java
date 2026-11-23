@@ -188,6 +188,9 @@ final class TestEngine {
             services.useFormRegistry(b.forms, b.formLinkOrigins);
         }
         services.useMessageAdapter(b.messageAdapter);
+        Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> stores = new java.util.LinkedHashMap<>();
+        b.dataStores.forEach(a -> stores.put(a.name(), a));
+        services.useDataStoreAdapters(stores);
         if (b.importedLayouts) {
             // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
             this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
@@ -343,6 +346,8 @@ final class TestEngine {
         private List<String> formLinkOrigins = List.of();
         private boolean importedLayouts;
         private io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
+        private final java.util.List<io.github.dhluong90.bpm.process.spi.DataStoreAdapter> dataStores =
+                new java.util.ArrayList<>();
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -499,6 +504,12 @@ final class TestEngine {
         /** The host's outbox port for the messages a process sends (#491); none by default. */
         Builder messageAdapter(io.github.dhluong90.bpm.process.spi.MessageAdapter value) {
             messageAdapter = value;
+            return this;
+        }
+
+        /** The host's data stores (#499), by name; none by default. */
+        Builder dataStores(io.github.dhluong90.bpm.process.spi.DataStoreAdapter... value) {
+            dataStores.addAll(java.util.List.of(value));
             return this;
         }
 

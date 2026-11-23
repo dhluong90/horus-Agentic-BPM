@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-disbursement" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:subProcess id="disburse">
+      <bpmn:startEvent id="disburse-start"/>
+      <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"/>
+      <bpmn:endEvent id="disburse-end"/>
+      <bpmn:sequenceFlow id="d1" sourceRef="disburse-start" targetRef="reserve-funds"/>
+      <bpmn:sequenceFlow id="d2" sourceRef="reserve-funds" targetRef="disburse-end"/>
+      <bpmn:subProcess id="undo-disbursement" triggeredByEvent="true">
+        <bpmn:startEvent id="undo-start"><bpmn:compensateEventDefinition/></bpmn:startEvent>
+        <bpmn:serviceTask id="reverse-disbursement" horus:handler="reverse-disbursement"/>
+        <bpmn:serviceTask id="notify-treasury" horus:handler="notify-treasury"/>
+        <bpmn:endEvent id="undo-end"/>
+        <bpmn:sequenceFlow id="u1" sourceRef="undo-start" targetRef="reverse-disbursement"/>
+        <bpmn:sequenceFlow id="u2" sourceRef="reverse-disbursement" targetRef="notify-treasury"/>
+        <bpmn:sequenceFlow id="u3" sourceRef="notify-treasury" targetRef="undo-end"/>
+      </bpmn:subProcess>
+    </bpmn:subProcess>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="disburse"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="disburse" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_loan-disbursement">
+    <bpmndi:BPMNPlane id="Plane_loan-disbursement" bpmnElement="loan-disbursement">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="247" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="disburse_di" bpmnElement="disburse" isExpanded="true"><dc:Bounds x="246" y="80" width="868" height="370"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="disburse-start_di" bpmnElement="disburse-start"><dc:Bounds x="534" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reserve-funds_di" bpmnElement="reserve-funds"><dc:Bounds x="878" y="120" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="disburse-end_di" bpmnElement="disburse-end"><dc:Bounds x="1038" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-disbursement_di" bpmnElement="undo-disbursement" isExpanded="true"><dc:Bounds x="286" y="250" width="532" height="160"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-start_di" bpmnElement="undo-start"><dc:Bounds x="326" y="312" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reverse-disbursement_di" bpmnElement="reverse-disbursement"><dc:Bounds x="422" y="290" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="notify-treasury_di" bpmnElement="notify-treasury"><dc:Bounds x="582" y="290" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-end_di" bpmnElement="undo-end"><dc:Bounds x="742" y="312" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="1174" y="247" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="u1_di" bpmnElement="u1"><di:waypoint x="362" y="330"/><di:waypoint x="422" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="u2_di" bpmnElement="u2"><di:waypoint x="522" y="330"/><di:waypoint x="582" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="u3_di" bpmnElement="u3"><di:waypoint x="682" y="330"/><di:waypoint x="742" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="d1_di" bpmnElement="d1"><di:waypoint x="570" y="160"/><di:waypoint x="878" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="d2_di" bpmnElement="d2"><di:waypoint x="978" y="160"/><di:waypoint x="1038" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="265"/><di:waypoint x="246" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="1114" y="265"/><di:waypoint x="1174" y="265"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

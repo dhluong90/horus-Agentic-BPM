@@ -8,17 +8,24 @@ import java.util.Objects;
 /**
  * Inputs of the kernel. Each is applied under the instance row lock by the shell.
  */
-public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.ChildEnded, Command.MoveToken, Command.RetryStep, Command.Compensate, Command.EndCompensation, Command.StartAdHocActivity {
+public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.ChildEnded, Command.MoveToken, Command.RetryStep, Command.Compensate, Command.EndCompensation, Command.EndBackgroundCompensation, Command.StartAdHocActivity {
 
     /**
-     * Starts the instance at its none start event.
+     * Starts the instance at its start event, or, for a process that starts on an instantiating event-based gateway
+     * (#499), at the catch event that fired.
      *
      * @param variables initial variables
      * @param actor who started it
+     * @param catchNodeId the catch event or receive task of the gateway whose message or signal creates the instance,
+     *     or null
      */
-    record Start(Map<String, Object> variables, String actor) implements Command {
+    record Start(Map<String, Object> variables, String actor, String catchNodeId) implements Command {
         public Start {
             variables = variables == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+        }
+
+        public Start(Map<String, Object> variables, String actor) {
+            this(variables, actor, null);
         }
     }
 
@@ -252,6 +259,18 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
     record EndCompensation(String scopeTokenId) implements Command {
         public EndCompensation {
             Objects.requireNonNull(scopeTokenId, "scopeTokenId must not be null");
+        }
+    }
+
+    /**
+     * The shell walked a background compensation to the bottom (PD-149): its walk token completes and the scope may
+     * end. The instance stays {@code RUNNING}; a walk token that already ended makes this a no-op, so a retry is safe.
+     *
+     * @param tokenId the walk token
+     */
+    record EndBackgroundCompensation(String tokenId) implements Command {
+        public EndBackgroundCompensation {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
         }
     }
 

@@ -22,6 +22,14 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataObject;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataObjectReference;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataStoreReference;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataInputAssociation;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataOutputAssociation;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IoSpecification;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InputSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.OutputSet;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.DataInput;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.DataOutput;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.LoopCharacteristics;
@@ -189,6 +197,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
     private static final Set<String> CHOREOGRAPHY_ROOTS = Set.of("choreography", "globalChoreographyTask",
             "globalConversation");
     /** Where a message flow carries the ids of the pools at its ends, and the correlation variable of its target. */
+    static final QName DATA_VARIABLE = new QName(BpmnNamespaces.HORUS, "variable");
     static final QName SOURCE_POOL = new QName(BpmnNamespaces.HORUS, "sourcePool");
     static final QName TARGET_POOL = new QName(BpmnNamespaces.HORUS, "targetPool");
     static final QName CORRELATION_KEY = new QName(BpmnNamespaces.HORUS, "correlationKey");
@@ -336,6 +345,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         signalNames.put(signalId, attr("name"));
                     }
                     skip();
+                } else if (BPMN.equals(ns) && "dataStore".equals(local)) {
+                    // #499: a root data store; a dataStoreReference names it, and a host handler serves it.
+                    dataStoreIds.add(attr("id"));
+                    skipChildren();
                 } else if (BPMN.equals(ns) && "message".equals(local)) {
                     message();
                 } else if (BPMN.equals(ns)) {
@@ -348,7 +361,25 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
+            for (DefinitionProblem ref : dataStoreRefs) {
+                if (!dataStoreIds.contains(ref.stage())) {
+                    invalid.add(new DefinitionProblem(ref.code(), ref.message(), ref.element(), ref.elementId(),
+                            ref.line()));
+                }
+            }
             List<Process> executable = executableProcesses();
+            // #499: the catch events of an instantiating event-based gateway create the instance, so no variable can
+            // carry a key for them; they need no horus:correlationKey.
+            Set<String> startingCatches = new HashSet<>();
+            for (Process candidate : executable) {
+                List<io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement> all = candidate.allFlowElements();
+                Set<String> gateways = new HashSet<>();
+                all.stream().filter(e -> e instanceof EventBasedGateway g && g.instantiate())
+                        .forEach(e -> gateways.add(e.id()));
+                all.stream().filter(e -> e instanceof SequenceFlow f && gateways.contains(f.sourceRef()))
+                        .forEach(e -> startingCatches.add(((SequenceFlow) e).targetRef()));
+            }
+            invalid.removeIf(p -> "CORRELATION_KEY_REQUIRED".equals(p.code()) && startingCatches.contains(p.elementId()));
             for (DefinitionProblem ref : unresolvedRefs) {
                 if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
@@ -929,6 +960,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
                 behaviourAttributes();
                 lastLoop = null;
+                lastIo = null;
+                lastIn = new ArrayList<>();
+                lastOut = new ArrayList<>();
                 int before = elements.size();
                 switch (local) {
                     case "standardLoopCharacteristics", "multiInstanceLoopCharacteristics" ->
@@ -994,6 +1028,38 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         }
                     }
                     case "sequenceFlow" -> elements.add(sequenceFlow());
+                    case "dataObject" -> {
+                        String id = id();
+                        String variable = horus("variable");
+                        elements.add(new DataObject(id, attr("name"), attr("itemSubjectRef"),
+                                "true".equals(attr("isCollection")), variable == null ? null : new ElementInfo(List.of(),
+                                        null, Map.of(DATA_VARIABLE, variable))));
+                        skipChildren();
+                    }
+                    case "dataObjectReference" -> {
+                        String id = id();
+                        elements.add(new DataObjectReference(id, attr("name"), attr("dataObjectRef"),
+                                attr("itemSubjectRef"), null));
+                        if (attr("dataObjectRef") == null) {
+                            invalid.add(new DefinitionProblem("DATA_OBJECT_REF_MISSING", "A dataObjectReference needs"
+                                    + " dataObjectRef", "dataObjectReference", safe(id), line()));
+                        }
+                        skipChildren();
+                    }
+                    case "dataStoreReference" -> {
+                        String id = id();
+                        elements.add(new DataStoreReference(id, attr("name"), attr("dataStoreRef"),
+                                attr("itemSubjectRef"), null));
+                        dataStoreRefs.add(new DefinitionProblem("DATA_STORE_UNKNOWN", "dataStoreRef "
+                                + safe(attr("dataStoreRef")) + " names no dataStore of the file", "dataStoreReference",
+                                safe(id), line(), attr("dataStoreRef")));
+                        skipChildren();
+                    }
+                    case "ioSpecification", "dataInputAssociation", "dataOutputAssociation" -> {
+                        if (!dataChild(local, "the enclosing sub-process")) {
+                            skip();
+                        }
+                    }
                     case "textAnnotation" -> artifacts.add(textAnnotation());
                     case "association" -> artifacts.add(association());
                     case "group" -> {
@@ -1021,8 +1087,127 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     attachLoop(elements, before, lastLoop);
                     lastLoop = null;
                 }
+                attachData(elements, before);
             }
             return own;
+        }
+
+        /** #499: the data of the activity being read; put on it by {@link #attachData}. */
+        private IoSpecification lastIo;
+        private List<DataInputAssociation> lastIn = new ArrayList<>();
+        private List<DataOutputAssociation> lastOut = new ArrayList<>();
+        private final List<DefinitionProblem> dataStoreRefs = new ArrayList<>();
+        private final Set<String> dataStoreIds = new HashSet<>();
+
+        private void skipChildren() throws XMLStreamException {
+            while (nextChild()) {
+                skip();
+            }
+        }
+
+        /**
+         * #499: reads an {@code ioSpecification}, {@code dataInputAssociation} or {@code dataOutputAssociation} of the
+         * activity being read. A transformation or an assignment is refused: the value moves as it is.
+         *
+         * @return true when the element was one of those and has been read
+         */
+        private boolean dataChild(String local, String owner) throws XMLStreamException {
+            switch (local) {
+                case "ioSpecification" -> {
+                    String id = attr("id");
+                    List<DataInput> inputs = new ArrayList<>();
+                    List<DataOutput> outputs = new ArrayList<>();
+                    List<InputSet> inputSets = new ArrayList<>();
+                    List<OutputSet> outputSets = new ArrayList<>();
+                    while (nextChild()) {
+                        String child = xml.getLocalName();
+                        if (!BPMN.equals(xml.getNamespaceURI())) {
+                            skip();
+                        } else if ("dataInput".equals(child)) {
+                            inputs.add(new DataInput(attr("id"), attr("name"), attr("itemSubjectRef"),
+                                    "true".equals(attr("isCollection")), null));
+                            skipChildren();
+                        } else if ("dataOutput".equals(child)) {
+                            outputs.add(new DataOutput(attr("id"), attr("name"), attr("itemSubjectRef"),
+                                    "true".equals(attr("isCollection")), null));
+                            skipChildren();
+                        } else if ("inputSet".equals(child) || "outputSet".equals(child)) {
+                            String setId = attr("id");
+                            String setName = attr("name");
+                            List<String> refs = new ArrayList<>();
+                            while (nextChild()) {
+                                if (BPMN.equals(xml.getNamespaceURI()) && ("dataInputRefs".equals(xml.getLocalName())
+                                        || "dataOutputRefs".equals(xml.getLocalName()))) {
+                                    refs.add(text().strip());
+                                } else {
+                                    skip();
+                                }
+                            }
+                            if ("inputSet".equals(child)) {
+                                inputSets.add(new InputSet(setId, setName, refs, null));
+                            } else {
+                                outputSets.add(new OutputSet(setId, setName, refs, null));
+                            }
+                        } else {
+                            unsupported("ioSpecification child " + child, owner, BpmnStages.NOT_PLANNED);
+                            skip();
+                        }
+                    }
+                    lastIo = new IoSpecification(id, inputs, outputs, inputSets, outputSets, null);
+                    return true;
+                }
+                case "dataInputAssociation", "dataOutputAssociation" -> {
+                    String id = attr("id");
+                    List<String> sources = new ArrayList<>();
+                    String target = null;
+                    while (nextChild()) {
+                        String child = xml.getLocalName();
+                        if (!BPMN.equals(xml.getNamespaceURI())) {
+                            skip();
+                        } else if ("sourceRef".equals(child)) {
+                            sources.add(text().strip());
+                        } else if ("targetRef".equals(child)) {
+                            target = text().strip();
+                        } else {
+                            unsupported(local + " child " + child, owner, BpmnStages.NOT_PLANNED, "is not supported: a"
+                                    + " data association moves the value as it is; use horus:input to compute one");
+                            skip();
+                        }
+                    }
+                    if (target == null) {
+                        invalid.add(new DefinitionProblem("DATA_ASSOCIATION_TARGET_MISSING", "A data association"
+                                + " needs a targetRef", local, safe(owner), line()));
+                    } else if ("dataInputAssociation".equals(local)) {
+                        lastIn.add(new DataInputAssociation(id, sources, target, null, null, null));
+                    } else {
+                        lastOut.add(new DataOutputAssociation(id, sources, target, null, null, null));
+                    }
+                    return true;
+                }
+                default -> {
+                    return false;
+                }
+            }
+        }
+
+        /** #499: puts the data read for the element just added on it; any other element refuses it. */
+        private void attachData(List<FlowElement> elements, int before) {
+            if (lastIo == null && lastIn.isEmpty() && lastOut.isEmpty()) {
+                return;
+            }
+            if (elements.size() > before && elements.get(elements.size() - 1) instanceof Activity activity) {
+                ActivityAttributes a = activity.activity();
+                elements.set(elements.size() - 1, withAttributes(activity, new ActivityAttributes(a.isForCompensation(),
+                        a.startQuantity(), a.completionQuantity(), a.defaultFlow(), lastIo, lastIn, lastOut,
+                        a.resources(), a.loopCharacteristics())));
+            } else if (elements.size() > before) {
+                invalid.add(new DefinitionProblem("DATA_ON_UNSUPPORTED_ELEMENT", "Data inputs and outputs are on a task,"
+                        + " a call activity or a sub-process", "ioSpecification",
+                        safe(elements.get(elements.size() - 1).id()), line()));
+            }
+            lastIo = null;
+            lastIn = new ArrayList<>();
+            lastOut = new ArrayList<>();
         }
 
         /** The loop characteristics read from the activity just read, handed to {@link #container}. */
@@ -1041,9 +1226,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         private static FlowElement withLoop(Activity activity, LoopCharacteristics loop) {
             ActivityAttributes a = activity.activity();
-            ActivityAttributes looped = new ActivityAttributes(a.isForCompensation(), a.startQuantity(),
+            return withAttributes(activity, new ActivityAttributes(a.isForCompensation(), a.startQuantity(),
                     a.completionQuantity(), a.defaultFlow(), a.ioSpecification(), a.dataInputAssociations(),
-                    a.dataOutputAssociations(), a.resources(), loop);
+                    a.dataOutputAssociations(), a.resources(), loop));
+        }
+
+        private static FlowElement withAttributes(Activity activity, ActivityAttributes looped) {
             return switch (activity) {
                 case Task t -> new Task(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.info());
                 case ManualTask t -> new ManualTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped, t.info());
@@ -1144,22 +1332,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to. The
-         * instantiating form and the parallel type are named as unsupported with stage S3.
+         * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to, or with
+         * {@code instantiate="true"} (#499) starts the process on the first of them to fire. The parallel type (#499) waits for all of them
+         * after the first.
          */
         private FlowElement eventBasedGateway() throws XMLStreamException {
             String id = id();
             String gwName = attr("name");
             boolean instantiate = "true".equals(attr("instantiate"));
             boolean parallel = "Parallel".equals(attr("eventGatewayType"));
-            if (instantiate) {
-                unsupported("eventBasedGateway with instantiate", id, BpmnStages.S3, "is not supported in this release;"
-                        + " stage S3 adds the instantiating event-based gateway");
-            }
-            if (parallel) {
-                unsupported("eventBasedGateway with eventGatewayType Parallel", id, BpmnStages.S3, "is not supported in"
-                        + " this release; stage S3 adds the parallel event-based gateway");
-            }
             Node children = children("eventBasedGateway", id, false);
             return new EventBasedGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED, instantiate,
                     parallel ? EventBasedGatewayType.PARALLEL : EventBasedGatewayType.EXCLUSIVE, children.info());
@@ -1300,9 +1481,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String id = id();
             String name = attr("name");
             int line = line();
-            CompensateEventDefinition compensate = null;
-            EventDefinition other = null;
-            List<EventDefinition> signals = new ArrayList<>();
+            List<EventDefinition> defs = new ArrayList<>();
             MessageEventDefinition message = null;
             String key = horus("correlationKey");
             List<HorusExtension> ext = new ArrayList<>();
@@ -1314,7 +1493,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         || "linkEventDefinition".equals(local))) {
                     // #493: an escalation throw, and the throw half of a link pair.
                     definitions++;
-                    other = definition(local, id, element, line);
+                    defs.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
                         || "terminateEventDefinition".equals(local))) {
                     definitions++;
@@ -1323,14 +1502,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
                     definitions++;
-                    compensate = compensateDefinition(id);
+                    defs.add(compensateDefinition(id));
                     children(local, id, false);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
-                    signals.add(signalDefinition(id, element));
+                    defs.add(signalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
                     definitions++;
                     message = messageDefinition(id);
+                    defs.add(message);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
                     extensions(element, id, true, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
@@ -1346,13 +1526,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions == 0) {
                 unsupported(element, id, BpmnStages.S0, BpmnStages.message(BpmnStages.S0));
-            } else if (definitions > 1) {
-                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; a throw event throws"
-                        + " exactly one");
             }
-            List<EventDefinition> defs = compensate != null ? List.<EventDefinition>of(compensate)
-                    : message != null ? List.<EventDefinition>of(message)
-                    : other != null ? List.<EventDefinition>of(other) : signals;
             messageExtras(element, id, line, defs, key, false, ext);
             return new IntermediateThrowEvent(id, name, List.of(), List.of(), defs, List.of(), null,
                     message == null ? null : info(ext, foreign));
@@ -1506,10 +1680,6 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
-            if (definitions.size() > 1 && !start) {
-                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; an end event raises"
-                        + " exactly one");
-            }
             // A message start event of a process has no instance yet, so its key becomes the business key; one of an event
             // sub-process has the instance, so it names its key variable like a message catch (#487, checked at compile).
             messageExtras(element, id, line, definitions, key, false, ext);
@@ -1522,16 +1692,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * A {@code compensateEventDefinition} (#488), at the current element: {@code activityRef} names the one activity
-         * to undo, none means the whole scope. {@code waitForCompletion="false"} is refused: the flow goes on after the
-         * undo is done.
+         * to undo, none means the whole scope. {@code waitForCompletion="false"} lets the flow go on while the undo runs
+         * in the background (PD-149); the default, true, holds the flow until the undo is done.
          */
         private CompensateEventDefinition compensateDefinition(String eventId) {
-            if ("false".equals(attr("waitForCompletion"))) {
-                unsupported("compensateEventDefinition waitForCompletion", eventId, BpmnStages.NOT_PLANNED,
-                        "false is not supported: the flow goes on after the undo is done");
-            }
             String ref = attr("activityRef");
-            return new CompensateEventDefinition(attr("id"), ref == null || ref.isBlank() ? null : ref, true, null);
+            return new CompensateEventDefinition(attr("id"), ref == null || ref.isBlank() ? null : ref,
+                    !"false".equals(attr("waitForCompletion")), null);
         }
 
         /**
@@ -1992,6 +2159,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
                     extensions("serviceTask", id, true, horusParts, foreign, parts);
+                } else if (BPMN.equals(ns) && dataChild(local, id)) {
+                    // #499
                 } else if (BPMN.equals(ns)) {
                     unsupported("serviceTask child " + local, id, BpmnStages.of(local));
                     skip();
@@ -2654,6 +2823,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 } else if (BPMN.equals(ns) && ("standardLoopCharacteristics".equals(local)
                         || "multiInstanceLoopCharacteristics".equals(local))) {
                     lastLoop = loopCharacteristics(local, id);
+                } else if (BPMN.equals(ns) && dataChild(local, id)) {
+                    // #499: read into lastIo, lastIn and lastOut, put on the activity once it is complete.
                 } else if (BPMN.equals(ns) && "script".equals(local) && "scriptTask".equals(element)) {
                     scriptLine = line();
                     scriptText = text();

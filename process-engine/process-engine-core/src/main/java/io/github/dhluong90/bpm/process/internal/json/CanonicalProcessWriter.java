@@ -78,6 +78,7 @@ public final class CanonicalProcessWriter {
             doc.put("name", process.name());
         }
         writeSteps(doc.putArray("steps"), process.flowElements(), process.artifacts());
+        writeDataElements(doc, process.flowElements());
         return doc;
     }
 
@@ -133,11 +134,19 @@ public final class CanonicalProcessWriter {
                     if (d.activityRef() != null) {
                         step.put("activity", d.activityRef());
                     }
+                    if (!d.waitForCompletion()) {
+                        step.put("background", true);
+                    }
                 }
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof
                                 io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition ->
                         step.put("type", "cancelEnd");
+                case EndEvent e when e.eventDefinitions().size() > 1 -> {
+                    // A multiple end event throws every definition, in document order (PD-149).
+                    step.put("type", "multipleEnd");
+                    writeMultiple(step, e.eventDefinitions(), false);
+                }
                 case EndEvent e -> {
                     step.put("type", "end");
                     writeEventDefinition(step, e.eventDefinitions());
@@ -391,6 +400,30 @@ public final class CanonicalProcessWriter {
                     step.put("type", "eventBasedGateway");
                     ArrayNode next = step.putArray("next");
                     out.forEach(f -> next.add(f.targetRef()));
+                    if (g.instantiate()) {
+                        // #499: the gateway starts the instance; the names of its signal and message catches let a
+                        // broadcast or a message find the definition.
+                        step.put("instantiate", true);
+                        if (g.eventGatewayType()
+                                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL) {
+                            step.put("eventGatewayType", "parallel");
+                        }
+                        ArrayNode signals = step.putArray("signals");
+                        ArrayNode messages = step.putArray("messages");
+                        for (SequenceFlow f : out) {
+                            elements.stream().filter(e -> e.id() != null && e.id().equals(f.targetRef())).findFirst()
+                                    .ifPresent(target -> {
+                                        if (target instanceof FlowNode catchNode) {
+                                            if (signalOf(catchNode) != null) {
+                                                signals.add(signalOf(catchNode));
+                                            }
+                                            if (messageOf(catchNode) != null) {
+                                                messages.add(messageOf(catchNode));
+                                            }
+                                        }
+                                    });
+                        }
+                    }
                 }
                 case IntermediateCatchEvent c when c.eventDefinitions().size() > 1 -> {
                     step.put("type", "multipleCatch");
@@ -451,6 +484,7 @@ public final class CanonicalProcessWriter {
                 case Transaction saga -> {
                     step.put("type", "saga");
                     writeSteps(step.putArray("steps"), saga.flowElements(), saga.artifacts());
+                    writeDataElements(step, saga.flowElements());
                 }
                 case SubProcess sub -> {
                     // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
@@ -460,6 +494,7 @@ public final class CanonicalProcessWriter {
                         step.put("triggeredByEvent", true);
                     }
                     writeSteps(step.putArray("steps"), sub.flowElements(), sub.artifacts());
+                    writeDataElements(step, sub.flowElements());
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
                         && t.eventDefinitions().get(0) instanceof CompensateEventDefinition d -> {
@@ -467,6 +502,14 @@ public final class CanonicalProcessWriter {
                     if (d.activityRef() != null) {
                         step.put("activity", d.activityRef());
                     }
+                    if (!d.waitForCompletion()) {
+                        // The flow goes on while the undo runs in the background: part of the step, so of the hash.
+                        step.put("background", true);
+                    }
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() > 1 -> {
+                    step.put("type", "multipleThrow");
+                    writeMultiple(step, t.eventDefinitions(), false);
                 }
                 // #491: message steps. The message name, the key variable and the mappings follow below.
                 case IntermediateCatchEvent c when messageOf(c) != null -> step.put("type", "messageCatch");
@@ -505,12 +548,63 @@ public final class CanonicalProcessWriter {
                     && activity.activity().loopCharacteristics() != null) {
                 writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
             }
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
+                writeDataAssociations(step, activity.activity());
+            }
             if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway)
                     && !(node instanceof ComplexGateway)
                     && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
+    }
+
+    /**
+     * #499: the data objects, data object references and data store references of a container, and the data inputs
+     * and outputs of an activity, written only when declared so a definition without them keeps its hash.
+     */
+    private static void writeDataElements(ObjectNode target, List<FlowElement> elements) {
+        ArrayNode data = null;
+        for (FlowElement element : elements) {
+            ObjectNode entry = null;
+            if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.DataObject d) {
+                data = data == null ? target.putArray("dataObjects") : data;
+                entry = data.addObject().put("kind", "dataObject").put("id", d.id());
+                entry.put("variable", d.info().otherAttributes().getOrDefault(
+                        new javax.xml.namespace.QName("urn:horus-bpm:bpmn:extensions:v1", "variable"), d.id()));
+            } else if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.DataObjectReference d) {
+                data = data == null ? target.putArray("dataObjects") : data;
+                entry = data.addObject().put("kind", "dataObjectReference").put("id", d.id());
+                entry.put("ref", d.dataObjectRef());
+            } else if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.DataStoreReference d) {
+                data = data == null ? target.putArray("dataObjects") : data;
+                entry = data.addObject().put("kind", "dataStoreReference").put("id", d.id());
+                entry.put("ref", d.dataStoreRef());
+            }
+            if (entry != null && ((io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement) element).name() != null) {
+                entry.put("name", element.name());
+            }
+        }
+    }
+
+    private static void writeDataAssociations(ObjectNode step,
+            io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes a) {
+        if (a.ioSpecification() == null && a.dataInputAssociations().isEmpty() && a.dataOutputAssociations().isEmpty()) {
+            return;
+        }
+        ObjectNode data = step.putObject("data");
+        if (a.ioSpecification() != null) {
+            ArrayNode inputs = data.putArray("dataInputs");
+            a.ioSpecification().dataInputs().forEach(d -> inputs.addObject().put("id", d.id()).put("name", d.name()));
+            ArrayNode outputs = data.putArray("dataOutputs");
+            a.ioSpecification().dataOutputs().forEach(d -> outputs.addObject().put("id", d.id()).put("name", d.name()));
+        }
+        ArrayNode in = data.putArray("in");
+        a.dataInputAssociations().forEach(d -> in.addObject().put("from", String.join(",", d.sourceRefs()))
+                .put("to", d.targetRef()));
+        ArrayNode out = data.putArray("out");
+        a.dataOutputAssociations().forEach(d -> out.addObject().put("from", String.join(",", d.sourceRefs()))
+                .put("to", d.targetRef()));
     }
 
     /**
@@ -538,6 +632,15 @@ public final class CanonicalProcessWriter {
                 case SignalEventDefinition sg -> entry.put("trigger", "signal").put("signal", sg.signalRef());
                 case ConditionalEventDefinition c -> entry.put("trigger", "conditional").put("condition",
                         normal(c.condition().language(), c.condition().text().strip()));
+                case CompensateEventDefinition c -> {
+                    entry.put("trigger", "compensation");
+                    if (c.activityRef() != null) {
+                        entry.put("activity", c.activityRef());
+                    }
+                    if (!c.waitForCompletion()) {
+                        entry.put("background", true);
+                    }
+                }
                 default -> writeOneDefinition(entry, List.of(d));
             }
         }
@@ -577,6 +680,11 @@ public final class CanonicalProcessWriter {
     }
 
     /** @return the message name of a message event or task, or null for any other node */
+    private static String signalOf(FlowNode node) {
+        return node instanceof Event e ? e.eventDefinitions().stream().filter(SignalEventDefinition.class::isInstance)
+                .map(d -> ((SignalEventDefinition) d).signalRef()).findFirst().orElse(null) : null;
+    }
+
     private static String messageOf(FlowNode node) {
         return switch (node) {
             case ReceiveTask t -> t.messageRef();

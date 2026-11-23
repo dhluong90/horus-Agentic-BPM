@@ -61,17 +61,58 @@ sequenceDiagram
 
 ## Run locally
 
-Needs JDK 21 or later, Node 22 or later (for the cockpit bundle) and Docker.
+Needs JDK 21 or later, Maven, Node 22 or later (for the cockpit bundle) and Docker. Run every command from the repository root.
 
 ```bash
-(cd cockpit/web && npm ci && npm run build)                         # once; or build with -Dcockpit.bundle.skip=true
+# 1. The cockpit bundle, once (or add -Dcockpit.bundle.skip=true to the build and run without the cockpit)
+(cd cockpit/web && npm ci && npm run build)
+
+# 2. PostgreSQL
 docker run -d --name horus-pe-pg -e POSTGRES_DB=horus -e POSTGRES_USER=horus \
   -e POSTGRES_PASSWORD=change-me -p 5432:5432 postgres:16-alpine
 
-mvn -B -pl examples/rule-and-process -am package -DskipTests      # from the repository root
+# 3. Build the host and the engines it embeds
+mvn -B -pl examples/rule-and-process -am package -DskipTests
+
+# 4. Start it with the demo users, on http://localhost:8080
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-and-process/target/example-rule-and-process-0.2.0.jar
+  java -jar examples/rule-and-process/target/example-rule-and-process-0.3.0-SNAPSHOT.jar
 ```
+
+Open `http://localhost:8080/` and sign in as one of the demo users below; the browser lands on the cockpit. Stop with Ctrl-C, and remove the database with `docker rm -f horus-pe-pg`.
+
+### Demo users
+
+The `dev` profile creates these users, all with the password from `HORUS_DEMO_PASSWORD` (form sign-in, or HTTP Basic for curl). Makers and checkers are different people: the engines refuse an approval by the person who made the change, whatever roles they hold.
+
+| User | Roles | What the user does in the demo |
+|---|---|---|
+| `tuan` | `TELLER` | Submits card applications and starts processes; the maker of an application |
+| `an` | `CARD_OFFICER`, `KYC_OFFICER`, `DISPUTES_OFFICER`, `PAYMENT_OFFICER`, `PRICING_OFFICER` | Works the officer tasks (fee review, credit review form, sign-offs) and the task roles of the demo models; the checker of a fee. The four-eyes review refuses anyone on work they started |
+| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | The maker: authors rule sets, simulates, imports and drafts process definitions in the cockpit and requests approval. Her own approval is refused (`SELF_APPROVAL_FORBIDDEN`). May switch between the tenants `bank-a` and `bank-b` |
+| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | The checker: approves rule sets and process definitions that someone else requested; simulates and replays selected decisions from the decision log; clears incidents |
+| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR`, `DISPUTES_SENIOR` | Cancels instances, reassigns tasks, clears incidents, correlates messages and broadcasts signals; the second holder who approves the migration and calendar changes that `hung` proposes |
+| `hung` | `OPERATIONS_OFFICER`, `OPS`, `AML_OFFICER`, `SANCTIONS_OFFICER` | Runs live cases: correlates messages, broadcasts signals, works tasks and incidents, proposes instance migrations and calendar changes |
+| `quynh` | `AUDITOR` | Reads rule sets, definitions, instances and the decision log; changes nothing |
+
+Permissions by role are in [`application.yml`](src/main/resources/application.yml) (`horus.bpm.rules.security` and `horus.bpm.processes.security`; the `dev` profile adds `rules:evaluate` and `rules:simulate` for the author and the approver, so `lan` or `minh` can replay selected decisions (`minh` also holds `rules:log:read`), and `role:` task roles for the demo models, in [`application-dev.yml`](src/main/resources/application-dev.yml)). Cockpit draft editing (`authoring.cockpit-drafts`, off by default) and the tenant switch (`horus.bpm.tenancy.switching.enabled`) are on for the `dev` profile only. `lan` carries `allowed_tenants: [bank-a, bank-b]` from the host's user store, so the switcher offers `bank-b`, an empty tenant that shows the isolation; every other user has `bank-a` only.
+
+### Demo models
+
+The `dev` profile imports every BPMN file under `src/main/resources/processes` for `bank-a` as `ACTIVE`, with auto-approval, so each scene runs on the default start:
+
+| Area | Files |
+|---|---|
+| Card application with a rule set and a four-eyes review | `card-fee-review` |
+| Transaction with compensation and cancel | `fund-transfer` |
+| Complex gateway, two of three sign-offs | `payment-approval` |
+| User task with a declared form | `credit-review-form` (the form is `src/main/resources/forms/credit-review.form.json`) |
+| Ad-hoc sub-process, call activity, terminate end | `customer-onboarding` (calls `card-welcome`) |
+| Sub-process, timer, error and link events, multi-instance | `card-delivery`, `card-dispute`, `card-limit-check`, `card-welcome` |
+| Messages, signals, event-based and inclusive gateways, pools | `order-payment`, `order-payment-pools`, `payment-review`, `payment-screening`, `rate-card-watch`, `fee-routing-feel` |
+| Conformance models: compensation, data objects and stores, gateways, multiple events, parallel and event-gateway starts | `conformance/*.bpmn` |
+
+The service steps these models call are registered by the host in [`DemoStepHandlers`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/DemoStepHandlers.java), the data stores (`credit-limits`, `score-ledger`, `ledger-notes`) by [`DemoDataStores`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/DemoDataStores.java), and the messages a process sends are written to the host's `event_outbox` by [`DemoMessageAdapter`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/DemoMessageAdapter.java). They are simple local steps for the demo; a real host registers its own under the same names. Two models start by message or signal and are not started from `POST /instances`: `loan-intake` (message `loan-application`) and `onboarding` (message `kyc-documents`, then signal `sanction-screening-done`). Deliver the message first: a signal alone cannot start `onboarding`, because its message catch needs a correlation key. Models in the Camunda Modeler open with their diagram; the engine's settings are the `horus:` attributes.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -83,9 +124,9 @@ SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=chang
 | `HORUS_BPM_PROCESSES_HANDLERS_SLOW_CALL_WARNING` | `200ms` | A local handler or decision slower than this is logged at WARN as `process.step.slow`: it holds the instance row lock and a connection, which usually means a network call in a handler |
 | `HORUS_BPM_PROCESSES_QUERY_MAX_PAGE_SIZE` | `200` | Most items per page of the process lists; may be lowered, never raised |
 | `HORUS_BPM_PROCESSES_QUERY_MAX_RANGE` | `P31D` | Longest start-time range of `GET /api/bpm/processes/v1/instances`; may be lowered, never raised |
-| `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the demo users, the fixed tenant `bank-a`, the start-up import and auto-approval of the sample process |
+| `SPRING_PROFILES_ACTIVE` | none | `dev` turns on the demo users, the fixed tenant `bank-a`, the tenant switch, the start-up import of every demo model and auto-approval |
 
-At start-up the log shows, in order: the host's own migration, the Rule Engine schema (`rle_schema_history`), the Process Engine schema (`pre_schema_history`), the sample process imported as version 1 `ACTIVE` for `bank-a`, and the `card-fee` rule set published by two seed identities (one requests, the other approves).
+At start-up the log shows, in order: the host's own migration, the Rule Engine schema (`rle_schema_history`), the Process Engine schema (`pre_schema_history`), every demo model imported as version 1 `ACTIVE` for `bank-a` (the line shown is the first), and the `card-fee` rule set published by two seed identities (one requests, the other approves).
 
 ```
 Rule Engine schema at version 2 (2 migration(s) applied)
@@ -96,19 +137,11 @@ Rule set card-fee v1 PUBLISHED (requested by seed-author, approved by seed-appro
 
 ## Walkthrough
 
-Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD`, using HTTP Basic:
-
-| User | Role | Engine permissions |
-|---|---|---|
-| `tuan` | `TELLER` | `processes:start`, `processes:read`, `rules:evaluate` |
-| `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
-| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:approve`, `processes:read`, `processes:incident:manage`; `rules:evaluate` and `rules:simulate` on `dev` only |
-| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | `rules:read`, `rules:approve`, `processes:approve`, `processes:read`, `processes:incident:manage`; `rules:evaluate` on `dev` only |
-| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | both of the above sets plus `processes:cancel`, `processes:task:manage`, `processes:incident:manage` and `processes:migration:manage`; the four-eyes review refuses her on applications she submitted |
+Demo users are listed under Run locally. The walkthrough signs them in with HTTP Basic; `P` is the password from `HORUS_DEMO_PASSWORD`.
 
 On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
 
-Smoke check: sign in at `http://localhost:8080/` as each of `tuan`, `an`, `lan`, `minh` and `hoa`. The browser lands on the cockpit (`/bpm/cockpit/`), and no call the cockpit makes answers 403 or 404.
+Smoke check: sign in at `http://localhost:8080/` as each of `tuan`, `an`, `lan`, `minh`, `hoa`, `hung` and `quynh`. The browser lands on the cockpit (`/bpm/cockpit/`), and no call the cockpit makes answers 403 or 404.
 
 Seed customers of `bank-a`: `C-001` (GOLD, 0 VND), `C-002` (STANDARD with 5 transactions, 10,000 VND), `C-003` (STANDARD with 1 transaction, 50,000 VND).
 
@@ -291,17 +324,9 @@ curl -s -u lan:$P -H 'Content-Type: application/xml' \
   --data-binary @examples/rule-and-process/src/main/resources/processes/card-fee-review.bpmn \
   localhost:8080/api/bpm/processes/v1/definitions
 # {"key":"card-fee-review","version":1,"status":"ACTIVE","definitionHash":"3fa54143...","sourceFormat":"BPMN_XML",...}
-
-curl -s -u lan:$P -H 'Content-Type: application/xml' \
-  --data-binary @process-engine/process-engine-bpmn/src/test/resources/bpmn/unsupported.bpmn \
-  localhost:8080/api/bpm/processes/v1/definitions
-# {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","unsupportedElements":[
-#   {"element":"boundaryEvent","elementId":"be-timeout","line":6,...},
-#   {"element":"dataObject","elementId":"do-1","line":7,...},
-#   {"element":"endEvent with terminateEventDefinition","elementId":"end","line":8,...}],...}
 ```
 
-Supported in this release: none start and end events, `serviceTask` (local), `businessRuleTask`, `userTask` (with `horus:resultVariable`; `horus:fourEyes` optional), `exclusiveGateway` with conditions and a default flow, `parallelGateway` (fork and join; no conditions on its outgoing flows). Everything else is refused by name with the stage that adds it. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
+Which BPMN elements the engine runs is listed in the wiki page Process Engine Importing BPMN (BPMN 2.0 element coverage); an element outside it is refused by name, with its id and line. Files must be UTF-8; bodies above `definitions.max-bytes` (1 MB) are refused with `413` before they are read.
 
 Conditions follow the Rule Engine's rules: null follows FEEL three-valued logic (`income < 5000000 VND` is null when `income` is unset, `tier != 'GOLD'` is true), only a true condition is taken, otherwise the default flow; numbers are decimals; money compares only within one currency, and a type error fails the step.
 

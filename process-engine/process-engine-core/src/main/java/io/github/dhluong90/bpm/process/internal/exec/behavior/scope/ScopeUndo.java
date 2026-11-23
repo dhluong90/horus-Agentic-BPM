@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * The undo of a sub-process or transaction that completed (#487, #488): a compensation boundary event on it, or a
- * compensation event sub-process in it, names one service task, whose handler is the undo. When the scope ends
+ * compensation event sub-process in it, names the service tasks whose handlers are the undo (#499: one or more, run in flow order). When the scope ends
  * normally one entry is pushed on the stack of the scope it stands in, so a later compensation of that scope runs it
  * with the steps around it, newest first. The inputs are those the task declares, read from the instance variables at
  * the moment the scope ended. The steps inside the sub-process keep their own entries and are still undone after it.
@@ -21,11 +21,15 @@ final class ScopeUndo {
     }
 
     static void push(FlowNode node, Token scope, ExecutionContext ctx) {
-        ctx.process().compensationActivityOf(node.id()).ifPresent(task -> task.extensions().first(HandlerRef.class)
-                .map(HandlerRef::handler).ifPresent(handler -> {
-                    Map<String, Object> snapshot = StepSupport.inputs(task, scope, ctx);
-                    ctx.effect(new Effect.PushCompensation(scope.scopeTokenId(), node.id(), scope.id(), handler,
-                            snapshot));
-                }));
+        // The stack is walked newest first, so the tasks are pushed last to first: the first task of the flow runs first.
+        java.util.List<FlowNode> chain = ctx.process().compensationChainOf(node.id());
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            FlowNode task = chain.get(i);
+            task.extensions().first(HandlerRef.class).map(HandlerRef::handler).ifPresent(handler -> {
+                Map<String, Object> snapshot = StepSupport.inputs(task, scope, ctx);
+                ctx.effect(new Effect.PushCompensation(scope.scopeTokenId(), node.id(), scope.id(), handler,
+                        snapshot, task.id()));
+            });
+        }
     }
 }

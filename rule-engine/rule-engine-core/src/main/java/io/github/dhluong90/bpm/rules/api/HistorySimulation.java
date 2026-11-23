@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.rules.api;
 
 import java.time.Instant;
+import java.util.Set;
 
 /**
  * Which logged decisions a history simulation replays through a draft (RLE-015): the caller's tenant's decisions of
@@ -9,8 +10,38 @@ import java.time.Instant;
  * @param from the first instant, inclusive; required
  * @param to the end, exclusive; required, after {@code from} and at most {@code query.max-range} (31 days) later
  * @param limit the most decisions to replay, 1 to {@code simulation.max-inputs} (1,000); null for that maximum
+ * @param decisionIds when not empty, only these decisions of the period are replayed (a selection from the log); ids
+ *     that are not the caller's tenant's decisions of the rule set in the period are left out, never reported
  */
-public record HistorySimulation(Instant from, Instant to, Integer limit) {
+public record HistorySimulation(Instant from, Instant to, Integer limit, Set<String> decisionIds) {
+
+    /** Normalises a missing selection to the empty set, which means the whole period. */
+    public HistorySimulation {
+        decisionIds = decisionIds == null ? Set.of() : Set.copyOf(decisionIds);
+    }
+
+    /**
+     * Replays the decisions of a period, newest first, up to {@code limit}.
+     *
+     * @param from the first instant, inclusive
+     * @param to the end, exclusive
+     * @param limit the most decisions, or null for the host's maximum
+     */
+    public HistorySimulation(Instant from, Instant to, Integer limit) {
+        this(from, to, limit, Set.of());
+    }
+
+    /**
+     * Replays only the selected decisions of a period.
+     *
+     * @param from the first instant, inclusive
+     * @param to the end, exclusive
+     * @param decisionIds the decisions to replay
+     * @return the request
+     */
+    public static HistorySimulation selected(Instant from, Instant to, Set<String> decisionIds) {
+        return new HistorySimulation(from, to, null, decisionIds);
+    }
 
     /**
      * Replays the decisions of a period, up to the host's maximum.
@@ -30,6 +61,6 @@ public record HistorySimulation(Instant from, Instant to, Integer limit) {
      * @return the copy
      */
     public HistorySimulation withLimit(int limit) {
-        return new HistorySimulation(from, to, limit);
+        return new HistorySimulation(from, to, limit, decisionIds);
     }
 }

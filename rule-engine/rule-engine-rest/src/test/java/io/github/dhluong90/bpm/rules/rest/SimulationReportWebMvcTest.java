@@ -125,6 +125,9 @@ class SimulationReportWebMvcTest {
                 new Class<?>[] {RuleEngine.class}, (self, method, args) -> {
                     calls.add(method.getName());
                     arguments.add(args[args.length - 1]);
+                    if (refusal != null) {
+                        throw refusal;
+                    }
                     return new HistorySimulationResult("card-fee", 2, VersionStatus.DRAFT, NOV_01,
                             NOV_01.plusSeconds(86_400), false, List.of());
                 });
@@ -341,5 +344,48 @@ class SimulationReportWebMvcTest {
         assertThat(tooLarge.getStatus()).isEqualTo(422);
         assertThat(json(tooLarge).get("code").asString()).isEqualTo(new ReadingsTooLargeException("decisions", 501, 500).code());
         assertThat(calls).isEmpty();
+    }
+
+    private MockHttpServletResponse replay(String body) throws Exception {
+        return mvc.perform(post(BASE + "2:simulate-history").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andReturn().getResponse();
+    }
+
+    @Test
+    void RLE_015_decision_ids_reach_the_engine_as_a_set_and_the_thousand_of_a_full_selection_pass_the_parser()
+            throws Exception {
+        String period = "\"from\":\"2026-11-01T00:00:00Z\",\"to\":\"2026-12-01T00:00:00Z\"";
+
+        assertThat(replay("{" + period + ",\"decisionIds\":[\"01A\",\"01B\",\"01A\"]}").getStatus()).isEqualTo(200);
+        assertThat(((HistorySimulation) arguments.getLast()).decisionIds()).containsExactlyInAnyOrder("01A", "01B");
+
+        StringBuilder thousand = new StringBuilder();
+        for (int i = 0; i < 1_000; i++) {
+            thousand.append(i == 0 ? "" : ",").append("\"id").append(i).append('"');
+        }
+        assertThat(replay("{" + period + ",\"decisionIds\":[" + thousand + "]}").getStatus()).isEqualTo(200);
+        assertThat(((HistorySimulation) arguments.getLast()).decisionIds()).hasSize(1_000);
+
+        assertThat(replay("{" + period + ",\"decisionIds\":null}").getStatus()).isEqualTo(200);
+        assertThat(((HistorySimulation) arguments.getLast()).decisionIds()).isEmpty();
+    }
+
+    @Test
+    void RLE_015_decision_ids_that_are_not_a_list_of_short_text_are_400_and_a_selection_over_the_limit_is_400_too()
+            throws Exception {
+        String period = "\"from\":\"2026-11-01T00:00:00Z\",\"to\":\"2026-12-01T00:00:00Z\"";
+        for (String bad : List.of("\"01A\"", "[1]", "[\"\"]", "[\"" + "x".repeat(65) + "\"]", "[null]")) {
+            MockHttpServletResponse response = replay("{" + period + ",\"decisionIds\":" + bad + "}");
+
+            assertThat(response.getStatus()).as(bad).isEqualTo(400);
+            assertThat(json(response).get("code").asString()).as(bad).isEqualTo("QUERY_INVALID");
+        }
+        assertThat(calls).isEmpty();
+
+        refusal = new io.github.dhluong90.bpm.rules.api.QueryInvalidException("decisionIds may hold at most 1000 ids");
+        MockHttpServletResponse tooMany = replay("{" + period + ",\"decisionIds\":[\"01A\"]}");
+
+        assertThat(tooMany.getStatus()).isEqualTo(400);
+        assertThat(json(tooMany).get("code").asString()).isEqualTo("QUERY_INVALID");
     }
 }

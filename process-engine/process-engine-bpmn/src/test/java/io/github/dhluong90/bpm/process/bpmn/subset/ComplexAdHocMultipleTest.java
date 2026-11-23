@@ -447,15 +447,24 @@ class ComplexAdHocMultipleTest {
         refused(onboarding("", "").replace("<bpmn:completionCondition>",
                 "<bpmn:sequenceFlow id=\"x\" sourceRef=\"collect-id\" targetRef=\"screen-sanctions\"/>"
                         + "<bpmn:completionCondition>"), "AD_HOC_HAS_FLOW", "x");
-        // A process that starts when all of several messages have come: the instance does not exist yet
+        // A process start waits for messages and signals only: a timer or a condition cannot be held before an instance
         refused(HEAD + """
                 <bpmn:startEvent id="start" parallelMultiple="true">
                   <bpmn:signalEventDefinition signalRef="Sig_rate"/>
-                  <bpmn:messageEventDefinition messageRef="Msg_funds"/>
+                  <bpmn:timerEventDefinition><bpmn:timeDuration>PT1H</bpmn:timeDuration></bpmn:timerEventDefinition>
                 </bpmn:startEvent>
                 <bpmn:endEvent id="end"/>
                 <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="end"/>
                 """ + TAIL, "MULTIPLE_EVENT_DEFINITION_INVALID", "start");
+        // A throw event with several definitions throws each and goes on: an error end has no way on
+        refused(HEAD + """
+                <bpmn:startEvent id="start"/>
+                <bpmn:endEvent id="close">
+                  <bpmn:signalEventDefinition signalRef="Sig_rate"/>
+                  <bpmn:terminateEventDefinition/>
+                </bpmn:endEvent>
+                <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="close"/>
+                """ + TAIL, "MULTIPLE_THROW_DEFINITION_INVALID", "close");
         // A timer cycle on a catch event stays refused
         refused(wait("").replace("<bpmn:signalEventDefinition signalRef=\"Sig_rate\"/>",
                 "<bpmn:timerEventDefinition><bpmn:timeDuration>PT1H</bpmn:timeDuration></bpmn:timerEventDefinition>")

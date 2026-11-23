@@ -26,11 +26,13 @@ public final class CompiledProcess {
     private final Map<String, String> containers;
     private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries;
     private final Map<String, String> compensationActivities;
+    private final Map<String, List<String>> compensationChains;
     private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess>> eventSubProcesses;
     private final Map<String, io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> gatewayOfCatch;
 
     private CompiledProcess(Builder builder) {
         this.compensationActivities = Map.copyOf(builder.compensationActivities);
+        this.compensationChains = Map.copyOf(builder.compensationChains);
         Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess>> events = new HashMap<>();
         builder.eventSubProcesses.forEach((k, v) -> events.put(k, List.copyOf(v)));
         this.eventSubProcesses = Collections.unmodifiableMap(events);
@@ -150,6 +152,22 @@ public final class CompiledProcess {
     }
 
     /**
+     * The undo tasks of a sub-process or transaction in the order they run (#499): the service tasks of its
+     * compensation event sub-process, in flow order from the start event; or the one compensation activity of a
+     * compensation boundary event.
+     *
+     * @param activityId the id of the sub-process, transaction or step
+     * @return the undo tasks, empty when it has none
+     */
+    public List<FlowNode> compensationChainOf(String activityId) {
+        List<String> chain = compensationChains.get(activityId);
+        if (chain == null) {
+            return compensationActivityOf(activityId).map(List::of).orElse(List.of());
+        }
+        return chain.stream().map(nodes::get).toList();
+    }
+
+    /**
      * @param containerId the process id, or the id of a sub-process or transaction
      * @return the event sub-processes (#487) that stand directly in that container, in document order
      */
@@ -239,6 +257,7 @@ public final class CompiledProcess {
         private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess>> eventSubProcesses =
                 new HashMap<>();
         private final Map<String, String> compensationActivities = new HashMap<>();
+        private final Map<String, List<String>> compensationChains = new HashMap<>();
 
         private Builder(String definitionId, Process process) {
             this.definitionId = Objects.requireNonNull(definitionId, "definitionId must not be null");
@@ -268,9 +287,25 @@ public final class CompiledProcess {
                         && s.eventDefinitions().size() == 1 && s.eventDefinitions().get(0) instanceof
                                 io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition);
                 if (compensates) {
+                    // #499: the undo is the service tasks in flow order from the start event; a validated one is a line.
+                    List<String> chain = new ArrayList<>();
                     nodes.values().stream().filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
-                            .ServiceTask && containers.get(n.id()).equals(esp.id())).findFirst().ifPresent(task ->
-                            compensationActivities.putIfAbsent(containers.get(esp.id()), task.id()));
+                            .StartEvent && containers.get(n.id()).equals(esp.id())).findFirst().ifPresent(start -> {
+                        String at = start.id();
+                        while (chain.size() < nodes.size()) {
+                            List<SequenceFlow> next = outgoing.getOrDefault(at, List.of());
+                            if (next.size() != 1 || !(nodes.get(next.get(0).targetRef()) instanceof
+                                    io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask)) {
+                                break;
+                            }
+                            at = next.get(0).targetRef();
+                            chain.add(at);
+                        }
+                    });
+                    if (!chain.isEmpty()) {
+                        compensationChains.putIfAbsent(containers.get(esp.id()), List.copyOf(chain));
+                        compensationActivities.putIfAbsent(containers.get(esp.id()), chain.get(0));
+                    }
                 }
             }
         }

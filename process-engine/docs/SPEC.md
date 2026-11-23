@@ -1030,8 +1030,8 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Milestone:** M3
 - **Kind:** other
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `dataObject` `do-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` with a compensation definition on line 42 (stage `S2`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` with `instantiate="true"` on line 63 (`S3`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `globalTask` `do-1` on line 57 (`not planned`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` with a compensation definition on line 42 (stage `S2`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), a `choreographyTask` `notify` on line 63 (`not planned`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
@@ -2031,11 +2031,11 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Traces to:** `TR-STD-04`, `TR-STD-05`, #490, #495
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** The files of `PRE-290` to `PRE-293`; a message boundary without `horus:correlationKey`; a gateway that leads to a task, one whose catch event has a second incoming flow, and one with `instantiate="true"`.
+- **Given:** The files of `PRE-290` to `PRE-293`; a message boundary without `horus:correlationKey`; a gateway that leads to a task, one whose catch event has a second incoming flow, and one with `eventGatewayType="Parallel"` and no `instantiate`.
 - **When:** Each is read, exported and read again, or imported.
-- **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip. A message boundary without a key is refused (`CORRELATION_KEY_REQUIRED`); a gateway to a task or to a shared catch event is refused at compile; the instantiating form is refused as unsupported with stage `S3`. The cockpit draws the new boundaries and the gateway as known symbols and the timeline names the entries, read only.
-- **Example:** `instantiate="true"` -> `422 BPMN_UNSUPPORTED_ELEMENT`, stage `S3`.
-- **Test ID:** `PRE_295_the_new_boundaries_and_the_gateway_export_and_read_back_to_the_same_definition`, `PRE_295_a_message_boundary_needs_its_key_and_a_gateway_must_lead_to_catch_events_that_only_it_enters`, `PRE_295_an_instantiating_event_based_gateway_is_refused_with_its_stage` (`EventBoundariesAndGatewayTest`), `PRE_295_the_new_boundaries_and_the_gateway_are_known_symbols_that_say_whether_they_interrupt` (`eventBoundaries.test.ts`)
+- **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip. A message boundary without a key is refused (`CORRELATION_KEY_REQUIRED`); a gateway to a task or to a shared catch event is refused at compile; a parallel gateway that does not instantiate is refused at compile (`EVENT_GATEWAY_PARALLEL_INSTANTIATE`). The cockpit draws the new boundaries and the gateway as known symbols and the timeline names the entries, read only.
+- **Example:** `eventGatewayType="Parallel"` with no `instantiate="true"` -> `422 VALIDATION_FAILED`, `EVENT_GATEWAY_PARALLEL_INSTANTIATE`.
+- **Test ID:** `PRE_295_the_new_boundaries_and_the_gateway_export_and_read_back_to_the_same_definition`, `PRE_295_a_message_boundary_needs_its_key_and_a_gateway_must_lead_to_catch_events_that_only_it_enters`, `PRE_295_a_parallel_event_based_gateway_that_does_not_instantiate_is_refused_by_the_compiler` (`EventBoundariesAndGatewayTest`), `PRE_295_the_new_boundaries_and_the_gateway_are_known_symbols_that_say_whether_they_interrupt` (`eventBoundaries.test.ts`)
 
 ### PRE-270 A broadcast wakes every waiter of its own tenant, by job, and never a waiter of another tenant
 - **Traces to:** `TR-TEN-01`, `TR-STD-11`, `TR-STD-14`, #492
@@ -2379,7 +2379,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:**
   - On the end of the sub-process one entry is pushed on the stack of the scope it stands in, after the entries of its steps, so a later compensation of that scope runs `reverse-disbursement` first, with `account` read when the sub-process ended and nothing else of the variables. Each entry still runs once (`PRE-290`).
   - The handler adds to the undo of the steps inside: they are undone after it. A sub-process that is cancelled or interrupted before it ends pushes nothing.
-  - A call activity pushes the entry of its boundary's compensation activity when the child completes, with the child's id, as a `horus:compensate` handler does. A compensation event sub-process needs a sub-process or transaction, one service task with `horus:handler`, and no compensation boundary event beside it (`COMPENSATION_HANDLER_SCOPE`, `COMPENSATION_EVENT_SUBPROCESS_SHAPE`, `COMPENSATION_DUPLICATE`).
+  - A call activity pushes the entry of its boundary's compensation activity when the child completes, with the child's id, as a `horus:compensate` handler does. A compensation event sub-process needs a sub-process or transaction, a line of service tasks with `horus:handler` (`PRE-340`), and no compensation boundary event beside it (`COMPENSATION_HANDLER_SCOPE`, `COMPENSATION_EVENT_SUBPROCESS_SHAPE`, `COMPENSATION_DUPLICATE`).
 - **Example:** `disburse ends -> push release-funds, then reverse-disbursement; a later undo runs reverse-disbursement, release-funds`.
 - **Test ID:** `PRE_326_a_compensation_event_sub_process_pushes_the_undo_of_its_sub_process_when_it_completes`, `PRE_326_a_compensation_boundary_event_on_a_sub_process_or_a_call_activity_names_its_undo`, `PRE_326_a_compensation_event_sub_process_has_one_undo_task_in_a_sub_process_that_has_no_other_undo` (`EventSubProcessTest`)
 ### PRE-300 An inclusive split takes every outgoing flow whose condition is true
@@ -2521,7 +2521,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:**
   - The event waits with one token per definition, each parked by the behaviour of that definition: a subscription for the signal and the message, a job for a timer, the condition asked again when variables change. A multiple event moves on at the first occurrence and drops the other waits (the signal subscription is deleted); a parallel multiple event holds each occurrence and moves on when the last one has occurred.
   - A boundary event with a timer and an error fires on either: the timer interrupts the activity, and an error is found when it is thrown. An event sub-process with several triggers starts on the first one and the other waits go.
-  - A multiple event holds timer, message, signal or conditional definitions (a process start event: message and signal only, and never parallel, because no instance exists to wait in; a boundary event: timer, error and escalation, and parallel only with timers) and one message at most (`MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`).
+  - A multiple event holds timer, message, signal or conditional definitions (a process start event: message and signal only, and with `parallelMultiple` the instance starts when all have arrived, see PRE-339; a boundary event: timer, error and escalation, and parallel only with timers) and one message at most (`MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`).
 - **Example:** `funds received -> the payment moves on, the signal wait is deleted`.
 - **Test ID:** `PRE_332_a_multiple_catch_event_fires_on_the_first_definition_and_drops_the_other_wait`, `PRE_332_a_parallel_multiple_catch_event_waits_until_every_definition_has_occurred`, `PRE_332_a_multiple_boundary_event_fires_on_its_timer_and_interrupts_the_activity`, `PRE_332_a_multiple_start_of_an_event_sub_process_fires_on_one_trigger_and_drops_the_other` (`ComplexAdHocMultipleTest`)
 
@@ -2564,3 +2564,96 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The officer is refused with `403 PERMISSION_DENIED` and nothing changes. The manager's replay returns the first answer and opens one task. The completion cancels the screening task in the same transaction and opens `open-account`. The REST action is `POST /instances/{id}:start-ad-hoc-activity` with `If-Match` and `Idempotency-Key`; a missing one is `428`.
 - **Example:** `officer-lan -> 403; manager-hoa -> collect-id opens once`.
 - **Test ID:** `PRE_336_the_operator_starts_activities_with_task_manage_and_the_condition_cancels_the_rest` (`AdHocPostgresIT`)
+
+### PRE-347 A data output association writes the step result into a data object; a data input association hands it to a step
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-data` with a service task `score` that has a data input association from the data object reference `profile-ref` and a data output association from its output `score` to the reference `score-ref`; the instance starts with `profile` set.
+- **When:** `score` completes with `{score: 712, band: "B"}`.
+- **Then:** The variable `creditScore` holds `712`, the timeline records `DATA_OBJECT_WRITTEN` with the data object's name, and the step received `profile` as its input `profile`. An output the result does not contain is `DATA_OUTPUT_MISSING`; an input data object with no value is `DATA_OBJECT_UNSET`. A data store reference that an association names is read and written through the host (`PRE-341`); one that no association names is kept, exported and hashed and runs nothing.
+- **Example:** `score -> 712 into creditScore`.
+- **Test ID:** `PRE_347_a_data_output_association_leaves_the_result_in_the_data_object_and_a_data_input_reads_it` (`ConformanceSuiteTest`)
+
+### PRE-348 Every conformance file keeps its elements, flows and hash through export and import
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** the files under `bpmn/conformance`: data objects, an exclusive gateway with a default flow, a parallel fork and join, a sub-process followed by a timer catch, an instantiating event-based gateway, a compensation event sub-process of two tasks and a data store.
+- **When:** Each is imported, run with every call, task and timer answered, then exported and imported again.
+- **Then:** The token takes the expected path and the instance completes; the second import has the same number of flow elements and the same canonical form, so the same definition hash.
+- **Example:** `amount 2,500,000 -> large; amount 40,000 -> small (default)`.
+- **Test ID:** `PRE_348_every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import` (`ConformanceSuiteTest`)
+
+### PRE-349 A compensation throw with `waitForCompletion="false"` lets the flow go on while the undo runs, and each undo runs once
+- **Traces to:** `TR-STD-04`, #499, PD-149
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** a loan booking that registers the loan and reserves the funds (each with an undo), then throws compensation for `reserve-funds` twice with `waitForCompletion="false"`, then notifies the customer.
+- **When:** The instance starts; then the undo job runs.
+- **Then:**
+  - The customer notice runs at once: the instance is `RUNNING`, never `COMPENSATING`, and nothing else is cancelled. The throw records a walk token (a live `FLOW` token marked `$backgroundUndo`) that holds the instance open, so it cannot complete or be cancelled while an undo is in flight (`InvalidStateException`); an intermediate throw with no outgoing flow is refused (`COMPENSATION_BACKGROUND_NEEDS_FLOW`).
+  - The walk schedules one `COMPENSATION` job at a time, newest first, under the instance lock; an undo already running, done or failed for good is not scheduled again, so the second throw, a retry and a replayed command undo nothing twice. A failed or manual undo opens its incident and pauses that walk only; the flow beside it is not touched.
+  - When the last entry is `DONE` the shell sends `EndBackgroundCompensation`, the walk token completes and the scope can end; the command is safe to repeat. An undo in flight when its instance ended (a terminate end) is still recorded.
+- **Example:** `reserve-funds -> release-funds called once, loan registration untouched, instance COMPLETED after it`.
+- **Test ID:** `PRE_349_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it` (`SagaCompensationTest`), `PRE_349_control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done` (`ConformanceSuiteTest`)
+
+### PRE-350 A parallel multiple process start waits for all its definitions
+- **Traces to:** `TR-STD-04`, #499, PD-149
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** a process `account-opening` whose start event has `parallelMultiple="true"` with the message `account-opening-request` and the signal `kyc-cleared`.
+- **When:** The message with key `APP-2026-0042` arrives, then the signal; and in another run the signal first, then the message.
+- **Then:** The first arrival is held (`pre_start_arrival`, V50) and a message answers `WAITING`; the last one starts exactly one instance with the message key as business key and the message payload as variables, and consumes the held rows. A repeat of an arrival with the same key replaces the held one and starts nothing; a replayed request returns its first answer. A signal is a latch with no key and completes the oldest held message. Definitions of a parallel start are messages and signals only, one message at most; the versions of the key are locked while an arrival is counted, so two arrivals that complete the set together start one instance.
+- **Example:** `APP-2026-0042 request + kyc-cleared -> one instance, business key APP-2026-0042`.
+- **Test ID:** `PRE_350_the_instance_starts_only_when_the_message_and_the_signal_have_both_arrived`, `PRE_350_a_signal_that_comes_first_is_held_and_the_message_starts_the_instance` (`ParallelStartPostgresIT`), `PRE_350_a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started` (`ConformanceSuiteTest`)
+
+### PRE-351 A multiple throw or end event throws every definition
+- **Traces to:** `TR-STD-04`, #499, PD-149
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** an intermediate throw event holding the message `loan-approved` and the signal `credit-line-opened`, followed by an end event holding the message and the signal `booking-closed`.
+- **When:** The instance runs.
+- **Then:** Each definition is thrown, messages, signals and background compensations in document order and escalations last (an escalation an interrupting handler catches takes the token over), then the flow goes on or the token ends. Only message, signal, escalation and compensation with `waitForCompletion="false"` are allowed together; an error, terminate, cancel, link or waiting compensation is `MULTIPLE_THROW_DEFINITION_INVALID`. A multiple throw is part of the definition hash.
+- **Example:** `announce -> loan-approved sent and credit-line-opened broadcast, then close -> loan-approved and booking-closed`.
+- **Test ID:** `PRE_351_a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on` (`ConformanceSuiteTest`), `PRE_334_a_misplaced_ad_hoc_sub_process_or_multiple_event_is_refused_with_its_code` (`ComplexAdHocMultipleTest`)
+
+### PRE-352 An instantiating event-based gateway starts the process on the first of its message or signal catches
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-intake`: an `eventBasedGateway` with `instantiate="true"` and no flow in, leading to the message catch `online` (`loan-application`) and the signal catch `branch` (`branch-batch-opened`), each followed by a review. It is deployed in `bank-a` and `bank-b`.
+- **When:** (a) The message `loan-application` is correlated in `bank-a` with `{applicant: "Tran Thi Mai"}`. (b) `bank-a` broadcasts `branch-batch-opened`. (c) A message no catch waits for arrives, or the instance is started through the API with no trigger.
+- **Then:** (a) One instance is created and continues after `online` with the payload as its variables; nothing waits on `branch`, so there is nothing to cancel, and history records `EVENT_GATEWAY_STARTED`. (b) One instance of `bank-a` starts after `branch`; `bank-b` starts none. (c) The message is `MESSAGE_NOT_CORRELATED`; the start is refused with `START_TRIGGER_REQUIRED` and nothing is stored. The import refuses, with their codes, a gateway with an incoming flow, one that is not in the process itself, and one that leads to a timer or conditional catch (`EVENT_GATEWAY_INSTANTIATE_INCOMING`, `EVENT_GATEWAY_INSTANTIATE_SCOPE`, `EVENT_GATEWAY_INSTANTIATE_TARGET`). A catch after the gateway needs no `horus:correlationKey`: no instance exists to hold the key. `eventGatewayType="Parallel"` is `PRE-355`.
+- **Example:** `loan-application APP-9001 -> instance at review-online; branch-batch-opened -> instance at review-branch`.
+- **Test ID:** `PRE_352_the_first_message_creates_the_instance_after_its_catch_and_the_others_are_not_waited_for`, `PRE_352_a_signal_creates_an_instance_of_its_own_tenant_after_the_signal_catch`, `PRE_352_a_message_no_catch_waits_for_starts_nothing_and_a_plain_start_is_refused` (`DataStoreAndGatewayStartPostgresIT`), `PRE_352_an_instantiating_event_gateway_starts_after_the_catch_that_fired_and_waits_for_no_other` (`ConformanceSuiteTest`)
+
+### PRE-355 A parallel instantiating event-based gateway starts the process on its first event and awaits every other
+- **Traces to:** #499, `PD-149`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding`: an `eventBasedGateway` with `instantiate="true"` and `eventGatewayType="Parallel"`, no flow in, leading to the message catches `kyc` (`kyc-documents`) and `consent` (`consent-signed`) and the signal catch `sanction` (`sanction-screening-done`), each followed by a review. It is deployed in `bank-a` and `bank-b`.
+- **When:** (a) `kyc-documents` is correlated in `bank-a` with key `CIF-1001`, then `consent-signed` with the same key and `sanction-screening-done` is broadcast. (b) `kyc-documents` and `consent-signed` for `CIF-2002` reach two replicas at the same moment. (c) Both banks receive `kyc-documents` for `CIF-3003`, then `bank-b` receives `consent-signed`. (d) A parallel gateway with no `instantiate="true"` is imported.
+- **Then:** (a) The first message creates one instance with `CIF-1001` as business key and it continues after `kyc`; the other two catches wait, one subscription each, and none is cancelled. A message catch with no `horus:correlationKey` waits under the business key of the instance. The second message answers `DELIVERED` for the same instance and the signal wakes the third wait, and starts no second instance while an instance of the process waits for it; the instance holds three reviews. (b) The arrivals of one key are serialised by the lock of the definition, so one instance is created: one arrival answers `STARTED`, the other `DELIVERED` for it. (c) Each bank has its own instance and `consent-signed` reaches that of `bank-b` only. (d) The import is refused with `EVENT_GATEWAY_PARALLEL_INSTANTIATE`. When a signal starts the instance and the process has a message catch, the instance has no business key to correlate under and the start is refused with `CORRELATION_KEY_REQUIRED`.
+- **Example:** `kyc-documents CIF-1001 -> instance at check-kyc; consent-signed CIF-1001 -> same instance at file-consent`.
+- **Test ID:** `PRE_355_the_first_event_creates_the_instance_and_every_other_catch_is_awaited`, `PRE_355_two_events_of_one_customer_on_two_replicas_create_one_instance`, `PRE_355_the_same_customer_key_in_two_tenants_starts_an_instance_in_each` (`DataStoreAndGatewayStartPostgresIT`), `PRE_355_a_parallel_instantiating_event_gateway_starts_on_one_catch_and_awaits_every_other` (`ConformanceSuiteTest`)
+
+### PRE-353 A compensation event sub-process may hold several service tasks, which run in flow order
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-booking-undo-tasks`: the sub-process `disburse` holds the step `reserve-funds` (undo `release-funds`) and a compensation event sub-process of two service tasks in a line, `reverse-disbursement` then `notify-treasury`, each with its own `horus:handler` and inputs. `notify-partner` after it fails with `onFailure: compensate`.
+- **When:** The undo of the process runs.
+- **Then:** When `disburse` ends the kernel pushes the step's entry, then one entry per task from the last to the first, so the walk (newest first) runs `reverse-disbursement`, `notify-treasury` and then `release-funds`, each once (`PRE-290`), each with the inputs read when the sub-process ended. A body that is not a line of service tasks with handlers from the start event to the one end event (a gateway, a branch, a user task) is `COMPENSATION_EVENT_SUBPROCESS_SHAPE`. The rest of `PRE-326` is unchanged.
+- **Example:** `reverse-disbursement, notify-treasury, release-funds`.
+- **Test ID:** `PRE_353_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside` (`SagaCompensationTest`), `PRE_353_a_compensation_event_sub_process_with_several_tasks_undoes_them_in_flow_order`, `PRE_353_an_undo_that_branches_or_holds_anything_but_service_tasks_is_refused` (`EventSubProcessTest`), `PRE_353_a_compensation_event_sub_process_of_two_tasks_pushes_them_so_the_walk_runs_them_in_flow_order` (`ConformanceSuiteTest`)
+
+### PRE-354 A data store association reads and writes through the host's adapter, for the tenant of the instance only
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `credit-scoring` with a service task `score`: a data input association from the data store reference `limits-ref` (store `credit-limits`, input `limit`) and a data output association of its output `score` to `ledger-ref` (store `score-ledger`). The host registers a `DataStoreAdapter` for each store, keyed by tenant. `bank-a` has a limit of `50,000,000 VND` and `bank-b` one of `5,000,000 VND`.
+- **When:** (a) Each bank starts an instance, one of them with a variable `tenantId` that names the other bank. (b) The definition is imported in a host with no adapter for `score-ledger`. (c) The adapter for `score-ledger` has no write.
+- **Then:** (a) Each step receives its own bank's limit as `limit` and its score is written under its own bank; every call to an adapter carries the tenant of the instance and the variable changes nothing. History records `DATA_STORE_READ` and `DATA_STORE_WRITTEN` with the store and the item. A read or write runs in the step transaction; `DataStoreAccess.idempotencyKey()` is the same when the step runs again. (b) The import is `422 VALIDATION_FAILED` with `DATA_STORE_ADAPTER_NOT_REGISTERED`, naming the step and the store, and nothing is stored. (c) The step fails with `DATA_STORE_WRITE_UNSUPPORTED`, or `DATA_STORE_READ_UNSUPPORTED` for a read; any other failure of an adapter is `DATA_STORE_FAILED` with the exception class only, never its message, which may hold a row. A store that returns no value is `DATA_STORE_VALUE_MISSING`. A data store reference that no association names needs no adapter and runs nothing.
+- **Example:** `bank-a limit 50,000,000 -> score 712 under bank-a; bank-b is untouched`.
+- **Test ID:** `PRE_354_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance`, `PRE_354_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time`, `PRE_354_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete` (`DataStoreAndGatewayStartPostgresIT`), `PRE_354_a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance` (`ConformanceSuiteTest`)

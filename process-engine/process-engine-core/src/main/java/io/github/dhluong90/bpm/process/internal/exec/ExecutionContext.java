@@ -21,6 +21,30 @@ public interface ExecutionContext {
     CompiledProcess process();
 
     /**
+     * The access to a data store for a step (#499): the tenant and the instance are the working copy's own, never a
+     * value read from the variables.
+     *
+     * @param store the data store id
+     * @param item the data input or output name
+     * @param nodeId the step
+     * @param token the token of the step's attempt
+     * @return the access
+     */
+    default DataStorePort.Access dataStoreAccess(String store, String item, String nodeId, Token token) {
+        throw new UnsupportedOperationException("dataStoreAccess");
+    }
+
+    /** @return the business key of the instance, or null (#499: a parallel event gateway's message catches use it) */
+    default String businessKey() {
+        return null;
+    }
+
+    /** @return the host's data stores; none by default */
+    default DataStorePort dataStores() {
+        return DataStorePort.NONE;
+    }
+
+    /**
      * Leaves a node by its outgoing sequence flows with default BPMN semantics: one flow moves the token, several
      * unconditional flows fork it, a default flow is taken when no condition holds.
      *
@@ -107,6 +131,18 @@ public interface ExecutionContext {
      */
     default void compensateAndResume(Token thrower, String targetActivityId) {
         throw new UnsupportedOperationException("compensateAndResume");
+    }
+
+    /**
+     * A compensation throw event with {@code waitForCompletion="false"} (PD-149): the undo of the scope, or of one
+     * activity, runs in the background while the thrower goes on. A background walk token holds the instance open
+     * ({@code RUNNING}, not completed) until the shell has walked the entries to the bottom; nothing else is cancelled.
+     *
+     * @param thrower the token on the throw event
+     * @param targetActivityId the activity to undo (an {@code activityRef}), or null for the whole scope
+     */
+    default void compensateInBackground(Token thrower, String targetActivityId) {
+        throw new UnsupportedOperationException("compensateInBackground");
     }
 
     /**

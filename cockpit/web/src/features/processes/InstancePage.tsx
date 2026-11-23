@@ -22,6 +22,7 @@ import {
   activityOf,
   actorReplica,
   durationParts,
+  dataNamed,
   entryKey,
   firstStep,
   incidentKey,
@@ -468,6 +469,14 @@ function RoutingNote({ entry, graph }: { entry: InstanceActivities['entries'][nu
   return <span className="muted"> · {t(key, { steps })}</span>;
 }
 
+/** Which data objects and stores a step read when it started, and which one it wrote (#499), by their names in the diagram. */
+function DataNote({ entry, entries, graph }: { entry: ActivityEntry; entries: readonly ActivityEntry[]; graph: DiagramGraph }) {
+  const { t } = useI18n();
+  const named = dataNamed(entry, entries, graph);
+  if (named === undefined) return null;
+  return <span className="muted"> · {t(named.direction === 'read' ? 'instance.timeline.dataRead' : 'instance.timeline.dataWritten', { names: named.names.join(', ') })}</span>;
+}
+
 const FIRED_TRIGGERS = ['timer', 'message', 'signal', 'condition', 'error', 'escalation'] as const;
 
 /**
@@ -546,6 +555,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                     {entry.type === 'EVENT_SUBPROCESS_STARTED' ? <TriggerDetail node={graph.nodes.find((node) => node.id === entry.nodeId)} /> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
                     <RoutingNote entry={entry} graph={graph} />
+                    <DataNote entry={entry} entries={activities.entries} graph={graph} />
                     {entry.event !== undefined ? <EventDetail event={entry.event} stepName={stepName} /> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>

@@ -451,8 +451,13 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       return answer.data;
     },
     async simulateHistoryReadings(name, version, request, signal) {
-      // A read: the engine writes nothing, so no Idempotency-Key. Only from, to and limit are sent (RLE-202).
-      const body = { from: request.from, to: request.to, ...(request.limit !== undefined ? { limit: request.limit } : {}) };
+      // A read: the engine writes nothing, so no Idempotency-Key. Only from, to, limit and the selected decision ids are sent (RLE-202).
+      const body = {
+        from: request.from,
+        to: request.to,
+        ...(request.limit !== undefined ? { limit: request.limit } : {}),
+        ...(request.decisionIds !== undefined && request.decisionIds.length > 0 ? { decisionIds: request.decisionIds } : {}),
+      };
       const answer = await call(
         { method: 'POST', path: `${versionPath(name, version)}:simulate-history-readings`, body: { contentType: 'application/json', text: JSON.stringify(body) }, ...(signal ? { signal } : {}) },
         historyReadings,

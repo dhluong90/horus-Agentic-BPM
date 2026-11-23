@@ -13,6 +13,15 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEven
 import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataObject;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataObjectReference;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataStoreReference;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataInputAssociation;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.DataOutputAssociation;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IoSpecification;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InputSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.OutputSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Collaboration;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Lane;
@@ -161,6 +170,7 @@ public final class SubsetBpmnWriter {
             }
         }
         messages.forEach((name, id) -> xml.line(1, "<bpmn:message id=" + attr(id) + " name=" + attr(name) + "/>"));
+        rootDataStores(xml, process);
         Refs refs = new Refs(signalIds, messages);
         Set<String> collaborationIds = new HashSet<>();
         if (collaboration != null) {
@@ -293,7 +303,8 @@ public final class SubsetBpmnWriter {
                         + attr(refs.messages().get(m.messageRef())) + "/>");
                 case TerminateEventDefinition t -> xml.line(lvl, "<bpmn:terminateEventDefinition/>");
                 case CompensateEventDefinition c -> xml.line(lvl, "<bpmn:compensateEventDefinition"
-                        + optional("activityRef", c.activityRef()) + "/>");
+                        + optional("activityRef", c.activityRef())
+                        + (c.waitForCompletion() ? "" : " waitForCompletion=\"false\"") + "/>");
                 case CancelEventDefinition c -> xml.line(lvl, "<bpmn:cancelEventDefinition/>");
                 case LinkEventDefinition l -> xml.line(lvl, "<bpmn:linkEventDefinition" + optional("name", l.name())
                         + "/>");
@@ -307,6 +318,15 @@ public final class SubsetBpmnWriter {
         switch (element) {
             case SequenceFlow flow -> sequenceFlow(xml, flow, lvl);
             case FlowNode node -> node(xml, node, lvl, refs);
+            case DataObject d -> xml.line(lvl, "<bpmn:dataObject id=" + attr(d.id()) + optional("name", d.name())
+                    + optional("itemSubjectRef", d.itemSubjectRef()) + (d.isCollection() ? " isCollection=\"true\"" : "")
+                    + optional("horus:variable", d.info().otherAttributes().get(SubsetBpmnReader.DATA_VARIABLE)) + "/>");
+            case DataObjectReference d -> xml.line(lvl, "<bpmn:dataObjectReference id=" + attr(d.id())
+                    + optional("name", d.name()) + optional("dataObjectRef", d.dataObjectRef())
+                    + optional("itemSubjectRef", d.itemSubjectRef()) + "/>");
+            case DataStoreReference d -> xml.line(lvl, "<bpmn:dataStoreReference id=" + attr(d.id())
+                    + optional("name", d.name()) + optional("dataStoreRef", d.dataStoreRef())
+                    + optional("itemSubjectRef", d.itemSubjectRef()) + "/>");
             default -> throw new IllegalArgumentException("Element " + element.id() + " ("
                     + element.getClass().getSimpleName() + ") is outside the exportable subset");
         }
@@ -431,7 +451,12 @@ public final class SubsetBpmnWriter {
             }
             case Transaction t -> tag = "bpmn:transaction";
             case ParallelGateway g -> tag = "bpmn:parallelGateway";
-            case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> tag = "bpmn:eventBasedGateway";
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> {
+                tag = "bpmn:eventBasedGateway";
+                attributes.append(g.instantiate() ? " instantiate=\"true\"" : "");
+                attributes.append(g.eventGatewayType() == io.github.dhluong90.bpm.process.internal.model.bpmn
+                        .EventBasedGatewayType.PARALLEL ? " eventGatewayType=\"Parallel\"" : "");
+            }
             case ComplexGateway g -> {
                 tag = "bpmn:complexGateway";
                 attributes.append(optional("default", g.defaultFlow()));
@@ -465,7 +490,7 @@ public final class SubsetBpmnWriter {
         LoopCharacteristics loop = node instanceof Activity activity ? activity.activity().loopCharacteristics() : null;
         if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
                 && node.outgoing().isEmpty() && !(node instanceof SubProcess) && loop == null && !(node instanceof Transaction)
-                && !(node instanceof AdHocSubProcess) && !(node instanceof ComplexGateway cg
+                && !(node instanceof AdHocSubProcess) && !hasData(node) && !(node instanceof ComplexGateway cg
                         && cg.activationCondition() != null)
                 && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event e
                         && !e.eventDefinitions().isEmpty())) {
@@ -510,6 +535,9 @@ public final class SubsetBpmnWriter {
         }
         node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
+        if (node instanceof Activity activity) {
+            dataOf(xml, activity.activity(), lvl + 1);
+        }
         if (loop != null) {
             loopCharacteristics(xml, loop, lvl + 1);
         }
@@ -535,6 +563,64 @@ public final class SubsetBpmnWriter {
                     + "</bpmn:completionCondition>");
         }
         xml.line(lvl, "</" + tag + ">");
+    }
+
+    private static boolean hasData(FlowNode node) {
+        if (!(node instanceof Activity activity)) {
+            return false;
+        }
+        var a = activity.activity();
+        return a.ioSpecification() != null || !a.dataInputAssociations().isEmpty()
+                || !a.dataOutputAssociations().isEmpty();
+    }
+
+    /** #499: the data inputs and outputs and their associations of an activity, in the schema's order. */
+    private static void dataOf(Xml xml, ActivityAttributes a, int lvl) {
+        IoSpecification io = a.ioSpecification();
+        if (io != null) {
+            xml.line(lvl, "<bpmn:ioSpecification" + optional("id", io.id()) + ">");
+            io.dataInputs().forEach(d -> xml.line(lvl + 1, "<bpmn:dataInput id=" + attr(d.id())
+                    + optional("name", d.name()) + "/>"));
+            io.dataOutputs().forEach(d -> xml.line(lvl + 1, "<bpmn:dataOutput id=" + attr(d.id())
+                    + optional("name", d.name()) + "/>"));
+            for (InputSet set : io.inputSets()) {
+                xml.line(lvl + 1, "<bpmn:inputSet" + optional("id", set.id()) + optional("name", set.name()) + ">");
+                set.dataInputRefs().forEach(r -> xml.line(lvl + 2, "<bpmn:dataInputRefs>" + text(r)
+                        + "</bpmn:dataInputRefs>"));
+                xml.line(lvl + 1, "</bpmn:inputSet>");
+            }
+            for (OutputSet set : io.outputSets()) {
+                xml.line(lvl + 1, "<bpmn:outputSet" + optional("id", set.id()) + optional("name", set.name()) + ">");
+                set.dataOutputRefs().forEach(r -> xml.line(lvl + 2, "<bpmn:dataOutputRefs>" + text(r)
+                        + "</bpmn:dataOutputRefs>"));
+                xml.line(lvl + 1, "</bpmn:outputSet>");
+            }
+            xml.line(lvl, "</bpmn:ioSpecification>");
+        }
+        for (DataInputAssociation d : a.dataInputAssociations()) {
+            association(xml, "dataInputAssociation", d.id(), d.sourceRefs(), d.targetRef(), lvl);
+        }
+        for (DataOutputAssociation d : a.dataOutputAssociations()) {
+            association(xml, "dataOutputAssociation", d.id(), d.sourceRefs(), d.targetRef(), lvl);
+        }
+    }
+
+    private static void association(Xml xml, String tag, String id, List<String> sources, String target, int lvl) {
+        xml.line(lvl, "<bpmn:" + tag + optional("id", id) + ">");
+        sources.forEach(r -> xml.line(lvl + 1, "<bpmn:sourceRef>" + text(r) + "</bpmn:sourceRef>"));
+        xml.line(lvl + 1, "<bpmn:targetRef>" + text(target) + "</bpmn:targetRef>");
+        xml.line(lvl, "</bpmn:" + tag + ">");
+    }
+
+    /** #499: one root data store for each store the data store references name, written before the process. */
+    private static void rootDataStores(Xml xml, Process process) {
+        Map<String, String> stores = new LinkedHashMap<>();
+        for (FlowElement element : process.allFlowElements()) {
+            if (element instanceof DataStoreReference d && d.dataStoreRef() != null) {
+                stores.putIfAbsent(d.dataStoreRef(), d.name());
+            }
+        }
+        stores.forEach((id, name) -> xml.line(1, "<bpmn:dataStore id=" + attr(id) + optional("name", name) + "/>"));
     }
 
     /** #496: the loop or multi-instance marker of an activity, read back to the same definition hash. */

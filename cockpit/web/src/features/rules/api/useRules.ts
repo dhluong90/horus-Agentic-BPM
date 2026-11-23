@@ -1,9 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, ReportRequest, ReplayRequest, RuleSetVersion, SimulationReport, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, HistoryReadings, ReportRequest, ReplayRequest, RuleSetVersion, SimulationReport, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
+import { runReplay } from '../model/replay';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -430,13 +431,21 @@ export function useCreateReport(name: string, version: number, onDone: (report: 
 export function useReplay(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
   const { client } = useRulesSession();
   const controller = useRef<AbortController | undefined>(undefined);
+  // What came in before a cancel: the engine writes nothing, so the steps already read stay valid to show.
+  const [progress, setProgress] = useState<{ partial: HistoryReadings; done: number; total: number } | undefined>(undefined);
   const mutation = useMutation({
-    mutationFn: (request: ReplayRequest) => {
+    mutationFn: (request: ReplayRequest & { limit: number }) => {
       const abort = new AbortController();
       controller.current = abort;
-      return client.simulateHistoryReadings(version.ruleSet, version.version, request, abort.signal);
+      setProgress(undefined);
+      return runReplay(
+        request,
+        (step) => client.simulateHistoryReadings(version.ruleSet, version.version, step, abort.signal),
+        (partial, done, total) => { setProgress({ partial, done, total }); },
+      );
     },
   });
   const cancel = () => { controller.current?.abort(); };
-  return { ...mutation, cancel };
+  const reset = () => { setProgress(undefined); mutation.reset(); };
+  return { ...mutation, cancel, reset, progress };
 }

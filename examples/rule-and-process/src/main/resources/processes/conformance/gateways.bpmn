@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="payment-routing" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:exclusiveGateway id="size" default="to-small"/>
+    <bpmn:scriptTask id="large" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="route"><bpmn:script>'large'</bpmn:script></bpmn:scriptTask>
+    <bpmn:scriptTask id="small" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="route"><bpmn:script>'small'</bpmn:script></bpmn:scriptTask>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="size"/>
+    <bpmn:sequenceFlow id="to-large" sourceRef="size" targetRef="large"><bpmn:conditionExpression>amount &gt;= 1000000</bpmn:conditionExpression></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="to-small" sourceRef="size" targetRef="small"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="large" targetRef="end"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="small" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_payment-routing">
+    <bpmndi:BPMNPlane id="Plane_payment-routing" bpmnElement="payment-routing">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="size_di" bpmnElement="size" isMarkerVisible="true"><dc:Bounds x="246" y="95" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="large_di" bpmnElement="large"><dc:Bounds x="356" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="small_di" bpmnElement="small"><dc:Bounds x="356" y="210" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="516" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="120"/><di:waypoint x="246" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="to-large_di" bpmnElement="to-large"><di:waypoint x="296" y="120"/><di:waypoint x="356" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="to-small_di" bpmnElement="to-small"><di:waypoint x="296" y="120"/><di:waypoint x="326" y="120"/><di:waypoint x="326" y="250"/><di:waypoint x="356" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="456" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="456" y="250"/><di:waypoint x="486" y="250"/><di:waypoint x="486" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

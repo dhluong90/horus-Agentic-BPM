@@ -39,6 +39,7 @@ final class WorkingContext implements ExecutionContext {
     private final List<HistoryEntry> history = new ArrayList<>();
     private final Deque<String> agenda = new ArrayDeque<>();
     private final ScopeArming arming;
+    private final DataStorePort dataStores;
     private InstanceStatus status;
     private long sequence;
     private boolean conditionArmed;
@@ -48,6 +49,12 @@ final class WorkingContext implements ExecutionContext {
 
     WorkingContext(InstanceState state, CompiledProcess process, ExpressionEvaluator expressions, Clock clock,
             String actor, int maxInstances, ScopeArming arming) {
+        this(state, process, expressions, clock, actor, maxInstances, arming, DataStorePort.NONE);
+    }
+
+    WorkingContext(InstanceState state, CompiledProcess process, ExpressionEvaluator expressions, Clock clock,
+            String actor, int maxInstances, ScopeArming arming, DataStorePort dataStores) {
+        this.dataStores = dataStores;
         this.arming = arming;
         this.loops = new Loops(this, maxInstances);
         this.initial = state;
@@ -60,6 +67,22 @@ final class WorkingContext implements ExecutionContext {
         this.participants = new java.util.LinkedHashSet<>(state.participants());
         this.status = state.status();
         this.sequence = state.sequence();
+    }
+
+    @Override
+    public DataStorePort dataStores() {
+        return dataStores;
+    }
+
+    @Override
+    public DataStorePort.Access dataStoreAccess(String store, String item, String nodeId, Token token) {
+        return new DataStorePort.Access(initial.tenantId(), store, item, initial.instanceId(), nodeId,
+                initial.instanceId() + ":" + nodeId + ":" + token.id() + ":" + store + ":" + item);
+    }
+
+    @Override
+    public String businessKey() {
+        return initial.businessKey();
     }
 
     Transition transition() {
@@ -140,6 +163,25 @@ final class WorkingContext implements ExecutionContext {
         history("INSTANCE_ENDED", null, Map.of("status", "FAILED"));
         effect(new Effect.EmitEvent(nextId(), "processes.instance.failed.v1",
                 Map.of("instanceId", initial.instanceId())));
+    }
+
+    /** The local that marks the walk token of a background compensation; its value is the activity, "" for the scope. */
+    static final String BACKGROUND_UNDO = BackgroundWalks.MARK;
+
+    /**
+     * A background walk reached the bottom (PD-149): its token completes, which lets the scope end. A walk that already
+     * ended is left alone, so the command is safe to repeat.
+     *
+     * @param tokenId the walk token
+     */
+    void endBackgroundCompensation(String tokenId) {
+        Token walk = tree().get(tokenId).orElseThrow(() -> new ExecutionException("TOKEN_NOT_FOUND", null,
+                "No walk token " + tokenId));
+        if (!walk.status().live() || !walk.locals().containsKey(BACKGROUND_UNDO)) {
+            return;
+        }
+        history("COMPENSATED", walk, Map.of("scopeTokenId", walk.scopeTokenId(), "background", true));
+        complete(walk);
     }
 
     /**
@@ -590,6 +632,27 @@ final class WorkingContext implements ExecutionContext {
     }
 
     @Override
+    public void compensateInBackground(Token thrower, String targetActivityId) {
+        Token scope = tree().get(thrower.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                thrower.nodeId(), "Token " + thrower.id() + " has no scope"));
+        Token created = createToken(TokenKind.FLOW, thrower.nodeId(), scope.id());
+        Token walk = new Token(created.id(), TokenKind.FLOW, TokenStatus.WAITING_ASYNC, scope.id(), thrower.nodeId(),
+                null, Map.of(BACKGROUND_UNDO, targetActivityId == null ? "" : targetActivityId));
+        update(walk);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("scopeTokenId", scope.id());
+        details.put("scope", scope.nodeId());
+        details.put("cause", "THROW_COMPENSATION");
+        details.put("background", true);
+        if (targetActivityId != null) {
+            details.put("activity", targetActivityId);
+        }
+        history.add(new HistoryEntry("COMPENSATION_STARTED", thrower.nodeId(), walk.id(), null, actor, now, details));
+        effect(new Effect.StartCompensation(scope.id(), thrower.nodeId(), "THROW_COMPENSATION", targetActivityId,
+                walk.id()));
+    }
+
+    @Override
     public void cancelTransaction(Token end) {
         Token scope = tree().get(end.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
                 end.nodeId(), "Token " + end.id() + " has no scope"));
@@ -718,7 +781,9 @@ final class WorkingContext implements ExecutionContext {
     private void resolveEventGateway(Token winner, FlowNode from) {
         Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> gateway =
                 process.eventGatewayOf(from.id());
-        if (gateway.isEmpty()) {
+        if (gateway.isEmpty() || gateway.get().eventGatewayType()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL) {
+            // #499: every catch of a parallel gateway is awaited; none of them cancels another.
             return;
         }
         List<String> targets = process.outgoing(gateway.get().id()).stream().map(SequenceFlow::targetRef).toList();

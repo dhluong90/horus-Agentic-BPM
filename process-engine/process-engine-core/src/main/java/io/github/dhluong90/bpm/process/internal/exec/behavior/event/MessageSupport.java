@@ -57,6 +57,12 @@ final class MessageSupport {
      */
     static String key(FlowNode node, Token token, ExecutionContext ctx, boolean required) {
         String variable = node.extensions().first(CorrelationKey.class).map(CorrelationKey::variable).orElse(null);
+        if (variable == null && ctx.process().eventGatewayOf(node.id()).filter(g -> g.instantiate()
+                && g.eventGatewayType() == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL)
+                .isPresent() && ctx.businessKey() != null) {
+            // #499: after a parallel instantiating gateway no instance existed to hold a key; the instance's own is used.
+            return ctx.businessKey();
+        }
         if (variable == null) {
             if (required) {
                 throw new ExecutionException("CORRELATION_KEY_REQUIRED", node.id(), "The step names no correlation key");

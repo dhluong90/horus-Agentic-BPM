@@ -151,7 +151,9 @@ class SagaCompensationTest {
                     handler("close-account", call -> done("closed", true)),
                     handler("fx-unbuy", call -> done("reversed", true)),
                     handler("fx-unsell", call -> done("reversed", true)),
-                    handler("refund-fee", call -> done("refunded", true))));
+                    handler("refund-fee", call -> done("refunded", true)),
+                    handler("reverse-disbursement", call -> done("reversed", true)),
+                    handler("notify-treasury", call -> done("told", true))));
         }
         TestEngine engine = TestEngine.replica("pod-1", clock).autoApprove(autoApprove)
                 .handlers(handlers.toArray(ServiceTaskHandler[]::new))
@@ -884,6 +886,25 @@ class SagaCompensationTest {
     }
 
     @Test
+    void PRE_353_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside() {
+        // Given loan-booking-undo-tasks: the funds reserved in the sub-process, whose undo is two tasks; the partner refuses
+        TestEngine engine = engine();
+        deploy(engine, "loan-booking-undo-tasks");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read");
+
+        // When notify-partner fails and the undo of the root scope runs
+        String id = engine.services.start(new StartRequest("loan-booking-undo-tasks", "LN-2026-0301", Map.of(), null)).id();
+        step(engine);
+        drain(engine);
+
+        // Then the sub-process's two tasks run first, in flow order, and the step inside is undone after them
+        assertThat(undoCalls()).containsExactly("reverse-disbursement:disburse", "notify-treasury:disburse",
+                "release-funds:reserve-funds");
+        assertThat(stack(id)).containsExactly("reserve-funds:DONE", "disburse:DONE", "disburse:DONE");
+        assertThat(status(id)).isEqualTo("FAILED");
+    }
+
+    @Test
     void PRE_344_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes() {
         // Given the cancelled transfer, where credit-back is refused with ACCOUNT_FROZEN the first time
         TestEngine engine = engine();
@@ -939,6 +960,41 @@ class SagaCompensationTest {
         // through the second throw to the end
         assertThat(undoCalls()).containsExactly("release-funds:reserve-funds");
         assertThat(stack(id)).containsExactly("open-account:PENDING", "reserve-funds:DONE", "register-loan:PENDING");
+        assertThat(status(id)).isEqualTo("COMPLETED");
+        assertThat(history(id, "COMPENSATION_STARTED")).containsExactly("COMPENSATION_STARTED:withdraw-reservation",
+                "COMPENSATION_STARTED:withdraw-again");
+    }
+
+    @Test
+    void PRE_349_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it() {
+        // Given loan-undo-background: the loan registered, the funds reserved, then two throws of the reservation that
+        // do not wait for the undo, then a customer notice
+        TestEngine engine = engine();
+        deploy(engine, "loan-undo-background");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read", "processes:cancel");
+
+        // When the instance starts
+        String id = engine.services.start(new StartRequest("loan-undo-background", "LN-2026-0301", Map.of(), null)).id();
+
+        // Then the flow went on to the notice while the undo waits as a job: the instance is RUNNING, not COMPENSATING,
+        // and is not completed, because the undo is still to run
+        assertThat(local.stream().map(Map.Entry::getKey)).contains("notify-customer");
+        assertThat(status(id)).isEqualTo("RUNNING");
+        assertThat(stack(id)).containsExactly("reserve-funds:RUNNING", "register-loan:PENDING");
+        assertThat(undoCalls()).isEmpty();
+
+        // And an undo is never abandoned half way: the instance cannot be cancelled while it runs
+        long lock = engine.services.instance(id).lockVersion();
+        assertThatThrownBy(() -> engine.services.cancel(id, lock, "Customer withdrew", "C-301"))
+                .isInstanceOf(InvalidStateException.class).hasMessageContaining("compensation running in the background");
+
+        // When the undo job runs
+        drain(engine);
+
+        // Then the reservation was released exactly once, though two throws named it, the loan registration is
+        // untouched, and only now does the instance end
+        assertThat(undoCalls()).containsExactly("release-funds:reserve-funds");
+        assertThat(stack(id)).containsExactly("reserve-funds:DONE", "register-loan:PENDING");
         assertThat(status(id)).isEqualTo("COMPLETED");
         assertThat(history(id, "COMPENSATION_STARTED")).containsExactly("COMPENSATION_STARTED:withdraw-reservation",
                 "COMPENSATION_STARTED:withdraw-again");

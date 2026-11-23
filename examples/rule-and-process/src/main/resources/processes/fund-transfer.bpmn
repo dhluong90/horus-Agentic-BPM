@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fund transfer as a BPMN transaction with compensation: the hold and the debit each have a compensation boundary
+     event whose activity undoes them. When the target account turns out to be closed (targetClosed = true), the cancel
+     end event compensates the transaction, newest first, and the cancel boundary event tells the customer. Start it
+     with amountMinor, currency, sourceAccount and targetClosed. The horus attributes are the engine's extension
+     namespace. -->
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_fund-transfer"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="fund-transfer" name="Fund transfer" isExecutable="true">
+    <bpmn:startEvent id="start" name="Transfer requested"/>
+    <bpmn:transaction id="transfer" name="Move the money">
+      <bpmn:startEvent id="transfer-start"/>
+      <bpmn:serviceTask id="hold-funds" name="Hold the funds" horus:handler="reserve-funds" horus:resultVariable="hold">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="hold-undo" attachedToRef="hold-funds" cancelActivity="false">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="release-hold-activity" name="Release the hold" isForCompensation="true" horus:handler="release-funds"/>
+      <bpmn:association id="hold-undo-link" associationDirection="One" sourceRef="hold-undo" targetRef="release-hold-activity"/>
+      <bpmn:serviceTask id="debit-source" name="Debit the source" horus:handler="post-debit" horus:resultVariable="debit">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="debit-undo" attachedToRef="debit-source" cancelActivity="false">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="credit-back-activity" name="Credit the debit back" isForCompensation="true" horus:handler="post-credit-back"/>
+      <bpmn:association id="debit-undo-link" associationDirection="One" sourceRef="debit-undo" targetRef="credit-back-activity"/>
+      <bpmn:exclusiveGateway id="target-open" name="Target account open?" default="to-end"/>
+      <bpmn:endEvent id="transfer-end" name="Money moved"/>
+      <bpmn:endEvent id="transfer-cancel" name="Target closed">
+        <bpmn:cancelEventDefinition/>
+      </bpmn:endEvent>
+      <bpmn:sequenceFlow id="transfer-start__hold" sourceRef="transfer-start" targetRef="hold-funds"/>
+      <bpmn:sequenceFlow id="hold__debit" sourceRef="hold-funds" targetRef="debit-source"/>
+      <bpmn:sequenceFlow id="debit__open" sourceRef="debit-source" targetRef="target-open"/>
+      <bpmn:sequenceFlow id="to-cancel" name="closed" sourceRef="target-open" targetRef="transfer-cancel">
+        <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">targetClosed == true</bpmn:conditionExpression>
+      </bpmn:sequenceFlow>
+      <bpmn:sequenceFlow id="to-end" name="open" sourceRef="target-open" targetRef="transfer-end"/>
+    </bpmn:transaction>
+    <bpmn:boundaryEvent id="transfer-cancelled" name="Transfer cancelled" attachedToRef="transfer">
+      <bpmn:cancelEventDefinition/>
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="notify-customer" name="Tell the customer" horus:handler="notify-customer"/>
+    <bpmn:endEvent id="cancelled-end" name="Transfer cancelled"/>
+    <bpmn:endEvent id="end" name="Transferred"/>
+    <bpmn:sequenceFlow id="start__transfer" sourceRef="start" targetRef="transfer"/>
+    <bpmn:sequenceFlow id="transfer__end" sourceRef="transfer" targetRef="end"/>
+    <bpmn:sequenceFlow id="cancelled__notify" sourceRef="transfer-cancelled" targetRef="notify-customer"/>
+    <bpmn:sequenceFlow id="notify__end" sourceRef="notify-customer" targetRef="cancelled-end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_fund-transfer">
+    <bpmndi:BPMNPlane id="Plane_fund-transfer" bpmnElement="fund-transfer">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="315" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="transfer_di" bpmnElement="transfer" isExpanded="true"><dc:Bounds x="246" y="80" width="642" height="506"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="transfer-start_di" bpmnElement="transfer-start"><dc:Bounds x="286" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="hold-funds_di" bpmnElement="hold-funds"><dc:Bounds x="382" y="120" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="release-hold-activity_di" bpmnElement="release-hold-activity"><dc:Bounds x="382" y="336" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="debit-source_di" bpmnElement="debit-source"><dc:Bounds x="542" y="120" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="credit-back-activity_di" bpmnElement="credit-back-activity"><dc:Bounds x="542" y="466" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="target-open_di" bpmnElement="target-open" isMarkerVisible="true"><dc:Bounds x="702" y="135" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="transfer-end_di" bpmnElement="transfer-end"><dc:Bounds x="812" y="250" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="transfer-cancel_di" bpmnElement="transfer-cancel"><dc:Bounds x="812" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="hold-undo_di" bpmnElement="hold-undo"><dc:Bounds x="414" y="182" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="debit-undo_di" bpmnElement="debit-undo"><dc:Bounds x="574" y="182" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="notify-customer_di" bpmnElement="notify-customer"><dc:Bounds x="948" y="636" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cancelled-end_di" bpmnElement="cancelled-end"><dc:Bounds x="1108" y="658" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="980" y="315" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="transfer-cancelled_di" bpmnElement="transfer-cancelled"><dc:Bounds x="549" y="568" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="transfer-start__hold_di" bpmnElement="transfer-start__hold"><di:waypoint x="322" y="160"/><di:waypoint x="382" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="hold__debit_di" bpmnElement="hold__debit"><di:waypoint x="482" y="160"/><di:waypoint x="542" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="debit__open_di" bpmnElement="debit__open"><di:waypoint x="642" y="160"/><di:waypoint x="702" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="to-cancel_di" bpmnElement="to-cancel"><di:waypoint x="752" y="160"/><di:waypoint x="812" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="to-end_di" bpmnElement="to-end"><di:waypoint x="752" y="160"/><di:waypoint x="782" y="160"/><di:waypoint x="782" y="268"/><di:waypoint x="812" y="268"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="hold-undo-link_di" bpmnElement="hold-undo-link"><di:waypoint x="432" y="218"/><di:waypoint x="432" y="376"/><di:waypoint x="382" y="376"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="debit-undo-link_di" bpmnElement="debit-undo-link"><di:waypoint x="592" y="218"/><di:waypoint x="592" y="506"/><di:waypoint x="542" y="506"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="start__transfer_di" bpmnElement="start__transfer"><di:waypoint x="186" y="333"/><di:waypoint x="246" y="333"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="transfer__end_di" bpmnElement="transfer__end"><di:waypoint x="888" y="333"/><di:waypoint x="980" y="333"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="cancelled__notify_di" bpmnElement="cancelled__notify"><di:waypoint x="567" y="604"/><di:waypoint x="567" y="676"/><di:waypoint x="948" y="676"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="notify__end_di" bpmnElement="notify__end"><di:waypoint x="1048" y="676"/><di:waypoint x="1108" y="676"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

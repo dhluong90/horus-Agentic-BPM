@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Credit review completed through a declared form: the officer decides APPROVE or REJECT in the form credit-review
+     (src/main/resources/forms/credit-review.form.json), and a reason is required when the decision is REJECT. The
+     engine checks the answer against the form before the task completes. -->
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_credit-review-form"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="credit-review-form" name="Credit review through a form" isExecutable="true">
+    <bpmn:startEvent id="start" name="Credit request received"/>
+    <bpmn:userTask id="review" name="Review the credit request" horus:assignee="role:CARD_OFFICER" horus:form="credit-review" horus:resultVariable="review"/>
+    <bpmn:exclusiveGateway id="decision" name="Decision" default="to-rejected"/>
+    <bpmn:endEvent id="approved" name="Credit approved"/>
+    <bpmn:endEvent id="rejected" name="Credit rejected"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="review"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="review" targetRef="decision"/>
+    <bpmn:sequenceFlow id="to-approved" name="APPROVE" sourceRef="decision" targetRef="approved">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">review.decision == 'APPROVE'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="to-rejected" name="REJECT" sourceRef="decision" targetRef="rejected"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_credit-review-form">
+    <bpmndi:BPMNPlane id="Plane_credit-review-form" bpmnElement="credit-review-form">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="review_di" bpmnElement="review"><dc:Bounds x="246" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="decision_di" bpmnElement="decision" isMarkerVisible="true"><dc:Bounds x="406" y="95" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="approved_di" bpmnElement="approved"><dc:Bounds x="516" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="rejected_di" bpmnElement="rejected"><dc:Bounds x="516" y="210" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="120"/><di:waypoint x="246" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="346" y="120"/><di:waypoint x="406" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="to-approved_di" bpmnElement="to-approved"><di:waypoint x="456" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="to-rejected_di" bpmnElement="to-rejected"><di:waypoint x="456" y="120"/><di:waypoint x="486" y="120"/><di:waypoint x="486" y="228"/><di:waypoint x="516" y="228"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

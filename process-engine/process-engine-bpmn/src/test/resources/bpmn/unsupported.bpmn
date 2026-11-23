@@ -4,7 +4,7 @@
     <bpmn:startEvent id="start"/>
     <bpmn:userTask id="review"/>
     <bpmn:boundaryEvent id="be-timeout" attachedToRef="review"/>
-    <bpmn:dataObject id="do-1"/>
+    <bpmn:globalTask id="do-1"/>
     <bpmn:endEvent id="end"><bpmn:linkEventDefinition name="x"/></bpmn:endEvent>
   </bpmn:process>
 </bpmn:definitions>

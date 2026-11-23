@@ -24,7 +24,7 @@ import tools.jackson.databind.node.ObjectNode;
 /** RFC 9457 problem details for Process Engine endpoints, with the engine error code in {@code code}. */
 @RestControllerAdvice(assignableTypes = {ProcessController.class, AgentReplayController.class,
         MigrationController.class, MigrationExecutionController.class, LayoutController.class,
-        IncidentController.class, CalendarController.class, StepCatalogueController.class})
+        IncidentController.class, CalendarController.class, StepCatalogueController.class, SignalController.class})
 public class ProcessProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProcessProblemDetails.class.getName());

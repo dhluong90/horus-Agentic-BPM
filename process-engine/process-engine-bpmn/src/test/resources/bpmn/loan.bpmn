@@ -54,13 +54,13 @@
 
 
 
-    <bpmn:dataObject id="do-1"/>
+    <bpmn:globalTask id="do-1"/>
 
 
 
 
 
-    <bpmn:eventBasedGateway id="notify" instantiate="true"/>
+    <bpmn:choreographyTask id="notify"/>
 
 
 

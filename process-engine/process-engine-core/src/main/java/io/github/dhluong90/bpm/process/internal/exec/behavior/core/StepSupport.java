@@ -45,16 +45,18 @@ public final class StepSupport {
                 out.put(input.name(), input.value());
             }
         }
+        DataBindings.readInputs(node, token, ctx, out);
         return out;
     }
 
     /** Stores an output in the node's result variable, or merges it into the process variables. */
-    static void storeResult(FlowNode node, Map<String, Object> output, ExecutionContext ctx) {
+    static void storeResult(FlowNode node, Map<String, Object> output, Token token, ExecutionContext ctx) {
         String target = node.extensions().first(ResultVariable.class).map(ResultVariable::name).orElse(null);
         if (target != null) {
             ctx.variables().set(target, Map.copyOf(output));
         } else {
             output.forEach((k, v) -> ctx.variables().set(k, v));
         }
+        DataBindings.writeOutputs(node, output, token, ctx);
     }
 }

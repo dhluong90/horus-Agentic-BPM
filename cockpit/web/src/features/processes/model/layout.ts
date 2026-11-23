@@ -47,11 +47,28 @@ export interface PlacedEdge {
   labelAt: Point | undefined;
 }
 
+/** A data object or data store drawn in the band under the steps (#499); `x`, `y` are the top-left of the symbol, the caption hangs below it. */
+export interface PlacedDataItem {
+  id: string;
+  kind: 'dataObject' | 'dataStore';
+  name: string | undefined;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  lines: string[];
+}
+
+/** The dotted association between a step and a data symbol; the arrowhead is at `points`' last point. */
+export interface PlacedDataLink { id: string; activity: string; item: string; direction: 'read' | 'write'; points: Point[] }
+
 export interface Layout {
   width: number;
   height: number;
   nodes: PlacedNode[];
   edges: PlacedEdge[];
+  /** Data symbols and their associations, in a band under every step; absent when the process has none. */
+  data?: { items: PlacedDataItem[]; links: PlacedDataLink[] };
 }
 
 /** Width of a task box; its height follows the number of lines of its name. */
@@ -306,7 +323,67 @@ function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: 
  */
 export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
   const level = layoutLevel(graph, undefined, typeLabel, options);
-  return { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
+  const base: Layout = { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
+  return graph.data === undefined ? base : placeData(graph.data, base);
+}
+
+/** The data object is a page 30 by 38, the store a drum 44 by 38; each has its name below, up to DATA_CAPTION wide. */
+const DATA_OBJECT_SIZE = { width: 30, height: 38 };
+const DATA_STORE_SIZE = { width: 44, height: 38 };
+const DATA_CAPTION = 104;
+/** Room between the last step and the band, and from one symbol to the next. */
+const DATA_BAND_GAP = 44;
+const DATA_SYMBOL_GAP = 12;
+/** Parallel associations at one step leave it this far apart, so none lies over another. */
+const DATA_LINK_STEP = 14;
+
+/**
+ * Puts the data symbols (#499) in one band under every step, each under the step it is joined to (the middle of the
+ * steps when it has several), pushed right so no two captions touch. An association leaves the step's lower edge,
+ * runs down to a line between the steps and the band, across, and down to the symbol, so it never crosses a symbol.
+ * A symbol in a sub-process that is drawn closed is left out, as its step is.
+ */
+function placeData(data: NonNullable<DiagramGraph['data']>, layout: Layout): Layout {
+  const byId = new Map(layout.nodes.map((node) => [node.id, node]));
+  const visible = data.items.filter((item) => item.parentId === undefined || byId.get(item.parentId)?.container?.open === true);
+  if (visible.length === 0) return layout;
+  const linksOf = (id: string) => data.links.filter((link) => link.item === id && byId.has(link.activity));
+  const anchored = visible.map((item) => {
+    const centres = linksOf(item.id).map((link) => { const node = byId.get(link.activity); return node === undefined ? 0 : node.x + node.width / 2; });
+    return { item, anchor: centres.length === 0 ? Number.POSITIVE_INFINITY : centres.reduce((a, b) => a + b, 0) / centres.length };
+  }).sort((a, b) => a.anchor - b.anchor);
+  const top = layout.height + DATA_BAND_GAP;
+  const items: PlacedDataItem[] = [];
+  let cursor = 0;
+  for (const { item, anchor } of anchored) {
+    const size = item.kind === 'dataStore' ? DATA_STORE_SIZE : DATA_OBJECT_SIZE;
+    const lines = wrapText(item.name ?? item.id, DATA_CAPTION, CAPTION_CHAR);
+    const centre = Number.isFinite(anchor) ? anchor : cursor + DATA_CAPTION / 2;
+    const x = Math.max(cursor, centre - DATA_CAPTION / 2);
+    items.push({ id: item.id, kind: item.kind, name: item.name, x: x + (DATA_CAPTION - size.width) / 2, y: top, ...size, lines });
+    cursor = x + DATA_CAPTION + DATA_SYMBOL_GAP;
+  }
+  const placed = new Map(items.map((item) => [item.id, item]));
+  const laneY = layout.height + DATA_BAND_GAP / 2;
+  const used = new Map<string, number>();
+  const links: PlacedDataLink[] = [];
+  for (const link of data.links) {
+    const node = byId.get(link.activity);
+    const item = placed.get(link.item);
+    if (node === undefined || item === undefined) continue;
+    // Each association at a step takes its own place along the step's lower edge.
+    const index = used.get(link.activity) ?? 0;
+    used.set(link.activity, index + 1);
+    const startX = Math.min(node.x + node.width - 8, node.x + node.width / 2 + (index % 2 === 0 ? 1 : -1) * Math.ceil(index / 2) * DATA_LINK_STEP);
+    const endX = item.x + item.width / 2;
+    const stepFoot = { x: startX, y: node.y + node.height };
+    const symbolTop = { x: endX, y: item.y };
+    const down = [stepFoot, { x: startX, y: laneY + index * 4 }, { x: endX, y: laneY + index * 4 }, symbolTop];
+    links.push({ id: link.id, activity: link.activity, item: link.item, direction: link.direction, points: link.direction === 'write' ? down : [...down].reverse() });
+  }
+  const width = Math.max(layout.width, Math.ceil(cursor - DATA_SYMBOL_GAP));
+  const bottom = Math.max(...items.map((item) => item.y + item.height + (Math.max(...items.map((i) => i.lines.length)) * CAPTION_LINE) + 14));
+  return { ...layout, width, height: Math.ceil(bottom), data: { items, links } };
 }
 
 /** True when two placed nodes' boxes intersect. */

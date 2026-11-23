@@ -82,7 +82,8 @@ The root element must declare the namespaces, and the process must be executable
 | `subProcess` (embedded, since 0.3.0) | a none `startEvent`, steps and at least one `endEvent` inside it | `name`. It reads and writes the process variables like the rest of the process; no flow crosses its border | `<bpmn:subProcess id="hand-over">` |
 | `startEvent` with a `signalEventDefinition` (since 0.3.0) | `signalRef`, the id of a document-level `signal` element | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `startEvent` with a `conditionalEventDefinition` (since 0.3.0) | a `condition` in `urn:horus-bpm:expr:v1` | `name` | `<bpmn:condition>amount >= 1000000</bpmn:condition>` |
-| `eventBasedGateway` (since 0.3.0) | two or more outgoing flows, each to a message, signal, timer or conditional `intermediateCatchEvent` or a `receiveTask` that no other flow enters | none; `instantiate="true"` and `eventGatewayType="Parallel"` are refused (`S3`) | `<bpmn:eventBasedGateway id="wait-payment"/>` |
+| `eventBasedGateway` (since 0.3.0) | two or more outgoing flows, each to a message, signal, timer or conditional `intermediateCatchEvent` or a `receiveTask` that no other flow enters | `instantiate="true"` (since 0.3.0): no flow in, each flow to a message or signal catch or a receive task; the first message or signal creates the instance and the catches need no `horus:correlationKey`. `eventGatewayType="Parallel"` (needs `instantiate="true"`): the first message or signal creates the instance and every other catch is awaited; a message catch with no `horus:correlationKey` waits under the business key of the instance | `<bpmn:eventBasedGateway id="wait-payment"/>` |
+| `dataObject`, `dataObjectReference`, `dataStoreReference` and a root `dataStore` (since 0.3.0) | `dataObjectRef` on a reference; `dataStoreRef` naming a root `dataStore` | `horus:variable` on a data object: the variable it is held in (its id by default); `ioSpecification`, `dataInputAssociation` and `dataOutputAssociation` on a task or call activity. A data output association writes the result value named by its `sourceRef` (a data output of the `ioSpecification`; the whole result when none) into the data object it targets, and a data input association hands the value of the data object to the step as an input named by its target. A transformation or assignment is refused. A data store reference that an association names is read and written through the host's `DataStoreAdapter` of the store's id, for the tenant of the instance; a store with no adapter is refused at import (`DATA_STORE_ADAPTER_NOT_REGISTERED`). One that no association names is kept and exported | `<bpmn:dataOutputAssociation><bpmn:sourceRef>out-score</bpmn:sourceRef><bpmn:targetRef>score-ref</bpmn:targetRef></bpmn:dataOutputAssociation>` |
 | `intermediateCatchEvent` with a signal or conditional definition (since 0.3.0) | as above | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `intermediateThrowEvent` and `endEvent` with a signal definition (since 0.3.0) | `signalRef` | `name` | `<bpmn:endEvent id="end"><bpmn:signalEventDefinition signalRef="Signal_done"/></bpmn:endEvent>` |
 | loop or multi-instance marker (since 0.3.0), on a task, a `callActivity` or an embedded `subProcess` | `standardLoopCharacteristics` with `loopMaximum` and an optional `loopCondition`; or `multiInstanceLoopCharacteristics` with `horus:collection` and `horus:elementVariable`, or a `loopCardinality` | `isSequential`, `horus:outputCollection`, `horus:outputElement`, `completionCondition` | `<bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"/>` |
@@ -181,7 +182,9 @@ A **complex gateway** joins when its `activationCondition` holds and splits on i
 
 An **ad-hoc sub-process** holds activities with no sequence flow between them. Nothing runs when a token enters; the operator starts an activity from the case view (the action needs `processes:task:manage`, `POST /instances/{id}:start-ad-hoc-activity`). `ordering="Parallel"` (the default) lets several run at once, `"Sequential"` one at a time. When an activity ends, `completionCondition` is asked; if it holds, the activities still running are cancelled (`cancelRemainingInstances="false"` lets them finish first) and the flow goes on. With no condition it ends when every activity has completed once. It holds activities only: no flows, events, gateways or boundary events (`AD_HOC_HAS_FLOW`, `AD_HOC_CONTENT_INVALID`, `AD_HOC_EMPTY`).
 
-A **multiple event** has several event definitions and fires on the first that occurs; with `parallelMultiple="true"` it waits for all of them. It works on an intermediate catch event and on the start event of an event sub-process (timer, message, signal, condition; one message at most), on a boundary event (timer, error, escalation; with `parallelMultiple` timers only) and on a process start event (message and signal, never parallel: no instance exists yet to wait in). A throw or end event with several definitions is refused. Refusals: `MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`, `PARALLEL_MULTIPLE_SINGLE`.
+A **multiple event** has several event definitions and fires on the first that occurs; with `parallelMultiple="true"` it waits for all of them. It works on an intermediate catch event and on the start event of an event sub-process (timer, message, signal, condition; one message at most), on a boundary event (timer, error, escalation; with `parallelMultiple` timers only) and on a process start event (message and signal; with `parallelMultiple` each arrival is held and the instance starts when all have come, see below). A throw or end event with several definitions throws each of them and goes on: message, signal, escalation and a compensation with `waitForCompletion="false"`. Refusals: `MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`, `PARALLEL_MULTIPLE_SINGLE`, `MULTIPLE_THROW_DEFINITION_INVALID`.
+
+A **parallel multiple process start** holds each message or signal in `pre_start_arrival` (migration V50). A message answers `WAITING` until the others have come; the last arrival starts one instance, with the message key as business key, and consumes the held rows. A signal has no key and completes the oldest held message.
 
 The cockpit draws the complex gateway with a star, the ad-hoc sub-process as a container, a multiple event with a pentagon and a parallel multiple one with a plus. On the case view of an open ad-hoc sub-process the inspector lists the activities that can start, one button each; without `processes:task:manage` the buttons say why they are disabled.
 
@@ -227,8 +230,8 @@ A **cancel end event** inside a transaction compensates it and leaves through th
 <bpmn:boundaryEvent id="transfer-cancelled" attachedToRef="transfer"><bpmn:cancelEventDefinition/></bpmn:boundaryEvent>
 ```
 
-The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. Not supported: a compensation boundary event on a call activity, a sub-process or a transaction, compensation event sub-processes, and `waitForCompletion="false"`.
-The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. A compensation boundary event may also sit on a call activity, a sub-process or a transaction, and a **compensation event sub-process** (a sub-process with `triggeredByEvent="true"` whose start event is a `compensateEventDefinition`, holding one service task with `horus:handler` between its start and end) does the same for the sub-process or transaction it stands in: when that sub-process completes, one undo entry is pushed on the stack of the scope around it, with the inputs the task declares, and a later compensation runs it before the steps inside. Those steps are still undone after it, where BPMN runs the handler only. Not supported: `waitForCompletion="false"` (an instance is `COMPENSATING` while the undo runs and takes no other command, so a flow that goes on beside it cannot run), and a compensation event sub-process with a body of more than one task.
+The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. Not supported: a compensation boundary event on a call activity, a sub-process or a transaction, and compensation event sub-processes.
+The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. A compensation boundary event may also sit on a call activity, a sub-process or a transaction, and a **compensation event sub-process** (a sub-process with `triggeredByEvent="true"` whose start event is a `compensateEventDefinition`, holding one service task with `horus:handler` between its start and end) does the same for the sub-process or transaction it stands in: when that sub-process completes, one undo entry is pushed on the stack of the scope around it, with the inputs the task declares, and a later compensation runs it before the steps inside. Those steps are still undone after it, where BPMN runs the handler only. A throw with `waitForCompletion="false"` does not wait: the flow goes on at once and the undo runs in the background, each entry once, with the instance `RUNNING` but not endable or cancellable until the undo is done (an intermediate throw then needs an outgoing flow, `COMPENSATION_BACKGROUND_NEEDS_FLOW`). Not supported: a compensation event sub-process with a body of more than one task.
 
 ### Terminate and link events (0.3.0)
 
@@ -242,7 +245,7 @@ A boundary event can wait for a message, a signal or a condition while its step 
 - **Signal.** One subscription row, woken by a broadcast through a job. A non-interrupting boundary stays armed for the next broadcast.
 - **Condition.** The engine asks again whenever the instance's variables change, in that transaction under the instance lock, and the boundary fires once. A condition that is already true when the step is entered fires on the next change of a variable, not on arrival.
 - **Cleanup.** When the step ends on its own, the subscriptions of its boundaries are deleted in the same transaction. When the step is cancelled, the same applies.
-- **Event-based gateway.** The token waits on every catch event that follows: one subscription or timer for each, written in one transaction. The first event that arrives runs its branch and the others are cancelled in the same transaction under the instance lock, so when two events arrive together on two replicas exactly one branch runs and the other delivery is refused as stale (`409`, or `MESSAGE_NOT_CORRELATED` for a message). A condition that is true on arrival wins at once. An instance cancelled while it waits loses every subscription and timer. The instantiating form and the parallel type are `S3`.
+- **Event-based gateway.** The token waits on every catch event that follows: one subscription or timer for each, written in one transaction. The first event that arrives runs its branch and the others are cancelled in the same transaction under the instance lock, so when two events arrive together on two replicas exactly one branch runs and the other delivery is refused as stale (`409`, or `MESSAGE_NOT_CORRELATED` for a message). A condition that is true on arrival wins at once. An instance cancelled while it waits loses every subscription and timer. The instantiating form starts the instance on the first event; with `eventGatewayType="Parallel"` no catch cancels another and the instance waits for all of them. Two events of one key that arrive together on two replicas create one instance: the arrivals of a key are serialised and the second finds the subscription of the first.
 
 The cockpit draws the symbols with their markers and the timeline names the message, signal or condition that fired and, at a gateway, the winner and the events it stopped; it never edits them.
 
@@ -276,6 +279,30 @@ A `callActivity` starts a child instance of another definition of the same tenan
 ```
 
 `horus:input` names the child's variable and gives its value, as on any step. `horus:output` sets the parent's variable `name` from the child's variable `from` when the child completes. Without `horus:calledVersion` the child starts on the version effective when the step runs and stays on it. A definition may name a process that is not deployed yet; the step raises the incident `NO_EFFECTIVE_VERSION` if it still is not when it runs. A call inside a `saga` must declare its undo with `horus:compensate`, because a completed child is undone only by its call step's own handler. `horus:in="all"` is not supported.
+
+### BPMN 2.0 element coverage (since 0.3.0)
+
+Compared with the executable element set of BPMN 2.0. A conformance suite (`ConformanceSuiteTest`, with its files under `bpmn/conformance`) runs data objects, gateways, a parallel join and a sub-process with a timer; the other rows are run by the scenario test of their own element.
+
+| Element | Supported | Notes |
+|---|---|---|
+| Process, none start event, none end event | Yes | |
+| Message, signal, timer, conditional start | Yes | |
+| Multiple start (message, signal), also parallel | Yes | A parallel start holds timers or conditions: no |
+| Task, manual task, script task, service task, business rule task, user task, send task, receive task | Yes | Script is one expression |
+| Call activity | Yes | |
+| Embedded, event, ad-hoc sub-process, transaction | Yes | A compensation event sub-process holds a line of service tasks, run in flow order |
+| Loop and multi-instance markers | Yes | |
+| Exclusive, parallel, inclusive, complex, event-based (exclusive, parallel and instantiating) gateway | Yes | A parallel event-based gateway instantiates; when a signal starts it, a message catch needs the instance to have a business key |
+| Intermediate catch: message, timer, signal, conditional, link, multiple | Yes | |
+| Intermediate throw: message, signal, escalation, compensation, link; several of message, signal, escalation, compensation | Yes | A multiple throw holds none of error, terminate, cancel, link |
+| Boundary: timer, error, escalation, message, signal, conditional, compensation, cancel, multiple | Yes | |
+| End: error, escalation, terminate, compensation, cancel, message, signal; several of message, signal, escalation, compensation | Yes | A multiple end holds none of error, terminate, cancel |
+| Compensation with `waitForCompletion="false"` | Yes | Needs a flow out of an intermediate throw |
+| Data object, data object reference, data input and output, associations | Yes | Run as variables |
+| Data store, data store reference | Yes | Read and written through the host's `DataStoreAdapter`; a reference no association names is kept and exported |
+| Lanes, pools, message flows, text annotation, association, group | Kept | Never executed |
+| Choreography, conversation | Kept | Read and kept as received, never run; after 1.0 |
 
 ### Accepted and skipped
 
@@ -315,8 +342,7 @@ Expected answer, `422`:
 ```json
 {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","unsupportedElements":[
   {"element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"not planned","message":"..."},
-  {"element":"inclusiveGateway","elementId":"ig-1","line":7,"stage":"S1","message":"..."},
-  {"element":"endEvent with messageEventDefinition","elementId":"end","line":8,"stage":"S2","message":"..."}],...}
+  {"element":"globalTask","elementId":"do-1","line":7,"stage":"not planned","message":"..."}],...}
 ```
 
 The answer lists every unsupported element in the file, each with its id, its line and its stage. Remove or replace each one and import again. At most 100 entries are listed; `violationsTruncated: true` says there were more. Ids are printed without control characters and cut at 200 characters.
@@ -329,18 +355,18 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: data objects and a timer cycle on a catch or boundary event are `S1`; the instantiating and the parallel event-based gateway are `S3`.
+Examples: a timer cycle on a catch or boundary event is `S1`; an ad-hoc feature after 1.0 is `S3`. A choreography is read and kept as received, never run.
 
 These are refused:
 
 | Kind | Elements |
 |---|---|
-| Gateways | an `eventBasedGateway` with `instantiate="true"` or `eventGatewayType="Parallel"` |
-| Events | a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event and a throw or end event with several definitions, and a process start event that waits for all of several triggers |
+| Gateways | an `eventBasedGateway` with `eventGatewayType="Parallel"` and no `instantiate="true"` (`EVENT_GATEWAY_PARALLEL_INSTANTIATE`, at compile) |
+| Events | a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event and a throw or end event with several definitions, and a process start event that waits for all of several triggers when one of them is a timer or condition |
 | Activities | a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker on anything but a task, a `callActivity` or an embedded `subProcess` |
 | Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
-| Structure | data objects and data stores, and a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
+| Structure | a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |
 
 An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.

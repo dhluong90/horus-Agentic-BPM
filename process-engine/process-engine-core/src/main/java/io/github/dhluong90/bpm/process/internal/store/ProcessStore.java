@@ -337,6 +337,19 @@ public interface ProcessStore {
     }
 
     /**
+     * Whether an instance of a process key waits for a signal of the name (#499): the signal then belongs to it and does
+     * not start another instance of a parallel instantiating event-based gateway.
+     *
+     * @param tenant tenant
+     * @param definitionKey the process key
+     * @param name signal name
+     * @return true when a subscription of the tenant for the name belongs to a version of the key
+     */
+    default boolean signalWaiterOfDefinition(String tenant, String definitionKey, String name) {
+        return false;
+    }
+
+    /**
      * The active versions of a tenant whose start event is a signal start for the name, newest first (#492). The caller
      * keeps only a version that is the key's effective one.
      *
@@ -487,6 +500,36 @@ public interface ProcessStore {
      * @param keep the subscription ids of the tokens that still wait
      */
     default void retainSubscriptions(String tenant, String instanceId, java.util.Collection<String> keep) {
+    }
+
+    // ---- parallel multiple process start (PD-149) ----------------------------------------------------------
+
+    /**
+     * Holds one arrival for a process whose start event waits for all of several definitions; a second arrival of the
+     * same definition and key replaces the first.
+     *
+     * @param kind {@code MESSAGE} or {@code SIGNAL}
+     * @param correlationKey the message's key, or the empty string
+     */
+    default void putStartArrival(String tenant, String keyName, String kind, String eventName, String correlationKey,
+            String payloadJson, Instant now) {
+        throw new UnsupportedOperationException("a parallel multiple start needs a store that holds arrivals");
+    }
+
+    /** @return the payload JSON of the held arrival, or empty */
+    default java.util.Optional<String> startArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
+        return java.util.Optional.empty();
+    }
+
+    /** @return the correlation key of the oldest held arrival of a message, or empty */
+    default java.util.Optional<String> oldestStartArrivalKey(String tenant, String keyName, String eventName) {
+        return java.util.Optional.empty();
+    }
+
+    /** Drops the arrival an instance start has used. */
+    default void deleteStartArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
     }
 
     /**

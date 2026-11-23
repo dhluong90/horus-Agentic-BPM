@@ -204,6 +204,7 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   // A disabled Approve says why; while the current diff loads it is only busy for a moment.
   const unavailable = canApprove || needsAcceptance || stale || (mayApprove && reviewNow === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
+  const tip: MessageKey | undefined = unavailable === 'dock.selfRequested' ? 'dock.tip.selfRequested' : unavailable === 'dock.selfAuthored' ? 'dock.tip.selfAuthored' : unavailable === 'dock.approveUnavailable' ? 'dock.tip.unavailable' : undefined;
   return (
     <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
       <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
@@ -214,14 +215,16 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
           <div className="decision__body">
             <PersonalDataWarnings warnings={shown} definition={version.definition}
               acceptance={mayApprove && toAccept.length > 0 ? { checked: accepted, onChange: setAccepted, needed: refused && !accepted, id: acceptId, inputs: [...new Set(toAccept.map((w) => w.input))] } : undefined} />
-            {unavailable !== undefined ? (
+            {unavailable === 'decision.changed' ? (
               <p className="gate__reason">
                 <span aria-hidden="true">⊘</span> <span id={reasonId}>{t(unavailable, { version: String(version.version) })}</span>
-                {unavailable === 'decision.changed' && onReviewAgain ? (
+                {onReviewAgain ? (
                   <> <button type="button" className="linkbtn hit" onClick={onReviewAgain}>{t('decision.reviewAgain')}</button></>
                 ) : null}
               </p>
             ) : null}
+            {/* Why Approve is off is a short tooltip on the button, and the full sentence for a screen reader. */}
+            {unavailable !== undefined && unavailable !== 'decision.changed' ? <span id={reasonId} className="sr-only">{t(unavailable, { version: String(version.version) })}</span> : null}
             {mayApprove || canReject ? (
               <label className="field" htmlFor={textId}>
                 <span className="field__label">{t('decision.comment')}</span>
@@ -232,11 +235,13 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
           </div>
           <div className="decision__actions">
             <div className="gate__buttons">
-              <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending || review === 'checking'}
-                {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : needsAcceptance ? { 'aria-describedby': acceptId } : {})}
-                onClick={() => { approve.start({ comment: text.trim(), acknowledgedWarnings: accepted ? toAccept : [] }); }}>
-                <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
-              </button>
+              <span className={tip !== undefined ? 'has-tip has-tip--above' : undefined} {...(tip !== undefined ? { 'data-tip': t(tip), tabIndex: 0 } : {})}>
+                <button type="button" className="btn btn--primary btn--ok" disabled={!canApprove || busy} aria-busy={approve.isPending || review === 'checking'}
+                  {...(unavailable !== undefined ? { 'aria-describedby': reasonId } : needsAcceptance ? { 'aria-describedby': acceptId } : {})}
+                  onClick={() => { approve.start({ comment: text.trim(), acknowledgedWarnings: accepted ? toAccept : [] }); }}>
+                  <span aria-hidden="true">✓</span> {approve.isPending ? t('dock.approving') : t('dock.approve')}
+                </button>
+              </span>
               {canReject ? (
                 <button type="button" className="btn btn--danger-quiet" disabled={text.trim() === '' || busy} aria-describedby={hintId} onClick={() => { reject.start(text.trim()); }}>
                   {reject.isPending ? t('dock.rejecting') : t('dock.reject')}

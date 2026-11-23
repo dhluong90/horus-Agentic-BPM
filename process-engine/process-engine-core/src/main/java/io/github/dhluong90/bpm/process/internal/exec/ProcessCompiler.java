@@ -23,6 +23,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ThrowEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
 import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
@@ -107,11 +108,13 @@ public final class ProcessCompiler {
         containerIds.add(process.id());
         nodes.values().stream().filter(n -> n instanceof Transaction || n instanceof SubProcess)
                 .map(FlowNode::id).forEach(containerIds::add);
-        Map<String, StartEvent> startOf = new HashMap<>();
+        Map<String, FlowNode> startOf = new HashMap<>();
         for (String container : containerIds) {
             boolean root = container.equals(process.id());
-            List<StartEvent> starts = nodes.values().stream().filter(StartEvent.class::isInstance)
-                    .filter(n -> container.equals(containerOf.get(n.id()))).map(StartEvent.class::cast).toList();
+            // #499: the root may start on an instantiating event-based gateway, which stands for its start event.
+            List<FlowNode> starts = nodes.values().stream().filter(n -> n instanceof StartEvent
+                            || root && n instanceof EventBasedGateway g && g.instantiate())
+                    .filter(n -> container.equals(containerOf.get(n.id()))).toList();
             if (starts.size() != 1) {
                 problems.add(DefinitionProblem.of("START_EVENT_COUNT", kind(root, nodes.get(container))
                         + " needs exactly one start event, found " + starts.size(), container));
@@ -187,9 +190,29 @@ public final class ProcessCompiler {
             }
             if (node instanceof EventBasedGateway gateway) {
                 // #495: a gateway waits on two or more catch events; each is entered by this gateway alone, and no flow has a condition.
-                if (gateway.instantiate() || gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL) {
-                    problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "an instantiating or parallel"
-                            + " event-based gateway has no behaviour in this release", "eventBasedGateway", node.id(), 0));
+                if (gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL && !gateway.instantiate()) {
+                    problems.add(DefinitionProblem.of("EVENT_GATEWAY_PARALLEL_INSTANTIATE", "A parallel event-based"
+                            + " gateway starts the process; set instantiate=\"true\"", node.id()));
+                }
+                if (gateway.instantiate()) {
+                    if (!containerOf.get(node.id()).equals(process.id())) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_INSTANTIATE_SCOPE", "An instantiating event-based"
+                                + " gateway starts the process; it stands in the process, not in a sub-process or"
+                                + " transaction", node.id()));
+                    }
+                    if (flows.stream().anyMatch(f -> f.targetRef().equals(node.id()))) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_INSTANTIATE_INCOMING", "An instantiating"
+                                + " event-based gateway starts the process and has no incoming flow", node.id()));
+                    }
+                    for (SequenceFlow f : out) {
+                        FlowNode target = nodes.get(f.targetRef());
+                        if (target != null && waitsForEvent(target) && !startsInstance(target)) {
+                            problems.add(DefinitionProblem.of("EVENT_GATEWAY_INSTANTIATE_TARGET", "An instantiating"
+                                    + " event-based gateway leads to message or signal catch events or receive tasks; a"
+                                    + " timer or conditional catch cannot create an instance; " + target.id() + " is one",
+                                    f.id()));
+                        }
+                    }
                 }
                 if (out.size() < 2) {
                     problems.add(DefinitionProblem.of("EVENT_GATEWAY_BRANCHES", "An event-based gateway waits on at"
@@ -402,6 +425,22 @@ public final class ProcessCompiler {
                 }
                 return;
             }
+            if (node instanceof ThrowEvent) {
+                for (EventDefinition d : defs) {
+                    boolean fits = d instanceof MessageEventDefinition || d instanceof SignalEventDefinition
+                            || d instanceof EscalationEventDefinition
+                            || d instanceof CompensateEventDefinition c && !c.waitForCompletion();
+                    if (!fits) {
+                        problems.add(DefinitionProblem.of("MULTIPLE_THROW_DEFINITION_INVALID", "A throw or end event with"
+                                + " several definitions throws each of them and goes on: message, signal, escalation and"
+                                + " a compensation with waitForCompletion=\"false\" only (an error, terminate, cancel,"
+                                + " link or waiting compensation changes the flow); found " + d.getClass().getSimpleName(),
+                                node.id()));
+                        break;
+                    }
+                }
+                return;
+            }
             boolean catches = node instanceof StartEvent || node instanceof IntermediateCatchEvent;
             boolean inEvent = node instanceof StartEvent s && isEventSubProcess(nodes.get(containerOf.get(s.id())));
             boolean root = node instanceof StartEvent s && containerOf.get(s.id()).equals(process.id());
@@ -412,7 +451,7 @@ public final class ProcessCompiler {
                     fits = d instanceof TimerEventDefinition || !parallel && (d instanceof ErrorEventDefinition
                             || d instanceof EscalationEventDefinition);
                 } else if (root) {
-                    fits = !parallel && (d instanceof MessageEventDefinition || d instanceof SignalEventDefinition);
+                    fits = d instanceof MessageEventDefinition || d instanceof SignalEventDefinition;
                 } else if (catches) {
                     fits = d instanceof TimerEventDefinition || d instanceof MessageEventDefinition
                             || d instanceof SignalEventDefinition || d instanceof ConditionalEventDefinition;
@@ -423,9 +462,9 @@ public final class ProcessCompiler {
                     fits = false;
                 }
                 if (!fits) {
-                    problems.add(DefinitionProblem.of("MULTIPLE_EVENT_DEFINITION_INVALID", (root && parallel
-                            ? "A process start event cannot wait for all of several triggers: the instance does not exist"
-                            + " yet; use a multiple start event that any one starts"
+                    problems.add(DefinitionProblem.of("MULTIPLE_EVENT_DEFINITION_INVALID", (root
+                            ? "A process start event with several triggers holds message and signal definitions only"
+                            + " (with parallelMultiple the instance starts when all have arrived)"
                             : "A multiple event holds timer, message, signal or conditional definitions (a start event of"
                             + " a process, message and signal only; a boundary event, timer, error and escalation, and"
                             + " with parallelMultiple timers only), and no timeCycle") + "; found "
@@ -512,13 +551,10 @@ public final class ProcessCompiler {
                     problems.add(DefinitionProblem.of("COMPENSATION_DUPLICATE", "Scope " + scope.id() + " has one undo:"
                             + " a compensation boundary event or one compensation event sub-process", start.id()));
                 }
-                List<FlowNode> body = nodes.values().stream().filter(n -> containerOf.get(n.id()).equals(owner.id())
-                        && !(n instanceof StartEvent) && !(n instanceof EndEvent)).toList();
-                if (body.size() != 1 || !(body.get(0) instanceof ServiceTask task)
-                        || task.extensions().first(HandlerRef.class).isEmpty()) {
+                if (!undoIsALine(owner, start, nodes, containerOf, flows)) {
                     problems.add(DefinitionProblem.of("COMPENSATION_EVENT_SUBPROCESS_SHAPE", "A compensation event"
-                            + " sub-process holds one service task with horus:handler, the undo, between its start"
-                            + " and end events", owner.id()));
+                            + " sub-process holds one or more service tasks with horus:handler in a line, the undo,"
+                            + " between its start and end events", owner.id()));
                 }
             }
             return;
@@ -632,9 +668,14 @@ public final class ProcessCompiler {
                         + " has a cancel end event and no cancel boundary event for the flow to leave by", id));
             }
         }
-        String target = node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
-                && event.eventDefinitions().size() == 1
-                && event.eventDefinitions().get(0) instanceof CompensateEventDefinition c ? c.activityRef() : null;
+        CompensateEventDefinition thrown = node instanceof ThrowEvent event ? event.eventDefinitions().stream()
+                .filter(CompensateEventDefinition.class::isInstance).map(CompensateEventDefinition.class::cast)
+                .findFirst().orElse(null) : null;
+        String target = thrown == null ? null : thrown.activityRef();
+        if (thrown != null && !thrown.waitForCompletion() && node instanceof IntermediateThrowEvent && out.isEmpty()) {
+            problems.add(DefinitionProblem.of("COMPENSATION_BACKGROUND_NEEDS_FLOW", "A throw that does not wait for"
+                    + " the undo (waitForCompletion=\"false\") lets the flow go on; give it an outgoing flow", id));
+        }
         if (target != null) {
             FlowNode named = nodes.get(target);
             if (!(named instanceof Activity) || isForCompensation(named) || !containerOf.get(target)
@@ -649,7 +690,36 @@ public final class ProcessCompiler {
         }
     }
 
-    private static void reachability(StartEvent start, Map<String, FlowNode> nodes, List<SequenceFlow> flows,
+    /**
+     * #499: the undo of a compensation event sub-process is a line of service tasks, each with a handler, from its start
+     * event to its end event: no gateway, no branch, no other node. The tasks run in that order.
+     */
+    private static boolean undoIsALine(FlowNode owner, StartEvent start, Map<String, FlowNode> nodes,
+            Map<String, String> containerOf, List<SequenceFlow> flows) {
+        long inside = nodes.values().stream().filter(n -> containerOf.get(n.id()).equals(owner.id())).count();
+        String at = start.id();
+        int tasks = 0;
+        for (int guard = 0; guard <= inside; guard++) {
+            String from = at;
+            List<SequenceFlow> next = flows.stream().filter(f -> f.sourceRef().equals(from)).toList();
+            if (next.size() != 1) {
+                return false;
+            }
+            FlowNode target = nodes.get(next.get(0).targetRef());
+            if (target instanceof EndEvent) {
+                // The line ends here; every node of the sub-process must be on it: start, the tasks, one end.
+                return tasks >= 1 && inside == tasks + 2L;
+            }
+            if (!(target instanceof ServiceTask task) || task.extensions().first(HandlerRef.class).isEmpty()) {
+                return false;
+            }
+            tasks++;
+            at = target.id();
+        }
+        return false;
+    }
+
+    private static void reachability(FlowNode start, Map<String, FlowNode> nodes, List<SequenceFlow> flows,
             List<DefinitionProblem> problems) {
         Set<String> forward = walk(start.id(), flows, true);
         // A throwCompensation ends its path too: the instance does not go on after it (#67).
@@ -703,6 +773,14 @@ public final class ProcessCompiler {
                 || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition
                 || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition
                 || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition);
+    }
+
+    /** A catch that may create an instance after an instantiating event-based gateway: a message or signal one (#499). */
+    static boolean startsInstance(FlowNode node) {
+        return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
+                || node instanceof IntermediateCatchEvent c && c.eventDefinitions().size() == 1
+                && (c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition
+                || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition);
     }
 
     static boolean throwsCompensation(FlowNode node) {

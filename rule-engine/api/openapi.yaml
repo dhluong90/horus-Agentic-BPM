@@ -3807,6 +3807,17 @@ components:
           minimum: 1
           maximum: 1000
           description: The most decisions to replay, newest first, 1 to `simulation.max-inputs`; default that maximum
+        decisionIds:
+          type: array
+          maxItems: 1000
+          uniqueItems: true
+          items: { type: string, maxLength: 64 }
+          description: |
+            Replays only these decisions of the period, newest first, instead of the whole period. An id that is
+            not a decision of the caller's tenant and this rule set in the period is left out of the answer and
+            not reported, so the request cannot probe other tenants. More ids than `simulation.max-inputs` is
+            `400 QUERY_INVALID`. Masked inputs are handled as for a period: a decision with a masked value is
+            listed with `maskedInputs` and is not replayed.
     HistorySimulationResult:
       type: object
       required: [ruleSet, version, status, from, to, decisionCount, replayedCount, changedCount, notReplayableCount,

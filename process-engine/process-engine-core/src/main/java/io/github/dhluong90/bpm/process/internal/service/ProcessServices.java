@@ -237,6 +237,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
     /** The host's port for the messages a process sends (#491); none until the starter installs one. */
     private volatile io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
+    /** The host's data stores by name (#499); none until the starter installs them. */
+    private volatile Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> dataStoreAdapters = Map.of();
     /** {@code calls.max-depth} (#92). */
     private volatile int maxCallDepth = EngineDefaults.MAX_CALL_DEPTH;
     private volatile int maxLoopInstances = DefaultExecutionKernel.DEFAULT_MAX_INSTANCES;
@@ -1687,6 +1689,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private List<DefinitionProblem> serviceRegistrationProblems(Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
+        // #499: a data store that an association reads or writes needs the host's adapter of that name.
+        io.github.dhluong90.bpm.process.internal.exec.DataStoreUse.storesUsed(process).forEach((store, nodeId) -> {
+            if (!dataStoreAdapters.containsKey(store)) {
+                problems.add(DefinitionProblem.of("DATA_STORE_ADAPTER_NOT_REGISTERED", nodeId + " -> " + safe(store)
+                        + ": no DataStoreAdapter of this name is registered in this host", nodeId));
+            }
+        });
         for (FlowElement element : process.allFlowElements()) {
             if (element instanceof ServiceTask task) {
                 undoRegistrationProblem(task).ifPresent(problems::add);
@@ -1998,13 +2007,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // A refusal throws, so the transaction rolls back with the idempotency claim: nothing is stored (#491).
         return transactions.inTransaction(() -> idempotent(tenant, "message-correlate", idempotencyKey, requestHash,
                 () -> correlateOnce(tenant, caller, messageName, correlationKey, fields),
-                d -> Values.write(java.util.Map.of("outcome", d.outcome().name(), "instanceId", d.instanceId(),
+                d -> Values.write(java.util.Map.of("outcome", d.outcome().name(),
+                        "instanceId", d.instanceId() == null ? "" : d.instanceId(),
                         "nodeId", d.nodeId() == null ? "" : d.nodeId())),
                 json -> {
                     Map<String, Object> m = Values.readMap(json);
                     String node = String.valueOf(m.get("nodeId"));
+                    String instance = String.valueOf(m.get("instanceId"));
                     return new MessageDelivery(MessageDelivery.Outcome.valueOf(String.valueOf(m.get("outcome"))),
-                            String.valueOf(m.get("instanceId")), node.isEmpty() ? null : node);
+                            instance.isEmpty() ? null : instance, node.isEmpty() ? null : node);
                 }));
     }
 
@@ -2030,7 +2041,85 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new MessageNotCorrelatedException("No instance waits for message " + name
                     + " with this key and no process starts on it");
         }
-        return startByMessage(tenant, caller, starting, key, payload);
+        io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent parallel = parallelStartOf(starting);
+        if (parallel != null) {
+            String started = arriveAtParallelStart(tenant, caller, starting, parallel, "MESSAGE", name, key, payload,
+                    RunAs.REQUEST);
+            return new MessageDelivery(started == null ? MessageDelivery.Outcome.WAITING
+                    : MessageDelivery.Outcome.STARTED, started, null);
+        }
+        if (key != null && startsParallelOnGateway(starting)) {
+            // #499: the arrivals of one key are serialised, so a second event that reaches another replica while the
+            // first is creating the instance waits for it and then finds the subscription, not a second instance.
+            store.lockDefinitions(tenant, starting.key());
+            List<ProcessStore.MessageSubscriptionRow> waiting = store.subscriptions(tenant, name, key, 2);
+            if (waiting.size() == 1) {
+                return deliverMessage(tenant, waiting.get(0), name, payload);
+            }
+        }
+        return startByMessage(tenant, caller, starting, key, payload, name);
+    }
+
+    /** @return whether the process starts on an instantiating event-based gateway of the parallel type (#499) */
+    private boolean startsParallelOnGateway(StoredDefinition definition) {
+        return compiled(definition).process().nodes().stream().anyMatch(n ->
+                n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g && g.instantiate()
+                && g.eventGatewayType()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType.PARALLEL);
+    }
+
+    /** @return the start event of the process itself that waits for all of several triggers (PD-149), or null */
+    private io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent parallelStartOf(StoredDefinition definition) {
+        CompiledProcess process = compiled(definition).process();
+        return process.nodes().stream().filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
+                && s.parallelMultiple() && s.eventDefinitions().size() > 1
+                && process.containerOf(s.id()).equals(process.process().id()))
+                .map(n -> (io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent) n).findFirst().orElse(null);
+    }
+
+    /**
+     * An arrival for a parallel multiple process start (PD-149): the message or signal is held, one row for each
+     * definition and correlation key, and the instance starts when every definition has arrived. The definition
+     * versions of the key are locked first, so two arrivals that complete the set at the same moment start one
+     * instance, not two. A message names the group by its correlation key (the business key of the instance); a
+     * signal is a latch with no key and joins the oldest held message. The rows an instance used are consumed.
+     *
+     * @return the id of the instance the arrival started, or null while the start still waits for the others
+     */
+    private String arriveAtParallelStart(String tenant, String caller, StoredDefinition definition,
+            io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent start, String kind, String name, String key,
+            Map<String, Object> payload, RunAs as) {
+        store.lockDefinitions(tenant, definition.key());
+        store.putStartArrival(tenant, definition.key(), kind, name, key == null ? "" : key, Values.write(payload),
+                clock.instant());
+        List<String[]> required = new ArrayList<>();
+        String messageName = null;
+        for (io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition d : start.eventDefinitions()) {
+            if (d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition m) {
+                required.add(new String[] {"MESSAGE", m.messageRef()});
+                messageName = m.messageRef();
+            } else if (d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition sg) {
+                required.add(new String[] {"SIGNAL", sg.signalRef()});
+            }
+        }
+        String group = "MESSAGE".equals(kind) ? (key == null ? "" : key) : messageName == null ? ""
+                : store.oldestStartArrivalKey(tenant, definition.key(), messageName).orElse(null);
+        if (group == null) {
+            return null;
+        }
+        Map<String, Object> merged = new LinkedHashMap<>();
+        for (String[] r : required) {
+            java.util.Optional<String> held = store.startArrival(tenant, definition.key(), r[0], r[1],
+                    "MESSAGE".equals(r[0]) ? group : "");
+            if (held.isEmpty()) {
+                return null;
+            }
+            merged.putAll(Values.readMap(held.get()));
+        }
+        for (String[] r : required) {
+            store.deleteStartArrival(tenant, definition.key(), r[0], r[1], "MESSAGE".equals(r[0]) ? group : "");
+        }
+        return startInstance(tenant, caller, definition, group.isEmpty() ? null : group, merged, null, as).instanceId();
     }
 
     private MessageDelivery deliverMessage(String tenant, ProcessStore.MessageSubscriptionRow subscription,
@@ -2080,7 +2169,43 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return found;
     }
 
+    /**
+     * #499: the catch event or receive task, after an instantiating event-based gateway at the start of the process,
+     * that waits for the message or signal of this name; null when the process does not start on it.
+     */
+    private static String gatewayCatch(CompiledProcess process, boolean signal, String name) {
+        if (name == null) {
+            return null;
+        }
+        for (io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode n : process.nodes()) {
+            if (!(n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g) || !g.instantiate()
+                    || !process.containerOf(g.id()).equals(process.process().id())) {
+                continue;
+            }
+            for (io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow f : process.outgoing(g.id())) {
+                io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode target = process.node(f.targetRef())
+                        .orElse(null);
+                if (target instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask r && !signal
+                        && name.equals(r.messageRef())) {
+                    return target.id();
+                }
+                if (target instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent c
+                        && c.eventDefinitions().stream().anyMatch(d -> signal
+                        ? d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition sd
+                                && name.equals(sd.signalRef())
+                        : d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition md
+                                && name.equals(md.messageRef()))) {
+                    return target.id();
+                }
+            }
+        }
+        return null;
+    }
+
     private static boolean startsOn(CompiledProcess process, String name) {
+        if (gatewayCatch(process, false, name) != null) {
+            return true;
+        }
         // Only the start event of the process itself: one in an event sub-process (#487) waits inside an instance.
         return process.nodes().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
                 && process.containerOf(s.id()).equals(process.process().id())
@@ -2089,7 +2214,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private MessageDelivery startByMessage(String tenant, String caller, StoredDefinition definition, String key,
-            Map<String, Object> payload) {
+            Map<String, Object> payload, String name) {
+        return startInstance(tenant, caller, definition, key, payload, name, RunAs.REQUEST);
+    }
+
+    private MessageDelivery startInstance(String tenant, String caller, StoredDefinition definition, String key,
+            Map<String, Object> payload, String name, RunAs as) {
         if (key != null) {
             InstanceRow existing = store.findInstanceByBusinessKey(tenant, definition.key(), key).orElse(null);
             if (existing != null) {
@@ -2105,7 +2235,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new MessageDelivery(MessageDelivery.Outcome.STARTED, existing.id(), null);
         }
         run(definition, row, InstanceState.created(instanceId, tenant, definition.id(), key),
-                new Command.Start(payload, caller), RunAs.REQUEST);
+                new Command.Start(payload, caller, gatewayCatch(compiled(definition).process(), false, name)), as);
         return new MessageDelivery(MessageDelivery.Outcome.STARTED, instanceId, null);
     }
 
@@ -3197,6 +3327,67 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Installs the host's data store adapters (#499), by the id of the {@code dataStore} each serves. Called once while
+     * the engine is wired. A definition whose association names a store with no adapter is refused at deploy time.
+     *
+     * @param adapters the adapters by name
+     */
+    public void useDataStoreAdapters(Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> adapters) {
+        this.dataStoreAdapters = Map.copyOf(adapters);
+    }
+
+    /**
+     * The kernel's port to the host's data stores (#499). The tenant of every call is the instance's, set by the
+     * kernel; a failure of the adapter becomes an execution error that names the store and the step and carries no
+     * message of the adapter, which may hold a row's content.
+     */
+    private final class HostDataStores implements io.github.dhluong90.bpm.process.internal.exec.DataStorePort {
+        @Override
+        public Object read(Access access) {
+            try {
+                return adapter(access).read(adapterAccess(access));
+            } catch (UnsupportedOperationException e) {
+                throw new ExecutionException("DATA_STORE_READ_UNSUPPORTED", access.nodeId(), "Data store "
+                        + access.store() + " cannot be read");
+            } catch (ExecutionException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw new ExecutionException("DATA_STORE_FAILED", access.nodeId(), "Reading data store "
+                        + access.store() + " failed: " + e.getClass().getSimpleName());
+            }
+        }
+
+        @Override
+        public void write(Access access, Object value) {
+            try {
+                adapter(access).write(adapterAccess(access), value);
+            } catch (UnsupportedOperationException e) {
+                throw new ExecutionException("DATA_STORE_WRITE_UNSUPPORTED", access.nodeId(), "Data store "
+                        + access.store() + " cannot be written");
+            } catch (ExecutionException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw new ExecutionException("DATA_STORE_FAILED", access.nodeId(), "Writing data store "
+                        + access.store() + " failed: " + e.getClass().getSimpleName());
+            }
+        }
+
+        private io.github.dhluong90.bpm.process.spi.DataStoreAdapter adapter(Access access) {
+            io.github.dhluong90.bpm.process.spi.DataStoreAdapter adapter = dataStoreAdapters.get(access.store());
+            if (adapter == null) {
+                throw new ExecutionException("DATA_STORE_ADAPTER_MISSING", access.nodeId(), "No adapter serves data store "
+                        + access.store());
+            }
+            return adapter;
+        }
+
+        private io.github.dhluong90.bpm.process.spi.DataStoreAdapter.DataStoreAccess adapterAccess(Access access) {
+            return new io.github.dhluong90.bpm.process.spi.DataStoreAdapter.DataStoreAccess(access.tenantId(),
+                    access.store(), access.item(), access.instanceId(), access.nodeId(), access.idempotencyKey());
+        }
+    }
+
+    /**
      * Sets the most repetitions one looped activity may have ({@code multi-instance.max}, #496): a collection or a
      * loop maximum over it opens an incident and creates no task. Set before the first instance runs.
      *
@@ -3334,6 +3525,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             if (effective == null || !effective.id().equals(candidate.id())) {
                 continue;
             }
+            io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent parallel = parallelStartOf(effective);
+            if (parallel != null) {
+                // PD-149: the signal is one of several the start waits for; it starts an instance only as the last.
+                String instance = arriveAtParallelStart(tenant, SIGNAL_ACTOR, effective, parallel, "SIGNAL", name, null,
+                        Map.of(), new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
+                if (instance != null) {
+                    started.add(instance);
+                }
+                continue;
+            }
+            if (startsParallelOnGateway(effective) && store.signalWaiterOfDefinition(tenant, effective.key(), name)) {
+                // #499: an instance of this process already awaits the signal; it is theirs, not a second start.
+                continue;
+            }
             if (depth[0] >= maxCallDepth) {
                 throw new StepFailedException("-", "SIGNAL_START_DEPTH_EXCEEDED", "signal starts nest deeper than "
                         + maxCallDepth);
@@ -3345,7 +3550,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             depth[0]++;
             try {
                 run(effective, row, InstanceState.created(instanceId, tenant, effective.id(), null),
-                        new Command.Start(Map.of(), SIGNAL_ACTOR), new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
+                        new Command.Start(Map.of(), SIGNAL_ACTOR, gatewayCatch(compiled(effective).process(), true, name)),
+                        new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
             } finally {
                 depth[0]--;
             }
@@ -3721,6 +3927,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new InvalidStateException("Instance " + instanceId + " is COMPENSATING: a compensation is"
                         + " running, and an undo is never abandoned half way; resolve its incidents first");
             }
+            if (store.tokens(tenant, instanceId).stream().anyMatch(t -> t.status().live() && t.locals().get(
+                    io.github.dhluong90.bpm.process.internal.exec.BackgroundWalks.MARK) != null)) {
+                // PD-149: the same rule as COMPENSATING, for an undo that runs beside the flow.
+                throw new InvalidStateException("Instance " + instanceId + " has a compensation running in the"
+                        + " background, and an undo is never abandoned half way; wait for it or resolve its incidents");
+            }
             if (!"RUNNING".equals(row.status())) {
                 throw new InvalidStateException("Instance " + instanceId + " is " + row.status());
             }
@@ -3818,6 +4030,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private List<ProcessStore.CompensationEntry> walkStack(StoredDefinition definition, String tenant,
             String instanceId, String walkScope) {
+        return walkStack(definition, tenant, instanceId, walkScope, null, false);
+    }
+
+    /**
+     * As above; with {@code explicit} a background walk (PD-149) names its own activity, which no waiting thrower
+     * carries, so the stack is filtered by it instead.
+     */
+    private List<ProcessStore.CompensationEntry> walkStack(StoredDefinition definition, String tenant,
+            String instanceId, String walkScope, String explicitTarget, boolean explicit) {
         List<io.github.dhluong90.bpm.process.internal.exec.Token> tokens = store.tokens(tenant, instanceId);
         java.util.Map<String, io.github.dhluong90.bpm.process.internal.exec.Token> byId = new java.util.HashMap<>();
         tokens.forEach(t -> byId.put(t.id(), t));
@@ -3832,7 +4053,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }
             }
         }
-        String target = tokens.stream().filter(t -> walkScope.equals(t.scopeTokenId())
+        String target = explicit ? explicitTarget : tokens.stream().filter(t -> walkScope.equals(t.scopeTokenId())
                 && t.status() == TokenStatus.WAITING_EVENT).findFirst()
                 .flatMap(t -> compiled(definition).process().node(t.nodeId()))
                 .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event)
@@ -3871,8 +4092,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private void startCompensation(StoredDefinition definition, String tenant, String instanceId,
             Effect.StartCompensation started) {
-        long depth = walkStack(definition, tenant, instanceId, started.scopeTokenId()).stream()
-                .filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).count();
+        long depth = (started.walkTokenId() == null ? walkStack(definition, tenant, instanceId, started.scopeTokenId())
+                : walkStack(definition, tenant, instanceId, started.scopeTokenId(), started.activityId(), true))
+                .stream().filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).count();
         InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
         Instant now = clock.instant();
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -3883,12 +4105,16 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (started.cause() != null) {
             payload.put("cause", started.cause());
         }
+        if (started.walkTokenId() != null) {
+            payload.put("background", true);
+        }
         payload.put("definitionKey", row.definitionKey());
         payload.put("version", row.definitionVersion());
         if (row.businessKey() != null) {
             payload.put("businessKey", row.businessKey());
         }
-        publish(new ProcessEventPublisher.Event(Ids.child(started.scopeTokenId() + "/compensation", 1),
+        publish(new ProcessEventPublisher.Event(Ids.child(started.scopeTokenId() + "/compensation"
+                + (started.walkTokenId() == null ? "" : "/" + started.walkTokenId()), 1),
                 "processes.compensation.started.v1", tenant, now, payload), instanceId);
         LOG.log(System.Logger.Level.WARNING, "process.compensation.started tenant={0} instance={1} scope={2} node={3}"
                 + " cause={4} depth={5}", tenant, instanceId, started.scopeTokenId(), started.nodeId(), started.cause(),
@@ -3902,7 +4128,44 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * incident; with none left the scope is {@code COMPENSATED} and the instance {@code FAILED} (PRE-013).
      */
     private void advanceWalk(StoredDefinition definition, String tenant, String instanceId, String scopeTokenId) {
-        List<ProcessStore.CompensationEntry> stack = walkStack(definition, tenant, instanceId, scopeTokenId);
+        InstanceRow row = store.findInstance(tenant, instanceId).orElse(null);
+        if (row == null) {
+            return;
+        }
+        if (InstanceStatus.COMPENSATING.name().equals(row.status())) {
+            advanceWalk(definition, tenant, instanceId, scopeTokenId, null);
+            return;
+        }
+        if (!"RUNNING".equals(row.status())) {
+            // The instance ended while an undo was in flight (a terminate end, say): what is still PENDING stays on
+            // the stack for the record; nothing new is started.
+            return;
+        }
+        // PD-149: the background walks of this scope, each with its own activity; they never wait for each other.
+        for (io.github.dhluong90.bpm.process.internal.exec.Token walk : store.tokens(tenant, instanceId)) {
+            if (walk.kind() == io.github.dhluong90.bpm.process.internal.exec.TokenKind.FLOW && walk.status().live()
+                    && scopeTokenId.equals(walk.scopeTokenId())
+                    && walk.locals().get(io.github.dhluong90.bpm.process.internal.exec.BackgroundWalks.MARK) != null) {
+                advanceWalk(definition, tenant, instanceId, scopeTokenId, walk);
+            }
+        }
+    }
+
+    /**
+     * One step of one walk: the classic one that the instance waits for ({@code background} null), or a background one
+     * (PD-149), whose last step completes its walk token and leaves the instance {@code RUNNING}.
+     */
+    private void advanceWalk(StoredDefinition definition, String tenant, String instanceId, String scopeTokenId,
+            io.github.dhluong90.bpm.process.internal.exec.Token background) {
+        String activity = null;
+        if (background != null) {
+            String named = String.valueOf(background.locals().get(
+                    io.github.dhluong90.bpm.process.internal.exec.BackgroundWalks.MARK));
+            activity = named.isEmpty() ? null : named;
+        }
+        List<ProcessStore.CompensationEntry> stack = background == null
+                ? walkStack(definition, tenant, instanceId, scopeTokenId)
+                : walkStack(definition, tenant, instanceId, scopeTokenId, activity, true);
         if (stack.stream().anyMatch(e -> !ProcessStore.CompensationEntry.PENDING.equals(e.status())
                 && !ProcessStore.CompensationEntry.DONE.equals(e.status()))) {
             return;
@@ -3910,6 +4173,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         ProcessStore.CompensationEntry next = stack.stream()
                 .filter(e -> ProcessStore.CompensationEntry.PENDING.equals(e.status())).findFirst().orElse(null);
         Instant now = clock.instant();
+        if (next == null && background != null) {
+            InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
+            run(definition, row, stateOf(tenant, row), new Command.EndBackgroundCompensation(background.id()),
+                    new RunAs.EngineWork(tenant, COMPENSATION_ACTOR));
+            LOG.log(System.Logger.Level.WARNING, "process.compensation.done tenant={0} instance={1} scope={2}"
+                    + " background=true", tenant, instanceId, scopeTokenId);
+            return;
+        }
         if (next == null) {
             InstanceRow row = store.findInstance(tenant, instanceId).orElseThrow();
             run(definition, row, stateOf(tenant, row), new Command.EndCompensation(scopeTokenId),
@@ -3996,7 +4267,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Map<String, Object> payload = Values.readMap(job.payloadJson());
         ProcessStore.CompensationEntry entry = entry(tenant, job.instanceId(), payload.get(COMPENSATION_ENTRY))
                 .orElse(null);
-        if (row == null || !InstanceStatus.COMPENSATING.name().equals(row.status()) || entry == null
+        // The entry and the job decide, not the status: a background undo (PD-149) runs under a RUNNING instance, and
+        // one that was in flight when its instance ended is still recorded, never dropped half way.
+        if (row == null || entry == null
                 || !ProcessStore.CompensationEntry.RUNNING.equals(entry.status()) || !job.id().equals(entry.jobId())) {
             jobs.cancelJob(tenant, job.id(), clock.instant());
             return StepCompletion.Outcome.DISCARDED;
@@ -5163,7 +5436,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // After the tokens: an entry references its scope token.
         for (Effect.PushCompensation push : pushes) {
             FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
-            FlowNode viaBoundary = node.extensions().first(CompensateHandlerRef.class).isPresent() ? null
+            FlowNode viaBoundary = push.undoNodeId() != null ? compiled.process().node(push.undoNodeId()).orElse(null)
+                    : node.extensions().first(CompensateHandlerRef.class).isPresent() ? null
                     : compiled.process().compensationActivityOf(node.id()).orElse(null);
             store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, viaBoundary, now));
         }
@@ -5348,7 +5622,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
             Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
-            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances),
+            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances,
+                    new HostDataStores()),
                     AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
                             n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
                             || (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
