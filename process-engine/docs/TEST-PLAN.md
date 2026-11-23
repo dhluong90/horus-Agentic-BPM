@@ -188,6 +188,12 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-273 | `PRE_273_*` in `SignalEventsPostgresIT` | Permission, idempotency key, tenant of the broadcast, signal start | M3 | `TR-IDEM-01` | Done (#492) |
 | PRE-274 | `PRE_274_*` in `SignalAndConditionalEventsTest` | Conditional catch on arrival, on change of variables, conditional start | M3 | `TR-STD-11` | Done (#492) |
 | PRE-275 | `PRE_275_*` in `SignalAndConditionalEventsImportTest` | Import, refusal and export of signal and conditional events | M3 | `TR-STD-05` | Done (#492) |
+| PRE-290 | `PRE_290_*` in `EventBoundariesAndGatewayTest`, `EventBoundariesAndGatewayPostgresIT` | Interrupting message boundary, correlation into it, subscription removed when the task ends first | M3 | `TR-STD-04` | Done (#490) |
+| PRE-291 | `PRE_291_*` in `EventBoundariesAndGatewayTest` | Non-interrupting message and signal boundaries stay armed; interrupting signal boundary | M3 | `TR-STD-04` | Done (#490) |
+| PRE-292 | `PRE_292_*` in `EventBoundariesAndGatewayTest` | Conditional boundary, interrupting and not, fires once on a variable change | M3 | `TR-STD-04` | Done (#490) |
+| PRE-293 | `PRE_293_*` in `EventBoundariesAndGatewayTest`, `EventBoundariesAndGatewayPostgresIT` | Event-based gateway: first wins, the others and their subscriptions and timers are cancelled, instance cancel | M3 | `TR-STD-04` | Done (#495) |
+| PRE-294 | `PRE_294_*` in `EventBoundariesAndGatewayPostgresIT` | Two events at the same moment on two replicas run exactly one branch | M3 | `TR-STD-04` | Done (#495) |
+| PRE-295 | `PRE_295_*` in `EventBoundariesAndGatewayTest`, `eventBoundaries.test.ts` | Export round trip, refusals, cockpit symbols and timeline words | M3 | `TR-STD-05` | Done (#490, #495) |
 | PRE-230 | `PRE_230_*` in `MessageCorrelationPostgresIT` | Testcontainers, two orders and one message | M3 | `TR-STD-04` | Done (#491) |
 | PRE-231 | `PRE_231_*` in `MessageCorrelationPostgresIT` | Testcontainers, two waiters with one key | M3 | `TR-STD-13` | Done (#491) |
 | PRE-232 | `PRE_232_*` in `MessageCorrelationPostgresIT` | Testcontainers, a message with no waiter; no rows left | M3 | `TR-STD-13` | Done (#491) |

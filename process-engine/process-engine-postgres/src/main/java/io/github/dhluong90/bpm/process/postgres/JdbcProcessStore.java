@@ -127,6 +127,10 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                     counter(counters, "loopCounter"), counter(counters, "nrOfInstances"),
                     counter(counters, "nrOfActiveInstances"), counter(counters, "nrOfCompletedInstances")));
         }
+        if ("BOUNDARY_FIRED".equals(type) || "EVENT_GATEWAY_RESOLVED".equals(type)) {
+            return new InstanceActivities.Entry(id, type, node, actor, at)
+                    .withEvent(eventPart(type, Values.readMap(rs.getString("details"))));
+        }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
             InstanceActivities.Entry plain = new InstanceActivities.Entry(id, type, node, actor, at);
             // #494: what a gateway chose and what a waiting join expects, read from the row's details.
@@ -157,6 +161,32 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 scope == null ? ("COMPENSATED".equals(type) ? node : null) : scope.toString(),
                 attempt instanceof Number n ? n.intValue() : null, error == null ? null : error.toString(),
                 handler == null ? null : handler.toString(), cause == null ? null : cause.toString());
+    }
+
+    /** What a boundary event or an event-based gateway tells the timeline (#490, #495): names and codes, never a value. */
+    private static Map<String, Object> eventPart(String type, Map<String, Object> details) {
+        Map<String, Object> event = new java.util.LinkedHashMap<>();
+        if ("EVENT_GATEWAY_RESOLVED".equals(type)) {
+            event.put("gateway", String.valueOf(details.get("gatewayId")));
+            event.put("winner", String.valueOf(details.get("winner")));
+            event.put("cancelled", details.get("cancelled") instanceof List<?> l ? l.stream().map(String::valueOf).toList()
+                    : List.of());
+            return event;
+        }
+        String trigger = String.valueOf(details.get("trigger"));
+        event.put("trigger", trigger);
+        Object name = switch (trigger) {
+            case "MESSAGE" -> details.get("message");
+            case "SIGNAL" -> details.get("signal");
+            case "CONDITION" -> details.get("condition");
+            case "ERROR", "ESCALATION" -> "-".equals(details.get("code")) ? null : details.get("code");
+            default -> null;
+        };
+        if (name != null) {
+            event.put("name", String.valueOf(name));
+        }
+        event.put("interrupting", Boolean.TRUE.equals(details.get("interrupting")));
+        return event;
     }
 
     // ---- definitions --------------------------------------------------------------------------------------

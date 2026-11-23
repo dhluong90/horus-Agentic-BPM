@@ -1011,6 +1011,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Kind:** other
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `dataObject` `do-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` with a compensation definition on line 42 (stage `S2`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` with `instantiate="true"` on line 63 (`S3`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
   - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
@@ -1955,6 +1956,66 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip; the export carries the root `error` and `escalation` elements the definitions refer to.
 - **Example:** `over-limit` -> `<bpmn:error errorCode="REFUND_LIMIT_EXCEEDED"/>` and an `errorRef`.
 - **Test ID:** `PRE_287_the_new_events_export_and_read_back_to_the_same_definition` (`BoundaryAndThrowEventsTest`)
+### PRE-290 An interrupting message boundary cancels the task it sits on when the message of its key arrives; the subscription never outlives the task
+- **Traces to:** `TR-STD-04`, `PRE-230`, #490
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-review` with a user task `review` for role `PAYMENT_OFFICER` and an interrupting boundary `cancelled-by-customer` on the message `payment-cancelled` with `horus:correlationKey="paymentId"`; two instances, with `paymentId` `PAY-9001` and `PAY-9002`.
+- **When:** The message `payment-cancelled` with key `PAY-9001` is correlated; separately, an instance's task completes before any message.
+- **Then:** At start each instance holds one `MESSAGE` subscription of its own key and the boundary's token waits in `WAITING_EVENT`. The correlation finds the boundary's subscription, cancels the task and its work item, deletes the subscription, runs the boundary's flow, and records `BOUNDARY_FIRED` with `trigger` `MESSAGE` and the message name. `PAY-9002` is untouched. A second delivery to the same subscription is refused. When the task completes first, the boundary token is cancelled and its subscription deleted in the same transaction.
+- **Example:** `payment-cancelled` for `PAY-9001` -> `review` `CANCELLED`, `withdrawn` reached, one subscription left.
+- **Test ID:** `PRE_290_an_interrupting_message_boundary_cancels_the_task_when_the_message_of_its_key_arrives`, `PRE_290_the_subscription_of_a_boundary_is_removed_when_the_task_completes_first` (`EventBoundariesAndGatewayTest`), `PRE_290_a_message_correlated_into_a_boundary_cancels_the_task_and_removes_the_subscription` (`EventBoundariesAndGatewayPostgresIT`)
+
+### PRE-291 A non-interrupting message or signal boundary leaves the task open and stays armed; an interrupting signal boundary cancels the task
+- **Traces to:** `TR-STD-04`, `PRE-271`, #490
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The review of `PRE-290` with `cancelActivity="false"` on the message boundary; and the same review with an interrupting boundary on the signal `account-frozen`.
+- **When:** The message arrives twice for the same key; then the task completes. In the second file the signal is delivered.
+- **Then:** Each message runs the boundary's flow once and records `BOUNDARY_FIRED` with `interrupting: false`; the task stays `WAITING_USER`, the subscription is not deleted between them, and it is deleted when the task completes. The signal boundary cancels the task, deletes its subscription and records `trigger` `SIGNAL` with the signal name.
+- **Example:** two `payment-cancelled` messages -> two runs of the flow, task still open.
+- **Test ID:** `PRE_291_a_non_interrupting_message_or_signal_boundary_leaves_the_task_open_and_stays_armed` (`EventBoundariesAndGatewayTest`)
+
+### PRE-292 A conditional boundary fires once when a variable change makes its condition true, under the instance lock
+- **Traces to:** `TR-STD-04`, `PRE-274`, #490
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A review that a boundary on `risk.score >= 80` interrupts, in parallel with a scoring task whose result variable is `risk`; the same file with `cancelActivity="false"`.
+- **When:** The scoring task completes with a score of 60, in another instance with a score of 90, and in the non-interrupting file a later task completes.
+- **Then:** At 60 the condition is false, the review stays open and nothing fails. At 90 the boundary fires in the same transaction as the completion: the review is cancelled with its work item and `BOUNDARY_FIRED` records `trigger` `CONDITION`. The non-interrupting boundary fires once, leaves the review open, and a later change of variables does not fire it again. A condition already true when the step is entered fires on the next change, not on arrival.
+- **Example:** `risk.score` 90 -> review cancelled, `escalated` reached.
+- **Test ID:** `PRE_292_a_conditional_boundary_fires_once_when_a_variable_change_makes_its_condition_true`, `PRE_292_a_non_interrupting_conditional_boundary_fires_once_and_leaves_the_task_open` (`EventBoundariesAndGatewayTest`)
+
+### PRE-293 An event-based gateway runs the first event that arrives and cancels the others with their subscriptions and timers
+- **Traces to:** `TR-STD-04`, `PRE-006`, `PRE-230`, #495
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-wait`: after the gateway `gw`, the message `payment-received` (key `orderId`), a timer of two hours and the signal `account-frozen`, each to its own end event; a second file with a conditional catch and a receive task.
+- **When:** The message arrives first; separately the timer fires first; the instance is cancelled while it waits; and in the second file the condition is true on arrival.
+- **Then:** At the gateway one token waits on each catch, with one subscription for the message, one for the signal and one timer job. When the message arrives, the timer job and the signal subscription are removed and the settled branch runs; a timer job that is still delivered is refused. When the timer fires, the subscriptions go. History records `EVENT_GATEWAY_RESOLVED` with the winner and the cancelled catches. A cancelled instance loses every subscription and job. A condition true on arrival wins before the other catches wait and creates no subscription.
+- **Example:** `payment-received` for `ORD-20481` at 02:30 -> timer cancelled, `settled` reached.
+- **Test ID:** `PRE_293_an_event_based_gateway_runs_the_first_event_and_cancels_the_others_with_their_subscriptions_and_timers`, `PRE_293_cancelling_an_instance_that_waits_at_the_gateway_removes_every_subscription_and_timer`, `PRE_293_a_condition_that_is_true_on_arrival_wins_at_once_and_the_other_catches_never_wait` (`EventBoundariesAndGatewayTest`), `PRE_293_cancelling_an_instance_that_waits_at_the_gateway_removes_every_subscription_and_timer` (`EventBoundariesAndGatewayPostgresIT`)
+
+### PRE-294 Two events that arrive at the same moment on two replicas run exactly one branch
+- **Traces to:** `TR-STD-04`, `TR-ASY-02`, #495
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-wait` with messages `payment-received` and `payment-reversed` and a two-hour timer; two replicas on one database; six rounds of one instance each.
+- **When:** In each round the two messages are correlated at the same moment, one on each replica (a barrier releases both); in a second test the message and the timer poller of the other replica race after the two hours have passed.
+- **Then:** Exactly one delivery succeeds and the other is refused as not correlated; exactly one end token is `COMPLETED`, the one of the winner; one `EVENT_GATEWAY_RESOLVED` entry is written; no subscription and no due job is left.
+- **Example:** `payment-received` and `payment-reversed` for `ORD-70` together -> one of `settled` or `refunded`, never both.
+- **Test ID:** `PRE_294_two_messages_that_arrive_together_on_two_replicas_run_exactly_one_branch`, `PRE_294_a_message_and_the_timer_that_fall_due_together_run_exactly_one_branch` (`EventBoundariesAndGatewayPostgresIT`)
+
+### PRE-295 The new boundaries and the gateway export and read back to the same definition; a malformed one is refused with its reason
+- **Traces to:** `TR-STD-04`, `TR-STD-05`, #490, #495
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The files of `PRE-290` to `PRE-293`; a message boundary without `horus:correlationKey`; a gateway that leads to a task, one whose catch event has a second incoming flow, and one with `instantiate="true"`.
+- **When:** Each is read, exported and read again, or imported.
+- **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip. A message boundary without a key is refused (`CORRELATION_KEY_REQUIRED`); a gateway to a task or to a shared catch event is refused at compile; the instantiating form is refused as unsupported with stage `S3`. The cockpit draws the new boundaries and the gateway as known symbols and the timeline names the entries, read only.
+- **Example:** `instantiate="true"` -> `422 BPMN_UNSUPPORTED_ELEMENT`, stage `S3`.
+- **Test ID:** `PRE_295_the_new_boundaries_and_the_gateway_export_and_read_back_to_the_same_definition`, `PRE_295_a_message_boundary_needs_its_key_and_a_gateway_must_lead_to_catch_events_that_only_it_enters`, `PRE_295_an_instantiating_event_based_gateway_is_refused_with_its_stage` (`EventBoundariesAndGatewayTest`), `PRE_295_the_new_boundaries_and_the_gateway_are_known_symbols_that_say_whether_they_interrupt` (`eventBoundaries.test.ts`)
+
 ### PRE-270 A broadcast wakes every waiter of its own tenant, by job, and never a waiter of another tenant
 - **Traces to:** `TR-TEN-01`, `TR-STD-11`, `TR-STD-14`, #492
 - **Milestone:** M3

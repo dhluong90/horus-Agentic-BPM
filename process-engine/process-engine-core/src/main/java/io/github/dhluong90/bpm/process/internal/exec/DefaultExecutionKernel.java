@@ -1,7 +1,10 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
@@ -149,7 +152,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private static boolean isConditionalWait(FlowNode node) {
         return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
                 && (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
-                        || node instanceof StartEvent)
+                        || node instanceof StartEvent || node instanceof BoundaryEvent)
                 && event.eventDefinitions().size() == 1
                 && event.eventDefinitions().get(0) instanceof
                         io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
@@ -347,7 +350,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private void armBoundaries(FlowNode node, Token token, WorkingContext ctx) {
         for (BoundaryEvent boundary : process.boundariesOf(node.id())) {
             if (boundary.eventDefinitions().size() != 1
-                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition)
+                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition
+                            || boundary.eventDefinitions().get(0) instanceof MessageEventDefinition
+                            || boundary.eventDefinitions().get(0) instanceof SignalEventDefinition
+                            || boundary.eventDefinitions().get(0) instanceof ConditionalEventDefinition)
                     || ctx.hasLiveBoundaryToken(boundary, token.scopeTokenId())) {
                 continue;
             }

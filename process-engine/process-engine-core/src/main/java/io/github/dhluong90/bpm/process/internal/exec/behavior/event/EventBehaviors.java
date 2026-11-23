@@ -15,6 +15,11 @@ public final class EventBehaviors implements BehaviorModule {
     @Override
     public void register(BehaviorRegistry registry) {
         registry.register(new TimerCatchEventBehavior());
+        // #490: message, signal and conditional boundary events; #495: the event-based gateway.
+        registry.register(new BoundaryMessageBehavior());
+        registry.register(new BoundarySignalBehavior());
+        registry.register(new BoundaryConditionalBehavior());
+        registry.register(new EventBasedGatewayBehavior());
         // #489: boundary events on tasks, call activities and sub-processes.
         registry.register(new BoundaryTimerBehavior());
         registry.register(BoundaryCatchBehavior.forError());

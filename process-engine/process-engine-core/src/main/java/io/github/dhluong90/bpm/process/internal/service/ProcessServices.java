@@ -5195,7 +5195,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
                             n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
                             || (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
-                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent)
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent)
                             && ((io.github.dhluong90.bpm.process.internal.model.bpmn.Event) n).eventDefinitions()
                             .stream().anyMatch(
                             io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition.class::isInstance)));

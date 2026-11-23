@@ -353,6 +353,8 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Parallel | As M2 |
 | Inclusive (S1) | Split: every flow whose condition is true, the default when none. Join: fires when no live token of the same scope can still reach it. The compiler stores per join the set of nodes that reach it without passing through it; under the instance lock the check scans the live tokens of the scope (typically under 20). The check runs on every arrival and every token end in the scope, so a token ending elsewhere cannot leave a join waiting (no lost wakeup). Built in #494 as a settle step that runs when the agenda of an apply is empty; two joins that wait for each other fail the command with `JOIN_DEADLOCK` |
 | Event-based (S2) | Subscriptions and timer jobs for every following catch event in one transaction; the first to fire cancels the others under the instance lock; instantiating event-based gateways at process start in S3 |
+| Inclusive (S1) | Split: every flow whose condition is true, the default when none. Join: fires when no live token of the same scope can still reach it. The compiler stores per join the set of nodes that reach it without passing through it; under the instance lock the check scans the live tokens of the scope (typically under 20). The check runs on every arrival and every token end in the scope, so a token ending elsewhere cannot leave a join waiting (no lost wakeup) |
+| Event-based (S2) | As built (#495): one token for every following catch event, each with its subscription or timer job, in one transaction; the first to fire cancels the others in its own transaction under the instance lock, so a second event that arrives at the same moment finds its token cancelled and is refused as stale; instantiating event-based gateways at process start in S3 |
 | Complex (S3) | `activationCondition` over `_activationCount` evaluated under the instance lock; reset semantics as in BPMN 2.0.2 section 13.4.4 |
 
 ### 5.10 Data, timers and other elements
@@ -398,12 +400,17 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | |
 | Signal start, catch, boundary, throw and end | Refused | Import | Execute | Start, intermediate catch, intermediate throw and end execute since 0.3.0 (#492); boundary with the boundary events |
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | Intermediate catch, a process-level start and the start of an event subprocess execute since 0.3.0 (#492, #487); the boundary comes with the boundary events |
+| Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | Message boundary executes since 0.3.0 (#490) |
+| Signal start, catch, boundary, throw and end | Refused | Import | Execute | Start, intermediate catch, intermediate throw and end execute since 0.3.0 (#492); boundary executes since 0.3.0 (#490) |
+| Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | Intermediate catch and a process-level start execute since 0.3.0 (#492); the boundary executes since 0.3.0 (#490); the start of an event subprocess comes with it |
 | Message start, intermediate catch and throw, end; receive and send tasks (#491) | Execute | | | |
 | Message boundary | Refused | Execute | | |
 | Signal start, catch, boundary, throw and end | Refused | Import | Execute | |
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Execute (#488, #487) | | | A compensation boundary on a call activity, sub-process or transaction executes; `waitForCompletion="false"` is not planned |
+| Event-based gateway | Refused | Import | Execute | The exclusive form executes since 0.3.0 (#495); instantiating forms come in S3 |
+| Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
 | Collaboration: pools, lanes, message flows, artifacts | Refused | Import and display | Message flows execute between pools through 5.4 | |
 | Complex gateway, ad-hoc subprocess, multiple and parallel multiple events | Refused | Import | Import | Execute |
 | Message buffer with time to live | | | | Optional, off by default |

@@ -504,6 +504,31 @@ A conditional catch needs no row: its token waits in `WAITING_EVENT`, and the ke
 
 DDL: `V46__pre_signal` (`pre_signal`, `pre_event_subscription`, job kind `SIGNAL_DELIVERY`).
 
+### 4.3b Message, signal and conditional boundaries and the event-based gateway (#490, #495, `PRE-290` to `PRE-295`)
+
+A boundary of one of these kinds is armed the way a timer boundary is (4.3a, #489): when the kernel enters the host activity it gives the boundary its own flow token in the host's scope, and the boundary's behaviour parks it in `WAITING_EVENT`. A message boundary writes the `MESSAGE` subscription of #491 with the correlation key read from the variable named by `horus:correlationKey`; a signal boundary writes the `SIGNAL` row of #492; a conditional boundary writes nothing and is asked again by the settle loop that runs after every command that changed the variables. No migration: the activity instance id of the boundary token is the subscription id, as for a catch event.
+
+A firing goes through one function, `ExecutionContext.fireBoundary(token, boundary, trigger, details, keepWaiting)`. An interrupting boundary cancels the host (its tree, work item, job or child) and the host's other boundaries, deletes its own subscription, and its token leaves by the boundary's flow. A non-interrupting message or signal boundary keeps its token armed on the same subscription and runs its flow on a new token, so the next message fires it again until the host ends; a non-interrupting conditional boundary fires once. When the host ends on its own, `takeOutgoing` cancels the boundary tokens and deletes their subscriptions in the same transaction, so nothing outlives the step. A condition that is already true when the host is entered fires on the next change of a variable, never on arrival.
+
+An event-based gateway enters one flow token on every following catch event or receive task, so each alternative has its subscription or timer job in the transaction that reached the gateway; the gateway's own token ends. Whichever alternative fires first calls `takeOutgoing`, which finds the gateway the catch event belongs to (`CompiledProcess.eventGatewayOf`), cancels the sibling tokens with their subscriptions and jobs, and records `EVENT_GATEWAY_RESOLVED` with the winner and the cancelled catches. The shell runs every command of an instance under its `pre_instance` row lock, so two events that arrive together on two replicas apply one after the other: the second finds its token `CANCELLED` and is refused as stale (a message as `MESSAGE_NOT_CORRELATED`, a timer is marked `DONE` without firing). A condition that is true on arrival wins before the other catches are entered. The activation checks the shape: two or more outgoing flows without conditions, each to a message, signal, timer or conditional catch event or a receive task that no other flow enters. The instantiating form and the parallel type are `S3` and are refused at import.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant P1 as Replica 1 (message)
+    participant DB as pre_instance, pre_message_subscription, pre_timer
+    participant P2 as Replica 2 (timer poller)
+    P1->>DB: find the subscription of payment-received and ORD-20481
+    P2->>DB: claim the two-hour timer job, lease 60 s
+    P1->>DB: lock the instance row
+    P2->>DB: lock the instance row (waits)
+    P1->>DB: message wins: cancel the timer token, job and subscriptions, run the settled branch, commit
+    DB-->>P2: lock granted, the timer token is CANCELLED
+    P2->>DB: mark the job DONE without firing, commit
+```
+
+The cockpit reads two additions of `GET /instances/{id}/activities`: the `event` part of a `BOUNDARY_FIRED` entry (trigger, message or signal name or condition text, interrupting) and of an `EVENT_GATEWAY_RESOLVED` entry (gateway, winner, cancelled). Names and codes only, never a variable value.
+
 ### 4.4 Jobs and timers across replicas (`PRE-006`, `TR-PERF-05`, `TR-ASY-02`)
 
 Every replica runs one poller thread. A poll is two kinds of short transaction, and no network call happens in either:
@@ -602,12 +627,13 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | `exclusiveGateway` with `conditionExpression` and `default` | `exclusiveGateway` | Conditions in our expression language, `language="urn:horus-bpm:expr:v1"` |
 | `parallelGateway` | `parallelGateway` | |
 | `inclusiveGateway` with `conditionExpression` and `default` (#494) | `inclusiveGateway` | Split: every flow with no condition or a true one, else the default, else `NO_PATH`. Join (several incoming flows): fires when no live token of the scope can still reach it; the compiler stores per join the nodes that reach it without passing through it (a boundary event adds its activity); a scope token stands for the block it sits on; a ring of joins that wait for each other fails with `JOIN_DEADLOCK`. No new table or migration |
+| `eventBasedGateway` (exclusive) | `eventBasedGateway` (`next` lists the catches) | `instantiate="true"` and `eventGatewayType="Parallel"` are refused (`S3`, #495) |
 | `intermediateCatchEvent` with `timerEventDefinition` (`timeDuration` or `timeDate`) | `timer` | |
 | `callActivity` | `callProcess` | `calledElement` is the definition key |
 | `transaction` subprocess | `saga` | |
 | `subProcess` (embedded, not `triggeredByEvent`) | `subProcess` | Its own steps are nested under `steps`, like a `saga` |
 | `intermediateThrowEvent` with `compensateEventDefinition` | `throwCompensation` | |
-| `boundaryEvent` with a timer, error or escalation definition, on a task, call activity or sub-process; `cancelActivity="false"` for non-interrupting | `boundaryEvent` (`attachedTo`, `trigger`, `interrupting`) | The root `error` and `escalation` elements give the codes. An error boundary always interrupts; no `errorRef` catches every code (#489) |
+| `boundaryEvent` with a timer, error, escalation, message, signal or conditional definition, on a task, call activity or sub-process; `cancelActivity="false"` for non-interrupting | `boundaryEvent` (`attachedTo`, `trigger`, `interrupting`) | The root `error` and `escalation` elements give the codes. An error boundary always interrupts; no `errorRef` catches every code (#489) |
 | `endEvent` with an error, escalation or terminate definition; `intermediateThrowEvent` with an escalation definition | `errorEnd`, `escalationEnd`, `terminateEnd`, `escalationThrow` | An intermediate error throw is not BPMN and is refused (#493) |
 | `intermediateThrowEvent` and `intermediateCatchEvent` with a `linkEventDefinition` | `linkThrow`, `linkCatch` (`link`) | A throw needs a catch of its name in its scope |
 | `sequenceFlow` | `next`, `branches[]` | |
@@ -615,6 +641,8 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | Anything else (message and signal events, inclusive and event-based gateways, lanes with semantics, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
 | Anything else (signal, error and boundary events, inclusive and event-based gateways, lanes with semantics, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
 | Anything else (message, signal, error and boundary events, event-based gateways, lanes with semantics, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
+| Anything else (inclusive gateways, lanes with semantics, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
+| Anything else (inclusive gateways, lanes with semantics, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
 | A CMMN document | rejected | `422 CMMN_UNSUPPORTED` (ADR-0017, `TR-STD-26`) |
 
 The reader uses `XMLInputFactory` with `SUPPORT_DTD=false` and `IS_SUPPORTING_EXTERNAL_ENTITIES=false`; any `DOCTYPE` is `422 BPMN_UNSAFE_XML`. Limits: 1 MB, nesting depth 32, 5,000 elements. Export writes the same subset with the `horus` namespace and BPMNDI from the latest layout (or from an automatic layout computed by the cockpit and sent with the request). Until layout revisions are stored (PRE-026), `SubsetBpmnWriter` generates a left-to-right layout: columns by shortest distance from the start event, rows in document order, back edges routed below the diagram. The export reads the stored source again and checks the recorded `definition_hash` before writing, the same integrity check as execution. Round trip: export then import of a definition gives the same `definition_hash`; CI checks this for every example definition and validates exported XML against the BPMN 2.0 XSD.

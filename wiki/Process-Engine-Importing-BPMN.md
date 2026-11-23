@@ -80,11 +80,12 @@ The root element must declare the namespaces, and the process must be executable
 | `scriptTask` | `horus:resultVariable`; a `<bpmn:script>` child with one expression in `urn:horus-bpm:expr:v1` | `scriptFormat` set to `urn:horus-bpm:expr:v1` | `<bpmn:script>amount * 2</bpmn:script>` |
 | `callActivity` (a `callProcess` step, 0.3.0) | `calledElement`, the key of the definition to call, in your tenant | `horus:calledVersion` to pin a version, `horus:input` and `horus:output` elements, `horus:compensate`, `horus:onFailure="compensate"` | `calledElement="kyc-check"` |
 | `subProcess` (embedded, since 0.3.0) | a none `startEvent`, steps and at least one `endEvent` inside it | `name`. It reads and writes the process variables like the rest of the process; no flow crosses its border | `<bpmn:subProcess id="hand-over">` |
-| `boundaryEvent` (since 0.3.0) | `attachedToRef`, the id of a task, call activity or sub-process in the same scope; one `timerEventDefinition` (`timeDuration` or `timeDate`), `errorEventDefinition` or `escalationEventDefinition`; at least one outgoing flow | `cancelActivity="false"` for a non-interrupting one (timer and escalation only); `errorRef` or `escalationRef` naming a root `error` or `escalation` | `<bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="false">` |
+| `boundaryEvent` (since 0.3.0) | `attachedToRef`, the id of a task, call activity or sub-process in the same scope; one `timerEventDefinition` (`timeDuration` or `timeDate`), `errorEventDefinition`, `escalationEventDefinition`, `messageEventDefinition`, `signalEventDefinition` or `conditionalEventDefinition`; at least one outgoing flow | `cancelActivity="false"` for a non-interrupting one (not for an error boundary); `errorRef`, `escalationRef`, `messageRef` or `signalRef` naming a root element; `horus:correlationKey` on a message boundary | `<bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="false">` |
 | `endEvent` with an `errorEventDefinition`, `escalationEventDefinition` or `terminateEventDefinition` (since 0.3.0) | for an error: `errorRef` to a root `error` with an `errorCode` | `escalationRef` on an escalation end | `<bpmn:endEvent id="refused"><bpmn:errorEventDefinition errorRef="Err_limit"/></bpmn:endEvent>` |
 | `intermediateThrowEvent` with an `escalationEventDefinition`, or a `linkEventDefinition`; `intermediateCatchEvent` with a `linkEventDefinition` (since 0.3.0) | `name` on each link definition; a throw needs a catch of the same name in the same scope | `escalationRef` | `<bpmn:linkEventDefinition name="notify"/>` |
 | `startEvent` with a `signalEventDefinition` (since 0.3.0) | `signalRef`, the id of a document-level `signal` element | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `startEvent` with a `conditionalEventDefinition` (since 0.3.0) | a `condition` in `urn:horus-bpm:expr:v1` | `name` | `<bpmn:condition>amount >= 1000000</bpmn:condition>` |
+| `eventBasedGateway` (since 0.3.0) | two or more outgoing flows, each to a message, signal, timer or conditional `intermediateCatchEvent` or a `receiveTask` that no other flow enters | none; `instantiate="true"` and `eventGatewayType="Parallel"` are refused (`S3`) | `<bpmn:eventBasedGateway id="wait-payment"/>` |
 | `intermediateCatchEvent` with a signal or conditional definition (since 0.3.0) | as above | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `intermediateThrowEvent` and `endEvent` with a signal definition (since 0.3.0) | `signalRef` | `name` | `<bpmn:endEvent id="end"><bpmn:signalEventDefinition signalRef="Signal_done"/></bpmn:endEvent>` |
 | loop or multi-instance marker (since 0.3.0), on a task, a `callActivity` or an embedded `subProcess` | `standardLoopCharacteristics` with `loopMaximum` and an optional `loopCondition`; or `multiInstanceLoopCharacteristics` with `horus:collection` and `horus:elementVariable`, or a `loopCardinality` | `isSequential`, `horus:outputCollection`, `horus:outputElement`, `completionCondition` | `<bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"/>` |
@@ -192,7 +193,7 @@ An escalation goes up the same way. An escalation end or throw event that nothin
   ...
 ```
 
-The worked example `examples/rule-and-process/src/main/resources/processes/card-dispute.bpmn` has a non-interrupting timer boundary, an error boundary and a link pair. An error cannot be thrown by an intermediate event (it is not BPMN); use an error end event. A boundary on a step with several boundaries is drawn side by side on its lower edge in the cockpit; the diagram and the timeline show them and never edit them.
+The worked example `examples/rule-and-process/src/main/resources/processes/card-dispute.bpmn` has a non-interrupting timer boundary, an error boundary and a link pair. [`payment-review.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/payment-review.bpmn) has a message boundary, a signal boundary, a conditional boundary and an event-based gateway. An error cannot be thrown by an intermediate event (it is not BPMN); use an error end event. A boundary on a step with several boundaries is drawn side by side on its lower edge in the cockpit; the diagram and the timeline show them and never edit them.
 
 ### Transactions, cancel and compensation (0.3.0)
 
@@ -220,6 +221,18 @@ The cockpit draws the transaction, both boundary events, the compensation activi
 ### Terminate and link events (0.3.0)
 
 A `terminateEventDefinition` on an end event cancels every other token of its scope, with their tasks, timers and called children: at the top level the instance completes, inside a sub-process only the sub-process ends and the parent goes on. A link throw jumps to the link catch of the same name in the same scope with no sequence flow, so several paths can end at one step. A throw with no catch of its name is refused at import as `LINK_CATCH_MISSING` with the element id; a name used by two catches in one scope is `LINK_CATCH_DUPLICATE`.
+
+### Message, signal and conditional boundaries, and the event-based gateway (0.3.0)
+
+A boundary event can wait for a message, a signal or a condition while its step runs, and interrupt it (the default) or run beside it (`cancelActivity="false"`).
+
+- **Message.** The boundary needs `horus:correlationKey`, the variable whose value the message must carry, read when the step is entered; `horus:output` maps payload fields as it does on a catch event. `POST /messages:correlate` with the name and key delivers into the boundary like into any waiting step. A non-interrupting boundary stays armed and runs its flow once for each message until the step ends.
+- **Signal.** One subscription row, woken by a broadcast through a job. A non-interrupting boundary stays armed for the next broadcast.
+- **Condition.** The engine asks again whenever the instance's variables change, in that transaction under the instance lock, and the boundary fires once. A condition that is already true when the step is entered fires on the next change of a variable, not on arrival.
+- **Cleanup.** When the step ends on its own, the subscriptions of its boundaries are deleted in the same transaction. When the step is cancelled, the same applies.
+- **Event-based gateway.** The token waits on every catch event that follows: one subscription or timer for each, written in one transaction. The first event that arrives runs its branch and the others are cancelled in the same transaction under the instance lock, so when two events arrive together on two replicas exactly one branch runs and the other delivery is refused as stale (`409`, or `MESSAGE_NOT_CORRELATED` for a message). A condition that is true on arrival wins at once. An instance cancelled while it waits loses every subscription and timer. The instantiating form and the parallel type are `S3`.
+
+The cockpit draws the symbols with their markers and the timeline names the message, signal or condition that fired and, at a gateway, the winner and the events it stopped; it never edits them.
 
 ### Signals and conditions (0.3.0)
 
@@ -305,14 +318,14 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `S0` | An element of the current stage that this release has not finished: an `intermediateThrowEvent` with no event definition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: data objects and a timer cycle are `S1`; `eventBasedGateway` is `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: data objects and a timer cycle are `S1`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused:
 
 | Kind | Elements |
 |---|---|
-| Gateways | `eventBasedGateway`, `complexGateway` |
-| Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event, and an event with several definitions |
+| Gateways | an `eventBasedGateway` with `instantiate="true"`, `complexGateway` |
+| Events | a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event, and an event with several definitions |
 | Activities | `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |

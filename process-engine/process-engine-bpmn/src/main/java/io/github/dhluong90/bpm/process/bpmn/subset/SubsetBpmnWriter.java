@@ -344,6 +344,7 @@ public final class SubsetBpmnWriter {
             }
             case Transaction t -> tag = "bpmn:transaction";
             case ParallelGateway g -> tag = "bpmn:parallelGateway";
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> tag = "bpmn:eventBasedGateway";
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";
                 attributes.append(optional("default", g.defaultFlow()));
@@ -692,6 +693,7 @@ public final class SubsetBpmnWriter {
             case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
             case InclusiveGateway g -> new int[] {50, 50};
+            case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };
     }

@@ -425,6 +425,8 @@ function TriggerDetail({ node }: { node: DiagramNode | undefined }) {
       {' · '}{t(node.interrupting === false ? 'instance.timeline.beside' : 'instance.timeline.interrupted')}
     </span>
   );
+}
+
 /** Which branches a gateway took and why a join waits, beside its timeline row (#494). */
 function RoutingNote({ entry, graph }: { entry: InstanceActivities['entries'][number]; graph: DiagramGraph }) {
   const { t } = useI18n();
@@ -433,6 +435,34 @@ function RoutingNote({ entry, graph }: { entry: InstanceActivities['entries'][nu
   const steps = routing.steps.join(', ');
   const key = routing.kind === 'waiting' ? 'instance.timeline.waitingFor' : routing.kind === 'tookDefault' ? 'instance.timeline.tookDefault' : 'instance.timeline.took';
   return <span className="muted"> · {t(key, { steps })}</span>;
+}
+
+const FIRED_TRIGGERS = ['timer', 'message', 'signal', 'condition', 'error', 'escalation'] as const;
+
+/**
+ * A boundary event that fired names its trigger (the message, the signal or the condition) and whether it stopped the
+ * step; an event-based gateway names the catch that came first and the ones it stopped (#490, #495). Names come from the
+ * diagram, never the ids the engine sent.
+ */
+function EventDetail({ event, stepName }: { event: NonNullable<ActivityEntry['event']>; stepName: (id: string) => string }) {
+  const { t } = useI18n();
+  if (event.winner !== undefined) {
+    const others = (event.cancelled ?? []).map(stepName).join(', ');
+    return (
+      <span className="muted">
+        {' · '}{t('instance.timeline.gateway.won', { winner: stepName(event.winner) })}
+        {others !== '' ? <>{' · '}{t('instance.timeline.gateway.stopped', { others })}</> : null}
+      </span>
+    );
+  }
+  const trigger = event.trigger?.toLowerCase();
+  const known = FIRED_TRIGGERS.find((item) => item === trigger);
+  return (
+    <span className="muted">
+      {known !== undefined ? <>{' · '}{t(`instance.timeline.fired.${known}` as MessageKey, { name: event.name ?? '' })}</> : null}
+      {event.interrupting !== undefined ? <>{' · '}{t(event.interrupting ? 'instance.timeline.fired.interrupting' : 'instance.timeline.fired.beside')}</> : null}
+    </span>
+  );
 }
 
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
@@ -486,6 +516,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                     {entry.type === 'EVENT_SUBPROCESS_STARTED' ? <TriggerDetail node={graph.nodes.find((node) => node.id === entry.nodeId)} /> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
                     <RoutingNote entry={entry} graph={graph} />
+                    {entry.event !== undefined ? <EventDetail event={entry.event} stepName={stepName} /> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

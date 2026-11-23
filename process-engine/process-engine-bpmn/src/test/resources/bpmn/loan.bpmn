@@ -39,7 +39,7 @@
 
 
     <bpmn:userTask id="review" horus:resultVariable="decision"/>
-    <bpmn:boundaryEvent id="be-timeout" attachedToRef="review"><bpmn:messageEventDefinition/></bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="be-timeout" attachedToRef="review"><bpmn:compensateEventDefinition/></bpmn:boundaryEvent>
 
 
 
@@ -60,7 +60,7 @@
 
 
 
-    <bpmn:eventBasedGateway id="notify"/>
+    <bpmn:eventBasedGateway id="notify" instantiate="true"/>
 
 
 

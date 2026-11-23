@@ -178,6 +178,15 @@ public final class CanonicalProcessWriter {
                             }
                             case io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition c ->
                                     step.put("trigger", "cancel");
+                            case MessageEventDefinition m -> step.put("trigger", "message");
+                            case SignalEventDefinition sg -> {
+                                step.put("trigger", "signal");
+                                step.put("signal", sg.signalRef());
+                            }
+                            case ConditionalEventDefinition c -> {
+                                step.put("trigger", "condition");
+                                step.put("condition", normal(c.condition().language(), c.condition().text().strip()));
+                            }
                             default -> step.put("trigger", "other");
                         }
                     }
@@ -357,6 +366,12 @@ public final class CanonicalProcessWriter {
                     step.put("type", "signalThrow");
                     step.put("signal", signal.signalRef());
                 }
+                case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> {
+                    // #495: the catch events it waits on, in document order.
+                    step.put("type", "eventBasedGateway");
+                    ArrayNode next = step.putArray("next");
+                    out.forEach(f -> next.add(f.targetRef()));
+                }
                 case ParallelGateway g -> {
                     step.put("type", "parallelGateway");
                     // A fork lists every branch in document order; a single next is written below.
@@ -433,7 +448,8 @@ public final class CanonicalProcessWriter {
                     && activity.activity().loopCharacteristics() != null) {
                 writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
             }
-            if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway) && !ends && out.size() == 1) {
+            if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway)
+                    && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }

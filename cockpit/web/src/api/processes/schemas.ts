@@ -301,6 +301,15 @@ export const activityEntry = z
     reason: z.string().optional(),
     /** An inclusive join that waits (#494): the steps a token can still arrive from. */
     waitingFor: z.array(z.string()).optional(),
+    /** `BOUNDARY_FIRED` and `EVENT_GATEWAY_RESOLVED` entries only (#490, #495): what fired, or which catch won and which were cancelled. */
+    event: z.object({
+      trigger: z.string().optional(),
+      name: z.string().optional(),
+      interrupting: z.boolean().optional(),
+      gateway: z.string().optional(),
+      winner: z.string().optional(),
+      cancelled: z.array(z.string()).optional(),
+    }).loose().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;
