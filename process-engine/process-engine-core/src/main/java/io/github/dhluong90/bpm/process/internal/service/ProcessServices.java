@@ -3737,6 +3737,38 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
 
+    @Override
+    public ProcessInstance startAdHocActivity(String instanceId, long expectedLockVersion, String scopeTokenId,
+            String activityId, String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWith(PERMISSION_TASK_MANAGE);
+        if (idempotencyKey == null) {
+            throw new PreconditionRequiredException("Starting an activity needs an Idempotency-Key");
+        }
+        if (scopeTokenId == null || scopeTokenId.isBlank() || activityId == null || activityId.isBlank()) {
+            throw new InputInvalidException("scopeTokenId and activityId are required");
+        }
+        String requestHash = Hashes.sha256Parts("start-ad-hoc", caller, instanceId, scopeTokenId, activityId,
+                String.valueOf(expectedLockVersion));
+        return transactions.inTransaction(() -> idempotent(tenant, "start-ad-hoc", idempotencyKey, requestHash, () -> {
+            InstanceRow row = store.lockInstance(tenant, instanceId)
+                    .orElseThrow(() -> new InstanceNotFoundException("No instance " + instanceId));
+            if (row.lockVersion() != expectedLockVersion) {
+                throw new VersionConflictException("Instance " + instanceId + " is at lock version " + row.lockVersion());
+            }
+            if (!"RUNNING".equals(row.status())) {
+                throw new InvalidStateException("Instance " + instanceId + " is " + row.status());
+            }
+            StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+            InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
+                    InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
+                    participants(tenant, row), row.sequence());
+            // A refusal (ACTIVITY_NOT_ENABLED, ACTIVITY_NOT_FOUND) reaches the caller as 422 STEP_FAILED with its code.
+            run(definition, row, state, new Command.StartAdHocActivity(scopeTokenId, activityId, caller), RunAs.REQUEST);
+            return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
+        }, Views::instanceToJson, Views::instanceFromJson));
+    }
+
     // ---- saga compensation (#67, ADR-0007, DESIGN section 4.2) ------------------------------------------------
 
     /** Payload key of an undo job: the job the forward step ran under. */

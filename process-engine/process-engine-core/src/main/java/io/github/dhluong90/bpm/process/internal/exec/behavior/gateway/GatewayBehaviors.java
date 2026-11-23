@@ -13,5 +13,6 @@ public final class GatewayBehaviors implements BehaviorModule {
         registry.register(new InclusiveGatewayBehavior())
                 .compileStep(new InclusiveJoinCompileStep())
                 .settleStep(new InclusiveJoinSettleStep());
+        registry.register(new ComplexGatewayBehavior()).compileStep(new ComplexGatewayBehavior.ArityStep());
     }
 }

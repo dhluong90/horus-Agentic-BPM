@@ -11,8 +11,8 @@ import java.util.Optional;
 /**
  * When a timer of this release falls due: {@code timeDuration} as an ISO 8601 duration in days, hours, minutes and
  * seconds ({@code PT10M}, {@code P3D}), counted from the moment the token arrives, or {@code timeDate} as an ISO 8601
- * date-time with an offset ({@code 2027-04-01T00:00:00+07:00}). Calendar durations (months, years), cycles,
- * expressions and business calendars come with the full event set. Pure; no I/O.
+ * date-time with an offset ({@code 2027-04-01T00:00:00+07:00}), or on an event sub-process start {@code timeCycle} as a
+ * repeating interval ({@code R3/PT10M}). Calendar durations (months, years), expressions and business calendars come with the full event set. Pure; no I/O.
  */
 public final class TimerSchedule {
 
@@ -27,13 +27,15 @@ public final class TimerSchedule {
      * @return why the timer cannot run in this release, or empty when it can
      */
     public static Optional<String> problem(TimerEventDefinition timer) {
-        if (timer.timeCycle() != null) {
-            return Optional.of("timeCycle is not supported yet; use timeDuration or timeDate");
-        }
         boolean hasDuration = text(timer.timeDuration()) != null;
         boolean hasDate = text(timer.timeDate()) != null;
-        if (hasDuration == hasDate) {
-            return Optional.of("A timer needs exactly one of timeDuration and timeDate");
+        boolean hasCycle = timer.timeCycle() != null;
+        if ((hasDuration ? 1 : 0) + (hasDate ? 1 : 0) + (hasCycle ? 1 : 0) != 1) {
+            return Optional.of("A timer needs exactly one of timeDuration, timeDate and timeCycle");
+        }
+        if (hasCycle) {
+            return cycle(timer).isPresent() ? Optional.empty() : Optional.of("timeCycle must be an ISO 8601 repeating"
+                    + " interval in days, hours, minutes or seconds, for example R3/PT10M or R/PT1H, at least PT1S");
         }
         try {
             if (hasDuration) {
@@ -62,6 +64,9 @@ public final class TimerSchedule {
         problem(timer).ifPresent(p -> {
             throw new IllegalArgumentException(p);
         });
+        if (timer.timeCycle() != null) {
+            return arrivedAt.plus(cycle(timer).orElseThrow().interval());
+        }
         String duration = text(timer.timeDuration());
         return duration != null ? arrivedAt.plus(Duration.parse(duration))
                 : OffsetDateTime.parse(text(timer.timeDate())).toInstant();
@@ -81,6 +86,42 @@ public final class TimerSchedule {
      */
     public static String date(TimerEventDefinition timer) {
         return text(timer.timeDate());
+    }
+
+    /**
+     * A repeating interval: {@code R3/PT10M} fires three times, {@code R/PT1H} without end, each one interval after the
+     * one before (the first one interval after the timer is armed).
+     *
+     * @param repetitions how many times it fires, or {@code -1} for without end
+     * @param interval the time between two firings
+     */
+    public record Cycle(long repetitions, Duration interval) {
+    }
+
+    /**
+     * @param timer the timer
+     * @return its repeating interval, or empty when it has no {@code timeCycle} or the text is not one this release runs
+     */
+    public static Optional<Cycle> cycle(TimerEventDefinition timer) {
+        String text = text(timer.timeCycle());
+        if (text == null) {
+            return Optional.empty();
+        }
+        int slash = text.indexOf('/');
+        if (slash < 1 || !text.startsWith("R")) {
+            return Optional.empty();
+        }
+        try {
+            String count = text.substring(1, slash);
+            long repetitions = count.isEmpty() ? -1 : Long.parseLong(count);
+            Duration interval = Duration.parse(text.substring(slash + 1));
+            if (repetitions == 0 || repetitions < -1 || interval.compareTo(MIN_DURATION) < 0) {
+                return Optional.empty();
+            }
+            return Optional.of(new Cycle(repetitions, interval));
+        } catch (DateTimeException | NumberFormatException e) {
+            return Optional.empty();
+        }
     }
 
     private static String text(Expression e) {

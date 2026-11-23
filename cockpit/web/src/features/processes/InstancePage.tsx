@@ -13,7 +13,8 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { Tabs } from '../rules/components/Tabs';
 import { formatDateTime } from '../rules/model/dates';
 import { useProcessesSession } from './api/processesContext';
-import { useDefinitionGraph, useDefinitionVersion, useInstance, useInstanceActivities } from './api/useProcesses';
+import { useDefinitionGraph, useDefinitionVersion, useInstance, useInstanceActivities, useStartAdHocActivity } from './api/useProcesses';
+import { adHocScope } from './model/adHoc';
 import type { DiagramOverlay, StepBadge } from './diagram/DefinitionDiagram';
 import { InstanceStatusPill } from './InstanceStatusPill';
 import { ancestorsOf, flowOrder, type DiagramGraph, type DiagramNode } from './model/bpmnGraph';
@@ -221,7 +222,7 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
         {node === undefined ? (
           <p className="inspector__hint">{t('instance.pick')}</p>
         ) : (
-          <StepDetails instance={instance} node={node} mark={marks.get(node.id)} activities={activities} load={load} />
+          <StepDetails instance={instance} graph={graph} node={node} mark={marks.get(node.id)} activities={activities} load={load} />
         )}
       </aside>
     </div>
@@ -268,8 +269,9 @@ const peopleOf = (actors: readonly (string | null | undefined)[]): string[] => [
   return who.engine ? [] : [who.login];
 }))];
 
-function StepDetails({ instance, node, mark, activities, load }: {
+function StepDetails({ instance, graph, node, mark, activities, load }: {
   instance: ProcessInstance;
+  graph: DiagramGraph;
   node: DiagramNode;
   mark: NodeMark | undefined;
   activities: InstanceActivities | undefined;
@@ -319,6 +321,7 @@ function StepDetails({ instance, node, mark, activities, load }: {
           </dl>
         )}
       </div>
+      {node.type === 'adHocSubProcess' ? <AdHocActions instance={instance} graph={graph} node={node} /> : null}
       {activity?.incident || task !== undefined || engineNode !== undefined ? (
         <div className="inspector__col inspector__col--end">
           {activity?.incident ? <IncidentBox code={activity.incident.code} openedAt={activity.incident.openedAt} replica={engineNode} /> : null}
@@ -326,6 +329,34 @@ function StepDetails({ instance, node, mark, activities, load }: {
           {!activity?.incident && engineNode !== undefined ? <EngineNode replica={engineNode} /> : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * An open ad-hoc sub-process (#500): the activities the operator may start now, each one button. The action needs
+ * processes:task:manage; without it the buttons are disabled and say why. The engine checks again on every start.
+ */
+function AdHocActions({ instance, graph, node }: { instance: ProcessInstance; graph: DiagramGraph; node: DiagramNode }) {
+  const { t } = useI18n();
+  const { can } = useProcessesSession();
+  const reasonId = useId();
+  const start = useStartAdHocActivity(instance);
+  const scope = adHocScope(graph, instance, node.id);
+  if (scope === undefined) return null;
+  const allowed = can('processes:task:manage');
+  return (
+    <div className="inspector__col inspector__col--end" role="group" aria-label={t('instance.adHoc.title')}>
+      <p className="inspector__type">{t('instance.adHoc.title')}</p>
+      {scope.enabled.length === 0 ? <p className="muted inspector__hint">{t('instance.adHoc.none')}</p> : scope.enabled.map((activity) => (
+        <button key={activity.id} type="button" className="btn btn--primary inspector__action" disabled={start.isPending}
+          aria-disabled={!allowed} aria-describedby={allowed ? undefined : reasonId}
+          onClick={() => { if (allowed) start.mutate({ scopeTokenId: scope.scopeTokenId, activityId: activity.id }); }}>
+          {t('instance.adHoc.start', { name: activity.name ?? activity.id })}
+        </button>
+      ))}
+      {!allowed ? <p id={reasonId} className="inspector__reason"><span aria-hidden="true">ⓘ</span> {t('instance.adHoc.blocked')}</p> : null}
+      {start.isError ? <p role="alert" className="inspector__reason">{t('instance.adHoc.failed')}</p> : null}
     </div>
   );
 }

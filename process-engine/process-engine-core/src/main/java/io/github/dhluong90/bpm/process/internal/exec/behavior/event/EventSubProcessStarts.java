@@ -31,6 +31,9 @@ final class EventSubProcessStarts {
     /** The local that marks a conditional listener whose condition has held since it last fired. */
     static final String MET = "$met";
 
+    /** The local that counts the firings a timer cycle has left; {@code -1} is without end (#500). */
+    static final String CYCLE_LEFT = "$cycleLeft";
+
     private EventSubProcessStarts() {
     }
 
@@ -82,8 +85,13 @@ final class EventSubProcessStarts {
                 throw new ExecutionException("TIMER_INVALID", node.id(), e.getMessage());
             }
             String jobId = ctx.nextId();
+            Map<String, Object> locals = token.locals();
+            if (timer.timeCycle() != null && !locals.containsKey(CYCLE_LEFT)) {
+                // #500: a cycle counts its firings down in the token's own locals; -1 is without end.
+                locals = Map.of(CYCLE_LEFT, TimerSchedule.cycle(timer).orElseThrow().repetitions());
+            }
             ctx.update(new Token(token.id(), token.kind(), TokenStatus.WAITING_TIMER, token.scopeTokenId(),
-                    token.nodeId(), jobId, token.locals()));
+                    token.nodeId(), jobId, locals));
             ctx.effect(new Effect.ScheduleJob(jobId, TimerCatchEventBehavior.JOB_KIND, token.id(), node.id(), dueAt,
                     Map.of()));
             ctx.history("TIMER_SCHEDULED", token, Map.of("jobId", jobId, "dueAt", dueAt.toString(),
@@ -98,6 +106,14 @@ final class EventSubProcessStarts {
             ctx.history("TIMER_FIRED", token, Map.of("jobId", due.jobId()));
             ctx.update(token.withStatus(TokenStatus.COMPLETED));
             ctx.startEventSubProcess(scopeOf(token, ctx), node, "TIMER", Map.of(), null);
+            // #500: a non-interrupting start with a cycle waits for its next firing until the count is used up.
+            Object left = token.locals().get(CYCLE_LEFT);
+            if (!node.isInterrupting() && left instanceof Number n && n.longValue() != 1) {
+                Token next = again(node, token, ctx);
+                ctx.update(new Token(next.id(), next.kind(), next.status(), next.scopeTokenId(), next.nodeId(),
+                        next.activityInstanceId(), Map.of(CYCLE_LEFT, n.longValue() < 0 ? -1L : n.longValue() - 1)));
+                enter(node, ctx.tree().get(next.id()).orElseThrow(), ctx);
+            }
         }
     }
 

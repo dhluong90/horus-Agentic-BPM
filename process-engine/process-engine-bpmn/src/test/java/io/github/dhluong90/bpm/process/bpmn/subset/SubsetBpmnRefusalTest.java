@@ -66,7 +66,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage() {
-        // Given loan.bpmn with a compensation boundary event (42), inclusive gateway (57), send task (63), ad-hoc sub-process (70)
+        // Given loan.bpmn with a compensation boundary event (42), inclusive gateway (57), send task (63)
         // and an XPath condition (88), and camunda:class on a service task (30)
         byte[] file = bytes("loan.bpmn");
 
@@ -77,9 +77,8 @@ class SubsetBpmnRefusalTest {
                     tuple("boundaryEvent with compensateEventDefinition", "be-timeout", 42, "S2"),
                     tuple("dataObject", "do-1", 57, "S1"),
                     tuple("eventBasedGateway with instantiate", "notify", 63, "S3"),
-                    tuple("adHocSubProcess", "adhoc-1", 70, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
-            assertThat(e.problems().get(4).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
+            assertThat(e.problems().get(3).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
             assertThat(e.truncated()).isFalse();
         });
     }

@@ -279,6 +279,11 @@ final class WorkingContext implements ExecutionContext {
         disarmBoundaries(from.id(), token.scopeTokenId(), null);
         resolveEventGateway(token, from);
         List<SequenceFlow> outgoing = process.outgoing(from.id());
+        if (outgoing.isEmpty() && process.adHoc(process.containerOf(from.id())).isPresent()) {
+            // #500: an activity of an ad-hoc sub-process has no flow out; its end is the end of that activity.
+            complete(token);
+            return;
+        }
         if (outgoing.isEmpty()) {
             throw new ExecutionException("NO_OUTGOING_FLOW", from.id(), from.id() + " has no outgoing sequence flow");
         }
@@ -324,6 +329,9 @@ final class WorkingContext implements ExecutionContext {
         if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway gateway) {
             return gateway.defaultFlow();
         }
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway gateway) {
+            return gateway.defaultFlow();
+        }
         if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
             return activity.activity().defaultFlow();
         }
@@ -364,7 +372,61 @@ final class WorkingContext implements ExecutionContext {
         if (token.scopeTokenId() == null) {
             return;
         }
-        settle(tree().get(token.scopeTokenId()).orElseThrow());
+        Token scope = tree().get(token.scopeTokenId()).orElseThrow();
+        if (process.adHoc(scope.nodeId()).isPresent()) {
+            adHocProgress(scope);
+            return;
+        }
+        settle(scope);
+    }
+
+    /** The local that marks an ad-hoc sub-process whose completion condition holds while activities still run. */
+    static final String AD_HOC_DONE = "$adHocDone";
+
+    /**
+     * An activity of an ad-hoc sub-process ended (#500). With a completion condition it is asked now; true cancels the
+     * activities still running ({@code cancelRemainingInstances}) or waits for them. Without one the sub-process ends
+     * when nothing runs and every activity has completed once.
+     */
+    private void adHocProgress(Token scope) {
+        io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess node = process.adHoc(scope.nodeId())
+                .orElseThrow();
+        List<Token> running = tree().live(scope.id());
+        boolean done;
+        Expression condition = node.completionCondition();
+        if (Boolean.TRUE.equals(scope.locals().get(AD_HOC_DONE))) {
+            done = running.isEmpty();
+        } else if (condition != null && condition.text() != null) {
+            Object value = evaluate(condition.text(), condition.language(), scope);
+            if (!(value instanceof Boolean met)) {
+                throw new ExecutionException("CONDITION_ERROR", node.id(), "The completion condition of " + node.id()
+                        + " did not produce a boolean");
+            }
+            if (met) {
+                history("AD_HOC_CONDITION_MET", scope, Map.of("running", running.size()));
+                if (node.cancelRemainingInstances()) {
+                    running.forEach(t -> cancelTree(t, null));
+                    done = true;
+                } else {
+                    Map<String, Object> locals = new LinkedHashMap<>(scope.locals());
+                    locals.put(AD_HOC_DONE, true);
+                    update(new Token(scope.id(), scope.kind(), scope.status(), scope.scopeTokenId(), scope.nodeId(),
+                            scope.activityInstanceId(), locals));
+                    done = running.isEmpty();
+                }
+            } else {
+                done = false;
+            }
+        } else {
+            done = running.isEmpty() && node.flowElements().stream()
+                    .filter(e -> e instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity)
+                    .allMatch(a -> tree().children(scope.id()).stream().anyMatch(t -> t.nodeId().equals(a.id())
+                            && t.status() == TokenStatus.COMPLETED));
+        }
+        if (done) {
+            update(scope.withStatus(TokenStatus.COMPLETED));
+            leaveBlock(tree().get(scope.id()).orElseThrow());
+        }
     }
 
     /**
@@ -399,14 +461,18 @@ final class WorkingContext implements ExecutionContext {
             // An event sub-process has no flow out: the scope it stands in may be done now.
             settle(tree().get(scope.scopeTokenId()).orElseThrow());
         } else {
-            // A saga block or sub-process ended (#67, #486): a new flow token leaves it in the enclosing scope.
-            FlowNode block = process.node(scope.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
-                    scope.nodeId(), "No saga block " + scope.nodeId()));
-            arming.completed(this, scope, block);
-            Token next = createToken(TokenKind.FLOW, block.id(), scope.scopeTokenId());
-            history("NODE_COMPLETED", next, Map.of("scopeTokenId", scope.id()));
-            takeOutgoing(next, block);
+            leaveBlock(scope);
         }
+    }
+
+    /** A saga block, sub-process or ad-hoc sub-process ended (#67, #486, #500): a new flow token leaves it. */
+    private void leaveBlock(Token scope) {
+        FlowNode block = process.node(scope.nodeId()).orElseThrow(() -> new ExecutionException("UNKNOWN_NODE",
+                scope.nodeId(), "No saga block " + scope.nodeId()));
+        arming.completed(this, scope, block);
+        Token next = createToken(TokenKind.FLOW, block.id(), scope.scopeTokenId());
+        history("NODE_COMPLETED", next, Map.of("scopeTokenId", scope.id()));
+        takeOutgoing(next, block);
     }
 
     /** @return whether the token waits on the start event of an event sub-process of the scope it stands in (#487) */
@@ -422,8 +488,7 @@ final class WorkingContext implements ExecutionContext {
 
     private boolean isConditionalListener(Token token) {
         return process.node(token.nodeId()).filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
-                .StartEvent s && s.eventDefinitions().size() == 1 && s.eventDefinitions().get(0) instanceof
-                io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition).isPresent();
+                .StartEvent && MultipleWaits.waitsOnCondition(n, token)).isPresent();
     }
 
     /**
@@ -577,6 +642,15 @@ final class WorkingContext implements ExecutionContext {
     }
 
     @Override
+    public void cancelToken(Token token) {
+        if (token.status().live()) {
+            cancelFlow(token, true);
+        } else if (token.status() == TokenStatus.JOINED) {
+            update(token.withStatus(TokenStatus.CANCELLED));
+        }
+    }
+
+    @Override
     public void cancelSubtree(Token scope) {
         for (Token child : tree().children(scope.id())) {
             if (child.kind() != TokenKind.FLOW) {
@@ -609,7 +683,8 @@ final class WorkingContext implements ExecutionContext {
     /** @return whether a live token already waits on this boundary event in the scope (a retry enters the step again) */
     boolean hasLiveBoundaryToken(BoundaryEvent boundary, String scopeTokenId) {
         return tokens.stream().anyMatch(t -> t.nodeId().equals(boundary.id()) && t.kind() == TokenKind.FLOW
-                && t.status().live() && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId));
+                && (t.status().live() || t.status() == TokenStatus.JOINED)
+                && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId));
     }
 
     /**
@@ -619,7 +694,8 @@ final class WorkingContext implements ExecutionContext {
     private void disarmBoundaries(String activityId, String scopeTokenId, String exceptTokenId) {
         for (BoundaryEvent boundary : process.boundariesOf(activityId)) {
             for (Token t : List.copyOf(tokens)) {
-                if (t.kind() == TokenKind.FLOW && t.nodeId().equals(boundary.id()) && t.status().live()
+                if (t.kind() == TokenKind.FLOW && t.nodeId().equals(boundary.id())
+                        && (t.status().live() || t.status() == TokenStatus.JOINED)
                         && java.util.Objects.equals(t.scopeTokenId(), scopeTokenId) && !t.id().equals(exceptTokenId)) {
                     update(t.withStatus(TokenStatus.CANCELLED));
                     if (t.status() == TokenStatus.WAITING_TIMER && t.activityInstanceId() != null) {
@@ -754,12 +830,14 @@ final class WorkingContext implements ExecutionContext {
         return null;
     }
 
-    private static boolean isKind(BoundaryEvent boundary, boolean error) {
-        if (boundary.eventDefinitions().size() != 1) {
-            return false;
+    /** The definition of the kind a throw looks for on a boundary event, a multiple one (#500) included. */
+    private static Optional<EventDefinition> catching(BoundaryEvent boundary, boolean error) {
+        if (boundary.parallelMultiple()) {
+            return Optional.empty();
         }
-        EventDefinition d = boundary.eventDefinitions().get(0);
-        return error ? d instanceof ErrorEventDefinition : d instanceof EscalationEventDefinition;
+        return boundary.eventDefinitions().stream()
+                .filter(d -> error ? d instanceof ErrorEventDefinition : d instanceof EscalationEventDefinition)
+                .findFirst();
     }
 
     /**
@@ -787,10 +865,11 @@ final class WorkingContext implements ExecutionContext {
                 BoundaryEvent specific = null;
                 BoundaryEvent any = null;
                 for (BoundaryEvent b : process.boundariesOf(host.nodeId())) {
-                    if (!isKind(b, error)) {
+                    Optional<EventDefinition> definition = catching(b, error);
+                    if (definition.isEmpty()) {
                         continue;
                     }
-                    String declared = codeOf(b.eventDefinitions().get(0), error);
+                    String declared = codeOf(definition.get(), error);
                     if (declared == null && any == null) {
                         any = b;
                     } else if (declared != null && declared.equals(code) && specific == null) {

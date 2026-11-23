@@ -56,6 +56,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocOrdering;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
@@ -527,6 +530,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.triggeredByEvent(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), a.incoming(), a.outgoing(), a.activity(),
+                            a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), resolveSignals(a.flowElements()), a.artifacts(),
+                            a.laneSets(), a.info());
                     default -> e;
                 });
             }
@@ -610,6 +616,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.triggeredByEvent(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), a.incoming(), a.outgoing(), a.activity(),
+                            a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), resolveMessages(a.flowElements()), a.artifacts(),
+                            a.laneSets(), a.info());
                     default -> e;
                 });
             }
@@ -892,16 +901,25 @@ public final class SubsetBpmnReader implements DefinitionReader {
          */
         private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts)
                 throws XMLStreamException {
+            return container(elements, artifacts, null);
+        }
+
+        /**
+         * Reads a container. {@code completion}, when not null, receives the {@code completionCondition} of an ad-hoc
+         * sub-process (#500); anywhere else that child is named as unsupported.
+         */
+        private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts,
+                Expression[] completion) throws XMLStreamException {
             nesting++;
             try {
-                return containerChildren(elements, artifacts);
+                return containerChildren(elements, artifacts, completion);
             } finally {
                 nesting--;
             }
         }
 
-        private LoopCharacteristics containerChildren(List<FlowElement> elements, List<Artifact> artifacts)
-                throws XMLStreamException {
+        private LoopCharacteristics containerChildren(List<FlowElement> elements, List<Artifact> artifacts,
+                Expression[] completion) throws XMLStreamException {
             LoopCharacteristics own = null;
             while (nextChild()) {
                 String local = xml.getLocalName();
@@ -965,6 +983,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                                 children.info()));
                     }
                     case "eventBasedGateway" -> elements.add(eventBasedGateway());
+                    case "complexGateway" -> elements.add(complexGateway());
+                    case "adHocSubProcess" -> elements.add(adHocSubProcess());
+                    case "completionCondition" -> {
+                        if (completion == null) {
+                            unsupported(local, attr("id"), BpmnStages.NOT_PLANNED, "belongs to an adHocSubProcess");
+                            skip();
+                        } else {
+                            completion[0] = expression();
+                        }
+                    }
                     case "sequenceFlow" -> elements.add(sequenceFlow());
                     case "textAnnotation" -> artifacts.add(textAnnotation());
                     case "association" -> artifacts.add(association());
@@ -1137,6 +1165,77 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     parallel ? EventBasedGatewayType.PARALLEL : EventBasedGatewayType.EXCLUSIVE, children.info());
         }
 
+        /** The current element read as a condition: its text, in its own language or the document's (#500). */
+        private Expression expression() throws XMLStreamException {
+            String language = attr("language") != null ? attr("language") : documentLanguage;
+            int at = line();
+            String id = attr("id");
+            String local = xml.getLocalName();
+            String text = text();
+            if (language != null && !Condition.isSupportedLanguage(language)) {
+                addProblem(new DefinitionProblem("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED", "language " + safe(language)
+                        + " is not supported; use " + BpmnNamespaces.EXPR_V1 + " or FEEL (" + BpmnNamespaces.FEEL + ")",
+                        local, safe(id), at, BpmnStages.NOT_PLANNED));
+            }
+            return new Expression(text.strip(), language == null ? BpmnNamespaces.EXPR_V1 : language, null);
+        }
+
+        /**
+         * A {@code complexGateway} (#500): {@code default} names the flow taken when no outgoing condition holds, and
+         * {@code activationCondition} says when a join fires; the split is read from the outgoing flows as for any other
+         * gateway.
+         */
+        private FlowElement complexGateway() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            String defaultFlow = attr("default");
+            Expression activation = null;
+            List<HorusExtension> horus = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
+            while (nextChild()) {
+                String ns = xml.getNamespaceURI();
+                String local = xml.getLocalName();
+                if (BPMN.equals(ns) && "activationCondition".equals(local)) {
+                    activation = expression();
+                } else if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
+                    skip();
+                } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
+                    extensions("complexGateway", id, false, horus, foreign);
+                } else if (BPMN.equals(ns)) {
+                    unsupported("complexGateway child " + local, id, BpmnStages.of(local));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            return new ComplexGateway(id, name, List.of(), List.of(), GatewayDirection.UNSPECIFIED, defaultFlow,
+                    activation, info(horus, foreign));
+        }
+
+        /**
+         * An {@code adHocSubProcess} (#500): activities with no sequence flow between them, started one at a time by
+         * the host. {@code ordering} is {@code Parallel} (the default) or {@code Sequential}; {@code completionCondition}
+         * ends it; {@code cancelRemainingInstances} (true by default) cancels what still runs when it ends.
+         */
+        private FlowElement adHocSubProcess() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            int at = line();
+            String ordering = attr("ordering");
+            if (ordering != null && !"Parallel".equals(ordering) && !"Sequential".equals(ordering)) {
+                invalid.add(new DefinitionProblem("AD_HOC_ORDERING_INVALID", "ordering is Parallel or Sequential",
+                        "adHocSubProcess", safe(id), at));
+            }
+            boolean cancelRemaining = !"false".equals(attr("cancelRemainingInstances"));
+            List<FlowElement> elements = new ArrayList<>();
+            List<Artifact> artifacts = new ArrayList<>();
+            Expression[] completion = new Expression[1];
+            container(elements, artifacts, completion);
+            return new AdHocSubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), completion[0],
+                    cancelRemaining, "Sequential".equals(ordering) ? AdHocOrdering.SEQUENTIAL : AdHocOrdering.PARALLEL,
+                    withRefs(elements), artifacts, List.of(), null);
+        }
+
         /**
          * A {@code saga} block (#67, ADR-0007): a BPMN {@code transaction} whose steps run under their own scope
          * token. It has a none start event, steps and at least one end event of its own; its {@code incoming} and
@@ -1248,7 +1347,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (definitions == 0) {
                 unsupported(element, id, BpmnStages.S0, BpmnStages.message(BpmnStages.S0));
             } else if (definitions > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; a throw event throws"
+                        + " exactly one");
             }
             List<EventDefinition> defs = compensate != null ? List.<EventDefinition>of(compensate)
                     : message != null ? List.<EventDefinition>of(message)
@@ -1283,7 +1383,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * Names the attributes of the current element that change how it runs and that this release does not honour:
-         * a compensation activity other than a service task, a quantity other than one, a non-interrupting start, a parallel multiple event or
+         * a compensation activity other than a service task, a quantity other than one, a non-interrupting start, or
          * an implementation other than a registered handler. Ignoring them would run the element differently from
          * what the model says.
          */
@@ -1303,8 +1403,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to the start event of an event"
                         + " sub-process; a boundary event uses cancelActivity");
             }
-            if ("true".equals(attr("parallelMultiple"))) {
-                unsupported("parallelMultiple", id, BpmnStages.S3);
+            if ("true".equals(attr("parallelMultiple")) && !xml.getLocalName().endsWith("Event")) {
+                unsupported("parallelMultiple", id, BpmnStages.NOT_PLANNED, "applies to an event that has several event"
+                        + " definitions");
             }
             String implementation = attr("implementation");
             if (implementation != null && !"##unspecified".equals(implementation)) {
@@ -1360,6 +1461,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             int line = line();
             String key = horus("correlationKey");
             boolean interrupting = !"false".equals(attr("isInterrupting"));
+            boolean parallel = "true".equals(attr("parallelMultiple"));
             List<EventDefinition> definitions = new ArrayList<>();
             List<HorusExtension> ext = new ArrayList<>();
             List<ForeignFragment> foreign = new ArrayList<>();
@@ -1382,17 +1484,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions.add(conditionalDefinition(id, element));
                 } else if (start && BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     // #487: the trigger of an event sub-process; where a start event may carry it is checked at compile.
+                    // #500: a timeCycle repeats a non-interrupting one.
                     TimerEventDefinition timer = timer(id);
                     definitions.add(timer);
-                    TimerSchedule.problem(timer).ifPresent(problem -> {
-                        if (problem.startsWith("timeCycle")) {
-                            addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                    "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                    BpmnStages.S1));
-                        } else {
-                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
-                        }
-                    });
+                    TimerSchedule.problem(timer).ifPresent(problem ->
+                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
                 } else if (start && BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
                         || "escalationEventDefinition".equals(local) || "compensateEventDefinition".equals(local))) {
                     definitions.add(definition(local, id, element, line));
@@ -1410,15 +1506,17 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
-            if (definitions.size() > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+            if (definitions.size() > 1 && !start) {
+                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; an end event raises"
+                        + " exactly one");
             }
             // A message start event of a process has no instance yet, so its key becomes the business key; one of an event
             // sub-process has the instance, so it names its key variable like a message catch (#487, checked at compile).
             messageExtras(element, id, line, definitions, key, false, ext);
             ElementInfo info = definitions.isEmpty() ? null : info(ext, foreign);
             return start
-                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, interrupting, info)
+                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, parallel, interrupting,
+                            info)
                     : new EndEvent(id, name, List.of(), List.of(), definitions, List.of(), null, info);
         }
 
@@ -1480,6 +1578,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String attachedTo = attr("attachedToRef");
             boolean cancel = !"false".equals(attr("cancelActivity"));
             String key = horus("correlationKey");
+            boolean parallel = "true".equals(attr("parallelMultiple"));
             int line = line();
             List<EventDefinition> definitions = new ArrayList<>();
             List<HorusExtension> ext = new ArrayList<>();
@@ -1489,15 +1588,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     TimerEventDefinition timer = timer(id);
                     definitions.add(timer);
-                    TimerSchedule.problem(timer).ifPresent(problem -> {
-                        if (problem.startsWith("timeCycle")) {
-                            addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                    "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                    BpmnStages.S1));
-                        } else {
-                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
-                        }
-                    });
+                    if (timer.timeCycle() != null) {
+                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
+                                BpmnStages.S1));
+                    } else {
+                        TimerSchedule.problem(timer).ifPresent(problem ->
+                                invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
+                    }
                 } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
                         || "escalationEventDefinition".equals(local) || "compensateEventDefinition".equals(local)
                         || "cancelEventDefinition".equals(local))) {
@@ -1524,8 +1622,6 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (definitions.isEmpty()) {
                 unsupported(element, id, BpmnStages.NOT_PLANNED, "has no event definition; a boundary event needs a"
                         + " timer, an error, an escalation, a compensation, a cancel, a message, a signal or a condition");
-            } else if (definitions.size() > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
             if (attachedTo == null || attachedTo.isBlank()) {
                 invalid.add(new DefinitionProblem("BOUNDARY_ATTACHED_INVALID", "A boundary event names the activity it is"
@@ -1533,7 +1629,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             definitions.removeIf(java.util.Objects::isNull);
             messageExtras(element, id, line, definitions, key, true, ext);
-            return new BoundaryEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, attachedTo,
+            return new BoundaryEvent(id, name, List.of(), List.of(), definitions, List.of(), null, parallel, attachedTo,
                     cancel, definitions.isEmpty() || !(definitions.get(0) instanceof MessageEventDefinition) ? null
                             : info(ext, foreign));
         }
@@ -1588,6 +1684,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                 } else if (e instanceof SubProcess sub) {
                     checkLinks(sub.flowElements());
+                } else if (e instanceof AdHocSubProcess adHoc) {
+                    checkLinks(adHoc.flowElements());
                 } else if (e instanceof Transaction saga) {
                     checkLinks(saga.flowElements());
                 }
@@ -1609,6 +1707,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.method(), resolveCodes(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.triggeredByEvent(), resolveCodes(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), a.incoming(), a.outgoing(), a.activity(),
+                            a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), resolveCodes(a.flowElements()), a.artifacts(),
+                            a.laneSets(), a.info());
                     default -> e;
                 });
             }
@@ -1647,7 +1748,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
          */
         private void messageExtras(String element, String id, int line, List<EventDefinition> definitions, String key,
                 boolean keyRequired, List<HorusExtension> ext) {
-            boolean message = !definitions.isEmpty() && definitions.get(0) instanceof MessageEventDefinition;
+            boolean message = definitions.stream().anyMatch(MessageEventDefinition.class::isInstance);
             if (!message) {
                 if (key != null || ext.stream().anyMatch(e -> e instanceof InputMapping || e instanceof OutputMapping)) {
                     invalid.add(new DefinitionProblem("MESSAGE_EXTENSION_MISPLACED", "horus:correlationKey, horus:input"
@@ -1701,18 +1802,18 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * An intermediate catch event with one {@code timerEventDefinition}: {@code timeDuration} or {@code timeDate}.
-         * Every other event definition, and {@code timeCycle}, is named as unsupported.
+         * An intermediate catch event with a timer ({@code timeDuration} or {@code timeDate}), link, signal, conditional
+         * or message definition. Several timer, message, signal or conditional definitions make a multiple event (#500):
+         * it fires on any one, or on all of them with {@code parallelMultiple="true"}. Every other event definition, and
+         * {@code timeCycle}, is named as unsupported.
          */
         private FlowElement catchEvent() throws XMLStreamException {
             String element = "intermediateCatchEvent";
             String id = id();
             String name = attr("name");
             int line = line();
-            TimerEventDefinition timer = null;
-            EventDefinition link = null;
-            EventDefinition other = null;
-            MessageEventDefinition message = null;
+            boolean parallel = "true".equals(attr("parallelMultiple"));
+            List<EventDefinition> defs = new ArrayList<>();
             String key = horus("correlationKey");
             List<HorusExtension> ext = new ArrayList<>();
             List<ForeignFragment> foreign = new ArrayList<>();
@@ -1721,20 +1822,29 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     definitions++;
-                    timer = timer(id);
+                    TimerEventDefinition timer = timer(id);
+                    defs.add(timer);
+                    if (timer.timeCycle() != null) {
+                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
+                                BpmnStages.S1));
+                    } else {
+                        TimerSchedule.problem(timer).ifPresent(problem ->
+                                invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
+                    }
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "linkEventDefinition".equals(local)) {
                     // #493: the catch half of a link pair.
                     definitions++;
-                    link = definition(local, id, element, line);
+                    defs.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
-                    other = signalDefinition(id, element);
+                    defs.add(signalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
                     definitions++;
-                    other = conditionalDefinition(id, element);
+                    defs.add(conditionalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
                     definitions++;
-                    message = messageDefinition(id);
+                    defs.add(messageDefinition(id));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
                     extensions(element, id, false, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
@@ -1754,27 +1864,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions == 0) {
                 unsupported(element, id, BpmnStages.S1, "has no event definition; a none catch event is not supported");
-            } else if (definitions > 1) {
-                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
-            if (timer != null && definitions == 1) {
-                TimerSchedule.problem(timer).ifPresent(problem -> {
-                    if (problem.startsWith("timeCycle")) {
-                        addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; stage S1 adds it", "timeCycle",
-                                safe(id), line, BpmnStages.S1));
-                    } else {
-                        invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
-                    }
-                });
-            }
-            List<EventDefinition> defs = timer != null ? List.<EventDefinition>of(timer)
-                    : message != null ? List.<EventDefinition>of(message)
-                    : link != null ? List.<EventDefinition>of(link)
-                    : other != null ? List.<EventDefinition>of(other) : List.of();
             messageExtras(element, id, line, defs, key, true, ext);
-            return new IntermediateCatchEvent(id, name, List.of(), List.of(), defs, List.of(), null, false,
-                    message == null ? null : info(ext, foreign));
+            boolean hasMessage = defs.stream().anyMatch(MessageEventDefinition.class::isInstance);
+            return new IntermediateCatchEvent(id, name, List.of(), List.of(), defs, List.of(), null, parallel,
+                    hasMessage ? info(ext, foreign) : null);
         }
 
         private TimerEventDefinition timer(String eventId) throws XMLStreamException {
@@ -2894,6 +2988,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 case SubProcess t -> new SubProcess(t.id(), t.name(), in, o, t.activity(), t.triggeredByEvent(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());
+                case AdHocSubProcess a -> new AdHocSubProcess(a.id(), a.name(), in, o, a.activity(),
+                        a.completionCondition(), a.cancelRemainingInstances(), a.ordering(), a.flowElements(),
+                        a.artifacts(), a.laneSets(), a.info());
+                case ComplexGateway g -> new ComplexGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.defaultFlow(), g.activationCondition(), g.info());
                 default -> e;
             });
         }

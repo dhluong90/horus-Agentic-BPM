@@ -167,6 +167,15 @@ public final class CompiledProcess {
     }
 
     /**
+     * @param nodeId a node id
+     * @return the ad-hoc sub-process (#500) with that id, if it is one
+     */
+    public Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess> adHoc(String nodeId) {
+        return nodeId != null && nodes.get(nodeId) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
+                .AdHocSubProcess a ? Optional.of(a) : Optional.empty();
+    }
+
+    /**
      * @param eventSubProcessId the id of an event sub-process
      * @return its start event, the one that carries the trigger
      */

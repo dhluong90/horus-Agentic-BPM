@@ -992,6 +992,56 @@ paths:
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /instances/{id}:start-ad-hoc-activity:
+    post:
+      tags: [instances]
+      operationId: startAdHocActivity
+      summary: Start an enabled activity of an ad-hoc sub-process
+      description: |
+        An ad-hoc sub-process has activities with no sequence flow between them; the host starts each one. The
+        activity must stand in the open sub-process named by `scopeTokenId` (a `SCOPE` token of the instance on the
+        ad-hoc node). With `ordering` Sequential no other activity of it may be running; with Parallel any number may.
+        An activity that is not enabled is refused with `422 STEP_FAILED` and the code `ACTIVITY_NOT_ENABLED` (or
+        `ACTIVITY_NOT_FOUND`). When an activity ends the `completionCondition` is asked; true ends the sub-process
+        and the flow goes on. Only a `RUNNING` instance (`409 INVALID_STATE`). Permission `processes:task:manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, minLength: 26, maxLength: 26 }
+        - name: If-Match
+          in: header
+          required: true
+          description: The instance's `lockVersion` (its `ETag`), quoted. Missing is `428 PRECONDITION_REQUIRED`; stale is `409 VERSION_CONFLICT`.
+          schema: { type: string, example: '"2"' }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Required; missing is `428 PRECONDITION_REQUIRED`. See the IdempotencyKey parameter.
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scopeTokenId, activityId]
+              properties:
+                scopeTokenId: { type: string, description: The scope token of the open ad-hoc sub-process }
+                activityId: { type: string, description: The id of the activity to start }
+            example: { scopeTokenId: 01JD0000000000000000000001, activityId: check-id }
+      responses:
+        '200':
+          $ref: '#/components/responses/Instance'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /signals:
     post:
       tags: [signals]

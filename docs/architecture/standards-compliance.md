@@ -413,6 +413,8 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
 | Collaboration: pools, lanes, message flows, artifacts | Import, display and export (#497): one definition per executable pool, black-box pools kept | | Message flows execute between pools through 5.4 | |
 | Complex gateway, ad-hoc subprocess, multiple and parallel multiple events | Refused | Import | Import | Execute |
+| Collaboration: pools, lanes, message flows, artifacts | Refused | Import and display | Message flows execute between pools through 5.4 | |
+| Complex gateway, ad-hoc subprocess, multiple and parallel multiple events | Refused | Import | Import | Execute (#500); a parallel multiple process start event, a multiple throw or end event and message, signal or conditional boundary events stay out |
 | Message buffer with time to live | | | | Optional, off by default |
 | MIWG round trip | Subset models | All reference models | | |
 | Executable conformance suite | Subset scenarios | S1 scenarios 100 percent | S1 and S2 100 percent | All 100 percent |

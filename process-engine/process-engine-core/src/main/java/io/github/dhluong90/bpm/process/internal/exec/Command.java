@@ -8,7 +8,7 @@ import java.util.Objects;
 /**
  * Inputs of the kernel. Each is applied under the instance row lock by the shell.
  */
-public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.ChildEnded, Command.MoveToken, Command.RetryStep, Command.Compensate, Command.EndCompensation {
+public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.ChildEnded, Command.MoveToken, Command.RetryStep, Command.Compensate, Command.EndCompensation, Command.StartAdHocActivity {
 
     /**
      * Starts the instance at its none start event.
@@ -252,6 +252,21 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
     record EndCompensation(String scopeTokenId) implements Command {
         public EndCompensation {
             Objects.requireNonNull(scopeTokenId, "scopeTokenId must not be null");
+        }
+    }
+
+    /**
+     * The host starts one activity of an ad-hoc sub-process (#500). The activity must stand in the sub-process, and
+     * with {@code ordering} Sequential no other activity of it may be running.
+     *
+     * @param scopeTokenId the scope token of the open ad-hoc sub-process
+     * @param activityId the activity to start
+     * @param actor who started it
+     */
+    record StartAdHocActivity(String scopeTokenId, String activityId, String actor) implements Command {
+        public StartAdHocActivity {
+            Objects.requireNonNull(scopeTokenId, "scopeTokenId must not be null");
+            Objects.requireNonNull(activityId, "activityId must not be null");
         }
     }
 }

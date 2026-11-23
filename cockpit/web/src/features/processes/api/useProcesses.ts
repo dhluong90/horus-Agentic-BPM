@@ -195,6 +195,19 @@ export function useClaimTask(task: Task) {
   });
 }
 
+/** Start one enabled activity of an ad-hoc sub-process (#500); the case and its timeline are read again. */
+export function useStartAdHocActivity(instance: { id: string; lockVersion: number }) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  const queryClient = useQueryClient();
+  const keyFor = useActionKey();
+  return useMutation({
+    mutationFn: ({ scopeTokenId, activityId }: { scopeTokenId: string; activityId: string }) =>
+      client.startAdHocActivity(instance.id, instance.lockVersion, scopeTokenId, activityId, keyFor(`ad-hoc:${instance.id}:${String(instance.lockVersion)}:${scopeTokenId}:${activityId}`)),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: keys.instance(instance.id) }); },
+  });
+}
+
 /** Complete the review task with the reviewer's answer and reason; the task is read again for its completed state. */
 export function useCompleteTask(task: Task) {
   const { client } = useProcessesSession();

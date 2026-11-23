@@ -35,9 +35,7 @@ final class BpmnStages {
             Map.entry("error", S1),
             Map.entry("escalation", S1),
             Map.entry("signal", S2),
-            Map.entry("eventBasedGateway", S2),
-            Map.entry("complexGateway", S3),
-            Map.entry("adHocSubProcess", S3));
+            Map.entry("eventBasedGateway", S2));
 
     private static final Map<String, String> EVENT_DEFINITIONS = Map.of(
             "timerEventDefinition", S1,

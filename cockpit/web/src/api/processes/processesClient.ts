@@ -177,6 +177,8 @@ export interface ProcessesClient {
   approveResolution(id: string, lockVersion: number, comment: string, idempotencyKey: string): Promise<Incident>;
   /** rejectIncidentResolution: as a second person, with a reason; the incident is open again */
   rejectResolution(id: string, lockVersion: number, reason: string, idempotencyKey: string): Promise<Incident>;
+  /** startAdHocActivity: one enabled activity of an open ad-hoc sub-process (processes:task:manage, #500) */
+  startAdHocActivity(instanceId: string, lockVersion: number, scopeTokenId: string, activityId: string, idempotencyKey: string): Promise<ProcessInstance>;
   /** completeTask: the reviewer's answer and reason; the engine records HUMAN_OVERRIDE */
   completeTask(id: string, lockVersion: number, answer: TaskAnswer, idempotencyKey: string): Promise<ProcessInstance>;
 }
@@ -322,6 +324,10 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async rejectResolution(id, lockVersion, reason, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/incidents/${segment(id)}:reject-resolution`, headers: command(lockVersion, idempotencyKey), body }, incident)).data;
+    },
+    async startAdHocActivity(instanceId, lockVersion, scopeTokenId, activityId, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ scopeTokenId, activityId }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/instances/${segment(instanceId)}:start-ad-hoc-activity`, headers: command(lockVersion, idempotencyKey), body }, processInstance)).data;
     },
     async completeTask(id, lockVersion, answer, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ result: answer.result, reason: answer.reason }) };

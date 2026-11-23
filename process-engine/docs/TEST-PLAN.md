@@ -176,6 +176,13 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-324 | `PRE_324_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel and integration on PostgreSQL, timers and subscriptions removed with the scope | M3 | `TR-STD-04`, `TR-STD-13` | Done (#487) |
 | PRE-325 | `PRE_325_*` in `EventSubProcessTest` | Unit on the reader, the writer and the compiler, round trip and refusal codes | M3 | `TR-STD-04`, `TR-STD-10` | Done (#487) |
 | PRE-326 | `PRE_326_*` in `EventSubProcessTest` | Unit on the kernel and the compiler, the undo of a completed sub-process or call activity | M3 | `TR-COMP-01`, `TR-IDEM-04` | Done (#487) |
+| PRE-330 | `PRE_330_*` in `ComplexAdHocMultipleTest` | Unit on the kernel, complex join, absorb and split | M3 | `TR-STD-04` | Done (#500) |
+| PRE-331 | `PRE_331_*` in `ComplexAdHocMultipleTest` | Unit on the kernel, ad-hoc ordering, condition and cancel | M3 | `TR-STD-04` | Done (#500) |
+| PRE-332 | `PRE_332_*` in `ComplexAdHocMultipleTest` | Unit on the kernel, multiple and parallel multiple catch, boundary and start | M3 | `TR-STD-04` | Done (#500) |
+| PRE-333 | `PRE_333_*` in `ComplexAdHocMultipleTest` | Unit on the kernel, timer cycle on an event sub-process start | M3 | `TR-STD-04` | Done (#500) |
+| PRE-334 | `PRE_334_*` in `ComplexAdHocMultipleTest` | Unit on the compiler, refusal codes | M3 | `TR-STD-04`, `TR-STD-10` | Done (#500) |
+| PRE-335 | `PRE_335_*` in `ComplexAdHocMultipleTest` | Unit on the reader and the writer, round trip | M3 | `TR-STD-04`, `TR-STD-10` | Done (#500) |
+| PRE-336 | `PRE_336_*` in `AdHocPostgresIT` | Integration on PostgreSQL, permission, idempotent replay, cancel of the remaining task | M3 | `TR-SEC-02`, `TR-IDEM-01` | Done (#500) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
 | PRE-219 | `PRE_219_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Done (#79) |

@@ -83,7 +83,6 @@ class RefusedStandardsIT {
                 + "<bpmn:startEvent id=\"start\"/>\n"
                 + "<bpmn:dataObject id=\"do-1\"/>\n"
                 + "<bpmn:eventBasedGateway id=\"notify\" instantiate=\"true\"/>\n"
-                + "<bpmn:adHocSubProcess id=\"adhoc-1\"/>\n"
                 + "</bpmn:process></bpmn:definitions>\n";
 
         HttpResponse<String> response = post("/api/bpm/processes/v1/definitions", "application/xml", loan);
@@ -92,8 +91,7 @@ class RefusedStandardsIT {
         JsonNode body = JSON.readTree(response.body());
         assertThat(body.get("code").stringValue()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
         assertThat(body.get("unsupportedElements")).extracting(p -> p.get("element").stringValue() + ":" + p.get("stage").stringValue()
-                + ":" + p.get("line").intValue()).containsExactly("dataObject:S1:5", "eventBasedGateway with instantiate:S3:6",
-                "adHocSubProcess:S3:7");
+                + ":" + p.get("line").intValue()).containsExactly("dataObject:S1:5", "eventBasedGateway with instantiate:S3:6");
         assertThat(count("pre_definition")).isEqualTo(before);
     }
 
