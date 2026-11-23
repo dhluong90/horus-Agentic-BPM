@@ -1057,7 +1057,9 @@ paths:
         a signal with an intermediate signal throw event or a signal end event does the same in its own transaction
         and records `SIGNAL_THROWN` with the number of waiters in its history. Needs an `Idempotency-Key` (`428
         PRECONDITION_REQUIRED` without one); a replay of the key returns the first answer and wakes nobody again.
-        Permission `processes:signal:broadcast`.
+        A signal start event whose process also holds a message catch event gives the new instance no business key to
+        correlate under: that start is refused with `422 STEP_FAILED`, reason `CORRELATION_KEY_REQUIRED`, and the whole
+        broadcast rolls back. Permission `processes:signal:broadcast`.
       parameters:
         - $ref: '#/components/parameters/RequiredIdempotencyKey'
       requestBody:
