@@ -461,7 +461,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-DEF-01`
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** File A uses only the subset of ADR-0013 with BPMNDI shapes; file B adds a `boundaryEvent` `be-timeout` on line 42 and an `inclusiveGateway` `ig-1` on line 57; file C starts with a `DOCTYPE` declaring an external entity.
+- **Given:** File A uses only the subset of ADR-0013 with BPMNDI shapes; file B adds a `boundaryEvent` `be-timeout` on line 42 and a `dataObject` `do-1` on line 57; file C starts with a `DOCTYPE` declaring an external entity.
 - **When:** Each is posted to `POST /api/bpm/processes/v1/definitions:import-bpmn`.
 - **Then:** A returns `201` with `status: DRAFT`, `source: BPMN` and layout revision 1 from BPMNDI. B returns `422 BPMN_UNSUPPORTED_ELEMENT` listing both elements with id and line. C returns `422 BPMN_UNSAFE_XML` and no entity is resolved. No transaction is opened for B or C.
 - **Example:** `boundaryEvent be-timeout line 42 -> 422 BPMN_UNSUPPORTED_ELEMENT`.
@@ -1009,7 +1009,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
 - **Kind:** other
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `dataObject` `do-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
   - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
@@ -1795,3 +1795,53 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
 - **Example:** `System.exit(0) -> refused at activation`.
 - **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`
+
+### PRE-300 An inclusive split takes every outgoing flow whose condition is true
+- **Traces to:** `TR-STD-04`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `payment-screening` with an `inclusiveGateway` `screen` whose flows go to `aml-review` (condition `amount >= 100000000 VND`), `sanctions-review` (condition `crossBorder == true`) and `standard-check` (the default flow); an instance started with `amount = 150000000 VND` and `crossBorder = true`.
+- **When:** The token reaches `screen`.
+- **Then:** One token waits at `aml-review` and one at `sanctions-review`; `standard-check` is never entered. `NODE_COMPLETED` on `screen` lists the flows taken, `screen__aml` and `screen__sanctions`, with reason `conditions`. A flow with no condition is always taken. A condition that is not a boolean fails the step with `CONDITION_ERROR`.
+- **Example:** `150,000,000 VND, cross-border -> two tokens`.
+- **Test ID:** `PRE_300_a_split_takes_every_flow_whose_condition_is_true`, `PRE_300_an_inclusive_gateway_with_its_default_imports_and_exports_to_the_same_definition` (`InclusiveGatewayBpmnTest`)
+
+### PRE-301 An inclusive split takes the default flow only when no condition is true
+- **Traces to:** `TR-STD-04`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The same process; an instance started with `amount = 25000000 VND` and `crossBorder = false`. A second process whose gateway has no default flow; a third whose default flow carries a condition.
+- **When:** The token reaches `screen`.
+- **Then:** Only `standard-check` is entered, and `NODE_COMPLETED` records reason `default`. With no true condition and no default flow the step fails with `NO_PATH`. A default flow that carries a condition, or is not an outgoing flow of the gateway, is refused at activation (`DEFAULT_FLOW_HAS_CONDITION`, `DEFAULT_FLOW_INVALID`).
+- **Example:** `25,000,000 VND, domestic -> standard-check only`.
+- **Test ID:** `PRE_301_when_no_condition_is_true_only_the_default_flow_is_taken`, `PRE_301_no_true_condition_and_no_default_flow_is_no_path`, `PRE_301_a_default_flow_that_carries_a_condition_or_is_not_an_outgoing_flow_is_refused_at_activation`
+
+### PRE-302 An inclusive join waits for the tokens that can still arrive and fires once
+- **Traces to:** `TR-STD-04`, `TR-ASY-03`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `payment-screening` with `aml-review` and `sanctions-review` open, both leading to the inclusive gateway `settle` (several incoming flows), which leads to `release`.
+- **When:** One review is completed, then the other, in either order. In a second instance only `aml-review` was started, and it is completed.
+- **Then:** The first arrival becomes `JOINED` and `TOKEN_JOINED` lists in `waitingFor` the steps a token can still arrive from. The second arrival completes both arrivals and creates one token to `release`, with one `JOIN_FIRED` row. In the second instance the join fires at the first arrival, because no other token can reach it: the number of arrivals is whatever the split started, not the number of incoming flows. Tokens of other scope tokens are never counted.
+- **Example:** `AML done, sanctions open -> waiting for sanctions-review; both done -> one release task`.
+- **Test ID:** `PRE_302_the_join_waits_for_exactly_the_tokens_the_split_started_in_either_order`, `PRE_302_a_join_with_one_started_branch_fires_when_that_branch_arrives`
+
+### PRE-303 An inclusive join does not wait for a path that can never reach it
+- **Traces to:** `TR-STD-04`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The split also starts `compliance-log`, which ends in its own end event; and a process where `sanctions-review` leads to an exclusive gateway, a hit to the join and a clear to an end event.
+- **When:** `aml-review` and `sanctions-review` are completed while the log is open; or `aml-review` is completed first and the sanctions review then ends with no hit.
+- **Then:** The join fires while the log is still open, because `compliance-log` has no path to the join. In the second process the join waits for the sanctions review, and fires when that token ends elsewhere: the check runs after every command, so a token ending on another branch releases a waiting join, and the instance does not complete while a token waits at the join.
+- **Example:** `sanctions cleared (no hit) -> the waiting join releases the payment`.
+- **Test ID:** `PRE_303_a_join_does_not_wait_for_a_path_that_can_never_arrive`, `PRE_303_a_token_that_leaves_for_another_end_releases_a_join_that_is_already_waiting`
+
+### PRE-304 An inclusive join counts tokens in loops and scopes, and two branches ending together fire it once
+- **Traces to:** `TR-STD-04`, `TR-ASY-03`, #494
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan process whose income check loops back until the income is confirmed while the credit check waits at the join; an onboarding process whose split starts a `saga` block (its own scope token) and a service step, both leading to the join; two joins that wait for a token that sits at the other; and on PostgreSQL two replicas completing `aml-review` and `sanctions-review` of 300 payments at the same moment.
+- **When:** The income check is sent round the loop once; the service step ends before the block; the deadlocked ring starts; the two reviews end together.
+- **Then:** A token that can still reach the join through a loop holds it until it arrives. A scope token on a block that reaches the join counts as one token that can still arrive, whatever is inside it. A ring of joins fails the command with `JOIN_DEADLOCK` and writes nothing. Under the instance lock the two simultaneous completions apply one after the other, and every payment has exactly one `release` task, no `JOINED` token left and one `JOIN_FIRED` row.
+- **Example:** `income not confirmed -> join waits; confirmed -> join fires once`.
+- **Test ID:** `PRE_304_a_token_in_a_loop_that_can_still_arrive_holds_the_join_until_it_does`, `PRE_304_a_block_that_can_still_reach_the_join_is_one_token_that_holds_it` (`InclusiveGatewayBpmnTest`), `PRE_304_two_joins_that_wait_for_each_other_fail_the_command_and_leave_the_state_unchanged`, `PRE_304_inclusive_join_prevents_concurrent_lost_wakeup` (`InclusiveJoinPostgresIT`)

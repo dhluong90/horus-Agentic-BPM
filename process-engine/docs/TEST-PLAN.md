@@ -155,6 +155,11 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-251 | `PRE_251_*` in `TaskElementsTest` | Unit on the kernel, a plain and a manual task | M3 | `TR-STD-04` | Done (#485) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
+| PRE-300 | `PRE_300_*` in `InclusiveGatewayTest` and `InclusiveGatewayBpmnTest` | Unit on the kernel with a payment screening; import and export round trip | M3 | `TR-STD-04` | Done (#494) |
+| PRE-301 | `PRE_301_*` in `InclusiveGatewayTest` | Unit on the kernel: default flow, `NO_PATH`, activation refusals | M3 | `TR-STD-04` | Done (#494) |
+| PRE-302 | `PRE_302_*` in `InclusiveGatewayTest` | Unit on the kernel: join waits, either order, one started branch | M3 | `TR-STD-04`, `TR-ASY-03` | Done (#494) |
+| PRE-303 | `PRE_303_*` in `InclusiveGatewayTest` | Unit on the kernel: a path that never arrives, a token ending elsewhere | M3 | `TR-STD-04` | Done (#494) |
+| PRE-304 | `PRE_304_*` in `InclusiveGatewayTest`, `InclusiveGatewayBpmnTest` and `InclusiveJoinPostgresIT` | Loop, `saga` scope, ring of joins; Testcontainers with two replicas and 300 simultaneous completions (`-Dbpm.join.iterations`) | M3 | `TR-STD-04`, `TR-ASY-03` | Done (#494) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

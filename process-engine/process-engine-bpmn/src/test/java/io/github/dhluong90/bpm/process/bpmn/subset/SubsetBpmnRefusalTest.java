@@ -75,7 +75,7 @@ class SubsetBpmnRefusalTest {
             assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
                     tuple("boundaryEvent", "be-timeout", 42, "S1"),
-                    tuple("inclusiveGateway", "ig-1", 57, "S1"),
+                    tuple("dataObject", "do-1", 57, "S1"),
                     tuple("sendTask", "notify", 63, "S2"),
                     tuple("adHocSubProcess", "adhoc-1", 70, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
@@ -167,7 +167,7 @@ class SubsetBpmnRefusalTest {
     void PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag() {
         StringBuilder body = new StringBuilder("<bpmn:startEvent id=\"s\"/>");
         for (int i = 0; i < 130; i++) {
-            body.append("<bpmn:inclusiveGateway id=\"g").append(i).append("\"/>");
+            body.append("<bpmn:dataObject id=\"g").append(i).append("\"/>");
         }
 
         assertThatThrownBy(() -> reader.read((HEAD + body + TAIL).getBytes(StandardCharsets.UTF_8)))
@@ -180,7 +180,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters() {
         String id = "g".repeat(250) + "&#13;&#10;y";
-        byte[] file = (HEAD + "<bpmn:inclusiveGateway id=\"a&#13;&#10;b\"/><bpmn:inclusiveGateway id=\"" + id + "\"/>"
+        byte[] file = (HEAD + "<bpmn:dataObject id=\"a&#13;&#10;b\"/><bpmn:dataObject id=\"" + id + "\"/>"
                 + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {

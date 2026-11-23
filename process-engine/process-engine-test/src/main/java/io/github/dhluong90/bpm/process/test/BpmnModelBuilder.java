@@ -14,6 +14,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.GatewayDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ProcessType;
@@ -147,6 +148,15 @@ public final class BpmnModelBuilder {
                 new Expression(duration, null, null), null, null)), null, null, false, null));
     }
 
+    /**
+     * @param id node id
+     * @param defaultFlow default flow id, or null
+     * @return this
+     */
+    public BpmnModelBuilder inclusiveGateway(String id, String defaultFlow) {
+        return node(new InclusiveGateway(id, null, null, null, GatewayDirection.UNSPECIFIED, defaultFlow, null));
+    }
+
     /** @param id node id @return this */
     public BpmnModelBuilder parallelGateway(String id) {
         return node(new ParallelGateway(id, null, null, null, GatewayDirection.UNSPECIFIED, null));
@@ -230,6 +240,8 @@ public final class BpmnModelBuilder {
             case BusinessRuleTask t -> new BusinessRuleTask(t.id(), t.name(), in, out, act, t.implementation(), t.info());
             case UserTask t -> new UserTask(t.id(), t.name(), in, out, act, t.implementation(), t.info());
             case ExclusiveGateway g -> new ExclusiveGateway(g.id(), g.name(), in, out, g.gatewayDirection(),
+                    g.defaultFlow(), g.info());
+            case InclusiveGateway g -> new InclusiveGateway(g.id(), g.name(), in, out, g.gatewayDirection(),
                     g.defaultFlow(), g.info());
             case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, out, g.gatewayDirection(), g.info());
             case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), in, out, c.eventDefinitions(),

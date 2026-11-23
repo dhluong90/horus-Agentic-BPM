@@ -131,6 +131,17 @@ public final class ProcessCompiler {
                 problems.add(DefinitionProblem.of("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", node.id()));
             }
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway inclusive) {
+                // Unconditional flows of an inclusive split are always taken (BPMN); only the default is checked.
+                out.stream().filter(f -> f.id().equals(inclusive.defaultFlow()) && f.conditionExpression() != null)
+                        .forEach(f -> problems.add(DefinitionProblem.of("DEFAULT_FLOW_HAS_CONDITION",
+                                "A default flow has no condition in BPMN; remove it or the default", f.id())));
+                if (inclusive.defaultFlow() != null
+                        && out.stream().noneMatch(f -> f.id().equals(inclusive.defaultFlow()))) {
+                    problems.add(DefinitionProblem.of("DEFAULT_FLOW_INVALID", "The default flow "
+                            + inclusive.defaultFlow() + " is not an outgoing flow of the gateway", node.id()));
+                }
+            }
             if (node instanceof ExclusiveGateway gateway) {
                 out.stream().filter(f -> f.id().equals(gateway.defaultFlow()) && f.conditionExpression() != null)
                         .forEach(f -> problems.add(DefinitionProblem.of("DEFAULT_FLOW_HAS_CONDITION",

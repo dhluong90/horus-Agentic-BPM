@@ -282,6 +282,11 @@ export const activityEntry = z
     errorCode: z.string().optional(),
     handler: z.string().optional(),
     cause: z.string().optional(),
+    /** A gateway that chose its flows (#494): the ids of the flows it took, and why. */
+    flows: z.array(z.string()).optional(),
+    reason: z.string().optional(),
+    /** An inclusive join that waits (#494): the steps a token can still arrive from. */
+    waitingFor: z.array(z.string()).optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

@@ -36,6 +36,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEven
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.InclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.service.DefinitionReader;
@@ -81,7 +82,8 @@ import javax.xml.stream.XMLStreamReader;
  * {@code endEvent}, {@code serviceTask} ({@code horus:handler}, or {@code horus:type="agentTask"} with
  * {@code horus:agent}, {@code <horus:outputSchema>} and {@code <horus:guardrail>}), {@code businessRuleTask}
  * ({@code horus:ruleSet}),
- * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} with {@code default}, {@code parallelGateway},
+ * {@code userTask} ({@code horus:assignee}), {@code exclusiveGateway} and {@code inclusiveGateway} with
+ * {@code default}, {@code parallelGateway},
  * an intermediate timer catch event with {@code timeDuration} or {@code timeDate}, and
  * {@code sequenceFlow} with an optional {@code conditionExpression} in {@code urn:horus-bpm:expr:v1}. Inputs are
  * {@code horus:input} elements and the result variable is {@code horus:resultVariable}.
@@ -388,6 +390,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         String defaultFlow = attr("default");
                         Node children = children(local, id, false);
                         elements.add(new ExclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
+                                defaultFlow, children.info()));
+                    }
+                    case "inclusiveGateway" -> {
+                        String id = id();
+                        String gwName = attr("name");
+                        String defaultFlow = attr("default");
+                        Node children = children(local, id, false);
+                        elements.add(new InclusiveGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
                                 defaultFlow, children.info()));
                     }
                     case "parallelGateway" -> {
@@ -1689,6 +1699,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
                 case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), in, o,
                         t.eventDefinitions(), t.eventDefinitionRefs(), t.data(), t.info());
+                case InclusiveGateway g -> new InclusiveGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.defaultFlow(), g.info());
                 case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
                 case Transaction t -> new Transaction(t.id(), t.name(), in, o, t.activity(), t.method(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());

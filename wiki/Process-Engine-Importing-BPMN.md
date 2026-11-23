@@ -80,6 +80,7 @@ The root element must declare the namespaces, and the process must be executable
 | `scriptTask` | `horus:resultVariable`; a `<bpmn:script>` child with one expression in `urn:horus-bpm:expr:v1` | `scriptFormat` set to `urn:horus-bpm:expr:v1` | `<bpmn:script>amount * 2</bpmn:script>` |
 | `callActivity` (a `callProcess` step, 0.3.0) | `calledElement`, the key of the definition to call, in your tenant | `horus:calledVersion` to pin a version, `horus:input` and `horus:output` elements, `horus:compensate`, `horus:onFailure="compensate"` | `calledElement="kyc-check"` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
+| `inclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="screen__standard"`. Takes every outgoing flow whose condition is true, or the default; with several incoming flows it waits for every token that can still reach it, see below |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
 Inputs to a service or rule step are `horus:input` elements inside `extensionElements`:
@@ -96,6 +97,10 @@ Inputs to a service or rule step are `horus:input` elements inside `extensionEle
 ### Script tasks
 
 A script is one expression, not a program. It reads the process variables, has at most 1,000 characters and 500 evaluation steps, and its value is stored in `horus:resultVariable`. It cannot call host code, name a Java class, assign a variable or loop. A script that does not parse is refused at import with `SCRIPT_INVALID` and its line; a script over the step budget fails its step with `SCRIPT_ERROR`. The language is the one the gateway conditions use ([[Rule Engine Expression Language|Rule-Engine-Expression-Language]]); FEEL scripts come later. A worked file is [`card-welcome.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-welcome.bpmn).
+
+### Inclusive gateway
+
+A split takes every outgoing flow that has no condition or a true one, one token each, and the `default` flow only when none qualifies; none and no default fails the step with `NO_PATH`. A gateway with several incoming flows is a join: it holds each arriving token until no other token of the same scope can still reach it, so it waits for exactly the branches the split started, however many, and not for those it did not. A token on a branch that never reaches the join, or that leaves for another end, does not hold it, and a token going round a loop that leads back to the join does. A block (`transaction`) that reaches the join counts as one token. Two joins that wait for each other fail the command with `JOIN_DEADLOCK`; change the model. The cockpit timeline shows the steps a split took, the default when it was taken, and the steps a waiting join expects. A worked file is [`payment-screening.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/payment-screening.bpmn).
 
 ### Calling another process (0.3.0)
 
@@ -162,13 +167,13 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` |
 
-Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `boundaryEvent`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused in 0.2.0:
 
 | Kind | Elements |
 |---|---|
-| Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
+| Gateways | `eventBasedGateway`, `complexGateway` (`inclusiveGateway` imports since 0.3.0) |
 | Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
 | Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |

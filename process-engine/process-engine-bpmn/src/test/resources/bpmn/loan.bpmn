@@ -54,7 +54,7 @@
 
 
 
-    <bpmn:inclusiveGateway id="ig-1"/>
+    <bpmn:dataObject id="do-1"/>
 
 
 

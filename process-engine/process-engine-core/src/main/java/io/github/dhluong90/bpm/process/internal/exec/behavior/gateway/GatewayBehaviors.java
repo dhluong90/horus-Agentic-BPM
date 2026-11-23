@@ -4,12 +4,14 @@ import io.github.dhluong90.bpm.process.internal.exec.BehaviorModule;
 import io.github.dhluong90.bpm.process.internal.exec.BehaviorRegistry;
 
 /**
- * Behaviours of the gateway stream: inclusive and complex gateways. Owned by that stream; registers nothing until it lands.
+ * Behaviours of the gateway stream: the inclusive gateway (#494). The complex gateway follows in this module.
  */
 public final class GatewayBehaviors implements BehaviorModule {
 
     @Override
     public void register(BehaviorRegistry registry) {
-        // Owned by the gateway stream.
+        registry.register(new InclusiveGatewayBehavior())
+                .compileStep(new InclusiveJoinCompileStep())
+                .settleStep(new InclusiveJoinSettleStep());
     }
 }

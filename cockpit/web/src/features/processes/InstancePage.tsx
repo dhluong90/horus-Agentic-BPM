@@ -24,6 +24,7 @@ import {
   incidentKey,
   isProblemEntry,
   nodeMarks,
+  routingWords,
   scopeState,
   undoEntryType,
   wordsOf,
@@ -337,6 +338,16 @@ function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolea
   );
 }
 
+/** Which branches a gateway took and why a join waits, beside its timeline row (#494). */
+function RoutingNote({ entry, graph }: { entry: InstanceActivities['entries'][number]; graph: DiagramGraph }) {
+  const { t } = useI18n();
+  const routing = routingWords(entry, graph);
+  if (routing === undefined) return null;
+  const steps = routing.steps.join(', ');
+  const key = routing.kind === 'waiting' ? 'instance.timeline.waitingFor' : routing.kind === 'tookDefault' ? 'instance.timeline.tookDefault' : 'instance.timeline.took';
+  return <span className="muted"> · {t(key, { steps })}</span>;
+}
+
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
 function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
@@ -379,6 +390,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
                     {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
                       ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
+                    <RoutingNote entry={entry} graph={graph} />
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

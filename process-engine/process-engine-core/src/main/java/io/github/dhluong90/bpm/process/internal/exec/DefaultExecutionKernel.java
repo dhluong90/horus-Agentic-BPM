@@ -180,6 +180,20 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
 
     private void drain(WorkingContext ctx) {
         int steps = 0;
+        boolean settled;
+        do {
+            steps = drainAgenda(ctx, steps);
+            settled = false;
+            if (ctx.status() == InstanceStatus.RUNNING) {
+                for (SettleStep step : behaviors.settleSteps()) {
+                    settled |= step.settle(ctx);
+                }
+            }
+        } while (settled);
+    }
+
+    private int drainAgenda(WorkingContext ctx, int before) {
+        int steps = before;
         String next;
         while ((next = ctx.nextOnAgenda()) != null) {
             if (++steps > MAX_STEPS_PER_APPLY) {
@@ -194,6 +208,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             ctx.history("NODE_ENTERED", token, Map.of());
             behaviorFor(node).enter(node, token, ctx);
         }
+        return steps;
     }
 
     private FlowNode node(String id) {
