@@ -4,6 +4,10 @@
      "=" is equality and strings use double quotes. Not loaded at start-up; import it with the steps in the Process
      Engine import guide. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_fee-routing-feel"
                   targetNamespace="urn:horus-bpm:examples"
@@ -18,10 +22,24 @@
     <bpmn:endEvent id="end" name="Done"/>
     <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="fee-check"/>
     <bpmn:sequenceFlow id="fee-check__review" sourceRef="fee-check" targetRef="officer-review">
-      <bpmn:conditionExpression language="https://www.omg.org/spec/DMN/20191111/FEEL/">fee &gt; 1000 and tier = "gold"</bpmn:conditionExpression>
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="https://www.omg.org/spec/DMN/20191111/FEEL/">fee &gt; 1000 and tier = "gold"</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
     <bpmn:sequenceFlow id="fee-check__waive" sourceRef="fee-check" targetRef="waive-note"/>
     <bpmn:sequenceFlow id="f2" sourceRef="officer-review" targetRef="end"/>
     <bpmn:sequenceFlow id="f3" sourceRef="waive-note" targetRef="end"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_fee-routing-feel">
+    <bpmndi:BPMNPlane id="BPMNPlane_fee-routing-feel" bpmnElement="fee-routing-feel">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="30" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fee-check_di" bpmnElement="fee-check" isMarkerVisible="true"><dc:Bounds x="146" y="60" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="73" y="24" width="90" height="30"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="officer-review_di" bpmnElement="officer-review"><dc:Bounds x="276" y="45" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="waive-note_di" bpmnElement="waive-note"><dc:Bounds x="276" y="175" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="456" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="66" y="85"/><di:waypoint x="146" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="fee-check__review_di" bpmnElement="fee-check__review"><di:waypoint x="196" y="85"/><di:waypoint x="276" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="fee-check__waive_di" bpmnElement="fee-check__waive"><di:waypoint x="171" y="110"/><di:waypoint x="171" y="215"/><di:waypoint x="276" y="215"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="376" y="85"/><di:waypoint x="456" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="376" y="215"/><di:waypoint x="416" y="215"/><di:waypoint x="416" y="85"/><di:waypoint x="456" y="85"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>

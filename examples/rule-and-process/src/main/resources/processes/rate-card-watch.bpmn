@@ -2,6 +2,9 @@
 <!-- Card pricing waits for a new rate card, reprices the card fees, and tells the rest of the tenant it is done.
      Any instance of the same tenant that waits for card-fees-repriced continues; no other tenant's does. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_rate-card-watch"
@@ -22,4 +25,15 @@
     <bpmn:sequenceFlow id="wait-rate-card__reprice" sourceRef="wait-rate-card" targetRef="reprice"/>
     <bpmn:sequenceFlow id="reprice__end" sourceRef="reprice" targetRef="end"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_rate-card-watch">
+    <bpmndi:BPMNPlane id="BPMNPlane_rate-card-watch" bpmnElement="rate-card-watch">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="30" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="wait-rate-card_di" bpmnElement="wait-rate-card"><dc:Bounds x="146" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reprice_di" bpmnElement="reprice"><dc:Bounds x="262" y="45" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="442" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="start__wait-rate-card_di" bpmnElement="start__wait-rate-card"><di:waypoint x="66" y="85"/><di:waypoint x="146" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="wait-rate-card__reprice_di" bpmnElement="wait-rate-card__reprice"><di:waypoint x="182" y="85"/><di:waypoint x="262" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="reprice__end_di" bpmnElement="reprice__end"><di:waypoint x="362" y="85"/><di:waypoint x="442" y="85"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>
