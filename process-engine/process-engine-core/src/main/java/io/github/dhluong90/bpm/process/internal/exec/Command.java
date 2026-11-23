@@ -11,14 +11,21 @@ import java.util.Objects;
 public sealed interface Command permits Command.Start, Command.CompleteTask, Command.JobDue, Command.AsyncResult, Command.RouteToReview, Command.CorrelateMessage, Command.DeliverSignal, Command.VariablesChanged, Command.Cancel, Command.ChildCompleted, Command.ChildEnded, Command.MoveToken, Command.RetryStep, Command.Compensate, Command.EndCompensation, Command.StartAdHocActivity {
 
     /**
-     * Starts the instance at its none start event.
+     * Starts the instance at its start event, or, for a process that starts on an instantiating event-based gateway
+     * (#499), at the catch event that fired.
      *
      * @param variables initial variables
      * @param actor who started it
+     * @param catchNodeId the catch event or receive task of the gateway whose message or signal creates the instance,
+     *     or null
      */
-    record Start(Map<String, Object> variables, String actor) implements Command {
+    record Start(Map<String, Object> variables, String actor, String catchNodeId) implements Command {
         public Start {
             variables = variables == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+        }
+
+        public Start(Map<String, Object> variables, String actor) {
+            this(variables, actor, null);
         }
     }
 

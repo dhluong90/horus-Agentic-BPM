@@ -39,6 +39,7 @@ final class WorkingContext implements ExecutionContext {
     private final List<HistoryEntry> history = new ArrayList<>();
     private final Deque<String> agenda = new ArrayDeque<>();
     private final ScopeArming arming;
+    private final DataStorePort dataStores;
     private InstanceStatus status;
     private long sequence;
     private boolean conditionArmed;
@@ -48,6 +49,12 @@ final class WorkingContext implements ExecutionContext {
 
     WorkingContext(InstanceState state, CompiledProcess process, ExpressionEvaluator expressions, Clock clock,
             String actor, int maxInstances, ScopeArming arming) {
+        this(state, process, expressions, clock, actor, maxInstances, arming, DataStorePort.NONE);
+    }
+
+    WorkingContext(InstanceState state, CompiledProcess process, ExpressionEvaluator expressions, Clock clock,
+            String actor, int maxInstances, ScopeArming arming, DataStorePort dataStores) {
+        this.dataStores = dataStores;
         this.arming = arming;
         this.loops = new Loops(this, maxInstances);
         this.initial = state;
@@ -60,6 +67,17 @@ final class WorkingContext implements ExecutionContext {
         this.participants = new java.util.LinkedHashSet<>(state.participants());
         this.status = state.status();
         this.sequence = state.sequence();
+    }
+
+    @Override
+    public DataStorePort dataStores() {
+        return dataStores;
+    }
+
+    @Override
+    public DataStorePort.Access dataStoreAccess(String store, String item, String nodeId, Token token) {
+        return new DataStorePort.Access(initial.tenantId(), store, item, initial.instanceId(), nodeId,
+                initial.instanceId() + ":" + nodeId + ":" + token.id() + ":" + store + ":" + item);
     }
 
     Transition transition() {

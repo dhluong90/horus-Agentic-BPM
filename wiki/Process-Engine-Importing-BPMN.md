@@ -82,8 +82,8 @@ The root element must declare the namespaces, and the process must be executable
 | `subProcess` (embedded, since 0.3.0) | a none `startEvent`, steps and at least one `endEvent` inside it | `name`. It reads and writes the process variables like the rest of the process; no flow crosses its border | `<bpmn:subProcess id="hand-over">` |
 | `startEvent` with a `signalEventDefinition` (since 0.3.0) | `signalRef`, the id of a document-level `signal` element | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `startEvent` with a `conditionalEventDefinition` (since 0.3.0) | a `condition` in `urn:horus-bpm:expr:v1` | `name` | `<bpmn:condition>amount >= 1000000</bpmn:condition>` |
-| `eventBasedGateway` (since 0.3.0) | two or more outgoing flows, each to a message, signal, timer or conditional `intermediateCatchEvent` or a `receiveTask` that no other flow enters | none; `instantiate="true"` and `eventGatewayType="Parallel"` are refused (`S3`) | `<bpmn:eventBasedGateway id="wait-payment"/>` |
-| `dataObject`, `dataObjectReference`, `dataStoreReference` and a root `dataStore` (since 0.3.0) | `dataObjectRef` on a reference; `dataStoreRef` naming a root `dataStore` | `horus:variable` on a data object: the variable it is held in (its id by default); `ioSpecification`, `dataInputAssociation` and `dataOutputAssociation` on a task or call activity. A data output association writes the result value named by its `sourceRef` (a data output of the `ioSpecification`; the whole result when none) into the data object it targets, and a data input association hands the value of the data object to the step as an input named by its target. A transformation or assignment is refused. A data store reference is kept and exported, not run | `<bpmn:dataOutputAssociation><bpmn:sourceRef>out-score</bpmn:sourceRef><bpmn:targetRef>score-ref</bpmn:targetRef></bpmn:dataOutputAssociation>` |
+| `eventBasedGateway` (since 0.3.0) | two or more outgoing flows, each to a message, signal, timer or conditional `intermediateCatchEvent` or a `receiveTask` that no other flow enters | `instantiate="true"` (since 0.3.0): no flow in, each flow to a message or signal catch or a receive task; the first message or signal creates the instance and the catches need no `horus:correlationKey`. `eventGatewayType="Parallel"` is refused (`S3`) | `<bpmn:eventBasedGateway id="wait-payment"/>` |
+| `dataObject`, `dataObjectReference`, `dataStoreReference` and a root `dataStore` (since 0.3.0) | `dataObjectRef` on a reference; `dataStoreRef` naming a root `dataStore` | `horus:variable` on a data object: the variable it is held in (its id by default); `ioSpecification`, `dataInputAssociation` and `dataOutputAssociation` on a task or call activity. A data output association writes the result value named by its `sourceRef` (a data output of the `ioSpecification`; the whole result when none) into the data object it targets, and a data input association hands the value of the data object to the step as an input named by its target. A transformation or assignment is refused. A data store reference that an association names is read and written through the host's `DataStoreAdapter` of the store's id, for the tenant of the instance; a store with no adapter is refused at import (`DATA_STORE_ADAPTER_NOT_REGISTERED`). One that no association names is kept and exported | `<bpmn:dataOutputAssociation><bpmn:sourceRef>out-score</bpmn:sourceRef><bpmn:targetRef>score-ref</bpmn:targetRef></bpmn:dataOutputAssociation>` |
 | `intermediateCatchEvent` with a signal or conditional definition (since 0.3.0) | as above | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `intermediateThrowEvent` and `endEvent` with a signal definition (since 0.3.0) | `signalRef` | `name` | `<bpmn:endEvent id="end"><bpmn:signalEventDefinition signalRef="Signal_done"/></bpmn:endEvent>` |
 | loop or multi-instance marker (since 0.3.0), on a task, a `callActivity` or an embedded `subProcess` | `standardLoopCharacteristics` with `loopMaximum` and an optional `loopCondition`; or `multiInstanceLoopCharacteristics` with `horus:collection` and `horus:elementVariable`, or a `loopCardinality` | `isSequential`, `horus:outputCollection`, `horus:outputElement`, `completionCondition` | `<bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"/>` |
@@ -285,20 +285,20 @@ Compared with the executable element set of BPMN 2.0. A conformance suite (`Conf
 | Element | Supported | Notes |
 |---|---|---|
 | Process, none start event, none end event | Yes | |
-| Message, signal, timer, conditional start | Yes | Parallel multiple start and the instantiating event-based gateway: not yet |
+| Message, signal, timer, conditional start | Yes | Parallel multiple start: not yet |
 | Multiple start (message, signal) | Yes | Never parallel |
 | Task, manual task, script task, service task, business rule task, user task, send task, receive task | Yes | Script is one expression |
 | Call activity | Yes | |
-| Embedded, event, ad-hoc sub-process, transaction | Yes | A compensation event sub-process holds one service task |
+| Embedded, event, ad-hoc sub-process, transaction | Yes | A compensation event sub-process holds a line of service tasks, run in flow order |
 | Loop and multi-instance markers | Yes | |
-| Exclusive, parallel, inclusive, complex, event-based (exclusive) gateway | Yes | The parallel and instantiating event-based gateway: not yet |
+| Exclusive, parallel, inclusive, complex, event-based (exclusive and instantiating) gateway | Yes | The parallel event-based gateway: not yet |
 | Intermediate catch: message, timer, signal, conditional, link, multiple | Yes | |
 | Intermediate throw: message, signal, escalation, compensation, link | Yes | A throw with several definitions: not yet |
 | Boundary: timer, error, escalation, message, signal, conditional, compensation, cancel, multiple | Yes | |
 | End: error, escalation, terminate, compensation, cancel, message, signal | Yes | An end with several definitions: not yet |
 | Compensation with `waitForCompletion="false"` | No | Refused |
 | Data object, data object reference, data input and output, associations | Yes | Run as variables |
-| Data store, data store reference | Kept | Exported, not run until a host store handler exists |
+| Data store, data store reference | Yes | Read and written through the host's `DataStoreAdapter`; a reference no association names is kept and exported |
 | Lanes, pools, message flows, text annotation, association, group | Kept | Never executed |
 | Choreography, conversation | Kept | Read and kept as received, never run; after 1.0 |
 
@@ -353,18 +353,18 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: a timer cycle on a catch or boundary event is `S1`; the instantiating and the parallel event-based gateway are `S3`. A choreography is read and kept as received, never run.
+Examples: a timer cycle on a catch or boundary event is `S1`; the parallel event-based gateway is `S3`. A choreography is read and kept as received, never run.
 
 These are refused:
 
 | Kind | Elements |
 |---|---|
-| Gateways | an `eventBasedGateway` with `instantiate="true"` or `eventGatewayType="Parallel"` |
+| Gateways | an `eventBasedGateway` with `eventGatewayType="Parallel"` |
 | Events | a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event and a throw or end event with several definitions, and a process start event that waits for all of several triggers |
 | Activities | a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker on anything but a task, a `callActivity` or an embedded `subProcess` |
 | Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
-| Structure | data objects and data stores, and a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
+| Structure | a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |
 
 An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.

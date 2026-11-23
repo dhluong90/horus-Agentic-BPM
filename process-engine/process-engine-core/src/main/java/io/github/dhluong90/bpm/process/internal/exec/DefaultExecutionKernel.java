@@ -25,6 +25,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private final BehaviorRegistry behaviors;
     private final ExpressionEvaluator expressions;
     private final int maxInstances;
+    private final DataStorePort dataStores;
 
     /** Most repetitions of one looped activity when the host does not say ({@code multi-instance.max}). */
     public static final int DEFAULT_MAX_INSTANCES = 1_000;
@@ -47,6 +48,19 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
      */
     public DefaultExecutionKernel(CompiledProcess process, BehaviorRegistry behaviors, ExpressionEvaluator expressions,
             int maxInstances) {
+        this(process, behaviors, expressions, maxInstances, DataStorePort.NONE);
+    }
+
+    /**
+     * @param process the compiled definition
+     * @param behaviors registered behaviours
+     * @param expressions the expression evaluator
+     * @param maxInstances most repetitions of one looped activity
+     * @param dataStores the host's data stores (#499)
+     */
+    public DefaultExecutionKernel(CompiledProcess process, BehaviorRegistry behaviors, ExpressionEvaluator expressions,
+            int maxInstances, DataStorePort dataStores) {
+        this.dataStores = Objects.requireNonNull(dataStores, "dataStores must not be null");
         if (maxInstances < 1) {
             throw new IllegalArgumentException("maxInstances must be at least 1");
         }
@@ -75,7 +89,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             public void completed(WorkingContext c, Token scope, FlowNode block) {
                 scopeCompleted(c, scope, block);
             }
-        });
+        }, dataStores);
         switch (command) {
             case Command.Start start -> start(start, ctx);
             case Command.CompleteTask complete -> trigger(complete.tokenId(), TokenStatus.WAITING_USER, null, complete, ctx);
@@ -220,6 +234,15 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.history("INSTANCE_STARTED", root, Map.of("definitionId", process.definitionId()));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.started.v1",
                 Map.of("instanceId", ctx.snapshot().instanceId(), "definitionId", process.definitionId())));
+        io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway gateway = process.process().flowElements()
+                .stream().filter(io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway.class::isInstance)
+                .map(io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway.class::cast)
+                .filter(io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway::instantiate).findFirst()
+                .orElse(null);
+        if (gateway != null) {
+            startOnGateway(gateway, start, root, ctx);
+            return;
+        }
         // A process has exactly one start event of its own scope (the compiler checks): a none, signal, message or
         // conditional one. A none start event wins if a process also has an event start.
         StartEvent startEvent = process.process().flowElements().stream().filter(StartEvent.class::isInstance)
@@ -230,6 +253,35 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         armEventSubProcesses(ctx, root);
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
+    }
+
+    /**
+     * #499: an instantiating event-based gateway. The message or signal that created the instance is the first of the
+     * gateway's catches to fire, so the token starts after that catch and the others are never waited for: there is
+     * nothing to cancel. A start with no trigger, or one for an event the gateway does not lead to, is refused.
+     */
+    private void startOnGateway(io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway gateway,
+            Command.Start start, Token root, WorkingContext ctx) {
+        FlowNode catchNode = start.catchNodeId() == null ? null : process.outgoing(gateway.id()).stream()
+                .filter(f -> f.targetRef().equals(start.catchNodeId())).findFirst()
+                .map(f -> node(f.targetRef())).orElse(null);
+        if (catchNode == null) {
+            throw new ExecutionException("START_TRIGGER_REQUIRED", gateway.id(), "The process starts on one of the"
+                    + " messages or signals that event gateway " + gateway.id() + " waits for; none was given");
+        }
+        for (io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping out
+                : catchNode.extensions().all(io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping.class)) {
+            if (!start.variables().containsKey(out.from())) {
+                throw new ExecutionException("MESSAGE_FIELD_MISSING", catchNode.id(), "The message has no field "
+                        + out.from());
+            }
+            ctx.variables().set(out.name(), start.variables().get(out.from()));
+        }
+        armEventSubProcesses(ctx, root);
+        Token flow = ctx.createToken(TokenKind.FLOW, catchNode.id(), root.id());
+        ctx.history("EVENT_GATEWAY_STARTED", flow, Map.of("gateway", gateway.id(), "catch", catchNode.id()));
+        ctx.history("NODE_COMPLETED", flow, Map.of());
+        ctx.takeOutgoing(flow, catchNode);
     }
 
     private void trigger(String tokenId, TokenStatus expected, String attemptId, Command command, WorkingContext ctx) {

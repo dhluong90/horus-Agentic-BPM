@@ -292,7 +292,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     @Override
     public List<StoredDefinition> signalStartDefinitions(String tenant, String name, int limit) {
-        return ProcessListQueries.SIGNAL_START_DEFINITIONS.list(jdbc, List.of(tenant, name, limit),
+        return ProcessListQueries.SIGNAL_START_DEFINITIONS.list(jdbc, List.of(tenant, name, name, limit),
                 JdbcProcessStore::definition);
     }
 

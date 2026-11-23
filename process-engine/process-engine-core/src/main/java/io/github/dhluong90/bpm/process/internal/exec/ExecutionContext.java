@@ -21,6 +21,25 @@ public interface ExecutionContext {
     CompiledProcess process();
 
     /**
+     * The access to a data store for a step (#499): the tenant and the instance are the working copy's own, never a
+     * value read from the variables.
+     *
+     * @param store the data store id
+     * @param item the data input or output name
+     * @param nodeId the step
+     * @param token the token of the step's attempt
+     * @return the access
+     */
+    default DataStorePort.Access dataStoreAccess(String store, String item, String nodeId, Token token) {
+        throw new UnsupportedOperationException("dataStoreAccess");
+    }
+
+    /** @return the host's data stores; none by default */
+    default DataStorePort dataStores() {
+        return DataStorePort.NONE;
+    }
+
+    /**
      * Leaves a node by its outgoing sequence flows with default BPMN semantics: one flow moves the token, several
      * unconditional flows fork it, a default flow is taken when no condition holds.
      *

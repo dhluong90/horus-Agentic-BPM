@@ -65,8 +65,11 @@ final class ProcessListQueries {
     static final ListQuery SIGNAL_START_DEFINITIONS = new ListQuery("signal-start-definitions",
             new Bound.Page("at most the requested number of active versions of one tenant, on idx_pre_definition_active (V45)"),
             "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND status = 'ACTIVE' "
-                    + "AND definition_json @> jsonb_build_object('steps', jsonb_build_array("
+                    + "AND (definition_json @> jsonb_build_object('steps', jsonb_build_array("
                     + "jsonb_build_object('type', 'start', 'signal', ?::text))) "
+                    + "OR definition_json @> jsonb_build_object('steps', jsonb_build_array("
+                    + "jsonb_build_object('type', 'eventBasedGateway', 'instantiate', true, "
+                    + "'signals', jsonb_build_array(?::text))))) "
                     + "ORDER BY key_name, version_num DESC LIMIT ?");
 
     /** The lifecycle actions of one definition version. */

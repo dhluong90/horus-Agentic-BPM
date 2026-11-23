@@ -151,7 +151,9 @@ class SagaCompensationTest {
                     handler("close-account", call -> done("closed", true)),
                     handler("fx-unbuy", call -> done("reversed", true)),
                     handler("fx-unsell", call -> done("reversed", true)),
-                    handler("refund-fee", call -> done("refunded", true))));
+                    handler("refund-fee", call -> done("refunded", true)),
+                    handler("reverse-disbursement", call -> done("reversed", true)),
+                    handler("notify-treasury", call -> done("told", true))));
         }
         TestEngine engine = TestEngine.replica("pod-1", clock).autoApprove(autoApprove)
                 .handlers(handlers.toArray(ServiceTaskHandler[]::new))
@@ -881,6 +883,25 @@ class SagaCompensationTest {
         assertThat(status(id)).isEqualTo("FAILED");
         assertThat(tokenStatus(scopeToken(id, "loan-booking-nested"))).isEqualTo("COMPENSATED");
         assertThat(drain(engine)).isEmpty();
+    }
+
+    @Test
+    void PRE_326_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside() {
+        // Given loan-booking-undo-tasks: the funds reserved in the sub-process, whose undo is two tasks; the partner refuses
+        TestEngine engine = engine();
+        deploy(engine, "loan-booking-undo-tasks");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read");
+
+        // When notify-partner fails and the undo of the root scope runs
+        String id = engine.services.start(new StartRequest("loan-booking-undo-tasks", "LN-2026-0301", Map.of(), null)).id();
+        step(engine);
+        drain(engine);
+
+        // Then the sub-process's two tasks run first, in flow order, and the step inside is undone after them
+        assertThat(undoCalls()).containsExactly("reverse-disbursement:disburse", "notify-treasury:disburse",
+                "release-funds:reserve-funds");
+        assertThat(stack(id)).containsExactly("reserve-funds:DONE", "disburse:DONE", "disburse:DONE");
+        assertThat(status(id)).isEqualTo("FAILED");
     }
 
     @Test

@@ -431,7 +431,10 @@
         "next": {
           "description": "The catch events (message, signal, timer, conditional) or receive tasks the gateway waits on; the first to fire wins and the others are cancelled.",
           "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/nodeId" }
-        }
+        },
+        "instantiate": { "description": "The gateway starts the instance: the first message or signal of its catches creates it and the others are not waited for.", "const": true },
+        "signals": { "description": "The signal names of an instantiating gateway's catches.", "type": "array", "items": { "$ref": "#/$defs/signalName" } },
+        "messages": { "description": "The message names of an instantiating gateway's catches.", "type": "array", "items": { "type": "string" } }
       }
     },
     "timerStep": {

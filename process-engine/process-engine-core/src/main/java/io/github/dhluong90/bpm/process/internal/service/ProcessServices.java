@@ -237,6 +237,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
     /** The host's port for the messages a process sends (#491); none until the starter installs one. */
     private volatile io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
+    /** The host's data stores by name (#499); none until the starter installs them. */
+    private volatile Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> dataStoreAdapters = Map.of();
     /** {@code calls.max-depth} (#92). */
     private volatile int maxCallDepth = EngineDefaults.MAX_CALL_DEPTH;
     private volatile int maxLoopInstances = DefaultExecutionKernel.DEFAULT_MAX_INSTANCES;
@@ -1687,6 +1689,13 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private List<DefinitionProblem> serviceRegistrationProblems(Process process) {
         List<DefinitionProblem> problems = new ArrayList<>();
+        // #499: a data store that an association reads or writes needs the host's adapter of that name.
+        io.github.dhluong90.bpm.process.internal.exec.DataStoreUse.storesUsed(process).forEach((store, nodeId) -> {
+            if (!dataStoreAdapters.containsKey(store)) {
+                problems.add(DefinitionProblem.of("DATA_STORE_ADAPTER_NOT_REGISTERED", nodeId + " -> " + safe(store)
+                        + ": no DataStoreAdapter of this name is registered in this host", nodeId));
+            }
+        });
         for (FlowElement element : process.allFlowElements()) {
             if (element instanceof ServiceTask task) {
                 undoRegistrationProblem(task).ifPresent(problems::add);
@@ -2030,7 +2039,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new MessageNotCorrelatedException("No instance waits for message " + name
                     + " with this key and no process starts on it");
         }
-        return startByMessage(tenant, caller, starting, key, payload);
+        return startByMessage(tenant, caller, starting, key, payload, name);
     }
 
     private MessageDelivery deliverMessage(String tenant, ProcessStore.MessageSubscriptionRow subscription,
@@ -2080,7 +2089,40 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return found;
     }
 
+    /**
+     * #499: the catch event or receive task, after an instantiating event-based gateway at the start of the process,
+     * that waits for the message or signal of this name; null when the process does not start on it.
+     */
+    private static String gatewayCatch(CompiledProcess process, boolean signal, String name) {
+        for (io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode n : process.nodes()) {
+            if (!(n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g) || !g.instantiate()
+                    || !process.containerOf(g.id()).equals(process.process().id())) {
+                continue;
+            }
+            for (io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow f : process.outgoing(g.id())) {
+                io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode target = process.node(f.targetRef())
+                        .orElse(null);
+                if (target instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask r && !signal
+                        && name.equals(r.messageRef())) {
+                    return target.id();
+                }
+                if (target instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent c
+                        && c.eventDefinitions().stream().anyMatch(d -> signal
+                        ? d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition sd
+                                && name.equals(sd.signalRef())
+                        : d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition md
+                                && name.equals(md.messageRef()))) {
+                    return target.id();
+                }
+            }
+        }
+        return null;
+    }
+
     private static boolean startsOn(CompiledProcess process, String name) {
+        if (gatewayCatch(process, false, name) != null) {
+            return true;
+        }
         // Only the start event of the process itself: one in an event sub-process (#487) waits inside an instance.
         return process.nodes().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
                 && process.containerOf(s.id()).equals(process.process().id())
@@ -2089,7 +2131,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private MessageDelivery startByMessage(String tenant, String caller, StoredDefinition definition, String key,
-            Map<String, Object> payload) {
+            Map<String, Object> payload, String name) {
         if (key != null) {
             InstanceRow existing = store.findInstanceByBusinessKey(tenant, definition.key(), key).orElse(null);
             if (existing != null) {
@@ -2105,7 +2147,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new MessageDelivery(MessageDelivery.Outcome.STARTED, existing.id(), null);
         }
         run(definition, row, InstanceState.created(instanceId, tenant, definition.id(), key),
-                new Command.Start(payload, caller), RunAs.REQUEST);
+                new Command.Start(payload, caller, gatewayCatch(compiled(definition).process(), false, name)),
+                RunAs.REQUEST);
         return new MessageDelivery(MessageDelivery.Outcome.STARTED, instanceId, null);
     }
 
@@ -3197,6 +3240,67 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Installs the host's data store adapters (#499), by the id of the {@code dataStore} each serves. Called once while
+     * the engine is wired. A definition whose association names a store with no adapter is refused at deploy time.
+     *
+     * @param adapters the adapters by name
+     */
+    public void useDataStoreAdapters(Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> adapters) {
+        this.dataStoreAdapters = Map.copyOf(adapters);
+    }
+
+    /**
+     * The kernel's port to the host's data stores (#499). The tenant of every call is the instance's, set by the
+     * kernel; a failure of the adapter becomes an execution error that names the store and the step and carries no
+     * message of the adapter, which may hold a row's content.
+     */
+    private final class HostDataStores implements io.github.dhluong90.bpm.process.internal.exec.DataStorePort {
+        @Override
+        public Object read(Access access) {
+            try {
+                return adapter(access).read(adapterAccess(access));
+            } catch (UnsupportedOperationException e) {
+                throw new ExecutionException("DATA_STORE_READ_UNSUPPORTED", access.nodeId(), "Data store "
+                        + access.store() + " cannot be read");
+            } catch (ExecutionException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw new ExecutionException("DATA_STORE_FAILED", access.nodeId(), "Reading data store "
+                        + access.store() + " failed: " + e.getClass().getSimpleName());
+            }
+        }
+
+        @Override
+        public void write(Access access, Object value) {
+            try {
+                adapter(access).write(adapterAccess(access), value);
+            } catch (UnsupportedOperationException e) {
+                throw new ExecutionException("DATA_STORE_WRITE_UNSUPPORTED", access.nodeId(), "Data store "
+                        + access.store() + " cannot be written");
+            } catch (ExecutionException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw new ExecutionException("DATA_STORE_FAILED", access.nodeId(), "Writing data store "
+                        + access.store() + " failed: " + e.getClass().getSimpleName());
+            }
+        }
+
+        private io.github.dhluong90.bpm.process.spi.DataStoreAdapter adapter(Access access) {
+            io.github.dhluong90.bpm.process.spi.DataStoreAdapter adapter = dataStoreAdapters.get(access.store());
+            if (adapter == null) {
+                throw new ExecutionException("DATA_STORE_ADAPTER_MISSING", access.nodeId(), "No adapter serves data store "
+                        + access.store());
+            }
+            return adapter;
+        }
+
+        private io.github.dhluong90.bpm.process.spi.DataStoreAdapter.DataStoreAccess adapterAccess(Access access) {
+            return new io.github.dhluong90.bpm.process.spi.DataStoreAdapter.DataStoreAccess(access.tenantId(),
+                    access.store(), access.item(), access.instanceId(), access.nodeId(), access.idempotencyKey());
+        }
+    }
+
+    /**
      * Sets the most repetitions one looped activity may have ({@code multi-instance.max}, #496): a collection or a
      * loop maximum over it opens an incident and creates no task. Set before the first instance runs.
      *
@@ -3345,7 +3449,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             depth[0]++;
             try {
                 run(effective, row, InstanceState.created(instanceId, tenant, effective.id(), null),
-                        new Command.Start(Map.of(), SIGNAL_ACTOR), new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
+                        new Command.Start(Map.of(), SIGNAL_ACTOR, gatewayCatch(compiled(effective).process(), true, name)),
+                        new RunAs.EngineWork(tenant, SIGNAL_ACTOR));
             } finally {
                 depth[0]--;
             }
@@ -5163,7 +5268,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         // After the tokens: an entry references its scope token.
         for (Effect.PushCompensation push : pushes) {
             FlowNode node = compiled.process().node(push.nodeId()).orElseThrow();
-            FlowNode viaBoundary = node.extensions().first(CompensateHandlerRef.class).isPresent() ? null
+            FlowNode viaBoundary = push.undoNodeId() != null ? compiled.process().node(push.undoNodeId()).orElse(null)
+                    : node.extensions().first(CompensateHandlerRef.class).isPresent() ? null
                     : compiled.process().compensationActivityOf(node.id()).orElse(null);
             store.pushCompensation(entryOf(push, tenant, state.instanceId(), node, viaBoundary, now));
         }
@@ -5348,7 +5454,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         return kernels.computeIfAbsent(definition.tenantId() + "/" + definition.id(), k -> {
             Process process = storedProcess(definition);
             CompiledProcess compiledProcess = compiler.compile(definition.id(), process);
-            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances),
+            return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances,
+                    new HostDataStores()),
                     AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
                             n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
                             || (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent

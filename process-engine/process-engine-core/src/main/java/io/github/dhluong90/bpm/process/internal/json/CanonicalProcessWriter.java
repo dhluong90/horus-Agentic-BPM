@@ -392,6 +392,26 @@ public final class CanonicalProcessWriter {
                     step.put("type", "eventBasedGateway");
                     ArrayNode next = step.putArray("next");
                     out.forEach(f -> next.add(f.targetRef()));
+                    if (g.instantiate()) {
+                        // #499: the gateway starts the instance; the names of its signal and message catches let a
+                        // broadcast or a message find the definition.
+                        step.put("instantiate", true);
+                        ArrayNode signals = step.putArray("signals");
+                        ArrayNode messages = step.putArray("messages");
+                        for (SequenceFlow f : out) {
+                            elements.stream().filter(e -> e.id() != null && e.id().equals(f.targetRef())).findFirst()
+                                    .ifPresent(target -> {
+                                        if (target instanceof FlowNode catchNode) {
+                                            if (signalOf(catchNode) != null) {
+                                                signals.add(signalOf(catchNode));
+                                            }
+                                            if (messageOf(catchNode) != null) {
+                                                messages.add(messageOf(catchNode));
+                                            }
+                                        }
+                                    });
+                        }
+                    }
                 }
                 case IntermediateCatchEvent c when c.eventDefinitions().size() > 1 -> {
                     step.put("type", "multipleCatch");
@@ -631,6 +651,11 @@ public final class CanonicalProcessWriter {
     }
 
     /** @return the message name of a message event or task, or null for any other node */
+    private static String signalOf(FlowNode node) {
+        return node instanceof Event e ? e.eventDefinitions().stream().filter(SignalEventDefinition.class::isInstance)
+                .map(d -> ((SignalEventDefinition) d).signalRef()).findFirst().orElse(null) : null;
+    }
+
     private static String messageOf(FlowNode node) {
         return switch (node) {
             case ReceiveTask t -> t.messageRef();

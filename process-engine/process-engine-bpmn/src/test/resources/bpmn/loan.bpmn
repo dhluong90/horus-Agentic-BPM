@@ -60,7 +60,7 @@
 
 
 
-    <bpmn:eventBasedGateway id="notify" instantiate="true"/>
+    <bpmn:eventBasedGateway id="notify" eventGatewayType="Parallel"/>
 
 
 

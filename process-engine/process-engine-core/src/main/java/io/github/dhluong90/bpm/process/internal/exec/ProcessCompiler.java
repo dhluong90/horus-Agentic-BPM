@@ -107,11 +107,13 @@ public final class ProcessCompiler {
         containerIds.add(process.id());
         nodes.values().stream().filter(n -> n instanceof Transaction || n instanceof SubProcess)
                 .map(FlowNode::id).forEach(containerIds::add);
-        Map<String, StartEvent> startOf = new HashMap<>();
+        Map<String, FlowNode> startOf = new HashMap<>();
         for (String container : containerIds) {
             boolean root = container.equals(process.id());
-            List<StartEvent> starts = nodes.values().stream().filter(StartEvent.class::isInstance)
-                    .filter(n -> container.equals(containerOf.get(n.id()))).map(StartEvent.class::cast).toList();
+            // #499: the root may start on an instantiating event-based gateway, which stands for its start event.
+            List<FlowNode> starts = nodes.values().stream().filter(n -> n instanceof StartEvent
+                            || root && n instanceof EventBasedGateway g && g.instantiate())
+                    .filter(n -> container.equals(containerOf.get(n.id()))).toList();
             if (starts.size() != 1) {
                 problems.add(DefinitionProblem.of("START_EVENT_COUNT", kind(root, nodes.get(container))
                         + " needs exactly one start event, found " + starts.size(), container));
@@ -187,9 +189,29 @@ public final class ProcessCompiler {
             }
             if (node instanceof EventBasedGateway gateway) {
                 // #495: a gateway waits on two or more catch events; each is entered by this gateway alone, and no flow has a condition.
-                if (gateway.instantiate() || gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL) {
-                    problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "an instantiating or parallel"
-                            + " event-based gateway has no behaviour in this release", "eventBasedGateway", node.id(), 0));
+                if (gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL) {
+                    problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "a parallel event-based gateway has no"
+                            + " behaviour in this release", "eventBasedGateway", node.id(), 0));
+                }
+                if (gateway.instantiate()) {
+                    if (!containerOf.get(node.id()).equals(process.id())) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_INSTANTIATE_SCOPE", "An instantiating event-based"
+                                + " gateway starts the process; it stands in the process, not in a sub-process or"
+                                + " transaction", node.id()));
+                    }
+                    if (flows.stream().anyMatch(f -> f.targetRef().equals(node.id()))) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_INSTANTIATE_INCOMING", "An instantiating"
+                                + " event-based gateway starts the process and has no incoming flow", node.id()));
+                    }
+                    for (SequenceFlow f : out) {
+                        FlowNode target = nodes.get(f.targetRef());
+                        if (target != null && waitsForEvent(target) && !startsInstance(target)) {
+                            problems.add(DefinitionProblem.of("EVENT_GATEWAY_INSTANTIATE_TARGET", "An instantiating"
+                                    + " event-based gateway leads to message or signal catch events or receive tasks; a"
+                                    + " timer or conditional catch cannot create an instance; " + target.id() + " is one",
+                                    f.id()));
+                        }
+                    }
                 }
                 if (out.size() < 2) {
                     problems.add(DefinitionProblem.of("EVENT_GATEWAY_BRANCHES", "An event-based gateway waits on at"
@@ -512,13 +534,10 @@ public final class ProcessCompiler {
                     problems.add(DefinitionProblem.of("COMPENSATION_DUPLICATE", "Scope " + scope.id() + " has one undo:"
                             + " a compensation boundary event or one compensation event sub-process", start.id()));
                 }
-                List<FlowNode> body = nodes.values().stream().filter(n -> containerOf.get(n.id()).equals(owner.id())
-                        && !(n instanceof StartEvent) && !(n instanceof EndEvent)).toList();
-                if (body.size() != 1 || !(body.get(0) instanceof ServiceTask task)
-                        || task.extensions().first(HandlerRef.class).isEmpty()) {
+                if (!undoIsALine(owner, start, nodes, containerOf, flows)) {
                     problems.add(DefinitionProblem.of("COMPENSATION_EVENT_SUBPROCESS_SHAPE", "A compensation event"
-                            + " sub-process holds one service task with horus:handler, the undo, between its start"
-                            + " and end events", owner.id()));
+                            + " sub-process holds one or more service tasks with horus:handler in a line, the undo,"
+                            + " between its start and end events", owner.id()));
                 }
             }
             return;
@@ -649,7 +668,36 @@ public final class ProcessCompiler {
         }
     }
 
-    private static void reachability(StartEvent start, Map<String, FlowNode> nodes, List<SequenceFlow> flows,
+    /**
+     * #499: the undo of a compensation event sub-process is a line of service tasks, each with a handler, from its start
+     * event to its end event: no gateway, no branch, no other node. The tasks run in that order.
+     */
+    private static boolean undoIsALine(FlowNode owner, StartEvent start, Map<String, FlowNode> nodes,
+            Map<String, String> containerOf, List<SequenceFlow> flows) {
+        long inside = nodes.values().stream().filter(n -> containerOf.get(n.id()).equals(owner.id())).count();
+        String at = start.id();
+        int tasks = 0;
+        for (int guard = 0; guard <= inside; guard++) {
+            String from = at;
+            List<SequenceFlow> next = flows.stream().filter(f -> f.sourceRef().equals(from)).toList();
+            if (next.size() != 1) {
+                return false;
+            }
+            FlowNode target = nodes.get(next.get(0).targetRef());
+            if (target instanceof EndEvent) {
+                // The line ends here; every node of the sub-process must be on it: start, the tasks, one end.
+                return tasks >= 1 && inside == tasks + 2L;
+            }
+            if (!(target instanceof ServiceTask task) || task.extensions().first(HandlerRef.class).isEmpty()) {
+                return false;
+            }
+            tasks++;
+            at = target.id();
+        }
+        return false;
+    }
+
+    private static void reachability(FlowNode start, Map<String, FlowNode> nodes, List<SequenceFlow> flows,
             List<DefinitionProblem> problems) {
         Set<String> forward = walk(start.id(), flows, true);
         // A throwCompensation ends its path too: the instance does not go on after it (#67).
@@ -703,6 +751,14 @@ public final class ProcessCompiler {
                 || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition
                 || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition
                 || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition);
+    }
+
+    /** A catch that may create an instance after an instantiating event-based gateway: a message or signal one (#499). */
+    static boolean startsInstance(FlowNode node) {
+        return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
+                || node instanceof IntermediateCatchEvent c && c.eventDefinitions().size() == 1
+                && (c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition
+                || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition);
     }
 
     static boolean throwsCompensation(FlowNode node) {
