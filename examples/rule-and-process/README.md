@@ -88,14 +88,14 @@ The `dev` profile creates these users, all with the password from `HORUS_DEMO_PA
 | User | Roles | What the user does in the demo |
 |---|---|---|
 | `tuan` | `TELLER` | Submits card applications and starts processes; the maker of an application |
-| `an` | `CARD_OFFICER` | Works the officer tasks (fee review, credit review form, sign-offs); the checker of a fee. The four-eyes review refuses anyone on work they started |
+| `an` | `CARD_OFFICER`, `KYC_OFFICER`, `DISPUTES_OFFICER`, `PAYMENT_OFFICER`, `PRICING_OFFICER` | Works the officer tasks (fee review, credit review form, sign-offs) and the task roles of the demo models; the checker of a fee. The four-eyes review refuses anyone on work they started |
 | `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | The maker: authors rule sets, simulates, imports and drafts process definitions in the cockpit and requests approval. Her own approval is refused (`SELF_APPROVAL_FORBIDDEN`). May switch between the tenants `bank-a` and `bank-b` |
-| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | The checker: approves rule sets and process definitions that someone else requested; reads the decision log; clears incidents |
-| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | Cancels instances, reassigns tasks, clears incidents, correlates messages and broadcasts signals; the second holder who approves the migration and calendar changes that `hung` proposes |
-| `hung` | `OPERATIONS_OFFICER` | Runs live cases: correlates messages, broadcasts signals, works tasks and incidents, proposes instance migrations and calendar changes |
+| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | The checker: approves rule sets and process definitions that someone else requested; simulates and replays selected decisions from the decision log; clears incidents |
+| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR`, `DISPUTES_SENIOR` | Cancels instances, reassigns tasks, clears incidents, correlates messages and broadcasts signals; the second holder who approves the migration and calendar changes that `hung` proposes |
+| `hung` | `OPERATIONS_OFFICER`, `OPS`, `AML_OFFICER`, `SANCTIONS_OFFICER` | Runs live cases: correlates messages, broadcasts signals, works tasks and incidents, proposes instance migrations and calendar changes |
 | `quynh` | `AUDITOR` | Reads rule sets, definitions, instances and the decision log; changes nothing |
 
-Permissions by role are in [`application.yml`](src/main/resources/application.yml) (`horus.bpm.rules.security` and `horus.bpm.processes.security`; the `dev` profile adds `rules:evaluate` and `rules:simulate` for the author and the approver in [`application-dev.yml`](src/main/resources/application-dev.yml)). Cockpit draft editing is on for rules and processes (`authoring.cockpit-drafts`), and the tenant switch is on for the `dev` profile (`horus.bpm.tenancy.switching.enabled`). `lan` carries `allowed_tenants: [bank-a, bank-b]` from the host's user store, so the switcher offers `bank-b`, an empty tenant that shows the isolation; every other user has `bank-a` only.
+Permissions by role are in [`application.yml`](src/main/resources/application.yml) (`horus.bpm.rules.security` and `horus.bpm.processes.security`; the `dev` profile adds `rules:evaluate` and `rules:simulate` for the author and the approver, so `lan` or `minh` can replay selected decisions (`minh` also holds `rules:log:read`), and `role:` task roles for the demo models, in [`application-dev.yml`](src/main/resources/application-dev.yml)). Cockpit draft editing (`authoring.cockpit-drafts`, off by default) and the tenant switch (`horus.bpm.tenancy.switching.enabled`) are on for the `dev` profile only. `lan` carries `allowed_tenants: [bank-a, bank-b]` from the host's user store, so the switcher offers `bank-b`, an empty tenant that shows the isolation; every other user has `bank-a` only.
 
 ### Demo models
 

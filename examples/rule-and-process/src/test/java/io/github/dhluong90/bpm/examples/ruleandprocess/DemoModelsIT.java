@@ -111,6 +111,24 @@ class DemoModelsIT {
     }
 
     @Test
+    void the_compensation_event_subprocess_demo_runs_to_completion_and_every_task_role_has_a_holder() throws Exception {
+        // When hoa starts loan-disbursement, whose steps are all registered handlers
+        HttpResponse<String> started = send("hoa", "POST", "/api/bpm/processes/v1/instances",
+                "{\"definitionKey\":\"loan-disbursement\",\"businessKey\":\"DISB-1\",\"variables\":{}}");
+
+        // Then the instance completes: the disbursement sub-process and its compensation event sub-process load and run
+        assertThat(started.statusCode()).as(started.body()).isEqualTo(201);
+        String id = JSON.readTree(started.body()).get("id").stringValue();
+        HttpResponse<String> instance = get("hoa", "/api/bpm/processes/v1/instances/" + id);
+        assertThat(JSON.readTree(instance.body()).get("status").stringValue()).as(instance.body()).isEqualTo("COMPLETED");
+
+        // And every role a model assigns a user task to is held by a demo user
+        assertThat(permissions("an")).contains("processes:task:work");
+        assertThat(permissions("hung")).contains("processes:task:work");
+        assertThat(permissions("hoa")).contains("processes:task:work");
+    }
+
+    @Test
     void a_message_starts_the_event_gateway_process_and_the_parallel_one_then_a_signal_continues_it() throws Exception {
         // When operations delivers the loan application message, then the KYC documents message and the signal
         HttpResponse<String> intake = post("hung", "/api/bpm/processes/v1/messages:correlate",
@@ -131,7 +149,7 @@ class DemoModelsIT {
     void every_demo_scene_has_a_user_who_may_run_it_and_only_lan_has_two_tenants() throws Exception {
         // Then each user's permissions on the default start cover the scenes of the demo
         assertThat(permissions("quynh")).contains("rules:log:read").doesNotContain("rules:author", "processes:start");
-        assertThat(permissions("minh")).contains("rules:log:read", "rules:approve", "processes:approve")
+        assertThat(permissions("minh")).contains("rules:log:read", "rules:simulate", "rules:approve", "processes:approve")
                 .doesNotContain("rules:author", "processes:author");
         assertThat(permissions("lan")).contains("rules:author", "processes:author", "processes:deploy")
                 .doesNotContain("rules:approve");

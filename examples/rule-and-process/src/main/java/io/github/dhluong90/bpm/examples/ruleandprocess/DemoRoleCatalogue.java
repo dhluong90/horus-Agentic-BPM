@@ -12,7 +12,9 @@ final class DemoRoleCatalogue implements RoleCatalogue {
 
     /** The roles of the demo users of {@link HostSecurityConfiguration}. */
     static final Set<String> DEMO_ROLES = Set.of("PRICING_AUTHOR", "PRICING_APPROVER", "PROCESS_DEPLOYER",
-            "PROCESS_APPROVER", "TELLER", "CARD_OFFICER", "BRANCH_SUPERVISOR", "OPERATIONS_OFFICER", "AUDITOR");
+            "PROCESS_APPROVER", "TELLER", "CARD_OFFICER", "BRANCH_SUPERVISOR", "OPERATIONS_OFFICER", "AUDITOR",
+            "KYC_OFFICER", "AML_OFFICER", "SANCTIONS_OFFICER", "PAYMENT_OFFICER", "PRICING_OFFICER", "DISPUTES_OFFICER",
+            "DISPUTES_SENIOR", "OPS");
 
     private final String tenant;
 

@@ -55,9 +55,6 @@ horus:
         hung: { en: Hung Le, vi: Lê Quốc Hùng }
         quynh: { en: Quynh Bui, vi: Bùi Như Quỳnh }
     rules:
-      authoring:
-        # The demo edits drafts in the cockpit. A host that changes definitions through its release pipeline leaves this off.
-        cockpit-drafts: true
       decision-log:
         # How long decisions are kept: the bank's choice, in whole months, at least 12 (P12M). Monthly partitions
         # older than this are dropped and each drop is recorded in rle_decision_log_drop. Never on by default: left empty (or keep-forever),
@@ -75,8 +72,6 @@ horus:
           # rules:pin is granted to no role: no process step pins a version yet, and a pin bypasses the version in
           # force. Grant it to the account process steps run under once a step needs it.
     processes:
-      authoring:
-        cockpit-drafts: true
       definitions:
         # Imported at start-up for each start-up tenant, through the normal import path. The dev profile imports
         # every demo model (application-dev.yml).
