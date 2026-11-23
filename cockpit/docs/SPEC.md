@@ -716,7 +716,7 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 - **Test IDs:** `CKP_090_the_request_carries_the_date_the_author_chose`, `CKP_090_a_date_that_has_passed_cannot_be_requested`, `CKP_090_without_a_date_the_one_click_request_is_unchanged`
 
 ### CKP-091 Migration plans and calendar changes wait in the approvals queue and are approved on the hash that was shown
-- **Traces to:** `TR-SEC-04`, `TR-UI-02`, PRE-254, PD-139, #473
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`, PRE-346, PD-139, #473
 - **Milestone:** M3
 - **Kind:** control
 - **Given:** Lan proposed the holiday 1 January 2028 for `vn-banking-hours`; Minh and Lan both hold `processes:calendar:manage`; a migration plan of loan-origination is proposed by Lan.

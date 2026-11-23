@@ -884,7 +884,7 @@ class SagaCompensationTest {
     }
 
     @Test
-    void PRE_290_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes() {
+    void PRE_344_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes() {
         // Given the cancelled transfer, where credit-back is refused with ACCOUNT_FROZEN the first time
         TestEngine engine = engine();
         creditBack.add(new AdapterResult.BusinessError("ACCOUNT_FROZEN", "account 0011-223344 is frozen"));
@@ -923,7 +923,7 @@ class SagaCompensationTest {
     }
 
     @Test
-    void PRE_291_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing() {
+    void PRE_345_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing() {
         // Given loan-undo-one: the loan registered, the funds reserved and the account opened, then two throws that
         // name reserve-funds
         TestEngine engine = engine();

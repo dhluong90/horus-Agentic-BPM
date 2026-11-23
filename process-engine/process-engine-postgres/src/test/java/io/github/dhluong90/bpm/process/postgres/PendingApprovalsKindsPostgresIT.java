@@ -95,7 +95,7 @@ class PendingApprovalsKindsPostgresIT {
     }
 
     @Test
-    void PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash() {
+    void PRE_346_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash() {
         Page<PendingApproval> page = list(PageRequest.first(), "bank-a", "lan", MIGRATE, CALENDAR, "processes:read");
 
         assertThat(page.items()).extracting(PendingApproval::kind).containsExactly("MIGRATION_PLAN", "CALENDAR_CHANGE");
@@ -117,7 +117,7 @@ class PendingApprovalsKindsPostgresIT {
     }
 
     @Test
-    void PRE_254_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required() {
+    void PRE_346_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required() {
         List<PendingApproval> own = list(PageRequest.first(), "bank-a", "thu", MIGRATE, CALENDAR, "processes:read")
                 .items();
         assertThat(own.get(0).allowedActions()).isEmpty();
@@ -135,7 +135,7 @@ class PendingApprovalsKindsPostgresIT {
     }
 
     @Test
-    void PRE_254_the_cursor_continues_across_kinds() {
+    void PRE_346_the_cursor_continues_across_kinds() {
         Page<PendingApproval> first = list(new PageRequest(1, null), "bank-a", "lan", MIGRATE, CALENDAR,
                 "processes:read");
         assertThat(first.items()).extracting(PendingApproval::kind).containsExactly("MIGRATION_PLAN");
@@ -147,7 +147,7 @@ class PendingApprovalsKindsPostgresIT {
     }
 
     @Test
-    void PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing() {
+    void PRE_346_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing() {
         String stale = "0".repeat(64);
         engine.identity.as("bank-a", "lan", MIGRATE, CALENDAR, "processes:read");
 
@@ -169,7 +169,7 @@ class PendingApprovalsKindsPostgresIT {
     }
 
     @Test
-    void PRE_254_the_proposer_cannot_approve_with_the_right_hash() {
+    void PRE_346_the_proposer_cannot_approve_with_the_right_hash() {
         PendingApproval item = list(PageRequest.first(), "bank-a", "thu", MIGRATE, CALENDAR, "processes:read").items()
                 .get(1);
         engine.identity.as("bank-a", "thu", MIGRATE, CALENDAR, "processes:read");

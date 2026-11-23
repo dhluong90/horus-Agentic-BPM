@@ -207,7 +207,7 @@ class MultiInstanceTest {
     // ---- PRE-290 parallel and sequential --------------------------------------------------------------------
 
     @Test
-    void PRE_290_a_parallel_step_opens_every_instance_at_once_and_continues_once_after_the_last() {
+    void PRE_337_a_parallel_step_opens_every_instance_at_once_and_continues_once_after_the_last() {
         // Given a loan with four co-signers
         DefaultExecutionKernel kernel = kernel(PARALLEL_COSIGNERS);
 
@@ -238,7 +238,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_290_a_sequential_step_runs_one_instance_at_a_time_with_its_own_element_as_input() {
+    void PRE_337_a_sequential_step_runs_one_instance_at_a_time_with_its_own_element_as_input() {
         // Given three owners to screen, one after another
         DefaultExecutionKernel kernel = kernel(SEQUENTIAL_SCREENING);
         Transition started = start(kernel, Map.of("owners", List.of("Tran Van An", "Le Thi Binh", "Pham Quoc Cuong")));
@@ -266,7 +266,7 @@ class MultiInstanceTest {
     // ---- PRE-291 completion condition --------------------------------------------------------------------------
 
     @Test
-    void PRE_291_a_completion_condition_that_holds_cancels_the_instances_still_running() {
+    void PRE_338_a_completion_condition_that_holds_cancels_the_instances_still_running() {
         // Given four co-signers and a loan that needs only two approvals
         DefaultExecutionKernel kernel = kernel(FIRST_TWO);
         Transition started = start(kernel, Map.of("cosigners", COSIGNERS));
@@ -294,7 +294,7 @@ class MultiInstanceTest {
     // ---- PRE-292 counters --------------------------------------------------------------------------------------
 
     @Test
-    void PRE_292_the_counters_count_instances_active_and_completed_and_a_condition_can_read_them() {
+    void PRE_339_the_counters_count_instances_active_and_completed_and_a_condition_can_read_them() {
         // Given four co-signers, and a condition on the share completed: nrOfCompletedInstances * 2 >= nrOfInstances
         DefaultExecutionKernel kernel = kernel(HALF_DONE);
         Transition started = start(kernel, Map.of("cosigners", COSIGNERS));
@@ -321,7 +321,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_292_an_empty_collection_continues_at_once_with_an_empty_output() {
+    void PRE_339_an_empty_collection_continues_at_once_with_an_empty_output() {
         // Given a loan with no co-signers
         DefaultExecutionKernel kernel = kernel(PARALLEL_COSIGNERS);
 
@@ -337,7 +337,7 @@ class MultiInstanceTest {
     // ---- PRE-293 the cap ---------------------------------------------------------------------------------------
 
     @Test
-    void PRE_293_a_collection_over_the_cap_opens_an_incident_and_creates_no_task() {
+    void PRE_340_a_collection_over_the_cap_opens_an_incident_and_creates_no_task() {
         // Given a cap of 3 repetitions per activity and a loan with four co-signers
         DefaultExecutionKernel kernel = kernel(PARALLEL_COSIGNERS, 3);
 
@@ -356,7 +356,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_293_a_collection_that_is_not_a_list_opens_an_incident_and_a_retry_after_the_fix_starts_the_step() {
+    void PRE_340_a_collection_that_is_not_a_list_opens_an_incident_and_a_retry_after_the_fix_starts_the_step() {
         // Given a loan whose co-signers variable holds a text
         DefaultExecutionKernel kernel = kernel(PARALLEL_COSIGNERS);
         Transition started = start(kernel, Map.of("cosigners", "Lan, Minh"));
@@ -380,7 +380,7 @@ class MultiInstanceTest {
     // ---- PRE-294 a failure inside one instance ---------------------------------------------------------------
 
     @Test
-    void PRE_294_a_failure_in_one_parallel_instance_holds_the_loop_and_the_others_still_finish() {
+    void PRE_341_a_failure_in_one_parallel_instance_holds_the_loop_and_the_others_still_finish() {
         // Given three owners screened in parallel
         DefaultExecutionKernel kernel = kernel(PARALLEL_SCREENING);
         Transition started = start(kernel, Map.of("owners", List.of("An", "Binh", "Cuong")));
@@ -412,7 +412,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_294_a_failure_in_a_sequential_instance_keeps_the_next_one_from_starting() {
+    void PRE_341_a_failure_in_a_sequential_instance_keeps_the_next_one_from_starting() {
         // Given two owners screened one after another, the first of which fails
         DefaultExecutionKernel kernel = kernel(SEQUENTIAL_SCREENING);
         Transition started = start(kernel, Map.of("owners", List.of("An", "Binh")));
@@ -431,7 +431,7 @@ class MultiInstanceTest {
     // ---- PRE-295 standard loop ----------------------------------------------------------------------------------
 
     @Test
-    void PRE_295_a_standard_loop_repeats_while_its_condition_holds_and_stops_at_its_maximum() {
+    void PRE_342_a_standard_loop_repeats_while_its_condition_holds_and_stops_at_its_maximum() {
         // Given a card payment tried while it is not PAID, at most three times
         DefaultExecutionKernel kernel = kernel(PAYMENT_RETRIES);
         Transition started = start(kernel, Map.of());
@@ -457,7 +457,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_295_a_loop_tested_before_its_first_run_may_not_run_at_all() {
+    void PRE_342_a_loop_tested_before_its_first_run_may_not_run_at_all() {
         // Given a payment loop tested before each try, and nothing due
         DefaultExecutionKernel kernel = kernel(TEST_BEFORE);
 
@@ -476,7 +476,7 @@ class MultiInstanceTest {
     // ---- sub-processes and call activities ---------------------------------------------------------------------
 
     @Test
-    void PRE_290_a_multi_instance_sub_process_runs_its_own_steps_once_per_item_and_continues_after_the_last() {
+    void PRE_337_a_multi_instance_sub_process_runs_its_own_steps_once_per_item_and_continues_after_the_last() {
         // Given two branches of a split disbursement, each a sub-process of reserve then post
         DefaultExecutionKernel kernel = kernel(SUB_PROCESS_PER_BRANCH);
 
@@ -501,7 +501,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_291_a_completion_condition_on_a_call_activity_cancels_the_children_still_running() {
+    void PRE_338_a_completion_condition_on_a_call_activity_cancels_the_children_still_running() {
         // Given three accounts checked by a called process, and a loan that needs one answer
         DefaultExecutionKernel kernel = kernel(CALL_PER_ACCOUNT);
         Transition started = start(kernel, Map.of("accounts", List.of("0011-1", "0011-2", "0011-3")));
@@ -526,7 +526,7 @@ class MultiInstanceTest {
     // ---- import, export and refusals ----------------------------------------------------------------------------
 
     @Test
-    void PRE_296_a_loop_reads_with_its_settings_and_exports_back_to_the_same_definition() {
+    void PRE_343_a_loop_reads_with_its_settings_and_exports_back_to_the_same_definition() {
         for (String xml : List.of(FIRST_TWO, SEQUENTIAL_SCREENING, PAYMENT_RETRIES, TEST_BEFORE, SUB_PROCESS_PER_BRANCH,
                 CALL_PER_ACCOUNT)) {
             // When the file is read and exported
@@ -543,7 +543,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_296_a_loop_that_cannot_end_or_has_no_source_is_refused_at_import() {
+    void PRE_343_a_loop_that_cannot_end_or_has_no_source_is_refused_at_import() {
         // Given a loop without a maximum, a multi-instance step with neither a collection nor a cardinality, and a
         // looped step that declares an undo
         String unbounded = PAYMENT_RETRIES.replace(" loopMaximum=\"3\"", "");
@@ -569,7 +569,7 @@ class MultiInstanceTest {
     }
 
     @Test
-    void PRE_296_a_loop_condition_in_another_language_is_refused_with_its_stage() {
+    void PRE_343_a_loop_condition_in_another_language_is_refused_with_its_stage() {
         String feel = PAYMENT_RETRIES.replace("<bpmn:loopCondition>", "<bpmn:loopCondition language=\"urn:feel\">");
         assertThatThrownBy(() -> read(feel)).hasMessageContaining("language");
     }

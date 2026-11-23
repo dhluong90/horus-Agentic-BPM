@@ -411,7 +411,7 @@ Implemented in 0.3.0 (#67, `PRE-013`, `PRE-044`, `PRE-073` to `PRE-076`).
 
 Source: [`diagrams/saga-compensation.mmd`](diagrams/saga-compensation.mmd).
 
-#### Loops and multi-instance (#496, `PRE-290` to `PRE-296`)
+#### Loops and multi-instance (#496, `PRE-337` to `PRE-343`)
 
 A task, a call activity or an embedded sub-process may repeat. `Loops` (package `internal.exec`) holds the semantics: as a token arrives at an activity with loop characteristics, the kernel asks it to enter the loop instead of running the activity once, and `WorkingContext` asks it, when a flow token leaves the activity or the scope of a looped sub-process ends, whether that ends one repetition. No behaviour of a step changes.
 

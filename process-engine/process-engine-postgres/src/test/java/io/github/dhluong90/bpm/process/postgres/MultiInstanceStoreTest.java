@@ -78,7 +78,7 @@ class MultiInstanceStoreTest {
     }
 
     @Test
-    void PRE_290_one_task_per_co_signer_is_written_under_a_body_and_the_decisions_keep_co_signer_order() {
+    void PRE_337_one_task_per_co_signer_is_written_under_a_body_and_the_decisions_keep_co_signer_order() {
         // Given three co-signers of a 450,000,000 VND loan
         TestEngine engine = engine();
         engine.identity.as("bank-a", "officer.lan", "processes:start", "processes:read");
@@ -124,7 +124,7 @@ class MultiInstanceStoreTest {
     }
 
     @Test
-    void PRE_293_a_collection_over_the_cap_opens_an_incident_and_writes_no_task() {
+    void PRE_340_a_collection_over_the_cap_opens_an_incident_and_writes_no_task() {
         // Given a cap of two repetitions per activity
         TestEngine engine = engine();
         engine.services.useMaxLoopInstances(2);

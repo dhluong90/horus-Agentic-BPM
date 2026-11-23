@@ -167,8 +167,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-287 | `PRE_287_*` in `BoundaryAndThrowEventsTest` | Unit on the reader and the writer, round trip of the canonical form | M3 | `TR-STD-04` | Done (#489, #493) |
 | PRE-288 | `PRE_288_*` in `SagaCompensationTest` and `TransactionCompensationTest` | Integration on PostgreSQL, the cancel walk and the cancel boundary; unit on the kernel, the reader, the writer and the compiler | M3 | `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04` | Done (#488) |
 | PRE-289 | `PRE_289_*` in `SagaCompensationTest` | Integration on PostgreSQL, the walk of an enclosing scope into completed sub-processes | M3 | `TR-COMP-01` | Done (#488) |
-| PRE-290 | `PRE_290_*` in `SagaCompensationTest` | Integration on PostgreSQL, retry of a failed undo under its own job | M3 | `TR-COMP-02`, `TR-IDEM-04` | Done (#488) |
-| PRE-291 | `PRE_291_*` in `SagaCompensationTest` | Integration on PostgreSQL, a throw that names an activity | M3 | `TR-COMP-01`, `TR-IDEM-04` | Done (#488) |
+| PRE-344 | `PRE_344_*` in `SagaCompensationTest` | Integration on PostgreSQL, retry of a failed undo under its own job | M3 | `TR-COMP-02`, `TR-IDEM-04` | Done (#488) |
+| PRE-345 | `PRE_345_*` in `SagaCompensationTest` | Integration on PostgreSQL, a throw that names an activity | M3 | `TR-COMP-01`, `TR-IDEM-04` | Done (#488) |
 | PRE-320 | `PRE_320_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel, interrupting message handler; integration on PostgreSQL, the wait and its subscription | M3 | `TR-STD-04`, `TR-STD-13` | Done (#487) |
 | PRE-321 | `PRE_321_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel, timer and signal beside the main flow; integration on PostgreSQL, the timer job | M3 | `TR-STD-04` | Done (#487) |
 | PRE-322 | `PRE_322_*` in `EventSubProcessTest` | Unit on the kernel, the conditional start, on arrival, and edge-triggered | M3 | `TR-STD-04`, `TR-STD-11` | Done (#487) |
@@ -211,13 +211,13 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-235 | `PRE_235_*` in `MessageCorrelationPostgresIT` and `MessageElementsImportTest` | Testcontainers with a recording adapter; kernel run twice from one state | M3 | `TR-STD-12`, `TR-SEC-05` | Done (#491) |
 | PRE-236 | `PRE_236_*` in `MessageCorrelationPostgresIT` | Testcontainers, a message start definition | M3 | `TR-STD-04` | Done (#491) |
 | PRE-237 | `PRE_237_*` in `MessageElementsImportTest` | Import and export round trip of the worked example; two refused files | M3 | `TR-STD-04`, `TR-STD-10` | Done (#491) |
-| PRE-290 | `PRE_290_*` in `MultiInstanceTest` and `MultiInstanceStoreTest` | Unit on the kernel with co-signers, owners and branches; integration on PostgreSQL with the token rows | M3 | `TR-STD-29` | Done (#496) |
-| PRE-291 | `PRE_291_*` in `MultiInstanceTest` | Unit on the kernel, a completion condition on a task and on a call activity | M3 | `TR-STD-29` | Done (#496) |
-| PRE-292 | `PRE_292_*` in `MultiInstanceTest` | Unit on the kernel, the counters and an empty collection | M3 | `TR-STD-29` | Done (#496) |
-| PRE-293 | `PRE_293_*` in `MultiInstanceTest` and `MultiInstanceStoreTest` | Unit on the kernel; integration on PostgreSQL, the cap and a collection that is not a list | M3 | `TR-STD-29` | Done (#496) |
-| PRE-294 | `PRE_294_*` in `MultiInstanceTest` | Unit on the kernel, a failure in one repetition, parallel and sequential | M3 | `TR-STD-29` | Done (#496) |
-| PRE-295 | `PRE_295_*` in `MultiInstanceTest` | Unit on the kernel, a card payment loop | M3 | `TR-STD-29` | Done (#496) |
-| PRE-296 | `PRE_296_*` in `MultiInstanceTest` | Unit on the reader, the compiler and the writer | M3 | `TR-STD-04` | Done (#496) |
+| PRE-337 | `PRE_337_*` in `MultiInstanceTest` and `MultiInstanceStoreTest` | Unit on the kernel with co-signers, owners and branches; integration on PostgreSQL with the token rows | M3 | `TR-STD-29` | Done (#496) |
+| PRE-338 | `PRE_338_*` in `MultiInstanceTest` | Unit on the kernel, a completion condition on a task and on a call activity | M3 | `TR-STD-29` | Done (#496) |
+| PRE-339 | `PRE_339_*` in `MultiInstanceTest` | Unit on the kernel, the counters and an empty collection | M3 | `TR-STD-29` | Done (#496) |
+| PRE-340 | `PRE_340_*` in `MultiInstanceTest` and `MultiInstanceStoreTest` | Unit on the kernel; integration on PostgreSQL, the cap and a collection that is not a list | M3 | `TR-STD-29` | Done (#496) |
+| PRE-341 | `PRE_341_*` in `MultiInstanceTest` | Unit on the kernel, a failure in one repetition, parallel and sequential | M3 | `TR-STD-29` | Done (#496) |
+| PRE-342 | `PRE_342_*` in `MultiInstanceTest` | Unit on the kernel, a card payment loop | M3 | `TR-STD-29` | Done (#496) |
+| PRE-343 | `PRE_343_*` in `MultiInstanceTest` | Unit on the reader, the compiler and the writer | M3 | `TR-STD-04` | Done (#496) |
 | PRE-300 | `PRE_300_*` in `InclusiveGatewayTest` and `InclusiveGatewayBpmnTest` | Unit on the kernel with a payment screening; import and export round trip | M3 | `TR-STD-04` | Done (#494) |
 | PRE-301 | `PRE_301_*` in `InclusiveGatewayTest` | Unit on the kernel: default flow, `NO_PATH`, activation refusals | M3 | `TR-STD-04` | Done (#494) |
 | PRE-302 | `PRE_302_*` in `InclusiveGatewayTest` | Unit on the kernel: join waits, either order, one started branch | M3 | `TR-STD-04`, `TR-ASY-03` | Done (#494) |
@@ -227,7 +227,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-297 | `PRE_297_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Lane hint, own assignee kept, no lane refused; task of a message-started instance | M3 | `TR-STD-04` | Done (#497) |
 | PRE-298 | `PRE_298_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Message flows kept; export and read back, per pool | M3 | `TR-STD-04`, `TR-STD-10` | Done (#497) |
 | PRE-299 | `PRE_299_*` in `CollaborationImportTest` | A choreography element and a file of two processes with no collaboration | M3 | `TR-STD-04` | Done (#497) |
-| PRE-254 | `PRE_254_*` in `PendingApprovalsKindsPostgresIT` | Migration plans and calendar changes in the approvals queue: order, cursor, four eyes, the reviewed hash | M3 | `TR-SEC-04` | Done (#473) |
+| PRE-346 | `PRE_346_*` in `PendingApprovalsKindsPostgresIT` | Migration plans and calendar changes in the approvals queue: order, cursor, four eyes, the reviewed hash | M3 | `TR-SEC-04` | Done (#473) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

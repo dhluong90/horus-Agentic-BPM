@@ -2181,7 +2181,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
 - **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
 - **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)
-### PRE-290 A parallel multi-instance step opens every repetition at once and the flow continues once, with the output in item order
+### PRE-337 A parallel multi-instance step opens every repetition at once and the flow continues once, with the output in item order
 - **Traces to:** `TR-STD-29`, `PRE-044`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2191,7 +2191,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `4 co-signers, completed 3, 1, 4, 2 -> verdicts in order 1, 2, 3, 4; book once`.
 - **Test ID:** `PRE_290_a_parallel_step_opens_every_instance_at_once_and_continues_once_after_the_last`, `PRE_290_a_sequential_step_runs_one_instance_at_a_time_with_its_own_element_as_input`, `PRE_290_a_multi_instance_sub_process_runs_its_own_steps_once_per_item_and_continues_after_the_last` (`MultiInstanceTest`); `PRE_290_one_task_per_co_signer_is_written_under_a_body_and_the_decisions_keep_co_signer_order` (`MultiInstanceStoreTest`)
 
-### PRE-291 A completion condition that holds ends the loop and cancels the repetitions still running
+### PRE-338 A completion condition that holds ends the loop and cancels the repetitions still running
 - **Traces to:** `TR-STD-29`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2201,7 +2201,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `4 co-signers, 2 approvals -> the other 2 tasks cancelled, book starts`.
 - **Test ID:** `PRE_291_a_completion_condition_that_holds_cancels_the_instances_still_running`, `PRE_291_a_completion_condition_on_a_call_activity_cancels_the_children_still_running` (`MultiInstanceTest`)
 
-### PRE-292 The counters count repetitions, a condition can read them, and an empty collection continues at once
+### PRE-339 The counters count repetitions, a condition can read them, and an empty collection continues at once
 - **Traces to:** `TR-STD-29`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2211,7 +2211,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `1 of 4 done -> 3 active, 1 completed`.
 - **Test ID:** `PRE_292_the_counters_count_instances_active_and_completed_and_a_condition_can_read_them`, `PRE_292_an_empty_collection_continues_at_once_with_an_empty_output` (`MultiInstanceTest`)
 
-### PRE-293 A collection over the cap, or one that is not a list, opens an incident and creates nothing
+### PRE-340 A collection over the cap, or one that is not a list, opens an incident and creates nothing
 - **Traces to:** `TR-STD-29`, `PRE-040`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2221,7 +2221,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `4 co-signers, cap 3 -> MULTI_INSTANCE_LIMIT, no task`.
 - **Test ID:** `PRE_293_a_collection_over_the_cap_opens_an_incident_and_creates_no_task`, `PRE_293_a_collection_that_is_not_a_list_opens_an_incident_and_a_retry_after_the_fix_starts_the_step` (`MultiInstanceTest`); `PRE_293_a_collection_over_the_cap_opens_an_incident_and_writes_no_task` (`MultiInstanceStoreTest`)
 
-### PRE-294 A failure inside one repetition holds the loop, not the others
+### PRE-341 A failure inside one repetition holds the loop, not the others
 - **Traces to:** `TR-STD-29`, `PRE-040`, `PRE-077`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2231,7 +2231,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `Binh fails, An and Cuong done -> loop held; retry, Binh done -> book`.
 - **Test ID:** `PRE_294_a_failure_in_one_parallel_instance_holds_the_loop_and_the_others_still_finish`, `PRE_294_a_failure_in_a_sequential_instance_keeps_the_next_one_from_starting` (`MultiInstanceTest`)
 
-### PRE-295 A standard loop repeats while its condition holds, up to its maximum, and may be tested before its first run
+### PRE-342 A standard loop repeats while its condition holds, up to its maximum, and may be tested before its first run
 - **Traces to:** `TR-STD-29`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2241,7 +2241,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `DECLINED, PAID -> 2 tries; DECLINED x3 -> stops at 3`.
 - **Test ID:** `PRE_295_a_standard_loop_repeats_while_its_condition_holds_and_stops_at_its_maximum`, `PRE_295_a_loop_tested_before_its_first_run_may_not_run_at_all` (`MultiInstanceTest`)
 
-### PRE-296 A loop imports and exports with its settings; one that cannot end, has no source or declares an undo is refused
+### PRE-343 A loop imports and exports with its settings; one that cannot end, has no source or declares an undo is refused
 - **Traces to:** `TR-STD-04`, `PRE-033`, #496
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2276,7 +2276,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `refused at notify-partner -> close-account, refund-fee, release-funds, cancel-loan`.
 - **Test ID:** `PRE_289_a_compensation_of_the_enclosing_scope_walks_into_the_sub_processes_completed_in_it` (`SagaCompensationTest`)
 
-### PRE-290 A failed undo is retried under its own job, and every undo runs once before the flow resumes
+### PRE-344 A failed undo is retried under its own job, and every undo runs once before the flow resumes
 - **Traces to:** `TR-COMP-02`, `TR-IDEM-04`, `PRE-074`, #488
 - **Milestone:** M3
 - **Kind:** control
@@ -2286,51 +2286,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `credit-back refused, retried -> one key, two attempts; release-hold once`.
 - **Test ID:** `PRE_290_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes` (`SagaCompensationTest`)
 
-### PRE-291 A compensation throw that names an activity undoes only that activity, and a second throw undoes nothing
-- **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, #488
-- **Milestone:** M3
-- **Kind:** control
-- **Given:** Process `loan-undo-one`: `register-loan`, `reserve-funds` and `open-account` complete in the root scope, each with an undo; then two compensation throw events with `activityRef="reserve-funds"` in a row, then the end.
-- **When:** The first throw runs, its undo completes, and the second throw runs.
-- **Then:** Only `release-funds` runs, once; the entries of `open-account` and `register-loan` stay `PENDING`; the second throw finds nothing `PENDING` for `reserve-funds` and the flow goes on at once; the instance ends `COMPLETED`, and history records `COMPENSATION_STARTED` on each throw. A compensation throw event or compensation end event with no `activityRef` undoes the whole scope the same way; one with no outgoing flow keeps the behaviour of `PRE-076`.
-- **Example:** `throw reserve-funds twice -> release-funds once`.
-- **Test ID:** `PRE_291_a_throw_that_names_an_activity_undoes_only_that_activity_and_a_second_throw_undoes_nothing` (`SagaCompensationTest`)
-
-### PRE-288 A cancel end event compensates its transaction newest first, and the cancel boundary event leaves the flow
-- **Traces to:** `TR-COMP-01`, `TR-COMP-02`, `TR-IDEM-04`, `PRE-073`, #488
-- **Milestone:** M3
-- **Kind:** control
-- **Given:** Process `fund-transfer-cancel`: the transaction `transfer` holds `hold-funds` (local, with a compensation boundary event whose compensation activity runs `release-hold`) and `debit-source` (remote, with a compensation boundary event whose compensation activity runs the adapter `credit-back`), then an exclusive gateway that takes a cancel end event when the target account `0099-887766` is closed. A cancel boundary event on `transfer` leads to `notify-customer`. An instance moves `25,000,000 VND` from `0011-223344` and the target is closed.
-- **When:** `debit-source` is accepted and the flow reaches the cancel end event.
-- **Then:**
-  - The other live tokens of the transaction are cancelled, the instance is `COMPENSATING` and cannot be cancelled, and `processes.compensation.started.v1` carries the transaction's scope token, `depth` 2 and `cause` `CANCEL`. The customer has not been told.
-  - `credit-back` runs first as a `COMPENSATION` job keyed by its own id, with the forward job and attempt of the debit; `release-hold` runs second with the attempt of the hold; nothing else runs.
-  - With every entry `DONE` the transaction's scope token is `COMPENSATED`, the instance is `RUNNING` again, history records `COMPENSATED` and `BOUNDARY_FIRED` with trigger `CANCEL`, `notify-customer` runs once, and the instance ends `COMPLETED`: a cancelled transaction is a business outcome and no `processes.instance.failed.v1` is published.
-  - A cancel end event outside a transaction, or in a transaction with no cancel boundary event, a compensation boundary event with no compensation activity, and a compensation activity with a flow, are refused when the definition is compiled (`CANCEL_END_OUTSIDE_TRANSACTION`, `CANCEL_BOUNDARY_REQUIRED`, `COMPENSATION_ACTIVITY_MISSING`, `COMPENSATION_ACTIVITY_HAS_FLOW`).
-- **Example:** `debit 25,000,000 VND accepted, target closed -> credit-back, release-hold, then notify-customer; instance COMPLETED`.
-- **Test ID:** `PRE_288_a_cancel_end_compensates_the_transaction_newest_first_and_the_cancel_boundary_leaves_the_flow` (`SagaCompensationTest`), `PRE_288_the_cancel_end_waits_for_the_undo_and_the_cancel_boundary_then_takes_the_flow`, `PRE_288_a_compensation_boundary_without_its_activity_and_a_cancel_end_without_its_boundary_are_refused` (`TransactionCompensationTest`)
-
-### PRE-289 A compensation of the enclosing scope walks into the sub-processes completed in it
-- **Traces to:** `TR-COMP-01`, `PRE-044`, `PRE-262`, #488
-- **Milestone:** M3
-- **Kind:** control
-- **Given:** Process `loan-booking-nested`: `register-loan` (undone by `cancel-loan`) in the root scope, then the sub-process `disburse` with `reserve-funds` (undone by `release-funds`), the sub-process `fees` with `charge-fee` (undone by `refund-fee`) and `open-account` (undone by `close-account`), all completed; then `notify-partner` in the root scope with `onFailure: compensate`, which the partner refuses.
-- **When:** `notify-partner` fails for good.
-- **Then:** The compensation is that of the root scope token and takes the entries of the root scope and of every scope token under it, newest pushed first across scopes: `close-account`, `refund-fee`, `release-funds`, `cancel-loan`, each once. Every entry is `DONE`, the root scope token is `COMPENSATED`, the instance ends `FAILED`, and the timeline lists the four undos under the one compensation of the root scope. An undo started inside a sub-process still walks only that sub-process and the scopes under it (`PRE-262`).
-- **Example:** `refused at notify-partner -> close-account, refund-fee, release-funds, cancel-loan`.
-- **Test ID:** `PRE_289_a_compensation_of_the_enclosing_scope_walks_into_the_sub_processes_completed_in_it` (`SagaCompensationTest`)
-
-### PRE-290 A failed undo is retried under its own job, and every undo runs once before the flow resumes
-- **Traces to:** `TR-COMP-02`, `TR-IDEM-04`, `PRE-074`, #488
-- **Milestone:** M3
-- **Kind:** control
-- **Given:** The cancelled transfer of `PRE-288`, where core banking refuses the first `credit-back` with `ACCOUNT_FROZEN`.
-- **When:** The first undo fails for good, and then operator `ops.lan` retries the incident after the account is unfrozen.
-- **Then:** After the failure the entry of `debit-source` is `FAILED`, an incident `COMPENSATION_FAILED` holds the walk, `release-hold` has not run, the instance is `COMPENSATING` and the cancel boundary has not fired. The retry runs `credit-back` again under the same job id with a new attempt id, so core banking sees one idempotency key; `release-hold` then runs exactly once, `notify-customer` runs once, both entries are `DONE`, the instance is `COMPLETED`, and nothing is left to run.
-- **Example:** `credit-back refused, retried -> one key, two attempts; release-hold once`.
-- **Test ID:** `PRE_290_a_failed_undo_is_retried_under_its_own_job_and_every_undo_runs_once_before_the_flow_resumes` (`SagaCompensationTest`)
-
-### PRE-291 A compensation throw that names an activity undoes only that activity, and a second throw undoes nothing
+### PRE-345 A compensation throw that names an activity undoes only that activity, and a second throw undoes nothing
 - **Traces to:** `TR-COMP-01`, `TR-IDEM-04`, #488
 - **Milestone:** M3
 - **Kind:** control
@@ -2515,7 +2471,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The import succeeds, the stored source keeps the element, and the answer lists `CHOREOGRAPHY_KEPT_AS_RECEIVED` in `warnings` with the line. No definition comes from it.
 - **Example:** `choreography c -> warning, 2 definitions as before`
 - **Test ID:** `PRE_299_a_choreography_is_kept_as_received_with_a_warning_and_a_second_process_needs_a_collaboration` (`CollaborationImportTest`)
-### PRE-254 Pending migration plans and calendar changes appear in the approvals queue, bound to the reviewed hash
+### PRE-346 Pending migration plans and calendar changes appear in the approvals queue, bound to the reviewed hash
 - **Traces to:** `TR-SEC-04`, `TR-UI-02`, PD-139, #473
 - **Milestone:** M3
 - **Kind:** control
