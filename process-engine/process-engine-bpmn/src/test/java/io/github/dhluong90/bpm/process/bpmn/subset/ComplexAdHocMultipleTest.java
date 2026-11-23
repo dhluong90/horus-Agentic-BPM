@@ -141,6 +141,25 @@ class ComplexAdHocMultipleTest {
     }
 
     @Test
+    void PRE_330_the_instance_completes_when_the_late_token_is_absorbed_after_the_branch_that_fired_has_ended() {
+        // Given the same three approvers, but the payment is released by an automatic step straight to the end
+        String automatic = THREE_APPROVERS.replace(
+                "<bpmn:userTask id=\"release\" horus:assignee=\"role:OPERATIONS\" horus:resultVariable=\"released\"/>",
+                "<bpmn:scriptTask id=\"release\" scriptFormat=\"urn:horus-bpm:expr:v1\" horus:resultVariable=\"released\"><bpmn:script>true</bpmn:script></bpmn:scriptTask>");
+        DefaultExecutionKernel kernel = kernel(automatic);
+        Transition state = start(kernel, Map.of());
+
+        // When two approvers sign, the payment is released and its branch reaches the end event
+        state = complete(kernel, state.state(), "branch-a", Map.of("ok", true));
+        state = complete(kernel, state.state(), "branch-b", Map.of("ok", true));
+        assertThat(state.state().status()).isEqualTo(InstanceStatus.RUNNING);
+
+        // And the third approver signs late: the absorbed token was the last live one, so the instance ends
+        state = complete(kernel, state.state(), "branch-c", Map.of("ok", true));
+        assertThat(state.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+    }
+
+    @Test
     void PRE_330_a_complex_gateway_splits_on_its_outgoing_conditions_and_falls_back_to_the_default_flow() {
         // Given a transfer routed by amount: over VND 1,000,000,000 to a second review, otherwise automatic
         String routed = HEAD + """
