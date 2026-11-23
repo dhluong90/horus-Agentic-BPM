@@ -225,10 +225,25 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param scopeTokenId the scope whose completed steps are undone
      * @param nodeId the step that failed, or the {@code throwCompensation}
      * @param cause the code that started it
+     * @param activityId the one activity a background walk undoes, or null for the whole scope
+     * @param walkTokenId the token of a background walk (PD-149, {@code waitForCompletion="false"}); null for a walk
+     *     the instance waits for
      */
-    record StartCompensation(String scopeTokenId, String nodeId, String cause) implements Effect {
+    record StartCompensation(String scopeTokenId, String nodeId, String cause, String activityId, String walkTokenId)
+            implements Effect {
         public StartCompensation {
             Objects.requireNonNull(scopeTokenId, "scopeTokenId must not be null");
+        }
+
+        /**
+         * A walk the instance waits for.
+         *
+         * @param scopeTokenId the scope
+         * @param nodeId the step that started it
+         * @param cause the code that started it
+         */
+        public StartCompensation(String scopeTokenId, String nodeId, String cause) {
+            this(scopeTokenId, nodeId, cause, null, null);
         }
     }
 

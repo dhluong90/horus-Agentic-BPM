@@ -2521,7 +2521,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:**
   - The event waits with one token per definition, each parked by the behaviour of that definition: a subscription for the signal and the message, a job for a timer, the condition asked again when variables change. A multiple event moves on at the first occurrence and drops the other waits (the signal subscription is deleted); a parallel multiple event holds each occurrence and moves on when the last one has occurred.
   - A boundary event with a timer and an error fires on either: the timer interrupts the activity, and an error is found when it is thrown. An event sub-process with several triggers starts on the first one and the other waits go.
-  - A multiple event holds timer, message, signal or conditional definitions (a process start event: message and signal only, and never parallel, because no instance exists to wait in; a boundary event: timer, error and escalation, and parallel only with timers) and one message at most (`MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`).
+  - A multiple event holds timer, message, signal or conditional definitions (a process start event: message and signal only, and with `parallelMultiple` the instance starts when all have arrived, see PRE-339; a boundary event: timer, error and escalation, and parallel only with timers) and one message at most (`MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`).
 - **Example:** `funds received -> the payment moves on, the signal wait is deleted`.
 - **Test ID:** `PRE_332_a_multiple_catch_event_fires_on_the_first_definition_and_drops_the_other_wait`, `PRE_332_a_parallel_multiple_catch_event_waits_until_every_definition_has_occurred`, `PRE_332_a_multiple_boundary_event_fires_on_its_timer_and_interrupts_the_activity`, `PRE_332_a_multiple_start_of_an_event_sub_process_fires_on_one_trigger_and_drops_the_other` (`ComplexAdHocMultipleTest`)
 
@@ -2584,3 +2584,36 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The token takes the expected path and the instance completes; the second import has the same number of flow elements and the same canonical form, so the same definition hash.
 - **Example:** `amount 2,500,000 -> large; amount 40,000 -> small (default)`.
 - **Test ID:** `every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import` (`ConformanceSuiteTest`)
+
+### PRE-339 A compensation throw with `waitForCompletion="false"` lets the flow go on while the undo runs, and each undo runs once
+- **Traces to:** `TR-STD-04`, #499, PD-149
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** a loan booking that registers the loan and reserves the funds (each with an undo), then throws compensation for `reserve-funds` twice with `waitForCompletion="false"`, then notifies the customer.
+- **When:** The instance starts; then the undo job runs.
+- **Then:**
+  - The customer notice runs at once: the instance is `RUNNING`, never `COMPENSATING`, and nothing else is cancelled. The throw records a walk token (a live `FLOW` token marked `$backgroundUndo`) that holds the instance open, so it cannot complete or be cancelled while an undo is in flight (`InvalidStateException`); an intermediate throw with no outgoing flow is refused (`COMPENSATION_BACKGROUND_NEEDS_FLOW`).
+  - The walk schedules one `COMPENSATION` job at a time, newest first, under the instance lock; an undo already running, done or failed for good is not scheduled again, so the second throw, a retry and a replayed command undo nothing twice. A failed or manual undo opens its incident and pauses that walk only; the flow beside it is not touched.
+  - When the last entry is `DONE` the shell sends `EndBackgroundCompensation`, the walk token completes and the scope can end; the command is safe to repeat. An undo in flight when its instance ended (a terminate end) is still recorded.
+- **Example:** `reserve-funds -> release-funds called once, loan registration untouched, instance COMPLETED after it`.
+- **Test ID:** `PRE_PD149_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it` (`SagaCompensationTest`), `control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done` (`ConformanceSuiteTest`)
+
+### PRE-340 A parallel multiple process start waits for all its definitions
+- **Traces to:** `TR-STD-04`, #499, PD-149
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** a process `account-opening` whose start event has `parallelMultiple="true"` with the message `account-opening-request` and the signal `kyc-cleared`.
+- **When:** The message with key `APP-2026-0042` arrives, then the signal; and in another run the signal first, then the message.
+- **Then:** The first arrival is held (`pre_start_arrival`, V50) and a message answers `WAITING`; the last one starts exactly one instance with the message key as business key and the message payload as variables, and consumes the held rows. A repeat of an arrival with the same key replaces the held one and starts nothing; a replayed request returns its first answer. A signal is a latch with no key and completes the oldest held message. Definitions of a parallel start are messages and signals only, one message at most; the versions of the key are locked while an arrival is counted, so two arrivals that complete the set together start one instance.
+- **Example:** `APP-2026-0042 request + kyc-cleared -> one instance, business key APP-2026-0042`.
+- **Test ID:** `PRE_PD149_the_instance_starts_only_when_the_message_and_the_signal_have_both_arrived`, `PRE_PD149_a_signal_that_comes_first_is_held_and_the_message_starts_the_instance` (`ParallelStartPostgresIT`), `a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started` (`ConformanceSuiteTest`)
+
+### PRE-341 A multiple throw or end event throws every definition
+- **Traces to:** `TR-STD-04`, #499, PD-149
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** an intermediate throw event holding the message `loan-approved` and the signal `credit-line-opened`, followed by an end event holding the message and the signal `booking-closed`.
+- **When:** The instance runs.
+- **Then:** Each definition is thrown, messages, signals and background compensations in document order and escalations last (an escalation an interrupting handler catches takes the token over), then the flow goes on or the token ends. Only message, signal, escalation and compensation with `waitForCompletion="false"` are allowed together; an error, terminate, cancel, link or waiting compensation is `MULTIPLE_THROW_DEFINITION_INVALID`. A multiple throw is part of the definition hash.
+- **Example:** `announce -> loan-approved sent and credit-line-opened broadcast, then close -> loan-approved and booking-closed`.
+- **Test ID:** `a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on` (`ConformanceSuiteTest`), `PRE_334_a_misplaced_ad_hoc_sub_process_or_multiple_event_is_refused_with_its_code` (`ComplexAdHocMultipleTest`)

@@ -101,6 +101,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.RetryStep retry -> retry(retry, ctx);
             case Command.Compensate compensate -> compensate(compensate, ctx);
             case Command.EndCompensation end -> ctx.endCompensation(end.scopeTokenId());
+            case Command.EndBackgroundCompensation end -> ctx.endBackgroundCompensation(end.tokenId());
             case Command.StartAdHocActivity adHoc -> startAdHoc(adHoc, ctx);
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");

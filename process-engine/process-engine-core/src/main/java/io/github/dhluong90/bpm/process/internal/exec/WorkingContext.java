@@ -142,6 +142,25 @@ final class WorkingContext implements ExecutionContext {
                 Map.of("instanceId", initial.instanceId())));
     }
 
+    /** The local that marks the walk token of a background compensation; its value is the activity, "" for the scope. */
+    static final String BACKGROUND_UNDO = BackgroundWalks.MARK;
+
+    /**
+     * A background walk reached the bottom (PD-149): its token completes, which lets the scope end. A walk that already
+     * ended is left alone, so the command is safe to repeat.
+     *
+     * @param tokenId the walk token
+     */
+    void endBackgroundCompensation(String tokenId) {
+        Token walk = tree().get(tokenId).orElseThrow(() -> new ExecutionException("TOKEN_NOT_FOUND", null,
+                "No walk token " + tokenId));
+        if (!walk.status().live() || !walk.locals().containsKey(BACKGROUND_UNDO)) {
+            return;
+        }
+        history("COMPENSATED", walk, Map.of("scopeTokenId", walk.scopeTokenId(), "background", true));
+        complete(walk);
+    }
+
     /**
      * The walk of a throw or a cancel reached the bottom (#488): the instance runs again, the thrower leaves. A
      * compensation throw event goes on by its outgoing flow or, as an end event, ends its token; a cancel end event
@@ -587,6 +606,27 @@ final class WorkingContext implements ExecutionContext {
         Token scope = tree().get(thrower.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
                 thrower.nodeId(), "Token " + thrower.id() + " has no scope"));
         startResumable(thrower, scope, "THROW_COMPENSATION", targetActivityId);
+    }
+
+    @Override
+    public void compensateInBackground(Token thrower, String targetActivityId) {
+        Token scope = tree().get(thrower.scopeTokenId()).orElseThrow(() -> new ExecutionException("INVALID_STATE",
+                thrower.nodeId(), "Token " + thrower.id() + " has no scope"));
+        Token created = createToken(TokenKind.FLOW, thrower.nodeId(), scope.id());
+        Token walk = new Token(created.id(), TokenKind.FLOW, TokenStatus.WAITING_ASYNC, scope.id(), thrower.nodeId(),
+                null, Map.of(BACKGROUND_UNDO, targetActivityId == null ? "" : targetActivityId));
+        update(walk);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("scopeTokenId", scope.id());
+        details.put("scope", scope.nodeId());
+        details.put("cause", "THROW_COMPENSATION");
+        details.put("background", true);
+        if (targetActivityId != null) {
+            details.put("activity", targetActivityId);
+        }
+        history.add(new HistoryEntry("COMPENSATION_STARTED", thrower.nodeId(), walk.id(), null, actor, now, details));
+        effect(new Effect.StartCompensation(scope.id(), thrower.nodeId(), "THROW_COMPENSATION", targetActivityId,
+                walk.id()));
     }
 
     @Override

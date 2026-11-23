@@ -13,7 +13,8 @@ import java.util.Map;
  * steps of sub-processes completed in it included. With no outgoing flow it is the end of the road as before: like a
  * step that fails with {@code onFailure: compensate}, the instance ends {@code FAILED} once the walk reaches the bottom
  * of the stack (DESIGN section 3.3). With an outgoing flow it is the BPMN throw: the flow goes on after the walk, and
- * an {@code activityRef} limits the undo to that activity.
+ * an {@code activityRef} limits the undo to that activity. With {@code waitForCompletion="false"} (PD-149) the flow
+ * goes on at once and the undo runs in the background.
  */
 final class ThrowCompensationBehavior implements FlowNodeBehavior<IntermediateThrowEvent> {
 
@@ -32,11 +33,19 @@ final class ThrowCompensationBehavior implements FlowNodeBehavior<IntermediateTh
 
     @Override
     public void enter(IntermediateThrowEvent node, Token token, ExecutionContext ctx) {
+        CompensateEventDefinition definition = (CompensateEventDefinition) node.eventDefinitions().get(0);
+        if (!definition.waitForCompletion()) {
+            // PD-149: the undo runs in the background and the flow goes on at once; the compiler required a flow.
+            ctx.compensateInBackground(token, definition.activityRef());
+            ctx.history("NODE_COMPLETED", token, Map.of("background", true));
+            ctx.takeOutgoing(token, node);
+            return;
+        }
         if (ctx.process().outgoing(node.id()).isEmpty()) {
             ctx.history("NODE_COMPLETED", token, Map.of());
             ctx.compensate(token, CAUSE);
             return;
         }
-        ctx.compensateAndResume(token, ((CompensateEventDefinition) node.eventDefinitions().get(0)).activityRef());
+        ctx.compensateAndResume(token, definition.activityRef());
     }
 }

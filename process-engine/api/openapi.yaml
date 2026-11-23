@@ -1164,11 +1164,13 @@ paths:
         message fields named by the step's `horus:output` become variables, and the answer is `DELIVERED`. When
         nothing waits for the key and exactly one effective definition has a message start event of that name, a new
         instance starts with `payload` as its variables and `correlationKey` as its business key (a second message with
-        the same key returns the existing instance), and the answer is `STARTED`. When two or more tokens wait for the
+        the same key returns the existing instance), and the answer is `STARTED`. When that start event is a parallel
+        multiple one, the message is held and the answer is `WAITING` until every other definition of the start has
+        arrived; the last one starts the instance. When two or more tokens wait for the
         same name and key, or two definitions start on the name, the answer is `409 MESSAGE_CORRELATION_AMBIGUOUS` and
         nothing runs. When nothing waits and nothing starts, the answer is `422 MESSAGE_NOT_CORRELATED` and nothing is
         stored: a message is not buffered. `Idempotency-Key` is required; a replay with the same key and request returns
-        the first answer, `DELIVERED` or `STARTED`, and delivers nothing twice. Permission `processes:message:correlate`.
+        the first answer, `DELIVERED`, `STARTED` or `WAITING`, and delivers nothing twice. Permission `processes:message:correlate`.
       parameters:
         - $ref: '#/components/parameters/RequiredIdempotencyKey'
       requestBody:
@@ -2863,11 +2865,11 @@ components:
           description: Only the fields a step names with `horus:output` are kept; a start message keeps all of them as variables
     MessageDelivery:
       type: object
-      required: [outcome, instanceId]
+      required: [outcome]
       properties:
-        outcome: { type: string, enum: [DELIVERED, STARTED] }
-        instanceId: { type: string }
-        nodeId: { type: string, description: The step that received the message; absent for STARTED }
+        outcome: { type: string, enum: [DELIVERED, STARTED, WAITING] }
+        instanceId: { type: string, description: The instance that received it or that it started; absent for WAITING }
+        nodeId: { type: string, description: The step that received the message; absent for STARTED and WAITING }
     AsyncStepCompletion:
       type: object
       required: [jobId, attemptId, outcome]

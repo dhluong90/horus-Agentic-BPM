@@ -1476,9 +1476,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String id = id();
             String name = attr("name");
             int line = line();
-            CompensateEventDefinition compensate = null;
-            EventDefinition other = null;
-            List<EventDefinition> signals = new ArrayList<>();
+            List<EventDefinition> defs = new ArrayList<>();
             MessageEventDefinition message = null;
             String key = horus("correlationKey");
             List<HorusExtension> ext = new ArrayList<>();
@@ -1490,7 +1488,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         || "linkEventDefinition".equals(local))) {
                     // #493: an escalation throw, and the throw half of a link pair.
                     definitions++;
-                    other = definition(local, id, element, line);
+                    defs.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
                         || "terminateEventDefinition".equals(local))) {
                     definitions++;
@@ -1499,14 +1497,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
                     definitions++;
-                    compensate = compensateDefinition(id);
+                    defs.add(compensateDefinition(id));
                     children(local, id, false);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
-                    signals.add(signalDefinition(id, element));
+                    defs.add(signalDefinition(id, element));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
                     definitions++;
                     message = messageDefinition(id);
+                    defs.add(message);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
                     extensions(element, id, true, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
@@ -1522,13 +1521,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions == 0) {
                 unsupported(element, id, BpmnStages.S0, BpmnStages.message(BpmnStages.S0));
-            } else if (definitions > 1) {
-                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; a throw event throws"
-                        + " exactly one");
             }
-            List<EventDefinition> defs = compensate != null ? List.<EventDefinition>of(compensate)
-                    : message != null ? List.<EventDefinition>of(message)
-                    : other != null ? List.<EventDefinition>of(other) : signals;
             messageExtras(element, id, line, defs, key, false, ext);
             return new IntermediateThrowEvent(id, name, List.of(), List.of(), defs, List.of(), null,
                     message == null ? null : info(ext, foreign));
@@ -1682,10 +1675,6 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
-            if (definitions.size() > 1 && !start) {
-                unsupported(element, id, BpmnStages.NOT_PLANNED, "has several event definitions; an end event raises"
-                        + " exactly one");
-            }
             // A message start event of a process has no instance yet, so its key becomes the business key; one of an event
             // sub-process has the instance, so it names its key variable like a message catch (#487, checked at compile).
             messageExtras(element, id, line, definitions, key, false, ext);
@@ -1698,16 +1687,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * A {@code compensateEventDefinition} (#488), at the current element: {@code activityRef} names the one activity
-         * to undo, none means the whole scope. {@code waitForCompletion="false"} is refused: the flow goes on after the
-         * undo is done.
+         * to undo, none means the whole scope. {@code waitForCompletion="false"} lets the flow go on while the undo runs
+         * in the background (PD-149); the default, true, holds the flow until the undo is done.
          */
         private CompensateEventDefinition compensateDefinition(String eventId) {
-            if ("false".equals(attr("waitForCompletion"))) {
-                unsupported("compensateEventDefinition waitForCompletion", eventId, BpmnStages.NOT_PLANNED,
-                        "false is not supported: the flow goes on after the undo is done");
-            }
             String ref = attr("activityRef");
-            return new CompensateEventDefinition(attr("id"), ref == null || ref.isBlank() ? null : ref, true, null);
+            return new CompensateEventDefinition(attr("id"), ref == null || ref.isBlank() ? null : ref,
+                    !"false".equals(attr("waitForCompletion")), null);
         }
 
         /**

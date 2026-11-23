@@ -943,4 +943,39 @@ class SagaCompensationTest {
         assertThat(history(id, "COMPENSATION_STARTED")).containsExactly("COMPENSATION_STARTED:withdraw-reservation",
                 "COMPENSATION_STARTED:withdraw-again");
     }
+
+    @Test
+    void PRE_PD149_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it() {
+        // Given loan-undo-background: the loan registered, the funds reserved, then two throws of the reservation that
+        // do not wait for the undo, then a customer notice
+        TestEngine engine = engine();
+        deploy(engine, "loan-undo-background");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read", "processes:cancel");
+
+        // When the instance starts
+        String id = engine.services.start(new StartRequest("loan-undo-background", "LN-2026-0301", Map.of(), null)).id();
+
+        // Then the flow went on to the notice while the undo waits as a job: the instance is RUNNING, not COMPENSATING,
+        // and is not completed, because the undo is still to run
+        assertThat(local.stream().map(Map.Entry::getKey)).contains("notify-customer");
+        assertThat(status(id)).isEqualTo("RUNNING");
+        assertThat(stack(id)).containsExactly("reserve-funds:RUNNING", "register-loan:PENDING");
+        assertThat(undoCalls()).isEmpty();
+
+        // And an undo is never abandoned half way: the instance cannot be cancelled while it runs
+        long lock = engine.services.instance(id).lockVersion();
+        assertThatThrownBy(() -> engine.services.cancel(id, lock, "Customer withdrew", "C-301"))
+                .isInstanceOf(InvalidStateException.class).hasMessageContaining("compensation running in the background");
+
+        // When the undo job runs
+        drain(engine);
+
+        // Then the reservation was released exactly once, though two throws named it, the loan registration is
+        // untouched, and only now does the instance end
+        assertThat(undoCalls()).containsExactly("release-funds:reserve-funds");
+        assertThat(stack(id)).containsExactly("reserve-funds:DONE", "register-loan:PENDING");
+        assertThat(status(id)).isEqualTo("COMPLETED");
+        assertThat(history(id, "COMPENSATION_STARTED")).containsExactly("COMPENSATION_STARTED:withdraw-reservation",
+                "COMPENSATION_STARTED:withdraw-again");
+    }
 }

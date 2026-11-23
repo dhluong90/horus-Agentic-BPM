@@ -303,7 +303,8 @@ public final class SubsetBpmnWriter {
                         + attr(refs.messages().get(m.messageRef())) + "/>");
                 case TerminateEventDefinition t -> xml.line(lvl, "<bpmn:terminateEventDefinition/>");
                 case CompensateEventDefinition c -> xml.line(lvl, "<bpmn:compensateEventDefinition"
-                        + optional("activityRef", c.activityRef()) + "/>");
+                        + optional("activityRef", c.activityRef())
+                        + (c.waitForCompletion() ? "" : " waitForCompletion=\"false\"") + "/>");
                 case CancelEventDefinition c -> xml.line(lvl, "<bpmn:cancelEventDefinition/>");
                 case LinkEventDefinition l -> xml.line(lvl, "<bpmn:linkEventDefinition" + optional("name", l.name())
                         + "/>");

@@ -52,5 +52,8 @@ public final class EventBehaviors implements BehaviorModule {
         registry.register(new MultipleEvents.Catch());
         registry.register(new MultipleEvents.Start());
         registry.register(new MultipleEvents.Boundary());
+        // PD-149: multiple throw and end events throw every definition.
+        registry.register(new MultipleThrows.Intermediate());
+        registry.register(new MultipleThrows.End());
     }
 }

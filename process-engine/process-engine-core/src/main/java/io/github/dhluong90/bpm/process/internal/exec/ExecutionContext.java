@@ -110,6 +110,18 @@ public interface ExecutionContext {
     }
 
     /**
+     * A compensation throw event with {@code waitForCompletion="false"} (PD-149): the undo of the scope, or of one
+     * activity, runs in the background while the thrower goes on. A background walk token holds the instance open
+     * ({@code RUNNING}, not completed) until the shell has walked the entries to the bottom; nothing else is cancelled.
+     *
+     * @param thrower the token on the throw event
+     * @param targetActivityId the activity to undo (an {@code activityRef}), or null for the whole scope
+     */
+    default void compensateInBackground(Token thrower, String targetActivityId) {
+        throw new UnsupportedOperationException("compensateInBackground");
+    }
+
+    /**
      * A cancel end event inside a transaction (#488): the transaction is compensated as for
      * {@link #compensateAndResume}, and when the walk is done its cancel boundary event leaves the flow in the
      * enclosing scope.

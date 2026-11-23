@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A loan booking that withdraws the funds reservation in the background (PD-149): the throw does not wait for the
+     undo, so the customer is told at once; a second throw of the same name finds the undo already running and does not
+     run it again. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-undo-background"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-undo-background" name="Loan booking, withdrawal in the background" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="register-loan" horus:handler="register-loan" horus:compensate="cancel-loan"/>
+    <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"/>
+    <bpmn:intermediateThrowEvent id="withdraw-reservation" name="Withdraw the reservation">
+      <bpmn:compensateEventDefinition activityRef="reserve-funds" waitForCompletion="false"/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:intermediateThrowEvent id="withdraw-again" name="Withdraw it again">
+      <bpmn:compensateEventDefinition activityRef="reserve-funds" waitForCompletion="false"/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:serviceTask id="notify-customer" horus:handler="notify-customer"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="register-loan"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="register-loan" targetRef="reserve-funds"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="reserve-funds" targetRef="withdraw-reservation"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="withdraw-reservation" targetRef="withdraw-again"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="withdraw-again" targetRef="notify-customer"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="notify-customer" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -36,12 +36,19 @@ public interface MessageService {
      *
      * @param outcome {@code DELIVERED} to a waiting instance, or {@code STARTED} for a new (or, with the same key, the
      *     existing) instance of a process with a message start event
-     * @param instanceId the instance
+     * @param instanceId the instance, or null when the message is held for a parallel multiple start
      * @param nodeId the step that received it, or null when it started an instance
      */
     record MessageDelivery(Outcome outcome, String instanceId, String nodeId) {
 
         /** What the message did. */
-        public enum Outcome { DELIVERED, STARTED }
+        public enum Outcome {
+            /** A waiting step received it. */
+            DELIVERED,
+            /** It started an instance. */
+            STARTED,
+            /** It is held for a process whose start event waits for all of several triggers; no instance yet. */
+            WAITING
+        }
     }
 }

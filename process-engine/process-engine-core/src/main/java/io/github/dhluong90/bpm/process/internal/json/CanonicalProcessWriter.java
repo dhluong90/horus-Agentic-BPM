@@ -134,11 +134,19 @@ public final class CanonicalProcessWriter {
                     if (d.activityRef() != null) {
                         step.put("activity", d.activityRef());
                     }
+                    if (!d.waitForCompletion()) {
+                        step.put("background", true);
+                    }
                 }
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof
                                 io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition ->
                         step.put("type", "cancelEnd");
+                case EndEvent e when e.eventDefinitions().size() > 1 -> {
+                    // A multiple end event throws every definition, in document order (PD-149).
+                    step.put("type", "multipleEnd");
+                    writeMultiple(step, e.eventDefinitions(), false);
+                }
                 case EndEvent e -> {
                     step.put("type", "end");
                     writeEventDefinition(step, e.eventDefinitions());
@@ -470,6 +478,14 @@ public final class CanonicalProcessWriter {
                     if (d.activityRef() != null) {
                         step.put("activity", d.activityRef());
                     }
+                    if (!d.waitForCompletion()) {
+                        // The flow goes on while the undo runs in the background: part of the step, so of the hash.
+                        step.put("background", true);
+                    }
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() > 1 -> {
+                    step.put("type", "multipleThrow");
+                    writeMultiple(step, t.eventDefinitions(), false);
                 }
                 // #491: message steps. The message name, the key variable and the mappings follow below.
                 case IntermediateCatchEvent c when messageOf(c) != null -> step.put("type", "messageCatch");
@@ -592,6 +608,15 @@ public final class CanonicalProcessWriter {
                 case SignalEventDefinition sg -> entry.put("trigger", "signal").put("signal", sg.signalRef());
                 case ConditionalEventDefinition c -> entry.put("trigger", "conditional").put("condition",
                         normal(c.condition().language(), c.condition().text().strip()));
+                case CompensateEventDefinition c -> {
+                    entry.put("trigger", "compensation");
+                    if (c.activityRef() != null) {
+                        entry.put("activity", c.activityRef());
+                    }
+                    if (!c.waitForCompletion()) {
+                        entry.put("background", true);
+                    }
+                }
                 default -> writeOneDefinition(entry, List.of(d));
             }
         }
