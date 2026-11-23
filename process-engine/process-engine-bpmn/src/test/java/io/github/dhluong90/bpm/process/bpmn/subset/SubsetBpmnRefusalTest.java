@@ -74,7 +74,7 @@ class SubsetBpmnRefusalTest {
             assertThat(e.code()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
             assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
-                    tuple("dataObject", "do-1", 57, "S1"),
+                    tuple("globalTask", "do-1", 57, "not planned"),
                     tuple("eventBasedGateway with instantiate", "notify", 63, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
             assertThat(e.problems().get(2).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
@@ -164,7 +164,7 @@ class SubsetBpmnRefusalTest {
     void PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag() {
         StringBuilder body = new StringBuilder("<bpmn:startEvent id=\"s\"/>");
         for (int i = 0; i < 130; i++) {
-            body.append("<bpmn:dataObject id=\"g").append(i).append("\"/>");
+            body.append("<bpmn:globalTask id=\"g").append(i).append("\"/>");
         }
 
         assertThatThrownBy(() -> reader.read((HEAD + body + TAIL).getBytes(StandardCharsets.UTF_8)))
@@ -177,7 +177,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters() {
         String id = "g".repeat(250) + "&#13;&#10;y";
-        byte[] file = (HEAD + "<bpmn:dataObject id=\"a&#13;&#10;b\"/><bpmn:dataObject id=\"" + id + "\"/>"
+        byte[] file = (HEAD + "<bpmn:globalTask id=\"a&#13;&#10;b\"/><bpmn:globalTask id=\"" + id + "\"/>"
                 + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {

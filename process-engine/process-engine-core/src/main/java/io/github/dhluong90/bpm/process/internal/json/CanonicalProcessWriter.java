@@ -78,6 +78,7 @@ public final class CanonicalProcessWriter {
             doc.put("name", process.name());
         }
         writeSteps(doc.putArray("steps"), process.flowElements(), process.artifacts());
+        writeDataElements(doc, process.flowElements());
         return doc;
     }
 
@@ -451,6 +452,7 @@ public final class CanonicalProcessWriter {
                 case Transaction saga -> {
                     step.put("type", "saga");
                     writeSteps(step.putArray("steps"), saga.flowElements(), saga.artifacts());
+                    writeDataElements(step, saga.flowElements());
                 }
                 case SubProcess sub -> {
                     // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
@@ -460,6 +462,7 @@ public final class CanonicalProcessWriter {
                         step.put("triggeredByEvent", true);
                     }
                     writeSteps(step.putArray("steps"), sub.flowElements(), sub.artifacts());
+                    writeDataElements(step, sub.flowElements());
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
                         && t.eventDefinitions().get(0) instanceof CompensateEventDefinition d -> {
@@ -505,12 +508,63 @@ public final class CanonicalProcessWriter {
                     && activity.activity().loopCharacteristics() != null) {
                 writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
             }
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
+                writeDataAssociations(step, activity.activity());
+            }
             if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway)
                     && !(node instanceof ComplexGateway)
                     && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
+    }
+
+    /**
+     * #499: the data objects, data object references and data store references of a container, and the data inputs
+     * and outputs of an activity, written only when declared so a definition without them keeps its hash.
+     */
+    private static void writeDataElements(ObjectNode target, List<FlowElement> elements) {
+        ArrayNode data = null;
+        for (FlowElement element : elements) {
+            ObjectNode entry = null;
+            if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.DataObject d) {
+                data = data == null ? target.putArray("dataObjects") : data;
+                entry = data.addObject().put("kind", "dataObject").put("id", d.id());
+                entry.put("variable", d.info().otherAttributes().getOrDefault(
+                        new javax.xml.namespace.QName("urn:horus-bpm:bpmn:extensions:v1", "variable"), d.id()));
+            } else if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.DataObjectReference d) {
+                data = data == null ? target.putArray("dataObjects") : data;
+                entry = data.addObject().put("kind", "dataObjectReference").put("id", d.id());
+                entry.put("ref", d.dataObjectRef());
+            } else if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.DataStoreReference d) {
+                data = data == null ? target.putArray("dataObjects") : data;
+                entry = data.addObject().put("kind", "dataStoreReference").put("id", d.id());
+                entry.put("ref", d.dataStoreRef());
+            }
+            if (entry != null && ((io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement) element).name() != null) {
+                entry.put("name", element.name());
+            }
+        }
+    }
+
+    private static void writeDataAssociations(ObjectNode step,
+            io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes a) {
+        if (a.ioSpecification() == null && a.dataInputAssociations().isEmpty() && a.dataOutputAssociations().isEmpty()) {
+            return;
+        }
+        ObjectNode data = step.putObject("data");
+        if (a.ioSpecification() != null) {
+            ArrayNode inputs = data.putArray("dataInputs");
+            a.ioSpecification().dataInputs().forEach(d -> inputs.addObject().put("id", d.id()).put("name", d.name()));
+            ArrayNode outputs = data.putArray("dataOutputs");
+            a.ioSpecification().dataOutputs().forEach(d -> outputs.addObject().put("id", d.id()).put("name", d.name()));
+        }
+        ArrayNode in = data.putArray("in");
+        a.dataInputAssociations().forEach(d -> in.addObject().put("from", String.join(",", d.sourceRefs()))
+                .put("to", d.targetRef()));
+        ArrayNode out = data.putArray("out");
+        a.dataOutputAssociations().forEach(d -> out.addObject().put("from", String.join(",", d.sourceRefs()))
+                .put("to", d.targetRef()));
     }
 
     /**

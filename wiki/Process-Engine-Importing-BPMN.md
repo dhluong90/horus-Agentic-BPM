@@ -83,6 +83,7 @@ The root element must declare the namespaces, and the process must be executable
 | `startEvent` with a `signalEventDefinition` (since 0.3.0) | `signalRef`, the id of a document-level `signal` element | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `startEvent` with a `conditionalEventDefinition` (since 0.3.0) | a `condition` in `urn:horus-bpm:expr:v1` | `name` | `<bpmn:condition>amount >= 1000000</bpmn:condition>` |
 | `eventBasedGateway` (since 0.3.0) | two or more outgoing flows, each to a message, signal, timer or conditional `intermediateCatchEvent` or a `receiveTask` that no other flow enters | none; `instantiate="true"` and `eventGatewayType="Parallel"` are refused (`S3`) | `<bpmn:eventBasedGateway id="wait-payment"/>` |
+| `dataObject`, `dataObjectReference`, `dataStoreReference` and a root `dataStore` (since 0.3.0) | `dataObjectRef` on a reference; `dataStoreRef` naming a root `dataStore` | `horus:variable` on a data object: the variable it is held in (its id by default); `ioSpecification`, `dataInputAssociation` and `dataOutputAssociation` on a task or call activity. A data output association writes the result value named by its `sourceRef` (a data output of the `ioSpecification`; the whole result when none) into the data object it targets, and a data input association hands the value of the data object to the step as an input named by its target. A transformation or assignment is refused. A data store reference is kept and exported, not run | `<bpmn:dataOutputAssociation><bpmn:sourceRef>out-score</bpmn:sourceRef><bpmn:targetRef>score-ref</bpmn:targetRef></bpmn:dataOutputAssociation>` |
 | `intermediateCatchEvent` with a signal or conditional definition (since 0.3.0) | as above | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `intermediateThrowEvent` and `endEvent` with a signal definition (since 0.3.0) | `signalRef` | `name` | `<bpmn:endEvent id="end"><bpmn:signalEventDefinition signalRef="Signal_done"/></bpmn:endEvent>` |
 | loop or multi-instance marker (since 0.3.0), on a task, a `callActivity` or an embedded `subProcess` | `standardLoopCharacteristics` with `loopMaximum` and an optional `loopCondition`; or `multiInstanceLoopCharacteristics` with `horus:collection` and `horus:elementVariable`, or a `loopCardinality` | `isSequential`, `horus:outputCollection`, `horus:outputElement`, `completionCondition` | `<bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"/>` |
@@ -277,6 +278,30 @@ A `callActivity` starts a child instance of another definition of the same tenan
 
 `horus:input` names the child's variable and gives its value, as on any step. `horus:output` sets the parent's variable `name` from the child's variable `from` when the child completes. Without `horus:calledVersion` the child starts on the version effective when the step runs and stays on it. A definition may name a process that is not deployed yet; the step raises the incident `NO_EFFECTIVE_VERSION` if it still is not when it runs. A call inside a `saga` must declare its undo with `horus:compensate`, because a completed child is undone only by its call step's own handler. `horus:in="all"` is not supported.
 
+### BPMN 2.0 element coverage (since 0.3.0)
+
+Compared with the executable element set of BPMN 2.0. A conformance suite (`ConformanceSuiteTest`, with its files under `bpmn/conformance`) runs data objects, gateways, a parallel join and a sub-process with a timer; the other rows are run by the scenario test of their own element.
+
+| Element | Supported | Notes |
+|---|---|---|
+| Process, none start event, none end event | Yes | |
+| Message, signal, timer, conditional start | Yes | Parallel multiple start and the instantiating event-based gateway: not yet |
+| Multiple start (message, signal) | Yes | Never parallel |
+| Task, manual task, script task, service task, business rule task, user task, send task, receive task | Yes | Script is one expression |
+| Call activity | Yes | |
+| Embedded, event, ad-hoc sub-process, transaction | Yes | A compensation event sub-process holds one service task |
+| Loop and multi-instance markers | Yes | |
+| Exclusive, parallel, inclusive, complex, event-based (exclusive) gateway | Yes | The parallel and instantiating event-based gateway: not yet |
+| Intermediate catch: message, timer, signal, conditional, link, multiple | Yes | |
+| Intermediate throw: message, signal, escalation, compensation, link | Yes | A throw with several definitions: not yet |
+| Boundary: timer, error, escalation, message, signal, conditional, compensation, cancel, multiple | Yes | |
+| End: error, escalation, terminate, compensation, cancel, message, signal | Yes | An end with several definitions: not yet |
+| Compensation with `waitForCompletion="false"` | No | Refused |
+| Data object, data object reference, data input and output, associations | Yes | Run as variables |
+| Data store, data store reference | Kept | Exported, not run until a host store handler exists |
+| Lanes, pools, message flows, text annotation, association, group | Kept | Never executed |
+| Choreography, conversation | Kept | Read and kept as received, never run; after 1.0 |
+
 ### Accepted and skipped
 
 These parts of a file are accepted and never executed. They do not change the definition hash, and the stored file keeps them as received.
@@ -315,8 +340,7 @@ Expected answer, `422`:
 ```json
 {"status":422,"code":"BPMN_UNSUPPORTED_ELEMENT","unsupportedElements":[
   {"element":"boundaryEvent","elementId":"be-timeout","line":6,"stage":"not planned","message":"..."},
-  {"element":"inclusiveGateway","elementId":"ig-1","line":7,"stage":"S1","message":"..."},
-  {"element":"endEvent with messageEventDefinition","elementId":"end","line":8,"stage":"S2","message":"..."}],...}
+  {"element":"globalTask","elementId":"do-1","line":7,"stage":"not planned","message":"..."}],...}
 ```
 
 The answer lists every unsupported element in the file, each with its id, its line and its stage. Remove or replace each one and import again. At most 100 entries are listed; `violationsTruncated: true` says there were more. Ids are printed without control characters and cut at 200 characters.
@@ -329,7 +353,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: data objects and a timer cycle on a catch or boundary event are `S1`; the instantiating and the parallel event-based gateway are `S3`.
+Examples: a timer cycle on a catch or boundary event is `S1`; the instantiating and the parallel event-based gateway are `S3`. A choreography is read and kept as received, never run.
 
 These are refused:
 

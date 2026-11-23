@@ -53,7 +53,7 @@ final class UserTaskBehavior implements FlowNodeBehavior<UserTask> {
             throw new ExecutionException("TASK_MISMATCH", node.id(), "Task " + complete.taskId()
                     + " is not the open task of this token");
         }
-        StepSupport.storeResult(node, complete.result(), ctx);
+        StepSupport.storeResult(node, complete.result(), token, ctx);
         Token active = token.withStatus(TokenStatus.ACTIVE);
         ctx.update(active);
         ctx.history("TASK_COMPLETED", token, Map.of("taskId", complete.taskId()));

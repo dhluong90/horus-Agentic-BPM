@@ -71,7 +71,7 @@ final class InvocationSupport {
                 // holds the steps in the order they completed. The entry keeps what the undo needs: the step's
                 // inputs and its result.
                 pushUndo(node, token, result.attemptId(), completed.output(), ctx);
-                StepSupport.storeResult(node, completed.output(), ctx);
+                StepSupport.storeResult(node, completed.output(), token, ctx);
                 ctx.effect(new Effect.RecordResult(token.id(), node.id(), result.attemptId(), completed.output(),
                         false));
                 Token active = token.withStatus(TokenStatus.ACTIVE);
@@ -150,7 +150,7 @@ final class InvocationSupport {
                     + " is not the open review task of this token");
         }
         pushUndo(node, token, token.activityInstanceId(), complete.result(), ctx);
-        StepSupport.storeResult(node, complete.result(), ctx);
+        StepSupport.storeResult(node, complete.result(), token, ctx);
         ctx.effect(new Effect.RecordResult(token.id(), node.id(), complete.taskId(), complete.result(), true));
         Token active = token.withStatus(TokenStatus.ACTIVE);
         ctx.update(active);
