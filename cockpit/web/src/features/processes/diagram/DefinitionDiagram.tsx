@@ -24,6 +24,7 @@ import {
 } from '../model/layout';
 import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
+import { placeCollaboration, POOL_HEADER, type CollaborationDrawing } from '../model/collaborationLayout';
 import { Minimap, type View } from './Minimap';
 import { NodeIcon } from './NodeIcon';
 
@@ -137,6 +138,48 @@ function MarkBadge({ mark, x, y }: { mark: Mark; x: number; y: number }) {
     <g className={`dg-mark dg-mark--${mark}`} aria-hidden="true">
       <circle cx={x} cy={y} r={9} />
       <text x={x} y={y + 4.5} textAnchor="middle">{MARK_GLYPH[mark]}</text>
+    </g>
+  );
+}
+
+/** The pool frame, the lane bands and the black-box pools behind the steps (#497). */
+function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
+  return (
+    <g className="dg-collab" data-collaboration="true">
+      {drawing.pool !== undefined ? (
+        <g className="dg-pool" data-pool={drawing.pool.id}>
+          <rect x={drawing.pool.x} y={drawing.pool.y} width={drawing.pool.width} height={drawing.pool.height} rx={4} />
+          <text className="dg-pool__name" x={drawing.pool.x + 12} y={drawing.pool.y + POOL_HEADER - 9}>{drawing.pool.label}</text>
+        </g>
+      ) : null}
+      {drawing.lanes.map((lane) => (
+        <g key={lane.id} className="dg-lane" data-lane={lane.id}>
+          <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} rx={6} />
+          <text className="dg-lane__name" x={lane.x + 10} y={lane.y + 14}>{lane.label}</text>
+        </g>
+      ))}
+      {drawing.blackBoxes.map((box) => (
+        <g key={box.id} className="dg-pool dg-pool--black-box" data-pool={box.id}>
+          <rect x={box.x} y={box.y} width={box.width} height={box.height} rx={4} />
+          <text className="dg-pool__name" x={box.x + box.width / 2} y={box.y + box.height / 2 + 4} textAnchor="middle">{box.label}</text>
+        </g>
+      ))}
+    </g>
+  );
+}
+
+/** A message flow: a dashed line with an arrow and, when it has one, a label (#497). */
+function MessageFlowLine({ flow, marker }: { flow: { id: string; label: string | undefined; points: readonly Point[]; labelAt: Point }; marker: string }) {
+  const pill = flow.label !== undefined ? Math.ceil(flow.label.length * LABEL_CHAR) + 14 : 0;
+  return (
+    <g className="dg-edge dg-edge--message" data-message-flow={flow.id}>
+      <path d={path(flow.points)} markerEnd={`url(#${marker})`} />
+      {flow.label !== undefined ? (
+        <g className="dg-edge__label">
+          <rect x={flow.labelAt.x - pill / 2} y={flow.labelAt.y - 10} width={pill} height={20} rx={10} />
+          <text x={flow.labelAt.x} y={flow.labelAt.y + 4} textAnchor="middle">{flow.label}</text>
+        </g>
+      ) : null}
     </g>
   );
 }
@@ -382,7 +425,10 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   const toggle = useCallback((id: string) => {
     setToggled((current) => new Map(current).set(id, !open.has(id)));
   }, [open]);
-  const layout = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges, open }), [graph, t, withBadges, open]);
+  const plain = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges, open }), [graph, t, withBadges, open]);
+  // #497: pools, lanes and message flows are drawn around the laid-out steps, read only.
+  const collaboration = useMemo(() => placeCollaboration(plain, graph), [plain, graph]);
+  const layout = collaboration?.layout ?? plain;
   const [zoom, setZoom] = useState<Zoom>('fit');
   const frame = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<{ width: number; height: number } | undefined>(undefined);
@@ -530,11 +576,15 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
                 </marker>
               )) : null}
             </defs>
+            {collaboration !== undefined ? <Collaboration drawing={collaboration} /> : null}
             <g>{layout.nodes.filter((node) => node.container?.open === true).map((node) => (
               <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}${node.loop !== undefined ? `, ${t(`diagram.loop.${node.loop}`)}` : ''}`}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
                 onToggle={() => { toggle(node.id); }} toggleLabel={t('diagram.collapse', { name: node.name ?? node.id })} />
             ))}</g>
+            {collaboration !== undefined ? (
+              <g>{collaboration.flows.map((flow) => <MessageFlowLine key={flow.id} flow={flow} marker={marker} />)}</g>
+            ) : null}
             <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
             <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (
               <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} loopLabel={node.loop !== undefined ? t(`diagram.loop.${node.loop}`) : undefined} badge={overlay?.badges.get(node.id)}

@@ -31,15 +31,18 @@ import java.util.Objects;
  * @param supersededBy the version number that superseded it, or null
  * @param warnings what an import kept in the stored source but did not read, such as {@code FOREIGN_EXTENSION_IGNORED};
  *     empty except in the answer to an import
+ * @param alsoImported the other executable pools of the same file, each a definition of its own (#497); empty except
+ *     in the answer to an import of a collaboration
  */
 public record DefinitionVersion(String id, String key, int version, String status, String name,
         String definitionHash, SourceFormat sourceFormat, String sourceHash, int nodeCount, String approvedBy,
         String createdBy, Instant createdAt, String source, long lockVersion, Instant effectiveFrom, String requestedBy,
         Instant requestedAt, Instant approvedAt, String decisionComment, String retiredBy, Instant retiredAt,
-        Integer supersededBy, List<DefinitionProblem> warnings) {
+        Integer supersededBy, List<DefinitionProblem> warnings, List<DefinitionRef> alsoImported) {
 
     public DefinitionVersion {
         warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        alsoImported = alsoImported == null ? List.of() : List.copyOf(alsoImported);
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(key, "key must not be null");
         Objects.requireNonNull(status, "status must not be null");
@@ -80,14 +83,58 @@ public record DefinitionVersion(String id, String key, int version, String statu
             Integer supersededBy) {
         this(id, key, version, status, name, definitionHash, sourceFormat, sourceHash, nodeCount, approvedBy,
                 createdBy, createdAt, source, lockVersion, effectiveFrom, requestedBy, requestedAt, approvedAt,
-                decisionComment, retiredBy, retiredAt, supersededBy, List.of());
+                decisionComment, retiredBy, retiredAt, supersededBy, List.of(), List.of());
     }
 
     /** @param found what the import ignored @return a copy that carries it */
     public DefinitionVersion withWarnings(List<DefinitionProblem> found) {
         return new DefinitionVersion(id, key, version, status, name, definitionHash, sourceFormat, sourceHash,
                 nodeCount, approvedBy, createdBy, createdAt, source, lockVersion, effectiveFrom, requestedBy,
-                requestedAt, approvedAt, decisionComment, retiredBy, retiredAt, supersededBy, found);
+                requestedAt, approvedAt, decisionComment, retiredBy, retiredAt, supersededBy, found, alsoImported);
+    }
+
+    /** @param others the other pools of the same file that became definitions (#497) @return a copy that names them */
+    public DefinitionVersion withAlsoImported(List<DefinitionRef> others) {
+        return new DefinitionVersion(id, key, version, status, name, definitionHash, sourceFormat, sourceHash,
+                nodeCount, approvedBy, createdBy, createdAt, source, lockVersion, effectiveFrom, requestedBy,
+                requestedAt, approvedAt, decisionComment, retiredBy, retiredAt, supersededBy, warnings, others);
+    }
+
+    /**
+     * The form with warnings and no other pools.
+     *
+     * @param id the version id
+     * @param key the definition key
+     * @param version the version number
+     * @param status the status
+     * @param name the display name, or null
+     * @param definitionHash the definition hash
+     * @param sourceFormat the source format
+     * @param sourceHash the source hash
+     * @param nodeCount number of flow nodes
+     * @param approvedBy approver or null
+     * @param createdBy the importing identity
+     * @param createdAt when it was imported
+     * @param source how it arrived
+     * @param lockVersion optimistic lock
+     * @param effectiveFrom when it takes effect, or null
+     * @param requestedBy who requested approval, or null
+     * @param requestedAt when, or null
+     * @param approvedAt when approved, or null
+     * @param decisionComment the comment, or null
+     * @param retiredBy who retired it, or null
+     * @param retiredAt when, or null
+     * @param supersededBy the superseding version, or null
+     * @param warnings what the import ignored
+     */
+    public DefinitionVersion(String id, String key, int version, String status, String name, String definitionHash,
+            SourceFormat sourceFormat, String sourceHash, int nodeCount, String approvedBy, String createdBy,
+            Instant createdAt, String source, long lockVersion, Instant effectiveFrom, String requestedBy,
+            Instant requestedAt, Instant approvedAt, String decisionComment, String retiredBy, Instant retiredAt,
+            Integer supersededBy, List<DefinitionProblem> warnings) {
+        this(id, key, version, status, name, definitionHash, sourceFormat, sourceHash, nodeCount, approvedBy,
+                createdBy, createdAt, source, lockVersion, effectiveFrom, requestedBy, requestedAt, approvedAt,
+                decisionComment, retiredBy, retiredAt, supersededBy, warnings, List.of());
     }
 
     /**

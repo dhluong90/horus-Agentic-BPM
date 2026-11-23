@@ -329,7 +329,7 @@ These are refused:
 | Activities | `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
-| Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
+| Structure | data objects and data stores, and a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |
 
 An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
@@ -408,6 +408,17 @@ All codes are on [[Common Error Codes]].
 ## Outside the `dev` profile
 
 The same import works, and the answer has `"status":"DRAFT"`. In 0.1.0 nothing can approve a process draft, so it cannot start. Use the preview on `dev` for evaluation. The approval flow for process definitions comes in a later release ([[Roadmap]]).
+
+## Pools, lanes and message flows
+
+A file with a `collaboration` is imported as one definition per executable pool: every `participant` whose `processRef` names a process with `isExecutable="true"` becomes a definition of its own, with its own key, versions and lifecycle, in one import. The answer is the first definition and lists the others in `alsoImported`; a replay with the same `Idempotency-Key` returns the same answer. A participant with no `processRef` is a black box: it is kept and drawn, and it is the other end of a message flow, nothing more.
+
+- **Lanes** are kept as written and drawn. A user task with no `horus:assignee` that stands in a named lane is assigned to the group of that lane, the lane's name in lower case with other characters as hyphens (`Back office` is `group:back-office`); a task that names its own assignee keeps it, and a task with neither is `ASSIGNEE_INVALID`.
+- **Message flows** are kept and drawn as dashed lines. A flow runs nothing: a message reaches an instance only through `POST /messages:correlate` (see Messages below). Where a flow ends at a message start, catch or receive step of an executable pool, the export records the `horus:correlationKey` of that step on the flow, so the diagram says which variable correlates it.
+- **Export** of one definition is a file that stands alone: its pool with its lanes, every other pool as a participant with no process, and each message flow drawn to that pool. Importing it again gives the same definition.
+- A `choreography` (or a global choreography task or conversation) is kept in the stored source and never run; the import answers with the warning `CHOREOGRAPHY_KEPT_AS_RECEIVED`.
+
+A worked file is [`order-payment-pools.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/order-payment-pools.bpmn): an order desk, a payment desk and a black-box auditor.
 
 ## Messages
 

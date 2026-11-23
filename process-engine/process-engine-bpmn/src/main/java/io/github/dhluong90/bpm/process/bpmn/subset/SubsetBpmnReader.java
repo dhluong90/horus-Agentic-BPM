@@ -40,6 +40,12 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinitio
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SendTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Collaboration;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Lane;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LaneSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Participant;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
@@ -175,6 +181,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
             BpmnNamespaces.XSI, BpmnNamespaces.BPMNDI, BpmnNamespaces.DC, BpmnNamespaces.DI,
             "http://www.w3.org/XML/1998/namespace");
     private static final int MAX_WARNINGS = 100;
+    /** Root elements of a choreography, kept as received (#497). */
+    private static final Set<String> CHOREOGRAPHY_ROOTS = Set.of("choreography", "globalChoreographyTask",
+            "globalConversation");
+    /** Where a message flow carries the ids of the pools at its ends, and the correlation variable of its target. */
+    static final QName SOURCE_POOL = new QName(BpmnNamespaces.HORUS, "sourcePool");
+    static final QName TARGET_POOL = new QName(BpmnNamespaces.HORUS, "targetPool");
+    static final QName CORRELATION_KEY = new QName(BpmnNamespaces.HORUS, "correlationKey");
 
     private final Limits limits;
 
@@ -229,8 +242,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
             try {
                 XmlHardening.requireUtf8Declaration(xml);
                 Pass pass = new Pass(xml);
-                Process process = pass.document();
-                return new Result(process, pass.warnings);
+                List<Process> all = pass.document();
+                return new Result(all.get(0), all, pass.warnings);
             } finally {
                 xml.close();
             }
@@ -275,7 +288,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             this.xml = xml;
         }
 
-        Process document() throws XMLStreamException {
+        List<Process> document() throws XMLStreamException {
             nextStart();
             // CMMN is refused at the root, before any other check (PRE-107): the XML hardening has already run.
             if (xml.getNamespaceURI() != null && xml.getNamespaceURI().startsWith(CMMN_NAMESPACE_PREFIX)) {
@@ -286,17 +299,24 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         "The root element must be definitions in namespace " + BPMN, xml.getLocalName(), null, line())));
             }
             documentLanguage = attr("expressionLanguage");
-            Process process = null;
             while (nextChild()) {
                 String ns = xml.getNamespaceURI();
                 String local = xml.getLocalName();
                 if (BPMN.equals(ns) && "process".equals(local)) {
-                    if (process != null) {
-                        unsupported(local, attr("id"), BpmnStages.S1);
+                    processes.add(process());
+                } else if (BPMN.equals(ns) && "collaboration".equals(local)) {
+                    if (collaboration != null) {
+                        invalid.add(new DefinitionProblem("COLLABORATION_DUPLICATE", "A file has one collaboration",
+                                "collaboration", safe(attr("id")), line()));
                         skip();
                     } else {
-                        process = process();
+                        collaboration();
                     }
+                } else if (BPMN.equals(ns) && CHOREOGRAPHY_ROOTS.contains(local)) {
+                    // #497: a choreography is kept as received, in the stored source, and never run.
+                    warn("CHOREOGRAPHY_KEPT_AS_RECEIVED", "A choreography is kept as received and is not run: model each"
+                            + " participant as an executable process", local, attr("id"));
+                    skip();
                 } else if (BPMN.equals(ns) && "category".equals(local)) {
                     category();
                 } else if (BPMN.equals(ns) && "error".equals(local)) {
@@ -324,27 +344,108 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
-            process = withMessageNames(process);
+            List<Process> executable = executableProcesses();
             for (DefinitionProblem ref : unresolvedRefs) {
                 if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
                     invalid.add(ref);
                 }
             }
-            if (process != null) {
+            List<Process> resolved = new ArrayList<>();
+            for (Process process : executable) {
+                process = withMessageNames(process);
                 process = resolveCodes(process);
                 process = withSignalNames(process);
+                resolved.add(process);
             }
+            Collaboration resolvedCollaboration = collaboration == null ? null : resolveCollaboration(resolved);
             if (!unsupported.isEmpty()) {
                 throw new BpmnUnsupportedElementException(unsupported, warnings, unsupportedTruncated);
             }
-            if (process == null) {
-                invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no process", null));
+            if (resolved.isEmpty()) {
+                invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no executable process", null));
             }
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
-            return withCategoryLabels(process);
+            List<Process> out = new ArrayList<>();
+            for (Process process : resolved) {
+                Process labelled = withCategoryLabels(process);
+                out.add(resolvedCollaboration != null && ownsPool(resolvedCollaboration, labelled)
+                        ? labelled.withCollaboration(resolvedCollaboration) : labelled);
+            }
+            return out;
+        }
+
+        private void warn(String code, String message, String element, String id) {
+            if (warnings.size() < MAX_WARNINGS) {
+                warnings.add(new DefinitionProblem(code, message, element, safe(id), line()));
+            }
+        }
+
+        private static boolean ownsPool(Collaboration c, Process p) {
+            return c.participants().stream().anyMatch(x -> p.id().equals(x.processRef()));
+        }
+
+        /** A process as read: executable or not, with where its key was written. */
+        private record Read(Process process, boolean executable, int line) { }
+
+        private final List<Read> processes = new ArrayList<>();
+        private Collaboration collaboration;
+        /** Lane sets of the process being read; null outside a process. */
+        private List<LaneSet> laneSink;
+        private int nesting;
+        private boolean codeRefsChecked;
+
+        /**
+         * The processes that become definitions. Alone in its file a process must be executable, as before. In a
+         * collaboration each participant that points to an executable process is one, the others are pools kept for
+         * display (#497).
+         */
+        private List<Process> executableProcesses() {
+            if (collaboration == null) {
+                if (processes.size() > 1) {
+                    invalid.add(new DefinitionProblem("PROCESS_NOT_IN_COLLABORATION", "A file with several processes needs"
+                            + " a collaboration whose participants point to them", "process",
+                            safe(processes.get(1).process().id()), processes.get(1).line()));
+                }
+                for (Read read : processes.stream().limit(1).toList()) {
+                    checkKey(read);
+                    if (!read.executable()) {
+                        invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
+                                "process", safe(read.process().id()), read.line()));
+                    }
+                }
+                return processes.isEmpty() ? List.of() : List.of(processes.get(0).process());
+            }
+            Set<String> pointed = new HashSet<>();
+            for (Participant participant : collaboration.participants()) {
+                if (participant.processRef() == null) {
+                    continue;
+                }
+                pointed.add(participant.processRef());
+                if (processes.stream().noneMatch(r -> r.process().id().equals(participant.processRef()))) {
+                    invalid.add(new DefinitionProblem("PARTICIPANT_PROCESS_MISSING", "The participant points to process '"
+                            + safe(participant.processRef()) + "', which this file does not hold", "participant",
+                            safe(participant.id()), 1));
+                }
+            }
+            List<Process> out = new ArrayList<>();
+            for (Read read : processes) {
+                if (read.executable()) {
+                    checkKey(read);
+                    out.add(read.process());
+                }
+            }
+            return out;
+        }
+
+        private void checkKey(Read read) {
+            if (!KEY.matcher(read.process().id()).matches()) {
+                invalid.add(new DefinitionProblem("KEY_INVALID", "The process id is the definition key and must be"
+                        + " kebab-case, for example card-fee-review", "process", safe(read.process().id()),
+                        read.line()));
+            }
         }
 
         /** A {@code signalEventDefinition}; its {@code signalRef} is resolved to the signal's name at the end. */
@@ -574,30 +675,231 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     artifacts, p.laneSets(), p.info());
         }
 
-        private Process process() throws XMLStreamException {
+        private Read process() throws XMLStreamException {
             String key = attr("id");
             String name = attr("name");
             int line = line();
-            if (key == null || !KEY.matcher(key).matches()) {
-                invalid.add(new DefinitionProblem("KEY_INVALID", "The process id is the definition key and must be"
-                        + " kebab-case, for example card-fee-review", "process", safe(key), line));
-            }
-            if (!"true".equals(attr("isExecutable"))) {
-                invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
-                        "process", safe(key), line));
-            }
+            boolean executable = "true".equals(attr("isExecutable"));
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
+            laneSink = new ArrayList<>();
+            nesting = 0;
             container(elements, artifacts);
-            return withRefs(new Process(key, name, ProcessType.NONE, true, false, elements, artifacts, List.of(), null));
+            elements = withLaneAssignees(elements, laneSink);
+            pendingAssignee.forEach((taskId, at) -> invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
+                    "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>, or a named lane to"
+                            + " take the group from", "userTask", safe(taskId), at)));
+            pendingAssignee.clear();
+            Process read = withRefs(new Process(key == null ? "_missing_" + line : key, name, ProcessType.NONE,
+                    executable, false, elements, artifacts, laneSink, null));
+            laneSink = null;
+            return new Read(read, executable, line);
         }
 
+        /** User tasks of the process being read that name no assignee: id to line. */
+        private final Map<String, Integer> pendingAssignee = new HashMap<>();
+
+        /**
+         * #497: a user task with no {@code horus:assignee} that stands in a named lane is assigned to the group of
+         * that lane, the lane's name in lower case with other characters as hyphens; an author's own assignee is
+         * never changed.
+         */
+        private List<FlowElement> withLaneAssignees(List<FlowElement> elements, List<LaneSet> sets) {
+            if (pendingAssignee.isEmpty() || sets.isEmpty()) {
+                return elements;
+            }
+            Map<String, String> groupOfNode = new HashMap<>();
+            sets.forEach(set -> laneGroups(set, groupOfNode));
+            List<FlowElement> out = new ArrayList<>();
+            for (FlowElement element : elements) {
+                if (element instanceof UserTask task && pendingAssignee.containsKey(task.id())
+                        && groupOfNode.containsKey(task.id())) {
+                    pendingAssignee.remove(task.id());
+                    List<HorusExtension> ext = new ArrayList<>();
+                    for (HorusExtension e : task.info().extensions().horus()) {
+                        ext.add(e instanceof TaskAssignment a
+                                ? new TaskAssignment("group:" + groupOfNode.get(task.id()), a.fourEyes()) : e);
+                    }
+                    out.add(new UserTask(task.id(), task.name(), task.incoming(), task.outgoing(), task.activity(),
+                            task.implementation(), info(ext, task.info().extensions().foreign())));
+                } else {
+                    out.add(element);
+                }
+            }
+            return out;
+        }
+
+        private static void laneGroups(LaneSet set, Map<String, String> groupOfNode) {
+            for (Lane lane : set.lanes()) {
+                String group = lane.name() == null ? "" : lane.name().toLowerCase(java.util.Locale.ROOT)
+                        .replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+                for (String ref : lane.flowNodeRefs()) {
+                    if (group.isEmpty() || group.length() > 100) {
+                        groupOfNode.remove(ref);
+                    } else {
+                        groupOfNode.put(ref, group);
+                    }
+                }
+                if (lane.childLaneSet() != null) {
+                    laneGroups(lane.childLaneSet(), groupOfNode);
+                }
+            }
+        }
+
+        /** A {@code laneSet}: kept for display and as a work group hint, never as an assignment (#497). */
+        private LaneSet laneSet() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            List<Lane> lanes = new ArrayList<>();
+            while (nextChild()) {
+                if (BPMN.equals(xml.getNamespaceURI()) && "lane".equals(xml.getLocalName())) {
+                    lanes.add(lane());
+                } else {
+                    skip();
+                }
+            }
+            return new LaneSet(id, name, lanes, null);
+        }
+
+        private Lane lane() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            List<String> refs = new ArrayList<>();
+            LaneSet child = null;
+            while (nextChild()) {
+                boolean bpmn = BPMN.equals(xml.getNamespaceURI());
+                if (bpmn && "flowNodeRef".equals(xml.getLocalName())) {
+                    String ref = text().strip();
+                    if (!ref.isEmpty()) {
+                        refs.add(ref);
+                    }
+                } else if (bpmn && "childLaneSet".equals(xml.getLocalName())) {
+                    child = laneSet();
+                } else {
+                    skip();
+                }
+            }
+            return new Lane(id, name, null, refs, child, null);
+        }
+
+        /** The {@code collaboration}: its pools and message flows, read as written and resolved at the end. */
+        private void collaboration() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            List<Participant> participants = new ArrayList<>();
+            List<MessageFlow> flows = new ArrayList<>();
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (!BPMN.equals(xml.getNamespaceURI())) {
+                    skip();
+                } else if ("participant".equals(local)) {
+                    String pid = id();
+                    participants.add(new Participant(pid, attr("name"), attr("processRef"), null, null, null));
+                    skip();
+                } else if ("messageFlow".equals(local)) {
+                    String fid = id();
+                    int at = line();
+                    flows.add(new MessageFlow(fid, attr("name"), attr("sourceRef"), attr("targetRef"),
+                            attr("messageRef"), null));
+                    if (attr("sourceRef") == null || attr("targetRef") == null) {
+                        invalid.add(new DefinitionProblem("MESSAGE_FLOW_ENDS_MISSING", "A message flow needs sourceRef"
+                                + " and targetRef", "messageFlow", safe(fid), at));
+                    }
+                    skip();
+                } else if (CHOREOGRAPHY_ROOTS.contains(local) || local.endsWith("Conversation")
+                        || "conversation".equals(local) || "conversationLink".equals(local)
+                        || "choreographyRef".equals(local) || "conversationAssociation".equals(local)) {
+                    warn("CHOREOGRAPHY_KEPT_AS_RECEIVED", "A choreography or conversation is kept as received and is not"
+                            + " run", local, attr("id"));
+                    skip();
+                } else {
+                    // text annotations, associations, groups, documentation and extensions are not run
+                    skip();
+                }
+            }
+            collaboration = new Collaboration(id, name, false, participants, flows, List.of(), null);
+        }
+
+        /**
+         * Resolves the message flows once every process is read: each end is a pool or a step of a pool, the
+         * message is named, and a flow into a message start, catch or receive step of an executable pool records the
+         * correlation variable the step reads (#497, documentation only; the run goes through #491).
+         */
+        private Collaboration resolveCollaboration(List<Process> executable) {
+            Map<String, String> poolOfNode = new HashMap<>();
+            Map<String, String> poolOfProcess = new HashMap<>();
+            for (Participant participant : collaboration.participants()) {
+                if (participant.processRef() != null) {
+                    poolOfProcess.put(participant.processRef(), participant.id());
+                }
+            }
+            Map<String, FlowNode> nodes = new HashMap<>();
+            for (Read read : processes) {
+                String pool = poolOfProcess.get(read.process().id());
+                for (FlowElement element : read.process().allFlowElements()) {
+                    if (element instanceof FlowNode node && pool != null) {
+                        poolOfNode.put(node.id(), pool);
+                        nodes.put(node.id(), node);
+                    }
+                }
+            }
+            Set<String> poolIds = new HashSet<>();
+            collaboration.participants().forEach(x -> poolIds.add(x.id()));
+            List<MessageFlow> out = new ArrayList<>();
+            for (MessageFlow flow : collaboration.messageFlows()) {
+                String source = poolIds.contains(flow.sourceRef()) ? flow.sourceRef() : poolOfNode.get(flow.sourceRef());
+                String target = poolIds.contains(flow.targetRef()) ? flow.targetRef() : poolOfNode.get(flow.targetRef());
+                if (flow.sourceRef() != null && source == null) {
+                    invalid.add(new DefinitionProblem("MESSAGE_FLOW_END_UNRESOLVED", "sourceRef '" + safe(flow.sourceRef())
+                            + "' is neither a participant nor a step of one", "messageFlow", safe(flow.id()), 1));
+                }
+                if (flow.targetRef() != null && target == null) {
+                    invalid.add(new DefinitionProblem("MESSAGE_FLOW_END_UNRESOLVED", "targetRef '" + safe(flow.targetRef())
+                            + "' is neither a participant nor a step of one", "messageFlow", safe(flow.id()), 1));
+                }
+                String message = null;
+                if (flow.messageRef() != null) {
+                    message = messageNames.get(flow.messageRef());
+                    if (message == null) {
+                        invalid.add(new DefinitionProblem("MESSAGE_REF_UNRESOLVED", "messageRef '" + safe(flow.messageRef())
+                                + "' does not resolve to a message of this document", "messageFlow", safe(flow.id()), 1));
+                    }
+                }
+                Map<QName, String> extra = new HashMap<>();
+                if (source != null) {
+                    extra.put(SOURCE_POOL, source);
+                }
+                if (target != null) {
+                    extra.put(TARGET_POOL, target);
+                }
+                FlowNode catcher = nodes.get(flow.targetRef());
+                if (catcher != null && executable.stream().anyMatch(p -> p.allFlowElements().stream()
+                        .anyMatch(e -> e.id().equals(catcher.id())))) {
+                    catcher.info().extensions().first(CorrelationKey.class)
+                            .ifPresent(k -> extra.put(CORRELATION_KEY, k.variable()));
+                }
+                out.add(new MessageFlow(flow.id(), flow.name(), flow.sourceRef(), flow.targetRef(), message,
+                        new ElementInfo(List.of(), null, extra)));
+            }
+            return new Collaboration(collaboration.id(), collaboration.name(), false, collaboration.participants(), out,
+                    List.of(), null);
+        }
 
         /**
          * The flow elements and artifacts of a process, a {@code saga} block ({@code transaction}) or a sub-process,
          * read into the given lists.
          */
         private LoopCharacteristics container(List<FlowElement> elements, List<Artifact> artifacts)
+                throws XMLStreamException {
+            nesting++;
+            try {
+                return containerChildren(elements, artifacts);
+            } finally {
+                nesting--;
+            }
+        }
+
+        private LoopCharacteristics containerChildren(List<FlowElement> elements, List<Artifact> artifacts)
                 throws XMLStreamException {
             LoopCharacteristics own = null;
             while (nextChild()) {
@@ -672,6 +974,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         artifacts.add(new Group(id, ref, null));
                     }
                     case "documentation", "extensionElements", "incoming", "outgoing" -> skip();
+                    case "laneSet" -> {
+                        LaneSet set = laneSet();
+                        if (nesting == 1 && laneSink != null) {
+                            laneSink.add(set);
+                        } else {
+                            unsupported("laneSet", set.id(), BpmnStages.NOT_PLANNED, "inside a sub-process or a saga is not"
+                                    + " supported; put the lanes on the process");
+                        }
+                    }
                     default -> {
                         unsupported(local, attr("id"), BpmnStages.of(local));
                         skip();
@@ -1228,7 +1539,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /** Fills in the code of each error and escalation definition from the root elements, once all are read. */
         private Process resolveCodes(Process process) {
-            for (DefinitionProblem ref : codeRefs) {
+            for (DefinitionProblem ref : codeRefsChecked ? List.<DefinitionProblem>of() : codeRefs) {
                 boolean error = "ERROR_REF".equals(ref.code());
                 String refId = ref.message();
                 if (refId.isEmpty()) {
@@ -1246,6 +1557,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             ref.line()));
                 }
             }
+            codeRefsChecked = true;
             Process resolved = new Process(process.id(), process.name(), process.processType(), process.isExecutable(),
                     process.isClosed(), resolveCodes(process.flowElements()), process.artifacts(), process.laneSets(),
                     process.info());
@@ -2105,7 +2417,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             boolean fourEyes = "true".equals(horus("fourEyes"));
             String name = attr("name");
             String result = horus("resultVariable");
-            if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
+            if (assignee == null && nesting == 1) {
+                // #497: a lane may name the work group; decided once the lanes of the process are read.
+                pendingAssignee.put(id, line);
+            } else if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
                 invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
                         "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", safe(id), line));
             }
