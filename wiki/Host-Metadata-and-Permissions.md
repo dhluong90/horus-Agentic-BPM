@@ -97,7 +97,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 {
   "schemaVersion": 1,
   "user": { "id": "lan", "displayName": "Lan Nguyen" },
-  "tenant": { "current": "bank-a", "allowed": ["bank-a"] },
+  "tenant": { "current": "bank-a", "allowed": ["bank-a"], "names": { "bank-a": "Bank A" } },
   "permissions": ["rules:read", "rules:author"],
   "roles": ["ROLE_PRICING_AUTHOR"],
   "groups": []
@@ -110,6 +110,7 @@ Requires an authenticated caller with a tenant, and no permission. Schema: [`bpm
 | `user.displayName` | The first claim of `horus.bpm.security.display-name-claims` the principal carries (default `name`, then `preferred_username`); omitted when none is present |
 | `tenant.current` | The tenant the request resolved to; see [Tenant](#tenant) |
 | `tenant.allowed` | The signed-in tenant, then, only while `horus.bpm.tenancy.switching.enabled` is `true`, the tenants of the token's `allowed_tenants` claim. The tenants a caller may send as `X-Tenant-Id` |
+| `tenant.names` | The display name of each tenant in `tenant.allowed`, in the caller's language (`Accept-Language`), for the tenant switcher (#474). Never names a tenant outside `allowed`; a tenant without a name is omitted, so show its id. Present only when the host has names: `horus.bpm.display-names.tenants.<id>.<language>`, or a `DisplayNames` bean overriding the new default method `tenant(tenantId, locale)`. Hosts that do not set either see no change |
 | `permissions` | Engine permissions the caller holds, in each engine's order; see [Permissions](#permissions) |
 | `roles` | The caller's host roles that an engine role mapping names, sorted. Other host roles are left out, so the host's role model does not reach the browser |
 | `groups` | The claim of `horus.bpm.security.groups-claim` (default `groups`) when the principal has one, otherwise empty |

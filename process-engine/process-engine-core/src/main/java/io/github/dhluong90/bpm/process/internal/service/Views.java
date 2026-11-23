@@ -372,6 +372,8 @@ public final class Views {
         putNullable(o, "claimedBy", t.claimedBy());
         o.put("createdAt", t.createdAt().toString());
         putNullable(o, "dueAt", t.dueAt() == null ? null : t.dueAt().toString());
+        o.put("slaState", t.slaState());
+        putNullable(o, "overdueBy", t.overdueBy() == null ? null : t.overdueBy().toString());
         return o;
     }
 

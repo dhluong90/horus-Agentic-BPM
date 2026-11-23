@@ -33,6 +33,11 @@ final class PropertyDisplayNames implements DisplayNames {
         return name(settings.users(), userId, locale);
     }
 
+    @Override
+    public Optional<String> tenant(String tenantId, Locale locale) {
+        return name(settings.tenants(), tenantId, locale);
+    }
+
     private Optional<String> name(Map<String, Map<String, String>> names, String id, Locale locale) {
         Map<String, String> byLanguage = names.get(id);
         if (byLanguage == null) {

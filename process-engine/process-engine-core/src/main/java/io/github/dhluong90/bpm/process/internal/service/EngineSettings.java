@@ -30,11 +30,13 @@ import java.util.Objects;
  * @param maxRoles {@code query.max-roles}: the most role and group queues one task list reads, 1 to
  *     {@link EngineDefaults#MAX_ROLES_LIMIT}; more is {@code 400 ROLE_FAN_OUT_EXCEEDED} (#408). Default
  *     {@link EngineDefaults#MAX_ROLES}
+ * @param dueSoonWindow {@code query.due-soon-window}: a task due within this time reads {@code DUE_SOON} in the task
+ *     list (PD-111, #472); positive. Default {@link EngineDefaults#DUE_SOON_WINDOW}
  */
 public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
         Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength, boolean makerChecker,
         ApproverRule approverRule, RetireLastVersionRule retireLastVersion, boolean requireContentHash,
-        ResolveApproval resolveApproval, boolean warnUnclassified, int maxRoles) {
+        ResolveApproval resolveApproval, boolean warnUnclassified, int maxRoles, Duration dueSoonWindow) {
 
     /** Who resolves an incident with an operator's output (PD-126, {@code incidents.resolve-approval}). */
     public enum ResolveApproval {
@@ -100,6 +102,12 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         if (maxRoles < 1 || maxRoles > EngineDefaults.MAX_ROLES_LIMIT) {
             throw new IllegalArgumentException("query.max-roles must be 1 to " + EngineDefaults.MAX_ROLES_LIMIT);
         }
+        if (dueSoonWindow == null) {
+            dueSoonWindow = EngineDefaults.DUE_SOON_WINDOW;
+        }
+        if (dueSoonWindow.isNegative() || dueSoonWindow.isZero()) {
+            throw new IllegalArgumentException("query.due-soon-window must be positive");
+        }
         if (reasonMaxLength < 1 || reasonMaxLength > EngineDefaults.MAX_REASON_LENGTH) {
             throw new IllegalArgumentException("lifecycle.reason-max-length must be 1 to " + EngineDefaults.MAX_REASON_LENGTH);
         }
@@ -112,6 +120,34 @@ public record EngineSettings(boolean definitionsAutoApprove, int maxNodes, int m
         if (resolveApproval == null) {
             resolveApproval = ResolveApproval.FOUR_EYES;
         }
+    }
+
+    /**
+     * Settings with the default due-soon window of PD-111.
+     *
+     * @param definitionsAutoApprove see the record
+     * @param maxNodes see the record
+     * @param maxBytes see the record
+     * @param idempotencyRetention see the record
+     * @param slowCallWarning see the record
+     * @param maxPageSize see the record
+     * @param maxRange see the record
+     * @param reasonMaxLength see the record
+     * @param makerChecker see the record
+     * @param approverRule see the record
+     * @param retireLastVersion see the record
+     * @param requireContentHash see the record
+     * @param resolveApproval see the record
+     * @param warnUnclassified see the record
+     * @param maxRoles see the record
+     */
+    public EngineSettings(boolean definitionsAutoApprove, int maxNodes, int maxBytes, Duration idempotencyRetention,
+            Duration slowCallWarning, int maxPageSize, Duration maxRange, int reasonMaxLength, boolean makerChecker,
+            ApproverRule approverRule, RetireLastVersionRule retireLastVersion, boolean requireContentHash,
+            ResolveApproval resolveApproval, boolean warnUnclassified, int maxRoles) {
+        this(definitionsAutoApprove, maxNodes, maxBytes, idempotencyRetention, slowCallWarning, maxPageSize, maxRange,
+                reasonMaxLength, makerChecker, approverRule, retireLastVersion, requireContentHash, resolveApproval,
+                warnUnclassified, maxRoles, EngineDefaults.DUE_SOON_WINDOW);
     }
 
     /**

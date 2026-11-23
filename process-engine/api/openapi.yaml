@@ -1110,6 +1110,8 @@ paths:
                     lockVersion: 0
                     createdAt: '2026-12-31T08:00:00Z'
                     dueAt: '2027-01-04T03:00:00Z'
+                    slaState: BREACHED
+                    overdueBy: PT2H5M
                 nextCursor: eyJhZnRlciI6Ii4uLiJ9
                 hasNext: true
         '304':
@@ -2668,7 +2670,7 @@ components:
         reason: { type: string, minLength: 1, maxLength: 500, description: Why; recorded in the history and the event }
     TaskSummary:
       type: object
-      required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, status, lockVersion, createdAt]
+      required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, status, lockVersion, createdAt, slaState]
       properties:
         id: { type: string }
         instanceId: { type: string }
@@ -2683,6 +2685,17 @@ components:
         claimedBy: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         dueAt: { type: [string, 'null'], format: date-time }
+        slaState:
+          type: string
+          enum: [NONE, ON_TIME, DUE_SOON, BREACHED]
+          description: >-
+            Computed by the engine at query time (PD-111). `NONE` without a due time; `BREACHED` once `dueAt` has
+            passed; `DUE_SOON` within `query.due-soon-window` (one hour by default) before it; else `ON_TIME`.
+        overdueBy:
+          type: [string, 'null']
+          format: duration
+          description: Clock time since `dueAt` as an ISO 8601 duration in whole minutes (for example `PT2H5M`); null unless `BREACHED`.
+          example: PT2H5M
     TaskSummaryPage:
       type: object
       required: [data, nextCursor, hasNext]

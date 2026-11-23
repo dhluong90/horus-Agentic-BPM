@@ -58,6 +58,19 @@ public interface DisplayNames {
         return Optional.empty();
     }
 
+    /**
+     * The name the tenant switcher shows for a tenant the caller may select (#474), distinct from its id.
+     * {@code GET /api/bpm/me} asks only for the tenants in the caller's allowed list, never any other.
+     *
+     * @param tenantId an allowed tenant of the caller
+     * @param locale the caller's language
+     * @return the tenant's name, or empty to show the tenant id
+     * @since 0.3.0
+     */
+    default Optional<String> tenant(String tenantId, Locale locale) {
+        return Optional.empty();
+    }
+
     /** @return names that are never known: every caller shows identifiers */
     static DisplayNames none() {
         return new DisplayNames() {

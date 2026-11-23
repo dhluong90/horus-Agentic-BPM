@@ -15,7 +15,9 @@ import io.github.dhluong90.bpm.process.internal.store.TransactionRunner;
 import io.github.dhluong90.bpm.process.spi.CallerResolver;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -63,9 +65,12 @@ final class TaskQueries {
     private final Supplier<Cursors> cursors;
     private final int maxPageSize;
     private final int maxRoles;
+    private final Duration dueSoonWindow;
 
     TaskQueries(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
-            ProcessQueryStore store, Supplier<Cursors> cursors, int maxPageSize, int maxRoles) {
+            ProcessQueryStore store, Supplier<Cursors> cursors, int maxPageSize, int maxRoles,
+            Duration dueSoonWindow) {
+        this.dueSoonWindow = Objects.requireNonNull(dueSoonWindow);
         this.tenants = Objects.requireNonNull(tenants);
         this.callers = Objects.requireNonNull(callers);
         this.clock = Objects.requireNonNull(clock);
@@ -160,7 +165,7 @@ final class TaskQueries {
             }
             return merged.values().stream().sorted(ORDER).limit(limit + 1L).toList();
         });
-        List<TaskSummary> items = rows.stream().limit(limit).map(TaskQueries::summary).toList();
+        List<TaskSummary> items = rows.stream().limit(limit).map(row -> summary(row, clock.instant())).toList();
         if (rows.size() <= limit) {
             return new Page<>(items, null);
         }
@@ -230,10 +235,21 @@ final class TaskQueries {
         return ranges;
     }
 
-    private static TaskSummary summary(TaskSummaryRow r) {
+    /** PD-111: clock time since the due time, whole minutes, at query time; the browser computes nothing. */
+    private TaskSummary summary(TaskSummaryRow r, Instant now) {
+        String sla = "NONE";
+        Duration overdue = null;
+        if (r.dueAt() != null) {
+            if (r.dueAt().isBefore(now)) {
+                sla = "BREACHED";
+                overdue = Duration.between(r.dueAt(), now).truncatedTo(ChronoUnit.MINUTES);
+            } else {
+                sla = r.dueAt().isAfter(now.plus(dueSoonWindow)) ? "ON_TIME" : "DUE_SOON";
+            }
+        }
         return new TaskSummary(r.id(), r.instanceId(), r.definitionKey(), r.definitionVersion(), r.businessKey(),
                 r.nodeId(), r.name(), r.assignee(), r.status(), r.lockVersion(), r.claimedBy(), r.createdAt(),
-                r.dueAt());
+                r.dueAt(), sla, overdue);
     }
 
     private int limit(PageRequest page) {
