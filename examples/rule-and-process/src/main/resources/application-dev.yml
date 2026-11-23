@@ -7,8 +7,8 @@ horus:
     rules:
       security:
         role-permissions:
-          # Dev only: the author and the approver may also evaluate, so the cockpit's Try it works for them.
-          ROLE_PRICING_AUTHOR: [rules:read, rules:author, rules:evaluate]
+          # Dev only: the author and the approver may also evaluate, so the cockpit's Try it works for them; the author also simulates.
+          ROLE_PRICING_AUTHOR: [rules:read, rules:author, rules:evaluate, rules:simulate]
           ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:evaluate]
           ROLE_TELLER: [rules:evaluate]
           ROLE_CARD_OFFICER: [rules:evaluate]

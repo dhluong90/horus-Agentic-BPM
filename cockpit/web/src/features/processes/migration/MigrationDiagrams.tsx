@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
 import type { Mark } from '../model/graphDiff';
 import type { DiagramGraph } from '../model/bpmnGraph';
@@ -28,6 +28,11 @@ export default function MigrationDiagrams({ source, target, sourceVersion, targe
   onSelect: (rowId: string | undefined) => void;
 }) {
   const { t } = useI18n();
+  // Both open fitted whole, at the smaller of the two scales, so a step keeps its size from one side to the other.
+  const [fits, setFits] = useState<{ source?: number; target?: number }>({});
+  const shared = fits.source !== undefined && fits.target !== undefined ? Math.min(fits.source, fits.target) : undefined;
+  const reportSource = useCallback((scale: number) => { setFits((now) => (now.source === scale ? now : { ...now, source: scale })); }, []);
+  const reportTarget = useCallback((scale: number) => { setFits((now) => (now.target === scale ? now : { ...now, target: scale })); }, []);
   const marks = useMemo(() => diagramMarks(rows), [rows]);
   // Until one is picked, the first changed step is the pair both diagrams open on, so the carried-over steps are in view.
   const row = rows.find((item) => item.id === selected) ?? rows[0];
@@ -57,11 +62,11 @@ export default function MigrationDiagrams({ source, target, sourceVersion, targe
   return (
     <div className="mdiagrams">
       <div className="mdiagrams__pane">
-        <DefinitionDiagram graph={source} marks={marks.source} markLabel={markLabel} overlay={sourceOverlay} toolbar={side(sourceVersion, 'migration.side.now')} reserve={RESERVE} fill
+        <DefinitionDiagram graph={source} marks={marks.source} markLabel={markLabel} overlay={sourceOverlay} toolbar={side(sourceVersion, 'migration.side.now')} reserve={RESERVE} fill fitAll sharedScale={shared} onFitAll={reportSource}
           label={t('migration.diagramLabel', { version: String(sourceVersion), count: String(source.nodes.length) })} />
       </div>
       <div className="mdiagrams__pane">
-        <DefinitionDiagram graph={target} marks={marks.target} markLabel={markLabel} overlay={targetOverlay} toolbar={side(targetVersion, 'migration.side.new')} reserve={RESERVE} fill
+        <DefinitionDiagram graph={target} marks={marks.target} markLabel={markLabel} overlay={targetOverlay} toolbar={side(targetVersion, 'migration.side.new')} reserve={RESERVE} fill fitAll sharedScale={shared} onFitAll={reportTarget}
           label={t('migration.diagramLabel', { version: String(targetVersion), count: String(target.nodes.length) })} />
       </div>
     </div>

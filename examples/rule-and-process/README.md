@@ -102,11 +102,13 @@ Demo users on the `dev` profile, all with the password from `HORUS_DEMO_PASSWORD
 |---|---|---|
 | `tuan` | `TELLER` | `processes:start`, `processes:read`, `rules:evaluate` |
 | `an` | `CARD_OFFICER` | `processes:read`, `processes:task:work`, `rules:evaluate` |
-| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:approve`, `processes:read`; `rules:evaluate` on `dev` only |
-| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | `rules:read`, `rules:approve`, `processes:approve`, `processes:read`; `rules:evaluate` on `dev` only |
-| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | both of the above sets plus `processes:cancel`; the four-eyes review refuses her on applications she submitted |
+| `lan` | `PRICING_AUTHOR`, `PROCESS_DEPLOYER`, `PROCESS_APPROVER` | `rules:read`, `rules:author`, `processes:deploy`, `processes:approve`, `processes:read`, `processes:incident:manage`; `rules:evaluate` and `rules:simulate` on `dev` only |
+| `minh` | `PRICING_APPROVER`, `PROCESS_APPROVER` | `rules:read`, `rules:approve`, `processes:approve`, `processes:read`, `processes:incident:manage`; `rules:evaluate` on `dev` only |
+| `hoa` | `TELLER`, `CARD_OFFICER`, `BRANCH_SUPERVISOR` | both of the above sets plus `processes:cancel`, `processes:task:manage`, `processes:incident:manage` and `processes:migration:manage`; the four-eyes review refuses her on applications she submitted |
 
 On the `dev` profile the author and the approver may also evaluate, so the cockpit's Try it works for them ([`application-dev.yml`](src/main/resources/application-dev.yml)).
+
+Smoke check: sign in at `http://localhost:8080/` as each of `tuan`, `an`, `lan`, `minh` and `hoa`. The browser lands on the cockpit (`/bpm/cockpit/`), and no call the cockpit makes answers 403 or 404.
 
 Seed customers of `bank-a`: `C-001` (GOLD, 0 VND), `C-002` (STANDARD with 5 transactions, 10,000 VND), `C-003` (STANDARD with 1 transaction, 50,000 VND).
 
