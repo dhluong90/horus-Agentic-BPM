@@ -4,11 +4,11 @@
 |---|---|
 | Type | Explanation and plan |
 | Owner area | Product |
-| Last reviewed | 2026-11-19 |
+| Last reviewed | 2026-11-23 |
 
 Design preview: nothing is released. This file owns milestones, dates and the order of work (PD-002). Feature scope and status are owned by the [feature map](feature-map.md); this roadmap names features by id. Reasons for scope choices are in the [decision log](decisions.md). The short public view is the wiki page [Roadmap](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Roadmap). Dates are targets, not commitments; [Release Notes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Release-Notes) state what shipped.
 
-Pending decisions that would change this roadmap are marked "(PD-nnn, pending)". Until a pending entry is decided, the roadmap shows the scope before that decision, and cut candidates stay in their milestone. The cockpit direction (PD-032 to PD-042) was decided by the product owner on 2026-11-18 and is part of this plan. The standards direction (PD-057, decided 2026-11-18: full BPMN 2.0 and DMN on the roadmap after 1.0, designed now, not in M1 or M2; no CMMN) adds foundation work to M1 and M2 and the [standards track](#standards-track-after-10-s1-to-s3) after 1.0. Business-user authoring (PD-043) was decided on 2026-11-19 (option 3) and is part of this plan. The cockpit UX direction (PD-056) was decided on 2026-11-19 (option 4, the hybrid of the approved cockpit prototype) and is part of this plan. The product owner approved this roadmap on 2026-11-19 (PD-067); sprint planning and the public project board start now. The approval did not decide any pending entry. On 2026-11-19 the product owner decided PD-012, PD-013, PD-019, PD-020, PD-028, PD-029, PD-030, PD-031, PD-043, PD-050, PD-058, PD-059, PD-060, PD-061, PD-070, PD-071 and PD-072 and accepted ADR-0008, ADR-0009, ADR-0016, ADR-0018, ADR-0019 and ADR-0020; this roadmap applies them. The decision gates on M1 and M2 code (PD-058, PD-059, PD-060) are met; the architect's DESIGN changes that follow them still gate the code they affect. Later on 2026-11-19 the product owner delegated business and use-case decisions to the product manager (PD-073) and set the principle "generic by design" (PD-074); the product manager then decided PD-014 to PD-018, PD-021 to PD-027, PD-044 to PD-049, PD-051 to PD-055, PD-063 to PD-066, the follow-ups PD-075 to PD-079 and the retirement approval mode PD-080 under that authority, and this roadmap applies them. PD-062 (standards track dates) sets public release dates and was escalated to the product owner. Later on 2026-11-19 the product owner set the first release: reviewed by Fri 20 Nov 2026 and shipped by Sun 22 Nov 2026, reliable and deployable (PD-082), with no branch protection on `main` (PD-081), a first BPMN and DMN subset (PD-084) and a target of full BPMN 2.0 and DMN for the same Sunday, measured by conformance pass rates (PD-085). The product manager set the release scope, cut order and readiness checklist under delegated authority. The product owner then labelled the first release `0.1.0` (PD-083), and the later releases are `0.2.0` (M1, 15 Jan 2027), `0.3.0` (M2, 26 Mar 2027) and `1.0.0` (M3, 21 May 2027) (PD-087). 1.0 keeps its meaning: a frozen API and every Must green.
+Pending decisions that would change this roadmap are marked "(PD-nnn, pending)". Until a pending entry is decided, the roadmap shows the scope before that decision, and cut candidates stay in their milestone. The cockpit direction (PD-032 to PD-042) was decided by the product owner on 2026-11-18 and is part of this plan. The standards direction (PD-057, decided 2026-11-18: full BPMN 2.0 and DMN on the roadmap after 1.0, designed now, not in M1 or M2; no CMMN) adds foundation work to M1 and M2 and the [1.0 baseline scope](#10-baseline-scope-pd-149-to-pd-151) (PD-149 superseded the staged plan on 2026-11-23). Business-user authoring (PD-043) was decided on 2026-11-19 (option 3) and is part of this plan. The cockpit UX direction (PD-056) was decided on 2026-11-19 (option 4, the hybrid of the approved cockpit prototype) and is part of this plan. The product owner approved this roadmap on 2026-11-19 (PD-067); sprint planning and the public project board start now. The approval did not decide any pending entry. On 2026-11-19 the product owner decided PD-012, PD-013, PD-019, PD-020, PD-028, PD-029, PD-030, PD-031, PD-043, PD-050, PD-058, PD-059, PD-060, PD-061, PD-070, PD-071 and PD-072 and accepted ADR-0008, ADR-0009, ADR-0016, ADR-0018, ADR-0019 and ADR-0020; this roadmap applies them. The decision gates on M1 and M2 code (PD-058, PD-059, PD-060) are met; the architect's DESIGN changes that follow them still gate the code they affect. Later on 2026-11-19 the product owner delegated business and use-case decisions to the product manager (PD-073) and set the principle "generic by design" (PD-074); the product manager then decided PD-014 to PD-018, PD-021 to PD-027, PD-044 to PD-049, PD-051 to PD-055, PD-063 to PD-066, the follow-ups PD-075 to PD-079 and the retirement approval mode PD-080 under that authority, and this roadmap applies them. PD-062 (standards track dates) sets public release dates and was escalated to the product owner. Later on 2026-11-19 the product owner set the first release: reviewed by Fri 20 Nov 2026 and shipped by Sun 22 Nov 2026, reliable and deployable (PD-082), with no branch protection on `main` (PD-081), a first BPMN and DMN subset (PD-084) and a target of full BPMN 2.0 and DMN for the same Sunday, measured by conformance pass rates (PD-085). The product manager set the release scope, cut order and readiness checklist under delegated authority. The product owner then labelled the first release `0.1.0` (PD-083), and the later releases are `0.2.0` (M1, 15 Jan 2027), `0.3.0` (M2, 26 Mar 2027) and `1.0.0` (M3, 21 May 2027) (PD-087). 1.0 keeps its meaning: a frozen API and every Must green.
 
 ## At a glance
 
@@ -18,11 +18,9 @@ Pending decisions that would change this roadmap are marked "(PD-nnn, pending)".
 | M0 Architecture | 18 Nov to 4 Dec 2026 (2 weeks) | Contributors verify schema, transaction boundaries and module rules against a live PostgreSQL; the product design is decided | 3 |
 | M1 Rule Engine and Cockpit, release 0.2.0 | 7 Dec 2026 to 15 Jan 2027 (6 weeks) | Business staff change governed rules without a deployment, from one cockpit that reaches every host | 57 |
 | M2 Process Engine with `agentTask`, release 0.3.0 | 18 Jan to 26 Mar 2027 (10 weeks) | Teams run approvals, sagas and guarded AI agent steps in their own service, and operators see and work every instance on its diagram from one inbox | 66 |
-| M3 Agentic depth, compatibility, release 1.0.0 | 29 Mar to 21 May 2027 (8 weeks) | Adopters run in production with evaluated agent changes, governed process changes and a frozen API | 33 |
-| S1 Standards: scopes and errors (1.1) | Target 22 Nov 2026 (PD-085), measured by daily pass rates; no claim before the suites pass | Teams bring any BPMN 2.0 model and see it in full; models with subprocesses, boundary events and multi-instance run; DMN decision models at Level 2 run | 11 |
-| S2 Standards: events across instances (1.2) | Target 22 Nov 2026 (PD-085), measured by daily pass rates; no claim before the suites pass | Processes in different services talk through messages and signals; full FEEL and DMN Level 3 | 5 |
-| S3 Standards: completeness (1.3) | Target 22 Nov 2026 (PD-085), measured by daily pass rates; no claim before the suites pass | BPMN 2.0.2 execution and DMN Level 3 conformance, with only the published deviations | 2 |
-| After 1.0 | Candidates | Broader reach: agent-chosen steps, multi-agent planning, more databases, a hosted cockpit; the emergency approval path until its ADR sets a milestone; tenant exit and sealed audit months, targeted 1.1 | 13 |
+| M3 Agentic depth, compatibility, release 1.0.0 | 29 Mar to 21 May 2027 (8 weeks) | Teams import BPMN 2.0 models from any standard modeller and run every executable element, in one 1.0 baseline with a complete Rule Engine; adopters run evaluated agent changes and governed process changes | 42 |
+| After 1.0: DMN levels and conformance evidence (1.1 to 1.3) | Not scheduled (PD-149) | DMN decision models at Level 2 and 3 run; published conformance evidence | 7 |
+| After 1.0 | Candidates | Broader reach: agent-chosen steps, multi-agent planning, more databases, a hosted cockpit; the emergency approval path until its ADR sets a milestone; tenant exit and sealed audit months, targeted 1.1 | 15 |
 
 ![Milestones M0 to M3 and the standards track S1 to S3, with gates and cut checkpoints](images/rm-milestones.svg)
 
@@ -75,7 +73,7 @@ The product owner asked for Camunda-like tools on top of embedded engines (PD-03
 
 | Camunda tool | Included | Not included |
 |---|---|---|
-| Modeler | A diagram for every definition (M2); a browser modeller limited to our step types and to steps the host has registered (M3, cut candidate, fallback 1.1) | Full BPMN 2.0 symbols before 1.1 (S1 adds the BPMN and DMN symbol sets), a desktop modeller, scripts in any language other than FEEL or our expression language |
+| Modeler | A diagram for every definition (M2); a browser modeller limited to our step types and to steps the host has registered (M3, cut candidate, fallback 1.1) | A built-in modeller before 1.0 (models are imported from standard BPMN modellers, PD-150), a desktop modeller, scripts in any language other than FEEL or our expression language |
 | Operate | Definition and instance diagrams with token overlay, node history, live counts per node (M2); migration shown as two diagrams (M3) | Moving a token by hand inside a running instance |
 | Tasklist | Task query by user, role and group, task forms, one inbox across hosts (M2) | A form designer |
 | Optimize | Counts, incidents and p50 and p95 durations per node from an in-host rollup (live M2, history M3) | Ad-hoc reports, process mining across services, BI; hosts send engine events to their own warehouse |
@@ -346,7 +344,7 @@ Effort: the architect estimates about 3 weeks for the cockpit direction in M2; m
 | MCP and reference model adapters (PE-F-34, PE-F-35), agent memory (PE-F-36), offline runner (PE-F-37) | M3 | Build on recorded M2 history |
 | Renamed-step migration and the migration screen (PE-F-31, CK-F-19) | M3 | In M2 engineers migrate through the REST API (PD-023, decided 2026-11-19) |
 | Business calendar editor screen (CK-F-18), replay simulation (RE-F-22, CK-F-11) | M3 | Moved up front to make room for the diagrams and the lifecycle (PD-042); the calendar SPI and built-in calendar stay in M2 |
-| Message correlation (PE-F-40) | 1.2 (S2) | Outside the single-service scope until 1.0; part of the standards track (PD-057) |
+| Message correlation (PE-F-40) | M3 | Part of the 1.0 BPMN Common Executable scope (PD-149) |
 | Cut if the 5 Mar 2027 checkpoint fails (end of week 7; fewer than 9 of 17 `PRE-*` green) | M3 | In order: RE-F-15 async decision log writing (PD-075), PE-F-30 migration execution (PD-017, decided 2026-11-19), CK-F-26 live counts on the diagram, PE-F-12 `callProcess` (PD-042), then RE-F-26 and RE-F-34 (PD-043) |
 
 The Lunar New Year holidays fall in the first half of February 2027, inside M2; plan capacity for about nine working weeks.
@@ -391,42 +389,17 @@ The Lunar New Year holidays fall in the first half of February 2027, inside M2; 
 
 The April and May public holidays leave about seven working weeks. The 1.0 quality gates of PD-049 add test and review work; if the M3 sizing shows they cannot fit, the date question goes to the product owner with cut options (PD-073). M3 is not estimated yet; at 33 features (PE-F-39 left with PD-028, CK-F-38 joined with PD-043, CK-F-45 with PD-056, RE-F-49 with PD-080) it carries about 4.6 per working week against about 2.7 before the cockpit direction, which is why five of the new or moved features are cut candidates, and why CK-F-45 is cut first.
 
-## Standards track after 1.0: S1 to S3
+## 1.0 baseline scope (PD-149 to PD-151)
 
-**Target changed, 2026-11-19.** The product owner targets full BPMN 2.0 and DMN compliance for Sun 22 Nov 2026 with added capacity (PD-085), and the first release carries a first BPMN and DMN subset (PD-084). The stage content below stays the order of work. Progress is measured by the DMN TCK, the BPMN MIWG round trip and the executable conformance suite, reported daily; nothing is called conformant before its suites pass (`TR-STD-05`). How each stage is announced is set at the review right after the first release (PD-062, pending).
+**Outcome.** Teams import BPMN 2.0 models from standard modellers such as Camunda Modeler or bpmn.io and run every executable element in their own service, next to a complete Rule Engine with simple UI rule editing. 1.0 is one baseline release; there are no interim tags such as 0.3.0, and only the product owner decides releases (PD-148).
 
-**Outcome.** Enable teams that hold BPMN 2.0 and DMN models from other tools to bring them, see them in full, run them and take them away again, inside their own service, so that the standards are never the reason an evaluation is lost and a model never locks a bank in. Decided by the product owner on 2026-11-18 (PD-057, ADR-0017). Content and exit criteria come from the architect's [standards compliance](../architecture/standards-compliance.md) sections 6 and 11; the requirements are `TR-STD-*` in [requirements.md](requirements.md).
+**In 1.0.** BPMN 2.0 Common Executable conformance level: every executable element, plus pools, lanes and message flows. Features: PE-F-40, PE-F-59 to PE-F-65, CK-F-41, CK-F-42 and the import and display of PE-F-63. This replaces the earlier plan of full BPMN after 1.0 in stages S1 to S3 (PD-057).
 
-**Dates.** Pending PD-062, escalated to the product owner on 2026-11-19 because it sets public release dates (PD-073). Recommended: publish order, content and exit criteria now and fix dates at the M3 exit review from measured throughput. Each stage is additive for the Java API, REST and definition formats, so none of them waits for a major release.
+**Not in 1.0.** Choreography and conversation diagrams; complex gateways, ad-hoc subprocesses and multiple events (PE-F-66); a built-in modeller (PD-150, CK-F-32).
 
-| Stage | Release | Outcome | Content | Features | Effort (assumption) |
-|---|---|---|---|---|---|
-| S1 Scopes and errors | 1.1 (pending PD-062) | Teams bring any BPMN 2.0 model and see it in full; models with subprocesses, boundary events and multi-instance run; DMN decision models at Level 2 run | Embedded and event subprocesses (timer, error, escalation), boundary timer, error and escalation events, inclusive gateway, multi-instance and loops, data objects, terminate and link events, script tasks with our expression language, handler-bound service tasks; full BPMN import and display with the MIWG round trip; every DMN hit policy, DRDs and item definitions, S-FEEL in the HORUS FEEL engine; cockpit BPMN and DMN symbol sets; deviation register and conformance evidence published | PE-F-59 to PE-F-63, RE-F-43 to RE-F-45, CK-F-41, X-F-26, X-F-27 | About 24 engineer-weeks (BPMN 12, DMN 8, cockpit 4) |
-| S2 Events across instances | 1.2 (pending PD-062) | Processes in different services talk through messages and signals without a broker in the engine; full FEEL and DMN Level 3 | Message events and tasks with correlation, signals with broadcast, conditional events, event-based gateway, full compensation, transaction cancel and hazards, message flows between pools through each host, script tasks with FEEL; full FEEL, every boxed expression, business knowledge models, decision services; conversations across hosts in the cockpit | PE-F-40, PE-F-64, PE-F-65, RE-F-46, CK-F-42 | About 28 engineer-weeks (BPMN 14, DMN 12, cockpit 2) |
-| S3 Completeness | 1.3 (pending PD-062) | BPMN 2.0.2 execution and DMN Level 3 conformance with only the published deviations | Complex gateway, ad-hoc subprocess, multiple and parallel multiple events, instantiating event-based gateways, optional message buffer; DMN `import` and DMNDI for every element | PE-F-66, RE-F-47 | About 8 engineer-weeks (BPMN 6, DMN 2) |
+**Lean until the baseline (PD-151).** One squashed baseline migration per engine, editable until 1.0 and forward-only after; tests required for bank-grade controls and engine semantics; cockpit UI CI job off until the baseline; full CI matrix, benchmarks and pooler leg nightly with one Java leg per pull request; one security audit (#365) before the baseline; mixed-version tolerance (#113, X-F-10) after 1.0.
 
-![Standards track S1 to S3 after 1.0](images/rm-standards-track.svg)
-
-Source: [diagrams/rm-standards-track.mmd](diagrams/rm-standards-track.mmd).
-
-**Exit criteria.**
-
-| Stage | Musts that gate the release | Also |
-|---|---|---|
-| S1 (1.1) | TR-STD-05 (deviation register and `standards` object in `/api/bpm/meta`), TR-STD-10 (every MIWG reference model round-trips), TR-STD-11 (S1 conformance scenarios 100 percent, also on two replicas), TR-STD-12 (interrupting boundary events), TR-STD-15 (multi-instance bounds), TR-STD-16 (script and service task binding), TR-STD-20 (DMN TCK Level 2 100 percent), TR-STD-22 (every hit policy), TR-STD-23 for S-FEEL, TR-STD-25 for DRDs | Every element outside S1 is refused by name with the stage that adds it (TR-STD-04); MIWG data allowed as test data (PD-064) |
-| S2 (1.2) | TR-STD-11 (S1 and S2 scenarios 100 percent), TR-STD-13 (message correlation), TR-STD-14 (signal broadcast), TR-STD-21 (TCK Level 3 at least 95 percent), TR-STD-23 for full FEEL | Reported: TR-STD-24 (p99 under 1 ms for a 10-decision DRG), TR-STD-27 (differential FEEL test). FEEL error mode decided (PD-066, 2026-11-19: per model, `strict` by default for v1 rule sets, `spec` for imported DMN; guardrails always fail closed) |
-| S3 (1.3) | TR-STD-11 (all scenarios 100 percent), TR-STD-21 (TCK Level 3 100 percent except the policy exclusions, each listed by test id) | The deviation register lists only the deviations of the standards compliance page section 12 |
-
-**Gates.**
-
-| Gate | Before | Why |
-|---|---|---|
-| PD-062 (dates, escalated to the product owner) decided; PD-061 (HORUS-built FEEL, ADR-0019) decided on 2026-11-19 | S1 planning | The DMN half of S1 is the S-FEEL core |
-| PD-064 (MIWG test data) decided 2026-11-19, after PD-053 | S1 code | Met |
-| K20 holds (demand for conformance) | S2 start | S2 and S3 are 36 of the 60 engineer-weeks; they start only if evaluators ask for them |
-| K21 holds (S-FEEL estimate and compiled-path latency) | Full FEEL in S2 | Re-open ADR-0019 before 12 weeks of full FEEL if the core misses |
-
-**Not in the track.** CMMN (refused, `TR-STD-26`); choreography and conversation diagrams, kept in the source document only (PD-065, decided 2026-11-19); BPEL execution; XPath, WSDL and any script language other than FEEL and our expression language (deviation register).
+**After 1.0.** The DMN levels and the conformance-evidence features (RE-F-43 to RE-F-47, X-F-26, X-F-27) stay after 1.0 with no dates.
 
 ## After 1.0 (candidates)
 

@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference |
 | Owner area | Product |
-| Last reviewed | 2026-11-19 |
+| Last reviewed | 2026-11-23 |
 
 Design preview: nothing is released. This file is the single owner of feature scope and status for the Rule Engine, the Process Engine, the Cockpit and cross-cutting capabilities until releases exist; after that, [Release Notes](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Release-Notes) state what shipped. Other documents link to feature ids here instead of restating scope. Milestone dates are in the [product roadmap](roadmap.md); the reasons for scope choices are in the [decision log](decisions.md) (PD-002).
 
@@ -15,7 +15,7 @@ Design preview: nothing is released. This file is the single owner of feature sc
 | Id | `RE-F-nn` Rule Engine, `PE-F-nn` Process Engine, `CK-F-nn` Cockpit, `X-F-nn` cross-cutting. Ids are stable and never reused |
 | Feature | The outcome for the persona, in one line |
 | Persona | Rule Engine: S1 host developer, S2 rule author, S3 approver and auditor. Process Engine: S1 host developer, S2 operations team, S3 agent step designer. Cockpit: Author, Approver, Operator, Auditor. As defined in each PRD section 5 |
-| Milestone | M0, M1, M2, M3, 1.1 (S1), 1.2 (S2), 1.3 (S3) for the standards track after 1.0 (dates pending PD-062), or later (after 1.0 or not scheduled). "If PD-nnn" means the milestone depends on a pending decision. "Cut candidate" means pre-approved to move out at the milestone checkpoint (see [Summary](#summary)) |
+| Milestone | M0, M1, M2, M3 (M3 is release 1.0), 1.1 (S1), 1.2 (S2), 1.3 (S3) for the standards track after 1.0 (dates pending PD-062), or later (after 1.0 or not scheduled). "If PD-nnn" means the milestone depends on a pending decision. "Cut candidate" means pre-approved to move out at the milestone checkpoint (see [Summary](#summary)) |
 | PRD | Section of the module PRD: [RE](prd-rule-engine.md), [PE](prd-process-engine.md), [CK](prd-cockpit.md), [V](vision.md); `UJ` names use cases in [Rule Engine users and journeys](rule-engine-users-and-journeys.md) |
 | SPEC | `RLE-*`, `PRE-*`, `CKP-*` statements in the module `SPEC.md` |
 | TR | Release requirements in [requirements.md](requirements.md) |
@@ -122,7 +122,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-37 | An offline runner replays recorded agent traces and human overrides against a changed guardrail or output schema; prompt changes are replayed through a host harness | S3 | M3 | PE 7.3, 7.4, 8 | | | spec gap | PE-F-22 | PD-014, PD-128 |
 | PE-F-38 | Adopters follow the autonomy ladder (rungs 1 to 3) and eval bar to raise agent autonomy one guardrail version at a time | S3 | M2 | PE 7.3 | PRD 7.3 (guidance, no engine behaviour) | | specified | PE-F-18 | |
 | PE-F-39 | An agent selects the next step among declared steps inside a bounded block, under the same guardrails | S3 | later | PE 7.4, 8 | | | design preview | PE-F-18 | PD-028 |
-| PE-F-40 | Message events and receive and send tasks correlate messages to instances by name and key in the caller's transaction, idempotent by message id; message flows between pools run through each host's outbox | S1 | 1.2 (S2) | PE 8 | | TR-STD-13 | design preview | PE-F-58, PE-F-60 | PD-057, PD-062 |
+| PE-F-40 | Message events and receive and send tasks correlate messages to instances by name and key in the caller's transaction, idempotent by message id; message flows between pools run through each host's outbox | S1 | M3 (1.0) | PE 8 | | TR-STD-13 | design preview | PE-F-58, PE-F-60 | PD-057, PD-062, PD-149 |
 | PE-F-41 | An architect imports a BPMN subset into a definition | S1 | M3 | PE 8 | PRE-033 | TR-DEF-01, TR-STD-04 | spec gap | PE-F-01 | PD-031, PD-034, PD-057 |
 | PE-F-42 | Several agents plan and coordinate steps | S3 | later | PE 8 | | | design preview | PE-F-39 | PD-028 |
 | PE-F-43 | Adopters run an agent in shadow (rung 0) from a how-to guide: output recorded, the process follows the human path; rung 3 stays the ceiling before 1.0 | S3 | M3 (documentation) | PE 7.3 | | | spec gap | PE-F-37 | PD-015 |
@@ -141,14 +141,14 @@ A PRD capability row that bundles several outcomes is split into several feature
 | PE-F-56 | A handler can return a business error; until error events exist it opens incident `UNHANDLED_BUSINESS_ERROR` | S1, S2 | M2 | PE 7.2 Logic | PRE-040, PRE-111, PRE-113 | TR-OPS-03, TR-IDEM-04 | specified | PE-F-08, PE-F-25 | PD-057 |
 | PE-F-57 | Cancelling an instance or migrating it off a step during an adapter call cancels the job; the late result is discarded and recorded with its attempt id | S1, S2 | M2 | PE 7.2 Logic | PRE-041, PRE-112 | TR-ASY-01, TR-ASY-02, TR-STD-12 | specified | PE-F-16 | PD-057 |
 | PE-F-58 | Every instance and `saga` has a scope token; joins and compensation are keyed by it, so subprocesses and multi-instance arrive in 1.1 without migrating in-flight instances | S1 | M2 | PE 7.2 Data | | TR-STD-11 | spec gap | PE-F-05, PE-F-27 | PD-059 |
-| PE-F-59 | Embedded subprocesses, terminate end events, manual and none tasks, link events and standard loops execute | S1 | 1.1 (S1) | PE 8 | | TR-STD-11, TR-STD-15 | design preview | PE-F-58 | PD-057, PD-062 |
-| PE-F-60 | Boundary timer, error and escalation events (interrupting and non-interrupting) and event subprocesses with timer, error or escalation start execute; a handler business error routes to the error boundary | S1, S2 | 1.1 (S1) | PE 8 | | TR-STD-11, TR-STD-12 | design preview | PE-F-56, PE-F-57, PE-F-59 | PD-057, PD-062 |
-| PE-F-61 | Inclusive gateways and parallel or sequential multi-instance on tasks and subprocesses execute, with bounded child counts and outputs ordered by loop counter | S1 | 1.1 (S1) | PE 8 | | TR-STD-11, TR-STD-15 | design preview | PE-F-58 | PD-057, PD-062 |
-| PE-F-62 | Data objects and associations execute; script tasks run only our expression language (FEEL from 1.2); service tasks bind only to registered handlers and vendor class attributes are refused | S1 | 1.1 (S1) | PE 8 | | TR-STD-16 | design preview | PE-F-08 | PD-057, PD-062 |
-| PE-F-63 | Every BPMN 2.0.2 element imports, is stored losslessly and exports again; every MIWG reference model round-trips; activating a definition with an element the release cannot run is refused naming the element and the stage that adds it | S1 | 1.1 (S1) | PE 8 | | TR-STD-04, TR-STD-10 | design preview | PE-F-41, PE-F-53 | PD-057, PD-062, PD-064, PD-065 |
-| PE-F-64 | Signals broadcast to every waiting subscription exactly once in bounded batches; conditional events and event-based gateways execute | S1, S2 | 1.2 (S2) | PE 8 | | TR-STD-11, TR-STD-14 | design preview | PE-F-40 | PD-057, PD-062 |
-| PE-F-65 | Full compensation (compensation activities, `activityRef`, compensation event subprocesses), transaction cancel and hazards execute; script tasks run FEEL | S1, S2 | 1.2 (S2) | PE 8 | | TR-STD-11 | design preview | PE-F-26, PE-F-60 | PD-057, PD-062 |
-| PE-F-66 | Complex gateways, ad-hoc subprocesses, multiple and parallel multiple events and instantiating event-based gateways execute; an optional message buffer with a time to live; the conformance suite passes 100 percent | S1 | 1.3 (S3) | PE 8 | | TR-STD-11 | design preview | PE-F-64 | PD-057, PD-062 |
+| PE-F-59 | Embedded subprocesses, terminate end events, manual and none tasks, link events and standard loops execute | S1 | M3 (1.0) | PE 8 | | TR-STD-11, TR-STD-15 | design preview | PE-F-58 | PD-057, PD-062, PD-149 |
+| PE-F-60 | Boundary timer, error and escalation events (interrupting and non-interrupting) and event subprocesses with timer, error or escalation start execute; a handler business error routes to the error boundary | S1, S2 | M3 (1.0) | PE 8 | | TR-STD-11, TR-STD-12 | design preview | PE-F-56, PE-F-57, PE-F-59 | PD-057, PD-062, PD-149 |
+| PE-F-61 | Inclusive gateways and parallel or sequential multi-instance on tasks and subprocesses execute, with bounded child counts and outputs ordered by loop counter | S1 | M3 (1.0) | PE 8 | | TR-STD-11, TR-STD-15 | design preview | PE-F-58 | PD-057, PD-062, PD-149 |
+| PE-F-62 | Data objects and associations execute; script tasks run only our expression language (FEEL from 1.2); service tasks bind only to registered handlers and vendor class attributes are refused | S1 | M3 (1.0) | PE 8 | | TR-STD-16 | design preview | PE-F-08 | PD-057, PD-062, PD-149 |
+| PE-F-63 | Every BPMN 2.0.2 element imports, is stored losslessly and exports again; every MIWG reference model round-trips; activating a definition with an element the release cannot run is refused naming the element and the stage that adds it | S1 | M3 (1.0) | PE 8 | | TR-STD-04, TR-STD-10 | design preview | PE-F-41, PE-F-53 | PD-057, PD-062, PD-064, PD-065, PD-149 |
+| PE-F-64 | Signals broadcast to every waiting subscription exactly once in bounded batches; conditional events and event-based gateways execute | S1, S2 | M3 (1.0) | PE 8 | | TR-STD-11, TR-STD-14 | design preview | PE-F-40 | PD-057, PD-062, PD-149 |
+| PE-F-65 | Full compensation (compensation activities, `activityRef`, compensation event subprocesses), transaction cancel and hazards execute; script tasks run FEEL | S1, S2 | M3 (1.0) | PE 8 | | TR-STD-11 | design preview | PE-F-26, PE-F-60 | PD-057, PD-062, PD-149 |
+| PE-F-66 | Complex gateways, ad-hoc subprocesses, multiple and parallel multiple events and instantiating event-based gateways execute; an optional message buffer with a time to live; the conformance suite passes 100 percent | S1 | later (after 1.0) | PE 8 | | TR-STD-11 | design preview | PE-F-64 | PD-057, PD-062, PD-149 |
 
 ## Cockpit
 
@@ -194,8 +194,8 @@ A PRD capability row that bundles several outcomes is split into several feature
 | CK-F-38 | An auditor sees a rule set's version history (author, requester, approver, comments, effective dates) and exports it with selected decisions as CSV or JSON evidence; masked inputs stay masked | Auditor | M3 (cut candidate) | CK 7.3; UJ UC-RE-45, UC-RE-47 | | TR-SEC-05, TR-OBS-01 | spec gap | RE-F-07, RE-F-17 | PD-043 |
 | CK-F-39 | An author copies a rule set from one tenant into another as a draft ("fork from tenant default"); until then, export and import | Author | later | UJ UC-RE-21 | | TR-TEN-01 | design preview | RE-F-25, RE-F-11 | |
 | CK-F-40 | Diagram nodes are drawn by BPMN element type plus HORUS subtype; a type the cockpit build does not know renders as a labelled generic node and the rest of the diagram stays intact; host details show the standards stage each host reports | Operator, Auditor | M2 | CK 7.3 | CKP-029 | TR-UI-07, TR-UI-08 | specified | CK-F-24, X-F-22 | PD-057 |
-| CK-F-41 | Every BPMN 2.0 and DMN symbol is displayed (pools, lanes, message flows, artifacts, events, gateways, DRDs); editing stays limited to what the host can execute | Operator, Auditor, Author | 1.1 (S1) | CK 8 | | TR-STD-10 | design preview | CK-F-40, PE-F-63 | PD-057, PD-062 |
-| CK-F-42 | An operator follows a conversation between pools in different hosts by correlation key, read from each host, and sees message and signal waits on the diagram | Operator | 1.2 (S2) | CK 8 | | TR-STD-13 | design preview | CK-F-41, PE-F-40 | PD-057, PD-062 |
+| CK-F-41 | Every BPMN 2.0 and DMN symbol is displayed (pools, lanes, message flows, artifacts, events, gateways, DRDs); editing stays limited to what the host can execute | Operator, Auditor, Author | M3 (1.0) | CK 8 | | TR-STD-10 | design preview | CK-F-40, PE-F-63 | PD-057, PD-062, PD-149 |
+| CK-F-42 | An operator follows a conversation between pools in different hosts by correlation key, read from each host, and sees message and signal waits on the diagram | Operator | M3 (1.0) | CK 8 | | TR-STD-13 | design preview | CK-F-41, PE-F-40 | PD-057, PD-062, PD-149 |
 | CK-F-43 | An author edits a draft of an existing rule set in the cockpit: changes a cell with the condition shorthand, adds, copies, deletes or moves a row, and saves with validation shown on each cell; follows the per-environment switch for cockpit authoring | Author | M1 | CK 7.3 | | TR-UI-02 | spec gap | CK-F-35, RE-F-02 | PD-013, PD-043, PD-056, PD-075 |
 | CK-F-44 | Approvers, support staff and auditors read every row as a plain-language policy sentence in their language ("Balance is at least 50,000,000 VND"), read only, in the docked table, the change dossier (old reading struck, new reading added), the simulation and the decision page. The reading style (sentence or shorthand) is a host setting, sentence by default; if the 8 Jan 2027 checkpoint fails, M1 ships shorthand only | Approver, Auditor, support staff | M1 | CK 7.3; UJ UC-RE-30 | | TR-UI-02, TR-UI-04 | spec gap | CK-F-02, CK-F-03, RE-F-18 | PD-056, PD-043, PD-077 |
 | CK-F-45 | An author edits one row's conditions as nested And, Or and Not groups with typed operators and values; the result is saved as a draft that the engine validates. An optional lens, off by default, that the host turns on | Author | M3 (cut candidate) | CK 7.3 | | TR-UI-02 | spec gap | CK-F-10, CK-F-37 | PD-056, PD-076 |
@@ -213,7 +213,7 @@ A PRD capability row that bundles several outcomes is split into several feature
 | X-F-07 | Every event carries the standard envelope, a versioned type, and is published in the transaction that changes state | Host developer | M1 | RE 7.2 Observability | | TR-OBS-06 | spec gap | | |
 | X-F-08 | The engines work behind a transaction-mode connection pooler | Host developer | M1 | RE 7.2 API | | TR-OPS-05 | specified | | PD-021 |
 | X-F-09 | Engine migrations are forward-only and every release notes the ones it adds | Host developer | M1 | V | | TR-OPS-01 | specified | | |
-| X-F-10 | Old and new module versions tolerate each other's schema for one minor release | Host developer | M3 | RE 8; PE 8 | | TR-OPS-02 | specified | X-F-09 | |
+| X-F-10 | Old and new module versions tolerate each other's schema for one minor release | Host developer | later (after 1.0) | RE 8; PE 8 | | TR-OPS-02 | specified | X-F-09 | , PD-151 |
 | X-F-11 | Evaluations and steps emit OpenTelemetry spans when a tracer is present | Host developer | M3 | RE 8 | | TR-OBS-03 | spec gap | | |
 | X-F-12 | Every release ships an SBOM, blocks on high or critical vulnerabilities, ships only permissive third-party licences (named test and build tools that never ship are allowed) and carries the licence notice | Host developer, auditor | M0 | V | | TR-SEC-06, TR-LIC-01, TR-LIC-02 | specified | | PD-053 |
 | X-F-13 | Every SPEC statement has a test named by its id; public API changes update the wiki in the same pull request | Contributor | M0 | V | | TR-QA-01, TR-QA-02, TR-QA-03 | specified | | |
@@ -276,15 +276,15 @@ These SPEC lines disagree with decided entries and are tracked here until the SP
 
 ## Summary
 
-Each cell: features (specified / spec gap / design preview). Generated from the tables above; regenerate when a row changes. Every feature on a milestone is counted; CK-F-43 is counted since the product manager confirmed the M1 editing scope under delegated authority ([PD-075](decisions.md#pd-075-minimal-cockpit-editing-in-m1-async-decision-log-to-m2)); the PD-043 features are counted since the product owner decided [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) on 2026-11-19. RE-F-41, PE-F-58 and X-F-28 are counted since the product owner decided [PD-058 to PD-060](decisions.md#pending-standards-foundations-and-track) on 2026-11-19; X-F-28 spans M1 (rules) and M2 (processes) and is counted once, in M1. Columns 1.1 to 1.3 are the standards track after 1.0 (PD-057), dates pending PD-062.
+Each cell: features (specified / spec gap / design preview). Generated from the tables above; regenerate when a row changes. Every feature on a milestone is counted; CK-F-43 is counted since the product manager confirmed the M1 editing scope under delegated authority ([PD-075](decisions.md#pd-075-minimal-cockpit-editing-in-m1-async-decision-log-to-m2)); the PD-043 features are counted since the product owner decided [PD-043](decisions.md#pd-043-rule-authoring-for-business-users-without-yaml) on 2026-11-19. RE-F-41, PE-F-58 and X-F-28 are counted since the product owner decided [PD-058 to PD-060](decisions.md#pending-standards-foundations-and-track) on 2026-11-19; X-F-28 spans M1 (rules) and M2 (processes) and is counted once, in M1. Columns 1.1 to 1.3 are the DMN and conformance-evidence features after 1.0; the BPMN element features moved to M3 (1.0) under PD-149.
 
 | Module | M0 | M1 | M2 | M3 | 1.1 (S1) | 1.2 (S2) | 1.3 (S3) | Later | Total |
 |---|---|---|---|---|---|---|---|---|---|
 | Rule Engine | 0 | 31 (17 / 14 / 0) | 2 (0 / 2 / 0) | 7 (1 / 6 / 0) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 4 (0 / 1 / 3) | 49 (18 / 23 / 8) |
-| Process Engine | 0 | 0 | 44 (23 / 21 / 0) | 11 (1 / 10 / 0) | 5 (0 / 0 / 5) | 3 (0 / 0 / 3) | 1 (0 / 0 / 1) | 2 (0 / 0 / 2) | 66 (24 / 31 / 11) |
-| Cockpit | 0 | 14 (7 / 7 / 0) | 16 (4 / 12 / 0) | 10 (1 / 9 / 0) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 0 | 3 (0 / 0 / 3) | 45 (12 / 28 / 5) |
-| Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 5 (1 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 4 (0 / 0 / 4) | 30 (12 / 12 / 6) |
-| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (28 / 37 / 0) | 33 (4 / 29 / 0) | 11 (0 / 0 / 11) | 5 (0 / 0 / 5) | 2 (0 / 0 / 2) | 13 (0 / 1 / 12) | 190 (66 / 94 / 30) |
+| Process Engine | 0 | 0 | 44 (23 / 21 / 0) | 19 (1 / 10 / 8) | 0 | 0 | 0 | 3 (0 / 0 / 3) | 66 (24 / 31 / 11) |
+| Cockpit | 0 | 14 (7 / 7 / 0) | 16 (4 / 12 / 0) | 12 (1 / 9 / 2) | 0 | 0 | 0 | 3 (0 / 0 / 3) | 45 (12 / 28 / 5) |
+| Cross-cutting | 3 (3 / 0 / 0) | 13 (7 / 6 / 0) | 3 (1 / 2 / 0) | 4 (0 / 4 / 0) | 2 (0 / 0 / 2) | 0 | 0 | 5 (1 / 0 / 4) | 30 (12 / 12 / 6) |
+| **All** | 3 (3 / 0 / 0) | 58 (31 / 27 / 0) | 65 (28 / 37 / 0) | 42 (3 / 29 / 10) | 5 (0 / 0 / 5) | 1 (0 / 0 / 1) | 1 (0 / 0 / 1) | 15 (1 / 1 / 13) | 190 (66 / 94 / 30) |
 
 ![Features per module per milestone](images/fm-features-per-module.svg)
 
@@ -326,3 +326,5 @@ Cut candidates: 15 features (0 in M1, 5 in M2, 10 in M3).
 PD-043 moved RE-F-26 from the M1 list to M2 up front, and PD-075 moved RE-F-15 to M2, so the M1 list keeps only partial cuts. PD-122 (2026-11-20) then moved RE-F-15 from the head of the M2 list to later: no decision log mode may lose a committed decision, so it returns only with a crash-safe design. M2 goes from 66 to 65 and later from 12 to 13.
 
 Use case ids (`UC-RE-nn`) are defined in [Rule Engine users and journeys](rule-engine-users-and-journeys.md).
+
+PD-149 (2026-11-23) moved ten BPMN features to M3, the 1.0 baseline: PE-F-40, PE-F-59 to PE-F-65, CK-F-41 and CK-F-42. PE-F-66 (complex gateways, ad-hoc subprocesses, multiple events) is outside the Common Executable level and moves to later. PD-151 moved X-F-10 (mixed-version tolerance, #113) to later. Total stays 190.
