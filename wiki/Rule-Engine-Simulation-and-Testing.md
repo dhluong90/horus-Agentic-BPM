@@ -75,6 +75,49 @@ curl -s -X POST http://localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versio
 
 The Java API is `ruleEngine.simulateHistory("card-fee", 2, HistorySimulation.between(from, to).withLimit(100))`.
 
+### Read the replay in plain language
+
+`POST .../versions/2:simulate-history-readings` takes the same body and runs the same replay, then reads each decision as a sentence, so a screen shows "fee was 50,000 VND, would be 30,000 VND" without building the text itself. It needs `rules:simulate`, `rules:log:read` and `rules:read`, all checked before the body is read.
+
+```json
+{"ruleSet":"card-fee","version":2,"decisionCount":2,"replayedCount":1,"changedCount":1,"notReplayableCount":1,
+ "languages":["en","vi"],"results":[
+  {"decisionId":"01KB2R6Q3C0000000000000001","loggedVersion":1,"changed":true,"code":null,"maskedInputs":[],
+   "simulated":{"kind":"MATCHED","ruleIds":["R2"],"readings":{"en":{"full":"Rule R2 always applies; it has no condition. Result: fee is 30,000 VND.","short":"R2: fee 30,000 VND","source":"GENERATED"}}},
+   "logged":{"kind":"MATCHED","ruleIds":["R2"],"readings":{"en":{"full":"Rule R2 always applies; it has no condition. Result: fee is 50,000 VND.","short":"R2: fee 50,000 VND","source":"GENERATED"}}}},
+  {"decisionId":"01KB2R6Q3C0000000000000000","loggedVersion":1,"changed":false,"code":"REPLAY_NOT_POSSIBLE",
+   "maskedInputs":["nationalId"],"simulated":null,"logged":null}]}
+```
+
+- **Each side is read in its own version.** The logged outcome in the version that made the decision, the simulated outcome in the draft, each as a `full` sentence and a `short` form in every language of the message catalogue (`en` and `vi` ship).
+- **A decision that cannot be replayed fails closed.** A masked input that had a value, or a logged version that cannot be evaluated again, gives `code: REPLAY_NOT_POSSIBLE`, the masked input names and no sentence. The reading never contains a logged input.
+- **At most 500 decisions.** Without a `limit` the run is 500; a larger `limit` is `422 READINGS_TOO_LARGE`, answered before anything is read. Nothing is written and no `Idempotency-Key` is taken.
+
+## Attach a simulation report to a publication request
+
+An approver should see evidence, not take it on trust. The engine runs the simulation and stores the result as a report bound to the exact content of the draft. You need `rules:simulate` to run one, and `rules:read` to read it.
+
+```bash
+curl -s -X POST http://localhost:8080/api/bpm/rules/v1/rule-sets/card-fee/versions/2/simulation-reports \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -H "Idempotency-Key: rep-2026-12-15-1" \
+  -d '{"source":"REPLAY","from":"2026-11-01T00:00:00Z","to":"2026-12-01T00:00:00Z","limit":100}'
+```
+
+```json
+{"id":"01KB2R6Q3C0000000000000001","ruleSet":"card-fee","version":2,"status":"CURRENT","attached":false,
+ "createdBy":"lan","scope":{"source":"REPLAY","limit":100,"truncated":false},
+ "counts":{"total":100,"changed":18,"unchanged":80,"failed":0,"notReplayable":2},"rows":[{"category":"CHANGED","decisionId":null,"before":{"kind":"MATCHED"},"after":{"kind":"MATCHED"}}]}
+```
+
+Use `"source":"SAMPLES"` with a `samples` list to report over sample customers instead.
+
+- **Counts.** Each item falls in one count: not replayable (a masked input), failed, changed or unchanged; they add up to `total`.
+- **Rows.** Up to 50 changed or failed rows, each with the matched rule and the outcome before and after as sentences in every language. Inputs are never part of a report, a masked value is never stored, and a `label` on a sample is ignored. `rowsTruncated` says more changed.
+- **Decision ids.** A replayed row carries its `decisionId` only for a caller with `rules:log:read`.
+- **Immutable and bound to the content.** A report is written once; the database refuses to change it. When the draft is replaced afterwards, the report reads `status: OUT_OF_DATE` and cannot be attached.
+- **Attach it.** `POST .../versions/2:request-publish` with `{"simulationReportId":"01KB2R6Q3C0000000000000001"}`. The report then reads `attached: true`, and the `rules.version.publish-requested.v1` event carries the id. `GET .../versions/2/simulation-reports` lists a version's reports, newest first; `GET .../simulation-reports/{id}` reads one.
+- **Require it.** A host lists rule sets in `horus.bpm.rules.lifecycle.require-simulation-report` (see [[Rule Engine Configuration]]); a request for those without a report is `409 SIMULATION_REPORT_REQUIRED`. The list is shown in `/api/bpm/meta`.
+
 ## Unit-test a rule set
 
 `rule-engine-test` loads a rule set file (YAML, JSON or DMN, by its extension) in memory and evaluates it with the engine's own reader, compiler and evaluator. No database, no Spring context, no masking key, no events; the tenant is a fixed `test`. A file that fails import fails the test class before any test runs, with the same violations (rule id, column, code, message) as the `422 VALIDATION_FAILED` answer.
@@ -166,4 +209,6 @@ Expected: `200` with `decisionsCompared`, `changedCount`, `outcomes` per side, `
 | The build fails after the tests pass, with a message naming `horus.rules.coverage.fail-on` | The setting asks for more coverage than the tests give, or its value is not `none`, `unique` or `any` | Add tests for the rows the message names, or relax the setting |
 | Replay shows 0 changed outcomes for a changed row | The period contains no decisions that reach that row | Choose a longer period (up to 31 days) or add sample inputs that hit the row |
 | `403 PERMISSION_DENIED` on `:simulate-history` | Replay needs both `rules:simulate` and `rules:log:read` | Grant `rules:log:read` to the role that replays, or replay with sample inputs instead |
+| `409 SIMULATION_REPORT_REQUIRED` on `:request-publish` | The host lists the rule set in `lifecycle.require-simulation-report` and the request carries no report | Run `POST .../simulation-reports` on the draft and send its id as `simulationReportId` |
+| `409 SIMULATION_REPORT_OUT_OF_DATE` on `:request-publish` | The draft changed after the report was run | Run a new report on the draft as it is now |
 | `notReplayableCount` above 0 | Those decisions had a masked input with a value; the log holds only its fingerprint | Expected for masked inputs; cover those cases with sample inputs |

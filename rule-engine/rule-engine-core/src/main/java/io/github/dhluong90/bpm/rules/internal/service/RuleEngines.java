@@ -23,13 +23,14 @@ import io.github.dhluong90.bpm.rules.internal.store.RuleStore;
  *     {@link CompiledCache#checkEpochs()} and its notification listener calls {@link CompiledCache#evict}
  * @param ruleSetHistory a rule set's history across its versions and the evidence export (PD-116)
  * @param functionCheck the start-up check of the host functions (RLE-058), run after the migrations
+ * @param simulationReports runs, stores and reads simulation reports (PD-115)
  * @param meters evaluation and retirement records; the starter binds them to the host's meter registry (DESIGN 4.8)
  */
 public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, CursorKeys cursorKeys,
         DecisionLogService decisionLog, MaskingStartupCheck maskingCheck, LifecycleSweep lifecycleSweep,
         DecisionLogQuery decisionLogQuery, CompiledCache cache,
         io.github.dhluong90.bpm.rules.api.RuleSetHistoryService ruleSetHistory, EngineMeters meters,
-        FunctionStartupCheck functionCheck) {
+        FunctionStartupCheck functionCheck, io.github.dhluong90.bpm.rules.api.SimulationReportService simulationReports) {
 
     /**
      * Builds the entry points with the default search bounds.
@@ -78,14 +79,16 @@ public record RuleEngines(RuleEngine ruleEngine, VersionService versionService, 
         CompiledCache cache = new CompiledCache(context.settings().cacheMaxEntries(), store, context.transactions());
         EngineMeters meters = new EngineMeters();
         Supersession supersession = new Supersession(store, outbox, context.settings(), context.transactions(), meters);
-        return new RuleEngines(new DefaultRuleEngine(context, store, log, cache, querySettings, meters),
-                new DefaultVersionService(context, store, outbox, keys, supersession, cache, meters,
-                        explainer instanceof CatalogueExplainer catalogue ? catalogue : CatalogueExplainer.bundled()), keys,
+        CatalogueExplainer catalogue = explainer instanceof CatalogueExplainer c ? c : CatalogueExplainer.bundled();
+        DefaultRuleEngine engine = new DefaultRuleEngine(context, store, log, cache, querySettings, meters);
+        return new RuleEngines(engine,
+                new DefaultVersionService(context, store, outbox, keys, supersession, cache, meters, catalogue), keys,
                 new DefaultDecisionLogService(context, log, outbox, store, explainer), new MaskingStartupCheck(store, context.masking(),
                         context.transactions(), context.clock()),
                 new LifecycleSweep(context, supersession), new DefaultDecisionLogQuery(context, log, store, keys, querySettings),
                 cache, new DefaultRuleSetHistoryService(context, store, log, outbox, keys), meters,
-                new FunctionStartupCheck(context.functions()));
+                new FunctionStartupCheck(context.functions()),
+                new DefaultSimulationReportService(context, store, engine, catalogue));
     }
 
     /**

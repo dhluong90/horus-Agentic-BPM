@@ -94,9 +94,9 @@ class EditorApiIT {
 
         // Then
         assertThat(first.status()).isEqualTo(200);
-        assertThat(first.json().path("data").toString()).isEqualTo("[{\"ruleSet\":\"card-fee\",\"latestVersion\":2,"
+        assertThat(first.json().path("data").toString()).isEqualTo("[{\"ruleSet\":\"card-fee\",\"displayName\":\"Card fee\",\"latestVersion\":2,"
                 + "\"latestStatus\":\"PENDING_APPROVAL\",\"publishedVersion\":1,\"lastChangedAt\":\"2026-12-15T02:00:00Z\"},"
-                + "{\"ruleSet\":\"fx-margin\",\"latestVersion\":1,\"latestStatus\":\"DRAFT\",\"publishedVersion\":null,"
+                + "{\"ruleSet\":\"fx-margin\",\"displayName\":\"Fx margin\",\"latestVersion\":1,\"latestStatus\":\"DRAFT\",\"publishedVersion\":null,"
                 + "\"lastChangedAt\":\"2026-12-15T02:00:00Z\"}]");
         assertThat(second.json().path("data").findValuesAsString("ruleSet")).containsExactly("kyc-risk");
         assertThat(second.json().path("nextCursor").isNull()).isTrue();

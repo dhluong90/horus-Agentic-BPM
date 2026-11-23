@@ -365,7 +365,9 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
                 changed = h.occurredAt();
             }
         }
-        return new RuleSetSummary(row.name(), latest.version(), latest.status(), published, changed);
+        String display = io.github.dhluong90.bpm.rules.internal.json.EngineJson.JSON.readTree(latest.canonicalJson())
+                .path("displayName").asString(null);
+        return new RuleSetSummary(row.name(), display, latest.version(), latest.status(), published, changed);
     }
 
     @Override

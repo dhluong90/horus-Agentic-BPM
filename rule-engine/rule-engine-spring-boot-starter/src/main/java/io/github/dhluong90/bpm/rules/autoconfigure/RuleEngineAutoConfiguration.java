@@ -130,7 +130,8 @@ public class RuleEngineAutoConfiguration {
                 properties.toSettings(environment).retireApproval(),
                 properties.toSettings(environment).retireLastVersion(),
                 properties.toSettings(environment).acknowledgeWarnings(),
-                properties.toSettings(environment).requireContentHash());
+                properties.toSettings(environment).requireContentHash(),
+                properties.toSettings(environment).requireSimulationReport());
     }
 
     /**

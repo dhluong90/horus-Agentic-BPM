@@ -1,0 +1,25 @@
+{
+  "id": "fee-by-tier",
+  "labels": { "en": "Fee by tier", "vi": "Phí theo hạng" },
+  "descriptions": {
+    "en": "A monthly fee that depends on the customer's tier. The first row that matches wins.",
+    "vi": "Phí hằng tháng phụ thuộc vào hạng của khách hàng. Dòng khớp đầu tiên được áp dụng."
+  },
+  "document": {
+    "schemaVersion": 1,
+    "description": "Fee by customer tier",
+    "hitPolicy": "first",
+    "inputs": [
+      { "name": "tier", "type": "string", "label": "Tier", "allowed": ["GOLD", "PLATINUM", "CLASSIC"] }
+    ],
+    "outputs": [
+      { "name": "fee", "type": "money", "label": "Fee" }
+    ],
+    "rules": [
+      { "id": "R1", "when": { "tier": "== 'GOLD'" }, "then": { "fee": "0 VND" } },
+      { "id": "R2", "when": { "tier": "== 'PLATINUM'" }, "then": { "fee": "20000 VND" } },
+      { "id": "R3", "when": { "tier": "== 'CLASSIC'" }, "then": { "fee": "50000 VND" } },
+      { "id": "R4", "when": {}, "then": { "fee": "50000 VND" } }
+    ]
+  }
+}
