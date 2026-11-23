@@ -368,7 +368,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Manual task, none task | Pass through, with a history row |
 | Receive task, send task | As message catch and message throw (#491) |
 | Script task | FEEL or `horus-expr-v1` only (section 7.1) |
-| Lanes and pools | Display; lanes have no execution semantics in BPMN and assignment stays on the task |
+| Lanes and pools | Display; lanes have no execution semantics in BPMN and assignment stays on the task. A user task with no `horus:assignee` takes the group named by its lane as a default (#497); an assignee the author wrote is never changed |
 | Ad-hoc subprocess (S3) | Activities available in the scope; started by the host through `startAdHocActivity` or all at once for `ordering="Parallel"` with `cancelRemainingInstances` and `completionCondition` |
 
 ## 6. Coverage by stage
@@ -399,7 +399,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
-| Collaboration: pools, lanes, message flows, artifacts | Refused | Import and display | Message flows execute between pools through 5.4 | |
+| Collaboration: pools, lanes, message flows, artifacts | Import, display and export (#497): one definition per executable pool, black-box pools kept | | Message flows execute between pools through 5.4 | |
 | Complex gateway, ad-hoc subprocess, multiple and parallel multiple events | Refused | Import | Import | Execute |
 | Message buffer with time to live | | | | Optional, off by default |
 | MIWG round trip | Subset models | All reference models | | |

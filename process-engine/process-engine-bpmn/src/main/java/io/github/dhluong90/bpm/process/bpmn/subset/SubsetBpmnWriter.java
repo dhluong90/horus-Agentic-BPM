@@ -11,6 +11,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Collaboration;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Lane;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LaneSet;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageFlow;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Participant;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
@@ -134,10 +139,23 @@ public final class SubsetBpmnWriter {
                 messages.put(messageName(node), unique(taken, "Message_" + messageName(node).replace(':', '_')));
             }
         }
+        Collaboration collaboration = process.collaboration();
+        if (collaboration != null) {
+            for (MessageFlow flow : collaboration.messageFlows()) {
+                if (flow.messageRef() != null && !messages.containsKey(flow.messageRef())) {
+                    messages.put(flow.messageRef(), unique(taken, "Message_" + flow.messageRef().replace(':', '_')));
+                }
+            }
+        }
         messages.forEach((name, id) -> xml.line(1, "<bpmn:message id=" + attr(id) + " name=" + attr(name) + "/>"));
         Refs refs = new Refs(signalIds, messages);
+        Set<String> collaborationIds = new HashSet<>();
+        if (collaboration != null) {
+            collaboration(xml, process, collaboration, messages, collaborationIds);
+        }
         xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
                 + " isExecutable=\"true\">");
+        process.laneSets().forEach(set -> laneSet(xml, set, 2, collaborationIds));
         for (FlowElement element : process.flowElements()) {
             flowElement(xml, element, 2, refs);
         }
@@ -150,10 +168,62 @@ public final class SubsetBpmnWriter {
         ids.addAll(signalIds.values());
         ids.addAll(messages.values());
         ids.add("Definitions_" + process.id());
+        ids.addAll(collaborationIds);
         categories(xml, process, ids);
         diagram(xml, process, ids);
         xml.line(0, "</bpmn:definitions>");
         return xml.out.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The collaboration of the file (#497). This process is its own pool; every other pool is written as a black box,
+     * and a message flow to a step of another pool is drawn to that pool, so the file is complete on its own and reads
+     * back to the same definition, lanes and message flows.
+     */
+    private static void collaboration(Xml xml, Process process, Collaboration c, Map<String, String> messages,
+            Set<String> ids) {
+        String own = c.participants().stream().filter(x -> process.id().equals(x.processRef()))
+                .map(Participant::id).findFirst().orElse(null);
+        Set<String> pools = new HashSet<>();
+        c.participants().forEach(x -> pools.add(x.id()));
+        xml.line(1, "<bpmn:collaboration id=" + attr(c.id()) + optional("name", c.name()) + ">");
+        ids.add(c.id());
+        for (Participant participant : c.participants()) {
+            ids.add(participant.id());
+            xml.line(2, "<bpmn:participant id=" + attr(participant.id()) + optional("name", participant.name())
+                    + (participant.id().equals(own) ? " processRef=" + attr(process.id()) : "") + "/>");
+        }
+        for (MessageFlow flow : c.messageFlows()) {
+            ids.add(flow.id());
+            Map<javax.xml.namespace.QName, String> extra = flow.info().otherAttributes();
+            String key = extra.get(SubsetBpmnReader.CORRELATION_KEY);
+            xml.line(2, "<bpmn:messageFlow id=" + attr(flow.id()) + optional("name", flow.name())
+                    + " sourceRef=" + attr(end(flow.sourceRef(), extra.get(SubsetBpmnReader.SOURCE_POOL), own, pools))
+                    + " targetRef=" + attr(end(flow.targetRef(), extra.get(SubsetBpmnReader.TARGET_POOL), own, pools))
+                    + (flow.messageRef() == null ? "" : " messageRef=" + attr(messages.get(flow.messageRef())))
+                    + (key == null ? "" : " horus:correlationKey=" + attr(key)) + "/>");
+        }
+        xml.line(1, "</bpmn:collaboration>");
+    }
+
+    private static String end(String ref, String pool, String own, Set<String> pools) {
+        return ref == null || pools.contains(ref) || pool == null || pool.equals(own) ? ref : pool;
+    }
+
+    private static void laneSet(Xml xml, LaneSet set, int lvl, Set<String> ids) {
+        ids.add(set.id());
+        xml.line(lvl, "<bpmn:laneSet id=" + attr(set.id()) + optional("name", set.name()) + ">");
+        for (Lane lane : set.lanes()) {
+            ids.add(lane.id());
+            xml.line(lvl + 1, "<bpmn:lane id=" + attr(lane.id()) + optional("name", lane.name()) + ">");
+            lane.flowNodeRefs().forEach(ref -> xml.line(lvl + 2, "<bpmn:flowNodeRef>" + text(ref)
+                    + "</bpmn:flowNodeRef>"));
+            if (lane.childLaneSet() != null) {
+                laneSet(xml, lane.childLaneSet(), lvl + 2, ids);
+            }
+            xml.line(lvl + 1, "</bpmn:lane>");
+        }
+        xml.line(lvl, "</bpmn:laneSet>");
     }
 
     /** The root {@code error} and {@code escalation} elements the event definitions of the process refer to (#489, #493). */

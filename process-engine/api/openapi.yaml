@@ -3043,6 +3043,17 @@ components:
           description: '`system:effective-date` when a newer version took effect'
         retiredAt: { type: [string, 'null'], format: date-time }
         supersededBy: { type: [integer, 'null'], description: The version that superseded this one }
+        alsoImported:
+          type: array
+          description: |
+            In the answer to an import of a collaboration (#497): the other executable pools of the file, each a
+            definition of its own. The answer itself is the first one. Absent for a file of one process.
+          items:
+            type: object
+            required: [key, version]
+            properties:
+              key: { type: string }
+              version: { type: integer }
         warnings:
           type: array
           description: |

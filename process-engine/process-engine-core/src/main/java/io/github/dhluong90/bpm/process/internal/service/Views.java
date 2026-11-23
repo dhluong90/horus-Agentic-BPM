@@ -53,6 +53,10 @@ public final class Views {
         if (!v.warnings().isEmpty()) {
             o.set("warnings", problems(v.warnings()));
         }
+        if (!v.alsoImported().isEmpty()) {
+            ArrayNode also = o.putArray("alsoImported");
+            v.alsoImported().forEach(r -> also.addObject().put("key", r.key()).put("version", r.version()));
+        }
         return o;
     }
 
@@ -85,7 +89,18 @@ public final class Views {
                 text(n, "requestedBy"), instant(n, "requestedAt"), instant(n, "approvedAt"), text(n, "decisionComment"),
                 text(n, "retiredBy"), instant(n, "retiredAt"),
                 n.has("supersededBy") && !n.get("supersededBy").isNull() ? n.get("supersededBy").intValue() : null,
-                warningsFromJson(n.get("warnings")));
+                warningsFromJson(n.get("warnings")), alsoFromJson(n.get("alsoImported")));
+    }
+
+    private static List<io.github.dhluong90.bpm.process.api.DefinitionRef> alsoFromJson(JsonNode array) {
+        List<io.github.dhluong90.bpm.process.api.DefinitionRef> out = new java.util.ArrayList<>();
+        if (array != null && array.isArray()) {
+            for (JsonNode r : array) {
+                out.add(new io.github.dhluong90.bpm.process.api.DefinitionRef(r.get("key").stringValue(),
+                        r.get("version").intValue()));
+            }
+        }
+        return out;
     }
 
     private static List<DefinitionProblem> warningsFromJson(JsonNode array) {

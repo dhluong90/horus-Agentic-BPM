@@ -85,10 +85,20 @@ export interface DiagramEdge {
   isLink?: boolean;
 }
 
+/** A pool of the collaboration (#497). `self` is the pool of the process this graph shows; the others are black boxes. */
+export interface DiagramPool { id: string; name: string | undefined; self: boolean }
+/** A lane of the process: a name and the steps it holds. Display only. */
+export interface DiagramLane { id: string; name: string | undefined; nodes: string[] }
+/** A message flow. Each end is a step of this process or a pool; `correlationKey` is the variable the target step reads. */
+export interface DiagramMessageFlow { id: string; label: string | undefined; source: string; target: string; correlationKey: string | undefined }
+export interface DiagramCollaboration { pools: DiagramPool[]; lanes: DiagramLane[]; messageFlows: DiagramMessageFlow[] }
+
 export interface DiagramGraph {
   name: string | undefined;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
+  /** Pools, lanes and message flows, read only (#497); absent for a process with none. */
+  collaboration?: DiagramCollaboration;
 }
 
 /** Children of a process that are not steps: flows, artefacts, data and lanes. */
@@ -186,6 +196,45 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
   }
 }
 
+function readLanes(set: Element, out: DiagramLane[]): void {
+  for (const lane of elementChildren(set)) {
+    if (lane.namespaceURI !== BPMN || lane.localName !== 'lane') continue;
+    const refs = elementChildren(lane).filter((c) => c.namespaceURI === BPMN && c.localName === 'flowNodeRef').map((c) => c.textContent.trim()).filter((r) => r !== '');
+    out.push({ id: nonEmpty(lane.getAttribute('id')) ?? '', name: nonEmpty(lane.getAttribute('name')), nodes: refs });
+    for (const child of elementChildren(lane)) if (child.namespaceURI === BPMN && child.localName === 'childLaneSet') readLanes(child, out);
+  }
+}
+
+/** Pools, lanes and message flows of a document (#497), or undefined when it has none. */
+function readCollaboration(document: Document, process: Element): DiagramCollaboration | undefined {
+  const lanes: DiagramLane[] = [];
+  for (const child of elementChildren(process)) if (child.namespaceURI === BPMN && child.localName === 'laneSet') readLanes(child, lanes);
+  const collaboration = Array.from(document.getElementsByTagNameNS(BPMN, 'collaboration'))[0];
+  const pools: DiagramPool[] = [];
+  const messageFlows: DiagramMessageFlow[] = [];
+  const processId = process.getAttribute('id');
+  const messageNames = new Map(Array.from(document.getElementsByTagNameNS(BPMN, 'message')).map((m) => [m.getAttribute('id') ?? '', nonEmpty(m.getAttribute('name'))]));
+  if (collaboration !== undefined) {
+    for (const child of elementChildren(collaboration)) {
+      if (child.namespaceURI !== BPMN) continue;
+      const id = nonEmpty(child.getAttribute('id'));
+      if (id === undefined) continue;
+      if (child.localName === 'participant') pools.push({ id, name: nonEmpty(child.getAttribute('name')), self: child.getAttribute('processRef') === processId });
+      if (child.localName === 'messageFlow') {
+        const source = nonEmpty(child.getAttribute('sourceRef'));
+        const target = nonEmpty(child.getAttribute('targetRef'));
+        if (source === undefined || target === undefined) continue;
+        messageFlows.push({
+          id, source, target,
+          label: nonEmpty(child.getAttribute('name')) ?? messageNames.get(child.getAttribute('messageRef') ?? ''),
+          correlationKey: nonEmpty(child.getAttributeNS(HORUS, 'correlationKey')),
+        });
+      }
+    }
+  }
+  return pools.length === 0 && lanes.length === 0 ? undefined : { pools, lanes, messageFlows };
+}
+
 /**
  * Reads the first executable process of a BPMN document. A document with a DOCTYPE, one that does not parse, or one
  * without a process is refused; the engine never exports such a document, so it is shown as an error, not guessed.
@@ -208,9 +257,11 @@ export function readBpmnGraph(xml: string): DiagramGraph {
     const caught = nodes.find((node) => node.type === 'intermediateCatchEvent:link' && node.linkName === thrown.linkName && node.parentId === thrown.parentId);
     if (caught !== undefined) edges.push({ id: `link:${thrown.id}`, source: thrown.id, target: caught.id, label: thrown.linkName, isDefault: false, isLink: true });
   }
+  const collaboration = readCollaboration(document, process);
   return {
     name: nonEmpty(process.getAttribute('name')),
     nodes,
+    ...(collaboration !== undefined ? { collaboration } : {}),
     // A flow to an element that is not drawn (an artefact, a lane) is left out rather than drawn to nowhere.
     edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, isDefault: defaults.has(edge.id) })),
   };

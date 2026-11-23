@@ -2098,3 +2098,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
 - **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
 - **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)
+
+### PRE-296 Each executable pool of a collaboration is a definition of its own; a pool with no process is kept for display
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, `TR-TEN-01`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example `order-payment-pools.bpmn`: a collaboration of the pools `Order desk` (process `order-desk`), `Payment desk` (process `payment-desk`) and `Auditor` (no process), imported by `bank-a` with `Idempotency-Key: imp-1`.
+- **When:** The file is imported, then imported again with the same key.
+- **Then:** `order-desk` and `payment-desk` are two definitions of `bank-a`, both version 1; the answer is the first and names the other in `alsoImported`. The replay returns the same answer and stores nothing more. `Auditor` is not a definition. `bank-b` has neither. A file of several processes with no collaboration is `422 VALIDATION_FAILED` with `PROCESS_NOT_IN_COLLABORATION`.
+- **Example:** `3 pools, 2 with a process -> order-desk v1 and payment-desk v1`
+- **Test ID:** `PRE_296_each_executable_pool_is_a_definition_and_the_black_box_is_not` (`CollaborationImportTest`), `PRE_296_two_pools_become_two_definitions_and_a_replay_stores_nothing_more` (`CollaborationPostgresIT`)
+
+### PRE-297 A lane names the work group of a user task that has no assignee, and never overrides an assignee
+- **Traces to:** `TR-STD-04`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** In `payment-desk`, the lane `Back office` holds the user task `confirm-payment`, which has no `horus:assignee`; a second file where the task has `horus:assignee="role:cashier"`; a third where the task is in no lane.
+- **When:** Each file is imported, and a message starts `payment-desk` for key `ORD-90001`.
+- **Then:** The task is assigned to `group:back-office` (the lane's name in lower case, other characters as hyphens) and the task list shows that group. In the second file the assignee stays `role:cashier`. In the third the import is refused with `ASSIGNEE_INVALID`. The lanes are kept as written.
+- **Example:** `lane "Back office" -> group:back-office`
+- **Test ID:** `PRE_297_a_lane_names_the_group_of_a_user_task_with_no_assignee_and_never_overrides_one`, `PRE_297_a_user_task_with_no_assignee_and_no_lane_is_still_refused` (`CollaborationImportTest`), `PRE_297_the_lane_names_the_work_group_of_a_task_started_by_the_message_start_of_its_pool` (`CollaborationPostgresIT`)
+
+### PRE-298 Message flows between pools are kept, document the correlation of their target, and survive the export
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example: `mf-received` from `report-payment` in `payment-desk` to the receive task `wait-for-payment` of `order-desk` (correlation key `orderId`), and `mf-audit` from `audited` to the black box `Auditor`.
+- **When:** `order-desk` is read, and each definition is exported and read again.
+- **Then:** The three message flows are kept with their message names and the pool at each end; `mf-received` records the correlation variable `orderId` of the step it targets, and `mf-audit` ends at the pool. The export of one pool is a file that stands alone: this pool with its lanes, every other pool as a participant with no process, and each message flow retargeted to that pool. Reading it gives the same canonical definition, the same lanes and the same three message flows. A message flow runs nothing: messages are delivered by `POST /messages:correlate`.
+- **Example:** `mf-received -> orderId; export of payment-desk keeps pool-order as a black box`
+- **Test ID:** `PRE_298_message_flows_are_kept_with_their_pools_and_the_correlation_of_the_catching_step`, `PRE_298_export_keeps_the_pools_lanes_and_message_flows_and_reads_back_to_the_same_definition` (`CollaborationImportTest`), `PRE_298_the_export_of_a_pool_keeps_the_message_flows_and_the_lanes` (`CollaborationPostgresIT`)
+
+### PRE-299 A choreography is kept as received with a warning and is never run
+- **Traces to:** `TR-STD-04`, #497
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example with a `choreography` element added to `definitions`.
+- **When:** The file is imported.
+- **Then:** The import succeeds, the stored source keeps the element, and the answer lists `CHOREOGRAPHY_KEPT_AS_RECEIVED` in `warnings` with the line. No definition comes from it.
+- **Example:** `choreography c -> warning, 2 definitions as before`
+- **Test ID:** `PRE_299_a_choreography_is_kept_as_received_with_a_warning_and_a_second_process_needs_a_collaboration` (`CollaborationImportTest`)

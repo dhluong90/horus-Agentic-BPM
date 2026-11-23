@@ -632,69 +632,87 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         // Parse, validate and hash before any transaction opens (DESIGN section 4).
         List<DefinitionProblem> warnings = List.of();
-        Process process;
+        List<Process> processes;
         if (reader instanceof DefinitionReader withWarnings) {
             DefinitionReader.Result read = withWarnings.readWithWarnings(bytes);
-            process = read.process();
+            processes = read.processes();
             warnings = read.warnings();
         } else {
-            process = reader.apply(bytes);
+            processes = List.of(reader.apply(bytes));
         }
         final List<DefinitionProblem> importWarnings = warnings;
-        compiler.compile("validation", process);
-        checkBindings(process);
-        checkGuardrailContracts(tenant, process);
-        String canonical = CanonicalProcessWriter.canonicalText(process);
-        String hash = Hashes.sha256(canonical);
-        int nodeCount = (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count();
+        record Prepared(Process process, String canonical, String hash, int nodeCount, String layout) { }
+        List<Prepared> prepared = new java.util.ArrayList<>();
+        for (Process process : processes) {
+            compiler.compile("validation", process);
+            checkBindings(process);
+            checkGuardrailContracts(tenant, process);
+            String canonical = CanonicalProcessWriter.canonicalText(process);
+            prepared.add(new Prepared(process, canonical, Hashes.sha256(canonical),
+                    (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count(),
+                    importedLayout(request, process)));
+        }
         String requestHash = Hashes.sha256Parts("import", caller, request.format().name(), Hashes.sha256(bytes));
-        String layout = importedLayout(request, process);
         return transactions.inTransaction(() -> idempotent(tenant, "import", request.idempotencyKey(), requestHash,
                 () -> {
-                    // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
-                    List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
-                    StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
-                    if (latest != null && latest.definitionHash().equals(hash)) {
-                        return view(latest).withWarnings(importWarnings);
+                    // #497: every executable pool of a collaboration is a definition of its own, stored together.
+                    List<DefinitionVersion> stored = new java.util.ArrayList<>();
+                    for (Prepared p : prepared) {
+                        stored.add(storeImported(tenant, caller, request, source, text, p.process(), p.canonical(),
+                                p.hash(), p.nodeCount(), p.layout()));
                     }
-                    Instant now = clock.instant();
-                    boolean active = settings.definitionsAutoApprove();
-                    StoredDefinition stored = new StoredDefinition(tenant, Ulid.next(now), process.id(),
-                            latest == null ? 1 : latest.version() + 1, active ? "ACTIVE" : "DRAFT", process.name(),
-                            canonical, hash, request.format().name(), text,
-                            Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
-                            active ? DEV_APPROVER : null, active ? now : null);
-                    store.insertDefinition(stored);
-                    if (layout != null) {
-                        // #445: revision 1, from the file's own diagram, in the transaction of the import.
-                        importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
-                                1, layout, Hashes.sha256(layout), hash, "BPMN", caller, now));
-                    }
-                    lifecycleHistory(stored, "IMPORTED", null, caller, null, Map.of("source", source), now);
-                    // One event per stored version, so its id is derived from the version id.
-                    Map<String, Object> payload = new LinkedHashMap<>();
-                    payload.put("definitionKey", stored.key());
-                    payload.put("version", stored.version());
-                    payload.put("definitionHash", hash);
-                    if (active) {
-                        payload.put("approvedBy", DEV_APPROVER);
-                        payload.put("approvedAt", now.toString());
-                        payload.put("effectiveFrom", now.toString());
-                        payload.put("sourceHash", stored.sourceHash());
-                        payload.put("readerVersion", READER_VERSION);
-                        payload.put("source", source);
-                    }
-                    publishDefinition(stored, active ? "processes.definition.approved.v1"
-                            : "processes.definition.imported.v1", payload, now);
-                    if (active) {
-                        // PRE-022 (c): every auto-approved import is named in the log, with tenant and key.
-                        LOG.log(System.Logger.Level.WARNING, "process.definition.auto-approved tenant={0} key={1} "
-                                + "version={2} (definitions.auto-approve, dev profile)", tenant, stored.key(),
-                                stored.version());
-                        retireSuperseded(versions, stored, now);
-                    }
-                    return view(stored).withWarnings(importWarnings);
+                    DefinitionVersion first = stored.get(0);
+                    List<DefinitionRef> also = stored.stream().skip(1)
+                            .map(v -> new DefinitionRef(v.key(), v.version())).toList();
+                    return first.withWarnings(importWarnings).withAlsoImported(also);
                 }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    private DefinitionVersion storeImported(String tenant, String caller, ImportRequest request, String source,
+            String text, Process process, String canonical, String hash, int nodeCount, String layout) {
+        // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
+        List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
+        StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
+        if (latest != null && latest.definitionHash().equals(hash)) {
+            return view(latest);
+        }
+        Instant now = clock.instant();
+        boolean active = settings.definitionsAutoApprove();
+        StoredDefinition stored = new StoredDefinition(tenant, Ulid.next(now), process.id(),
+                latest == null ? 1 : latest.version() + 1, active ? "ACTIVE" : "DRAFT", process.name(),
+                canonical, hash, request.format().name(), text,
+                Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
+                active ? DEV_APPROVER : null, active ? now : null);
+        store.insertDefinition(stored);
+        if (layout != null) {
+            // #445: revision 1, from the file's own diagram, in the transaction of the import.
+            importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
+                    1, layout, Hashes.sha256(layout), hash, "BPMN", caller, now));
+        }
+        lifecycleHistory(stored, "IMPORTED", null, caller, null, Map.of("source", source), now);
+        // One event per stored version, so its id is derived from the version id.
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("definitionKey", stored.key());
+        payload.put("version", stored.version());
+        payload.put("definitionHash", hash);
+        if (active) {
+            payload.put("approvedBy", DEV_APPROVER);
+            payload.put("approvedAt", now.toString());
+            payload.put("effectiveFrom", now.toString());
+            payload.put("sourceHash", stored.sourceHash());
+            payload.put("readerVersion", READER_VERSION);
+            payload.put("source", source);
+        }
+        publishDefinition(stored, active ? "processes.definition.approved.v1"
+                : "processes.definition.imported.v1", payload, now);
+        if (active) {
+            // PRE-022 (c): every auto-approved import is named in the log, with tenant and key.
+            LOG.log(System.Logger.Level.WARNING, "process.definition.auto-approved tenant={0} key={1} "
+                    + "version={2} (definitions.auto-approve, dev profile)", tenant, stored.key(),
+                    stored.version());
+            retireSuperseded(versions, stored, now);
+        }
+        return view(stored);
     }
 
     // ---- definition lifecycle (ADR-0012, DESIGN section 3.2) -------------------------------------------------
@@ -5140,7 +5158,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
                     + ": the stored source does not match its source hash");
         }
-        Process process = reader.apply(source);
+        Process process = reader instanceof DefinitionReader keyed ? keyed.readKey(source, definition.key())
+                : reader.apply(source);
         if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
             throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
                     + ": the stored source no longer gives the recorded definition hash");

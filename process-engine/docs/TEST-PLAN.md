@@ -185,6 +185,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-235 | `PRE_235_*` in `MessageCorrelationPostgresIT` and `MessageElementsImportTest` | Testcontainers with a recording adapter; kernel run twice from one state | M3 | `TR-STD-12`, `TR-SEC-05` | Done (#491) |
 | PRE-236 | `PRE_236_*` in `MessageCorrelationPostgresIT` | Testcontainers, a message start definition | M3 | `TR-STD-04` | Done (#491) |
 | PRE-237 | `PRE_237_*` in `MessageElementsImportTest` | Import and export round trip of the worked example; two refused files | M3 | `TR-STD-04`, `TR-STD-10` | Done (#491) |
+| PRE-296 | `PRE_296_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Import of the worked example; Testcontainers, replay with one key | M3 | `TR-STD-04`, `TR-TEN-01` | Done (#497) |
+| PRE-297 | `PRE_297_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Lane hint, own assignee kept, no lane refused; task of a message-started instance | M3 | `TR-STD-04` | Done (#497) |
+| PRE-298 | `PRE_298_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Message flows kept; export and read back, per pool | M3 | `TR-STD-04`, `TR-STD-10` | Done (#497) |
+| PRE-299 | `PRE_299_*` in `CollaborationImportTest` | A choreography element and a file of two processes with no collaboration | M3 | `TR-STD-04` | Done (#497) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

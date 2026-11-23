@@ -171,7 +171,8 @@ final class TestEngine {
                 tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval);
         JdbcProcessStore processStore = new JdbcProcessStore(ds);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
-                Map.of(SourceFormat.BPMN_XML, reader::read), Map.of(),
+                Map.of(SourceFormat.BPMN_XML, reader),
+                Map.of(SourceFormat.BPMN_XML, new io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter()::write),
                 new LocalServiceInvoker(b.handlers.stream().collect(Collectors.toMap(ServiceTaskHandler::name, h -> h)),
                         decisions, Duration.ofSeconds(5)),
                 publisher, settings, BehaviorCatalog.registry(), new V1ExpressionEvaluator(100), jobStore, jobSettings,
