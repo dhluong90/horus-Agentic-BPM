@@ -9,7 +9,8 @@ import java.util.Map;
  * row lock, checks the task's lock version, changes the task with a conditional update, and writes its history entry
  * and event in the same transaction; a completion then runs the following synchronous steps in it too.
  *
- * <p>Deliberate gap of this release: forms are not validated.
+ * <p>A task whose step declares a form is completed through it: {@link #form} resolves the form, and
+ * {@code complete} refuses a result that breaks its schema with {@code FORM_VALIDATION_FAILED} (PRE-031).
  */
 public interface TaskService {
 
@@ -21,6 +22,21 @@ public interface TaskService {
      * @throws TaskNotFoundException when no such task exists in the tenant
      */
     TaskView task(String taskId);
+
+    /**
+     * Resolves the form of a task of the caller's tenant: the schema, display hints and prefilled data of the form its
+     * step declares, with masked fields still masked, or the link to the host's own screen. Needs
+     * {@code processes:task:work}. Writes nothing.
+     *
+     * @param taskId the task id
+     * @return the resolved form
+     * @throws TaskNotFoundException when no such task exists in the tenant
+     * @throws FormNotDeclaredException when the task's step declares no form
+     * @throws UnsupportedOperationException in an implementation that predates task forms
+     */
+    default TaskForm form(String taskId) {
+        throw new UnsupportedOperationException("This task service does not resolve task forms");
+    }
 
     /**
      * Claims an open task for the caller ({@code OPEN} to {@code CLAIMED}). Needs {@code processes:task:work}, and

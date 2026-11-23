@@ -4,7 +4,7 @@ import {
   localiseDemo, VI_DEMO_DEFINITIONS, VI_REVIEW_CONTEXT, type DemoDefinition,
 } from './processDemo';
 import { demoCases } from './caseDemo';
-import { DIRECTORY, QUEUE_NOW, QUEUE_SEED, type QueueSeedTask } from './taskQueueDemo';
+import { DIRECTORY, QUEUE_NOW, QUEUE_SEED, QUEUE_FORMS, type QueueSeedTask } from './taskQueueDemo';
 import { fakeHash, MIGRATION_DEFINITIONS } from './migrationDemo';
 import { createMigrationApi, type MigrationSeed } from './migrationEngine';
 import { demoIncidents, type StoredIncident } from './incidentDemo';
@@ -62,6 +62,15 @@ export interface RecordedHandOver {
   from: string | null;
   to: string;
   reason: string;
+}
+
+/** A task completed through its declared form, as the engine received it (CKP-021). */
+export interface RecordedCompletion {
+  taskId: string;
+  actor: string;
+  result: Record<string, unknown>;
+  ifMatch: string | undefined;
+  idempotencyKey: string | undefined;
 }
 
 export interface RecordedOverride {
@@ -172,6 +181,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const handOvers: RecordedHandOver[] = [];
   const replies = new Map<string, ProcessAnswer>();
   const overrides: RecordedOverride[] = [];
+  const completions: RecordedCompletion[] = [];
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
   const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
   const incidentCommands: RecordedIncidentCommand[] = [];
@@ -287,6 +297,27 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (!recommendations.includes(String(result['recommendation']))) out.push(`$.recommendation: must be one of ${recommendations.join(', ')}`);
     if (typeof result['incomeVerified'] !== 'boolean') out.push('$.incomeVerified: expected boolean');
     for (const [key, value] of Object.entries(result)) if (value === '***') out.push(`$.${key}: masked value`);
+    return out;
+  };
+
+  /** The checks of a declared form the demo engine makes: required fields, the conditional rule, enums, integers and the mask. */
+  const formViolations = (schema: Record<string, unknown>, result: Record<string, unknown>) => {
+    const properties = (schema['properties'] ?? {}) as Record<string, Record<string, unknown>>;
+    const required = new Set((schema['required'] ?? []) as string[]);
+    const rule = schema['if'] as { properties?: Record<string, { const?: unknown }> } | undefined;
+    if (rule?.properties !== undefined && Object.entries(rule.properties).every(([name, check]) => result[name] === check.const)) {
+      for (const name of ((schema['then'] as { required?: string[] } | undefined)?.required ?? [])) required.add(name);
+    }
+    const out: { pointer: string; rule: string }[] = [];
+    for (const [name, property] of Object.entries(properties)) {
+      const value = result[name];
+      if (value === undefined || value === null) {
+        if (required.has(name)) out.push({ pointer: `/${name}`, rule: 'required' });
+      } else if (property['mask'] === true && value === '***') out.push({ pointer: `/${name}`, rule: 'masked value' });
+      else if (Array.isArray(property['enum']) && !property['enum'].includes(value)) out.push({ pointer: `/${name}`, rule: `must be one of ${property['enum'].join(', ')}` });
+      else if (property['type'] === 'integer' && !Number.isInteger(value)) out.push({ pointer: `/${name}`, rule: 'expected integer' });
+      else if (property['type'] === 'string' && typeof value === 'string' && typeof property['maxLength'] === 'number' && value.length > property['maxLength']) out.push({ pointer: `/${name}`, rule: `must be at most ${String(property['maxLength'])} characters` });
+    }
     return out;
   };
 
@@ -593,6 +624,17 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return incidentCommand(item, command, request, header);
     }
     if (request.method === 'GET' && path === `${BASE}/tasks`) return listTasks(url, request);
+    const formMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)\/form$/.exec(path);
+    if (formMatch && request.method === 'GET') {
+      const task = tasks.get(formMatch[1] ?? '');
+      if (!request.permissions.includes('processes:task:work')) return problem(403, 'PERMISSION_DENIED');
+      if (!task) return problem(404, 'TASK_NOT_FOUND');
+      const declared = QUEUE_FORMS[task.id];
+      if (declared === undefined) return problem(404, 'FORM_NOT_DECLARED');
+      const base = { schemaVersion: 1, taskId: task.id, lockVersion: task.lockVersion };
+      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: declared };
+      return json(200, body, { ETag: `"${String(task.lockVersion)}"` });
+    }
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete|reassign|delegate))?$/.exec(path);
     if (taskMatch) {
       const task = tasks.get(taskMatch[1] ?? '');
@@ -648,6 +690,12 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         if (violations.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations });
         overrides.push({ taskId: task.id, reviewedBy: request.user, reason: body.reason ?? '', result, idempotencyKey: header('Idempotency-Key') });
       }
+      const declared = QUEUE_FORMS[task.id];
+      if (declared !== undefined && 'schema' in declared) {
+        const errors = formViolations(declared.schema, result);
+        if (errors.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations: errors.map((e) => `$.${e.pointer.slice(1)}: ${e.rule}`), errors });
+        completions.push({ taskId: task.id, actor: request.user, result, ifMatch, idempotencyKey });
+      }
       Object.assign(task, { status: 'COMPLETED', completedBy: request.user, completedAt: '2026-11-20T03:20:00Z', lockVersion: task.lockVersion + 1 });
       return json(200, instance(), { ETag: '"5"' });
     }
@@ -666,5 +714,5 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (item) item.lockVersion += 1;
   };
 
-  return { handle, overrides, requests, decisions, calendarDecisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
+  return { handle, overrides, completions, requests, decisions, calendarDecisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
 }

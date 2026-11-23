@@ -332,3 +332,23 @@
 .timeline__more { margin: 12px 0 0; font: var(--type-label); }
 .cases { margin-top: 8px; }
 .cases__more { display: flex; justify-content: center; padding: 16px 0 4px; }
+
+/* ---------- Task form (CKP-021) ---------- */
+.taskform__card { max-width: 960px; }
+.taskform__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; align-items: start; }
+@media (max-width: 900px) { .taskform__grid { grid-template-columns: minmax(0, 1fr); } }
+.taskform__field--wide { grid-column: 1 / -1; }
+.taskform__field, .taskform__group { scroll-margin-bottom: 240px; }
+.taskform__field .field__input, .taskform__field select.field__input { min-height: var(--target-min); width: 100%; }
+.taskform__star { color: var(--bad); }
+.taskform__group { border: 0; margin: 0; padding: 0; min-width: 0; }
+.taskform__group legend { padding: 0; margin-bottom: 4px; }
+.taskform__options { display: flex; flex-wrap: wrap; gap: 4px 20px; min-height: var(--target-min); align-items: center; }
+.taskform__option { display: inline-flex; align-items: center; gap: 8px; min-height: var(--target-min); cursor: pointer; }
+.taskform__option input { width: 18px; height: 18px; }
+.taskform__money { display: flex; gap: 8px; }
+.taskform__money .taskform__currency { flex: none; width: 88px; text-align: center; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-2); font-weight: 600; }
+.taskform__money .taskform__amount { flex: 1 1 auto; text-align: right; }
+.taskform__masked { display: flex; align-items: center; gap: 12px; min-height: var(--target-min); }
+.taskform__keep { align-self: flex-start; }
+.taskform .review-dock { margin-top: 16px; max-width: 960px; }

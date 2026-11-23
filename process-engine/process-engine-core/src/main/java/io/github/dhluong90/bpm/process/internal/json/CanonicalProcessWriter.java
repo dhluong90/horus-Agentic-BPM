@@ -48,6 +48,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.util.List;
@@ -301,6 +302,19 @@ public final class CanonicalProcessWriter {
                         ObjectNode spec = step.putObject("sla").put("duration", sla.duration().toString());
                         if (sla.calendar() != null) {
                             spec.put("calendar", sla.calendar());
+                        }
+                    });
+                    // Likewise only when declared (PRE-031): a key, a schema path with its hints, or a link.
+                    t.extensions().first(FormSpec.class).ifPresent(form -> {
+                        if (form.formKey() != null) {
+                            step.put("form", form.formKey());
+                        } else if (form.link() != null) {
+                            step.putObject("form").put("link", form.link());
+                        } else {
+                            ObjectNode spec = step.putObject("form").put("schema", form.schema());
+                            if (form.hints() != null) {
+                                spec.set("hints", EngineJson.JSON.readTree(form.hints()));
+                            }
                         }
                     });
                     // Likewise only when declared (PRE-178).

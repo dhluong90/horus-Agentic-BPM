@@ -34,6 +34,7 @@ import io.github.dhluong90.bpm.process.spi.AgentAdapter;
 import io.github.dhluong90.bpm.process.spi.AssigneeDirectory;
 import io.github.dhluong90.bpm.process.spi.RoleCatalogue;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
+import io.github.dhluong90.bpm.process.spi.FormRegistry;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import io.github.dhluong90.bpm.process.internal.service.JobSettings;
 import io.github.dhluong90.bpm.process.spi.ServiceAdapter;
@@ -196,6 +197,18 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
+     * The default task forms (PRE-031): JSON documents on the classpath under
+     * {@code horus.bpm.processes.tasks.form-resource-root}. A host with its own form service registers a
+     * {@link FormRegistry} bean.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    FormRegistry processEngineFormRegistry(ProcessEngineProperties properties) {
+        return new ClasspathFormRegistry(properties.tasks().formResourceRoot(),
+                ProcessEngineAutoConfiguration.class.getClassLoader());
+    }
+
+    /**
      * Makes the audit copy of masked agent inputs (#59): with the Rule Engine and its masking key for the tenant, the
      * keyed fingerprint the decision log keeps for the same value ({@code hmac:<keyId>:<hex>}); otherwise
      * {@code ***}. A host may register its own.
@@ -337,7 +350,8 @@ public class ProcessEngineAutoConfiguration {
             ProcessEventPublisher publisher, ProcessEngineProperties properties, Environment environment,
             OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
             ObjectProvider<AssigneeDirectory> directory, ObjectProvider<RoleCatalogue> roles,
-            JdbcLayoutStore layoutStore, ObjectProvider<io.github.dhluong90.bpm.process.spi.MessageAdapter> messageAdapter) {
+            JdbcLayoutStore layoutStore, FormRegistry forms,
+            ObjectProvider<io.github.dhluong90.bpm.process.spi.MessageAdapter> messageAdapter) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -371,6 +385,8 @@ public class ProcessEngineAutoConfiguration {
         RoleCatalogue catalogue = roles.getIfUnique(() -> RoleCatalogue.ACCEPT_ALL);
         warnWhenRolesAreNotChecked(environment, catalogue);
         services.useRoleCatalogue(catalogue);
+        // PRE-031: the host's forms, and where a form link may point.
+        services.useFormRegistry(forms, properties.tasks().formLinkOrigins());
         // #92: how deep one call may sit above another.
         services.useCallDepth(properties.calls().maxDepth());
         // #496: most repetitions of one looped activity.

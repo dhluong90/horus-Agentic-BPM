@@ -267,7 +267,10 @@ paths:
         VALIDATION_FAILED` with one problem per step naming `step -> name` (`HANDLER_NOT_REGISTERED`,
         `ADAPTER_NOT_REGISTERED`), and the version stays `DRAFT` (`PRE-072`). Every `role:` an escalation level names must
         be in the tenant's role list when the host registers a `RoleCatalogue` (`ESCALATION_ROLE_UNKNOWN`, naming the
-        step and the role; `PRE-180`); a host without one is not checked. Permission `processes:author` or
+        step and the role; `PRE-180`); a host without one is not checked. A declared form must still be usable:
+        a registered key or schema path, a schema and hints in the task-form subset, and a link that is relative
+        or on an origin of `tasks.form-link-origins` (`FORM_NOT_REGISTERED`, `FORM_SCHEMA_INVALID`,
+        `FORM_HINTS_INVALID`, `FORM_LINK_NOT_ALLOWED`; `PRE-219`). Permission `processes:author` or
         `processes:deploy`. The answer lists in `warnings` each agent step field that declares no `mask`
         (`UNCLASSIFIED_FIELD`, PD-146, `PRE-205`); the warnings never block the request.
       parameters:
@@ -1253,6 +1256,66 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /tasks/{id}/form:
+    get:
+      tags: [tasks]
+      operationId: getTaskForm
+      summary: Read the form a task is completed through
+      description: |
+        The form the task's step declares in the definition (PRE-031), resolved for this task: the JSON Schema of the
+        result (types `string`, `integer`, `number`, `boolean`, `enum`, `format: date` or `date-time`, and the money
+        object `{currency, amount}`; one root `if`/`then`/`else` for a field required only in some cases), the display
+        hints (`order`, `widgets`, `labels` per locale, `readOnly`), and `data`, the values of the instance variables
+        the schema declares. A field the schema marks `"mask": true` carries the placeholder `***` in `data` whenever
+        the variable exists: the clear value never leaves the engine through a form (PRE-220). A step that declares a
+        link to the host's own screen answers `link` instead of `form`, with `{taskId}` and `{instanceId}` replaced;
+        such a task is completed by the host's screen with `:complete` as any other. A step that declares no form is
+        `404 FORM_NOT_DECLARED`, and so is a registered form the host no longer provides. The `ETag` is the task's
+        `lockVersion`, quoted, to send as `If-Match` on `:complete`. Writes nothing. Permission `processes:task:work`.
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: The resolved form, or the link
+          headers:
+            ETag:
+              description: The task's `lockVersion`, quoted; send it as `If-Match`
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TaskForm' }
+              examples:
+                form:
+                  summary: A credit review declared with a form
+                  value:
+                    schemaVersion: 1
+                    taskId: 01JD8Q4K3V9N2M5X7B1C6R0TEA
+                    lockVersion: 1
+                    form:
+                      schema:
+                        type: object
+                        required: [decision]
+                        properties:
+                          decision: { enum: [APPROVE, REJECT] }
+                          reason: { type: string, maxLength: 500 }
+                          idNumber: { type: string, mask: true }
+                        if: { required: [decision], properties: { decision: { const: REJECT } } }
+                        then: { required: [reason] }
+                      hints:
+                        order: [decision, reason]
+                        labels: { reason: { en: Reason, vi: Lý do } }
+                      data: { idNumber: '***' }
+                link:
+                  summary: A task completed in the host's own screen
+                  value:
+                    schemaVersion: 1
+                    taskId: 01JD8Q4K3V9N2M5X7B1C6R0TEB
+                    lockVersion: 0
+                    link: /loans/review/01JD8Q4K3V9N2M5X7B1C6R0TEB
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /tasks/{id}:claim:
     post:
       tags: [tasks]
@@ -1394,7 +1457,10 @@ paths:
         (`403 SELF_APPROVAL_FORBIDDEN`, PRE-007). The review task of a refused async result is always four-eyes,
         and the identity that reported the refused result is refused as well. Its result must meet the step's
         output schema (`422 FORM_VALIDATION_FAILED` with `violations`; nothing is written and the task stays
-        claimed). A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing
+        claimed). A task whose step declares a form (`GET /tasks/{id}/form`) is completed through it: a `result` that
+        breaks the form's schema is `422 FORM_VALIDATION_FAILED` with `violations` and `errors`, one JSON Pointer per
+        failing field such as `/reason`, and nothing is written (PRE-031). A task declared with a link is not checked
+        here; the host's screen validates it. A stale `If-Match` is `409 VERSION_CONFLICT` and writes nothing
         (PRE-003). The result is stored in the task's result variable. The following synchronous steps run in the
         same transaction.
       parameters:
@@ -2799,6 +2865,50 @@ components:
           type: object
           additionalProperties: true
           description: At most 256 KB of JSON. Floating-point numbers are read as decimals; money is a Money object.
+    TaskForm:
+      type: object
+      description: The resolved form of a task, `task-form.v1.schema.json`. Exactly one of `form` and `link`.
+      required: [schemaVersion, taskId, lockVersion]
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        taskId: { type: string }
+        lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
+        form:
+          type: object
+          required: [schema, hints, data]
+          properties:
+            schema:
+              type: object
+              additionalProperties: true
+              description: JSON Schema 2020-12 of the result, in the task-form subset
+            hints:
+              type: object
+              properties:
+                order: { type: array, items: { type: string } }
+                widgets:
+                  type: object
+                  additionalProperties:
+                    type: string
+                    enum: [text, textarea, select, radio, checkbox, date, datetime, money, readonly]
+                labels:
+                  type: object
+                  description: Per field, per locale
+                  additionalProperties:
+                    type: object
+                    additionalProperties: { type: string, maxLength: 200 }
+                readOnly: { type: array, items: { type: string } }
+              additionalProperties: true
+            data:
+              type: object
+              additionalProperties: true
+              description: Prefilled values; a field the schema marks `mask` is `***`
+        link:
+          type: string
+          maxLength: 2000
+          description: The host's own screen, relative or on an origin of `tasks.form-link-origins`
+      oneOf:
+        - required: [form]
+        - required: [link]
     Task:
       type: object
       required: [id, instanceId, definitionKey, definitionVersion, nodeId, assignee, fourEyes, status, lockVersion,
@@ -3790,7 +3900,7 @@ components:
           type: string
           enum: [INPUT_INVALID, QUERY_INVALID, ROLE_FAN_OUT_EXCEEDED, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
-            TASK_NOT_FOUND, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
+            TASK_NOT_FOUND, FORM_NOT_DECLARED, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
@@ -3831,6 +3941,18 @@ components:
             Present on `FORM_VALIDATION_FAILED`: each failing path and rule, for example `$.riskScore: expected
             integer`, never a value
           items: { type: string }
+        errors:
+          type: array
+          description: >-
+            Present on `FORM_VALIDATION_FAILED`: the same failures as `violations`, in the same order, each with the
+            JSON Pointer of the failing field (`/reason`; the empty pointer is the whole result) and the rule, never
+            a value
+          items:
+            type: object
+            required: [pointer, rule]
+            properties:
+              pointer: { type: string }
+              rule: { type: string }
         currentDefinitionHash: { type: string, description: 'Present on `CONTENT_CHANGED`, the hash of the content stored now' }
         currentLockVersion: { type: integer, description: 'Present on `CONTENT_CHANGED`, the lock version stored now' }
         currentChangeSetHash: { type: string, description: 'Present on `CONTENT_CHANGED` when the change set was not the one reviewed (PRE-202), the hash of the change set now' }

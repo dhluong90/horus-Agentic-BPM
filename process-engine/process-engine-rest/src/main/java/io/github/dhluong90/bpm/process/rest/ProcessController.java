@@ -771,6 +771,17 @@ public class ProcessController {
     }
 
     /**
+     * Reads the form a task is completed through ({@code processes:task:work}): the schema, hints and prefilled data
+     * of the form its step declares, masked fields still masked, or the link to the host's own screen. The
+     * {@code ETag} is the task's lock version, the value to send as {@code If-Match} on completion.
+     */
+    @GetMapping("/tasks/{id}/form")
+    public ResponseEntity<byte[]> taskForm(@PathVariable("id") String id) {
+        io.github.dhluong90.bpm.process.api.TaskForm form = tasks.form(id);
+        return json(HttpStatus.OK, Views.taskForm(form), form.lockVersion(), null);
+    }
+
+    /**
      * Completes an attempt of a remote step whose adapter handed the call off ({@code processes:step:complete}),
      * for example a credit bureau's callback. The caller also needs a completer role of the step's adapter
      * ({@code adapters.completer-roles}). Body: {@code attemptId}, {@code completionToken}, {@code status}

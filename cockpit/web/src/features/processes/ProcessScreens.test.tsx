@@ -440,10 +440,10 @@ describe('CKP-007 agent task inspector', () => {
     expect(within(editor).getByLabelText('Risk score')).toHaveAttribute('aria-invalid', 'true');
   });
 
-  it('CKP_007_a_task_without_an_agent_answer_says_so', async () => {
+  it('CKP_007_a_task_with_neither_an_agent_answer_nor_a_form_says_so', async () => {
     setScenario('processes-reviewer');
     open(`#/tasks/${FORM_TASK_ID}`);
 
-    expect(await screen.findByText(/Only escalated agent steps open here/)).toBeInTheDocument();
+    expect(await screen.findByText(/has no form to complete here/)).toBeInTheDocument();
   });
 });

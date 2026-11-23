@@ -39,6 +39,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param incidents how incidents are resolved (PD-126)
  * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  * @param calls limits of a process that calls another (#92)
+ * @param tasks how a user task is completed through a declared form (PRE-031)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -64,7 +65,39 @@ public record ProcessEngineProperties(
         @DefaultValue Incidents incidents,
         @DefaultValue Classification classification,
         @DefaultValue Calls calls,
-        @DefaultValue MultiInstance multiInstance) {
+        @DefaultValue MultiInstance multiInstance,
+        @DefaultValue Tasks tasks) {
+
+    /**
+     * Where a user task's declared form comes from and where its link may point (PRE-031, PRE-219).
+     *
+     * @param formResourceRoot classpath folder the default {@code FormRegistry} reads form documents from, ending in
+     *     {@code /}; default {@code forms/}. A host that registers its own {@code FormRegistry} ignores it
+     * @param formLinkOrigins origins a form link may point to besides relative links, for example
+     *     {@code https://loans.example.com}; empty by default, so only relative links are accepted. An origin is
+     *     {@code http} or {@code https}, a host and an optional port, with no path
+     */
+    public record Tasks(
+            @DefaultValue("forms/") String formResourceRoot,
+            @DefaultValue List<String> formLinkOrigins) {
+
+        private static final java.util.regex.Pattern ORIGIN = java.util.regex.Pattern.compile(
+                "^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?$");
+
+        public Tasks {
+            if (!formResourceRoot.endsWith("/") || formResourceRoot.startsWith("/") || formResourceRoot.contains("..")) {
+                throw new IllegalArgumentException("horus.bpm.processes.tasks.form-resource-root must be a relative "
+                        + "classpath folder ending in /, was " + formResourceRoot);
+            }
+            formLinkOrigins = List.copyOf(formLinkOrigins);
+            for (String origin : formLinkOrigins) {
+                if (!ORIGIN.matcher(origin).matches()) {
+                    throw new IllegalArgumentException("horus.bpm.processes.tasks.form-link-origins holds " + origin
+                            + ", which is not an origin such as https://loans.example.com");
+                }
+            }
+        }
+    }
 
     /**
      * The reminder about agent step fields with no classification (PD-146, #438). Masking stays opt-in: an agent
