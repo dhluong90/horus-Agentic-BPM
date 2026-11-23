@@ -317,6 +317,7 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
   content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 30; padding: 4px 8px; border-radius: var(--radius-s, 6px);
   background: var(--surface); color: var(--ink); box-shadow: var(--sh-pop); font: var(--type-caption, 500 12px/1.4 var(--font-ui)); white-space: nowrap; pointer-events: none;
 }
+.has-tip--above { display: inline-flex; }
 .picker { position: relative; display: block; }
 .picker__trigger {
   display: flex; align-items: center; gap: 4px; width: 100%; min-height: 36px; padding: 2px 8px; border-radius: var(--radius-s);

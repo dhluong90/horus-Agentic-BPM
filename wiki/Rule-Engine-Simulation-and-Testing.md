@@ -77,7 +77,7 @@ The Java API is `ruleEngine.simulateHistory("card-fee", 2, HistorySimulation.bet
 
 ### Read the replay in plain language
 
-`POST .../versions/2:simulate-history-readings` takes the same body and runs the same replay, then reads each decision as a sentence, so a screen shows "fee was 50,000 VND, would be 30,000 VND" without building the text itself. It needs `rules:simulate`, `rules:log:read` and `rules:read`, all checked before the body is read.
+`POST .../versions/2:simulate-history-readings` takes the same body and runs the same replay, then reads each decision as a sentence, so a screen shows "fee was 50,000 VND, would be 30,000 VND" without building the text itself. It needs `rules:simulate`, `rules:log:read` and `rules:read`, all checked before the body is read. Add `decisionIds` (up to 1,000) to replay only those decisions of the period; an id that is not your tenant's decision of this rule set in the period is left out, and a decision with a masked value is still listed as not replayable.
 
 ```json
 {"ruleSet":"card-fee","version":2,"decisionCount":2,"replayedCount":1,"changedCount":1,"notReplayableCount":1,

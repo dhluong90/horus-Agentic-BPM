@@ -129,12 +129,29 @@ export interface DiagramLane { id: string; name: string | undefined; nodes: stri
 export interface DiagramMessageFlow { id: string; label: string | undefined; source: string; target: string; correlationKey: string | undefined }
 export interface DiagramCollaboration { pools: DiagramPool[]; lanes: DiagramLane[]; messageFlows: DiagramMessageFlow[] }
 
+/**
+ * A data symbol of the process (#499): a data object (its reference, or the object itself when nothing refers to it)
+ * or a data store reference. Read only; the cockpit draws them and never edits them.
+ */
+export interface DiagramDataItem {
+  id: string;
+  kind: 'dataObject' | 'dataStore';
+  name: string | undefined;
+  /** The sub-process or saga block it stands in; absent for the process itself. */
+  parentId?: string;
+}
+/** A data association between a step and a symbol: `read` is a data input association, `write` a data output association. */
+export interface DiagramDataLink { id: string; activity: string; item: string; direction: 'read' | 'write' }
+export interface DiagramData { items: DiagramDataItem[]; links: DiagramDataLink[] }
+
 export interface DiagramGraph {
   name: string | undefined;
   nodes: DiagramNode[];
   edges: DiagramEdge[];
   /** Pools, lanes and message flows, read only (#497); absent for a process with none. */
   collaboration?: DiagramCollaboration;
+  /** Data objects, data stores and their associations, read only (#499); absent for a process with none. */
+  data?: DiagramData;
 }
 
 /** Children of a process that are not steps: flows, artefacts, data and lanes. */
@@ -221,6 +238,63 @@ function triggerOf(element: Element): { trigger: string | undefined; interruptin
 
 /** Nested sub-processes the cockpit follows; a deeper one is drawn as a plain box, never skipped. */
 const MAX_NESTING = 8;
+
+/** The text of the `sourceRef`/`targetRef` children of a data association. */
+function refsOf(association: Element, name: 'sourceRef' | 'targetRef'): string[] {
+  return elementChildren(association).filter((c) => c.namespaceURI === BPMN && c.localName === name).map((c) => c.textContent.trim()).filter((r) => r !== '');
+}
+
+/**
+ * Reads the data symbols of one container (#499). A data input association runs from a reference to the step's input,
+ * a data output association from the step's output to a reference; the BPMN end that is a reference names the symbol.
+ * Reference ids are kept raw here; `readData` joins them to the objects they refer to.
+ */
+function readDataOf(container: Element, parentId: string | undefined, raw: RawData): void {
+  for (const child of elementChildren(container)) {
+    if (child.namespaceURI !== BPMN) continue;
+    const id = nonEmpty(child.getAttribute('id'));
+    if (id === undefined) continue;
+    if (child.localName === 'dataObject') raw.objects.set(id, { name: nonEmpty(child.getAttribute('name')), ...(parentId !== undefined ? { parentId } : {}) });
+    if (child.localName === 'dataObjectReference') raw.references.push({ id, kind: 'dataObject', name: nonEmpty(child.getAttribute('name')), ref: nonEmpty(child.getAttribute('dataObjectRef')), parentId });
+    if (child.localName === 'dataStoreReference') raw.references.push({ id, kind: 'dataStore', name: nonEmpty(child.getAttribute('name')), ref: nonEmpty(child.getAttribute('dataStoreRef')), parentId });
+    for (const association of elementChildren(child)) {
+      if (association.namespaceURI !== BPMN) continue;
+      const aid = nonEmpty(association.getAttribute('id')) ?? `${id}:${String(raw.links.length)}`;
+      if (association.localName === 'dataInputAssociation') for (const source of refsOf(association, 'sourceRef')) raw.links.push({ id: `${aid}:${source}`, activity: id, item: source, direction: 'read' });
+      if (association.localName === 'dataOutputAssociation') for (const target of refsOf(association, 'targetRef')) raw.links.push({ id: `${aid}:${target}`, activity: id, item: target, direction: 'write' });
+    }
+    if (isContainer(child) && raw.depth < MAX_NESTING) {
+      raw.depth += 1;
+      readDataOf(child, id, raw);
+      raw.depth -= 1;
+    }
+  }
+}
+
+interface RawData {
+  depth: number;
+  objects: Map<string, { name: string | undefined; parentId?: string }>;
+  references: { id: string; kind: 'dataObject' | 'dataStore'; name: string | undefined; ref: string | undefined; parentId: string | undefined }[];
+  links: DiagramDataLink[];
+}
+
+/** The data symbols of a process: every reference, and every data object nothing refers to; links to a symbol or step that is not there are left out. */
+function readData(process: Element, nodeIds: ReadonlySet<string>): DiagramData | undefined {
+  const raw: RawData = { depth: 0, objects: new Map(), references: [], links: [] };
+  readDataOf(process, undefined, raw);
+  const items: DiagramDataItem[] = raw.references.map((r) => ({
+    id: r.id, kind: r.kind,
+    name: r.name ?? (r.ref !== undefined ? raw.objects.get(r.ref)?.name : undefined),
+    ...(r.parentId !== undefined ? { parentId: r.parentId } : {}),
+  }));
+  const referred = new Set(raw.references.map((r) => r.ref));
+  for (const [id, object] of raw.objects) {
+    if (!referred.has(id)) items.push({ id, kind: 'dataObject', name: object.name, ...(object.parentId !== undefined ? { parentId: object.parentId } : {}) });
+  }
+  const itemIds = new Set(items.map((i) => i.id));
+  const links = raw.links.filter((l) => itemIds.has(l.item) && nodeIds.has(l.activity));
+  return items.length === 0 ? undefined : { items, links };
+}
 
 /** Reads the steps and flows of one container into the flat lists; a step inside names its container in `parentId`. */
 function readContainer(container: Element, parentId: string | undefined, nodes: DiagramNode[], edges: DiagramEdge[], defaults: Set<string>, depth: number): void {
@@ -327,10 +401,12 @@ export function readBpmnGraph(xml: string): DiagramGraph {
     if (caught !== undefined) edges.push({ id: `link:${thrown.id}`, source: thrown.id, target: caught.id, label: thrown.linkName, isDefault: false, isLink: true });
   }
   const collaboration = readCollaboration(document, process);
+  const data = readData(process, ids);
   return {
     name: nonEmpty(process.getAttribute('name')),
     nodes,
     ...(collaboration !== undefined ? { collaboration } : {}),
+    ...(data !== undefined ? { data } : {}),
     // A flow to an element that is not drawn (an artefact, a lane) is left out rather than drawn to nowhere.
     edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, isDefault: defaults.has(edge.id) })),
   };

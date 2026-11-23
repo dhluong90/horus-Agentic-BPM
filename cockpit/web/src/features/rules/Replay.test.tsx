@@ -5,8 +5,10 @@ import { App } from '../../App';
 import type { Scenario } from '../../mocks/fixtures';
 import { resetRuleEngine } from '../../mocks/handlers';
 import { mockHost, setScenario } from '../../mocks/node';
+import { decisionIdOf } from '../../mocks/ruleReports';
+import type { HistoryReadings } from '../../api/rules/schemas';
 import { simulationSeed, type FakeRequest } from '../../mocks/ruleEngine';
-import { dayOf, groupOf, presetDays, replayRequest } from './model/replay';
+import { dayOf, groupOf, parseDecisionIds, presetDays, replayRequest, runReplay, weeklyWindows } from './model/replay';
 
 let sent: { path: string; key: string | null; body: string }[] = [];
 
@@ -52,10 +54,13 @@ describe('replay of past decisions against a draft', () => {
     expect(changed[0]).toHaveTextContent(/Rule R\d applies/);
     await user.click(screen.getByRole('button', { name: /^Unchanged/ }));
     expect(within(screen.getByRole('table', { name: 'Replayed decisions, newest first' })).getAllByText('Same result with this draft.').length).toBeGreaterThan(0);
-    // One read: the cockpit sends only the period and the cap, no Idempotency-Key, and nothing that logs a decision.
-    expect(sent.map((call) => call.path)).toEqual(['/rule-sets/card-fee/versions/2:simulate-history-readings']);
-    expect(sent[0]?.key).toBeNull();
-    await waitFor(() => { expect(Object.keys(JSON.parse(sent[0]?.body ?? '{}') as object).sort()).toEqual(['from', 'limit', 'to']); });
+    // Reads only: the cockpit reads the period a week at a time, newest first, sends the period and the cap of
+    // each step, never an Idempotency-Key, and nothing that logs a decision.
+    expect(sent.length).toBeGreaterThan(1);
+    expect(new Set(sent.map((call) => call.path))).toEqual(new Set(['/rule-sets/card-fee/versions/2:simulate-history-readings']));
+    expect(sent.every((call) => call.key === null)).toBe(true);
+    await waitFor(() => { expect(sent.every((call) => call.body !== '')).toBe(true); });
+    for (const call of sent) expect(Object.keys(JSON.parse(call.body) as object).sort()).toEqual(['from', 'limit', 'to']);
   });
 
   it('CKP_096_a_decision_with_a_masked_input_names_the_input_and_never_shows_a_value', async () => {
@@ -152,5 +157,53 @@ describe('the period and the cap of a replay', () => {
     expect(groupOf({ changed: true, code: 'REPLAY_NOT_POSSIBLE' })).toBe('notReplayable');
     expect(groupOf({ changed: true, code: null })).toBe('changed');
     expect(groupOf({ changed: false, code: null })).toBe('unchanged');
+  });
+});
+
+describe('replay of selected decisions and the part read before a cancel (#96)', () => {
+  it('CKP_096_selected_decisions_are_the_only_ones_sent_and_replayed', async () => {
+    resetRuleEngine(simulationSeed());
+    const user = userEvent.setup();
+    const [a, b] = [decisionIdOf(0), decisionIdOf(2)];
+    open('#/rules/card-fee/2/replay');
+    await user.type(await screen.findByLabelText('Only these decisions (optional)'), `${a}\n${b}\n01NOTMINE0000000000000000`);
+    await user.click(screen.getByRole('button', { name: 'Run replay' }));
+    await screen.findByRole('table', { name: 'Replayed decisions, newest first' });
+    // The id that is not in the log is left out, never reported; the two chosen are listed, newest first.
+    await user.click(screen.getByRole('button', { name: /^All/ }));
+    const rows = within(screen.getByRole('table', { name: 'Replayed decisions, newest first' })).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent(a.slice(-8));
+    expect(rows[1]).toHaveTextContent(b.slice(-8));
+    await waitFor(() => { expect((JSON.parse(sent[0]?.body ?? '{}') as { decisionIds: string[] }).decisionIds).toEqual([a, b, '01NOTMINE0000000000000000']); });
+  });
+
+  it('CKP_096_an_id_that_is_not_in_the_log_is_left_out_and_the_answer_holds_no_input', () => {
+    const engine = resetRuleEngine(simulationSeed());
+    const wide = { from: new Date(Date.now() - 20 * 86_400_000).toISOString(), to: new Date(Date.now() + 86_400_000).toISOString() };
+    const answer = engine.handle(post('/rule-sets/card-fee/versions/2:simulate-history-readings', { ...wide, decisionIds: ['01NOTMINE0000000000000000', decisionIdOf(3)] }, [...LAN, 'rules:read']));
+    expect(answer.status).toBe(200);
+    const body = JSON.parse(answer.body) as { results: { decisionId: string }[] };
+    expect(body.results.map((r) => r.decisionId)).toEqual([decisionIdOf(3)]);
+    expect(answer.body).not.toContain('"inputs"');
+    expect(engine.handle(post('/rule-sets/card-fee/versions/2:simulate-history-readings', { ...wide, decisionIds: 'x' }, [...LAN, 'rules:read'])).status).toBe(400);
+  });
+
+  it('CKP_096_a_cancel_keeps_the_steps_already_read_and_the_period_goes_week_by_week_newest_first', async () => {
+    const weeks = weeklyWindows('2026-11-01T00:00:00.000Z', '2026-11-30T00:00:00.000Z');
+    expect(weeks).toHaveLength(5);
+    expect(weeks[0]).toEqual({ from: '2026-11-23T00:00:00.000Z', to: '2026-11-30T00:00:00.000Z' });
+    expect(weeks.at(-1)).toEqual({ from: '2026-11-01T00:00:00.000Z', to: '2026-11-02T00:00:00.000Z' });
+    const part = (ids: string[]): HistoryReadings => ({ ruleSet: 'r', version: 2, status: 'DRAFT', from: '', to: '', decisionCount: ids.length, replayedCount: ids.length, changedCount: 0, notReplayableCount: 0, truncated: false, languages: ['en'], results: ids.map((decisionId, i) => ({ decisionId, loggedVersion: 1, evalClock: `2026-11-${String(29 - i).padStart(2, '0')}T00:00:00Z`, changed: false, code: null, maskedInputs: [], simulated: null, logged: null })) });
+    let calls = 0;
+    const seen: HistoryReadings[] = [];
+    await expect(runReplay({ from: '2026-11-01T00:00:00.000Z', to: '2026-11-30T00:00:00.000Z', limit: 100 }, () => {
+      calls += 1;
+      if (calls === 3) return Promise.reject(new DOMException('aborted', 'AbortError'));
+      return Promise.resolve(part(calls === 1 ? ['a', 'b'] : ['c']));
+    }, (joined) => { seen.push(joined); })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(seen).toHaveLength(2);
+    expect(seen.at(-1)?.results.map((r) => r.decisionId)).toEqual(['a', 'c', 'b']);
+    expect(parseDecisionIds(' a,b\n a ;c ')).toEqual(['a', 'b', 'c']);
   });
 });

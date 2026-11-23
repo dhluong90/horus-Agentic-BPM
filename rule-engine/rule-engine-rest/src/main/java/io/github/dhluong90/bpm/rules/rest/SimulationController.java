@@ -182,7 +182,20 @@ public class SimulationController {
             }
             limit = limitNode.intValue();
         }
-        return new HistorySimulation(instant(request, "from"), instant(request, "to"), limit);
+        java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+        JsonNode idsNode = request.get("decisionIds");
+        if (idsNode != null && !idsNode.isNull()) {
+            if (!idsNode.isArray()) {
+                throw new QueryInvalidException("decisionIds must be an array of decision ids");
+            }
+            for (JsonNode id : idsNode) {
+                if (!id.isString() || id.stringValue().isBlank() || id.stringValue().length() > 64) {
+                    throw new QueryInvalidException("decisionIds must hold decision ids as text of at most 64 characters");
+                }
+                ids.add(id.stringValue());
+            }
+        }
+        return new HistorySimulation(instant(request, "from"), instant(request, "to"), limit, ids);
     }
 
     /**

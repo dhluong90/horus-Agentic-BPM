@@ -458,6 +458,10 @@ public final class DefaultRuleEngine implements RuleEngine {
                     + " days apart (query.max-range " + querySettings.maxRange() + "), were " + range);
         }
         int max = context.settings().simulationMaxInputs();
+        if (request.decisionIds().size() > max) {
+            throw new QueryInvalidException("decisionIds may hold at most " + max + " ids (simulation.max-inputs), had "
+                    + request.decisionIds().size());
+        }
         if (request.limit() == null) {
             return max;
         }
@@ -466,6 +470,31 @@ public final class DefaultRuleEngine implements RuleEngine {
                     + request.limit());
         }
         return request.limit();
+    }
+
+    /**
+     * The selected decisions of the period, newest first, read page by page from the tenant's own log so an id of
+     * another tenant or rule set is never found; stops once every id is found or the period is read.
+     */
+    private List<DecisionRecord> selectedRows(String tenant, String ruleSet, HistorySimulation period, int most) {
+        Set<String> wanted = new HashSet<>(period.decisionIds());
+        List<DecisionRecord> found = new ArrayList<>();
+        DecisionLog.Position after = null;
+        while (!wanted.isEmpty() && found.size() < most) {
+            List<DecisionRecord> page = log.search(tenant, ruleSet, period.from(), period.to(), after, 500,
+                    querySettings.statementTimeout());
+            for (DecisionRecord row : page) {
+                if (wanted.remove(row.id()) && found.size() < most) {
+                    found.add(row);
+                }
+            }
+            if (page.size() < 500) {
+                break;
+            }
+            DecisionRecord last = page.getLast();
+            after = new DecisionLog.Position(last.createdAt(), last.id());
+        }
+        return found;
     }
 
     private HistorySimulationResult doSimulateHistory(String tenant, String ruleSet, int number,
@@ -482,8 +511,10 @@ public final class DefaultRuleEngine implements RuleEngine {
         draftRules.inputs().forEach(clause -> draftInputs.add(clause.name()));
         // One read, tenant and rule set first and the period on the partition key, newest first; one row more than
         // the limit tells whether the period held more.
-        List<DecisionRecord> rows = log.search(tenant, ruleSet, period.from(), period.to(), null, limit + 1,
-                querySettings.statementTimeout());
+        List<DecisionRecord> rows = period.decisionIds().isEmpty()
+                ? log.search(tenant, ruleSet, period.from(), period.to(), null, limit + 1,
+                        querySettings.statementTimeout())
+                : selectedRows(tenant, ruleSet, period, limit + 1);
         boolean truncated = rows.size() > limit;
         Map<Integer, CompiledRuleSet> loggedVersions = new HashMap<>();
         RequestReads request = context.settings().regexLimits().newRequest();
