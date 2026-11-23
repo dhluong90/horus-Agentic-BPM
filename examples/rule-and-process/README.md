@@ -105,6 +105,7 @@ The `dev` profile imports every BPMN file under `src/main/resources/processes` f
 |---|---|
 | Card application with a rule set and a four-eyes review | `card-fee-review` |
 | Transaction with compensation and cancel | `fund-transfer` |
+| Live undo: compensation boundaries and a compensation event sub-process, chosen by a start variable | `loan-payout` |
 | Complex gateway, two of three sign-offs | `payment-approval` |
 | User task with a declared form | `credit-review-form` (the form is `src/main/resources/forms/credit-review.form.json`) |
 | Ad-hoc sub-process, call activity, terminate end | `customer-onboarding` (calls `card-welcome`) |
@@ -134,6 +135,28 @@ Process Engine schema at version 1 (1 migration(s) applied)
 Process definition card-fee-review v1 ACTIVE for tenant bank-a from classpath:processes/card-fee-review.bpmn (hash 3fa54143...)
 Rule set card-fee v1 PUBLISHED (requested by seed-author, approved by seed-approver)
 ```
+
+### Live demo paths: error, compensation, timers
+
+Three scenes that a presenter drives on the default `dev` start. `P` is `HORUS_DEMO_PASSWORD`; `hoa` starts the instances, and `an` (a `DISPUTES_OFFICER`) works the dispute task in the cockpit's task list.
+
+**Business error.** Start `card-dispute` with a refund above the officer's limit of 5,000,000 VND, then complete the `assess` task as `an`. The refund step answers `REFUND_LIMIT_EXCEEDED`, the error boundary takes it, and the `senior-approval` task opens for `hoa` (role `DISPUTES_SENIOR`) with no incident. With `"amountMinor": 1000000` the refund posts and the dispute closes after the customer notification.
+
+```bash
+curl -s -u hoa:$P -H 'Content-Type: application/json' \
+  -d '{"definitionKey":"card-dispute","businessKey":"DISPUTE-1","variables":{"amountMinor":6000000}}' \
+  localhost:8080/api/bpm/processes/v1/instances
+```
+
+**Compensation.** `loan-payout` reserves funds and posts a debit in a sub-process, then credits the customer. The start variable `failCredit` picks the path. With `false` the payout completes and nothing is undone. With `true` the credit step answers `CREDIT_REJECTED`, the error boundary reaches a compensation throw, and the instance is `COMPENSATING` while the undo runs newest first: the compensation event sub-process reverses the disbursement, the debit boundary credits the debit back, the reservation boundary releases the hold. The instance then tells the customer and ends on `Payout undone`. The timeline (`GET /instances/{id}/activities`, or the cockpit) lists each undo.
+
+```bash
+curl -s -u hoa:$P -H 'Content-Type: application/json' \
+  -d '{"definitionKey":"loan-payout","businessKey":"PAYOUT-1","variables":{"failCredit":true,"amountMinor":90000000,"currency":"VND","sourceAccount":"ACC-9"}}' \
+  localhost:8080/api/bpm/processes/v1/instances
+```
+
+**Timers.** The models keep their real durations (`card-dispute` two days, `payment-review` two hours, `sub-process-and-timer` 24 hours). The `dev` profile shortens them for the demo through `horus.demo.timers.<event id>` in [`application-dev.yml`](src/main/resources/application-dev.yml), `PT1M` each: `assess-overdue`, `two-hours` and `cooling-off`. Start a `card-dispute` and leave `assess` open: after one minute the non-interrupting boundary fires, the reminder runs, and the task stays open. Change a value with an environment variable, for example `HORUS_DEMO_TIMERS_ASSESS_OVERDUE=PT10S`, or delete the key to keep the model's own duration. The override is applied only when the model is imported at start-up, and only on the `dev` profile; other profiles and the files on disk keep the real durations. A timer is at least `PT1S`.
 
 ## Walkthrough
 

@@ -1,6 +1,14 @@
 # Local development only. The demo users sign in with the host's form or HTTP Basic and carry no tenant
 # attribute, so the engines serve them for this fixed tenant. Refused outside the dev profile.
 horus:
+  demo:
+    # Short timers so a presenter sees one fire live (DemoTimerOverrides). The key is the id of the event that holds the
+    # timer; the models keep their real durations (P2D, PT2H, PT24H) outside the dev profile. Set a key to a longer
+    # duration, or delete it, to keep the model's own.
+    timers:
+      assess-overdue: PT1M   # card-dispute, the officer's reminder
+      two-hours: PT1M        # payment-review, the wait for the payment
+      cooling-off: PT1M      # sub-process-and-timer, the cooling-off wait
   bpm:
     tenancy:
       dev-tenant: bank-a
@@ -45,6 +53,7 @@ horus:
           - classpath:processes/card-welcome.bpmn
           - classpath:processes/card-delivery.bpmn
           - classpath:processes/card-dispute.bpmn
+          - classpath:processes/loan-payout.bpmn
           - classpath:processes/card-limit-check.bpmn
           - classpath:processes/fee-routing-feel.bpmn
           - classpath:processes/order-payment.bpmn

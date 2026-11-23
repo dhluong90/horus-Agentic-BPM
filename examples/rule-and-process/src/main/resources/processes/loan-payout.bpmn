@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loan payout with a live undo. The payout sub-process reserves the funds and posts the debit; each step has a
+     compensation boundary event whose activity undoes it, and the sub-process has a compensation event sub-process that
+     reverses the disbursement. The credit to the customer then runs. Start it with failCredit = false and the payout
+     completes; start it with failCredit = true and the credit step answers the business error CREDIT_REJECTED, the error
+     boundary takes it to a compensation throw, and the engine undoes the completed work newest first (the event
+     sub-process, the debit credit-back, the hold release) before the customer is told. Start it with
+     failCredit, amountMinor, currency and sourceAccount. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-payout"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:error id="Err_credit" name="Credit rejected" errorCode="CREDIT_REJECTED"/>
+  <bpmn:process id="loan-payout" name="Loan payout" isExecutable="true">
+    <bpmn:startEvent id="start" name="Payout requested"/>
+    <bpmn:subProcess id="payout" name="Reserve and debit">
+      <bpmn:startEvent id="payout-start"/>
+      <bpmn:serviceTask id="reserve" name="Reserve the funds" horus:handler="reserve-funds" horus:resultVariable="reservation">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="reserve-undo" attachedToRef="reserve" cancelActivity="false">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="release-activity" name="Release the reservation" isForCompensation="true" horus:handler="release-funds"/>
+      <bpmn:association id="reserve-undo-link" associationDirection="One" sourceRef="reserve-undo" targetRef="release-activity"/>
+      <bpmn:serviceTask id="debit" name="Debit the account" horus:handler="post-debit" horus:resultVariable="debit">
+        <bpmn:extensionElements>
+          <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+          <horus:input name="currency" value="${instance.currency}"/>
+          <horus:input name="account" value="${instance.sourceAccount}"/>
+        </bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="debit-undo" attachedToRef="debit" cancelActivity="false">
+        <bpmn:compensateEventDefinition/>
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="credit-back-activity" name="Credit the debit back" isForCompensation="true" horus:handler="post-credit-back"/>
+      <bpmn:association id="debit-undo-link" associationDirection="One" sourceRef="debit-undo" targetRef="credit-back-activity"/>
+      <bpmn:endEvent id="payout-end"/>
+      <bpmn:sequenceFlow id="p1" sourceRef="payout-start" targetRef="reserve"/>
+      <bpmn:sequenceFlow id="p2" sourceRef="reserve" targetRef="debit"/>
+      <bpmn:sequenceFlow id="p3" sourceRef="debit" targetRef="payout-end"/>
+      <bpmn:subProcess id="undo-disbursement" name="Reverse the disbursement" triggeredByEvent="true">
+        <bpmn:startEvent id="undo-start"><bpmn:compensateEventDefinition/></bpmn:startEvent>
+        <bpmn:serviceTask id="reverse-disbursement" name="Reverse the disbursement" horus:handler="reverse-disbursement"/>
+        <bpmn:endEvent id="undo-end"/>
+        <bpmn:sequenceFlow id="u1" sourceRef="undo-start" targetRef="reverse-disbursement"/>
+        <bpmn:sequenceFlow id="u2" sourceRef="reverse-disbursement" targetRef="undo-end"/>
+      </bpmn:subProcess>
+    </bpmn:subProcess>
+    <bpmn:serviceTask id="credit-customer" name="Credit the customer" horus:handler="payout.credit">
+      <bpmn:extensionElements>
+        <horus:input name="failCredit" value="${instance.failCredit}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="credit-failed" name="Credit rejected" attachedToRef="credit-customer">
+      <bpmn:errorEventDefinition errorRef="Err_credit"/>
+    </bpmn:boundaryEvent>
+    <bpmn:intermediateThrowEvent id="undo-payout" name="Undo the payout">
+      <bpmn:compensateEventDefinition/>
+    </bpmn:intermediateThrowEvent>
+    <bpmn:serviceTask id="tell-failure" name="Tell the customer it failed" horus:handler="notify-customer"/>
+    <bpmn:serviceTask id="tell-success" name="Tell the customer it was paid" horus:handler="notify-customer"/>
+    <bpmn:endEvent id="paid" name="Loan paid out"/>
+    <bpmn:endEvent id="rolled-back" name="Payout undone"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="payout"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="payout" targetRef="credit-customer"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="credit-customer" targetRef="tell-success"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="tell-success" targetRef="paid"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="credit-failed" targetRef="undo-payout"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="undo-payout" targetRef="tell-failure"/>
+    <bpmn:sequenceFlow id="f7" sourceRef="tell-failure" targetRef="rolled-back"/>
+  </bpmn:process>
+</bpmn:definitions>

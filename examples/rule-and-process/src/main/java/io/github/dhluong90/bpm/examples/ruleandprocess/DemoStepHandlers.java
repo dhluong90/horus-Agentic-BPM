@@ -132,4 +132,18 @@ class DemoStepHandlers {
             return HandlerResult.completed(of("refunded", true));
         });
     }
+
+    /**
+     * The credit step of {@code loan-payout}: a start variable {@code failCredit = true} makes it answer the business
+     * error CREDIT_REJECTED, so a presenter chooses the happy path or the undo.
+     */
+    @Bean
+    ServiceTaskHandler payoutCredit() {
+        return new Step("payout.credit", false, call -> {
+            if (Boolean.TRUE.equals(call.inputs().get("failCredit"))) {
+                return new HandlerResult.BusinessError("CREDIT_REJECTED", "The credit to the customer was rejected");
+            }
+            return HandlerResult.completed(of("credited", true));
+        });
+    }
 }

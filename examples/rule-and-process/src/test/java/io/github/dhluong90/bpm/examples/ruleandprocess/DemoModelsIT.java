@@ -27,6 +27,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -36,7 +37,8 @@ import tools.jackson.databind.json.JsonMapper;
  * added to that folder and not listed in {@code application-dev.yml} fails this test.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
-    "HORUS_DEMO_PASSWORD=it-pass", "horus.bpm.processes.definitions.max-nodes=500"})
+    "HORUS_DEMO_PASSWORD=it-pass", "horus.bpm.processes.definitions.max-nodes=500",
+    "horus.demo.timers.assess-overdue=PT2S"})
 @ActiveProfiles("dev")
 @Testcontainers
 class DemoModelsIT {
@@ -50,6 +52,9 @@ class DemoModelsIT {
     static final Map<String, Map<String, Object>> VARIABLES = Map.ofEntries(
             Map.entry("fund-transfer", Map.of("amountMinor", 2_000_000, "currency", "VND", "sourceAccount", "ACC-1",
                     "targetClosed", false)),
+            Map.entry("card-dispute", Map.of("amountMinor", 1_000_000)),
+            Map.entry("loan-payout", Map.of("failCredit", false, "amountMinor", 90_000_000, "currency", "VND",
+                    "sourceAccount", "ACC-9")),
             Map.entry("card-welcome", Map.of("monthlyFee", 20_000)),
             Map.entry("card-delivery", Map.of("monthlyFee", 20_000)),
             Map.entry("customer-onboarding", Map.of("monthlyFee", 20_000)),
@@ -164,6 +169,137 @@ class DemoModelsIT {
         assertThat(tenants("minh")).containsExactly("bank-a");
         HttpResponse<String> meta = get("lan", "/api/bpm/meta");
         assertThat(meta.body()).contains("\"authoring.cockpit-drafts\":true");
+    }
+
+    @Test
+    void a_dispute_refund_above_the_limit_raises_the_error_and_goes_to_the_senior_approval() throws Exception {
+        // When the officer finishes the assessment of a 6,000,000 VND refund, above the 5,000,000 limit
+        String id = start("hoa", "card-dispute", "DISPUTE-BIG", Map.of("amountMinor", 6_000_000));
+        completeTask("an", id, "assess");
+
+        // Then REFUND_LIMIT_EXCEEDED is caught by the error boundary: no incident, a senior approval task is open
+        JsonNode instance = JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + id).body());
+        assertThat(instance.get("status").stringValue()).as(instance.toString()).isEqualTo("RUNNING");
+        assertThat(openTasks(instance)).containsExactly("senior-approval");
+
+        // And a 1,000,000 VND refund posts and ends with the customer notification
+        String small = start("hoa", "card-dispute", "DISPUTE-SMALL", Map.of("amountMinor", 1_000_000));
+        completeTask("an", small, "assess");
+        JsonNode done = JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + small).body());
+        assertThat(done.get("status").stringValue()).as(done.toString()).isEqualTo("COMPLETED");
+    }
+
+    @Test
+    void a_failed_credit_runs_the_compensation_boundaries_and_event_subprocess_and_a_good_one_runs_none() throws Exception {
+        Map<String, Object> payout = new LinkedHashMap<>(
+                Map.of("amountMinor", 90_000_000, "currency", "VND", "sourceAccount", "ACC-9"));
+
+        // When the credit step succeeds, the payout completes and nothing is undone
+        payout.put("failCredit", false);
+        String paid = start("hoa", "loan-payout", "PAYOUT-OK", payout);
+        String paidActivities = get("hoa", "/api/bpm/processes/v1/instances/" + paid + "/activities").body();
+        assertThat(JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + paid).body()).get("status")
+                .stringValue()).isEqualTo("COMPLETED");
+        assertThat(paidActivities).contains("tell-success").doesNotContain("COMPENSATION_", "tell-failure");
+
+        // When the credit step answers CREDIT_REJECTED
+        payout.put("failCredit", true);
+        String undone = start("hoa", "loan-payout", "PAYOUT-FAIL", payout);
+
+        // Then the instance completes on the undone end, after the event sub-process, the debit credit-back and the
+        // hold release ran, and the customer was told it failed
+        JsonNode instance = awaitStatus(undone, "COMPLETED");
+        assertThat(instance.get("status").stringValue()).as(instance.toString()).isEqualTo("COMPLETED");
+        String activities = get("hoa", "/api/bpm/processes/v1/instances/" + undone + "/activities").body();
+        List<String> undos = new ArrayList<>();
+        for (JsonNode entry : JSON.readTree(activities).get("entries")) {
+            if ("COMPENSATION_STEP_COMPLETED".equals(entry.get("type").stringValue())) {
+                undos.add(entry.get("nodeId").stringValue());
+            }
+        }
+        assertThat(undos).as("newest first: the event sub-process of the payout, the debit, then the hold")
+                .containsExactly("payout", "debit", "reserve");
+        assertThat(activities).contains("COMPENSATED", "tell-failure").doesNotContain("tell-success");
+    }
+
+    @Test
+    void a_demo_timer_set_short_in_the_dev_profile_fires_on_its_own() throws Exception {
+        // When a dispute is assessed by nobody for longer than the shortened timer (PT2S here, PT1M by default)
+        String id = start("hoa", "card-dispute", "DISPUTE-TIMER", Map.of("amountMinor", 1_000_000));
+
+        // Then the non-interrupting boundary fires: the reminder runs while the assessment task stays open
+        String activities = "";
+        for (int i = 0; i < 60 && !activities.contains("remind-officer"); i++) {
+            Thread.sleep(1_000);
+            activities = get("hoa", "/api/bpm/processes/v1/instances/" + id + "/activities").body();
+        }
+        assertThat(activities).as("the reminder step ran after the timer").contains("remind-officer");
+        JsonNode instance = JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + id).body());
+        assertThat(openTasks(instance)).containsExactly("assess");
+    }
+
+    @Test
+    void the_shipped_model_keeps_its_real_timer_durations() throws Exception {
+        assertThat(Files.readString(MODELS.resolve("card-dispute.bpmn"))).contains("<bpmn:timeDuration>P2D<");
+        assertThat(Files.readString(MODELS.resolve("payment-review.bpmn"))).contains("<bpmn:timeDuration>PT2H<");
+    }
+
+    private String start(String user, String key, String businessKey, Map<String, Object> variables) throws Exception {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("definitionKey", key);
+        body.put("businessKey", businessKey);
+        body.put("variables", variables);
+        HttpResponse<String> started = send(user, "POST", "/api/bpm/processes/v1/instances", JSON.writeValueAsString(body));
+        assertThat(started.statusCode()).as(started.body()).isEqualTo(201);
+        return JSON.readTree(started.body()).get("id").stringValue();
+    }
+
+    /** The user claims the open task on the node and completes it (both calls carry If-Match and an Idempotency-Key). */
+    private void completeTask(String user, String instanceId, String nodeId) throws Exception {
+        JsonNode instance = JSON.readTree(get(user, "/api/bpm/processes/v1/instances/" + instanceId).body());
+        JsonNode task = null;
+        for (JsonNode t : instance.get("tasks")) {
+            if (nodeId.equals(t.get("nodeId").stringValue()) && "OPEN".equals(t.get("status").stringValue())) {
+                task = t;
+            }
+        }
+        assertThat(task).as("an open task on " + nodeId + " in " + instance).isNotNull();
+        String path = "/api/bpm/processes/v1/tasks/" + task.get("id").stringValue();
+        int lock = task.get("lockVersion").intValue();
+        HttpResponse<String> claim = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path + ":claim"))
+                .header("Authorization", basic(user)).header("If-Match", "\"" + lock + "\"")
+                .header("Idempotency-Key", "claim-" + instanceId).POST(HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(claim.statusCode()).as(claim.body()).isEqualTo(200);
+        HttpResponse<String> complete = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path + ":complete"))
+                .header("Authorization", basic(user)).header("Content-Type", "application/json")
+                .header("If-Match", "\"" + (lock + 1) + "\"").header("Idempotency-Key", "complete-" + instanceId)
+                .POST(HttpRequest.BodyPublishers.ofString("{\"result\":{\"upheld\":true}}")).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertThat(complete.statusCode()).as(complete.body()).isEqualTo(200);
+    }
+
+    /** The undo runs on the engine's adapter threads, so the instance is COMPENSATING for a moment. */
+    private JsonNode awaitStatus(String id, String status) throws Exception {
+        JsonNode instance = null;
+        for (int i = 0; i < 60; i++) {
+            instance = JSON.readTree(get("hoa", "/api/bpm/processes/v1/instances/" + id).body());
+            if (status.equals(instance.get("status").stringValue())) {
+                break;
+            }
+            Thread.sleep(500);
+        }
+        return instance;
+    }
+
+    private static List<String> openTasks(JsonNode instance) {
+        List<String> open = new ArrayList<>();
+        for (JsonNode t : instance.get("tasks")) {
+            if ("OPEN".equals(t.get("status").stringValue()) || "CLAIMED".equals(t.get("status").stringValue())) {
+                open.add(t.get("nodeId").stringValue());
+            }
+        }
+        return open;
     }
 
     private List<String> permissions(String user) throws Exception {
