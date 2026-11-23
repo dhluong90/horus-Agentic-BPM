@@ -25,7 +25,7 @@ import java.util.Map;
  * through the outgoing flows (those whose condition holds, else the default flow, as at any split). A gateway without
  * an activation condition fires when every incoming flow has delivered, like a parallel join. Once fired, the tokens
  * that arrive later are absorbed, and when every incoming flow has delivered its token the gateway resets for the next
- * round. All of it runs under the instance row lock, so two branches arriving together are applied one after the other.
+ * round; the absorbed token ends through the context, so a scope whose other branches already ended completes then. All of it runs under the instance row lock, so two branches arriving together are applied one after the other.
  */
 final class ComplexGatewayBehavior implements FlowNodeBehavior<ComplexGateway> {
 
@@ -91,7 +91,7 @@ final class ComplexGatewayBehavior implements FlowNodeBehavior<ComplexGateway> {
         ctx.update(joined);
         if (alreadyFired) {
             ctx.history("TOKEN_ABSORBED", joined, Map.of("arrived", arrived, "expected", expected));
-            reset(ctx, held, joined, arrived, expected);
+            reset(ctx, held, joined, arrived, expected, true);
             return;
         }
         ctx.history("TOKEN_JOINED", joined, Map.of("arrived", arrived, "expected", expected));
@@ -120,20 +120,27 @@ final class ComplexGatewayBehavior implements FlowNodeBehavior<ComplexGateway> {
                 null, marked);
         ctx.update(fired);
         ctx.history("COMPLEX_FIRED", fired, Map.of("arrived", arrived, "expected", expected));
-        reset(ctx, held, fired, arrived, expected);
+        reset(ctx, held, fired, arrived, expected, false);
         Token out = ctx.createToken(TokenKind.FLOW, node.id(), token.scopeTokenId());
         ctx.history("NODE_COMPLETED", out, Map.of());
         ctx.takeOutgoing(out, node);
     }
 
     /** When every incoming flow has delivered, the round is over: the held tokens end and the gateway starts again. */
-    private static void reset(ExecutionContext ctx, List<Token> held, Token last, int arrived, int expected) {
+    private static void reset(ExecutionContext ctx, List<Token> held, Token last, int arrived, int expected,
+            boolean settleScope) {
         if (arrived < expected) {
             return;
         }
         for (Token t : held) {
             ctx.update(t.withStatus(TokenStatus.COMPLETED));
         }
-        ctx.update(last.withStatus(TokenStatus.COMPLETED));
+        if (settleScope) {
+            // The absorbed token is the last live one when the branch that fired has already ended: complete it
+            // through the context so the enclosing scope is asked whether it has any work left.
+            ctx.complete(last);
+        } else {
+            ctx.update(last.withStatus(TokenStatus.COMPLETED));
+        }
     }
 }
