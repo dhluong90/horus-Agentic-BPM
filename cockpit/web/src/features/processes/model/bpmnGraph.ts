@@ -76,8 +76,6 @@ export interface DiagramNode {
   name: string | undefined;
   /** The BPMN element type with the HORUS subtype, for example `serviceTask:agentTask` or `boundaryEvent:timer`. */
   type: string;
-  /** The variable a script task stores its result in, shown beside the step in the timeline. */
-  resultVariable?: string;
   /** The id of the sub-process or saga block this step stands in; absent for a step of the process itself (#486). */
   parentId?: string;
   /** For a boundary event (#489): the id of the task, call activity or sub-process it sits on. */
@@ -237,13 +235,11 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
     const attachedTo = boundary ? nonEmpty(child.getAttribute('attachedToRef')) : undefined;
     const link = child.localName.startsWith('intermediate') ? linkNameOf(child) : undefined;
     const byEvent = child.localName === 'subProcess' && child.getAttribute('triggeredByEvent') === 'true' ? triggerOf(child) : undefined;
-    const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
     const loop = loopKind(child);
     nodes.push({
       id,
       name: nonEmpty(child.getAttribute('name')),
       type: nodeType(child),
-      ...(resultVariable !== undefined ? { resultVariable } : {}),
       ...(loop !== undefined ? { loop } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
       ...(attachedTo !== undefined ? { attachedTo, interrupting: child.getAttribute('cancelActivity') !== 'false' } : {}),

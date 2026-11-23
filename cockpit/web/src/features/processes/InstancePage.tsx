@@ -472,7 +472,6 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
   useWantNames({ users: peopleOf(activities.entries.map((entry) => entry.actor)) });
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
   const stepName = (id: string) => names.get(id) ?? wordsOf(id);
-  const results = new Map(graph.nodes.flatMap((node) => (node.resultVariable !== undefined ? [[node.id, node.resultVariable] as const] : [])));
   // A step inside a sub-process names the sub-processes around it, outermost first, so the timeline nests its steps (#486).
   const trail = (id: string | null): string[] => (id === null ? [] : ancestorsOf(graph, id).map((node) => node.name ?? node.id));
   const scopes = activities.compensations ?? [];
@@ -509,8 +508,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                   <td className={trail(entry.nodeId).length > 0 ? 'timeline__step timeline__step--nested' : 'timeline__step'} data-depth={trail(entry.nodeId).length}>
                     {trail(entry.nodeId).length > 0 ? <span className="muted timeline__trail">{trail(entry.nodeId).join(' › ')} › </span> : null}
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
-                    {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
-                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
+                    {entry.type === 'NODE_COMPLETED' && entry.resultVariable !== undefined
+                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: entry.resultVariable })}</span> : null}
                     {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
                     {entry.type === 'EVENT_SUBPROCESS_STARTED' ? <TriggerDetail node={graph.nodes.find((node) => node.id === entry.nodeId)} /> : null}

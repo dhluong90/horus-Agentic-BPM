@@ -145,11 +145,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      *     escalation), the {@code name} of the message, signal or code, the condition text, and whether it interrupted;
      *     for {@code EVENT_GATEWAY_RESOLVED} the {@code gateway}, the {@code winner} and the {@code cancelled} catches
      *     (#490, #495); never a variable value; null otherwise
+     * @param resultVariable for the {@code NODE_COMPLETED} of a script step, the variable it set, as recorded when it
+     *     ran (#518); null otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
             String handler, String cause, Integer waiters, java.util.Map<String, String> message, Instances instances,
-            Routing routing, java.util.Map<String, Object> event) {
+            Routing routing, java.util.Map<String, Object> event, String resultVariable) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -166,7 +168,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
                 String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
                 String errorCode, String handler, String cause, Integer waiters, java.util.Map<String, String> message) {
             this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
-                    errorCode, handler, cause, waiters, message, null, null, null);
+                    errorCode, handler, cause, waiters, message, null, null, null, null);
         }
 
         /** An entry with no count of woken waiters, no message part and no loop counters and no routing. */
@@ -174,7 +176,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
                 String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
                 String errorCode, String handler, String cause) {
             this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
-                    errorCode, handler, cause, null, null, null, null, null);
+                    errorCode, handler, cause, null, null, null, null, null, null);
         }
 
         /**
@@ -188,7 +190,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
             this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null, null, null,
-                    null);
+                    null, null);
         }
 
         /**
@@ -203,19 +205,19 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public static Entry signalThrown(String id, String nodeId, String actor, Instant occurredAt, Integer waiters) {
             return new Entry(id, "SIGNAL_THROWN", nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null,
-                    null, null, null, waiters, null, null, null, null);
+                    null, null, null, waiters, null, null, null, null, null);
         }
 
         /** @return the same entry with the routing of a gateway or join */
         public Entry withRouting(Routing newRouting) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting, event);
+                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting, event, resultVariable);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing, event);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable);
         }
 
         /**
@@ -226,7 +228,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable);
         }
 
         /**
@@ -235,7 +237,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withInstances(Instances counters) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, counters, routing, event);
+                    attempt, errorCode, handler, cause, waiters, message, counters, routing, event, resultVariable);
         }
 
         /**
@@ -246,7 +248,18 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withEvent(java.util.Map<String, Object> newEvent) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, newEvent);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, newEvent, resultVariable);
+        }
+
+        /**
+         * The same entry carrying the result variable a script step recorded.
+         *
+         * @param variable the variable name
+         * @return the entry with {@code resultVariable} set
+         */
+        public Entry withResultVariable(String variable) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, variable);
         }
 
         /** @return true for the history types the undo of a saga writes */

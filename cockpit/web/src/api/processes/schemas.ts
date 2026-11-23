@@ -348,6 +348,8 @@ export const activityEntry = z
       winner: z.string().optional(),
       cancelled: z.array(z.string()).optional(),
     }).loose().optional(),
+    /** The `NODE_COMPLETED` of a script step: the variable it set, as recorded when it ran (#518). */
+    resultVariable: z.string().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

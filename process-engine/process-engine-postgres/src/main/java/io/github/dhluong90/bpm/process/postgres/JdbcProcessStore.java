@@ -144,6 +144,13 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                             : reason.toString(), waiting));
                 }
             }
+            // A script step records the variable it set (#518), so the timeline never reads it from the diagram.
+            if ("NODE_COMPLETED".equals(type)) {
+                Object variable = Values.readMap(rs.getString("details")).get("resultVariable");
+                if (variable instanceof String name && !name.isBlank()) {
+                    return plain.withResultVariable(name);
+                }
+            }
             return plain;
         }
         Map<String, Object> details = Values.readMap(rs.getString("details"));

@@ -660,6 +660,7 @@ public class ProcessController {
                     }
                 });
             }
+            putIfPresent(item, "resultVariable", entry.resultVariable());
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {
