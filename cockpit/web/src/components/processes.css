@@ -137,7 +137,9 @@
 
 .pdiff { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--gap); align-items: stretch; }
 .dg__frame--fill { max-height: none; display: flex; }
-.dg__frame--fill .dg__svg { margin: auto; flex: none; }
+.dg__frame--fill { justify-content: safe center; align-items: safe center; }
+/* Centred only while it fits: a drawing wider than the canvas starts at its left edge and pans, never cropped there. */
+.dg__frame--fill .dg__svg { margin: 0; flex: none; }
 .pdiff--first { display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 1180px) { .pdiff { grid-template-columns: minmax(0, 1fr); } }
 .pdiff__main { min-width: 0; }
