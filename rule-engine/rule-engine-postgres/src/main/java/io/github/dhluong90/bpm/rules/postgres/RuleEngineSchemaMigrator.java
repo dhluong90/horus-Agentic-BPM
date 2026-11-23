@@ -7,6 +7,7 @@ import java.util.Optional;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.exception.FlywayValidateException;
 import org.flywaydb.core.api.MigrationInfoService;
 import org.flywaydb.core.api.output.MigrateResult;
 
@@ -19,7 +20,9 @@ import org.flywaydb.core.api.output.MigrateResult;
  * The engine opens no connection pool of its own (TR-EMB-04).
  *
  * <p>The baseline version is {@code 0}: on a schema that already holds host tables, Flyway records a
- * baseline below {@code V1} and still applies every engine migration.
+ * baseline below {@code V1} and still applies every engine migration. The engine schema is one {@code V1__baseline}
+ * until the 1.0 release; a database made by an earlier build fails validation and is refused with a request to
+ * reset it.
  */
 public final class RuleEngineSchemaMigrator {
 
@@ -46,7 +49,14 @@ public final class RuleEngineSchemaMigrator {
      */
     public SchemaMigrationResult migrate() {
         Flyway flyway = flyway();
-        MigrateResult result = flyway.migrate();
+        MigrateResult result;
+        try {
+            result = flyway.migrate();
+        } catch (FlywayValidateException e) {
+            throw new IllegalStateException("The rle_* tables were made by a build before the 1.0 schema baseline and "
+                    + "cannot be upgraded: drop the schema and start again (a database with real data needs a dump "
+                    + "and reload). Nothing was changed. " + e.getMessage().lines().findFirst().orElse(""), e);
+        }
         return new SchemaMigrationResult(
                 result.initialSchemaVersion,
                 currentVersionOf(flyway).orElse(null),
@@ -85,7 +95,7 @@ public final class RuleEngineSchemaMigrator {
 
     /**
      * The migration lock is a session advisory lock, not a transactional one. A migration that runs outside a
-     * transaction ({@code CREATE INDEX CONCURRENTLY}, TR-OPS-02, V20) waits for every open transaction to end, so with
+     * transaction ({@code CREATE INDEX CONCURRENTLY}, TR-OPS-02) waits for every open transaction to end, so with
      * a transactional lock it would wait on Flyway's own lock transaction until {@code lock_timeout}. Concurrent
      * migrators are still serialised by the session lock.
      */

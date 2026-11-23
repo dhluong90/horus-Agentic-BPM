@@ -94,7 +94,7 @@ final class RuleListQueries {
 
     /**
      * The first page of the versions waiting for a second person, oldest request first, of every rule set of one
-     * tenant (#31, RLE-190), on {@code idx_rle_version_pending (tenant_id, requested_at, id)} (V30); keyset on
+     * tenant (#31, RLE-190), on {@code idx_rle_version_pending (tenant_id, requested_at, id)}; keyset on
      * {@code (requested_at, id)}, never {@code OFFSET}. The definition and source are not read.
      */
     static final ListQuery PENDING_APPROVALS = pendingApprovals(false);
@@ -158,11 +158,11 @@ final class RuleListQueries {
                     """);
 
     /**
-     * A rule set's own history rows, newest first, through {@code idx_rle_version_history_rule_set} (V24): tenant and
+     * A rule set's own history rows, newest first, through {@code idx_rle_version_history_rule_set}: tenant and
      * rule set lead, the index holds rule set rows only and is ordered as the query.
      */
     static final ListQuery RULE_SET_EVENTS = new ListQuery("rule-set-events",
-            new Bound.Page("newest first on idx_rle_version_history_rule_set (V24)"),
+            new Bound.Page("newest first on idx_rle_version_history_rule_set"),
             """
                     SELECT tenant_id, id, rule_set_id, action, actor, occurred_at, evidence::text AS evidence
                     FROM rle_version_history

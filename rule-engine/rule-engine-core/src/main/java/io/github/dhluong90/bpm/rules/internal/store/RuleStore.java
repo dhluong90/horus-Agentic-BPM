@@ -233,7 +233,7 @@ public interface RuleStore {
     List<HistoryRow> historyOf(String tenantId, java.util.Collection<String> versionIds, int perVersionLimit);
 
     /**
-     * Appends one rule set event to the history (migration V24).
+     * Appends one rule set event to the history.
      *
      * @param row the row
      */

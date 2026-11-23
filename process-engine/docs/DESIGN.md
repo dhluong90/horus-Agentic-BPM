@@ -503,7 +503,7 @@ A signal is broadcast within one tenant: the tenant is read from the authenticat
 
 A conditional catch needs no row: its token waits in `WAITING_EVENT`, and the kernel asks it again at the end of every command that changed the instance's variables, repeating while a token fires, within the step budget. A condition that cannot be evaluated then is false and never fails the command. A process-level conditional start is evaluated once against the start variables.
 
-DDL: `V46__pre_signal` (`pre_signal`, `pre_event_subscription`, job kind `SIGNAL_DELIVERY`).
+DDL: baseline schema (`pre_signal`, `pre_event_subscription`, job kind `SIGNAL_DELIVERY`).
 
 ### 4.3b Message, signal and conditional boundaries and the event-based gateway (#490, #495, `PRE-290` to `PRE-295`)
 
@@ -1353,7 +1353,7 @@ CREATE TABLE pre_engine_key (
   created_at  TIMESTAMPTZ NOT NULL
 );
 
--- 0.3.0 (#74, V23 to V25): migration plans. A plan moves nothing; the dry run only reads. Execution states follow.
+-- 0.3.0 (#74): migration plans. A plan moves nothing; the dry run only reads. Execution states follow.
 CREATE TABLE pre_migration (
   tenant_id            TEXT        NOT NULL,
   id                   VARCHAR(26) NOT NULL,

@@ -13,7 +13,7 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * {@code rle_simulation_report} (V31) and {@code rle_simulation_report_attachment} (V32): reports written once, and the
+ * {@code rle_simulation_report} and {@code rle_simulation_report_attachment}: reports written once, and the
  * report a publication request carries. Both tables are append-only in the database. Every statement names its tenant
  * (TR-TEN-01); a report is found by tenant, rule set, version and id together, so another tenant's, rule set's or
  * version's report is simply not there.

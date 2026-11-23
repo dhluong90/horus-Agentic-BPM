@@ -4,7 +4,7 @@ import io.github.dhluong90.bpm.rules.api.RuleSetHistory;
 import java.time.Instant;
 
 /**
- * A row of {@code rle_version_history} that belongs to the rule set rather than to one version (migration V24): no
+ * A row of {@code rle_version_history} that belongs to the rule set rather than to one version: no
  * version id, statuses or lock version, and the evidence of an export.
  *
  * @param tenantId the tenant

@@ -170,6 +170,7 @@ rm decision.json
 | `400 CONTENT_HASH_REQUIRED` | `expectedCanonicalHash` is missing | Read `$HASH` first, as in step 5 |
 | `404 NO_EFFECTIVE_VERSION` in step 6 | Step 5 did not finish | Check `curl -s -u minh:demo-only $H/rule-sets/card-fee/versions/1` shows `PUBLISHED` |
 | Cockpit shows 404 or a blank page | The cockpit bundle was not built before the jar | Repeat the build in step 3 |
+| The host stops with "drop the schema and start again" | The database was made by a build before the 1.0 schema baseline (#479); no upgrade is supported before 1.0 | Reset it: `docker exec horus-pg psql -U horus -d horus -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public'`, then start the host again (a database with real data needs a dump and reload) |
 | The cockpit says you cannot read decisions | The host started without the last property of step 3 | Restart with it |
 
 More errors are in [[Common Error Codes]].

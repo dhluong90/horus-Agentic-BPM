@@ -164,32 +164,6 @@ class EditorApiQaPostgresIT {
         assertThat(versions.findRuleSet("card-fee")).isEmpty();
     }
 
-    /** A version that existed before V3 still answers GET .../history with its creation (DESIGN 3.3.3). */
-    @Test
-    void RLE_025_a_version_created_before_the_history_table_has_its_created_row() {
-        // Given a database at V2 holding card-fee v1
-        DataSource old = freshDatabase();
-        org.flywaydb.core.Flyway.configure().dataSource(old).table("rle_schema_history")
-                .locations(RuleEngineSchemaMigrator.MIGRATION_LOCATION).baselineOnMigrate(true).baselineVersion("0")
-                .target("2").load().migrate();
-        JdbcClient v2 = JdbcClient.create(old);
-        v2.sql("INSERT INTO rle_rule_set (tenant_id, id, name, created_at) VALUES "
-                + "('bank-a', '01KD00000000000000000RS001', 'card-fee', '2026-11-01T00:00:00Z')").update();
-        v2.sql("""
-                INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, canonical_json,
-                  canonical_hash, source_format, source_document, source_hash, lock_version, created_by, created_at)
-                VALUES ('bank-a', '01KD00000000000000000VS001', '01KD00000000000000000RS001', 1, 'DRAFT', 'FIRST',
-                  '{}', :h, 'YAML', '', :h, 0, 'lan', '2026-11-01T00:00:00Z')
-                """).param("h", "0".repeat(64)).update();
-
-        // When V3 runs
-        new RuleEngineSchemaMigrator(old).migrate();
-
-        // Then the version's history is not empty
-        assertThat(v2.sql("SELECT count(*) FROM rle_version_history WHERE tenant_id = 'bank-a'")
-                .query(Long.class).single()).isEqualTo(1L);
-    }
-
     void imported(String name) {
         caller.as("bank-a", "lan");
         versions.importRuleSet(ImportRequest.yaml(EditorApiPostgresIT.renamed(name, null)));

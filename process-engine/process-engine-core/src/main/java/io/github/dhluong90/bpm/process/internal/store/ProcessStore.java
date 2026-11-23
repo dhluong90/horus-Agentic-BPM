@@ -177,7 +177,7 @@ public interface ProcessStore {
     }
 
     /**
-     * One undo on the compensation stack of a scope token (#67, V31).
+     * One undo on the compensation stack of a scope token (#67).
      *
      * @param seq push order within the scope token, from 1
      * @param instanceSeq push order within the instance, from 1, assigned by the store: a compensation of an enclosing
@@ -436,7 +436,7 @@ public interface ProcessStore {
 
     Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey);
 
-    // ---- called child processes (#92, V42, V43) ------------------------------------------------------------------
+    // ---- called child processes (#92) ------------------------------------------------------------------
 
     /**
      * The link of a called child to the parent token it was started for.

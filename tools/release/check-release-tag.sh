@@ -12,6 +12,8 @@
 #          2. The root and every module of the reactor (effective POM) are at exactly X.Y.Z, never a
 #             -SNAPSHOT, and under the group id io.github.dhluong90.bpm.
 #          3. The commit (HEAD) is on main: an ancestor of refs/remotes/origin/main.
+#          4. BASELINE_OPEN in tools/check-migration-order.py is False: until 1.0 the V1 baseline of each
+#             engine may be edited in place (#479); the release commit closes it.
 #          Every check runs and reports before the guard refuses, so one run names every problem.
 # Exit:    0 when every check passed, 1 when any failed, 2 on a usage error.
 
@@ -70,6 +72,14 @@ elif git merge-base --is-ancestor HEAD "$MAIN_REF"; then
 else
   echo "ERROR: tag $tag points at commit $(git rev-parse --short HEAD), which is not on main."
   ok=false
+fi
+
+# 4: the migration baseline is closed.
+if grep -Eq '^BASELINE_OPEN *= *True' "$ROOT/tools/check-migration-order.py"; then
+  echo "ERROR: tag $tag: BASELINE_OPEN is still True in tools/check-migration-order.py, so a V1 baseline can still be edited in place; set it to False in the release commit."
+  ok=false
+else
+  echo "Tag $tag: the migration baseline is closed (BASELINE_OPEN is False)."
 fi
 
 if [[ "$ok" != true ]]; then

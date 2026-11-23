@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * A tenant's {@code PUBLISHED} versions whose latest {@code APPROVED} history row lists inputs masked only by the
- * tenant's {@code decision-log.mask-default} (V15, PD-104), read at start-up when that default is turned off.
+ * tenant's {@code decision-log.mask-default}, read at start-up when that default is turned off.
  *
  * @param versions the first versions, by rule set name and version number
  * @param total how many versions match in all

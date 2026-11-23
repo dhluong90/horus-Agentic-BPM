@@ -31,7 +31,7 @@ import java.util.List;
  *     rather than by their declaration at approval (PD-104), else empty
  * @param copiedFrom on the {@code CREATED} row of a restore, the earlier version it copied (RLE-062); otherwise null
  * @param retireRequestedBy on a {@code RETIRED} row in {@code four-eyes} mode, who requested the retirement the actor
- *     confirmed (RLE-038, column {@code retire_requested_by}, V18); otherwise null
+ *     confirmed (RLE-038, column {@code retire_requested_by}); otherwise null
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
