@@ -66,7 +66,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage() {
-        // Given loan.bpmn with a compensation boundary event (42), inclusive gateway (57), send task (63)
+        // Given loan.bpmn with a data object (57), event-based gateway with instantiate (63)
         // and an XPath condition (88), and camunda:class on a service task (30)
         byte[] file = bytes("loan.bpmn");
 
@@ -74,11 +74,10 @@ class SubsetBpmnRefusalTest {
             assertThat(e.code()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
             assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
-                    tuple("boundaryEvent with compensateEventDefinition", "be-timeout", 42, "S2"),
                     tuple("dataObject", "do-1", 57, "S1"),
                     tuple("eventBasedGateway with instantiate", "notify", 63, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
-            assertThat(e.problems().get(3).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
+            assertThat(e.problems().get(2).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
             assertThat(e.truncated()).isFalse();
         });
     }
@@ -190,12 +189,12 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:inclusiveGateway id=\"sc\"/><bpmn:choreographyTask id=\"ch\"/>"
+                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:choreographyTask id=\"ch\"/>"
                 + "<bpmn:eventBasedGateway id=\"eg\" instantiate=\"true\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {
             assertThat(e.problems()).extracting(DefinitionProblem::stage)
-                    .containsExactly("S0", "S1", "not planned", "S3");
+                    .containsExactly("S0", "not planned", "S3");
             assertThat(e.problems()).extracting(DefinitionProblem::message)
                     .allSatisfy(m -> assertThat(m).doesNotContainIgnoringCase("sprint").doesNotContain("next")
                             .doesNotContain("later").doesNotContainPattern("20\\d\\d"));
