@@ -1621,3 +1621,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The same list is `304` with the `ETag` and no body. Every change in an item, in the page or cursor, or in the caller's own view (`allowedActions`) gives another tag, so the old tag gets `200` and the new body. The tag is computed from the body the caller's own tenant and permissions produced, after the tenant and permission checks: a `bank-b` caller's list differs, so `bank-a`'s tag never matches it, a refused caller gets `403` and never `304`, and the tag says nothing about another tenant's tasks or incidents. `*` and weak (`W/`) tags match as for the instance activities read.
 - **Example:** `GET /tasks -> ETag "9f2c..."; again with If-None-Match "9f2c..." -> 304; after a claim -> 200 with a new tag`.
 - **Test ID:** `PRE_218_the_task_list_has_an_etag_that_follows_its_page_and_content_and_never_crosses_callers` (`ProcessRestErrorMatrixTest`), `PRE_218_the_incident_list_has_an_etag_that_follows_its_content_and_the_callers_actions` (`IncidentRestContractTest`)
+
+### PRE-250 A script task stores the value of its expression in its result variable
+- **Traces to:** `TR-STD-04`, `TR-SEC-01`, #485
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `card-fee-review` with a `scriptTask` `double-fee` whose script is `amount * 2` in `urn:horus-bpm:expr:v1` and `horus:resultVariable="result"`; an instance started with `amount = 1500000`.
+- **When:** The token reaches `double-fee`.
+- **Then:** In the same transaction `result` holds `3000000`, `amount` is unchanged, `NODE_COMPLETED` is written for `double-fee` with `by: engine` and `resultVariable: result`, and the token takes the outgoing flow. The script reads the variables visible to the token and sets that one variable. Money, dates and instants are stored as text.
+- **Example:** `amount 1500000, script "amount * 2" -> result 3000000`.
+- **Test ID:** `PRE_250_a_script_task_stores_its_value_in_the_result_variable_and_the_timeline_names_it`, `PRE_250_task_manual_task_and_script_task_import_and_export_to_the_same_definition` (`TaskElementsImportTest`)
+
+### PRE-251 A plain task and a manual task pass the token on and the history records them
+- **Traces to:** `TR-STD-04`, #485
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `card-fee-review` with a `task` `note` and a `manualTask` `post-letter` between start and end.
+- **When:** An instance starts.
+- **Then:** The token moves through both at once, the instance completes, and each writes `NODE_COMPLETED` with `by: engine`. The engine creates no task for a manual task: the work it names is done outside the engine.
+- **Example:** `start -> note -> post-letter -> end, all in the start transaction`.
+- **Test ID:** `PRE_251_a_manual_task_and_a_plain_task_pass_through_and_the_timeline_records_them`
+
+### PRE-252 A script that is not valid, or in another language, is refused at import with its line
+- **Traces to:** `TR-STD-04`, `PRE-033`, #485
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A `scriptTask` whose script `amount *` is on line 5; a `scriptTask` with no script or no `horus:resultVariable`; a `scriptTask` with `scriptFormat` FEEL, and one with `javascript`.
+- **When:** Each file is imported.
+- **Then:** The first is `422 VALIDATION_FAILED` with problem `SCRIPT_INVALID`, the element id and line 5. The second lists `SCRIPT_MISSING` and `RESULT_VARIABLE_REQUIRED`. FEEL is `422 BPMN_SCRIPT_FORMAT_UNSUPPORTED` with stage `S1`, and `javascript` the same code with stage `not planned`. Nothing is stored.
+- **Example:** `scriptFormat javascript -> BPMN_SCRIPT_FORMAT_UNSUPPORTED, not planned`.
+- **Test ID:** `PRE_252_a_script_that_is_not_valid_is_refused_with_the_line_of_the_script`, `PRE_252_a_script_task_needs_a_script_and_a_result_variable`, `PRE_252_a_script_in_another_language_is_refused_with_its_stage`
+
+### PRE-253 A script cannot leave its sandbox: expressions only, at most 1,000 characters and 500 steps
+- **Traces to:** `TR-SEC-01`, `TR-STD-04`, #485
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `scriptTask` bodies `java.lang.Runtime.getRuntime().exec('rm -rf /')`, `System.exit(0)`, `amount.getClass().getName()`, `load('file:///etc/passwd')`, `while (true) {}` and `amount = 0; amount`; a body of about 540 expression nodes; a body of 1,200 characters; and the body `amount >= 1000 and amount < 10000` with `amount = 5000`.
+- **When:** Each definition is compiled, and the instances start.
+- **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
+- **Example:** `System.exit(0) -> refused at activation`.
+- **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`

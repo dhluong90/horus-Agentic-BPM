@@ -13,6 +13,12 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <path d="M8 1.5l1.6 4.9 4.9 1.6-4.9 1.6L8 14.5l-1.6-4.9L1.5 8l4.9-1.6z" {...common} />;
       case 'businessRuleTask':
         return <><rect x="1.5" y="2.5" width="13" height="11" rx="1.5" {...common} /><path d="M1.5 6h13M6 6v7.5" {...common} /></>;
+      case 'task':
+        return <rect x="1.5" y="3.5" width="13" height="9" rx="2" {...common} />;
+      case 'manualTask':
+        return <path d="M4 14V7.5a1 1 0 012 0V4.5a1 1 0 012 0v-.5a1 1 0 012 0v.5a1 1 0 012 0V10c0 2.5-1.5 4-4 4z" {...common} />;
+      case 'scriptTask':
+        return <><path d="M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2.5" {...common} /></>;
       case 'callActivity':
         return <><rect x="1.5" y="2.5" width="13" height="11" rx="2" {...common} /><path d="M8 5.5v5M5.5 8h5" {...common} /></>;
       case 'transaction':
