@@ -409,9 +409,9 @@ class EventBoundariesAndGatewayTest {
     }
 
     @Test
-    void PRE_295_an_instantiating_event_based_gateway_is_refused_with_its_stage() {
+    void PRE_295_a_parallel_event_based_gateway_is_refused_with_its_stage() {
         String instantiating = PAYMENT_WAIT.replace("<bpmn:eventBasedGateway id=\"gw\"/>",
-                "<bpmn:eventBasedGateway id=\"gw\" instantiate=\"true\"/>");
+                "<bpmn:eventBasedGateway id=\"gw\" eventGatewayType=\"Parallel\"/>");
 
         assertThatThrownBy(() -> read(instantiating)).isInstanceOf(BpmnUnsupportedElementException.class)
                 .hasMessageContaining("S3");

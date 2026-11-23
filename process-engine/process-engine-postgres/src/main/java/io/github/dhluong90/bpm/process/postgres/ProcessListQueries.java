@@ -70,7 +70,10 @@ final class ProcessListQueries {
                     // PD-149: a multiple start event lists its signals under events.
                     + "OR definition_json @> jsonb_build_object('steps', jsonb_build_array("
                     + "jsonb_build_object('type', 'start', 'events', jsonb_build_array("
-                    + "jsonb_build_object('signal', ?::text))))) ) "
+                    + "jsonb_build_object('signal', ?::text))))) "
+                    + "OR definition_json @> jsonb_build_object('steps', jsonb_build_array("
+                    + "jsonb_build_object('type', 'eventBasedGateway', 'instantiate', true, "
+                    + "'signals', jsonb_build_array(?::text))))) "
                     + "ORDER BY key_name, version_num DESC LIMIT ?");
 
     /** The lifecycle actions of one definition version. */

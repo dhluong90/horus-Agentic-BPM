@@ -368,6 +368,18 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
             }
             List<Process> executable = executableProcesses();
+            // #499: the catch events of an instantiating event-based gateway create the instance, so no variable can
+            // carry a key for them; they need no horus:correlationKey.
+            Set<String> startingCatches = new HashSet<>();
+            for (Process candidate : executable) {
+                List<io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement> all = candidate.allFlowElements();
+                Set<String> gateways = new HashSet<>();
+                all.stream().filter(e -> e instanceof EventBasedGateway g && g.instantiate())
+                        .forEach(e -> gateways.add(e.id()));
+                all.stream().filter(e -> e instanceof SequenceFlow f && gateways.contains(f.sourceRef()))
+                        .forEach(e -> startingCatches.add(((SequenceFlow) e).targetRef()));
+            }
+            invalid.removeIf(p -> "CORRELATION_KEY_REQUIRED".equals(p.code()) && startingCatches.contains(p.elementId()));
             for (DefinitionProblem ref : unresolvedRefs) {
                 if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
@@ -1320,18 +1332,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to. The
-         * instantiating form and the parallel type are named as unsupported with stage S3.
+         * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to, or with
+         * {@code instantiate="true"} (#499) starts the process on the first of them to fire. The parallel type is named
+         * as unsupported with stage S3.
          */
         private FlowElement eventBasedGateway() throws XMLStreamException {
             String id = id();
             String gwName = attr("name");
             boolean instantiate = "true".equals(attr("instantiate"));
             boolean parallel = "Parallel".equals(attr("eventGatewayType"));
-            if (instantiate) {
-                unsupported("eventBasedGateway with instantiate", id, BpmnStages.S3, "is not supported in this release;"
-                        + " stage S3 adds the instantiating event-based gateway");
-            }
             if (parallel) {
                 unsupported("eventBasedGateway with eventGatewayType Parallel", id, BpmnStages.S3, "is not supported in"
                         + " this release; stage S3 adds the parallel event-based gateway");

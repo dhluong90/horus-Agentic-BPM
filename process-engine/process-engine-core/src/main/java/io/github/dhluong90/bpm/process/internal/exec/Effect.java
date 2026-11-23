@@ -197,10 +197,17 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param attemptId forward attempt
      * @param handler handler or manual
      * @param inputSnapshot inputs at completion
+     * @param undoNodeId the compensation task that runs the undo when a sub-process has several (#499), or null
      */
-    record PushCompensation(String scopeTokenId, String nodeId, String attemptId, String handler, Map<String, Object> inputSnapshot) implements Effect {
+    record PushCompensation(String scopeTokenId, String nodeId, String attemptId, String handler,
+            Map<String, Object> inputSnapshot, String undoNodeId) implements Effect {
         public PushCompensation {
             inputSnapshot = inputSnapshot == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(inputSnapshot));
+        }
+
+        public PushCompensation(String scopeTokenId, String nodeId, String attemptId, String handler,
+                Map<String, Object> inputSnapshot) {
+            this(scopeTokenId, nodeId, attemptId, handler, inputSnapshot, null);
         }
     }
 

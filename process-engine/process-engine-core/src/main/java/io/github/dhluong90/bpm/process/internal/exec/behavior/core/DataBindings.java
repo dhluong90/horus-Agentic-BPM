@@ -1,5 +1,7 @@
 package io.github.dhluong90.bpm.process.internal.exec.behavior.core;
 
+import io.github.dhluong90.bpm.process.internal.exec.DataStorePort;
+import io.github.dhluong90.bpm.process.internal.exec.DataStoreUse;
 import io.github.dhluong90.bpm.process.internal.exec.ExecutionContext;
 import io.github.dhluong90.bpm.process.internal.exec.ExecutionException;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
@@ -20,8 +22,9 @@ import javax.xml.namespace.QName;
 /**
  * Data objects as scoped process variables (#499). A data object is the variable named by its {@code horus:variable}
  * attribute, or by its id. A data output association copies a value of the step's result into the variable of the
- * data object it targets; a data input association adds the variable's value to the inputs of the step. A data store
- * reference is kept and exported but not executed in this release.
+ * data object it targets; a data input association adds the variable's value to the inputs of the step. A data
+ * store reference that an association names is read and written through the host's data store adapter (#499); the
+ * tenant is the instance's own.
  */
 final class DataBindings {
 
@@ -74,6 +77,11 @@ final class DataBindings {
                 }
             }
             for (String source : association.sourceRefs()) {
+                Optional<String> store = DataStoreUse.storeOf(ctx.process().process(), source);
+                if (store.isPresent()) {
+                    out.put(inputName, readStore(node, token, ctx, store.get(), inputName));
+                    continue;
+                }
                 Optional<DataObject> object = dataObject(ctx, source);
                 if (object.isEmpty()) {
                     continue;
@@ -92,11 +100,13 @@ final class DataBindings {
             return;
         }
         for (DataOutputAssociation association : a.dataOutputAssociations()) {
-            Optional<DataObject> object = dataObject(ctx, association.targetRef());
-            if (object.isEmpty()) {
+            Optional<String> store = DataStoreUse.storeOf(ctx.process().process(), association.targetRef());
+            Optional<DataObject> object = store.isPresent() ? Optional.empty() : dataObject(ctx, association.targetRef());
+            if (object.isEmpty() && store.isEmpty()) {
                 continue;
             }
             Object value = Map.copyOf(output);
+            String item = association.targetRef();
             if (!association.sourceRefs().isEmpty()) {
                 String key = association.sourceRefs().get(0);
                 if (a.ioSpecification() != null) {
@@ -108,13 +118,35 @@ final class DataBindings {
                 }
                 if (!output.containsKey(key)) {
                     throw new ExecutionException("DATA_OUTPUT_MISSING", node.id(), "The result has no value named "
-                            + key + " for data object " + name(object.get()));
+                            + key + " for " + (store.isPresent() ? "data store " + store.get()
+                            : "data object " + name(object.get())));
                 }
                 value = output.get(key);
+                item = key;
+            }
+            if (store.isPresent()) {
+                writeStore(node, token, ctx, store.get(), item, value);
+                continue;
             }
             ctx.variables().set(variable(object.get()), value);
             ctx.history("DATA_OBJECT_WRITTEN", token, Map.of("dataObject", name(object.get()), "variable",
                     variable(object.get())));
         }
+    }
+
+    private static Object readStore(FlowNode node, Token token, ExecutionContext ctx, String store, String item) {
+        Object value = ctx.dataStores().read(ctx.dataStoreAccess(store, item, node.id(), token));
+        if (value == null) {
+            throw new ExecutionException("DATA_STORE_VALUE_MISSING", node.id(), "Data store " + store
+                    + " returned no value for " + item);
+        }
+        ctx.history("DATA_STORE_READ", token, Map.of("dataStore", store, "item", item));
+        return value;
+    }
+
+    private static void writeStore(FlowNode node, Token token, ExecutionContext ctx, String store, String item,
+            Object value) {
+        ctx.dataStores().write(ctx.dataStoreAccess(store, item, node.id(), token), value);
+        ctx.history("DATA_STORE_WRITTEN", token, Map.of("dataStore", store, "item", item));
     }
 }

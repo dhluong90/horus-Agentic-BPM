@@ -351,7 +351,8 @@ public class ProcessEngineAutoConfiguration {
             OutputSchemaValidator outputSchemas, InputMasker inputMasker, BusinessCalendar calendar,
             ObjectProvider<AssigneeDirectory> directory, ObjectProvider<RoleCatalogue> roles,
             JdbcLayoutStore layoutStore, FormRegistry forms,
-            ObjectProvider<io.github.dhluong90.bpm.process.spi.MessageAdapter> messageAdapter) {
+            ObjectProvider<io.github.dhluong90.bpm.process.spi.MessageAdapter> messageAdapter,
+            ObjectProvider<io.github.dhluong90.bpm.process.spi.DataStoreAdapter> dataStores) {
         requireDevOnlyRelaxations(environment, properties);
         if (properties.definitions().autoApprove()) {
             LOG.warn("Process definitions are imported as ACTIVE without approval "
@@ -380,6 +381,14 @@ public class ProcessEngineAutoConfiguration {
         services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
         // #491: the host's outbox port for the messages a process sends; none when the host sends no messages.
         services.useMessageAdapter(messageAdapter.getIfUnique());
+        // #499: the host's data stores, by the id of the BPMN dataStore each serves; two with one name are a wiring error.
+        Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> stores = new LinkedHashMap<>();
+        dataStores.orderedStream().forEach(a -> {
+            if (stores.putIfAbsent(a.name(), a) != null) {
+                throw new IllegalStateException("Two DataStoreAdapter beans are named " + a.name());
+            }
+        });
+        services.useDataStoreAdapters(stores);
         // PRE-180: approval asks the host's role list whether an escalation target role exists. The default accepts
         // every role; outside the dev profile that is worth a warning, because a misspelt role is then not caught.
         RoleCatalogue catalogue = roles.getIfUnique(() -> RoleCatalogue.ACCEPT_ALL);
