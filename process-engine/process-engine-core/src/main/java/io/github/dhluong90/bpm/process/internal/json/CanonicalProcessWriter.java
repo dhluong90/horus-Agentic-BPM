@@ -27,6 +27,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
@@ -100,6 +101,9 @@ public final class CanonicalProcessWriter {
                 case StartEvent s -> {
                     step.put("type", "start");
                     writeEventDefinition(step, s.eventDefinitions());
+                    if (s.eventDefinitions().size() > 1) {
+                        writeMultiple(step, s.eventDefinitions(), s.parallelMultiple());
+                    }
                     if (!s.isInterrupting()) {
                         step.put("interrupting", false);
                     }
@@ -179,6 +183,8 @@ public final class CanonicalProcessWriter {
                                     step.put("trigger", "cancel");
                             default -> step.put("trigger", "other");
                         }
+                    } else {
+                        writeMultiple(step, b.eventDefinitions(), b.parallelMultiple());
                     }
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
@@ -342,6 +348,43 @@ public final class CanonicalProcessWriter {
                     step.put("type", "signalThrow");
                     step.put("signal", signal.signalRef());
                 }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() > 1 -> {
+                    step.put("type", "multipleCatch");
+                    writeMultiple(step, c.eventDefinitions(), c.parallelMultiple());
+                }
+                case ComplexGateway g -> {
+                    // #500: the activation condition, every outgoing branch with its condition, and the default.
+                    step.put("type", "complexGateway");
+                    if (g.activationCondition() != null && g.activationCondition().text() != null) {
+                        step.put("activation", normal(g.activationCondition().language(),
+                                g.activationCondition().text()));
+                    }
+                    ArrayNode branches = step.putArray("branches");
+                    for (SequenceFlow f : out) {
+                        if (f.id().equals(g.defaultFlow())) {
+                            continue;
+                        }
+                        branches.addObject().put("when", f.conditionExpression() == null ? "true"
+                                : normal(f.conditionExpression().language(), f.conditionExpression().text()))
+                                .put("next", f.targetRef());
+                    }
+                    flows.stream().filter(f -> f.id().equals(g.defaultFlow())).findFirst()
+                            .ifPresent(f -> step.put("default", f.targetRef()));
+                }
+                case io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess adHoc -> {
+                    // #500: ordering, completion condition and cancel flag are part of the step, so of the hash.
+                    step.put("type", "adHocSubProcess");
+                    step.put("ordering", adHoc.ordering() == io.github.dhluong90.bpm.process.internal.model.bpmn
+                            .AdHocOrdering.SEQUENTIAL ? "sequential" : "parallel");
+                    if (!adHoc.cancelRemainingInstances()) {
+                        step.put("cancelRemaining", false);
+                    }
+                    if (adHoc.completionCondition() != null && adHoc.completionCondition().text() != null) {
+                        step.put("completionCondition", normal(adHoc.completionCondition().language(),
+                                adHoc.completionCondition().text()));
+                    }
+                    writeSteps(step.putArray("steps"), adHoc.flowElements(), adHoc.artifacts());
+                }
                 case ParallelGateway g -> {
                     step.put("type", "parallelGateway");
                     // A fork lists every branch in document order; a single next is written below.
@@ -413,7 +456,7 @@ public final class CanonicalProcessWriter {
                     mapped.forEach(o -> received.put(o.name(), o.from()));
                 }
             }
-            if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
+            if (!(node instanceof ExclusiveGateway) && !(node instanceof ComplexGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
@@ -427,6 +470,29 @@ public final class CanonicalProcessWriter {
         if (definitions.size() != 1) {
             return;
         }
+        writeOneDefinition(step, definitions);
+    }
+
+    /**
+     * The definitions of a multiple event (#500): {@code multiple} fires on any one, {@code parallelMultiple} only when
+     * all of them have occurred. Each is written as its own entry, so the hash covers every one.
+     */
+    private static void writeMultiple(ObjectNode step, List<EventDefinition> definitions, boolean parallel) {
+        step.put("trigger", parallel ? "parallelMultiple" : "multiple");
+        ArrayNode events = step.putArray("events");
+        for (EventDefinition d : definitions) {
+            ObjectNode entry = events.addObject();
+            switch (d) {
+                case MessageEventDefinition m -> entry.put("trigger", "message").put("message", m.messageRef());
+                case SignalEventDefinition sg -> entry.put("trigger", "signal").put("signal", sg.signalRef());
+                case ConditionalEventDefinition c -> entry.put("trigger", "conditional").put("condition",
+                        normal(c.condition().language(), c.condition().text().strip()));
+                default -> writeOneDefinition(entry, List.of(d));
+            }
+        }
+    }
+
+    private static void writeOneDefinition(ObjectNode step, List<EventDefinition> definitions) {
         switch (definitions.get(0)) {
             case TimerEventDefinition t -> {
                 step.put("trigger", "timer");
@@ -435,6 +501,9 @@ public final class CanonicalProcessWriter {
                 }
                 if (t.timeDate() != null && t.timeDate().text() != null) {
                     step.put("until", t.timeDate().text().strip());
+                }
+                if (t.timeCycle() != null && t.timeCycle().text() != null) {
+                    step.put("cycle", t.timeCycle().text().strip());
                 }
             }
             case ErrorEventDefinition e -> {

@@ -4,7 +4,11 @@ import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
@@ -146,6 +150,7 @@ public final class ProcessCompiler {
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
             compensationProblems(node, out, nodes, containerOf, flows, associations, problems);
             if (!(node instanceof EndEvent) && !throwsCompensation(node) && !isLinkThrow(node) && out.isEmpty()
+                    && !(nodes.get(containerOf.get(node.id())) instanceof AdHocSubProcess)
                     && !isCompensationBoundary(node) && !isForCompensation(node) && !isEventSubProcess(node)) {
                 problems.add(DefinitionProblem.of("NO_OUTGOING_FLOW", "Only an end event may have no outgoing flow",
                         node.id()));
@@ -224,6 +229,7 @@ public final class ProcessCompiler {
                 }
             }
             eventSubProcessProblems(node, flows, nodes, containerOf, process, problems);
+            complexAndMultipleProblems(node, out, nodes, containerOf, flows, process, problems);
             if (node instanceof UserTask task && task.extensions().first(ResultVariable.class).isEmpty()) {
                 problems.add(DefinitionProblem.of("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
                         + " a completion result can never overwrite other process variables", node.id()));
@@ -283,6 +289,126 @@ public final class ProcessCompiler {
         return builder.build();
     }
 
+    /**
+     * The rules of #500. A complex gateway has a valid default flow and activation condition. An ad-hoc sub-process
+     * holds activities and nothing else, with no sequence flow between them. A multiple event has two or more
+     * definitions of the kinds that can wait or be thrown to it, and a parallel multiple one only where all of them can
+     * be waited for.
+     */
+    private static void complexAndMultipleProblems(FlowNode node, List<SequenceFlow> out, Map<String, FlowNode> nodes,
+            Map<String, String> containerOf, List<SequenceFlow> flows, Process process, List<DefinitionProblem> problems) {
+        if (node instanceof ComplexGateway gateway) {
+            if (gateway.defaultFlow() != null && out.stream().noneMatch(f -> f.id().equals(gateway.defaultFlow()))) {
+                problems.add(DefinitionProblem.of("DEFAULT_FLOW_INVALID", "The default flow " + gateway.defaultFlow()
+                        + " is not an outgoing flow of the gateway", node.id()));
+            }
+            out.stream().filter(f -> f.id().equals(gateway.defaultFlow()) && f.conditionExpression() != null)
+                    .forEach(f -> problems.add(DefinitionProblem.of("DEFAULT_FLOW_HAS_CONDITION",
+                            "A default flow has no condition in BPMN; remove it or the default", f.id())));
+            if (gateway.activationCondition() != null && gateway.activationCondition().text() != null) {
+                try {
+                    io.github.dhluong90.bpm.process.internal.expr.Condition.parse(gateway.activationCondition().text(),
+                            gateway.activationCondition().language());
+                } catch (ConditionException e) {
+                    problems.add(DefinitionProblem.of("CONDITION_INVALID", e.getMessage(), node.id()));
+                }
+            }
+        }
+        if (node instanceof AdHocSubProcess adHoc) {
+            if (adHoc.completionCondition() != null && adHoc.completionCondition().text() != null) {
+                try {
+                    io.github.dhluong90.bpm.process.internal.expr.Condition.parse(adHoc.completionCondition().text(),
+                            adHoc.completionCondition().language());
+                } catch (ConditionException e) {
+                    problems.add(DefinitionProblem.of("CONDITION_INVALID", e.getMessage(), node.id()));
+                }
+            }
+            if (adHoc.flowElements().stream().noneMatch(e -> e instanceof Activity)) {
+                problems.add(DefinitionProblem.of("AD_HOC_EMPTY", "An ad-hoc sub-process holds at least one activity",
+                        node.id()));
+            }
+            for (FlowElement e : adHoc.flowElements()) {
+                if (e instanceof SequenceFlow) {
+                    problems.add(DefinitionProblem.of("AD_HOC_HAS_FLOW", "The activities of an ad-hoc sub-process have no"
+                            + " sequence flow between them; the host starts each one", e.id()));
+                } else if (!(e instanceof Activity) || isEventSubProcess((FlowNode) e)) {
+                    problems.add(DefinitionProblem.of("AD_HOC_CONTENT_INVALID", "An ad-hoc sub-process holds activities"
+                            + " only: no events, gateways or event sub-processes", e.id()));
+                }
+            }
+        }
+        if (node instanceof BoundaryEvent boundary && nodes.get(boundary.attachedToRef()) != null
+                && nodes.get(containerOf.get(boundary.attachedToRef())) instanceof AdHocSubProcess) {
+            problems.add(DefinitionProblem.of("AD_HOC_CONTENT_INVALID", "A boundary event is not placed on an activity of an"
+                    + " ad-hoc sub-process; put it on the ad-hoc sub-process", node.id()));
+        }
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event) {
+            List<EventDefinition> defs = event.eventDefinitions();
+            boolean parallel = node instanceof StartEvent s ? s.parallelMultiple()
+                    : node instanceof IntermediateCatchEvent c ? c.parallelMultiple()
+                    : node instanceof BoundaryEvent b && b.parallelMultiple();
+            if (defs.size() < 2) {
+                if (parallel) {
+                    problems.add(DefinitionProblem.of("PARALLEL_MULTIPLE_SINGLE", "parallelMultiple applies to an event"
+                            + " with several event definitions", node.id()));
+                }
+                for (EventDefinition d : defs) {
+                    if (d instanceof TimerEventDefinition t && t.timeCycle() != null && !(node instanceof StartEvent s
+                            && isEventSubProcess(nodes.get(containerOf.get(s.id()))))) {
+                        problems.add(DefinitionProblem.of("TIMER_CYCLE_MISPLACED", "A timeCycle starts an event"
+                                + " sub-process; a timer catch or boundary event uses timeDuration or timeDate",
+                                node.id()));
+                    }
+                }
+                return;
+            }
+            boolean catches = node instanceof StartEvent || node instanceof IntermediateCatchEvent;
+            boolean inEvent = node instanceof StartEvent s && isEventSubProcess(nodes.get(containerOf.get(s.id())));
+            boolean root = node instanceof StartEvent s && containerOf.get(s.id()).equals(process.id());
+            long messages = defs.stream().filter(MessageEventDefinition.class::isInstance).count();
+            for (EventDefinition d : defs) {
+                boolean fits;
+                if (node instanceof BoundaryEvent) {
+                    fits = d instanceof TimerEventDefinition || !parallel && (d instanceof ErrorEventDefinition
+                            || d instanceof EscalationEventDefinition);
+                } else if (root) {
+                    fits = !parallel && (d instanceof MessageEventDefinition || d instanceof SignalEventDefinition);
+                } else if (catches) {
+                    fits = d instanceof TimerEventDefinition || d instanceof MessageEventDefinition
+                            || d instanceof SignalEventDefinition || d instanceof ConditionalEventDefinition;
+                } else {
+                    fits = false;
+                }
+                if (d instanceof TimerEventDefinition t && t.timeCycle() != null) {
+                    fits = false;
+                }
+                if (!fits) {
+                    problems.add(DefinitionProblem.of("MULTIPLE_EVENT_DEFINITION_INVALID", (root && parallel
+                            ? "A process start event cannot wait for all of several triggers: the instance does not exist"
+                            + " yet; use a multiple start event that any one starts"
+                            : "A multiple event holds timer, message, signal or conditional definitions (a start event of"
+                            + " a process, message and signal only; a boundary event, timer, error and escalation, and"
+                            + " with parallelMultiple timers only), and no timeCycle") + "; found "
+                            + d.getClass().getSimpleName(), node.id()));
+                    break;
+                }
+            }
+            if (messages > 1) {
+                problems.add(DefinitionProblem.of("MULTIPLE_EVENT_MESSAGE_ONCE", "A multiple event waits for one message:"
+                        + " its correlation key and outputs belong to the event", node.id()));
+            }
+            if (inEvent || catches && !root) {
+                // Conditions and timers are fine; nothing more to check here.
+                return;
+            }
+            if (node instanceof BoundaryEvent b && !b.cancelActivity() && defs.stream()
+                    .anyMatch(ErrorEventDefinition.class::isInstance)) {
+                problems.add(DefinitionProblem.of("BOUNDARY_ERROR_NOT_INTERRUPTING", "An error boundary event always"
+                        + " cancels its activity; remove cancelActivity=\"false\"", node.id()));
+            }
+        }
+    }
+
     private static boolean isEventSubProcess(FlowNode node) {
         return node instanceof SubProcess s && s.triggeredByEvent();
     }
@@ -312,16 +438,16 @@ public final class ProcessCompiler {
         FlowNode owner = nodes.get(container);
         boolean inEvent = owner != null && isEventSubProcess(owner);
         EventDefinition trigger = start.eventDefinitions().size() == 1 ? start.eventDefinitions().get(0) : null;
+        boolean hasMessage = start.eventDefinitions().stream().anyMatch(MessageEventDefinition.class::isInstance);
         boolean eventOnly = trigger instanceof TimerEventDefinition || trigger instanceof ErrorEventDefinition
                 || trigger instanceof EscalationEventDefinition || trigger instanceof CompensateEventDefinition;
         if (inEvent) {
-            if (trigger == null) {
+            if (start.eventDefinitions().isEmpty()) {
                 problems.add(DefinitionProblem.of("EVENT_SUBPROCESS_TRIGGER_REQUIRED", "The start event of an event"
                         + " sub-process carries its trigger: a timer, message, signal, conditional, error, escalation"
                         + " or compensation", start.id()));
             }
-            if (trigger instanceof MessageEventDefinition
-                    && start.extensions().first(CorrelationKey.class).isEmpty()) {
+            if (hasMessage && start.extensions().first(CorrelationKey.class).isEmpty()) {
                 problems.add(DefinitionProblem.of("CORRELATION_KEY_REQUIRED", "A message start event of an event"
                         + " sub-process needs horus:correlationKey, the variable whose value the message must carry",
                         start.id()));
@@ -361,7 +487,7 @@ public final class ProcessCompiler {
             problems.add(DefinitionProblem.of("START_TRIGGER_MISPLACED", "A timer, error, escalation or compensation"
                     + " start event starts an event sub-process; a process starts on a none, message, signal or"
                     + " conditional start event", start.id()));
-        } else if (!root && trigger != null) {
+        } else if (!root && !start.eventDefinitions().isEmpty()) {
             problems.add(DefinitionProblem.of("START_TRIGGER_MISPLACED", "A sub-process starts on a none start event;"
                     + " a message, signal or conditional start event starts a process or an event sub-process",
                     start.id()));
@@ -370,7 +496,7 @@ public final class ProcessCompiler {
             problems.add(DefinitionProblem.of("START_TRIGGER_MISPLACED", "isInterrupting=\"false\" applies to the start"
                     + " event of an event sub-process", start.id()));
         }
-        if (trigger instanceof MessageEventDefinition && start.extensions().first(CorrelationKey.class).isPresent()) {
+        if (hasMessage && start.extensions().first(CorrelationKey.class).isPresent()) {
             problems.add(DefinitionProblem.of("CORRELATION_KEY_UNEXPECTED", "A message start event has no instance"
                     + " yet; the message's key becomes the business key", start.id()));
         }

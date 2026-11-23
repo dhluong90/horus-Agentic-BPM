@@ -43,5 +43,9 @@ public final class EventBehaviors implements BehaviorModule {
         registry.register(EventSubProcessStarts.Passive.error());
         registry.register(EventSubProcessStarts.Passive.escalation());
         registry.register(EventSubProcessStarts.Passive.compensation());
+        // #500: multiple and parallel multiple events.
+        registry.register(new MultipleEvents.Catch());
+        registry.register(new MultipleEvents.Start());
+        registry.register(new MultipleEvents.Boundary());
     }
 }

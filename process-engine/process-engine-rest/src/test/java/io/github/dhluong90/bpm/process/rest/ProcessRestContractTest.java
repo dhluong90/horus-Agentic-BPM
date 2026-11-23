@@ -599,6 +599,12 @@ class ProcessRestContractTest {
         }
 
         @Override
+        public ProcessInstance startAdHocActivity(String instanceId, long expectedLockVersion, String scopeTokenId,
+                String activityId, String idempotencyKey) {
+            throw new UnsupportedOperationException("not used by this test");
+        }
+
+        @Override
         public TaskView task(String taskId) {
             throw new UnsupportedOperationException("not used by this test");
         }

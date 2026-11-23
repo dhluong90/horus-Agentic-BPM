@@ -437,6 +437,14 @@ class ProcessRestErrorMatrixTest {
         }
 
         @Override
+        public ProcessInstance startAdHocActivity(String instanceId, long expectedLockVersion, String scopeTokenId,
+                String activityId, String idempotencyKey) {
+            maybeFail();
+            calls.add("startAdHoc " + instanceId + " " + scopeTokenId + " " + activityId);
+            return instance(expectedLockVersion + 1, "RUNNING");
+        }
+
+        @Override
         public ProcessInstance cancel(String instanceId, long expectedLockVersion, String reason, String idempotencyKey) {
             maybeFail();
             calls.add("cancel " + instanceId + " " + expectedLockVersion + " " + reason + " " + idempotencyKey);

@@ -149,7 +149,21 @@ An interrupting event sub-process cancels the other work of its scope, tasks, jo
 </bpmn:subProcess>
 ```
 
-Refused at import: a timer, error, escalation or compensation start event outside an event sub-process (`START_TRIGGER_MISPLACED`), a flow in or out (`EVENT_SUBPROCESS_HAS_FLOW`), a start event with no trigger (`EVENT_SUBPROCESS_TRIGGER_REQUIRED`), a message trigger with no key (`CORRELATION_KEY_REQUIRED`), an error trigger that does not interrupt (`EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING`) and a boundary event on an event sub-process. A timer cycle is not supported.
+Refused at import: a timer, error, escalation or compensation start event outside an event sub-process (`START_TRIGGER_MISPLACED`), a flow in or out (`EVENT_SUBPROCESS_HAS_FLOW`), a start event with no trigger (`EVENT_SUBPROCESS_TRIGGER_REQUIRED`), a message trigger with no key (`CORRELATION_KEY_REQUIRED`), an error trigger that does not interrupt (`EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING`) and a boundary event on an event sub-process. A timer start may be a `timeCycle` such as `R3/PT24H` (three firings, one interval apart; `R/PT24H` has no end); a non-interrupting event sub-process starts again for each, an interrupting one fires once. A cycle on a catch or boundary event is `S1`.
+
+### Complex gateway, ad-hoc sub-process and multiple events (0.3.0)
+
+A **complex gateway** joins when its `activationCondition` holds and splits on its outgoing conditions, with a `default` flow as at any gateway. Each token that arrives is held and counted; `_activationCount` in the condition is the number held. The arrival that makes the condition true sends one token on; later tokens of the same round are absorbed, and the gateway resets when every incoming flow has delivered. With no condition it waits for all incoming flows, like a parallel join. If every flow has delivered and the condition is still false, the step fails (`ACTIVATION_CONDITION_FALSE`).
+
+```xml
+<bpmn:complexGateway id="join"><bpmn:activationCondition>_activationCount &gt;= 2</bpmn:activationCondition></bpmn:complexGateway>
+```
+
+An **ad-hoc sub-process** holds activities with no sequence flow between them. Nothing runs when a token enters; the operator starts an activity from the case view (the action needs `processes:task:manage`, `POST /instances/{id}:start-ad-hoc-activity`). `ordering="Parallel"` (the default) lets several run at once, `"Sequential"` one at a time. When an activity ends, `completionCondition` is asked; if it holds, the activities still running are cancelled (`cancelRemainingInstances="false"` lets them finish first) and the flow goes on. With no condition it ends when every activity has completed once. It holds activities only: no flows, events, gateways or boundary events (`AD_HOC_HAS_FLOW`, `AD_HOC_CONTENT_INVALID`, `AD_HOC_EMPTY`).
+
+A **multiple event** has several event definitions and fires on the first that occurs; with `parallelMultiple="true"` it waits for all of them. It works on an intermediate catch event and on the start event of an event sub-process (timer, message, signal, condition; one message at most), on a boundary event (timer, error, escalation; with `parallelMultiple` timers only) and on a process start event (message and signal, never parallel: no instance exists yet to wait in). A throw or end event with several definitions is refused. Refusals: `MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`, `PARALLEL_MULTIPLE_SINGLE`.
+
+The cockpit draws the complex gateway with a star, the ad-hoc sub-process as a container, a multiple event with a pentagon and a parallel multiple one with a plus. On the case view of an open ad-hoc sub-process the inspector lists the activities that can start, one button each; without `processes:task:manage` the buttons say why they are disabled.
 
 ### Boundary events, errors and escalations (0.3.0)
 
@@ -193,7 +207,7 @@ A **cancel end event** inside a transaction compensates it and leaves through th
 <bpmn:boundaryEvent id="transfer-cancelled" attachedToRef="transfer"><bpmn:cancelEventDefinition/></bpmn:boundaryEvent>
 ```
 
-The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. A compensation boundary event may also sit on a call activity, a sub-process or a transaction, and a **compensation event sub-process** (a sub-process with `triggeredByEvent="true"` whose start event is a `compensateEventDefinition`, holding one service task with `horus:handler` between its start and end) does the same for the sub-process or transaction it stands in: when that sub-process completes, one undo entry is pushed on the stack of the scope around it, with the inputs the task declares, and a later compensation runs it before the steps inside. Those steps are still undone after it, where BPMN runs the handler only. Not supported: `waitForCompletion="false"`, and a compensation event sub-process with a body of more than one task.
+The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. A compensation boundary event may also sit on a call activity, a sub-process or a transaction, and a **compensation event sub-process** (a sub-process with `triggeredByEvent="true"` whose start event is a `compensateEventDefinition`, holding one service task with `horus:handler` between its start and end) does the same for the sub-process or transaction it stands in: when that sub-process completes, one undo entry is pushed on the stack of the scope around it, with the inputs the task declares, and a later compensation runs it before the steps inside. Those steps are still undone after it, where BPMN runs the handler only. Not supported: `waitForCompletion="false"` (an instance is `COMPENSATING` while the undo runs and takes no other command, so a flow that goes on beside it cannot run), and a compensation event sub-process with a body of more than one task.
 
 ### Terminate and link events (0.3.0)
 
@@ -279,16 +293,16 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `S0` | An element of the current stage that this release has not finished: an `intermediateThrowEvent` with no event definition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: `inclusiveGateway`, data objects and a timer cycle are `S1`; `eventBasedGateway` is `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `inclusiveGateway`, data objects and a timer cycle on a catch or boundary event are `S1`; `eventBasedGateway` is `S2`.
 
 These are refused:
 
 | Kind | Elements |
 |---|---|
-| Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
-| Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event, and an event with several definitions |
-| Activities | `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
-| Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
+| Gateways | `inclusiveGateway`, `eventBasedGateway` |
+| Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event, a throw or end event with several definitions, and a process start event that waits for all of several triggers |
+| Activities | a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
+| Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |

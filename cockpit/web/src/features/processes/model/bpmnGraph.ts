@@ -25,6 +25,14 @@ export const KNOWN_NODE_TYPES = [
   'exclusiveGateway',
   'parallelGateway',
   'inclusiveGateway',
+  'complexGateway',
+  'adHocSubProcess',
+  'intermediateCatchEvent:multiple',
+  'intermediateCatchEvent:parallelMultiple',
+  'startEvent:multiple',
+  'startEvent:parallelMultiple',
+  'boundaryEvent:multiple',
+  'boundaryEvent:parallelMultiple',
   'intermediateCatchEvent:timer',
   'callActivity',
   'transaction',
@@ -87,6 +95,8 @@ export interface DiagramNode {
   trigger?: string;
   /** For a link throw or catch (#493): the name that pairs the two. */
   linkName?: string;
+  /** For an ad-hoc sub-process (#500): whether its activities may run side by side or one at a time. */
+  ordering?: 'parallel' | 'sequential';
 }
 
 export interface DiagramEdge {
@@ -158,6 +168,9 @@ export function nodeType(element: Element): string {
     return subtype === undefined ? local : `${local}:${subtype}`;
   }
   if (local.endsWith('Event')) {
+    // #500: several definitions make a multiple event, or a parallel multiple one that waits for all of them.
+    const definitions = elementChildren(element).filter((child) => child.namespaceURI === BPMN && child.localName.endsWith('EventDefinition'));
+    if (definitions.length > 1) return `${local}:${element.getAttribute('parallelMultiple') === 'true' ? 'parallelMultiple' : 'multiple'}`;
     const kind = eventKind(element);
     return kind === undefined ? local : `${local}:${kind}`;
   }
@@ -167,7 +180,7 @@ export function nodeType(element: Element): string {
 
 /** Elements that hold steps of their own: a sub-process, an event sub-process (#487) and a saga block. */
 function isContainer(element: Element): boolean {
-  return element.localName === 'subProcess' || element.localName === 'transaction';
+  return element.localName === 'subProcess' || element.localName === 'transaction' || element.localName === 'adHocSubProcess';
 }
 
 /** The start event of an event sub-process, which carries what starts it (#487). */
@@ -216,6 +229,7 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       ...(child.localName === 'startEvent' && child.getAttribute('isInterrupting') === 'false' ? { interrupting: false } : {}),
       ...(byEvent !== undefined ? { interrupting: byEvent.interrupting, ...(byEvent.trigger !== undefined ? { trigger: byEvent.trigger } : {}) } : {}),
       ...(link !== undefined ? { linkName: link } : {}),
+      ...(child.localName === 'adHocSubProcess' ? { ordering: child.getAttribute('ordering') === 'Sequential' ? ('sequential' as const) : ('parallel' as const) } : {}),
     });
     if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);
   }

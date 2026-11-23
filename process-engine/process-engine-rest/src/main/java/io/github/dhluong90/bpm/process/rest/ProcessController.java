@@ -721,6 +721,28 @@ public class ProcessController {
     }
 
     /**
+     * Starts one enabled activity of an open ad-hoc sub-process ({@code processes:task:manage}, #500). Body:
+     * {@code scopeTokenId} and {@code activityId}. {@code If-Match} carries the instance {@code lockVersion} and
+     * {@code Idempotency-Key} makes a retry safe; both are required.
+     */
+    @PostMapping(value = "/instances/{id}:start-ad-hoc-activity", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> startAdHocActivity(@PathVariable("id") String id, HttpServletRequest http,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        if (ifMatch == null || ifMatch.isBlank()) {
+            throw new PreconditionRequiredException("Send If-Match with the instance's lockVersion (its ETag), for "
+                    + "example \"2\"");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot start the activity twice");
+        }
+        JsonNode request = parse(boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
+        ProcessInstance instance = engine.startAdHocActivity(id, lockVersion(ifMatch), text(request, "scopeTokenId"),
+                text(request, "activityId"), idempotencyKey);
+        return json(HttpStatus.OK, Views.instance(instance), instance.lockVersion(), null);
+    }
+
+    /**
      * Reads a task with the caller's {@code allowedActions} ({@code processes:task:work}); the {@code ETag} is its
      * lock version.
      */

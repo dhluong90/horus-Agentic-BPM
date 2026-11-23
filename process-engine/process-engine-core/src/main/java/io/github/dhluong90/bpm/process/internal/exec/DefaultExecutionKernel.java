@@ -78,6 +78,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.RetryStep retry -> retry(retry, ctx);
             case Command.Compensate compensate -> compensate(compensate, ctx);
             case Command.EndCompensation end -> ctx.endCompensation(end.scopeTokenId());
+            case Command.StartAdHocActivity adHoc -> startAdHoc(adHoc, ctx);
             default -> throw new ExecutionException("COMMAND_NOT_SUPPORTED", null,
                     command.getClass().getSimpleName() + " is not supported in this release");
         }
@@ -114,7 +115,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     continue;
                 }
                 FlowNode node = node(token.nodeId());
-                if (!isConditionalWait(node)) {
+                if (!isConditionalWait(node, token)) {
                     // Only a conditional wait asks its condition again; a signal, message or boundary wait is woken by its own command.
                     continue;
                 }
@@ -126,13 +127,9 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         }
     }
 
-    private static boolean isConditionalWait(FlowNode node) {
-        return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
-                && (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
-                        || node instanceof StartEvent)
-                && event.eventDefinitions().size() == 1
-                && event.eventDefinitions().get(0) instanceof
-                        io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
+    private static boolean isConditionalWait(FlowNode node, Token token) {
+        return (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                || node instanceof StartEvent) && MultipleWaits.waitsOnCondition(node, token);
     }
 
     /**
@@ -148,17 +145,45 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         for (io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess esp
                 : process.eventSubProcessesOf(scope.nodeId())) {
             StartEvent start = process.triggerOf(esp.id()).orElseThrow();
-            if (start.eventDefinitions().size() != 1 || start.eventDefinitions().get(0) instanceof
+            if (start.eventDefinitions().size() == 1 && (start.eventDefinitions().get(0) instanceof
                     io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition
                     || start.eventDefinitions().get(0) instanceof
                             io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition
                     || start.eventDefinitions().get(0) instanceof
-                            io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition) {
+                            io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition)) {
                 continue;
             }
             Token listener = ctx.createToken(TokenKind.FLOW, start.id(), scope.id());
             behaviorFor(start).enter(start, listener, ctx);
         }
+    }
+
+    /** #500: the host starts an enabled activity of an open ad-hoc sub-process. */
+    private void startAdHoc(Command.StartAdHocActivity command, WorkingContext ctx) {
+        Token scope = ctx.tree().get(command.scopeTokenId()).orElseThrow(() ->
+                new ExecutionException("TOKEN_NOT_FOUND", null, "No token " + command.scopeTokenId()));
+        io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess node = process.adHoc(scope.nodeId())
+                .filter(n -> scope.kind() == TokenKind.SCOPE && scope.status().live()).orElseThrow(() ->
+                        new ExecutionException("INVALID_STATE", scope.nodeId(), "Token " + scope.id()
+                                + " is not an open ad-hoc sub-process"));
+        boolean known = node.flowElements().stream().anyMatch(e -> e.id().equals(command.activityId())
+                && e instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity);
+        if (!known) {
+            throw new ExecutionException("ACTIVITY_NOT_FOUND", node.id(), node.id() + " has no activity "
+                    + command.activityId());
+        }
+        boolean running = !ctx.tree().live(scope.id()).isEmpty();
+        boolean closing = Boolean.TRUE.equals(scope.locals().get(WorkingContext.AD_HOC_DONE));
+        if (closing || running && node.ordering()
+                == io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocOrdering.SEQUENTIAL) {
+            throw new ExecutionException("ACTIVITY_NOT_ENABLED", node.id(), command.activityId() + " cannot start now: "
+                    + (closing ? "the completion condition holds and the running activities finish first"
+                    : "ordering is Sequential and another activity is running"));
+        }
+        Token flow = ctx.createToken(TokenKind.FLOW, command.activityId(), scope.id());
+        ctx.history("AD_HOC_ACTIVITY_STARTED", flow, Map.of("adHocId", node.id(), "activityId", command.activityId(),
+                "actor", String.valueOf(command.actor())));
+        ctx.enqueue(flow);
     }
 
     private void start(Command.Start start, WorkingContext ctx) {
@@ -307,8 +332,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
      */
     private void armBoundaries(FlowNode node, Token token, WorkingContext ctx) {
         for (BoundaryEvent boundary : process.boundariesOf(node.id())) {
-            if (boundary.eventDefinitions().size() != 1
-                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition)
+            if (boundary.eventDefinitions().stream().noneMatch(TimerEventDefinition.class::isInstance)
                     || ctx.hasLiveBoundaryToken(boundary, token.scopeTokenId())) {
                 continue;
             }
@@ -332,6 +356,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.Cancel c -> c.actor();
             case Command.RetryStep r -> r.actor();
             case Command.VariablesChanged v -> v.actor();
+            case Command.StartAdHocActivity a -> a.actor();
             default -> null;
         };
     }

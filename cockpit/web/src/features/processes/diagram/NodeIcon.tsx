@@ -84,6 +84,16 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <path d="M4 4l8 8M12 4l-8 8" {...common} />;
       case 'endEvent:cancel':
         return <path d="M4 4l8 8M12 4l-8 8" {...common} strokeWidth={2.4} />;
+      case 'adHocSubProcess':
+        return <><rect x="1.5" y="2.5" width="13" height="11" rx="2" {...common} /><path d="M4.5 10.5c1-2 2-2 3 0s2 2 3 0" {...common} /></>;
+      case 'intermediateCatchEvent:multiple':
+      case 'startEvent:multiple':
+      case 'boundaryEvent:multiple':
+        return <path d="M8 2l5.5 4.2-2.1 6.8H4.6L2.5 6.2z" {...common} />;
+      case 'intermediateCatchEvent:parallelMultiple':
+      case 'startEvent:parallelMultiple':
+      case 'boundaryEvent:parallelMultiple':
+        return <path d="M8 2.5v11M2.5 8h11" {...common} strokeWidth={2.2} />;
       case 'generic':
         return <><rect x="2" y="2" width="12" height="12" rx="2" {...common} strokeDasharray="2 2" /><path d="M6.5 6.2a1.6 1.6 0 113 .8c-.6.4-1.5.8-1.5 1.8M8 11.3v.1" {...common} /></>;
       default:

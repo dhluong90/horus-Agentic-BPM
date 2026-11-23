@@ -25,6 +25,9 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocOrdering;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ComplexGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
@@ -194,6 +197,9 @@ public final class SubsetBpmnWriter {
                     if (t.timeDate() != null && t.timeDate().text() != null) {
                         xml.line(lvl + 1, "<bpmn:timeDate>" + text(t.timeDate().text()) + "</bpmn:timeDate>");
                     }
+                    if (t.timeCycle() != null && t.timeCycle().text() != null) {
+                        xml.line(lvl + 1, "<bpmn:timeCycle>" + text(t.timeCycle().text()) + "</bpmn:timeCycle>");
+                    }
                     xml.line(lvl, "</bpmn:timerEventDefinition>");
                 }
                 case ErrorEventDefinition e -> xml.line(lvl, "<bpmn:errorEventDefinition"
@@ -260,7 +266,8 @@ public final class SubsetBpmnWriter {
         switch (node) {
             case StartEvent s -> {
                 tag = "bpmn:startEvent";
-                attributes.append(s.isInterrupting() ? "" : " isInterrupting=\"false\"");
+                attributes.append(s.isInterrupting() ? "" : " isInterrupting=\"false\"")
+                        .append(s.parallelMultiple() ? " parallelMultiple=\"true\"" : "");
             }
             case EndEvent e -> {
                 tag = "bpmn:endEvent";
@@ -268,10 +275,14 @@ public final class SubsetBpmnWriter {
             }
             case BoundaryEvent b -> {
                 tag = "bpmn:boundaryEvent";
-                attributes.append(optional("attachedToRef", b.attachedToRef()))
+                attributes.append(b.parallelMultiple() ? " parallelMultiple=\"true\"" : "")
+                        .append(optional("attachedToRef", b.attachedToRef()))
                         .append(b.cancelActivity() ? "" : " cancelActivity=\"false\"");
             }
-            case IntermediateCatchEvent c -> tag = "bpmn:intermediateCatchEvent";
+            case IntermediateCatchEvent c -> {
+                tag = "bpmn:intermediateCatchEvent";
+                attributes.append(c.parallelMultiple() ? " parallelMultiple=\"true\"" : "");
+            }
             case IntermediateThrowEvent t -> {
                 tag = "bpmn:intermediateThrowEvent";
                 inputs = t.extensions().all(InputMapping.class);
@@ -338,6 +349,15 @@ public final class SubsetBpmnWriter {
             }
             case Transaction t -> tag = "bpmn:transaction";
             case ParallelGateway g -> tag = "bpmn:parallelGateway";
+            case ComplexGateway g -> {
+                tag = "bpmn:complexGateway";
+                attributes.append(optional("default", g.defaultFlow()));
+            }
+            case AdHocSubProcess a -> {
+                tag = "bpmn:adHocSubProcess";
+                attributes.append(a.ordering() == AdHocOrdering.SEQUENTIAL ? " ordering=\"Sequential\"" : "")
+                        .append(a.cancelRemainingInstances() ? "" : " cancelRemainingInstances=\"false\"");
+            }
             case ExclusiveGateway g -> {
                 tag = "bpmn:exclusiveGateway";
                 attributes.append(optional("default", g.defaultFlow()));
@@ -357,6 +377,8 @@ public final class SubsetBpmnWriter {
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
         if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
                 && node.outgoing().isEmpty() && !(node instanceof SubProcess) && !(node instanceof Transaction)
+                && !(node instanceof AdHocSubProcess) && !(node instanceof ComplexGateway cg
+                        && cg.activationCondition() != null)
                 && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event e
                         && !e.eventDefinitions().isEmpty())) {
             xml.line(lvl, "<" + tag + attributes + "/>");
@@ -404,13 +426,27 @@ public final class SubsetBpmnWriter {
         node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
         definitions(xml, node, lvl + 1, refs);
+        if (node instanceof ComplexGateway g && g.activationCondition() != null) {
+            xml.line(lvl + 1, "<bpmn:activationCondition xsi:type=\"bpmn:tFormalExpression\" language="
+                    + attr(language(g.activationCondition())) + ">" + text(g.activationCondition().text())
+                    + "</bpmn:activationCondition>");
+        }
         if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer sub) {
             // #486, #488: the steps and flows of a sub-process or a transaction, nested one level deeper; the diagram is
             // generated for the top level only.
             sub.flowElements().forEach(inner -> flowElement(xml, inner, lvl + 1, refs));
             sub.artifacts().forEach(inner -> artifact(xml, inner, lvl + 1));
         }
+        if (node instanceof AdHocSubProcess a && a.completionCondition() != null) {
+            xml.line(lvl + 1, "<bpmn:completionCondition xsi:type=\"bpmn:tFormalExpression\" language="
+                    + attr(language(a.completionCondition())) + ">" + text(a.completionCondition().text())
+                    + "</bpmn:completionCondition>");
+        }
         xml.line(lvl, "</" + tag + ">");
+    }
+
+    private static String language(io.github.dhluong90.bpm.process.internal.model.bpmn.Expression e) {
+        return e.language() == null ? BpmnNamespaces.EXPR_V1 : e.language();
     }
 
     private static void artifact(Xml xml, Artifact artifact, int lvl) {
@@ -633,6 +669,7 @@ public final class SubsetBpmnWriter {
             case IntermediateCatchEvent c -> new int[] {36, 36};
             case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
+            case ComplexGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };
     }

@@ -1009,12 +1009,12 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
 - **Kind:** other
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
-  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
+  - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 4 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
   - `camunda:class` is a foreign extension and is not refused. It is listed under `warnings` as `FOREIGN_EXTENSION_IGNORED` with its namespace and line, and the stored source keeps it byte for byte. Warnings keep the item fields of a problem (`code`, `message`, `element`, `elementId`, `line`).
-  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `parallelMultiple="true"` (`S3`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
+  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
   - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
   - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` throw is `S2` (a message throw is supported, `PRE-235`), an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
@@ -2229,3 +2229,85 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - A call activity pushes the entry of its boundary's compensation activity when the child completes, with the child's id, as a `horus:compensate` handler does. A compensation event sub-process needs a sub-process or transaction, one service task with `horus:handler`, and no compensation boundary event beside it (`COMPENSATION_HANDLER_SCOPE`, `COMPENSATION_EVENT_SUBPROCESS_SHAPE`, `COMPENSATION_DUPLICATE`).
 - **Example:** `disburse ends -> push release-funds, then reverse-disbursement; a later undo runs reverse-disbursement, release-funds`.
 - **Test ID:** `PRE_326_a_compensation_event_sub_process_pushes_the_undo_of_its_sub_process_when_it_completes`, `PRE_326_a_compensation_boundary_event_on_a_sub_process_or_a_call_activity_names_its_undo`, `PRE_326_a_compensation_event_sub_process_has_one_undo_task_in_a_sub_process_that_has_no_other_undo` (`EventSubProcessTest`)
+
+### PRE-330 A complex gateway joins on its activation condition, fires once, absorbs the late token, and splits on its outgoing conditions
+- **Traces to:** `TR-STD-04`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A payment of VND 2,500,000,000 that three approvers (`branch-a`, `branch-b`, `branch-c`) may sign after a parallel fork, joined by a complex gateway with the activation condition `_activationCount >= 2` and one outgoing flow to the task `release`; and a transfer routed by a complex gateway with the condition `amount > 1000000000` to `review` and a default flow to `auto`.
+- **When:** `branch-a`, then `branch-b`, then `branch-c` complete; a transfer of VND 2,500,000,000 and one of VND 5,000,000 start; a join whose condition is `_activationCount > 3` receives its third token.
+- **Then:**
+  - Each arriving token is held `JOINED` and counted; `_activationCount` is the number held. After `branch-a` nothing leaves; after `branch-b` the condition holds and one token leaves, so `release` opens once; the token of `branch-c` is absorbed and opens nothing. When every incoming flow has delivered its token the gateway resets for the next round.
+  - A gateway without an activation condition fires when every incoming flow has delivered, like a parallel join. A gateway with one incoming flow only splits.
+  - The split takes every outgoing flow whose condition holds, else the default flow; the large transfer opens `review`, the small one `auto`. No true condition and no default is `NO_PATH`.
+  - A join whose condition is still false when every incoming flow has delivered fails the step with `ACTIVATION_CONDITION_FALSE` instead of waiting for ever.
+- **Example:** `two of three signatures -> release once; the third is absorbed`.
+- **Test ID:** `PRE_330_a_complex_join_fires_once_when_its_condition_is_met_and_absorbs_the_late_token`, `PRE_330_a_complex_gateway_splits_on_its_outgoing_conditions_and_falls_back_to_the_default_flow`, `PRE_330_a_complex_join_whose_condition_never_holds_fails_the_step_instead_of_stalling` (`ComplexAdHocMultipleTest`)
+
+### PRE-331 An ad-hoc sub-process runs the activities its host starts, in any order its `ordering` allows, until its completion condition holds
+- **Traces to:** `TR-STD-04`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding` with the ad-hoc sub-process `onboarding` holding the activities `collect-id`, `screen-sanctions` and `call-referee`, no sequence flow between them, the completion condition `idCheck.passed == true`, and the task `open-account` after it.
+- **When:** The instance enters `onboarding`; the host starts `collect-id` and `screen-sanctions` side by side (Parallel) and `collect-id` completes with `passed` true; or completes with `passed` false and is started again; or, with ordering Sequential, a second activity is started while one runs; or the condition is left out and each activity completes once.
+- **Then:**
+  - Entering the sub-process opens a scope and runs nothing. An activity runs only when the host starts it, with `StartAdHocActivity`; an activity that does not stand in the sub-process is `ACTIVITY_NOT_FOUND`.
+  - With Parallel ordering any number of activities may run; with Sequential one at a time, and a start while another runs is `ACTIVITY_NOT_ENABLED`.
+  - When an activity ends the condition is asked. True cancels the activities still running with their work items (`cancelRemainingInstances`, true by default; false lets them finish first) and the token leaves by the outgoing flow. False leaves the sub-process open and an activity may run again.
+  - Without a completion condition the sub-process ends when nothing runs and every activity has completed once.
+  - An ad-hoc sub-process holds activities and no sequence flow, event, gateway or boundary event (`AD_HOC_HAS_FLOW`, `AD_HOC_CONTENT_INVALID`, `AD_HOC_EMPTY`).
+- **Example:** `identity check passed -> screening cancelled, account opening starts`.
+- **Test ID:** `PRE_331_an_ad_hoc_sub_process_starts_nothing_until_the_host_starts_an_activity`, `PRE_331_with_parallel_ordering_the_condition_cancels_the_remaining_activities_and_the_flow_goes_on`, `PRE_331_a_false_condition_leaves_the_sub_process_open_and_an_activity_may_run_again`, `PRE_331_with_sequential_ordering_a_second_activity_is_not_enabled_while_one_runs`, `PRE_331_without_a_condition_the_sub_process_ends_when_every_activity_has_completed_once` (`ComplexAdHocMultipleTest`)
+
+### PRE-332 A multiple event fires on any one of its definitions, a parallel multiple event on all of them
+- **Traces to:** `TR-STD-04`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A payment that waits at an intermediate catch event for the signal `rate-card-updated` or the message `funds-received`; the same event with `parallelMultiple="true"`; a service task `charge` with a boundary event holding a timer of one hour and an error; an event sub-process whose start event holds a timer of 24 hours and the message `funds-received`.
+- **When:** The funds arrive; only the signal arrives and then the funds; the timer of the boundary falls due; the timer of the event sub-process falls due.
+- **Then:**
+  - The event waits with one token per definition, each parked by the behaviour of that definition: a subscription for the signal and the message, a job for a timer, the condition asked again when variables change. A multiple event moves on at the first occurrence and drops the other waits (the signal subscription is deleted); a parallel multiple event holds each occurrence and moves on when the last one has occurred.
+  - A boundary event with a timer and an error fires on either: the timer interrupts the activity, and an error is found when it is thrown. An event sub-process with several triggers starts on the first one and the other waits go.
+  - A multiple event holds timer, message, signal or conditional definitions (a process start event: message and signal only, and never parallel, because no instance exists to wait in; a boundary event: timer, error and escalation, and parallel only with timers) and one message at most (`MULTIPLE_EVENT_DEFINITION_INVALID`, `MULTIPLE_EVENT_MESSAGE_ONCE`).
+- **Example:** `funds received -> the payment moves on, the signal wait is deleted`.
+- **Test ID:** `PRE_332_a_multiple_catch_event_fires_on_the_first_definition_and_drops_the_other_wait`, `PRE_332_a_parallel_multiple_catch_event_waits_until_every_definition_has_occurred`, `PRE_332_a_multiple_boundary_event_fires_on_its_timer_and_interrupts_the_activity`, `PRE_332_a_multiple_start_of_an_event_sub_process_fires_on_one_trigger_and_drops_the_other` (`ComplexAdHocMultipleTest`)
+
+### PRE-333 A timer cycle on the start event of an event sub-process repeats a non-interrupting one for its count
+- **Traces to:** `TR-STD-04`, #487, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-application` with a reminder event sub-process, `isInterrupting="false"`, started by `timeCycle` `R2/PT24H`.
+- **When:** The first timer fires, then the second.
+- **Then:** Each firing starts the reminder; the first schedules the next timer one interval later, the second schedules none. `R/PT1H` has no end. An interrupting one fires once. A `timeCycle` anywhere else is refused (`TIMER_CYCLE_MISPLACED`; on a catch or boundary event `S1`).
+- **Example:** `R2/PT24H -> reminder at +24 h and +48 h, then no timer`.
+- **Test ID:** `PRE_333_a_timer_cycle_start_repeats_a_non_interrupting_event_sub_process_for_its_count` (`ComplexAdHocMultipleTest`)
+
+### PRE-334 A misplaced ad-hoc sub-process or multiple event is refused with its code
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** An ad-hoc sub-process with a sequence flow between two activities; a process start event with `parallelMultiple="true"`; a multiple catch event with two message definitions.
+- **When:** Each is imported.
+- **Then:** `AD_HOC_HAS_FLOW` naming the flow, `MULTIPLE_EVENT_DEFINITION_INVALID` naming the start event, `MULTIPLE_EVENT_MESSAGE_ONCE` naming the catch event; nothing is stored.
+- **Example:** `parallel multiple process start -> MULTIPLE_EVENT_DEFINITION_INVALID`.
+- **Test ID:** `PRE_334_a_misplaced_ad_hoc_sub_process_or_multiple_event_is_refused_with_its_code` (`ComplexAdHocMultipleTest`)
+
+### PRE-335 A complex gateway, an ad-hoc sub-process and a multiple event export and read back to the same definition
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #500
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process with a complex gateway and its activation condition, one with a Sequential ad-hoc sub-process with `cancelRemainingInstances="false"`, and one with a parallel multiple catch event.
+- **When:** Each is read, exported as BPMN and read again.
+- **Then:** The canonical definition, and so the hash, is the same: the activation condition, the ordering, the completion condition and the cancel flag, and every definition of a multiple event with `parallelMultiple`, are part of it.
+- **Example:** `ordering Sequential survives the export`.
+- **Test ID:** `PRE_335_the_export_of_each_element_reads_back_to_the_same_definition` (`ComplexAdHocMultipleTest`)
+
+### PRE-336 Starting an ad-hoc activity needs `processes:task:manage`, is idempotent, and cancels what the completion condition leaves
+- **Traces to:** `TR-SEC-02`, `TR-IDEM-01`, #500
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `customer-onboarding` entered by an officer who holds `processes:start` and `processes:task:work`, and a branch manager who holds `processes:task:manage`.
+- **When:** The officer starts `collect-id`; the manager starts `collect-id` twice with the same `Idempotency-Key` and then `screen-sanctions`; the officer completes the identity check as passed.
+- **Then:** The officer is refused with `403 PERMISSION_DENIED` and nothing changes. The manager's replay returns the first answer and opens one task. The completion cancels the screening task in the same transaction and opens `open-account`. The REST action is `POST /instances/{id}:start-ad-hoc-activity` with `If-Match` and `Idempotency-Key`; a missing one is `428`.
+- **Example:** `officer-lan -> 403; manager-hoa -> collect-id opens once`.
+- **Test ID:** `PRE_336_the_operator_starts_activities_with_task_manage_and_the_condition_cancels_the_rest` (`AdHocPostgresIT`)

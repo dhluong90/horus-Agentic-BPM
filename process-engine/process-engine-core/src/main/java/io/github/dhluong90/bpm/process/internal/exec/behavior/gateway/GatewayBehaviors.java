@@ -10,6 +10,6 @@ public final class GatewayBehaviors implements BehaviorModule {
 
     @Override
     public void register(BehaviorRegistry registry) {
-        // Owned by the gateway stream.
+        registry.register(new ComplexGatewayBehavior()).compileStep(new ComplexGatewayBehavior.ArityStep());
     }
 }

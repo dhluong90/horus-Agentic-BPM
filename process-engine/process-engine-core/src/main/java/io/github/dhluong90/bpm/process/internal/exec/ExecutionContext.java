@@ -60,6 +60,16 @@ public interface ExecutionContext {
     void complete(Token token);
 
     /**
+     * Cancels one flow token with the work it waits on: its task, job or subscription (#500). A token that already
+     * ended, or that was held back by a join, is left as it is or marked {@code CANCELLED}.
+     *
+     * @param token the token
+     */
+    default void cancelToken(Token token) {
+        throw new UnsupportedOperationException("cancelToken");
+    }
+
+    /**
      * Cancels a scope token and everything under it: tokens, tasks, jobs and subscriptions.
      *
      * @param scope the scope token

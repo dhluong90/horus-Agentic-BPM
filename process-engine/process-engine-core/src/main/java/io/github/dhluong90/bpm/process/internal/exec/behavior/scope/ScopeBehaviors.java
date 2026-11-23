@@ -15,6 +15,7 @@ public final class ScopeBehaviors implements BehaviorModule {
     public void register(BehaviorRegistry registry) {
         registry.register(new SagaBehavior());
         registry.register(new SubProcessBehavior());
+        registry.register(new AdHocSubProcessBehavior());
         registry.register(new ThrowCompensationBehavior());
         registry.register(new CompensationEndBehavior.Compensate());
         registry.register(new CompensationEndBehavior.Cancel());

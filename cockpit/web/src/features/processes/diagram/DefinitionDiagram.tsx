@@ -263,7 +263,7 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
 
 function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const centre = symbolCentre(node);
-  const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : undefined;
+  const glyph = node.type === 'exclusiveGateway' ? '×' : node.type === 'parallelGateway' ? '+' : node.type === 'inclusiveGateway' ? '○' : node.type === 'complexGateway' ? '✳' : undefined;
   // #489, #493: a boundary event sits on its activity with a double ring, dashed when it does not interrupt; an end event
   // that raises or terminates carries its symbol inside the thick ring.
   const boundary = node.type.startsWith('boundaryEvent');
