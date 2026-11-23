@@ -140,6 +140,8 @@ export const pendingRuleApproval = z
     /** The requester as a screen shows them, in the caller's language; the id when the host knows no name (#442). */
     requestedByName: z.string().min(1).optional(),
     requestedAt: z.string(),
+    /** The date the requester asked the version to take effect; null means at approval (RLE-210, #470). */
+    effectiveFrom: nullableString,
     allowedActions: z.array(z.string()),
     deniedActions: z.object({ approve: z.string().optional(), reject: z.string().optional() }).loose(),
   })

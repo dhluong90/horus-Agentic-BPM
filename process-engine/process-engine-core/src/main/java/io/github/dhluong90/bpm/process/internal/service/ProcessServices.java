@@ -1344,6 +1344,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#pendingApprovals(PageRequest)}. */
     public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page) {
+        return pendingApprovals(page, List.of());
+    }
+
+    /**
+     * The pending approvals list with other kinds of proposal beside the definition versions (#473): each source is
+     * read after the same keyset position and the results are merged on {@code (requestedAt, id)}, so a page is the
+     * oldest {@code limit} proposals of all kinds and the cursor is the position of the last one.
+     *
+     * @param page the page request
+     * @param sources the other kinds, in any order
+     * @return the page
+     */
+    public Page<io.github.dhluong90.bpm.process.api.PendingApproval> pendingApprovals(PageRequest page,
+            List<PendingApprovalSource> sources) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_READ);
         PageRequest request = page == null ? PageRequest.first() : page;
@@ -1369,12 +1383,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         java.util.Set<String> held = callers.currentPermissions();
         List<ProcessStore.PendingApprovalRow> rows = transactions.inTransaction(() -> store.pendingApprovals(tenant,
                 lastAt, lastId, limit + 1));
-        List<io.github.dhluong90.bpm.process.api.PendingApproval> items = rows.stream().limit(limit)
-                .map(r -> pendingApproval(r, caller, held)).toList();
-        if (rows.size() <= limit) {
+        List<io.github.dhluong90.bpm.process.api.PendingApproval> all = new ArrayList<>(rows.stream()
+                .map(r -> pendingApproval(r, caller, held)).toList());
+        for (PendingApprovalSource source : sources) {
+            all.addAll(transactions.inTransaction(() -> source.pending(tenant, caller, held, lastAt, lastId,
+                    limit + 1)));
+        }
+        if (!sources.isEmpty()) {
+            all.sort(java.util.Comparator.comparing(io.github.dhluong90.bpm.process.api.PendingApproval::requestedAt)
+                    .thenComparing(io.github.dhluong90.bpm.process.api.PendingApproval::id));
+        }
+        List<io.github.dhluong90.bpm.process.api.PendingApproval> items = all.stream().limit(limit).toList();
+        if (all.size() <= limit) {
             return new Page<>(items, null);
         }
-        ProcessStore.PendingApprovalRow last = rows.get(limit - 1);
+        io.github.dhluong90.bpm.process.api.PendingApproval last = items.get(limit - 1);
         return new Page<>(items, cursors().sign(tenant, "", "pending-approvals", last.requestedAt() + "|" + last.id()));
     }
 
@@ -1408,9 +1431,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 allowed.add(reject);
             }
         }
-        return new io.github.dhluong90.bpm.process.api.PendingApproval(row.key(), row.name(), row.version(),
-                row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed, denied,
-                displayName(row.requestedBy()));
+        return io.github.dhluong90.bpm.process.api.PendingApproval.definition(row.id(), row.key(), row.name(),
+                row.version(), row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed,
+                denied, displayName(row.requestedBy()));
     }
 
     /** A user's readable name from the host (#442); a lookup that fails leaves the id to show. */

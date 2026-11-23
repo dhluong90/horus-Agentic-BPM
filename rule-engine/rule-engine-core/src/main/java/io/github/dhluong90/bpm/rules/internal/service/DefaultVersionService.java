@@ -41,6 +41,7 @@ import io.github.dhluong90.bpm.rules.api.VersionNotFoundException;
 import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionActions;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
+import io.github.dhluong90.bpm.rules.api.EffectiveDateInPastException;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
 import io.github.dhluong90.bpm.rules.api.VersionWarning;
@@ -598,12 +599,18 @@ public final class DefaultVersionService implements VersionService {
         if (reportId != null && (reportId.isBlank() || reportId.length() > MAX_REPORT_ID_LENGTH)) {
             throw new InputInvalidException("simulationReportId must be 1 to " + MAX_REPORT_ID_LENGTH + " characters");
         }
-        // The report joins the request hash only when named, so a request stored before this field existed replays.
-        String requestHash = reportId == null
-                ? Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
-                        String.valueOf(opts.expectedLockVersion()))
-                : Hashes.sha256Parts("request-publish", actor, ruleSet, Integer.toString(version),
-                        String.valueOf(opts.expectedLockVersion()), reportId);
+        // The report and the date join the request hash only when named, so a request stored before these fields
+        // existed replays.
+        Instant requestedDate = opts.effectiveFrom();
+        java.util.List<String> parts = new java.util.ArrayList<>(java.util.List.of("request-publish", actor, ruleSet,
+                Integer.toString(version), String.valueOf(opts.expectedLockVersion())));
+        if (reportId != null) {
+            parts.add(reportId);
+        }
+        if (requestedDate != null) {
+            parts.add("effectiveFrom=" + requestedDate);
+        }
+        String requestHash = Hashes.sha256Parts(parts.toArray(String[]::new));
         return context.idempotent(tenant, "request-publish", opts.idempotencyKey(), requestHash, 200, () -> {
             StoredVersion current = load(tenant, ruleSet, version);
             if (current.status() != VersionStatus.DRAFT) {
@@ -619,7 +626,12 @@ public final class DefaultVersionService implements VersionService {
             // A draft imported before strict mode was turned on is checked again before anyone can approve it.
             requireMaskDeclarations(tenant, current.canonicalJson());
             Instant now = context.clock().instant();
-            StoredVersion updated = current.requested(actor, now);
+            // RLE-210: an explicit date cannot be before the request; checked before anything is written.
+            if (requestedDate != null && requestedDate.isBefore(now)) {
+                throw new EffectiveDateInPastException(ruleSet, version, requestedDate, now);
+            }
+            StoredVersion updated = requestedDate == null ? current.requested(actor, now)
+                    : current.requested(actor, now, requestedDate);
             store.updateVersion(updated, current.lockVersion());
             history(updated, LifecycleAction.REQUESTED, current.status(), actor, null, now);
             if (reportId != null) {
@@ -1057,7 +1069,7 @@ public final class DefaultVersionService implements VersionService {
                 return new PendingApproval(v.ruleSet(), v.version(), v.canonicalHash(), v.lockVersion(),
                         v.requestedBy(), v.requestedAt(), allowed,
                         VersionActions.pendingDenials(v.createdBy(), v.requestedBy(), caller, permissions),
-                        displayName(v.requestedBy()));
+                        displayName(v.requestedBy()), v.effectiveFrom());
             }).toList();
             if (rows.size() <= limit) {
                 return new Page<>(items, null);

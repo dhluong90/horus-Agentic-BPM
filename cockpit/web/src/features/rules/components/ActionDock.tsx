@@ -8,7 +8,7 @@ import { formatDateTime } from '../model/dates';
 import { toHostError } from '../../../api/hostError';
 import { asksForReview } from '../../processes/approval/ApprovalDock';
 import { PersonalDataWarnings } from './PersonalDataWarnings';
-import { RequestPublishDialog } from './RequestPublishDialog';
+import { RequestPublishDialog, type PublishArgs } from './RequestPublishDialog';
 import { ProblemNotice } from './ProblemNotice';
 
 export interface Action<TArgs = void> {
@@ -60,7 +60,7 @@ function EditButton({ version, onEdit }: { version: RuleSetVersion; onEdit: () =
  * Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen: where the
  * view has its own focal action (the Simulate view's Run), Request publish is drawn secondary.
  */
-export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDiscarded, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action<string | undefined>; onDiscarded: (discarded: DiscardedVersion) => void; demoteRequest?: boolean }) {
+export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDiscarded, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action<PublishArgs>; onDiscarded: (discarded: DiscardedVersion) => void; demoteRequest?: boolean }) {
   const { t } = useI18n();
   const session = useRulesSession();
   // Every edit is of a stored draft: it needs rules:author, and the host may keep changes in its release pipeline.
@@ -77,11 +77,15 @@ export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDis
         {edit}
         {canRequest ? (
           <button type="button" className={demoteRequest ? 'btn' : 'btn btn--primary'} disabled={requestPublish.isPending} aria-busy={requestPublish.isPending}
-            onClick={() => { if (needsReport) setAsking(true); else requestPublish.start(undefined); }}>
+            onClick={() => { if (needsReport) setAsking(true); else requestPublish.start({ report: undefined, effectiveFrom: undefined }); }}>
             {requestPublish.isPending && !asking ? t('dock.requesting') : t('dock.requestPublish')}
           </button>
         ) : null}
-        {asking && needsReport ? <RequestPublishDialog version={version} request={requestPublish} onClose={() => { setAsking(false); }} /> : null}
+        {/* RLE-210: a start date is optional, so the one-click request stays and a quiet button opens the dialog. */}
+        {canRequest && !needsReport ? (
+          <button type="button" className="btn btn--quiet" disabled={requestPublish.isPending} onClick={() => { setAsking(true); }}>{t('dock.chooseDate')}</button>
+        ) : null}
+        {asking ? <RequestPublishDialog version={version} request={requestPublish} needsReport={needsReport} onClose={() => { setAsking(false); }} /> : null}
       </>
     );
   }

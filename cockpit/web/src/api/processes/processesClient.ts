@@ -5,7 +5,10 @@ import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
   definitionVersion,
+  calendarChange,
+  calendarChangePage,
   pendingDefinitionApprovalPage,
+  type CalendarChange,
   type PendingDefinitionApproval,
   graphDiff,
   migrationDryRun,
@@ -139,8 +142,16 @@ export interface ProcessesClient {
   checkMigrationPlan(id: string, signal?: AbortSignal): Promise<MigrationDryRun>;
   /** proposeMigrationExecution: asks a second person to approve moving the instances, with a reason */
   proposeMigration(id: string, reason: string, idempotencyKey: string): Promise<MigrationExecution>;
-  /** approveMigrationExecution: as a second person; `lockVersion` is the proposal the approver was shown */
-  approveMigration(id: string, lockVersion: number, idempotencyKey: string): Promise<MigrationExecution>;
+  /** approveMigrationExecution: as a second person; `lockVersion` is the proposal the approver was shown, `expectedPlanHash` the plan hash of the item they were shown (PD-139) */
+  approveMigration(id: string, lockVersion: number, idempotencyKey: string, expectedPlanHash?: string): Promise<MigrationExecution>;
+  /** listCalendarChanges: the pending changes of the business calendars, newest first (PRE-181) */
+  listCalendarChanges(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<CalendarChange>>;
+  /** getCalendarChange: one change with its old and new value */
+  getCalendarChange(id: string, signal?: AbortSignal): Promise<CalendarChange>;
+  /** approveCalendarChange: as a second person, bound to the change hash the approver was shown (PD-139) */
+  approveCalendarChange(id: string, request: { comment: string; expectedChangeHash: string }, idempotencyKey: string): Promise<CalendarChange>;
+  /** rejectCalendarChange: the calendar stays as it is; the comment says why */
+  rejectCalendarChange(id: string, comment: string, idempotencyKey: string): Promise<CalendarChange>;
   /** rejectMigrationExecution: back to the proposer with a reason */
   rejectMigration(id: string, lockVersion: number, reason: string, idempotencyKey: string): Promise<MigrationExecution>;
   /** getMigrationExecution: the proposal, the approval and the progress */
@@ -322,8 +333,27 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:execute`, headers: { 'Idempotency-Key': idempotencyKey }, body }, migrationExecution)).data;
     },
-    async approveMigration(id, lockVersion, idempotencyKey) {
-      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:approve`, headers: command(lockVersion, idempotencyKey) }, migrationExecution)).data;
+    async approveMigration(id, lockVersion, idempotencyKey, expectedPlanHash) {
+      // A body only with a plan hash: an approval without one is the approval of a client written before #473.
+      const body = expectedPlanHash === undefined ? {} : { body: { contentType: 'application/json', text: JSON.stringify({ expectedPlanHash }) } };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:approve`, headers: command(lockVersion, idempotencyKey), ...body }, migrationExecution)).data;
+    },
+    async listCalendarChanges(request = {}) {
+      const query = new URLSearchParams({ status: 'PENDING' });
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/calendar-changes?${query.toString()}`, ...withSignal(request.signal) }, calendarChangePage)).data;
+    },
+    async getCalendarChange(id, signal) {
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/calendar-changes/${segment(id)}`, ...withSignal(signal) }, calendarChange)).data;
+    },
+    async approveCalendarChange(id, request, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ comment: request.comment, expectedChangeHash: request.expectedChangeHash }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/calendar-changes/${segment(id)}:approve`, headers: { 'Idempotency-Key': idempotencyKey }, body }, calendarChange)).data;
+    },
+    async rejectCalendarChange(id, comment, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ comment }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/calendar-changes/${segment(id)}:reject`, headers: { 'Idempotency-Key': idempotencyKey }, body }, calendarChange)).data;
     },
     async rejectMigration(id, lockVersion, reason, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };

@@ -40,6 +40,8 @@ export type Route =
   | { name: 'process'; key: string; version: number; lens?: ProcessLens | undefined }
   | { name: 'migrate'; key: string; version: number; from?: number | undefined }
   | { name: 'migration'; migrationId: string }
+  | { name: 'calendar-changes' }
+  | { name: 'calendar-change'; changeId: string }
   | { name: 'instance'; instanceId: string }
   | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined; overdue?: boolean | undefined; scope?: Scope | undefined; on?: string | undefined }
   | { name: 'task'; taskId: string }
@@ -90,6 +92,8 @@ export function areaOf(route: Route): Area {
     case 'process':
     case 'migrate':
     case 'migration':
+    case 'calendar-changes':
+    case 'calendar-change':
     case 'instance':
       return 'processes';
     case 'task':
@@ -144,6 +148,7 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
     return isProcessLens(lens) ? { name: 'process', key: ruleSet, version: Number(version), lens } : { name: 'process', key: ruleSet, version: Number(version) };
   }
   if (area === 'migrations' && ruleSet !== undefined) return { name: 'migration', migrationId: ruleSet };
+  if (area === 'calendar-changes') return ruleSet !== undefined ? { name: 'calendar-change', changeId: ruleSet } : { name: 'calendar-changes' };
   if (area === 'instances' && ruleSet !== undefined) return { name: 'instance', instanceId: ruleSet };
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
   if (area === 'tasks') return queueRoute(new URLSearchParams(search));
@@ -215,6 +220,8 @@ export function formatRoute(route: Route): string {
       return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}/move${route.from !== undefined ? `?from=${String(route.from)}` : ''}`;
     case 'migration':
       return `#/migrations/${encodeURIComponent(route.migrationId)}`;
+    case 'calendar-change':
+      return `#/calendar-changes/${encodeURIComponent(route.changeId)}`;
     case 'instance':
       return `#/instances/${encodeURIComponent(route.instanceId)}`;
     case 'task':

@@ -46,6 +46,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 400 | [CONTENT_HASH_REQUIRED](#content_hash_required) | processes | 0.3.0 |
 | 409 | [CONTENT_CHANGED](#content_changed) | processes | 0.3.0 |
 | 409 | [CHANGE_SET_TRUNCATED](#change_set_truncated) | processes | 0.3.0 |
+| 422 | [EFFECTIVE_DATE_IN_PAST](#effective_date_in_past) | rules | 0.3.0 |
 | 422 | [OUTPUT_INVALID](#output_invalid) | processes | 0.3.0 |
 | 422 | [LAYOUT_INVALID](#layout_invalid) | processes | 0.3.0 |
 | 422 | [MIGRATION_PLAN_INVALID](#migration_plan_invalid) | processes | 0.3.0 |
@@ -155,6 +156,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### SIMULATION_REPORT_NOT_FOUND
 `404`. The version has no report with that id in your tenant. It is the same answer for a report of another tenant, another rule set or another version, so the code never says whether one exists.
+
+### EFFECTIVE_DATE_IN_PAST
+`422`. The `:request-publish` body asks for an `effectiveFrom` before the time of the request. Nothing was written and the draft stays a draft. Send the current time or a later one, or leave the date out so the version takes effect at approval.
 
 ### AUTHOR_UNKNOWN
 `409`. The pending rule set version has no recorded author, so four eyes cannot tell whether the approver made it (PD-105). Only versions written before the author was recorded (schema V2) have none. Nobody can approve it, and the engine never assigns an author. Import the change again, which records you as its author, and have someone else approve that version; reject or withdraw the old one.

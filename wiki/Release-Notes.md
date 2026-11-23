@@ -13,6 +13,11 @@ Every release note lists the database migrations it adds (TR-OPS-01) and the "sh
 
 What `main` holds for the next release. It is still a 0.x release, so it makes no compatibility promise.
 
+- **Effective date on request publish (#470, RLE-210).** `:request-publish` takes an optional `effectiveFrom`; the version takes effect on that date once approved. A date before the request is `422 EFFECTIVE_DATE_IN_PAST`; the date is fixed once requested, is not part of the content hash, and `GET /approvals` items of the Rule Engine carry it so the approver sees it.
+- The cockpit adds Choose a start date beside Request publish and shows the date in the approvals preview. No migration.
+- **Migration plans and calendar changes in the approvals queue (#473, PRE-254).** `GET /approvals` of the Process Engine also lists proposed migration plans and pending calendar changes (`kind`, `id`, `contentHash`, `reason`), oldest first, four eyes kept. `:approve` of a migration takes optional `expectedPlanHash`, of a calendar change `expectedChangeHash`; another value is `409 CONTENT_CHANGED`. `GET /calendar-changes/{id}` adds `contentHash`.
+- The cockpit queue shows both kinds, and Processes gets a Calendar changes list and review. Migration V49 adds two partial indexes, built concurrently.
+
 - **Overdue time on task items (#472, PD-111).** Items of `GET /tasks` now carry `slaState` (`NONE`, `ON_TIME`, `DUE_SOON`, `BREACHED`) and `overdueBy`, an ISO 8601 duration in whole minutes since `dueAt`, null unless breached, both computed by the engine at query time. New setting `horus.bpm.processes.query.due-soon-window` (`PT1H`). Additive; no migration.
 - **Tenant display names in `/me` (#474).** `GET /api/bpm/me` adds `tenant.names`, a display name for each tenant the caller may switch to and for no other, from `horus.bpm.display-names.tenants.<id>.<language>` or the new default method `DisplayNames.tenant(tenantId, locale)`. Additive; hosts that set nothing see no change; no migration.
 - **Plain, manual and script tasks (#485).** `task` and `manualTask` pass the token on; `scriptTask` runs one expression (1,000 characters, 500 steps, no host code) into `horus:resultVariable`; FEEL scripts follow.

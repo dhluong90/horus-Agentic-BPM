@@ -178,6 +178,16 @@ public final class JdbcCalendarStore implements CalendarStore {
     }
 
     @Override
+    public List<ChangeRow> pendingChangesOldestFirst(String tenant, Instant afterAt, String afterId, int limit) {
+        if (afterAt == null) {
+            return ProcessListQueries.PENDING_CALENDAR_CHANGES.list(jdbc, List.of(tenant, limit),
+                    JdbcCalendarStore::change);
+        }
+        return ProcessListQueries.PENDING_CALENDAR_CHANGES_AFTER.list(jdbc, List.of(tenant, ts(afterAt), afterId, limit),
+                JdbcCalendarStore::change);
+    }
+
+    @Override
     public Optional<ProcessStore.IdempotencyRecord> idempotency(String tenant, String operation, String key,
             Instant now) {
         return jdbc.sql("SELECT tenant_id, operation, idempotency_key, request_hash, response_body::text AS body, "

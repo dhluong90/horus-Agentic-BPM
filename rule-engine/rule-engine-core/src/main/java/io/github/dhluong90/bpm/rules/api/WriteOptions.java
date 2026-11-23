@@ -20,15 +20,35 @@ import java.util.List;
  * @param simulationReportId on {@code request-publish} only: the id of a simulation report of this version to attach to
  *     the request (PD-115, RLE-201); optional, but required for a rule set the host lists in
  *     {@code lifecycle.require-simulation-report}
+ * @param effectiveFrom on {@code request-publish} only: the instant the version should take effect (RLE-210, #470);
+ *     optional (null: the date in the document, else at approval); a past instant is {@code EFFECTIVE_DATE_IN_PAST}
  */
 public record WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId,
         String expectedCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings,
-        String simulationReportId) {
+        String simulationReportId, java.time.Instant effectiveFrom) {
 
     private static final WriteOptions NONE = new WriteOptions(null, null, null);
 
     public WriteOptions {
         acknowledgedWarnings = acknowledgedWarnings == null ? List.of() : List.copyOf(acknowledgedWarnings);
+    }
+
+    /**
+     * Creates options without an effective date.
+     *
+     * @param idempotencyKey see the record
+     * @param expectedLockVersion see the record
+     * @param comment see the record
+     * @param correlationId see the record
+     * @param expectedCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param simulationReportId see the record
+     */
+    public WriteOptions(String idempotencyKey, Long expectedLockVersion, String comment, String correlationId,
+            String expectedCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings,
+            String simulationReportId) {
+        this(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash, acknowledgedWarnings,
+                simulationReportId, null);
     }
 
     /**
@@ -111,7 +131,7 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions withCorrelationId(String id) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, id, expectedCanonicalHash,
-                acknowledgedWarnings, simulationReportId);
+                acknowledgedWarnings, simulationReportId, effectiveFrom);
     }
 
     /**
@@ -122,7 +142,7 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions acknowledging(List<AcknowledgedWarning> warnings) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash,
-                warnings, simulationReportId);
+                warnings, simulationReportId, effectiveFrom);
     }
 
     /**
@@ -133,7 +153,7 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions expectingContent(String canonicalHash) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, canonicalHash,
-                acknowledgedWarnings, simulationReportId);
+                acknowledgedWarnings, simulationReportId, effectiveFrom);
     }
 
     /**
@@ -144,6 +164,17 @@ public record WriteOptions(String idempotencyKey, Long expectedLockVersion, Stri
      */
     public WriteOptions withSimulationReport(String reportId) {
         return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash,
-                acknowledgedWarnings, reportId);
+                acknowledgedWarnings, reportId, effectiveFrom);
+    }
+
+    /**
+     * Returns a copy that asks a publication request to take effect at this instant (RLE-210, #470).
+     *
+     * @param instant the instant; not before the request time
+     * @return the options
+     */
+    public WriteOptions withEffectiveFrom(java.time.Instant instant) {
+        return new WriteOptions(idempotencyKey, expectedLockVersion, comment, correlationId, expectedCanonicalHash,
+                acknowledgedWarnings, simulationReportId, instant);
     }
 }

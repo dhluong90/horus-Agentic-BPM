@@ -390,7 +390,7 @@ final class InMemoryStores implements RuleStore, DecisionLog, EventOutbox, Idemp
                 .limit(limit)
                 .map(v -> new io.github.dhluong90.bpm.rules.internal.store.PendingVersion(v.id(), v.ruleSet(),
                         v.version(), v.canonicalHash(), v.lockVersion(), v.createdBy(), v.requestedBy(),
-                        v.requestedAt())).toList();
+                        v.requestedAt(), v.effectiveFrom())).toList();
     }
 
     @Override

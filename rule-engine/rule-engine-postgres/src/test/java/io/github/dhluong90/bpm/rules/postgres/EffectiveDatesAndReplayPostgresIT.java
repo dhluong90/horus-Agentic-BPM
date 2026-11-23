@@ -115,6 +115,36 @@ class EffectiveDatesAndReplayPostgresIT {
             "balance", Money.ofMinor("VND", 1_250_000), "openedOn", LocalDate.of(2024, 3, 9)));
 
     @Test
+    void RLE_210_a_date_asked_for_at_request_decides_which_version_is_in_force_and_a_past_date_is_refused() {
+        // Given v1 in force from 1 Nov and a draft v2 whose document names no date; lan requests it for 1 Dec at 25 Nov
+        publish("bank-a", cardFee("2026-11-01T00:00:00Z", "50000 VND"), Instant.parse("2026-10-20T00:00:00Z"));
+        caller.as("bank-a", "lan", AUTHOR);
+        byte[] undated = new String(cardFee("2026-11-01T00:00:00Z", "30000 VND"), StandardCharsets.UTF_8)
+                .replace("effectiveFrom: \"2026-11-01T00:00:00Z\"\n", "").getBytes(StandardCharsets.UTF_8);
+        int v2 = podA.versionService().importVersion("card-fee", ImportRequest.yaml(undated)).version();
+        clock.set(Instant.parse("2026-11-25T10:00:00Z"));
+        assertThatThrownBy(() -> podA.versionService().requestPublish("card-fee", v2,
+                WriteOptions.none().withEffectiveFrom(Instant.parse("2026-11-24T00:00:00Z"))))
+                .isInstanceOf(io.github.dhluong90.bpm.rules.api.EffectiveDateInPastException.class);
+        long lock = podA.versionService().requestPublish("card-fee", v2, WriteOptions.none().withEffectiveFrom(DEC_01))
+                .lockVersion();
+        caller.as("bank-a", "minh", APPROVER);
+        assertThat(podB.versionService().pendingApprovals(null).items().getFirst().effectiveFrom()).isEqualTo(DEC_01);
+        podA.versionService().approve("card-fee", v2, new WriteOptions(null, lock, null));
+
+        // When evaluated before and on 1 Dec
+        caller.as("bank-a", "pricing", PRICING);
+        DecisionResult november = podB.ruleEngine().evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(NOV_20));
+        DecisionResult december = podB.ruleEngine().evaluate(DecisionRequest.of("card-fee", STANDARD).withClock(DEC_01));
+
+        // Then v1 serves until the date and v2 from it, on the database as stored
+        assertThat(november.version()).isEqualTo(1);
+        assertThat(december.version()).isEqualTo(2);
+        assertThat(jdbc.sql("SELECT effective_from FROM rle_version WHERE version_num = 2")
+                .query(java.sql.Timestamp.class).single().toInstant()).isEqualTo(DEC_01);
+    }
+
+    @Test
     void RLE_008_explicit_clock_resolves_effective_version_and_replays() {
         // Given v1 from 1 Nov at 50,000 VND and v2 from 1 Dec at 30,000 VND
         publish("bank-a", cardFee("2026-11-01T00:00:00Z", "50000 VND"), Instant.parse("2026-10-20T00:00:00Z"));

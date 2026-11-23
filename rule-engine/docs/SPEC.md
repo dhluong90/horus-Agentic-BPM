@@ -1383,3 +1383,17 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
   - An unknown value fails the run naming the setting. The report is written in every case.
 - **Example:** `fail-on none -> pass; unique -> kyc-route K1, K2; any -> card-fee R3; kyc-route K1, K2; most -> fails naming horus.rules.coverage.fail-on`.
 - **Test ID:** `RLE_065_uncovered_rows_fail_the_build_only_at_the_configured_threshold`, `RLE_065_a_run_that_covers_every_row_passes_whatever_the_threshold`
+
+### RLE-210 A publication request can name the date the version takes effect, and the approver sees it
+- **Traces to:** `TR-SEC-04`, `TR-AUD-01`, PD-139, #470
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Draft v2 of `card-fee` by `lan`, who requests publication at 2026-12-15T01:30:00Z; `ha` holds `rules:approve`.
+- **When:** `lan` sends `:request-publish` with `{"effectiveFrom": "2027-01-01T00:00:00Z"}`; with `2026-12-14T00:00:00Z`; with `"tomorrow"`; with no date. `ha` reads `GET /approvals`, then approves with the `canonicalHash` of the list item.
+- **Then:**
+  - `200`, v2 is `PENDING_APPROVAL` with `effectiveFrom` 2027-01-01T00:00:00Z, shown in the version, in the pending approvals item and in `rules.version.publish-requested.v1`. The date is not part of the content hash.
+  - A date before the request time is `422 EFFECTIVE_DATE_IN_PAST` and v2 stays `DRAFT`; a value that is not an ISO 8601 instant with an offset is `400 INPUT_INVALID`.
+  - Once pending the date cannot change: a draft is the only version that can be replaced, so another date needs a withdrawal and a new request. `lan` still cannot approve it (`403 SELF_APPROVAL_FORBIDDEN`) and an approval naming another hash is `409 CONTENT_CHANGED`.
+  - Approved, v2 is `PUBLISHED` and is the version in force from 2027-01-01T00:00:00Z, not before. With no date the version takes effect at approval, as before. The date joins the idempotency hash only when named.
+- **Example:** `request-publish {effectiveFrom: 2027-01-01T00:00:00Z} -> 200, GET /approvals shows effectiveFrom; approve -> in force from 2027-01-01`
+- **Test IDs:** `RLE_210_a_requested_effective_date_is_stored_shown_to_the_approver_and_applied`, `RLE_210_a_past_effective_date_is_refused_and_the_draft_stays_a_draft`, `RLE_210_the_effective_date_does_not_change_the_hash_or_the_four_eyes`, `RLE_210_a_date_asked_for_at_request_decides_which_version_is_in_force_and_a_past_date_is_refused`

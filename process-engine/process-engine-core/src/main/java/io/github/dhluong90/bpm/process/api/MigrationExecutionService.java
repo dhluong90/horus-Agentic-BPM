@@ -46,6 +46,25 @@ public interface MigrationExecutionService {
     MigrationExecution approve(String migrationId, long expectedLockVersion, String idempotencyKey);
 
     /**
+     * Approves as {@link #approve(String, long, String)} does, only if the plan is still the one the approver reviewed
+     * (PD-139, #473).
+     *
+     * @param migrationId the plan
+     * @param expectedLockVersion the {@code lockVersion} of the proposal the approver read
+     * @param idempotencyKey idempotency key, or null
+     * @param expectedPlanHash the {@code contentHash} (the plan hash) shown in the pending approvals list, or null for
+     *     no check; another value is {@code CONTENT_CHANGED} and nothing is written
+     * @return the execution, {@code APPROVED}
+     */
+    default MigrationExecution approve(String migrationId, long expectedLockVersion, String idempotencyKey,
+            String expectedPlanHash) {
+        if (expectedPlanHash != null) {
+            throw new UnsupportedOperationException("a reviewed hash is not supported by this service");
+        }
+        return approve(migrationId, expectedLockVersion, idempotencyKey);
+    }
+
+    /**
      * Rejects a proposal as a second person; the plan becomes {@code REJECTED} and may be proposed again.
      *
      * @param migrationId the plan

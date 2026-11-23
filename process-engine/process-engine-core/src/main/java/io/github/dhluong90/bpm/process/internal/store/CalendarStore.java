@@ -110,6 +110,19 @@ public interface CalendarStore {
      */
     List<ChangeRow> changes(String tenant, String status, Instant afterAt, String afterId, int limit);
 
+    /**
+     * A page of the tenant's {@code PENDING} changes, oldest proposal first on {@code (proposed_at, id)}, for the
+     * pending approvals list (#473).
+     *
+     * @param afterAt keyset: {@code proposedAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<ChangeRow> pendingChangesOldestFirst(String tenant, Instant afterAt, String afterId, int limit) {
+        throw new UnsupportedOperationException("pending changes are not supported by this store");
+    }
+
     /** @return the recorded answer of an idempotency key that has not expired */
     Optional<ProcessStore.IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now);
 

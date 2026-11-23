@@ -116,7 +116,7 @@ function pendingItem(v: StoredVersion, request: FakeRequest) {
   const withdraw = v.requestedBy === request.user && request.permissions.includes('rules:author');
   return {
     ruleSet: v.ruleSet, version: v.version, canonicalHash: hash(JSON.stringify(v.definition)), lockVersion: v.lockVersion,
-    requestedBy: v.requestedBy ?? '', requestedByName: namedUser(v.requestedBy ?? '', request), requestedAt: v.requestedAt ?? v.createdAt,
+    requestedBy: v.requestedBy ?? '', requestedByName: namedUser(v.requestedBy ?? '', request), requestedAt: v.requestedAt ?? v.createdAt, effectiveFrom: v.effectiveFrom,
     allowedActions: [...(denial === undefined ? ['approve', 'reject'] : []), ...(withdraw ? ['withdraw'] : [])],
     deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
   };
@@ -644,14 +644,17 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     if (action === 'request-publish') {
       if (v.status !== 'DRAFT') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
       // RLE-201: an optional report to attach, required for the rule sets the host lists; it must have been run on this content.
-      const sent = request.body === '' ? {} : (JSON.parse(request.body) as { simulationReportId?: string });
+      const sent = request.body === '' ? {} : (JSON.parse(request.body) as { simulationReportId?: string; effectiveFrom?: string });
+      // RLE-210: a date asked for is an ISO 8601 instant with an offset, and not before the request.
+      if (sent.effectiveFrom !== undefined && Number.isNaN(Date.parse(sent.effectiveFrom))) return problem(400, 'INPUT_INVALID', 'effectiveFrom must be an ISO 8601 instant with an offset');
+      if (sent.effectiveFrom !== undefined && Date.parse(sent.effectiveFrom) < Date.parse(now())) return problem(422, 'EFFECTIVE_DATE_IN_PAST', `${v.ruleSet} v${String(v.version)} cannot take effect before now`);
       if (sent.simulationReportId === undefined && (reportOptions.required ?? []).includes(v.ruleSet)) return problem(409, 'SIMULATION_REPORT_REQUIRED', `${v.ruleSet} needs a simulation report with the request`);
       if (sent.simulationReportId !== undefined) {
         const attached = reports.find((r) => r.id === sent.simulationReportId && r.ruleSet === v.ruleSet && r.version === v.version);
         if (!attached) return problem(404, 'SIMULATION_REPORT_NOT_FOUND', `Report ${sent.simulationReportId} not found on ${v.ruleSet} v${String(v.version)}`);
         if (attached.canonicalHash !== hash(JSON.stringify(v.definition))) return problem(409, 'SIMULATION_REPORT_OUT_OF_DATE', 'The draft changed after the report was run');
       }
-      Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1, simulationReportId: sent.simulationReportId ?? null });
+      Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1, simulationReportId: sent.simulationReportId ?? null, ...(sent.effectiveFrom !== undefined ? { effectiveFrom: new Date(sent.effectiveFrom).toISOString() } : {}) });
       record(v, 'REQUESTED', from, request.user, null);
       return view(v, request, marks);
     }
@@ -690,7 +693,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return { ...refusal, body: JSON.stringify({ ...(JSON.parse(refusal.body) as object), ...extra }) };
     }
     for (const other of versionsOf(v.ruleSet)) if (other.status === 'PUBLISHED') other.status = 'RETIRED';
-    Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: now(), lockVersion: v.lockVersion + 1 });
+    Object.assign(v, { status: 'PUBLISHED', approvedBy: request.user, approvedAt: now(), effectiveFrom: v.effectiveFrom ?? now(), lockVersion: v.lockVersion + 1 });
     record(v, 'APPROVED', from, request.user, body.comment ?? null);
     return view(v, request, marks);
   }

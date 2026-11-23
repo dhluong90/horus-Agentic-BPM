@@ -219,6 +219,10 @@ class ListQueryPlanCheckTest {
         samples.put("calendars-after", List.of("bank-a", "vn-banking-hours", 51));
         samples.put("calendar-changes", List.of("bank-a", "PENDING", 51));
         samples.put("calendar-changes-after", List.of("bank-a", "PENDING", T, "ACC" + "%023d".formatted(9), 51));
+        samples.put("pending-calendar-changes", List.of("bank-a", 51));
+        samples.put("pending-calendar-changes-after", List.of("bank-a", T, "ACC" + "%023d".formatted(9), 51));
+        samples.put("proposed-migrations", List.of("bank-a", 51));
+        samples.put("proposed-migrations-after", List.of("bank-a", T, "AMG" + "%023d".formatted(9), 51));
         String[] both = {"CLAIMED", "OPEN"};
         Timestamp end = Timestamp.from(Instant.parse("9999-12-31T00:00:00Z"));
         Timestamp epoch = Timestamp.from(Instant.EPOCH);

@@ -22,10 +22,12 @@ import java.util.Objects;
  *     {@code PERMISSION_REQUIRED}, {@code SELF_APPROVAL_FORBIDDEN} or {@code AUTHOR_UNKNOWN}
  * @param requestedByName the requester's readable name in the caller's language (#442), or the id when the host knows
  *     none
+ * @param effectiveFrom the date the requester asked the version to take effect, or null for "when approved"
+ *     (RLE-210, #470); the approver sees it before approving
  */
 public record PendingApproval(String ruleSet, int version, String canonicalHash, long lockVersion,
         String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions,
-        String requestedByName) {
+        String requestedByName, Instant effectiveFrom) {
 
     public PendingApproval {
         Objects.requireNonNull(ruleSet, "ruleSet must not be null");
@@ -36,6 +38,26 @@ public record PendingApproval(String ruleSet, int version, String canonicalHash,
         if (requestedByName == null || requestedByName.isBlank()) {
             requestedByName = requestedBy;
         }
+    }
+
+    /**
+     * An item with no requested effective date, as before #470.
+     *
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param canonicalHash see the record
+     * @param lockVersion see the record
+     * @param requestedBy see the record
+     * @param requestedAt see the record
+     * @param allowedActions see the record
+     * @param deniedActions see the record
+     * @param requestedByName see the record
+     */
+    public PendingApproval(String ruleSet, int version, String canonicalHash, long lockVersion,
+            String requestedBy, Instant requestedAt, List<String> allowedActions, Map<String, String> deniedActions,
+            String requestedByName) {
+        this(ruleSet, version, canonicalHash, lockVersion, requestedBy, requestedAt, allowedActions, deniedActions,
+                requestedByName, null);
     }
 
     /**

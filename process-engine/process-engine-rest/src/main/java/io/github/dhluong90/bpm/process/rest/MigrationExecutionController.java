@@ -58,10 +58,30 @@ public class MigrationExecutionController {
 
     /** Approves a proposal as a second person; the runner then moves the instances. */
     @PostMapping("/migrations/{id}:approve")
-    public ResponseEntity<byte[]> approve(@PathVariable("id") String id,
+    public ResponseEntity<byte[]> approve(@PathVariable("id") String id, HttpServletRequest http,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
-            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
-        MigrationExecution approved = executions.approve(id, lockVersion(ifMatch), idempotencyKey);
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        // Optional body {"expectedPlanHash"}: the plan the approver reviewed (PD-139, #473).
+        String expectedPlanHash = null;
+        byte[] bytes = ProcessController.boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        if (bytes.length > 0) {
+            JsonNode body = parse(bytes);
+            for (String name : body.propertyNames()) {
+                if (!"expectedPlanHash".equals(name)) {
+                    throw new InputInvalidException("Unknown field " + (name.length() > 64 ? name.substring(0, 64) : name)
+                            + "; the body takes expectedPlanHash only");
+                }
+            }
+            JsonNode hash = body.get("expectedPlanHash");
+            if (hash != null && !hash.isNull()) {
+                if (!hash.isString()) {
+                    throw new InputInvalidException("expectedPlanHash must be a string");
+                }
+                expectedPlanHash = hash.stringValue();
+            }
+        }
+        long lock = lockVersion(ifMatch);
+        MigrationExecution approved = executions.approve(id, lock, idempotencyKey, expectedPlanHash);
         return json(HttpStatus.OK, execution(approved), approved.lockVersion());
     }
 
@@ -186,7 +206,10 @@ public class MigrationExecutionController {
     }
 
     private static JsonNode body(HttpServletRequest http) throws IOException {
-        byte[] bytes = ProcessController.boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
+        return parse(ProcessController.boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
+    }
+
+    private static JsonNode parse(byte[] bytes) {
         try {
             JsonNode node = EngineJson.JSON.readTree(bytes);
             if (node == null || !node.isObject()) {

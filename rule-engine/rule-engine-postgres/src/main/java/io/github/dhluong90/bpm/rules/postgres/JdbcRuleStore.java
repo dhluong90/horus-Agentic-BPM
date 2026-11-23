@@ -299,7 +299,8 @@ public final class JdbcRuleStore implements RuleStore {
         org.springframework.jdbc.core.RowMapper<io.github.dhluong90.bpm.rules.internal.store.PendingVersion> mapper = (rs, row) ->
                 new io.github.dhluong90.bpm.rules.internal.store.PendingVersion(rs.getString("id"), rs.getString("name"),
                         rs.getInt("version_num"), rs.getString("canonical_hash"), rs.getLong("lock_version"),
-                        rs.getString("created_by"), rs.getString("requested_by"), instant(rs, "requested_at"));
+                        rs.getString("created_by"), rs.getString("requested_by"), instant(rs, "requested_at"),
+                        instant(rs, "effective_from"));
         if (after == null) {
             return RuleListQueries.PENDING_APPROVALS.list(jdbc,
                     ListQuery.params("tenant", tenantId, "limit", limit), mapper);

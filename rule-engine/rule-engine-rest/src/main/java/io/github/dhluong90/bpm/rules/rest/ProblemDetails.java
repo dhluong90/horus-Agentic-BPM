@@ -69,6 +69,7 @@ public class ProblemDetails {
             Map.entry("RATE_LIMITED", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("VALIDATION_FAILED", UNPROCESSABLE),
             Map.entry("BATCH_TOO_LARGE", UNPROCESSABLE),
+            Map.entry("EFFECTIVE_DATE_IN_PAST", UNPROCESSABLE),
             Map.entry("HISTORY_TOO_LARGE", UNPROCESSABLE),
             Map.entry("EVIDENCE_TOO_LARGE", UNPROCESSABLE),
             Map.entry("READINGS_TOO_LARGE", UNPROCESSABLE),

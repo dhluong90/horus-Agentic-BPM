@@ -216,8 +216,21 @@ public record StoredVersion(
      * @return the new state with the lock version incremented
      */
     public StoredVersion requested(String requester, Instant at) {
+        return requested(requester, at, effectiveFrom);
+    }
+
+    /**
+     * Returns a copy moved to {@code PENDING_APPROVAL} that asks to take effect at {@code requestedEffectiveFrom}
+     * (RLE-210); the date is not part of the content hash.
+     *
+     * @param requester the requester
+     * @param at the request time
+     * @param requestedEffectiveFrom the date asked for, or the date already on the version
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion requested(String requester, Instant at, Instant requestedEffectiveFrom) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PENDING_APPROVAL, hitPolicy,
-                effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
+                requestedEffectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
                 requester, at, null, null, null, createdBy, createdAt, null, copiedFrom);
     }
 

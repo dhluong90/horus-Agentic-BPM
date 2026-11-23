@@ -335,10 +335,20 @@ public final class Views {
 
     /** @param a pending approval @return JSON tree: hashes and identities, never the definition (#31) */
     public static ObjectNode pendingApproval(io.github.dhluong90.bpm.process.api.PendingApproval a) {
-        ObjectNode o = EngineJson.NODES.objectNode().put("key", a.key());
+        ObjectNode o = EngineJson.NODES.objectNode().put("kind", a.kind());
+        putNullable(o, "id", a.id());
+        o.put("key", a.key());
         putNullable(o, "name", a.name());
-        o.put("version", a.version()).put("definitionHash", a.definitionHash()).put("lockVersion", a.lockVersion())
-                .put("requestedBy", a.requestedBy()).put("requestedAt", a.requestedAt().toString());
+        o.put("version", a.version());
+        if (a.sourceVersion() == null) {
+            o.putNull("sourceVersion");
+        } else {
+            o.put("sourceVersion", a.sourceVersion());
+        }
+        putNullable(o, "definitionHash", a.definitionHash());
+        o.put("contentHash", a.contentHash()).put("lockVersion", a.lockVersion()).put("requestedBy", a.requestedBy())
+                .put("requestedAt", a.requestedAt().toString());
+        putNullable(o, "reason", a.reason());
         // #442: the requester as the screen shows them; the id when the host knows no name
         putNullable(o, "requestedByName", a.requestedByName());
         ArrayNode actions = o.putArray("allowedActions");

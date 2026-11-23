@@ -134,8 +134,12 @@ export interface RulesClient {
   replaceDraft(name: string, version: number, lockVersion: number, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** validateDraft: the checks of a save, answered as cell problems; stores nothing, so no key and no If-Match (RLE-090) */
   validateDraft(name: string, version: number, document: RuleDocument, signal?: AbortSignal): Promise<DraftValidation>;
-  /** requestPublish; `simulationReportId` attaches a report of this version (RLE-201), required when the host lists the rule set in lifecycle.require-simulation-report */
-  requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string, simulationReportId?: string): Promise<RuleSetVersion>;
+  /**
+   * requestPublish; `simulationReportId` attaches a report of this version (RLE-201), required when the host lists the
+   * rule set in lifecycle.require-simulation-report; `effectiveFrom` (an ISO 8601 instant) is when the version takes effect once
+   * approved, not before the request (RLE-210, #470)
+   */
+  requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string, options?: { simulationReportId?: string | undefined; effectiveFrom?: string | undefined }): Promise<RuleSetVersion>;
   /** listRuleSetTemplates: the host's templates a new rule set starts from (RLE-197); writes nothing */
   listTemplates(signal?: AbortSignal): Promise<RuleSetTemplate[]>;
   /** listSimulationReports: at most 50 reports of a version, newest first, without rows (RLE-200) */
@@ -314,14 +318,16 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       );
       return answer.data;
     },
-    async requestPublish(name, version, lockVersion, idempotencyKey, simulationReportId) {
+    async requestPublish(name, version, lockVersion, idempotencyKey, options = {}) {
+      const { simulationReportId, effectiveFrom } = options;
+      const sent = { ...(simulationReportId !== undefined ? { simulationReportId } : {}), ...(effectiveFrom !== undefined ? { effectiveFrom } : {}) };
       const answer = await call(
         {
           method: 'POST',
           path: `${versionPath(name, version)}:request-publish`,
           headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
-          // A body only when a report is attached: a request without one is the request of a client written before reports.
-          ...(simulationReportId !== undefined ? { body: { contentType: 'application/json', text: JSON.stringify({ simulationReportId }) } } : {}),
+          // A body only when a report or a date is sent: a request without either is the request of a client written before them.
+          ...(Object.keys(sent).length > 0 ? { body: { contentType: 'application/json', text: JSON.stringify(sent) } } : {}),
         },
         ruleSetVersion,
       );

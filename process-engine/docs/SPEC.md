@@ -1795,3 +1795,15 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
 - **Example:** `System.exit(0) -> refused at activation`.
 - **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`
+
+### PRE-254 Pending migration plans and calendar changes appear in the approvals queue, bound to the reviewed hash
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`, PD-139, #473
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a `thu` proposes the execution of the plan loan-origination v1 to v2 at 02:00 and the holiday 1 January 2028 for `vn-banking-hours` at 03:00; `lan` holds `processes:migration:manage` and `processes:calendar:manage`; `dan` holds `processes:read` only; `eve` is at bank-b.
+- **When:** each lists `GET /approvals`; `lan` approves the plan and the change with a wrong hash, then with the `contentHash` of the item; `thu` approves with the right hash.
+- **Then:**
+  - `lan` sees `MIGRATION_PLAN` then `CALENDAR_CHANGE`, oldest first, with `contentHash` (the plan hash; the change hash), `reason` and `approve`, `reject` allowed. A cursor continues across the two kinds. `thu` has no `approve` on either (`SELF_APPROVAL_FORBIDDEN`); she may withdraw her calendar change with `reject`. `dan` sees the calendar change with `PERMISSION_REQUIRED` and no migration plan. `eve` sees nothing.
+  - A hash other than the item's is `409 CONTENT_CHANGED` and nothing is written; the item stays in the list. With the item's hash both are approved and leave the list. `thu` is `403 SELF_APPROVAL_FORBIDDEN` with the right hash.
+- **Example:** `GET /approvals -> [{kind: MIGRATION_PLAN, contentHash: <planHash>}, {kind: CALENDAR_CHANGE, contentHash: <changeHash>}]; approve with another hash -> 409 CONTENT_CHANGED`
+- **Test IDs:** `PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash`, `PRE_254_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required`, `PRE_254_the_cursor_continues_across_kinds`, `PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing`, `PRE_254_the_proposer_cannot_approve_with_the_right_hash`

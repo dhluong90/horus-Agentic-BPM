@@ -90,7 +90,7 @@ A link into a screen always opens that screen. Otherwise the cockpit opens on Ho
 
 | User | Cockpit 0.1 opens on |
 |---|---|
-| Approver (`rules:approve` or `processes:approve`) | Approvals: one queue of pending rule and process changes |
+| Approver (`rules:approve` or `processes:approve`) | Approvals: one queue of pending rule and process changes, migration plans and calendar changes (the Processes page lists the calendar changes) |
 | Author (`rules:author`) | Approvals, filtered to the user's own requests |
 | Auditor or support (`rules:log:read` only) | Decisions |
 | Anyone else | Rule sets |
