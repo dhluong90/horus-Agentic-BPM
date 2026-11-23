@@ -28,7 +28,7 @@ final class RuleListQueries {
      * or history row, so a rejection (which clears {@code requested_at}) still counts as a change.
      */
     static final String SUMMARY_SELECT = """
-            SELECT s.name, lv.version_num AS latest_version, lv.status AS latest_status,
+            SELECT s.name, lv.display_name, lv.version_num AS latest_version, lv.status AS latest_status,
               (SELECT e.version_num FROM rle_version e
                 WHERE e.tenant_id = s.tenant_id AND e.rule_set_id = s.id
                   AND e.approved_at IS NOT NULL AND e.effective_from <= :now
@@ -41,7 +41,7 @@ final class RuleListQueries {
                   JOIN rle_version v ON v.tenant_id = h.tenant_id AND v.id = h.version_id
                   WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id)) AS last_changed_at
             FROM rle_rule_set s
-            JOIN LATERAL (SELECT v.version_num, v.status FROM rle_version v
+            JOIN LATERAL (SELECT v.version_num, v.status, v.canonical_json ->> 'displayName' AS display_name FROM rle_version v
                            WHERE v.tenant_id = s.tenant_id AND v.rule_set_id = s.id AND v.status <> 'DISCARDED'
                            ORDER BY v.version_num DESC LIMIT 1) lv ON TRUE
             """;

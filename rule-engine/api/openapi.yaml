@@ -2841,9 +2841,16 @@ components:
         enum: [request-publish, discard, approve, reject, withdraw, retire, confirm-retire, cancel-retire]
     RuleSetSummary:
       type: object
-      required: [ruleSet, latestVersion, latestStatus, publishedVersion, lastChangedAt]
+      required: [ruleSet, displayName, latestVersion, latestStatus, publishedVersion, lastChangedAt]
       properties:
         ruleSet: { type: string }
+        displayName:
+          type: string
+          description: |
+            The name people read, for example `Card fee`. It is the `displayName` of the latest
+            version's document; when the document names none, the rule set name made readable
+            (`card-fee` reads `Card fee`). Never null. The cockpit shows it in lists and headings and
+            keeps `ruleSet` as the key behind a Details link.
         latestVersion: { type: integer, minimum: 1 }
         latestStatus:
           type: string

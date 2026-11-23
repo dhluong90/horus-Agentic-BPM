@@ -12,7 +12,7 @@
 -- Rolling upgrade: a replica on the release before this one never reads or writes the table.
 -- Forward-only. Rollback, if ever needed, is a new forward migration; it loses every stored report, which an approval
 -- may have relied on, so export first (SELECT * FROM rle_simulation_report):
---   DROP TABLE rle_simulation_report;   -- after V38's table is dropped
+--   DROP TABLE rle_simulation_report;   -- after V32's table is dropped
 --   DROP FUNCTION rle_append_only_guard();
 -- The triggers must be dropped before the table can be emptied; a role that owns the table can do so, as with V4.
 

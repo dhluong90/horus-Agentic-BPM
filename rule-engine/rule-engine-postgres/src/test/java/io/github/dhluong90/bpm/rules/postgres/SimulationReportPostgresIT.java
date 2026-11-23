@@ -31,7 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * Simulation reports on PostgreSQL (PD-115, RLE-199 to RLE-201, migrations V37 and V38): a replay over the November
+ * Simulation reports on PostgreSQL (PD-115, RLE-199 to RLE-201, migrations V31 and V32): a replay over the November
  * decisions of the partitioned log stored once and bound to the draft's hash, attached to the publication request,
  * refused to be changed by the database, and invisible to another tenant.
  */

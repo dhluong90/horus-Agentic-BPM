@@ -23,6 +23,7 @@ Choose one, give the new rule set its own name, edit the rows, and save it as yo
 
 ```yaml
 ruleSet: card-fee               # unique within a tenant, kebab-case
+displayName: Card fee           # optional, 1 to 100 characters; lists show it, else the key made readable
 description: Monthly fee by card tier and balance
 hitPolicy: first                # first | unique | collect
 effectiveFrom: 2026-12-01T00:00:00+07:00   # optional ISO instant; otherwise effective when approved

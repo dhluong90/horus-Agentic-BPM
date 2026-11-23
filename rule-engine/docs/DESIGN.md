@@ -933,11 +933,11 @@ CREATE TABLE rle_version_function (
 );
 CREATE INDEX rle_version_function_by_name ON rle_version_function (function_name, tenant_id, version_id);
 
--- V37 (RLE-199, RLE-200, PD-115): a simulation report, written once. It holds counts and at most 50 rows read in plain
+-- V31 (RLE-199, RLE-200, PD-115): a simulation report, written once. It holds counts and at most 50 rows read in plain
 -- language (readings, rule ids, decision ids), never an input or a masked value. canonical_hash is the version's hash
 -- when the report was run; the answer compares it with the hash now. tenant_id leads every key (TR-TEN-01). The guard
 -- function refuses UPDATE, DELETE and TRUNCATE (SQLSTATE 55000), as V4 does for the history. Additive: a new function
--- and table. Rollback is a new forward migration (DROP TABLE after V38's), which loses the reports approvals relied on.
+-- and table. Rollback is a new forward migration (DROP TABLE after V32's), which loses the reports approvals relied on.
 CREATE TABLE rle_simulation_report (
   tenant_id TEXT NOT NULL, id VARCHAR(26) NOT NULL, rule_set_name TEXT NOT NULL, version_num INT NOT NULL,
   canonical_hash CHAR(64) NOT NULL, created_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL,
@@ -952,7 +952,7 @@ CREATE TABLE rle_simulation_report (
 );
 CREATE INDEX idx_rle_simulation_report_version ON rle_simulation_report (tenant_id, rule_set_name, version_num, id DESC);
 
--- V38 (RLE-201, PD-115): the report a publication request carries, appended with the request and never changed. The
+-- V32 (RLE-201, PD-115): the report a publication request carries, appended with the request and never changed. The
 -- latest row of a version is the one its current request carries. Additive: a new table.
 CREATE TABLE rle_simulation_report_attachment (
   tenant_id TEXT NOT NULL, id VARCHAR(26) NOT NULL, rule_set_name TEXT NOT NULL, version_num INT NOT NULL,

@@ -3435,7 +3435,7 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Follow-ups.** Architect: the rule engine SPEC and OpenAPI change. Maintainers (engineering): #95 and #109.
 
-**Applied, 2026-11-22.** The engine side is built: `RLE-199` to `RLE-201` in the Rule Engine SPEC, the report endpoints and `simulationReportId` in its OpenAPI, DESIGN section 4.13, migrations `V37` and `V38`, and the setting `lifecycle.require-simulation-report` shown in `/api/bpm/meta` (it replaces the earlier draft name `publication.require-simulation-report`). Reports are immutable, bound to the canonical hash and never store a masked value. The cockpit screen of #109 is not built yet.
+**Applied, 2026-11-22.** The engine side is built: `RLE-199` to `RLE-201` in the Rule Engine SPEC, the report endpoints and `simulationReportId` in its OpenAPI, DESIGN section 4.13, migrations `V31` and `V32`, and the setting `lifecycle.require-simulation-report` shown in `/api/bpm/meta` (it replaces the earlier draft name `publication.require-simulation-report`). Reports are immutable, bound to the canonical hash and never store a masked value. The cockpit screen of #109 is not built yet.
 
 ### PD-116 Evidence exports are produced by the engine, hashed and recorded
 

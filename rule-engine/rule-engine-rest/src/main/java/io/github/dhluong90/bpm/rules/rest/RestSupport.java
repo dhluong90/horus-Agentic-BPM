@@ -82,6 +82,7 @@ final class RestSupport {
     static ObjectNode ruleSetSummary(RuleSetSummary summary) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("ruleSet", summary.ruleSet());
+        node.put("displayName", summary.displayName());
         node.put("latestVersion", summary.latestVersion());
         node.put("latestStatus", summary.latestStatus().name());
         node.set("publishedVersion", EngineValues.value(summary.publishedVersion()));

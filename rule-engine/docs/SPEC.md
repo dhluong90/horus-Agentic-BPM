@@ -1091,6 +1091,16 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `November replay of card-fee v2 -> 18 of 100 changed; newest: logged "R2: fee 50,000 VND", simulated "R2: fee 30,000 VND"; masked decision -> REPLAY_NOT_POSSIBLE [nationalId]`
 - **Test IDs:** `RLE_202_history_readings_read_each_decision_in_the_version_that_made_it`, `RLE_202_a_masked_decision_is_listed_as_replay_not_possible_and_never_read`, `RLE_202_reading_needs_rules_read`, `RLE_202_history_readings_read_both_sides_and_name_a_masked_input_without_its_value`, `RLE_202_each_of_the_three_permissions_is_needed_and_a_limit_over_500_is_422`
 
+### RLE-203 A rule set list and detail show a human name, from the document or from the key
+- **Traces to:** `TR-UI-02`, #83, #96, #109
+- **Milestone:** M3
+- **Kind:** other
+- **Given:** `card-fee` whose latest version's document has `"displayName": "Card fee"`; `id-check-fee` whose document names none.
+- **When:** A caller with `rules:read` lists `GET /rule-sets` and reads `GET /rule-sets/id-check-fee`.
+- **Then:** Each item carries `displayName`, never null: "Card fee" for `card-fee`, and "Id check fee" (the key with hyphens as spaces and a capital first letter) for `id-check-fee`. `ruleSet` keeps the key. A `displayName` that is blank or longer than 100 characters is refused at import with `422` naming `displayName`.
+- **Example:** `GET /rule-sets -> [{ruleSet: card-fee, displayName: Card fee}, {ruleSet: id-check-fee, displayName: Id check fee}]`.
+- **Test ID:** `RLE_203_a_document_may_name_the_rule_set_for_people_and_the_name_is_kept_in_the_canonical_form`, `RLE_203_a_blank_or_over_long_display_name_is_refused`, `RLE_203_without_a_display_name_the_key_is_made_readable`
+
 ## Platform Requirements Made Testable (RE-F-10, RE-F-13, X-F-05)
 
 ### RLE-034 The compiled cache holds at most `cache.max-entries` versions and heap stays flat

@@ -2,7 +2,7 @@
 --
 -- :request-publish may name a simulationReportId. The request writes one row here in its own transaction, so the report
 -- an approver is shown is the one the requester attached, and a later request (after a withdrawal) adds a newer row
--- instead of changing the old one. Rows are appended and never changed; V37's guard function refuses the rest. The
+-- instead of changing the old one. Rows are appended and never changed; V31's guard function refuses the rest. The
 -- version's status and lock are not touched: the attachment is evidence, not part of the version.
 --
 -- Additive: a new table and an index. Nothing existing is altered; lock_timeout makes the migration fail fast.
