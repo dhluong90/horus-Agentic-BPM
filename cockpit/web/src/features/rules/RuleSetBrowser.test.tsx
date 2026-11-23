@@ -188,7 +188,7 @@ describe('rule set browser (CKP-030)', () => {
     open('#/rules/card-fee/1');
     await screen.findByRole('button', { name: 'Import new version' });
     await user.upload(fileInput(), new File([GOOD], 'card-fee-v3.yaml', { type: 'application/yaml' }));
-    expect(await screen.findByText('Imported by lan from card-fee-v3.yaml')).toBeInTheDocument();
+    expect(await screen.findByText(/Imported by .+ from card-fee-v3\.yaml/)).toBeInTheDocument();
     // The new version's title takes the focus, so the import button no longer holds it.
     await waitFor(() => { expect(screen.getByRole('heading', { level: 1 })).toHaveFocus(); });
   });

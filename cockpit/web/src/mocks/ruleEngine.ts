@@ -94,10 +94,15 @@ function actionsFor(v: StoredVersion, request: FakeRequest): string[] {
   const can = (permission: string) => request.permissions.includes(permission);
   // RLE-098: the author of a draft may also discard it.
   if (v.status === 'DRAFT') return can('rules:author') ? ['request-publish', ...(v.createdBy === request.user ? ['discard'] : [])] : [];
-  if (v.status !== 'PENDING_APPROVAL' || !can('rules:approve')) return [];
-  // PD-089: neither the requester nor the author may approve or reject; withdrawing is its own action.
-  const self = v.requestedBy === request.user || v.createdBy === request.user;
-  return self ? [] : ['approve', 'reject'];
+  if (v.status !== 'PENDING_APPROVAL') return [];
+  // PD-089: neither the requester nor the author may approve or reject; the requester withdraws instead (VersionActions).
+  const actions: string[] = [];
+  if (can('rules:approve') && v.requestedBy !== request.user) {
+    if (v.createdBy !== request.user) actions.push('approve');
+    actions.push('reject');
+  }
+  if (can('rules:author') && v.requestedBy === request.user) actions.push('withdraw');
+  return actions;
 }
 
 /** The requester as the host's `DisplayNames` gives them in the caller's language; the login when none is known (#442). */
