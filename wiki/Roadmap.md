@@ -13,7 +13,7 @@ This page is the short public view. The full plan, with the features in each mil
 | M0 Architecture | 4 Dec 2026 | Read the decided storage schema, transaction rules and expression grammar, and boot an example host that creates the engine tables in PostgreSQL |
 | M1 Rule Engine 0.1, Cockpit 0.1 | 15 Jan 2027 | Evaluate versioned decision tables inside your service's transaction; change rules by editing the cells and rows of a draft in the cockpit, by a spreadsheet round trip (CSV), or by importing YAML or JSON; simulate them, read the change in plain language, and publish them only after a second person approves in the cockpit; look up and explain any past decision; reach several of your services from one standalone cockpit with one sign-in |
 | M2 Process Engine 0.1 with `agentTask`, Cockpit 0.2 | 26 Mar 2027 | Run approvals with task queues and SLAs, compensating service steps, and AI agent steps whose output must pass a JSON Schema and your guardrail rules; see every process definition and instance as a diagram with its current step; work one task inbox and one incident list across your services; complete tasks through declared forms; process definitions take effect only after a second person approves them; edit tables in a grid with templates; write the decision log asynchronously on high-volume paths, by setting |
-| M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Plug in MCP and model adapters from the examples, test a changed prompt or guardrail against recorded traces before it goes live, approve process changes as a graph diff in the cockpit, see per-step durations on the diagram, import BPMN and export it, upgrade without downtime, and build on a frozen API; optionally require a second approver to retire a live rule version. A browser modeller limited to the steps your service registers is planned for M3 and may move to 1.1 |
+| M3 Agentic depth, compatibility, 1.0 | 21 May 2027 | Plug in MCP and model adapters from the examples, test a changed prompt or guardrail against recorded traces before it goes live, approve process changes as a graph diff in the cockpit, see per-step durations on the diagram, 1.0 executes every executable BPMN 2.0 element, import BPMN and export it, upgrade without downtime, and build on a frozen API; optionally require a second approver to retire a live rule version. A browser modeller limited to the steps your service registers is planned for M3 and may move to 1.1 |
 
 ## What may move
 
@@ -23,7 +23,7 @@ Each milestone has a checkpoint and a list of features that move out, in order, 
 |---|---|---|
 | M1 | 8 Jan 2027 | Decision log filters beyond rule set and period; then plain-language readings show the condition shorthand instead of sentences (both moved to M2) |
 | M2 | 5 Mar 2027 | Async decision log mode, batched migration execution, live counts on the diagram, `callProcess`, batch evaluate, decision search by correlation id or input value (moved to M3) |
-| M3 | 23 Apr 2027 | Condition builder lens, calendar editor screen, the modeller canvas (to 1.1), the historical heatmap, BPMN export, DMN import, what-if comparison, the documentation site, version history and evidence export, the second-approver mode for retirement (to 1.1) |
+| M3 | 23 Apr 2027 | Condition builder lens, calendar editor screen, the modeller canvas (built-in modeller after 1.0; models are imported from Camunda Modeler or bpmn.io), the historical heatmap, BPMN export, DMN import, what-if comparison, the documentation site, version history and evidence export, the second-approver mode for retirement (to 1.1) |
 
 ## Configured, not built in
 
@@ -36,7 +36,7 @@ Decisions on scope follow principle 13, generic by design: where business needs 
 | Why rules first | The Rule Engine is useful alone, and `agentTask` guardrails and `decision` steps are rule set evaluations |
 | Why `agentTask` in M2 | It is a service step plus schema validation plus a guardrail decision, all available once the Process Engine core and the Rule Engine exist |
 | Why the grid editor waits for Cockpit 0.2 | Cell and row editing of a draft and a spreadsheet round trip are enough for business users in M1, and YAML import serves a GitOps flow. The full grid with templates needs the 0.2 cockpit and would push Rule Engine 0.1 past January |
-| Why diagrams before the modeller | Operators need "where is this instance now" every day; the modeller's engine APIs land before the 1.0 freeze so the canvas can follow in 1.1 without breaking the API |
+| Why diagrams before the modeller | Operators need "where is this instance now" every day; the modeller's engine APIs land before the 1.0 freeze so a built-in modeller can follow after 1.0 without breaking the API; until then models are imported from Camunda Modeler or bpmn.io |
 
 ## What we are testing
 
