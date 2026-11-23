@@ -42,21 +42,21 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
     expect(steps).toHaveLength(13);
   });
 
-  it('CKP_070_an_unknown_node_type_renders_as_a_generic_node_naming_its_type', async () => {
+  it('CKP_BOUNDARY_a_boundary_event_is_drawn_on_its_step_and_named_in_words', async () => {
     setScenario('processes-reviewer');
     open('#/processes/loan-origination/3');
 
     const diagram = await screen.findByRole('group', { name: /Diagram of Loan origination/ });
-    const generic = within(diagram).getByRole('img', { name: 'No documents in 2 days, Timer' });
-    expect(generic).toHaveClass('dg-node--generic');
-    expect(generic).toHaveAttribute('data-type', 'boundaryEvent:timer');
-    // Named in words with the timer icon, never by the key the engine sent; the whole name is drawn, wrapped.
-    expect(generic.querySelector('.dg-node__type')).toHaveTextContent(/^Timer$/);
-    expect(generic.querySelector('.dg-node__name')).toHaveTextContent('No documents in 2 days');
+    const boundary = within(diagram).getByRole('img', { name: 'No documents in 2 days, Timer on a step' });
+    // The demo's boundary does not interrupt, so its ring is dashed; its key is never shown.
+    expect(boundary).toHaveClass('dg-node--soft');
+    expect(boundary).toHaveAttribute('data-type', 'boundaryEvent:timer');
+    expect(boundary).toHaveAttribute('data-interrupting', 'false');
     expect(diagram).not.toHaveTextContent(/boundaryEvent/);
     // The rest of the diagram is intact.
     expect(within(diagram).getByRole('img', { name: 'Remind applicant, Service task' })).toBeInTheDocument();
   });
+
 
   it('CKP_070_vietnamese_names_every_known_type_in_words', async () => {
     setScenario('processes-reviewer');

@@ -1,7 +1,9 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.time.Clock;
 import java.util.Map;
@@ -192,7 +194,25 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             }
             FlowNode node = node(token.nodeId());
             ctx.history("NODE_ENTERED", token, Map.of());
+            armBoundaries(node, token, ctx);
             behaviorFor(node).enter(node, token, ctx);
+        }
+    }
+
+    /**
+     * #489: an activity with timer boundary events parks one timer token per boundary before it runs. Error and
+     * escalation boundaries hold no token: they are found when something is thrown. A step entered again by a retry
+     * keeps the timers it already has.
+     */
+    private void armBoundaries(FlowNode node, Token token, WorkingContext ctx) {
+        for (BoundaryEvent boundary : process.boundariesOf(node.id())) {
+            if (boundary.eventDefinitions().size() != 1
+                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition)
+                    || ctx.hasLiveBoundaryToken(boundary, token.scopeTokenId())) {
+                continue;
+            }
+            Token waiting = ctx.createToken(TokenKind.FLOW, boundary.id(), token.scopeTokenId());
+            behaviorFor(boundary).enter(boundary, waiting, ctx);
         }
     }
 

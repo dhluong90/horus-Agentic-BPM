@@ -1874,3 +1874,83 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The first reads with the steps and flows of `onboard` nested under it, and its canonical form holds a step of type `subProcess` with its own `steps`; the BPMN export reads back to the same canonical form. The second is refused as `422 BPMN_UNSUPPORTED_ELEMENT` for `subProcess with triggeredByEvent`, stage `S1`. The third is refused at activation with `FLOW_CROSSES_SAGA` naming the flow, because a flow never crosses the boundary of a scope. The fourth is refused with `NO_END_EVENT` naming `onboard`.
 - **Example:** `flow fraud -> end across the boundary -> FLOW_CROSSES_SAGA`.
 - **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_is_refused_with_its_stage_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)
+
+### PRE-280 An interrupting timer boundary cancels the task it sits on and runs its own flow
+- **Traces to:** `TR-STD-04`, `PRE-006`, #489
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `claim-flow` with a user task `review` for role `CLAIM_OFFICER` and a boundary timer `overdue` of `PT4H` that interrupts, started at 03:00 UTC; the boundary's flow leads to the service task `remind` (handler `send-reminder`).
+- **When:** The instance starts; then the four hours pass and the timer job falls due.
+- **Then:** At start the task is open and the boundary holds one `TIMER` job due at 07:00 UTC, the job kind and lease of any timer; the boundary's token waits in `WAITING_TIMER` under the same scope as the task. When the job fires, the token on `review` and its work item are `CANCELLED`, `remind` runs, and history records `BOUNDARY_FIRED` with the boundary id, the step it sits on and `interrupting: true`. A completion of the cancelled task is refused. The instance completes when the reminder's flow ends. A boundary on a call activity cancels the running child with the reason `parent step cancelled`, and the child's later end finds no waiting token and is dropped.
+- **Example:** `overdue` fires at 07:00 -> task `CANCELLED`, `remind` runs, history `BOUNDARY_FIRED`.
+- **Test ID:** `PRE_280_an_interrupting_timer_boundary_cancels_the_task_and_runs_its_own_flow` (`BoundaryAndThrowEventsTest`), `PRE_280_a_timer_boundary_on_a_call_activity_cancels_the_child_and_runs_its_flow` (`BoundaryEventsPostgresIT`)
+
+### PRE-281 A non-interrupting timer boundary runs its flow once and leaves the task open; a timer never outlives its task
+- **Traces to:** `TR-STD-04`, #489
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The same `claim-flow` with `cancelActivity="false"` on `overdue`.
+- **When:** The timer fires; then the officer completes the task. In a second run the officer completes the task before the timer fires.
+- **Then:** On firing the task stays `WAITING_USER`, no work item is cancelled, `remind` runs once and no second timer is scheduled; the instance goes on waiting for the officer and completes when both the task and the boundary's flow have ended. When the task completes before the timer, the timer job is cancelled in the same transaction, the boundary has no live token, and a late firing of that job is refused as stale.
+- **Example:** `overdue` fires with the task open -> reminder sent once, task still open.
+- **Test ID:** `PRE_281_a_non_interrupting_timer_boundary_runs_its_flow_once_and_leaves_the_task_open`, `PRE_281_the_timer_is_cancelled_when_the_task_completes_before_it_fires` (`BoundaryAndThrowEventsTest`)
+
+### PRE-282 An error boundary takes a business error by its code before it becomes an incident; a code no boundary matches still opens one
+- **Traces to:** `TR-STD-04`, `PRE-040`, #489
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A debit `post-debit` with an error boundary `no-funds` for the error code `INSUFFICIENT_FUNDS` and a boundary `any-error` that names no error and so catches every code; the same debit without `any-error`.
+- **When:** The handler answers the business error `INSUFFICIENT_FUNDS`, then `ACCOUNT_FROZEN`.
+- **Then:** With both boundaries, `INSUFFICIENT_FUNDS` takes `no-funds` (the boundary that names the code wins over the catch-all), the step's token is `CANCELLED` and no incident opens; `ACCOUNT_FROZEN` takes `any-error`. Without the catch-all, `ACCOUNT_FROZEN` leaves the token on `debit` and opens the incident `UNHANDLED_BUSINESS_ERROR` with the code, as before this release. A failed call activity matches with the code `CHILD_FAILED` or `CHILD_CANCELLED`. History records `ERROR_THROWN` with the code and, when caught, `caughtBy`.
+- **Example:** `INSUFFICIENT_FUNDS` -> boundary `no-funds`, 0 incidents; `ACCOUNT_FROZEN` with no catch-all -> 1 incident.
+- **Test ID:** `PRE_282_an_error_boundary_takes_the_business_error_with_its_code_and_no_incident_opens`, `PRE_282_an_error_code_no_boundary_matches_opens_an_incident_as_before` (`BoundaryAndThrowEventsTest`), `PRE_282_a_business_error_with_a_matching_boundary_opens_no_incident`, `PRE_282_a_business_error_with_another_code_still_opens_an_incident` (`BoundaryEventsPostgresIT`)
+
+### PRE-283 An error end event is caught by the nearest matching boundary around it; one nothing catches opens an incident on the end event
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A disbursement sub-process `disburse` whose check ends in an error end event for `LIMIT_EXCEEDED`; one file with a boundary on `disburse` for that code, and one whose boundary is for `INSUFFICIENT_FUNDS`.
+- **When:** The check completes and the token reaches the error end event.
+- **Then:** With the matching boundary, the scope token of `disburse` and everything under it is `CANCELLED`, the boundary's flow runs in the enclosing scope and no incident opens; history records `ERROR_THROWN` with `caughtBy`. With the other boundary, the token stays on the end event, an incident `UNHANDLED_BUSINESS_ERROR` names the code, and the sub-process is not cancelled. An error that is not caught inside a sub-process is looked for on the sub-process, then on the scope around it, up to the process. An error throw is an end event only: an intermediate throw with an error definition is not BPMN and is refused at import.
+- **Example:** `LIMIT_EXCEEDED` thrown in `disburse` -> boundary `limit` runs `notify-limit`.
+- **Test ID:** `PRE_283_an_error_end_inside_a_sub_process_is_caught_by_the_boundary_on_the_sub_process`, `PRE_283_an_error_end_that_no_boundary_catches_opens_an_incident_on_the_end_event` (`BoundaryAndThrowEventsTest`)
+
+### PRE-284 An escalation is caught by an interrupting or non-interrupting boundary; one nothing catches is recorded and the flow goes on
+- **Traces to:** `TR-STD-04`, #489, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A KYC sub-process `kyc` that throws the escalation `AML_HIT` and then verifies the customer; three files: a boundary for `AML_HIT` that does not interrupt, one that interrupts, and none.
+- **When:** The instance starts and the throw event is reached.
+- **Then:** Non-interrupting: the AML review runs beside the sub-process, whose own flow goes on to the identity check. Interrupting: the sub-process scope is `CANCELLED`, the identity check never runs, and only the AML review runs. No boundary: the throw is recorded in history as `ESCALATION_THROWN` without `caughtBy`, the flow goes on to the identity check, and no incident opens. An escalation end event ends its token whether it was caught or not.
+- **Example:** `AML_HIT` with no boundary -> `ESCALATION_THROWN`, identity check runs.
+- **Test ID:** `PRE_284_a_non_interrupting_escalation_boundary_runs_beside_the_sub_process_which_goes_on`, `PRE_284_an_interrupting_escalation_boundary_cancels_the_sub_process`, `PRE_284_an_escalation_nothing_catches_is_recorded_and_the_flow_goes_on` (`BoundaryAndThrowEventsTest`)
+
+### PRE-285 A terminate end event cancels every other token of its scope: the instance at the top level, the sub-process inside one
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A screening with a service task `screen` and a user task `manual-check` in parallel, where `screen` ends in a terminate end event; and an onboarding sub-process with a bureau call that ends in a terminate and a review task in parallel, followed by `open-account` in the parent.
+- **When:** `screen` completes and the terminate is reached; in the second file the bureau call completes.
+- **Then:** At the top level the open work item of `manual-check` is cancelled, no token is live, the instance is `COMPLETED` and history records `TERMINATED` with the scope and the number of tokens cancelled. Inside the sub-process the review is cancelled and the sub-process completes, and the parent goes on with `open-account`: a terminate ends its own scope only.
+- **Example:** `screen` ends in a terminate -> `manual-check` cancelled, instance `COMPLETED`.
+- **Test ID:** `PRE_285_a_terminate_end_cancels_the_other_branches_and_the_instance_completes`, `PRE_285_a_terminate_end_inside_a_sub_process_ends_only_that_sub_process` (`BoundaryAndThrowEventsTest`)
+
+### PRE-286 A link throw jumps to the link catch of its name in the same scope; a throw with no catch is refused at import with its element id
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A card registration where the link throw `to-fees` is named `fees`, jumping over the optional step to the link catch `from-fees`; and the same file whose catch is named `charges`.
+- **When:** The registration completes and the token reaches the throw; the second file is imported.
+- **Then:** The token moves to `from-fees` with no sequence flow, the fee is charged next, the optional step never runs, and history records `LINK_JUMPED` with the name and the catch. The second file is refused as `422 VALIDATION_FAILED` with the problem `LINK_CATCH_MISSING` and the element id `to-fees`. A catch named twice in one scope is `LINK_CATCH_DUPLICATE`, and a link whose throw and catch are in different scopes is not a pair.
+- **Example:** `fees` thrown -> `charge-fee` runs; catch `charges` -> `LINK_CATCH_MISSING` on `to-fees`.
+- **Test ID:** `PRE_286_a_link_throw_jumps_to_the_link_catch_of_the_same_name`, `PRE_286_a_link_throw_without_a_catch_of_its_name_is_refused_at_import_with_its_element_id` (`BoundaryAndThrowEventsTest`)
+
+### PRE-287 Boundary, error, escalation, terminate and link events export and read back to the same definition
+- **Traces to:** `TR-STD-04`, #489, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The files of `PRE-280` to `PRE-286`.
+- **When:** Each is read, exported as BPMN and read again.
+- **Then:** The canonical form, which the version hash is made of, is equal for the original and the round trip; the export carries the root `error` and `escalation` elements the definitions refer to.
+- **Example:** `over-limit` -> `<bpmn:error errorCode="REFUND_LIMIT_EXCEEDED"/>` and an `errorRef`.
+- **Test ID:** `PRE_287_the_new_events_export_and_read_back_to_the_same_definition` (`BoundaryAndThrowEventsTest`)

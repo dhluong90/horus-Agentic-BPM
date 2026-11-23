@@ -29,6 +29,15 @@ export const KNOWN_NODE_TYPES = [
   'transaction',
   'subProcess',
   'intermediateThrowEvent:compensate',
+  'boundaryEvent:timer',
+  'boundaryEvent:error',
+  'boundaryEvent:escalation',
+  'endEvent:error',
+  'endEvent:escalation',
+  'endEvent:terminate',
+  'intermediateThrowEvent:escalation',
+  'intermediateThrowEvent:link',
+  'intermediateCatchEvent:link',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 
@@ -45,6 +54,12 @@ export interface DiagramNode {
   resultVariable?: string;
   /** The id of the sub-process or saga block this step stands in; absent for a step of the process itself (#486). */
   parentId?: string;
+  /** For a boundary event (#489): the id of the task, call activity or sub-process it sits on. */
+  attachedTo?: string;
+  /** For a boundary event: whether it cancels what it sits on when it fires; false is drawn with a dashed ring. */
+  interrupting?: boolean;
+  /** For a link throw or catch (#493): the name that pairs the two. */
+  linkName?: string;
 }
 
 export interface DiagramEdge {
@@ -54,6 +69,8 @@ export interface DiagramEdge {
   label: string | undefined;
   /** The default flow of a gateway. */
   isDefault: boolean;
+  /** A link between a throw and its catch of the same name (#493), drawn dashed; not a sequence flow. */
+  isLink?: boolean;
 }
 
 export interface DiagramGraph {
@@ -90,6 +107,14 @@ function eventKind(element: Element): string | undefined {
     if (child.namespaceURI === BPMN && child.localName.endsWith('EventDefinition')) {
       return child.localName.slice(0, -'EventDefinition'.length);
     }
+  }
+  return undefined;
+}
+
+/** The name of the link event definition of an event, if it has one (#493). */
+function linkNameOf(element: Element): string | undefined {
+  for (const child of elementChildren(element)) {
+    if (child.namespaceURI === BPMN && child.localName === 'linkEventDefinition') return nonEmpty(child.getAttribute('name'));
   }
   return undefined;
 }
@@ -132,6 +157,9 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
     if (NOT_A_STEP.has(child.localName)) continue;
     const defaultFlow = nonEmpty(child.getAttribute('default'));
     if (defaultFlow !== undefined) defaults.add(defaultFlow);
+    const boundary = child.localName === 'boundaryEvent';
+    const attachedTo = boundary ? nonEmpty(child.getAttribute('attachedToRef')) : undefined;
+    const link = child.localName.startsWith('intermediate') ? linkNameOf(child) : undefined;
     const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
     nodes.push({
       id,
@@ -139,6 +167,8 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       type: nodeType(child),
       ...(resultVariable !== undefined ? { resultVariable } : {}),
       ...(parentId !== undefined ? { parentId } : {}),
+      ...(attachedTo !== undefined ? { attachedTo, interrupting: child.getAttribute('cancelActivity') !== 'false' } : {}),
+      ...(link !== undefined ? { linkName: link } : {}),
     });
     if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);
   }
@@ -161,6 +191,11 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   const defaults = new Set<string>();
   readContainer(process, undefined, nodes, edges, defaults, 0);
   const ids = new Set(nodes.map((node) => node.id));
+  // A link throw is joined to the catch of the same name in the same container by a dashed line (#493).
+  for (const thrown of nodes.filter((node) => node.type === 'intermediateThrowEvent:link' && node.linkName !== undefined)) {
+    const caught = nodes.find((node) => node.type === 'intermediateCatchEvent:link' && node.linkName === thrown.linkName && node.parentId === thrown.parentId);
+    if (caught !== undefined) edges.push({ id: `link:${thrown.id}`, source: thrown.id, target: caught.id, label: thrown.linkName, isDefault: false, isLink: true });
+  }
   return {
     name: nonEmpty(process.getAttribute('name')),
     nodes,

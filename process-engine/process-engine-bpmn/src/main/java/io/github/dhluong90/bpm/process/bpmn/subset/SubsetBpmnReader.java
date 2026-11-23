@@ -12,6 +12,12 @@ import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
 import io.github.dhluong90.bpm.process.internal.expr.Condition;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
 import io.github.dhluong90.bpm.process.internal.expr.Script;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
@@ -131,6 +137,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /** The {@code horus:type} of an agent step. */
     static final String AGENT_TASK = "agentTask";
     private static final Set<String> IGNORED_CHILDREN = Set.of("incoming", "outgoing", "documentation");
+    /** The event definitions an end event may carry (#493). */
+    private static final Set<String> END_DEFINITIONS = Set.of("errorEventDefinition", "escalationEventDefinition",
+            "terminateEventDefinition");
     /** Where a group carries the label of the category value it refers to; the process model has no root elements. */
     static final QName CATEGORY_VALUE_LABEL = new QName(BpmnNamespaces.BPMN, "categoryValue");
     /** Where a group carries the id of the category that holds its category value. */
@@ -230,6 +239,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private final List<DefinitionProblem> unresolvedRefs = new ArrayList<>();
         /** Category value id to its label and its category id, from the document-level categories. */
         private final Map<String, String[]> categoryValues = new HashMap<>();
+        /** Root {@code error} id to its code, and root {@code escalation} id to its code (#489, #493). */
+        private final Map<String, String> errorCodes = new HashMap<>();
+        private final Map<String, String> escalationCodes = new HashMap<>();
+        /** Where each error or escalation reference was written, to check it once the root elements are read. */
+        private final List<DefinitionProblem> codeRefs = new ArrayList<>();
 
         Pass(XMLStreamReader xml) {
             this.xml = xml;
@@ -259,6 +273,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                 } else if (BPMN.equals(ns) && "category".equals(local)) {
                     category();
+                } else if (BPMN.equals(ns) && "error".equals(local)) {
+                    // #489: a root error is a code the definitions of error events refer to.
+                    errorCodes.put(attr("id"), attr("errorCode"));
+                    skip();
+                } else if (BPMN.equals(ns) && "escalation".equals(local)) {
+                    escalationCodes.put(attr("id"), attr("escalationCode"));
+                    skip();
                 } else if (BPMN.equals(ns)) {
                     if (local.endsWith("EventDefinition") && attr("id") != null) {
                         sharedDefinitionIds.add(attr("id"));
@@ -274,6 +295,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
                     invalid.add(ref);
                 }
+            }
+            if (process != null) {
+                process = resolveCodes(process);
             }
             if (!unsupported.isEmpty()) {
                 throw new BpmnUnsupportedElementException(unsupported, warnings, unsupportedTruncated);
@@ -381,6 +405,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case "scriptTask" -> elements.add(scriptTask());
                     case "userTask" -> elements.add(userTask());
                     case "callActivity" -> elements.add(callActivity());
+                    case "boundaryEvent" -> elements.add(boundaryEvent());
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
                     case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
                     case "transaction" -> elements.add(saga());
@@ -476,10 +501,22 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             int line = line();
             CompensateEventDefinition compensate = null;
+            EventDefinition other = null;
             int definitions = 0;
             while (nextChild()) {
                 String local = xml.getLocalName();
-                if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
+                if (BPMN.equals(xml.getNamespaceURI()) && ("escalationEventDefinition".equals(local)
+                        || "linkEventDefinition".equals(local))) {
+                    // #493: an escalation throw, and the throw half of a link pair.
+                    definitions++;
+                    other = definition(local, id, element, line);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
+                        || "terminateEventDefinition".equals(local))) {
+                    definitions++;
+                    unsupported(element + " with " + local, id, BpmnStages.NOT_PLANNED, "is not BPMN: an error or a"
+                            + " terminate is raised by an end event");
+                    skip();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "compensateEventDefinition".equals(local)) {
                     definitions++;
                     if (attr("activityRef") != null) {
                         unsupported(element + " with compensateEventDefinition activityRef", id, BpmnStages.S2);
@@ -506,8 +543,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 invalid.add(new DefinitionProblem("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", element, safe(id), line));
             }
-            return new IntermediateThrowEvent(id, name, List.of(), List.of(),
-                    compensate == null ? List.of() : List.of(compensate), List.of(), null, null);
+            List<EventDefinition> defined = compensate != null ? List.of(compensate)
+                    : other != null ? List.of(other) : List.of();
+            return new IntermediateThrowEvent(id, name, List.of(), List.of(), defined, List.of(), null, null);
         }
 
         /**
@@ -607,16 +645,21 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String element = start ? "startEvent" : "endEvent";
             String id = id();
             String name = attr("name");
+            int line = line();
+            List<EventDefinition> definitions = new ArrayList<>();
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "eventDefinitionRef".equals(local)) {
                     // A reference that does not resolve is a broken document: 422 naming the reference, not
                     // "not executable" at activation.
-                    int line = line();
+                    int refLine = line();
                     String ref = text().strip();
                     unresolvedRefs.add(new DefinitionProblem("EVENT_DEFINITION_REF_UNRESOLVED", "eventDefinitionRef '"
                             + safe(ref) + "' does not resolve to an event definition of this document", element,
-                            safe(id), line));
+                            safe(id), refLine));
+                } else if (!start && BPMN.equals(xml.getNamespaceURI()) && END_DEFINITIONS.contains(local)) {
+                    // #493: an end event that raises an error or an escalation, or terminates its scope.
+                    definitions.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
@@ -628,9 +671,187 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
+            if (definitions.size() > 1) {
+                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+            }
             return start
                     ? new StartEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, false, true, null)
-                    : new EndEvent(id, name, List.of(), List.of(), List.of(), List.of(), null, null);
+                    : new EndEvent(id, name, List.of(), List.of(), definitions, List.of(), null, null);
+        }
+
+        /**
+         * One error, escalation, terminate or link event definition of #489 and #493, at the current element. An error
+         * or escalation reference is checked against the root elements once they have been read.
+         */
+        private EventDefinition definition(String local, String eventId, String element, int line)
+                throws XMLStreamException {
+            String definitionId = attr("id");
+            EventDefinition result;
+            switch (local) {
+                case "errorEventDefinition" -> {
+                    String ref = attr("errorRef");
+                    codeRefs.add(new DefinitionProblem("ERROR_REF", ref == null ? "" : ref, element, safe(eventId), line));
+                    result = new ErrorEventDefinition(definitionId, ref, null, null);
+                }
+                case "escalationEventDefinition" -> {
+                    String ref = attr("escalationRef");
+                    codeRefs.add(new DefinitionProblem("ESCALATION_REF", ref == null ? "" : ref, element,
+                            safe(eventId), line));
+                    result = new EscalationEventDefinition(definitionId, ref, null, null);
+                }
+                case "linkEventDefinition" -> result = new LinkEventDefinition(definitionId, attr("name"), List.of(), null,
+                        null);
+                default -> result = new TerminateEventDefinition(definitionId, null);
+            }
+            skip();
+            return result;
+        }
+
+        /**
+         * A {@code boundaryEvent} (#489): attached to a task, a call activity or a sub-process, with a timer, an error
+         * or an escalation definition, interrupting ({@code cancelActivity} true, the default) or not. Message, signal
+         * and conditional boundaries are named as unsupported with their stage.
+         */
+        private FlowElement boundaryEvent() throws XMLStreamException {
+            String element = "boundaryEvent";
+            String id = id();
+            String name = attr("name");
+            String attachedTo = attr("attachedToRef");
+            boolean cancel = !"false".equals(attr("cancelActivity"));
+            int line = line();
+            List<EventDefinition> definitions = new ArrayList<>();
+            while (nextChild()) {
+                String local = xml.getLocalName();
+                if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
+                    TimerEventDefinition timer = timer(id);
+                    definitions.add(timer);
+                    TimerSchedule.problem(timer).ifPresent(problem -> {
+                        if (problem.startsWith("timeCycle")) {
+                            addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                    "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
+                                    BpmnStages.S1));
+                        } else {
+                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
+                        }
+                    });
+                } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
+                        || "escalationEventDefinition".equals(local))) {
+                    definitions.add(definition(local, id, element, line));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
+                    definitions.add(null);
+                    unsupported(element + " with " + local, id, BpmnStages.of(local));
+                    skip();
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
+                        && !"extensionElements".equals(local)) {
+                    unsupported(element + " child " + local, id, BpmnStages.of(local));
+                    skip();
+                } else {
+                    skip();
+                }
+            }
+            if (definitions.isEmpty()) {
+                unsupported(element, id, BpmnStages.NOT_PLANNED, "has no event definition; a boundary event needs a"
+                        + " timer, an error or an escalation");
+            } else if (definitions.size() > 1) {
+                unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
+            }
+            if (attachedTo == null || attachedTo.isBlank()) {
+                invalid.add(new DefinitionProblem("BOUNDARY_ATTACHED_INVALID", "A boundary event names the activity it is"
+                        + " attached to with attachedToRef", element, safe(id), line));
+            }
+            definitions.removeIf(java.util.Objects::isNull);
+            return new BoundaryEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, attachedTo,
+                    cancel, null);
+        }
+
+        /** Fills in the code of each error and escalation definition from the root elements, once all are read. */
+        private Process resolveCodes(Process process) {
+            for (DefinitionProblem ref : codeRefs) {
+                boolean error = "ERROR_REF".equals(ref.code());
+                String refId = ref.message();
+                if (refId.isEmpty()) {
+                    if (error && "endEvent".equals(ref.element())) {
+                        invalid.add(new DefinitionProblem("ERROR_CODE_REQUIRED", "An error end event names the error it"
+                                + " raises with errorRef", ref.element(), ref.elementId(), ref.line()));
+                    }
+                } else if (!(error ? errorCodes : escalationCodes).containsKey(refId)) {
+                    invalid.add(new DefinitionProblem(error ? "ERROR_REF_UNRESOLVED" : "ESCALATION_REF_UNRESOLVED",
+                            (error ? "errorRef '" : "escalationRef '") + safe(refId) + "' does not name an error of this"
+                                    + " document", ref.element(), ref.elementId(), ref.line()));
+                } else if (error && errorCodes.get(refId) == null) {
+                    invalid.add(new DefinitionProblem("ERROR_CODE_REQUIRED", "The error '" + safe(refId)
+                            + "' has no errorCode, so nothing could match it", ref.element(), ref.elementId(),
+                            ref.line()));
+                }
+            }
+            Process resolved = new Process(process.id(), process.name(), process.processType(), process.isExecutable(),
+                    process.isClosed(), resolveCodes(process.flowElements()), process.artifacts(), process.laneSets(),
+                    process.info());
+            checkLinks(resolved.flowElements());
+            return resolved;
+        }
+
+        /** #493: every link throw has a link catch of the same name in the same scope; refused at import otherwise. */
+        private void checkLinks(List<FlowElement> elements) {
+            Set<String> catches = new HashSet<>();
+            for (FlowElement e : elements) {
+                if (e instanceof IntermediateCatchEvent c && c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof LinkEventDefinition link && link.name() != null) {
+                    catches.add(link.name());
+                }
+            }
+            for (FlowElement e : elements) {
+                if (e instanceof IntermediateThrowEvent t && t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof LinkEventDefinition link) {
+                    if (link.name() == null || link.name().isBlank()) {
+                        invalid.add(new DefinitionProblem("LINK_NAME_REQUIRED", "A link event needs a name",
+                                "intermediateThrowEvent", safe(t.id()), 0));
+                    } else if (!catches.contains(link.name())) {
+                        invalid.add(new DefinitionProblem("LINK_CATCH_MISSING", "The link throw '" + safe(link.name())
+                                + "' has no link catch of the same name in its scope", "intermediateThrowEvent",
+                                safe(t.id()), 0));
+                    }
+                } else if (e instanceof SubProcess sub) {
+                    checkLinks(sub.flowElements());
+                } else if (e instanceof Transaction saga) {
+                    checkLinks(saga.flowElements());
+                }
+            }
+        }
+
+        private List<FlowElement> resolveCodes(List<FlowElement> elements) {
+            List<FlowElement> out = new ArrayList<>();
+            for (FlowElement e : elements) {
+                out.add(switch (e) {
+                    case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), b.incoming(), b.outgoing(),
+                            resolved(b.eventDefinitions()), b.eventDefinitionRefs(), b.data(), b.parallelMultiple(),
+                            b.attachedToRef(), b.cancelActivity(), b.info());
+                    case EndEvent x -> new EndEvent(x.id(), x.name(), x.incoming(), x.outgoing(),
+                            resolved(x.eventDefinitions()), x.eventDefinitionRefs(), x.data(), x.info());
+                    case IntermediateThrowEvent x -> new IntermediateThrowEvent(x.id(), x.name(), x.incoming(),
+                            x.outgoing(), resolved(x.eventDefinitions()), x.eventDefinitionRefs(), x.data(), x.info());
+                    case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.method(), resolveCodes(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveCodes(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    default -> e;
+                });
+            }
+            return out;
+        }
+
+        private List<EventDefinition> resolved(List<EventDefinition> definitions) {
+            List<EventDefinition> out = new ArrayList<>();
+            for (EventDefinition d : definitions) {
+                out.add(switch (d) {
+                    case ErrorEventDefinition x -> new ErrorEventDefinition(x.id(), x.errorRef(),
+                            x.errorRef() == null ? null : errorCodes.get(x.errorRef()), x.info());
+                    case EscalationEventDefinition x -> new EscalationEventDefinition(x.id(), x.escalationRef(),
+                            x.escalationRef() == null ? null : escalationCodes.get(x.escalationRef()), x.info());
+                    default -> d;
+                });
+            }
+            return out;
         }
 
         /**
@@ -643,12 +864,17 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             int line = line();
             TimerEventDefinition timer = null;
+            EventDefinition link = null;
             int definitions = 0;
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
                     definitions++;
                     timer = timer(id);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "linkEventDefinition".equals(local)) {
+                    // #493: the catch half of a link pair.
+                    definitions++;
+                    link = definition(local, id, element, line);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions++;
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
@@ -666,7 +892,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
             }
             if (definitions == 0) {
-                unsupported(element, id, BpmnStages.S1, "has no event definition; link and none catch events are not supported");
+                unsupported(element, id, BpmnStages.S1, "has no event definition; a none catch event is not supported");
             } else if (definitions > 1) {
                 unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
@@ -682,7 +908,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 });
             }
             return new IntermediateCatchEvent(id, name, List.of(), List.of(),
-                    timer == null ? List.of() : List.of(timer), List.of(), null, false, null);
+                    timer != null ? List.of(timer) : link != null ? List.of(link) : List.of(), List.of(), null, false, null);
         }
 
         private TimerEventDefinition timer(String eventId) throws XMLStreamException {
@@ -1711,6 +1937,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
                 case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), in, o,
                         t.eventDefinitions(), t.eventDefinitionRefs(), t.data(), t.info());
+                case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), in, o, b.eventDefinitions(),
+                        b.eventDefinitionRefs(), b.data(), b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(),
+                        b.info());
                 case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
                 case Transaction t -> new Transaction(t.id(), t.name(), in, o, t.activity(), t.method(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());

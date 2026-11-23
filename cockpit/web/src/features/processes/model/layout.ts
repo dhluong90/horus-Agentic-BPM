@@ -38,6 +38,8 @@ export interface PlacedEdge {
   target: string;
   label: string | undefined;
   isDefault: boolean;
+  /** A link between a throw and its catch (#493), drawn dashed. */
+  isLink?: boolean;
   points: Point[];
   /** Centre of the edge's label, in the space dagre kept free for it. */
   labelAt: Point | undefined;
@@ -66,6 +68,10 @@ export const CAPTION_GAP = 10;
 const CAPTION_LINE = 17;
 export const EVENT_RADIUS = 20;
 export const GATEWAY_HALF = 24;
+/** Boundary events (#489): the first sits this far in from the left of its activity, the next ones this far apart, and a flow drops this far under the symbol before it runs on. */
+const BOUNDARY_INSET = 24;
+const BOUNDARY_STEP = 44;
+const BOUNDARY_DROP = 14;
 /** Room kept on each side of an edge label, so it never touches the node or the edge it names. */
 const LABEL_PAD = 10;
 const LABEL_HEIGHT = 22;
@@ -178,8 +184,13 @@ function stepCount(graph: DiagramGraph, id: string): number {
  */
 function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: (type: string) => string, options: LayoutOptions): Level {
   const badges = options.badges === true;
-  const nodesHere = graph.nodes.filter((node) => node.parentId === scope);
-  const ids = new Set(nodesHere.map((node) => node.id));
+  const everyoneHere = graph.nodes.filter((node) => node.parentId === scope);
+  const hereIds = new Set(everyoneHere.map((node) => node.id));
+  // A boundary event (#489) sits on the lower edge of its activity, so it takes no place of its own in the ranks.
+  const boundaries = everyoneHere.filter((node) => node.attachedTo !== undefined && hereIds.has(node.attachedTo));
+  const boundaryIds = new Set(boundaries.map((node) => node.id));
+  const hostOf = new Map(boundaries.map((node) => [node.id, node.attachedTo ?? '']));
+  const nodesHere = everyoneHere.filter((node) => !boundaryIds.has(node.id));
   const inner = new Map<string, Level>();
   const sizes = new Map<string, Size>();
   const containers = new Map<string, { steps: number; open: boolean }>();
@@ -205,10 +216,11 @@ function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: 
     const size = sizes.get(node.id);
     if (size) g.setNode(node.id, { width: size.width, height: size.height });
   }
-  const edgesHere = graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target));
+  const edgesHere = graph.edges.filter((edge) => hereIds.has(edge.source) && hereIds.has(edge.target));
   for (const edge of edgesHere) {
     const label = edge.label === undefined ? {} : { width: Math.ceil(edge.label.length * CAPTION_CHAR) + 2 * LABEL_PAD, height: LABEL_HEIGHT, labelpos: 'c' };
-    g.setEdge(edge.source, edge.target, label, edge.id);
+    // A flow that leaves a boundary event is ranked as if it left the activity the boundary sits on.
+    g.setEdge(hostOf.get(edge.source) ?? edge.source, edge.target, label, edge.id);
   }
   dagre.layout(g);
 
@@ -221,13 +233,36 @@ function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: 
     const container = containers.get(node.id);
     return { ...node, shape, width: size.width, height: size.height, lines: size.lines, typeLines: size.typeLines, x: placed.x - size.width / 2, y: placed.y - size.height / 2 + lift, ...(container !== undefined ? { container } : {}) };
   });
+  // Boundary events: on the lower edge of the activity, side by side when there are several (#489).
+  const placedPerHost = new Map<string, number>();
+  for (const node of boundaries) {
+    const host = nodes.find((candidate) => candidate.id === node.attachedTo);
+    if (host === undefined) continue;
+    const index = placedPerHost.get(host.id) ?? 0;
+    placedPerHost.set(host.id, index + 1);
+    const centreX = host.x + BOUNDARY_INSET + index * BOUNDARY_STEP;
+    const centreY = host.y + host.height;
+    const shape = shapeOf(node.type);
+    nodes.push({ ...node, shape, width: SYMBOL_SIZE, height: SYMBOL_SIZE, lines: [], typeLines: [], x: centreX - SYMBOL_SIZE / 2, y: centreY - SYMBOL_SIZE / 2 });
+  }
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const edges: PlacedEdge[] = edgesHere.map((edge) => {
-    const laid = g.edge({ v: edge.source, w: edge.target, name: edge.id }) as { points?: Point[]; x?: number; y?: number } | undefined;
+    const laid = g.edge({ v: hostOf.get(edge.source) ?? edge.source, w: edge.target, name: edge.id }) as { points?: Point[]; x?: number; y?: number } | undefined;
     const points = (laid?.points ?? []).map((p) => ({ x: p.x, y: p.y }));
     const source = byId.get(edge.source);
     const target = byId.get(edge.target);
-    if (source && points.length > 1) {
+    const leavesBoundary = boundaryIds.has(edge.source);
+    if (leavesBoundary && source && points.length > 1) {
+      // Down from the boundary symbol, along under the activity, then on as dagre routed the flow.
+      const start = symbolCentre(source);
+      const first = points[1];
+      const lane = start.y + EVENT_RADIUS + BOUNDARY_DROP;
+      const rest = points.slice(1);
+      points.length = 0;
+      points.push({ x: start.x, y: start.y + EVENT_RADIUS }, { x: start.x, y: lane });
+      if (first) points.push({ x: first.x, y: lane });
+      points.push(...rest);
+    } else if (source && points.length > 1) {
       const first = points[0];
       const second = points[1];
       if (first && second) points[0] = onOutline(first, second, source);

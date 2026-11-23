@@ -1,6 +1,15 @@
 package io.github.dhluong90.bpm.process.bpmn.subset;
 
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
@@ -95,6 +104,7 @@ public final class SubsetBpmnWriter {
         xml.line(0, "                  targetNamespace=\"urn:horus-bpm:definitions\"");
         xml.line(0, "                  expressionLanguage=\"" + BpmnNamespaces.EXPR_V1 + "\"");
         xml.line(0, "                  exporter=\"HORUS Process Engine\">");
+        rootCodes(xml, process);
         xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
                 + " isExecutable=\"true\">");
         for (FlowElement element : process.flowElements()) {
@@ -111,6 +121,56 @@ public final class SubsetBpmnWriter {
         diagram(xml, process, ids);
         xml.line(0, "</bpmn:definitions>");
         return xml.out.toString().getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** The root {@code error} and {@code escalation} elements the event definitions of the process refer to (#489, #493). */
+    private static void rootCodes(Xml xml, Process process) {
+        Map<String, String> errors = new LinkedHashMap<>();
+        Map<String, String> escalations = new LinkedHashMap<>();
+        for (FlowElement element : process.allFlowElements()) {
+            if (element instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event) {
+                for (EventDefinition d : event.eventDefinitions()) {
+                    if (d instanceof ErrorEventDefinition e && e.errorRef() != null) {
+                        errors.putIfAbsent(e.errorRef(), e.errorCode());
+                    } else if (d instanceof EscalationEventDefinition e && e.escalationRef() != null) {
+                        escalations.putIfAbsent(e.escalationRef(), e.escalationCode());
+                    }
+                }
+            }
+        }
+        errors.forEach((id, code) -> xml.line(1, "<bpmn:error id=" + attr(id) + optional("errorCode", code) + "/>"));
+        escalations.forEach((id, code) -> xml.line(1, "<bpmn:escalation id=" + attr(id)
+                + optional("escalationCode", code) + "/>"));
+    }
+
+    /** The event definitions of an event as child elements (#489, #493). */
+    private static void definitions(Xml xml, FlowNode node, int lvl) {
+        if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event)) {
+            return;
+        }
+        for (EventDefinition d : event.eventDefinitions()) {
+            switch (d) {
+                case TimerEventDefinition t -> {
+                    xml.line(lvl, "<bpmn:timerEventDefinition>");
+                    if (t.timeDuration() != null && t.timeDuration().text() != null) {
+                        xml.line(lvl + 1, "<bpmn:timeDuration>" + text(t.timeDuration().text()) + "</bpmn:timeDuration>");
+                    }
+                    if (t.timeDate() != null && t.timeDate().text() != null) {
+                        xml.line(lvl + 1, "<bpmn:timeDate>" + text(t.timeDate().text()) + "</bpmn:timeDate>");
+                    }
+                    xml.line(lvl, "</bpmn:timerEventDefinition>");
+                }
+                case ErrorEventDefinition e -> xml.line(lvl, "<bpmn:errorEventDefinition"
+                        + optional("errorRef", e.errorRef()) + "/>");
+                case EscalationEventDefinition e -> xml.line(lvl, "<bpmn:escalationEventDefinition"
+                        + optional("escalationRef", e.escalationRef()) + "/>");
+                case TerminateEventDefinition t -> xml.line(lvl, "<bpmn:terminateEventDefinition/>");
+                case LinkEventDefinition l -> xml.line(lvl, "<bpmn:linkEventDefinition" + optional("name", l.name())
+                        + "/>");
+                default -> throw new IllegalArgumentException("Element " + node.id() + " has an event definition ("
+                        + d.getClass().getSimpleName() + ") outside the exportable subset");
+            }
+        }
     }
 
     private static void flowElement(Xml xml, FlowElement element, int lvl) {
@@ -132,6 +192,13 @@ public final class SubsetBpmnWriter {
         switch (node) {
             case StartEvent s -> tag = "bpmn:startEvent";
             case EndEvent e -> tag = "bpmn:endEvent";
+            case BoundaryEvent b -> {
+                tag = "bpmn:boundaryEvent";
+                attributes.append(optional("attachedToRef", b.attachedToRef()))
+                        .append(b.cancelActivity() ? "" : " cancelActivity=\"false\"");
+            }
+            case IntermediateCatchEvent c -> tag = "bpmn:intermediateCatchEvent";
+            case IntermediateThrowEvent t -> tag = "bpmn:intermediateThrowEvent";
             case ServiceTask t when agent != null -> {
                 tag = "bpmn:serviceTask";
                 attributes.append(" horus:type=\"agentTask\"").append(optional("horus:agent", agent.agent()))
@@ -195,7 +262,9 @@ public final class SubsetBpmnWriter {
                 f.action())));
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
         if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
-                && node.outgoing().isEmpty() && !(node instanceof SubProcess)) {
+                && node.outgoing().isEmpty() && !(node instanceof SubProcess)
+                && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event e
+                        && !e.eventDefinitions().isEmpty())) {
             xml.line(lvl, "<" + tag + attributes + "/>");
             return;
         }
@@ -240,6 +309,7 @@ public final class SubsetBpmnWriter {
         }
         node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
+        definitions(xml, node, lvl + 1);
         if (node instanceof SubProcess sub) {
             // #486: the steps and flows of the scope, nested one level deeper; the diagram is generated for the top level only.
             sub.flowElements().forEach(inner -> flowElement(xml, inner, lvl + 1));
@@ -335,12 +405,26 @@ public final class SubsetBpmnWriter {
         Map<Integer, Integer> rowsUsed = new HashMap<>();
         Map<String, Box> boxes = new LinkedHashMap<>();
         for (FlowNode node : nodes) {
+            if (node instanceof BoundaryEvent) {
+                continue;
+            }
             int col = column.get(node.id());
             int row = rowsUsed.merge(col, 1, Integer::sum) - 1;
             int[] size = size(node);
             int cellX = LEFT + col * COLUMN_WIDTH;
             int cellY = TOP + row * ROW_HEIGHT;
             boxes.put(node.id(), new Box(cellX + (100 - size[0]) / 2, cellY + (80 - size[1]) / 2, size[0], size[1]));
+        }
+        // #489: a boundary event sits on the lower edge of its activity, side by side when there are several.
+        Map<String, Integer> boundariesPlaced = new HashMap<>();
+        for (FlowNode node : nodes) {
+            if (node instanceof BoundaryEvent b && boxes.containsKey(b.attachedToRef())) {
+                Box host = boxes.get(b.attachedToRef());
+                int n = boundariesPlaced.merge(b.attachedToRef(), 1, Integer::sum) - 1;
+                boxes.put(node.id(), new Box(host.x() + 12 + n * 40, host.y() + host.height() - 18, 36, 36));
+            } else if (node instanceof BoundaryEvent) {
+                boxes.put(node.id(), new Box(LEFT, TOP, 36, 36));
+            }
         }
         int bottom = boxes.values().stream().mapToInt(b -> b.y() + b.height()).max().orElse(TOP);
         Map<String, Box> artifactBoxes = new LinkedHashMap<>();
@@ -416,6 +500,12 @@ public final class SubsetBpmnWriter {
         for (SequenceFlow f : flows) {
             next.computeIfAbsent(f.sourceRef(), k -> new ArrayList<>()).add(f.targetRef());
         }
+        // A boundary event is reached from its activity (#489).
+        for (FlowNode node : nodes) {
+            if (node instanceof BoundaryEvent b && b.attachedToRef() != null) {
+                next.computeIfAbsent(b.attachedToRef(), k -> new ArrayList<>()).add(b.id());
+            }
+        }
         Map<String, Integer> column = new HashMap<>();
         Deque<String> queue = new ArrayDeque<>();
         for (FlowNode node : nodes) {
@@ -444,6 +534,9 @@ public final class SubsetBpmnWriter {
         return switch (node) {
             case StartEvent s -> new int[] {36, 36};
             case EndEvent e -> new int[] {36, 36};
+            case BoundaryEvent b -> new int[] {36, 36};
+            case IntermediateCatchEvent c -> new int[] {36, 36};
+            case IntermediateThrowEvent t -> new int[] {36, 36};
             case ExclusiveGateway g -> new int[] {50, 50};
             default -> new int[] {100, 80};
         };

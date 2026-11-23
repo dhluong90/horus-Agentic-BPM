@@ -320,7 +320,7 @@ One shape in both engines (PD-141), so a client needs one parser:
    "message":"<businessKnowledgeModel id=\"bkm-1\"> is not supported; it is added in stage S2 (line 55)"}],...}
 ```
 
-A BPMN refusal is the same, with `"code":"BPMN_UNSUPPORTED_ELEMENT"` and a BPMN element such as `boundaryEvent`.
+A BPMN refusal is the same, with `"code":"BPMN_UNSUPPORTED_ELEMENT"` and a BPMN element such as `inclusiveGateway`.
 
 ### EXPRESSION_LANGUAGE_UNSUPPORTED
 `422`. A DMN file names an `expressionLanguage` or `typeLanguage` other than FEEL, for example JUEL or Groovy. `unsupportedElements` holds the element that names it with its `line` and `stage` (`not planned`). Nothing is stored.

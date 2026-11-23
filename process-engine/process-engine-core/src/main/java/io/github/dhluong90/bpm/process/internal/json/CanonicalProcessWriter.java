@@ -1,5 +1,10 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.LinkEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TerminateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
@@ -84,7 +89,74 @@ public final class CanonicalProcessWriter {
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
             switch (node) {
                 case StartEvent s -> step.put("type", "start");
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof ErrorEventDefinition d -> {
+                    // #493: an end event that raises an error; the code is part of the hash.
+                    step.put("type", "errorEnd");
+                    step.put("errorCode", d.errorCode());
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof EscalationEventDefinition d -> {
+                    step.put("type", "escalationEnd");
+                    if (d.escalationCode() != null) {
+                        step.put("escalationCode", d.escalationCode());
+                    }
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof TerminateEventDefinition ->
+                        step.put("type", "terminateEnd");
                 case EndEvent e -> step.put("type", "end");
+                case BoundaryEvent b -> {
+                    // #489: a boundary event, with its trigger, what it is attached to and whether it interrupts.
+                    step.put("type", "boundaryEvent");
+                    step.put("attachedTo", b.attachedToRef());
+                    if (!b.cancelActivity()) {
+                        step.put("interrupting", false);
+                    }
+                    if (b.eventDefinitions().size() == 1) {
+                        switch (b.eventDefinitions().get(0)) {
+                            case TimerEventDefinition t -> {
+                                step.put("trigger", "timer");
+                                if (t.timeDuration() != null && t.timeDuration().text() != null) {
+                                    step.put("duration", t.timeDuration().text().strip());
+                                }
+                                if (t.timeDate() != null && t.timeDate().text() != null) {
+                                    step.put("until", t.timeDate().text().strip());
+                                }
+                            }
+                            case ErrorEventDefinition e -> {
+                                step.put("trigger", "error");
+                                if (e.errorCode() != null) {
+                                    step.put("errorCode", e.errorCode());
+                                }
+                            }
+                            case EscalationEventDefinition e -> {
+                                step.put("trigger", "escalation");
+                                if (e.escalationCode() != null) {
+                                    step.put("escalationCode", e.escalationCode());
+                                }
+                            }
+                            default -> step.put("trigger", "other");
+                        }
+                    }
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof EscalationEventDefinition d -> {
+                    step.put("type", "escalationThrow");
+                    if (d.escalationCode() != null) {
+                        step.put("escalationCode", d.escalationCode());
+                    }
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof LinkEventDefinition d -> {
+                    step.put("type", "linkThrow");
+                    step.put("link", d.name());
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof LinkEventDefinition d -> {
+                    step.put("type", "linkCatch");
+                    step.put("link", d.name());
+                }
                 case ServiceTask t when t.extensions().first(AgentTaskSpec.class).isPresent() -> {
                     // process-definition.v1 agentTaskStep: the whole guard spec is part of the hash (#52).
                     AgentTaskSpec agent = t.extensions().first(AgentTaskSpec.class).orElseThrow();
@@ -256,7 +328,10 @@ public final class CanonicalProcessWriter {
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
-            if (!(node instanceof ExclusiveGateway) && !(node instanceof IntermediateThrowEvent) && out.size() == 1) {
+            boolean ends = node instanceof IntermediateThrowEvent t && (t.eventDefinitions().isEmpty()
+                    || t.eventDefinitions().get(0) instanceof CompensateEventDefinition
+                    || t.eventDefinitions().get(0) instanceof LinkEventDefinition);
+            if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }
