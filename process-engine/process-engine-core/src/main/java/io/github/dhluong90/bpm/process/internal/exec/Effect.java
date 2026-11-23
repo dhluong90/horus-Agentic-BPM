@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
  */
-public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.CancelChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
+public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.BroadcastSignal, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.CancelChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
 
     /**
      * Insert a job in {@code pre_timer}.
@@ -45,6 +45,17 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param nodeId node
      */
     record CreateSubscription(String subscriptionId, String kind, String name, String correlationKey, String tokenId, String nodeId) implements Effect {    }
+
+    /**
+     * Broadcast a signal to every subscription of the instance's tenant and start the definitions with a start event
+     * for it (#492). The shell writes the broadcast and the wake-up jobs in the transaction; it wakes nobody inline.
+     *
+     * @param signalId id of this broadcast, derived like other kernel ids, so a replay is the same broadcast
+     * @param name the signal name
+     * @param tokenId the token that threw it
+     * @param nodeId the throwing event
+     */
+    record BroadcastSignal(String signalId, String name, String tokenId, String nodeId) implements Effect {    }
 
     /**
      * Delete a subscription.

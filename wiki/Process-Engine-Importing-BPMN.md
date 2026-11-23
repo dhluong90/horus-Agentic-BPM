@@ -83,6 +83,10 @@ The root element must declare the namespaces, and the process must be executable
 | `boundaryEvent` (since 0.3.0) | `attachedToRef`, the id of a task, call activity or sub-process in the same scope; one `timerEventDefinition` (`timeDuration` or `timeDate`), `errorEventDefinition` or `escalationEventDefinition`; at least one outgoing flow | `cancelActivity="false"` for a non-interrupting one (timer and escalation only); `errorRef` or `escalationRef` naming a root `error` or `escalation` | `<bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="false">` |
 | `endEvent` with an `errorEventDefinition`, `escalationEventDefinition` or `terminateEventDefinition` (since 0.3.0) | for an error: `errorRef` to a root `error` with an `errorCode` | `escalationRef` on an escalation end | `<bpmn:endEvent id="refused"><bpmn:errorEventDefinition errorRef="Err_limit"/></bpmn:endEvent>` |
 | `intermediateThrowEvent` with an `escalationEventDefinition`, or a `linkEventDefinition`; `intermediateCatchEvent` with a `linkEventDefinition` (since 0.3.0) | `name` on each link definition; a throw needs a catch of the same name in the same scope | `escalationRef` | `<bpmn:linkEventDefinition name="notify"/>` |
+| `startEvent` with a `signalEventDefinition` (since 0.3.0) | `signalRef`, the id of a document-level `signal` element | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
+| `startEvent` with a `conditionalEventDefinition` (since 0.3.0) | a `condition` in `urn:horus-bpm:expr:v1` | `name` | `<bpmn:condition>amount >= 1000000</bpmn:condition>` |
+| `intermediateCatchEvent` with a signal or conditional definition (since 0.3.0) | as above | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
+| `intermediateThrowEvent` and `endEvent` with a signal definition (since 0.3.0) | `signalRef` | `name` | `<bpmn:endEvent id="end"><bpmn:signalEventDefinition signalRef="Signal_done"/></bpmn:endEvent>` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
@@ -141,6 +145,18 @@ The worked example `examples/rule-and-process/src/main/resources/processes/card-
 ### Terminate and link events (0.3.0)
 
 A `terminateEventDefinition` on an end event cancels every other token of its scope, with their tasks, timers and called children: at the top level the instance completes, inside a sub-process only the sub-process ends and the parent goes on. A link throw jumps to the link catch of the same name in the same scope with no sequence flow, so several paths can end at one step. A throw with no catch of its name is refused at import as `LINK_CATCH_MISSING` with the element id; a name used by two catches in one scope is `LINK_CATCH_DUPLICATE`.
+
+### Signals and conditions (0.3.0)
+
+A signal is declared once in the document, as `<bpmn:signal id="Signal_rate" name="rate-card-updated"/>`, and events refer to it by `signalRef`. The name is 1 to 100 letters, digits, `.`, `_`, `:` or `-`, starting with a letter or digit (`SIGNAL_NAME_INVALID`); a reference to no signal is `SIGNAL_REF_INVALID`. Signals are broadcast **within one tenant**: a throw or `POST /signals` reaches the waiters and the signal starts of that tenant, never another's.
+
+- **Catch.** The token waits and costs one row. A broadcast does not run the waiters inline: it writes one wake-up job for each, and each waiter continues in its own transaction, once.
+- **Throw and end.** The event broadcasts and the instance goes on at once. The timeline shows `SIGNAL_THROWN` with the number of waiters.
+- **Start.** A broadcast starts one instance of the version in effect of each definition whose start event is a signal start for that name. A start request for such a definition starts it too.
+- **Conditional catch.** A condition that is true on arrival passes at once. Otherwise the token waits and the engine asks again whenever the instance's variables change, in that transaction and for that instance only. A condition that cannot be evaluated yet is not true.
+- **Conditional start.** The instance starts only when the condition is true for the start variables, otherwise the start is refused (`422 STEP_FAILED`, reason `START_CONDITION_FALSE`) and nothing is stored. A conditional start that waits for a change of variables belongs to an event sub-process, which comes with them.
+
+Signals carry no data into an instance. A broadcast needs `processes:signal:broadcast` and an `Idempotency-Key`; see [[Process Engine API]]. A worked file is [`rate-card-watch.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/rate-card-watch.bpmn).
 
 ### Calling another process (0.3.0)
 
@@ -208,8 +224,10 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `S1`, `S2`, `S3` | The stage after 1.0 that adds the element |
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: an `intermediateThrowEvent` with no event definition |
+| `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
 Examples: `inclusiveGateway`, an event sub-process, data objects and a timer cycle are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway` and message events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused in 0.2.0:
 
@@ -218,6 +236,8 @@ These are refused in 0.2.0:
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
 | Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event that is neither a timer nor a link, an intermediate throw event that is neither a compensation, an escalation nor a link, and any start event or an end event with a message or signal definition |
 | Activities | an event sub-process (`subProcess` with `triggeredByEvent="true"`), `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
+| Events | `boundaryEvent`, an `intermediateThrowEvent` that is not a signal throw or a `throwCompensation`, a catch event that is not a timer, signal or conditional event, a start event with a definition other than signal or conditional, an end event with a definition other than signal (timer, message, error, terminate), a conditional end or throw event, and an event with several definitions |
+| Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
@@ -255,6 +275,8 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `ERROR_CODE_REQUIRED`, `ERROR_REF_UNRESOLVED`, `ESCALATION_REF_UNRESOLVED` | Point an error end event's `errorRef` at a root `error` that has an `errorCode`; point `errorRef` and `escalationRef` at a root element of the file |
 | `LINK_CATCH_MISSING`, `LINK_CATCH_DUPLICATE`, `LINK_NAME_REQUIRED`, `LINK_THROW_HAS_OUTGOING` | Name every link event, give each link throw one link catch of the same name in its scope, and draw no flow out of a throw |
 | `ASSOCIATION_DIRECTION_INVALID` | Set `associationDirection` on the `association` to `None`, `One` or `Both`, or leave it out |
+| `SIGNAL_REF_MISSING`, `SIGNAL_REF_INVALID`, `SIGNAL_NAME_INVALID` | Give a signal event a `signalRef` that is the id of a `signal` element of the document, with a name of 1 to 100 letters, digits, `.`, `_`, `:` or `-` |
+| `CONDITION_MISSING`, `CONDITION_INVALID` | Give a conditional event a `condition` with an expression in `urn:horus-bpm:expr:v1` that parses |
 | `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
 | `NO_PROCESS` | Add a `process` element |
 | `XML_MALFORMED` | Fix the XML at the line given |

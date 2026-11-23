@@ -38,6 +38,12 @@ export const KNOWN_NODE_TYPES = [
   'intermediateThrowEvent:escalation',
   'intermediateThrowEvent:link',
   'intermediateCatchEvent:link',
+  'startEvent:signal',
+  'startEvent:conditional',
+  'endEvent:signal',
+  'intermediateCatchEvent:signal',
+  'intermediateThrowEvent:signal',
+  'intermediateCatchEvent:conditional',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 

@@ -35,7 +35,7 @@ The REST layer checks one permission string per endpoint with `@PreAuthorize`; t
 | Engine | Permissions | Reference |
 |---|---|---|
 | Rule Engine | `rules:evaluate`, `rules:read`, `rules:author`, `rules:approve`, `rules:simulate`, `rules:log:read`, `rules:pin` (0.2.0; held by no role by default) | [[Rule Engine Configuration]] |
-| Process Engine | `processes:read`, `processes:deploy`, `processes:author`, `processes:approve`, `processes:start`, `processes:cancel`, `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:migration:manage`, `processes:calendar:manage` | [[Process Engine Overview]] |
+| Process Engine | `processes:read`, `processes:deploy`, `processes:author`, `processes:approve`, `processes:start`, `processes:cancel`, `processes:task:work`, `processes:task:manage`, `processes:incident:manage`, `processes:signal:broadcast`, `processes:migration:manage`, `processes:calendar:manage` | [[Process Engine Overview]] |
 
 ## Maker-checker in the service layer
 

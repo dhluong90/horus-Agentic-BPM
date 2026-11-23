@@ -466,6 +466,16 @@ Source: [`diagrams/migration-steps.mmd`](diagrams/migration-steps.mmd).
 
 Source: [`diagrams/migration-dry-run.mmd`](diagrams/migration-dry-run.mmd).
 
+### 4.3a Signal and conditional events (#492, `PRE-270` to `PRE-275`)
+
+![Signal broadcast](../../docs/architecture/images/signal-broadcast.svg)
+
+A signal is broadcast within one tenant: the tenant is read from the authenticated context (REST) or from the throwing instance (a throw or end event), never from a body. A broadcast is sync in-transaction and only writes: `pre_signal` (the id is the idempotency key), one `SIGNAL_DELIVERY` job per waiting subscription (`INSERT .. SELECT`, job id = subscription id, so a waiter is woken once), and, inline, the effective version of each definition whose start event is a signal start for the name, found by JSON containment on the stored canonical form (`idx_pre_definition_active`, V45). A start that nests deeper than `calls.max-depth` fails with `SIGNAL_START_DEPTH_EXCEEDED`. The waiters are woken afterwards: the job fires in its own transaction, locks that one instance, checks that the token still waits on that subscription (a cancelled or ended instance consumes the job and deletes the row) and delivers `DeliverSignal`. A signal carries no data into an instance.
+
+A conditional catch needs no row: its token waits in `WAITING_EVENT`, and the kernel asks it again at the end of every command that changed the instance's variables, repeating while a token fires, within the step budget. A condition that cannot be evaluated then is false and never fails the command. A process-level conditional start is evaluated once against the start variables.
+
+DDL: `V46__pre_signal` (`pre_signal`, `pre_event_subscription`, job kind `SIGNAL_DELIVERY`).
+
 ### 4.4 Jobs and timers across replicas (`PRE-006`, `TR-PERF-05`, `TR-ASY-02`)
 
 Every replica runs one poller thread. A poll is two kinds of short transaction, and no network call happens in either:
@@ -757,7 +767,7 @@ Common set on every endpoint: `400 INPUT_INVALID`, `401`, `403 FORBIDDEN` (permi
 
 ### 6.3 Permissions
 
-From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:agent:replay` (replay recorded agent answers against a candidate guardrail and read the reports; held by no role by default, PD-128, #98), `processes:incident:manage` (retry an incident, propose a resolution, and approve or reject another person's proposal; 0.3.0, #68), `processes:migration:manage`, `processes:calendar:manage`.
+From ADR-0010 as amended by ADR-0012: `processes:read`, `processes:deploy` (import a complete definition as a draft, the Git and pipeline path), `processes:author` (create and edit drafts, request approval, save layout, read the step catalogue), `processes:approve` (approve, reject, retire), `processes:start` (start instances), `processes:signal:broadcast` (broadcast a signal in the caller's tenant; a signal start event starts its instances for the broadcaster, #492), `processes:cancel` (cancel a running instance with a reason; PD-103, so starting a case and stopping one are separate duties), `processes:task:work`, `processes:task:manage`, `processes:step:complete` (report the result of a remote step attempt, for the integration that receives a partner's callback; 0.2.0), `processes:agent:replay` (replay recorded agent answers against a candidate guardrail and read the reports; held by no role by default, PD-128, #98), `processes:incident:manage` (retry an incident, propose a resolution, and approve or reject another person's proposal; 0.3.0, #68), `processes:migration:manage`, `processes:calendar:manage`.
 
 ### 6.4 Events
 

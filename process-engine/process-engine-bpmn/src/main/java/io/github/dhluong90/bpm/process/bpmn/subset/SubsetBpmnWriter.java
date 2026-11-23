@@ -16,7 +16,12 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
@@ -105,10 +110,17 @@ public final class SubsetBpmnWriter {
         xml.line(0, "                  expressionLanguage=\"" + BpmnNamespaces.EXPR_V1 + "\"");
         xml.line(0, "                  exporter=\"HORUS Process Engine\">");
         rootCodes(xml, process);
+        // Each signal a process uses is one signal element, so the file reads back to the same names.
+        Map<String, String> signalIds = new LinkedHashMap<>();
+        process.allFlowElements().stream().filter(FlowNode.class::isInstance).map(FlowNode.class::cast)
+                .flatMap(n -> eventDefinitions(n).stream()).filter(SignalEventDefinition.class::isInstance)
+                .map(d -> ((SignalEventDefinition) d).signalRef())
+                .forEach(name -> signalIds.computeIfAbsent(name, k -> "Signal_" + (signalIds.size() + 1)));
+        signalIds.forEach((name, id) -> xml.line(1, "<bpmn:signal id=" + attr(id) + " name=" + attr(name) + "/>"));
         xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
                 + " isExecutable=\"true\">");
         for (FlowElement element : process.flowElements()) {
-            flowElement(xml, element, 2);
+            flowElement(xml, element, 2, signalIds);
         }
         process.artifacts().forEach(artifact -> artifact(xml, artifact, 2));
         xml.line(1, "</bpmn:process>");
@@ -116,6 +128,7 @@ public final class SubsetBpmnWriter {
         process.allFlowElements().forEach(e -> ids.add(e.id()));
         process.artifacts().forEach(a -> ids.add(a.id()));
         ids.add(process.id());
+        ids.addAll(signalIds.values());
         ids.add("Definitions_" + process.id());
         categories(xml, process, ids);
         diagram(xml, process, ids);
@@ -144,7 +157,7 @@ public final class SubsetBpmnWriter {
     }
 
     /** The event definitions of an event as child elements (#489, #493). */
-    private static void definitions(Xml xml, FlowNode node, int lvl) {
+    private static void definitions(Xml xml, FlowNode node, int lvl, Map<String, String> signalIds) {
         if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event)) {
             return;
         }
@@ -164,6 +177,11 @@ public final class SubsetBpmnWriter {
                         + optional("errorRef", e.errorRef()) + "/>");
                 case EscalationEventDefinition e -> xml.line(lvl, "<bpmn:escalationEventDefinition"
                         + optional("escalationRef", e.escalationRef()) + "/>");
+                case SignalEventDefinition s -> xml.line(lvl, "<bpmn:signalEventDefinition signalRef="
+                        + attr(signalIds.get(s.signalRef())) + "/>");
+                case ConditionalEventDefinition c -> xml.line(lvl, "<bpmn:conditionalEventDefinition><bpmn:condition"
+                        + " xsi:type=\"bpmn:tFormalExpression\" language=\"" + BpmnNamespaces.EXPR_V1 + "\">"
+                        + text(c.condition().text()) + "</bpmn:condition></bpmn:conditionalEventDefinition>");
                 case TerminateEventDefinition t -> xml.line(lvl, "<bpmn:terminateEventDefinition/>");
                 case LinkEventDefinition l -> xml.line(lvl, "<bpmn:linkEventDefinition" + optional("name", l.name())
                         + "/>");
@@ -173,16 +191,22 @@ public final class SubsetBpmnWriter {
         }
     }
 
-    private static void flowElement(Xml xml, FlowElement element, int lvl) {
+    private static void flowElement(Xml xml, FlowElement element, int lvl, Map<String, String> signalIds) {
         switch (element) {
             case SequenceFlow flow -> sequenceFlow(xml, flow, lvl);
-            case FlowNode node -> node(xml, node, lvl);
+            case FlowNode node -> node(xml, node, lvl, signalIds);
             default -> throw new IllegalArgumentException("Element " + element.id() + " ("
                     + element.getClass().getSimpleName() + ") is outside the exportable subset");
         }
     }
 
-    private static void node(Xml xml, FlowNode node, int lvl) {
+    private static void node(Xml xml, FlowNode node, int lvl, Map<String, String> signalIds) {
+    private static List<EventDefinition> eventDefinitions(FlowNode node) {
+        return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
+                ? event.eventDefinitions() : List.of();
+    }
+
+
         String tag;
         StringBuilder attributes = new StringBuilder(" id=" + attr(node.id()) + optional("name", node.name()));
         List<InputMapping> inputs = List.of();
@@ -309,10 +333,10 @@ public final class SubsetBpmnWriter {
         }
         node.incoming().forEach(id -> xml.line(lvl + 1, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(lvl + 1, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));
-        definitions(xml, node, lvl + 1);
+        definitions(xml, node, lvl + 1, signalIds);
         if (node instanceof SubProcess sub) {
             // #486: the steps and flows of the scope, nested one level deeper; the diagram is generated for the top level only.
-            sub.flowElements().forEach(inner -> flowElement(xml, inner, lvl + 1));
+            sub.flowElements().forEach(inner -> flowElement(xml, inner, lvl + 1, signalIds));
             sub.artifacts().forEach(inner -> artifact(xml, inner, lvl + 1));
         }
         xml.line(lvl, "</" + tag + ">");

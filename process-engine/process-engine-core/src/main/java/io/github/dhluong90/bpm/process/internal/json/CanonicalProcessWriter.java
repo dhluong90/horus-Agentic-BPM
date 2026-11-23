@@ -22,7 +22,10 @@ import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ParallelGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
@@ -88,7 +91,10 @@ public final class CanonicalProcessWriter {
             }
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
             switch (node) {
-                case StartEvent s -> step.put("type", "start");
+                case StartEvent s -> {
+                    step.put("type", "start");
+                    writeEventDefinition(step, s.eventDefinitions());
+                }
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof ErrorEventDefinition d -> {
                     // #493: an end event that raises an error; the code is part of the hash.
@@ -105,7 +111,10 @@ public final class CanonicalProcessWriter {
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof TerminateEventDefinition ->
                         step.put("type", "terminateEnd");
-                case EndEvent e -> step.put("type", "end");
+                case EndEvent e -> {
+                    step.put("type", "end");
+                    writeEventDefinition(step, e.eventDefinitions());
+                }
                 case BoundaryEvent b -> {
                     // #489: a boundary event, with its trigger, what it is attached to and whether it interrupts.
                     step.put("type", "boundaryEvent");
@@ -286,6 +295,21 @@ public final class CanonicalProcessWriter {
                         step.put("until", timer.timeDate().text().strip());
                     }
                 }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof SignalEventDefinition signal -> {
+                    step.put("type", "signalCatch");
+                    step.put("signal", signal.signalRef());
+                }
+                case IntermediateCatchEvent c when c.eventDefinitions().size() == 1
+                        && c.eventDefinitions().get(0) instanceof ConditionalEventDefinition conditional -> {
+                    step.put("type", "conditionalCatch");
+                    step.put("condition", conditional.condition().text().strip());
+                }
+                case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
+                        && t.eventDefinitions().get(0) instanceof SignalEventDefinition signal -> {
+                    step.put("type", "signalThrow");
+                    step.put("signal", signal.signalRef());
+                }
                 case ParallelGateway g -> {
                     step.put("type", "parallelGateway");
                     // A fork lists every branch in document order; a single next is written below.
@@ -334,6 +358,18 @@ public final class CanonicalProcessWriter {
             if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
+        }
+    }
+
+    /** A start or end event's signal or condition, written only when declared so other definitions keep their hash. */
+    private static void writeEventDefinition(ObjectNode step, List<EventDefinition> definitions) {
+        if (definitions.size() != 1) {
+            return;
+        }
+        switch (definitions.get(0)) {
+            case SignalEventDefinition signal -> step.put("signal", signal.signalRef());
+            case ConditionalEventDefinition conditional -> step.put("condition", conditional.condition().text().strip());
+            default -> { }
         }
     }
 

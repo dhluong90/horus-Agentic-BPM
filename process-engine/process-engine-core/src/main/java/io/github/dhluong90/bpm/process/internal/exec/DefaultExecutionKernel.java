@@ -49,6 +49,8 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.AsyncResult result -> trigger(result.tokenId(), TokenStatus.WAITING_ASYNC, result.attemptId(),
                     result, ctx);
             case Command.JobDue due -> trigger(due.tokenId(), TokenStatus.WAITING_TIMER, due.jobId(), due, ctx);
+            case Command.DeliverSignal signal -> trigger(signal.tokenId(), TokenStatus.WAITING_EVENT,
+                    signal.subscriptionId(), signal, ctx);
             case Command.ChildEnded ended -> trigger(ended.tokenId(), TokenStatus.WAITING_CHILD, ended.attemptId(),
                     ended, ctx);
             case Command.MoveToken move -> moveToken(move, ctx);
@@ -62,7 +64,37 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     command.getClass().getSimpleName() + " is not supported in this release");
         }
         drain(ctx);
+        settleConditions(ctx);
         return ctx.transition();
+    }
+
+    /**
+     * Conditional events (#492): when a command changed the instance variables, every token waiting on a conditional
+     * catch event asks its condition again, in this transaction and for this instance only, never by polling. A token
+     * that moves on may change variables itself, so the pass repeats until nothing fires, within the step budget.
+     */
+    private void settleConditions(WorkingContext ctx) {
+        int passes = 0;
+        boolean changed = ctx.variablesChanged();
+        while (changed) {
+            if (++passes > MAX_STEPS_PER_APPLY) {
+                throw new ExecutionException("STEP_LIMIT", null, "Conditional events fire without end in one transaction");
+            }
+            java.util.Set<String> waiting = new java.util.LinkedHashSet<>();
+            ctx.tree().all().stream().filter(t -> t.status() == TokenStatus.WAITING_EVENT)
+                    .forEach(t -> waiting.add(t.id()));
+            for (String id : waiting) {
+                Token token = ctx.tree().get(id).orElseThrow();
+                if (token.status() != TokenStatus.WAITING_EVENT) {
+                    continue;
+                }
+                FlowNode node = node(token.nodeId());
+                behaviorFor(node).trigger(node, token, new Command.VariablesChanged(Map.of(), ctx.actor()), ctx);
+            }
+            drain(ctx);
+            changed = waiting.stream().anyMatch(id -> ctx.tree().get(id).map(Token::status).orElse(null)
+                    != TokenStatus.WAITING_EVENT);
+        }
     }
 
     private void start(Command.Start start, WorkingContext ctx) {
@@ -75,9 +107,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.history("INSTANCE_STARTED", root, Map.of("definitionId", process.definitionId()));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.started.v1",
                 Map.of("instanceId", ctx.snapshot().instanceId(), "definitionId", process.definitionId())));
-        StartEvent startEvent = process.nodes().stream().filter(StartEvent.class::isInstance)
-                .map(StartEvent.class::cast).filter(s -> s.eventDefinitions().isEmpty()).findFirst()
-                .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No none start event"));
+        // A process has exactly one start event (the compiler checks), a none, signal or conditional one (#492).
+        StartEvent startEvent = process.process().flowElements().stream().filter(StartEvent.class::isInstance)
+                .map(StartEvent.class::cast).findFirst()
+                .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No start event"));
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
     }

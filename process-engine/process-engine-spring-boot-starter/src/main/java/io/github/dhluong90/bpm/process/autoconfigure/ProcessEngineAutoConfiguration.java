@@ -117,7 +117,7 @@ public class ProcessEngineAutoConfiguration {
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
             "processes:step:complete", "processes:agent:replay", "processes:task:manage", "processes:calendar:manage",
-            "processes:migration:manage", "processes:incident:manage");
+            "processes:migration:manage", "processes:incident:manage", "processes:signal:broadcast");
     /** Setting published in {@code /api/bpm/meta}: the approval a migration plan's execution needs (PD-131). */
     static final String MIGRATION_APPROVAL_SETTING = "migration.approval";
     /** Removed property; set at all, it fails start-up naming its replacement (PRE-022 e). */
@@ -687,6 +687,12 @@ public class ProcessEngineAutoConfiguration {
     }
 
     @Bean
+    @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.SignalService.class)
+    io.github.dhluong90.bpm.process.api.SignalService processSignalService(ProcessServices services) {
+        return services;
+    }
+
+    @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
     ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts,
             NodeWindowStatsService windowStats, InstanceActivityService activities, JdbcProcessStore store) {
@@ -858,6 +864,13 @@ public class ProcessEngineAutoConfiguration {
         @ConditionalOnMissingBean
         IncidentController processEngineIncidentController(IncidentService incidents) {
             return new IncidentController(incidents);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        io.github.dhluong90.bpm.process.rest.SignalController processEngineSignalController(
+                io.github.dhluong90.bpm.process.api.SignalService signals) {
+            return new io.github.dhluong90.bpm.process.rest.SignalController(signals);
         }
 
         @Bean

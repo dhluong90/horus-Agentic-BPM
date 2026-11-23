@@ -138,13 +138,21 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause) {
+            String handler, String cause, Integer waiters) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(type, "type");
             Objects.requireNonNull(occurredAt, "occurredAt");
             Objects.requireNonNull(kind, "kind");
+        }
+
+        /** An entry without a count of woken waiters. */
+        public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
+                String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
+                String errorCode, String handler, String cause) {
+            this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
+                    errorCode, handler, cause, null);
         }
 
         /**
@@ -157,13 +165,28 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null);
+        }
+
+        /**
+         * The throw of a signal (#492).
+         *
+         * @param id the entry id
+         * @param nodeId the throwing event
+         * @param actor the identity
+         * @param occurredAt when
+         * @param waiters how many waiting subscriptions of the tenant the broadcast woke
+         * @return the entry
+         */
+        public static Entry signalThrown(String id, String nodeId, String actor, Instant occurredAt, Integer waiters) {
+            return new Entry(id, "SIGNAL_THROWN", nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null,
+                    null, null, null, waiters);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters);
         }
 
         /** @return true for the history types the undo of a saga writes */

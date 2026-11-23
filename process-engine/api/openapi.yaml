@@ -37,6 +37,8 @@ servers:
 security:
   - hostAuth: []
 tags:
+  - name: signals
+    description: Broadcast a signal within the tenant
   - name: definitions
     description: Import, list and read BPMN process definitions
   - name: lifecycle
@@ -967,6 +969,57 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /signals:
+    post:
+      tags: [signals]
+      operationId: broadcastSignal
+      summary: Broadcast a signal to the waiting instances of the tenant
+      description: |
+        Wakes every instance of the caller's tenant that waits at an intermediate signal catch event of this name,
+        and starts the effective version of every definition of the tenant whose start event is a signal start event
+        of this name. A signal never reaches another tenant: the tenant is the authenticated one and a tenant in the
+        body is never read. The answer is `202`: the call writes the signal and one wake-up job for each waiter in one
+        transaction and locks no waiting instance; each waiter continues when its job fires, in a transaction of its
+        own. The signal carries no data into the instances. A waiter is woken at most once. An instance that throws
+        a signal with an intermediate signal throw event or a signal end event does the same in its own transaction
+        and records `SIGNAL_THROWN` with the number of waiters in its history. Needs an `Idempotency-Key` (`428
+        PRECONDITION_REQUIRED` without one); a replay of the key returns the first answer and wakes nobody again.
+        Permission `processes:signal:broadcast`.
+      parameters:
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name:
+                  type: string
+                  pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$'
+                  description: The signal name, as written in the definitions
+            example: { name: rate-card-updated }
+      responses:
+        '202':
+          description: The signal is written and its waiters are woken by jobs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SignalBroadcast' }
+              example:
+                signalId: 01JD7Q3V8K2M5N9P0R4S6T8WXY
+                name: rate-card-updated
+                waiters: 3
+                startedInstances: []
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
@@ -2620,6 +2673,20 @@ components:
         amount:
           type: integer
           description: Minor units
+    SignalBroadcast:
+      type: object
+      required: [signalId, name, waiters, startedInstances]
+      properties:
+        signalId: { type: string, minLength: 26, maxLength: 26 }
+        name: { type: string }
+        waiters:
+          type: integer
+          minimum: 0
+          description: How many waiting subscriptions of the tenant this broadcast will wake
+        startedInstances:
+          type: array
+          items: { type: string, minLength: 26, maxLength: 26 }
+          description: The instances a signal start event of this name started
     StartRequest:
       type: object
       required: [definitionKey]
@@ -3053,6 +3120,7 @@ components:
               errorCode: { type: string, description: 'Undo steps that failed: the error code' }
               handler: { type: string, description: 'Undo steps: the name of the undo handler' }
               cause: { type: string, description: 'The start of an undo: the error code that caused it' }
+              waiters: { type: integer, minimum: 0, description: 'A `SIGNAL_THROWN` entry: how many waiting subscriptions of the tenant the broadcast woke (#492)' }
         compensations:
           type: array
           description: >-

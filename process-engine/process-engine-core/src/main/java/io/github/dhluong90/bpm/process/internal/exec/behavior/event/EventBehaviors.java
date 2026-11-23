@@ -8,6 +8,8 @@ import io.github.dhluong90.bpm.process.internal.exec.BehaviorRegistry;
  * event-based gateway. This release registers the intermediate timer catch event with a duration or a date, which
  * the replica-safe job claim (PRE-006) fires, the boundary events (#489) and the error, escalation, terminate and link
  * events (#493); the rest of the event set follows in this module.
+ * the replica-safe job claim (PRE-006) fires, and the signal and conditional events (#492); the rest of the event
+ * set follows in this module.
  */
 public final class EventBehaviors implements BehaviorModule {
 
@@ -25,5 +27,11 @@ public final class EventBehaviors implements BehaviorModule {
         registry.register(new ThrowEventBehaviors.TerminateEnd());
         registry.register(new ThrowEventBehaviors.LinkThrow());
         registry.register(new ThrowEventBehaviors.LinkCatch());
+        registry.register(new SignalCatchEventBehavior());
+        registry.register(new SignalThrowEventBehavior());
+        registry.register(new SignalEndEventBehavior());
+        registry.register(new SignalStartEventBehavior());
+        registry.register(new ConditionalCatchEventBehavior());
+        registry.register(new ConditionalStartEventBehavior());
     }
 }

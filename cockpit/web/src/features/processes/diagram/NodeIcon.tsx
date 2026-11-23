@@ -44,6 +44,15 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} fill="currentColor" />;
       case 'intermediateCatchEvent:link':
         return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} />;
+      case 'startEvent:signal':
+      case 'intermediateCatchEvent:signal':
+        return <path d="M8 2.5l6 10.5H2z" {...common} />;
+      case 'endEvent:signal':
+      case 'intermediateThrowEvent:signal':
+        return <path d="M8 2.5l6 10.5H2z" {...common} fill="currentColor" />;
+      case 'startEvent:conditional':
+      case 'intermediateCatchEvent:conditional':
+        return <path d="M3.5 2.5h9v11h-9zM5.5 5.5h5M5.5 8h5M5.5 10.5h5" {...common} />;
       case 'intermediateThrowEvent:compensate':
         return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} />;
       case 'generic':

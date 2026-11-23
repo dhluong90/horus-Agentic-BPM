@@ -28,6 +28,12 @@ const KEYS: Record<KnownNodeType, MessageKey> = {
   'intermediateThrowEvent:escalation': 'node.escalationThrow',
   'intermediateThrowEvent:link': 'node.linkThrow',
   'intermediateCatchEvent:link': 'node.linkCatch',
+  'startEvent:signal': 'node.signal',
+  'startEvent:conditional': 'node.conditional',
+  'endEvent:signal': 'node.signal',
+  'intermediateCatchEvent:signal': 'node.signal',
+  'intermediateThrowEvent:signal': 'node.signal',
+  'intermediateCatchEvent:conditional': 'node.conditional',
 };
 
 /** Event definitions a node of an unknown element type can still be named by: `boundaryEvent:timer` is a timer. */
