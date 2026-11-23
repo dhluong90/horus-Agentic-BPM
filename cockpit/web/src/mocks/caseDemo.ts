@@ -147,6 +147,8 @@ function loanBooked(): DemoCase {
         entry('DECISION_EVALUATED', '2026-11-18T08:06:20Z', 'credit-decision'),
         entry('NODE_COMPLETED', '2026-11-18T08:06:21Z', 'book-loan', 'svc-loans'),
         entry('NODE_COMPLETED', '2026-11-18T08:06:21Z', 'compute-offer', null, 'offerTerms'),
+        entry('DATA_OBJECT_WRITTEN', '2026-11-18T08:06:21Z', 'compute-offer'),
+        entry('NODE_ENTERED', '2026-11-18T08:06:21Z', 'send-offer'),
         entry('INSTANCE_ENDED', '2026-11-18T08:06:22Z'),
       ],
     },

@@ -137,6 +137,70 @@ class HistorySimulationTest {
     }
 
     @Test
+    void RLE_015_a_selection_replays_only_the_chosen_decisions_and_never_another_tenants() {
+        // Given bank-a's 100 November decisions, and a bank-b decision id that is not bank-a's
+        cardFeeWithNovemberHistory();
+        caller.become("bank-a", "pricing-approver", REPLAYER);
+        HistorySimulationResult all = engine.simulateHistory("card-fee", 2, HistorySimulation.between(NOV_01, DEC_01));
+        String newest = all.items().get(0).decisionId();
+        String older = all.items().get(5).decisionId();
+
+        // When two are selected, with an id that exists nowhere
+        HistorySimulationResult chosen = engine.simulateHistory("card-fee", 2,
+                HistorySimulation.selected(NOV_01, DEC_01, Set.of(older, newest, "01NOSUCHDECISION000000000")));
+
+        // Then only the two replay, newest first, with the same answer as in the whole-period run
+        assertThat(chosen.items()).extracting(HistorySimulationResult.Item::decisionId).containsExactly(newest, older);
+        assertThat(chosen.items().get(0)).isEqualTo(all.items().get(0));
+        assertThat(chosen.truncated()).isFalse();
+
+        // And a selection larger than simulation.max-inputs is refused before any read
+        Set<String> tooMany = new java.util.HashSet<>();
+        for (int i = 0; i < 1001; i++) {
+            tooMany.add("id-" + i);
+        }
+        assertThatThrownBy(() -> engine.simulateHistory("card-fee", 2, HistorySimulation.selected(NOV_01, DEC_01, tooMany)))
+                .isInstanceOf(QueryInvalidException.class);
+        assertThat(stores.decisions).hasSize(100);
+    }
+
+    @Test
+    void RLE_015_a_selected_decision_with_a_masked_value_is_still_not_replayable_and_its_value_never_leaves() {
+        // Given a fee whose national id is masked, and one decision with a value
+        String masked = """
+                schemaVersion: 1
+                ruleSet: id-check-fee
+                hitPolicy: first
+                inputs:
+                  - { name: nationalId, type: string, mask: true }
+                  - { name: tier, type: string }
+                outputs:
+                  - { name: fee, type: money }
+                rules:
+                  - { id: R2, when: {}, then: { fee: "%s" } }
+                """;
+        publish("bank-a", "id-check-fee", masked.formatted("20000 VND").getBytes(StandardCharsets.UTF_8));
+        caller.become("bank-a", "teller", TELLER);
+        clock.set(Instant.parse("2026-11-10T03:00:00Z"));
+        String withValue = engine.evaluate(DecisionRequest.of("id-check-fee",
+                DecisionInput.of(Map.of("nationalId", "079201001234", "tier", "STANDARD")))).decisionId();
+        clock.set(DEC_15);
+        draft("bank-a", "id-check-fee", masked.formatted("15000 VND").getBytes(StandardCharsets.UTF_8));
+        caller.become("bank-a", "pricing-approver", REPLAYER);
+
+        // When that decision is selected by id
+        HistorySimulationResult result = engine.simulateHistory("id-check-fee", 2,
+                HistorySimulation.selected(NOV_01, DEC_01, Set.of(withValue)));
+
+        // Then selecting does not unlock it: named by input, no value, no outcome
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().get(0).maskedInputs()).containsExactly("nationalId");
+        assertThat(result.items().get(0).simulated()).isNull();
+        assertThat(result.items().get(0).logged()).isNull();
+        assertThat(String.valueOf(result)).doesNotContain("079201001234");
+    }
+
+    @Test
     void RLE_015_the_logged_side_is_what_was_decided() {
         // Given
         cardFeeWithNovemberHistory();

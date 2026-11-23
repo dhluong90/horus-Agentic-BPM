@@ -1,5 +1,6 @@
 import type { ActivityEntry, CompensationScope, InstanceActivities, InstanceTask, NodeActivity, ProcessInstance } from '../../../api/processes/schemas';
 import type { MessageKey } from '../../../i18n/en';
+import type { DiagramGraph } from './bpmnGraph';
 
 /*
  * How one instance reads on its diagram (CKP-017). Every fact comes from the engine: tokens and tasks from
@@ -93,6 +94,7 @@ const ENTRY_TYPES = [
   'MESSAGE_WAITING', 'MESSAGE_RECEIVED', 'MESSAGE_SENT',
   'MI_STARTED', 'MI_INSTANCE_STARTED', 'MI_INSTANCE_COMPLETED', 'MI_INSTANCE_CANCELLED', 'MI_COMPLETED', 'MI_REFUSED',
   'EVENT_GATEWAY_WAITING', 'EVENT_GATEWAY_RESOLVED',
+  'DATA_OBJECT_WRITTEN',
 ] as const;
 type EntryType = (typeof ENTRY_TYPES)[number];
 
@@ -218,4 +220,30 @@ export function actorReplica(actor: string | null): { engine: true; replica: str
   if (actor === null) return { engine: true, replica: undefined };
   const replica = /^engine:(.+)$/.exec(actor);
   return replica ? { engine: true, replica: replica[1] } : { engine: false, login: actor };
+}
+
+/**
+ * The data a timeline row names (#499), read from the definition's own associations, never from a value: a step that
+ * starts names the data objects and stores it reads; a `DATA_OBJECT_WRITTEN` entry names the one the step wrote, the
+ * first for the step's first such entry, the next for the next. Empty for any other row.
+ */
+export function dataNamed(entry: ActivityEntry, entries: readonly ActivityEntry[], graph: DiagramGraph): { direction: 'read' | 'write'; names: string[] } | undefined {
+  const data = graph.data;
+  if (data === undefined || entry.nodeId === null) return undefined;
+  const nameOf = (id: string) => {
+    const item = data.items.find((candidate) => candidate.id === id);
+    return item?.name ?? item?.id ?? id;
+  };
+  if (entry.type === 'NODE_ENTERED') {
+    const names = data.links.filter((link) => link.activity === entry.nodeId && link.direction === 'read').map((link) => nameOf(link.item));
+    return names.length > 0 ? { direction: 'read', names } : undefined;
+  }
+  if (entry.type === 'DATA_OBJECT_WRITTEN') {
+    const writes = data.links.filter((link) => link.activity === entry.nodeId && link.direction === 'write');
+    const earlier = entries.filter((other) => other.type === 'DATA_OBJECT_WRITTEN' && other.nodeId === entry.nodeId);
+    const position = Math.max(0, earlier.findIndex((other) => other.id === entry.id));
+    const link = writes.length > 0 ? writes[position % writes.length] : undefined;
+    return link !== undefined ? { direction: 'write', names: [nameOf(link.item)] } : undefined;
+  }
+  return undefined;
 }

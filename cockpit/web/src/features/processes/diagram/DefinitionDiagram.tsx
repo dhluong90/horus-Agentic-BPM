@@ -18,6 +18,8 @@ import {
   CLOSED_CONTAINER_EXTRA,
   TASK_TEXT,
   TYPE_INDENT,
+  type PlacedDataItem,
+  type PlacedDataLink,
   type PlacedEdge,
   type PlacedNode,
   type Point,
@@ -198,6 +200,44 @@ function Edge({ edge, marker, defaultLabel, mark }: { edge: PlacedEdge; marker: 
           <text x={at.x} y={at.y + 4} textAnchor="middle">{edge.label}</text>
         </g>
       ) : null}
+    </g>
+  );
+}
+
+/**
+ * A data object (a page with a folded corner) or a data store (a drum), BPMN's own shapes (#499). Read only: it takes
+ * no focus and no click, but names itself to assistive technology as "Data object: Applicant profile".
+ */
+function DataSymbol({ item, kindLabel }: { item: PlacedDataItem; kindLabel: string }) {
+  const { x, y, width: w, height: h } = item;
+  const centre = x + w / 2;
+  const name = item.name ?? item.id;
+  return (
+    <g className={`dg-data dg-data--${item.kind}`} data-data={item.id} data-kind={item.kind} role="img" aria-label={`${kindLabel}: ${name}`}>
+      <title>{`${kindLabel}: ${name}`}</title>
+      {item.kind === 'dataObject' ? (
+        <>
+          <path d={`M${String(x)} ${String(y)} L${String(x + w - 9)} ${String(y)} L${String(x + w)} ${String(y + 9)} L${String(x + w)} ${String(y + h)} L${String(x)} ${String(y + h)} Z`} />
+          <path className="dg-data__fold" d={`M${String(x + w - 9)} ${String(y)} L${String(x + w - 9)} ${String(y + 9)} L${String(x + w)} ${String(y + 9)}`} />
+        </>
+      ) : (
+        <>
+          <path d={`M${String(x)} ${String(y + 6)} L${String(x)} ${String(y + h - 6)} A${String(w / 2)} 6 0 0 0 ${String(x + w)} ${String(y + h - 6)} L${String(x + w)} ${String(y + 6)} A${String(w / 2)} 6 0 0 0 ${String(x)} ${String(y + 6)} Z`} />
+          <path className="dg-data__fold" d={`M${String(x)} ${String(y + 6)} A${String(w / 2)} 6 0 0 0 ${String(x + w)} ${String(y + 6)} M${String(x)} ${String(y + 13)} A${String(w / 2)} 6 0 0 0 ${String(x + w)} ${String(y + 13)}`} />
+        </>
+      )}
+      <text aria-hidden="true" className="dg-node__caption" x={centre} y={y + h + 16} textAnchor="middle">
+        {item.lines.map((line, index) => <tspan key={index} x={centre} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{line}</tspan>)}
+      </text>
+    </g>
+  );
+}
+
+/** The dotted line of a data association; its arrowhead points at where the data goes (a step for a read, a symbol for a write). */
+function DataLine({ link, marker }: { link: PlacedDataLink; marker: string }) {
+  return (
+    <g className={`dg-edge dg-edge--data dg-edge--${link.direction}`} data-data-link={link.id} data-direction={link.direction}>
+      <path d={path(link.points)} markerEnd={`url(#${marker})`} />
     </g>
   );
 }
@@ -586,6 +626,12 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
               <g>{collaboration.flows.map((flow) => <MessageFlowLine key={flow.id} flow={flow} marker={marker} />)}</g>
             ) : null}
             <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
+            {layout.data !== undefined ? (
+              <g className="dg-data-layer">
+                {layout.data.links.map((link) => <DataLine key={link.id} link={link} marker={marker} />)}
+                {layout.data.items.map((item) => <DataSymbol key={item.id} item={item} kindLabel={t(item.kind === 'dataStore' ? 'diagram.data.store' : 'diagram.data.object')} />)}
+              </g>
+            ) : null}
             <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (
               <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} loopLabel={node.loop !== undefined ? t(`diagram.loop.${node.loop}`) : undefined} badge={overlay?.badges.get(node.id)}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}

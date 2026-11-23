@@ -9,7 +9,7 @@ import { useRulesSession } from '../api/rulesContext';
 import { useReplay } from '../api/useRules';
 import { formatDateTime } from '../model/dates';
 import { clauseLabel, columnLabel } from '../model/reading';
-import { countGroups, DEFAULT_CAP, groupOf, presetDays, replayRequest, shortId, type Preset, type ReplayForm, type ReplayGroup } from '../model/replay';
+import { countGroups, DEFAULT_CAP, groupOf, parseDecisionIds, presetDays, replayRequest, shortId, validDecisionIds, type Preset, type ReplayForm, type ReplayGroup } from '../model/replay';
 import { EmptyNote, ForbiddenNote, MaskedNote, ReadingStyleSwitch, TooLargeNote, readingIn, useViewerReadingStyle } from './ReadingParts';
 import { ProblemNotice } from './ProblemNotice';
 import { formatCount } from './ReportParts';
@@ -151,7 +151,7 @@ export function ReplayScreen({ version }: { version: RuleSetVersion }) {
   const session = useRulesSession();
   const replay = useReplay(version);
   const [view, setView] = useState<'period' | 'result'>('period');
-  const [form, setForm] = useState<ReplayForm>(() => ({ ...presetDays('thirty', Date.now()), cap: String(DEFAULT_CAP) }));
+  const [form, setForm] = useState<ReplayForm>(() => ({ ...presetDays('thirty', Date.now()), cap: String(DEFAULT_CAP), ids: '' }));
   const [preset, setPreset] = useState<Preset | undefined>('thirty');
   const [sent, setSent] = useState<{ from: string; to: string } | undefined>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -161,6 +161,8 @@ export function ReplayScreen({ version }: { version: RuleSetVersion }) {
   const toId = useId();
   const capId = useId();
   const capHintId = useId();
+  const idsId = useId();
+  const idsHintId = useId();
   const allowed = session.can('rules:simulate') && session.can('rules:log:read') && session.can('rules:read');
   const request = replayRequest(form);
 
@@ -188,11 +190,14 @@ export function ReplayScreen({ version }: { version: RuleSetVersion }) {
 
   if (view === 'result' && sent !== undefined) {
     const failure = replay.isError ? failureOf(replay.error) : undefined;
-    const answer = replay.data;
+    // A cancelled replay keeps the steps already read: they are real answers, shown as partial.
+    const partial = failure === 'cancelled' ? replay.progress?.partial : undefined;
+    const answer = replay.data ?? partial;
     const counts = answer !== undefined ? countGroups(answer.results) : undefined;
     let title = t('replay.title');
     if (replay.isPending) title = t('replay.running');
-    else if (failure === 'cancelled') title = t('replay.cancelled');
+    else if (failure === 'cancelled' && (partial === undefined || partial.results.length === 0)) title = t('replay.cancelled');
+    else if (failure === 'cancelled' && partial !== undefined) title = t('replay.stopped', { count: formatCount(partial.results.length, locale) });
     else if (answer !== undefined && counts !== undefined) {
       const replayed = counts.changed + counts.unchanged;
       if (answer.results.length === 0) title = t('replay.summaryEmpty');
@@ -205,7 +210,7 @@ export function ReplayScreen({ version }: { version: RuleSetVersion }) {
         <div className="simrun__head">
           <div className="simrun__titles">
             <h2 id="replay-title" ref={heading} tabIndex={-1} className="simrun__title-text tnum">{title}</h2>
-            <p className="simrun__sub">{replay.isPending ? t('replay.runningSub') : failure === 'cancelled' ? t('replay.cancelledSub') : t('replay.sub')}</p>
+            <p className="simrun__sub">{replay.isPending ? t('replay.runningSub') : failure === 'cancelled' ? t(partial !== undefined && partial.results.length > 0 ? 'replay.stoppedSub' : 'replay.cancelledSub') : t('replay.sub')}</p>
           </div>
           <div className="simrun__actions">
             {replay.isPending ? <button type="button" className="btn" onClick={replay.cancel}>{t('replay.cancel')}</button> : (
@@ -214,7 +219,7 @@ export function ReplayScreen({ version }: { version: RuleSetVersion }) {
           </div>
         </div>
         <div role="status" aria-live="polite" className="simrun__body">
-          {replay.isPending ? <><div className="replay__progress" role="progressbar" aria-label={t('replay.running')}><span /></div><LoadingRows rows={4} /></> : null}
+          {replay.isPending ? <><div className="replay__progress" role="progressbar" aria-label={t('replay.running')}><span /></div>{replay.progress !== undefined ? <p className="simrun__hint tnum">{t('replay.progress', { done: String(replay.progress.done), total: String(replay.progress.total), count: formatCount(replay.progress.partial.results.length, locale) })}</p> : null}<LoadingRows rows={4} /></> : null}
           {failure === 'forbidden' ? <ForbiddenNote text="replay.forbidden" /> : null}
           {failure === 'too-large' ? <TooLargeNote text="replay.tooLarge" /> : null}
           {failure === 'period' ? <ProblemNotice error={replay.error} message={t('replay.refused.period')} /> : null}
@@ -257,6 +262,11 @@ export function ReplayScreen({ version }: { version: RuleSetVersion }) {
         <div className="field">
           <label className="field__label" htmlFor={toId}>{t('replay.to')}</label>
           <input id={toId} type="date" className="field__input" value={form.to} min={form.from === '' ? undefined : form.from} onChange={(e) => { setPreset(undefined); setForm({ ...form, to: e.target.value }); }} />
+        </div>
+        <div className="field replay__ids">
+          <label className="field__label" htmlFor={idsId}>{t('replay.ids')}</label>
+          <textarea id={idsId} className="field__input tnum" rows={2} spellCheck={false} value={form.ids ?? ''} aria-describedby={idsHintId} aria-invalid={form.ids !== undefined && !validDecisionIds(parseDecisionIds(form.ids))} onChange={(e) => { setForm({ ...form, ids: e.target.value }); }} />
+          <p id={idsHintId} className="simrun__hint">{t('replay.idsHint')}</p>
         </div>
         <div className="field">
           <label className="field__label" htmlFor={capId}>{t('replay.cap')}</label>
