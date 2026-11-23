@@ -55,8 +55,9 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * users carry no tenant, so {@code application-dev.yml} sets {@code horus.bpm.tenancy.dev-tenant: bank-a},
  * which the engines accept on the {@code dev} profile only (PD-079).
  *
- * <p>Demo users exist on the {@code dev} profile only: {@code lan} (roles PRICING_AUTHOR, PROCESS_DEPLOYER and PROCESS_APPROVER),
- * {@code minh} (roles PRICING_APPROVER and PROCESS_APPROVER), {@code tuan} (role TELLER), {@code an} (role CARD_OFFICER) and {@code hoa} (TELLER, CARD_OFFICER and BRANCH_SUPERVISOR), with the password from
+ * <p>Demo users exist on the {@code dev} profile only: {@code lan} (roles PRICING_AUTHOR, PROCESS_DEPLOYER and PROCESS_APPROVER, allowed tenants bank-a and bank-b),
+ * {@code minh} (roles PRICING_APPROVER and PROCESS_APPROVER), {@code tuan} (role TELLER), {@code an} (role CARD_OFFICER),
+ * {@code hoa} (TELLER, CARD_OFFICER and BRANCH_SUPERVISOR), {@code hung} (OPERATIONS_OFFICER) and {@code quynh} (AUDITOR), with the password from
  * {@code HORUS_DEMO_PASSWORD}. On that profile they may also use HTTP Basic, for the curl walkthrough. Their roles map to engine
  * permissions in {@code application.yml}. A real host signs users in through its identity provider instead.
  */
@@ -152,7 +153,8 @@ class HostSecurityConfiguration {
      * with the form and Spring Boot generates no default user either.
      */
     @Bean
-    InMemoryUserDetailsManager hostUsers(Environment environment, @Value("${HORUS_DEMO_PASSWORD:}") String password) {
+    InMemoryUserDetailsManager hostUsers(Environment environment, @Value("${HORUS_DEMO_PASSWORD:}") String password,
+            @Value("${horus.bpm.tenancy.dev-tenant:}") String devTenant) {
         List<UserDetails> users = new ArrayList<>();
         if (!environment.matchesProfiles(DEV_PROFILE)) {
             return new InMemoryUserDetailsManager(users);
@@ -163,8 +165,9 @@ class HostSecurityConfiguration {
         } else {
             PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
             String encoded = encoder.encode(password);
-            // The walkthrough of the README: lan authors rules and deploys processes, minh approves rules,
-            // tuan submits card applications, an reviews fees as card officer.
+            // lan makes: she authors rules and deploys processes. minh checks: he approves them. tuan submits card
+            // applications, an reviews the fees as card officer. The engines refuse an approval by the person who made
+            // the change, whatever roles that person holds (four eyes by person), so lan can never approve her own work.
             users.add(User.withUsername("lan").password(encoded).roles("PRICING_AUTHOR", "PROCESS_DEPLOYER",
                     "PROCESS_APPROVER").build());
             users.add(User.withUsername("minh").password(encoded).roles("PRICING_APPROVER", "PROCESS_APPROVER").build());
@@ -172,8 +175,14 @@ class HostSecurityConfiguration {
             users.add(User.withUsername("an").password(encoded).roles("CARD_OFFICER").build());
             // A branch supervisor holds both roles and may cancel: the four-eyes review refuses her on her own applications.
             users.add(User.withUsername("hoa").password(encoded).roles("TELLER", "CARD_OFFICER", "BRANCH_SUPERVISOR").build());
+            // Operations runs live cases: correlates messages, broadcasts signals, migrates instances and proposes
+            // calendars. hoa is the second holder of migration and calendar approval.
+            users.add(User.withUsername("hung").password(encoded).roles("OPERATIONS_OFFICER").build());
+            // The auditor reads rules, processes and the decision log, and changes nothing.
+            users.add(User.withUsername("quynh").password(encoded).roles("AUDITOR").build());
         }
-        return new InMemoryUserDetailsManager(users);
+        // lan may switch between bank-a and bank-b in the cockpit (horus.bpm.tenancy.switching in application-dev.yml).
+        return new DemoUserStore(users, devTenant, java.util.Map.of("lan", List.of("bank-a", "bank-b")));
     }
 
     /**

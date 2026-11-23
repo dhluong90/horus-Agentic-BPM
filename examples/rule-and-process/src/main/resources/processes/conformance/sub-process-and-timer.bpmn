@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-issue" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:subProcess id="print">
+      <bpmn:startEvent id="print-start"/>
+      <bpmn:serviceTask id="emboss" horus:handler="cards.emboss"/>
+      <bpmn:endEvent id="print-end"/>
+      <bpmn:sequenceFlow id="p1" sourceRef="print-start" targetRef="emboss"/>
+      <bpmn:sequenceFlow id="p2" sourceRef="emboss" targetRef="print-end"/>
+    </bpmn:subProcess>
+    <bpmn:intermediateCatchEvent id="cooling-off">
+      <bpmn:timerEventDefinition><bpmn:timeDuration>PT24H</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="print"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="print" targetRef="cooling-off"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="cooling-off" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_card-issue">
+    <bpmndi:BPMNPlane id="Plane_card-issue" bpmnElement="card-issue">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="print_di" bpmnElement="print" isExpanded="true"><dc:Bounds x="246" y="80" width="372" height="160"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="print-start_di" bpmnElement="print-start"><dc:Bounds x="286" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="emboss_di" bpmnElement="emboss"><dc:Bounds x="382" y="120" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="print-end_di" bpmnElement="print-end"><dc:Bounds x="542" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cooling-off_di" bpmnElement="cooling-off"><dc:Bounds x="678" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="774" y="142" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="p1_di" bpmnElement="p1"><di:waypoint x="322" y="160"/><di:waypoint x="382" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="p2_di" bpmnElement="p2"><di:waypoint x="482" y="160"/><di:waypoint x="542" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="160"/><di:waypoint x="246" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="618" y="160"/><di:waypoint x="678" y="160"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="714" y="160"/><di:waypoint x="774" y="160"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

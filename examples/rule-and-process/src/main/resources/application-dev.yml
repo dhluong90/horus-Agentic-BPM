@@ -4,16 +4,49 @@ horus:
   bpm:
     tenancy:
       dev-tenant: bank-a
+      # lan may select bank-a or bank-b in the cockpit's tenant switch; every accepted switch is audited.
+      switching:
+        enabled: true
     rules:
       security:
         role-permissions:
           # Dev only: the author and the approver may also evaluate, so the cockpit's Try it works for them; the author also simulates.
           ROLE_PRICING_AUTHOR: [rules:read, rules:author, rules:evaluate, rules:simulate]
-          ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:evaluate]
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:evaluate, rules:log:read]
+          ROLE_AUDITOR: [rules:read, rules:log:read]
           ROLE_TELLER: [rules:evaluate]
           ROLE_CARD_OFFICER: [rules:evaluate]
     processes:
       definitions:
         # Seed the sample process for the demo tenant and activate it without approval (dev profile only).
         startup-tenants: [bank-a]
+        # Every demo and conformance model, so each scene of the live demo runs on the default start. card-welcome
+        # comes before customer-onboarding, which calls it.
+        locations:
+          - classpath:processes/card-fee-review.bpmn
+          - classpath:processes/card-welcome.bpmn
+          - classpath:processes/card-delivery.bpmn
+          - classpath:processes/card-dispute.bpmn
+          - classpath:processes/card-limit-check.bpmn
+          - classpath:processes/fee-routing-feel.bpmn
+          - classpath:processes/order-payment.bpmn
+          - classpath:processes/order-payment-pools.bpmn
+          - classpath:processes/payment-review.bpmn
+          - classpath:processes/payment-screening.bpmn
+          - classpath:processes/rate-card-watch.bpmn
+          - classpath:processes/fund-transfer.bpmn
+          - classpath:processes/payment-approval.bpmn
+          - classpath:processes/credit-review-form.bpmn
+          - classpath:processes/customer-onboarding.bpmn
+          - classpath:processes/conformance/compensation-background.bpmn
+          - classpath:processes/conformance/compensation-event-subprocess.bpmn
+          - classpath:processes/conformance/data-objects.bpmn
+          - classpath:processes/conformance/data-store.bpmn
+          - classpath:processes/conformance/event-gateway-parallel-start.bpmn
+          - classpath:processes/conformance/event-gateway-start.bpmn
+          - classpath:processes/conformance/gateways.bpmn
+          - classpath:processes/conformance/multiple-throw-and-end.bpmn
+          - classpath:processes/conformance/parallel-join.bpmn
+          - classpath:processes/conformance/parallel-multiple-start.bpmn
+          - classpath:processes/conformance/sub-process-and-timer.bpmn
         auto-approve: true

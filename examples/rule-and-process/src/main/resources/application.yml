@@ -41,13 +41,23 @@ horus:
         PRICING_APPROVER: { en: Pricing approver, vi: Người duyệt biểu giá }
         PROCESS_DEPLOYER: { en: Process deployer, vi: Người triển khai quy trình }
         PROCESS_APPROVER: { en: Process approver, vi: Người duyệt quy trình }
+        OPERATIONS_OFFICER: { en: Operations officer, vi: Cán bộ vận hành }
+        AUDITOR: { en: Auditor, vi: Kiểm toán viên }
+      tenants:
+        bank-a: { en: Bank A, vi: Ngân hàng A }
+        bank-b: { en: Bank B, vi: Ngân hàng B }
       users:
         lan: { en: Lan Pham, vi: Phạm Thị Lan }
         minh: { en: Minh Vo, vi: Võ Quang Minh }
         tuan: { en: Tuan Do, vi: Đỗ Anh Tuấn }
         an: { en: An Nguyen, vi: Nguyễn Văn An }
         hoa: { en: Hoa Tran, vi: Trần Thị Hoa }
+        hung: { en: Hung Le, vi: Lê Quốc Hùng }
+        quynh: { en: Quynh Bui, vi: Bùi Như Quỳnh }
     rules:
+      authoring:
+        # The demo edits drafts in the cockpit. A host that changes definitions through its release pipeline leaves this off.
+        cockpit-drafts: true
       decision-log:
         # How long decisions are kept: the bank's choice, in whole months, at least 12 (P12M). Monthly partitions
         # older than this are dropped and each drop is recorded in rle_decision_log_drop. Never on by default: left empty (or keep-forever),
@@ -56,20 +66,26 @@ horus:
       security:
         role-permissions:
           ROLE_PRICING_AUTHOR: [rules:read, rules:author]
-          ROLE_PRICING_APPROVER: [rules:read, rules:approve]
+          # The approver reads the decision log to see what a rule set decided before approving a change.
+          ROLE_PRICING_APPROVER: [rules:read, rules:approve, rules:log:read]
+          ROLE_AUDITOR: [rules:read, rules:log:read]
           # Starting a process and completing a task run its businessRuleTask steps as the caller.
           ROLE_TELLER: [rules:evaluate]
           ROLE_CARD_OFFICER: [rules:evaluate]
           # rules:pin is granted to no role: no process step pins a version yet, and a pin bypasses the version in
           # force. Grant it to the account process steps run under once a step needs it.
     processes:
+      authoring:
+        cockpit-drafts: true
       definitions:
-        # Imported at start-up for each start-up tenant, through the normal import path.
+        # Imported at start-up for each start-up tenant, through the normal import path. The dev profile imports
+        # every demo model (application-dev.yml).
         locations:
           - classpath:processes/card-fee-review.bpmn
       security:
         role-permissions:
-          ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:read]
+          # The deployer imports and drafts a definition; a different person approves it.
+          ROLE_PROCESS_DEPLOYER: [processes:deploy, processes:author, processes:read]
           # Approves process definition versions requested by someone else (four eyes).
           # Approvers also work incidents (retry, resolve), so lan and minh can clear a stuck case.
           ROLE_PROCESS_APPROVER: [processes:approve, processes:read, processes:incident:manage]
@@ -77,8 +93,16 @@ horus:
           ROLE_CARD_OFFICER: [processes:read, processes:task:work]
           # Cancelling an application's process is its own permission (PD-103); starting does not grant it.
           # The supervisor also manages tasks (reassign, delegate), incidents and migrations of running cases.
+          # hoa is also the second holder of migration and calendar approval beside hung (the engine refuses the proposer).
           ROLE_BRANCH_SUPERVISOR: [processes:read, processes:cancel, processes:task:manage, processes:incident:manage,
-            processes:migration:manage]
+            processes:migration:manage, processes:calendar:manage, processes:message:correlate,
+            processes:signal:broadcast]
+          # Runs live cases: delivers messages, broadcasts signals, works tasks and incidents, and proposes migrations
+          # and calendar changes that hoa approves.
+          ROLE_OPERATIONS_OFFICER: [processes:read, processes:task:work, processes:incident:manage,
+            processes:message:correlate, processes:signal:broadcast, processes:migration:manage,
+            processes:calendar:manage]
+          ROLE_AUDITOR: [processes:read]
     cockpit:
       # How the cockpit header names this service.
       host-label: Card issuing

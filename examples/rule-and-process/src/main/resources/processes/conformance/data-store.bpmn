@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:dataStore id="credit-limits" name="Credit limits"/>
+  <bpmn:dataStore id="score-ledger" name="Score ledger"/>
+  <bpmn:process id="credit-scoring" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="score" name="Score the applicant" horus:handler="credit.score">
+      <bpmn:ioSpecification id="io-score">
+        <bpmn:dataInput id="in-limit" name="limit"/>
+        <bpmn:dataOutput id="out-score" name="score"/>
+        <bpmn:inputSet><bpmn:dataInputRefs>in-limit</bpmn:dataInputRefs></bpmn:inputSet>
+        <bpmn:outputSet><bpmn:dataOutputRefs>out-score</bpmn:dataOutputRefs></bpmn:outputSet>
+      </bpmn:ioSpecification>
+      <bpmn:dataInputAssociation id="a-in"><bpmn:sourceRef>limits-ref</bpmn:sourceRef><bpmn:targetRef>in-limit</bpmn:targetRef></bpmn:dataInputAssociation>
+      <bpmn:dataOutputAssociation id="a-out"><bpmn:sourceRef>out-score</bpmn:sourceRef><bpmn:targetRef>ledger-ref</bpmn:targetRef></bpmn:dataOutputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end"/>
+    <bpmn:dataStoreReference id="limits-ref" name="Credit limits" dataStoreRef="credit-limits"/>
+    <bpmn:dataStoreReference id="ledger-ref" name="Score ledger" dataStoreRef="score-ledger"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="score"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="score" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_credit-scoring">
+    <bpmndi:BPMNPlane id="Plane_credit-scoring" bpmnElement="credit-scoring">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="150" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="score_di" bpmnElement="score"><dc:Bounds x="246" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="406" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="186" y="120"/><di:waypoint x="246" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="346" y="120"/><di:waypoint x="406" y="120"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
