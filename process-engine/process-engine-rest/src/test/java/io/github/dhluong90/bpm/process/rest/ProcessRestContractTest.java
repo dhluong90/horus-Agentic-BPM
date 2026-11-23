@@ -526,7 +526,7 @@ class ProcessRestContractTest {
             var undoStep = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
                     "01JD0000000000000000000100", "COMPENSATION_STEP_FAILED", "verify-docs", "system:compensation",
                     NOW.plusSeconds(200), "COMPENSATION", "verify-docs", "01JD0000000000000000000098",
-                    "01JD0000000000000000000090", "kyc-saga", 3, "ACCOUNT_FROZEN", "undo-verify", null, null);
+                    "01JD0000000000000000000090", "kyc-saga", 3, "ACCOUNT_FROZEN", "undo-verify", null);
             var scope = new io.github.dhluong90.bpm.process.api.InstanceActivities.Compensation(
                     "01JD0000000000000000000090", "kyc-saga", io.github.dhluong90.bpm.process.api.InstanceActivities
                             .CompensationState.NOT_FULLY_UNDONE, NOW.plusSeconds(195), null, "PARTNER_REFUSED",
