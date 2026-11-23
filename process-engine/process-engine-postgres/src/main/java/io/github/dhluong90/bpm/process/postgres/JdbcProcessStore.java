@@ -113,7 +113,13 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
             return new InstanceActivities.Entry(id, type, node, actor, at).withMessage(message);
         }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
-            return new InstanceActivities.Entry(id, type, node, actor, at);
+            InstanceActivities.Entry plain = new InstanceActivities.Entry(id, type, node, actor, at);
+            if (!"NODE_COMPLETED".equals(type)) {
+                return plain;
+            }
+            // A script step records the variable it set (#518), so the timeline never reads it from the diagram.
+            Object variable = Values.readMap(rs.getString("details")).get("resultVariable");
+            return variable instanceof String name && !name.isBlank() ? plain.withResultVariable(name) : plain;
         }
         Map<String, Object> details = Values.readMap(rs.getString("details"));
         boolean step = type.startsWith("COMPENSATION_STEP_");
@@ -129,7 +135,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 scopeToken == null ? rs.getString("token_id") : scopeToken.toString(),
                 scope == null ? ("COMPENSATED".equals(type) ? node : null) : scope.toString(),
                 attempt instanceof Number n ? n.intValue() : null, error == null ? null : error.toString(),
-                handler == null ? null : handler.toString(), cause == null ? null : cause.toString());
+                handler == null ? null : handler.toString(), cause == null ? null : cause.toString(), null);
     }
 
     // ---- definitions --------------------------------------------------------------------------------------

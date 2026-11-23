@@ -286,6 +286,8 @@ export const activityEntry = z
     waiters: z.number().int().min(0).optional(),
     /** Message steps only (#491): the name, the key as the host masked it, and the delivery result. */
     message: z.object({ name: z.string(), correlationKey: z.string().optional(), result: z.string() }).loose().optional(),
+    /** The `NODE_COMPLETED` of a script step: the variable it set, as recorded when it ran (#518). */
+    resultVariable: z.string().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

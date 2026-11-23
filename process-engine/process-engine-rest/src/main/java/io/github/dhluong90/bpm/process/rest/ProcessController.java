@@ -621,6 +621,7 @@ public class ProcessController {
                 ObjectNode message = item.putObject("message");
                 entry.message().forEach(message::put);
             }
+            putIfPresent(item, "resultVariable", entry.resultVariable());
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {

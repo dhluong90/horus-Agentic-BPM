@@ -4,6 +4,7 @@ import type { RuleDocument } from '../../../api/rules/rulesClient';
 import type { Rule, RuleSetVersion } from '../../../api/rules/schemas';
 import type { MessageKey } from '../../../i18n/en';
 import { useI18n, type Locale, type Translate } from '../../../i18n/I18nProvider';
+import { useRulesSession } from '../api/rulesContext';
 import { useDraftCheck, useReplaceDraft } from '../api/useRules';
 import { cellSentence } from '../model/cellMessages';
 import { diffRules } from '../model/diff';
@@ -73,6 +74,7 @@ function theirChanges(opened: RuleSetVersion, latest: RuleSetVersion, t: Transla
  */
 export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSetVersion; onSaved: (saved: RuleSetVersion) => void; onDiscard: () => void }) {
   const { t, locale } = useI18n();
+  const { conditionBuilder } = useRulesSession();
   const [loaded, setLoaded] = useState<Loaded>(() => load(latest));
   const [draft, dispatch] = useReducer(draftReducer, loaded.version.definition, (definition) => initialDraft(toRows(definition)));
   const save = useReplaceDraft(onSaved);
@@ -152,7 +154,7 @@ export function DraftWorkspace({ latest, onSaved, onDiscard }: { latest: RuleSet
             </ul>
           ) : null}
           {answer?.problemsTruncated === true ? <p className="dock__note">{t('editor.truncated', { count: String(answer.problems.length) })}</p> : null}
-          <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} errors={errors} readings={readings} />
+          <DraftEditor definition={version.definition} draft={draft} dispatch={dispatch} errors={errors} readings={readings} builder={conditionBuilder} />
         </div>
         <aside className="workbench__side">
           <DraftChanges definition={version.definition} base={version.definition.rules} next={shown.rules} refused={shown.refused} />

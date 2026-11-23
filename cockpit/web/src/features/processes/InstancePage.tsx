@@ -438,8 +438,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                   <td className={trail(entry.nodeId).length > 0 ? 'timeline__step timeline__step--nested' : 'timeline__step'} data-depth={trail(entry.nodeId).length}>
                     {trail(entry.nodeId).length > 0 ? <span className="muted timeline__trail">{trail(entry.nodeId).join(' › ')} › </span> : null}
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
-                    {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
-                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
+                    {entry.type === 'NODE_COMPLETED' && (entry.resultVariable ?? (entry.nodeId !== null ? results.get(entry.nodeId) : undefined)) !== undefined
+                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: entry.resultVariable ?? results.get(entry.nodeId ?? '') ?? '' })}</span> : null}
                     {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}

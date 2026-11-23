@@ -41,7 +41,7 @@ export function nextFocus(table: HTMLTableElement, from: HTMLElement, move: Move
     const at = list.indexOf(from);
     return at === -1 ? undefined : list[move === 'left' ? at - 1 : at + 1];
   }
-  const rows = [...table.querySelectorAll('tbody > tr:not(.dt__reading-row)')];
+  const rows = [...table.querySelectorAll('tbody > tr:not(.dt__reading-row, .dt__builder-row)')];
   const target = rows[rows.indexOf(row) + (move === 'up' ? -1 : 1)];
   const column = [...row.children].indexOf(cell);
   const targetCell = target?.children[column];

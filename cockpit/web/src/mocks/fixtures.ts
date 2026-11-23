@@ -34,6 +34,12 @@ export const metaWithReports: BpmMetaV1 = {
   }],
 };
 
+/** A host that turns on the nested And/Or/Not condition builder (PD-076): the feature is off unless the host announces it. */
+export const metaWithBuilder: BpmMetaV1 = {
+  ...metaRulesOnly,
+  modules: [{ module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1', features: ['rules.condition-builder'], settings: { 'authoring.cockpit-drafts': true } }],
+};
+
 /** A module name no cockpit of this release knows: what a newer host with a third engine module reports. */
 export const UNKNOWN_MODULE = 'cases';
 
@@ -189,7 +195,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report', 'rules-author-replay', 'rules-author-replay-no-log'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report', 'rules-author-replay', 'rules-author-replay-no-log', 'rules-author-builder'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -230,6 +236,8 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
         meta: json({ ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'authoring.cockpit-drafts': false } }] }),
         me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
       };
+    case 'rules-author-builder':
+      return { ...ok, meta: json(metaWithBuilder), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }) };
     case 'rules-author-templates':
       // An author who may simulate, on a host with templates and required reports.
       return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate'] }) };

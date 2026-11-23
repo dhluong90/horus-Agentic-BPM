@@ -137,10 +137,12 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      * @param cause for the start of an undo, the error code that caused it; null otherwise
      * @param message for a message step ({@code MESSAGE_WAITING}, {@code MESSAGE_RECEIVED}, {@code MESSAGE_SENT}), the
      *     keys {@code name}, {@code correlationKey} (as the host's masker made it) and {@code result}; null otherwise
+     * @param resultVariable for the {@code NODE_COMPLETED} of a script step, the variable it set, as recorded when it
+     *     ran (#518); null otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause, Integer waiters, java.util.Map<String, String> message) {
+            String handler, String cause, Integer waiters, java.util.Map<String, String> message, String resultVariable) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -156,7 +158,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
                 String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
                 String errorCode, String handler, String cause) {
             this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
-                    errorCode, handler, cause, null, null);
+                    errorCode, handler, cause, null, null, null);
         }
 
         /**
@@ -169,7 +171,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         /**
@@ -184,13 +186,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public static Entry signalThrown(String id, String nodeId, String actor, Instant occurredAt, Integer waiters) {
             return new Entry(id, "SIGNAL_THROWN", nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null,
-                    null, null, null, waiters, null);
+                    null, null, null, waiters, null, null);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, resultVariable);
         }
 
         /**
@@ -201,7 +203,18 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message);
+                    attempt, errorCode, handler, cause, waiters, message, resultVariable);
+        }
+
+        /**
+         * The same entry carrying the result variable a script step recorded.
+         *
+         * @param variable the variable name
+         * @return the entry with {@code resultVariable} set
+         */
+        public Entry withResultVariable(String variable) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, variable);
         }
 
         /** @return true for the history types the undo of a saga writes */

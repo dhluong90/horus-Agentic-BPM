@@ -58,7 +58,7 @@ const hash = (text: string) => Array.from({ length: 8 }, (_, seed) => {
   return h.toString(16).padStart(8, '0');
 }).join('');
 
-interface Violation { ruleId: string | null; column: string | null; message: string; code: string }
+interface Violation { ruleId: string | null; column: string | null; message: string; code: string; position?: number }
 
 /**
  * The engine's problem catalogue (explain_en / explain_vi.properties): one sentence per code, never the cell's text.
@@ -216,6 +216,30 @@ function view(v: StoredVersion, request: FakeRequest, marks: Marker, withSource 
   return json(body, { ETag: `"${String(v.lockVersion)}"` });
 }
 
+const SHORTHAND_START = /^(==|!=|<|>|in\s|in\[|not in|is\s|between\s)/;
+const WORDS_OF_THE_LANGUAGE = new Set(['and', 'or', 'not', 'in', 'is', 'null', 'true', 'false', 'between']);
+
+/**
+ * The first problem of a full expression (not a shorthand), as the engine places it: an unknown name at its first
+ * character, a money input compared with a bare number at the operator. A stand-in for the engine's parser, enough
+ * for the condition builder's screens; positions count characters of the cell as written.
+ */
+function fullExpressionProblem(text: string, types: ReadonlyMap<string, string>): { code: string; message: string; position: number } | undefined {
+  if (SHORTHAND_START.test(text.trim()) || !/\b(and|or|not)\b|==|!=|<|>/.test(text)) return undefined;
+  const names = /'(?:[^'\\]|\\.)*'|[A-Za-z_]\w*|\d+(?:\.\d+)?(?:\s+[A-Z]{3}\b)?|(?:==|!=|<=|>=|<|>)|\S/g;
+  const tokens = [...text.matchAll(names)].map((m) => ({ text: m[0], at: m.index }));
+  for (const [index, token] of tokens.entries()) {
+    if (/^[A-Za-z_]\w*$/.test(token.text) && !WORDS_OF_THE_LANGUAGE.has(token.text) && !types.has(token.text)) {
+      return { code: 'UNKNOWN_INPUT', message: `Unknown input '${token.text}'`, position: token.at };
+    }
+    const name = tokens[index - 1]?.text ?? '';
+    if (/^(==|!=|<=|>=|<|>)$/.test(token.text) && types.get(name) === 'money' && /^\d+(\.\d+)?$/.test(tokens[index + 1]?.text ?? '')) {
+      return { code: 'TYPE_MISMATCH', message: 'compares a money with a number', position: token.at };
+    }
+  }
+  return undefined;
+}
+
 const MONEY_TEXT = /^-?\d+(\.\d+)?\s+[A-Z]{3}$/;
 
 /** The engine's static checks that the screens show, every cell at once, in the engine's words. */
@@ -236,6 +260,11 @@ function validate(definition: Definition): Violation[] {
       // Arithmetic on a money input with a plain number ("balance + 100 > 0") is a type error in the engine.
       if (types.get(input) === 'money' && /[A-Za-z_]\w*\s*[-+*/]\s*\d/.test(condition)) {
         found.push({ ruleId: rule.id, column: input, message: 'adds a number to a money', code: 'TYPE_MISMATCH' });
+        continue;
+      }
+      const full = fullExpressionProblem(condition, types);
+      if (full !== undefined) {
+        found.push({ ruleId: rule.id, column: input, message: full.message, code: full.code, position: full.position });
         continue;
       }
       const bare = /^(==|!=)\s*([A-Za-z_]\w*)$/.exec(condition);
@@ -596,7 +625,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     }
     const found = validate(checked.document);
     const problems = found.slice(0, PROBLEM_LIMIT).map((f) => ({
-      ruleId: f.ruleId, column: f.column, code: f.code, position: null,
+      ruleId: f.ruleId, column: f.column, code: f.code, position: f.position ?? null,
       message: PROBLEM_CATALOGUE[f.code] ?? PROBLEM_CATALOGUE[f.column !== null ? 'RULE_INVALID' : 'DOCUMENT_INVALID'],
     }));
     // The engine reads a valid draft with the reader of RLE-091 and answers each row's full sentence.

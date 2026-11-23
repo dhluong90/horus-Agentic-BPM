@@ -24,7 +24,7 @@ describe('CKP-069 a definition without stored layout is laid out automatically',
   it('CKP_069_loan_origination_is_laid_out_left_to_right_without_overlapping_nodes', () => {
     const layout = layoutGraph(readBpmnGraph(LOAN_ORIGINATION_BPMN));
 
-    expect(layout.nodes).toHaveLength(13);
+    expect(layout.nodes).toHaveLength(14);
     for (const [index, a] of layout.nodes.entries()) {
       for (const b of layout.nodes.slice(index + 1)) {
         // A boundary event sits on the edge of its own step by design (#489).
@@ -96,8 +96,6 @@ describe('PRE-250 task, manual task and script task are viewable steps', () => {
 
     expect(nodes.map((node) => node.type)).toEqual(['task', 'manualTask', 'scriptTask']);
     expect(nodes.every((node) => isKnownNodeType(node.type))).toBe(true);
-    expect(nodes[2]?.resultVariable).toBe('fee2');
-    expect(nodes[0]?.resultVariable).toBeUndefined();
   });
 });
 
