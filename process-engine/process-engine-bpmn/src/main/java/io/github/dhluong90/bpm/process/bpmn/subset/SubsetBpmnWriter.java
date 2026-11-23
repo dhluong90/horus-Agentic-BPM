@@ -200,13 +200,12 @@ public final class SubsetBpmnWriter {
         }
     }
 
-    private static void node(Xml xml, FlowNode node, int lvl, Map<String, String> signalIds) {
     private static List<EventDefinition> eventDefinitions(FlowNode node) {
         return node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
                 ? event.eventDefinitions() : List.of();
     }
 
-
+    private static void node(Xml xml, FlowNode node, int lvl, Map<String, String> signalIds) {
         String tag;
         StringBuilder attributes = new StringBuilder(" id=" + attr(node.id()) + optional("name", node.name()));
         List<InputMapping> inputs = List.of();
