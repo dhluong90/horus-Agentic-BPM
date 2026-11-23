@@ -169,6 +169,13 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-289 | `PRE_289_*` in `SagaCompensationTest` | Integration on PostgreSQL, the walk of an enclosing scope into completed sub-processes | M3 | `TR-COMP-01` | Done (#488) |
 | PRE-290 | `PRE_290_*` in `SagaCompensationTest` | Integration on PostgreSQL, retry of a failed undo under its own job | M3 | `TR-COMP-02`, `TR-IDEM-04` | Done (#488) |
 | PRE-291 | `PRE_291_*` in `SagaCompensationTest` | Integration on PostgreSQL, a throw that names an activity | M3 | `TR-COMP-01`, `TR-IDEM-04` | Done (#488) |
+| PRE-320 | `PRE_320_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel, interrupting message handler; integration on PostgreSQL, the wait and its subscription | M3 | `TR-STD-04`, `TR-STD-13` | Done (#487) |
+| PRE-321 | `PRE_321_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel, timer and signal beside the main flow; integration on PostgreSQL, the timer job | M3 | `TR-STD-04` | Done (#487) |
+| PRE-322 | `PRE_322_*` in `EventSubProcessTest` | Unit on the kernel, the conditional start, on arrival, and edge-triggered | M3 | `TR-STD-04`, `TR-STD-11` | Done (#487) |
+| PRE-323 | `PRE_323_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel, error and escalation caught, nearest first; integration on PostgreSQL, no incident | M3 | `TR-STD-04` | Done (#487) |
+| PRE-324 | `PRE_324_*` in `EventSubProcessTest` and `EventSubProcessPostgresIT` | Unit on the kernel and integration on PostgreSQL, timers and subscriptions removed with the scope | M3 | `TR-STD-04`, `TR-STD-13` | Done (#487) |
+| PRE-325 | `PRE_325_*` in `EventSubProcessTest` | Unit on the reader, the writer and the compiler, round trip and refusal codes | M3 | `TR-STD-04`, `TR-STD-10` | Done (#487) |
+| PRE-326 | `PRE_326_*` in `EventSubProcessTest` | Unit on the kernel and the compiler, the undo of a completed sub-process or call activity | M3 | `TR-COMP-01`, `TR-IDEM-04` | Done (#487) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
 | PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |

@@ -24,4 +24,9 @@ final class SubProcessBehavior implements FlowNodeBehavior<SubProcess> {
     public void enter(SubProcess node, Token token, ExecutionContext ctx) {
         ctx.enterScope(token, node);
     }
+
+    @Override
+    public void scopeCompleted(SubProcess node, Token scope, ExecutionContext ctx) {
+        ScopeUndo.push(node, scope, ctx);
+    }
 }

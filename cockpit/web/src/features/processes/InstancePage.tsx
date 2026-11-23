@@ -411,6 +411,21 @@ function MessageDetail({ message }: { message: NonNullable<ActivityEntry['messag
   );
 }
 
+const TRIGGERS = ['timer', 'message', 'signal', 'conditional', 'error', 'escalation', 'compensate'] as const;
+
+/** What started an event sub-process and whether it interrupted its scope, read from the definition's own start event (#487). */
+function TriggerDetail({ node }: { node: DiagramNode | undefined }) {
+  const { t } = useI18n();
+  if (node?.trigger === undefined) return null;
+  const known = (TRIGGERS as readonly string[]).includes(node.trigger);
+  return (
+    <span className="muted">
+      {known ? <>{' · '}{t(`instance.timeline.trigger.${node.trigger}` as MessageKey)}</> : null}
+      {' · '}{t(node.interrupting === false ? 'instance.timeline.beside' : 'instance.timeline.interrupted')}
+    </span>
+  );
+}
+
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
 function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
@@ -459,6 +474,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                       ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
                     {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
+                    {entry.type === 'EVENT_SUBPROCESS_STARTED' ? <TriggerDetail node={graph.nodes.find((node) => node.id === entry.nodeId)} /> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>

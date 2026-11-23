@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A loan application with three event sub-processes: the applicant withdrawing (message, interrupting), a reminder
+     to the underwriter after 24 hours (timer, non-interrupting) and a rate-card change (signal, non-interrupting). -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="loan-application-definitions"
+                  targetNamespace="urn:horus:examples" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="Msg_withdrawn" name="applicant-withdrew"/>
+  <bpmn:signal id="Sig_rate" name="rate-card-updated"/>
+  <bpmn:process id="loan-application" name="Loan application" isExecutable="true">
+    <bpmn:startEvent id="received"/>
+    <bpmn:userTask id="assess" name="Assess the application" horus:assignee="role:UNDERWRITER"
+                   horus:resultVariable="assessment"/>
+    <bpmn:endEvent id="decided"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="received" targetRef="assess"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="assess" targetRef="decided"/>
+
+    <bpmn:subProcess id="withdrawal" name="Applicant withdraws" triggeredByEvent="true">
+      <bpmn:startEvent id="withdrawn" horus:correlationKey="applicationId">
+        <bpmn:messageEventDefinition messageRef="Msg_withdrawn"/>
+      </bpmn:startEvent>
+      <bpmn:serviceTask id="close-file" horus:handler="close-application-file"/>
+      <bpmn:endEvent id="file-closed"/>
+      <bpmn:sequenceFlow id="w1" sourceRef="withdrawn" targetRef="close-file"/>
+      <bpmn:sequenceFlow id="w2" sourceRef="close-file" targetRef="file-closed"/>
+    </bpmn:subProcess>
+
+    <bpmn:subProcess id="reminder" name="Remind the underwriter" triggeredByEvent="true">
+      <bpmn:startEvent id="after-a-day" isInterrupting="false">
+        <bpmn:timerEventDefinition><bpmn:timeDuration>PT24H</bpmn:timeDuration></bpmn:timerEventDefinition>
+      </bpmn:startEvent>
+      <bpmn:serviceTask id="remind-underwriter" horus:handler="send-underwriter-reminder"/>
+      <bpmn:endEvent id="reminded"/>
+      <bpmn:sequenceFlow id="r1" sourceRef="after-a-day" targetRef="remind-underwriter"/>
+      <bpmn:sequenceFlow id="r2" sourceRef="remind-underwriter" targetRef="reminded"/>
+    </bpmn:subProcess>
+
+    <bpmn:subProcess id="reprice" name="Reprice on a rate change" triggeredByEvent="true">
+      <bpmn:startEvent id="rate-changed" isInterrupting="false">
+        <bpmn:signalEventDefinition signalRef="Sig_rate"/>
+      </bpmn:startEvent>
+      <bpmn:serviceTask id="reprice-offer" horus:handler="reprice-loan-offer"/>
+      <bpmn:endEvent id="repriced"/>
+      <bpmn:sequenceFlow id="p1" sourceRef="rate-changed" targetRef="reprice-offer"/>
+      <bpmn:sequenceFlow id="p2" sourceRef="reprice-offer" targetRef="repriced"/>
+    </bpmn:subProcess>
+  </bpmn:process>
+</bpmn:definitions>

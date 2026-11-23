@@ -21,4 +21,9 @@ final class SagaBehavior implements FlowNodeBehavior<Transaction> {
     public void enter(Transaction node, Token token, ExecutionContext ctx) {
         ctx.enterScope(token, node);
     }
+
+    @Override
+    public void scopeCompleted(Transaction node, Token scope, ExecutionContext ctx) {
+        ScopeUndo.push(node, scope, ctx);
+    }
 }

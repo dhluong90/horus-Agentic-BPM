@@ -2024,7 +2024,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private static boolean startsOn(CompiledProcess process, String name) {
+        // Only the start event of the process itself: one in an event sub-process (#487) waits inside an instance.
         return process.nodes().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent s
+                && process.containerOf(s.id()).equals(process.process().id())
                 && s.eventDefinitions().stream().anyMatch(d -> d instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition m
                 && name.equals(m.messageRef())));
     }
@@ -5192,8 +5194,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new Compiled(compiledProcess, new DefaultExecutionKernel(compiledProcess, behaviors, expressions, maxLoopInstances),
                     AgentMemory.sources(process), compiledProcess.nodes().stream().anyMatch(n ->
                             n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask
-                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent c
-                            && c.eventDefinitions().stream().anyMatch(
+                            || (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                            || n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent)
+                            && ((io.github.dhluong90.bpm.process.internal.model.bpmn.Event) n).eventDefinitions()
+                            .stream().anyMatch(
                             io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition.class::isInstance)));
         });
     }

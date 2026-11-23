@@ -26,9 +26,13 @@ public final class CompiledProcess {
     private final Map<String, String> containers;
     private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries;
     private final Map<String, String> compensationActivities;
+    private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess>> eventSubProcesses;
 
     private CompiledProcess(Builder builder) {
         this.compensationActivities = Map.copyOf(builder.compensationActivities);
+        Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess>> events = new HashMap<>();
+        builder.eventSubProcesses.forEach((k, v) -> events.put(k, List.copyOf(v)));
+        this.eventSubProcesses = Collections.unmodifiableMap(events);
         this.containers = Map.copyOf(builder.containers);
         Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> attached = new HashMap<>();
         builder.boundaries.forEach((k, v) -> attached.put(k, List.copyOf(v)));
@@ -129,6 +133,34 @@ public final class CompiledProcess {
     }
 
     /**
+     * @param containerId the process id, or the id of a sub-process or transaction
+     * @return the event sub-processes (#487) that stand directly in that container, in document order
+     */
+    public List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess> eventSubProcessesOf(String containerId) {
+        return eventSubProcesses.getOrDefault(containerId, List.of());
+    }
+
+    /**
+     * @param nodeId a node id
+     * @return whether it is an event sub-process (#487)
+     */
+    public boolean isEventSubProcess(String nodeId) {
+        return nodes.get(nodeId) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess s
+                && s.triggeredByEvent();
+    }
+
+    /**
+     * @param eventSubProcessId the id of an event sub-process
+     * @return its start event, the one that carries the trigger
+     */
+    public Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent> triggerOf(String eventSubProcessId) {
+        return nodes.values().stream()
+                .filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent
+                        && containerOf(n.id()).equals(eventSubProcessId))
+                .map(n -> (io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent) n).findFirst();
+    }
+
+    /**
      * @param node a node
      * @return the name of its link event definition when it is a link throw or catch event (#493), else empty
      */
@@ -178,6 +210,8 @@ public final class CompiledProcess {
         private final Map<String, String> containers = new HashMap<>();
         private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries =
                 new HashMap<>();
+        private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess>> eventSubProcesses =
+                new HashMap<>();
         private final Map<String, String> compensationActivities = new HashMap<>();
 
         private Builder(String definitionId, Process process) {
@@ -200,6 +234,19 @@ public final class CompiledProcess {
                     compensationActivities.putIfAbsent(b.attachedToRef(), a.targetRef());
                 }
             }
+            // #487: a compensation event sub-process names the service task inside it as the undo of its sub-process.
+            for (io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess esp
+                    : eventSubProcesses.values().stream().flatMap(List::stream).toList()) {
+                boolean compensates = nodes.values().stream().anyMatch(n -> n instanceof io.github.dhluong90.bpm.process
+                        .internal.model.bpmn.StartEvent s && containers.get(n.id()).equals(esp.id())
+                        && s.eventDefinitions().size() == 1 && s.eventDefinitions().get(0) instanceof
+                                io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition);
+                if (compensates) {
+                    nodes.values().stream().filter(n -> n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
+                            .ServiceTask && containers.get(n.id()).equals(esp.id())).findFirst().ifPresent(task ->
+                            compensationActivities.putIfAbsent(containers.get(esp.id()), task.id()));
+                }
+            }
         }
 
         private void index(String containerId, List<io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement>
@@ -211,6 +258,10 @@ public final class CompiledProcess {
                     if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent boundary
                             && boundary.attachedToRef() != null) {
                         boundaries.computeIfAbsent(boundary.attachedToRef(), k -> new ArrayList<>()).add(boundary);
+                    }
+                    if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess sub
+                            && sub.triggeredByEvent()) {
+                        eventSubProcesses.computeIfAbsent(containerId, k -> new ArrayList<>()).add(sub);
                     }
                     if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer c) {
                         index(node.id(), c.flowElements());

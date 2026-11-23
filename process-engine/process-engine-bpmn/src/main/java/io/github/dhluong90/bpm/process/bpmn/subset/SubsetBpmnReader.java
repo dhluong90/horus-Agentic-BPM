@@ -416,6 +416,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.eventDefinitionRefs(), t.data(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(),
+                            t.info());
                     default -> e;
                 });
             }
@@ -494,6 +497,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.implementation(), nameOf(t.messageRef(), t.id(), "sendTask"), t.operationRef(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(),
+                            t.info());
                     default -> e;
                 });
             }
@@ -801,7 +807,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             for (FlowElement e : elements) {
                 // PD-127: a completed child is never left silently in place, so a call inside a saga declares its undo.
-                if (e instanceof CallActivity c && c.info().extensions().first(CompensateHandlerRef.class).isEmpty()) {
+                if (e instanceof CallActivity c && c.info().extensions().first(CompensateHandlerRef.class).isEmpty()
+                        && elements.stream().noneMatch(b -> b instanceof BoundaryEvent boundary
+                                && c.id().equals(boundary.attachedToRef()) && boundary.eventDefinitions().size() == 1
+                                && boundary.eventDefinitions().get(0) instanceof CompensateEventDefinition)) {
                     invalid.add(new DefinitionProblem("COMPENSATION_REQUIRED", "A callProcess step inside a saga declares"
                             + " its undo with horus:compensate (a handler, another callProcess, or manual)",
                             "callActivity", safe(c.id()), line()));
@@ -813,16 +822,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /**
          * An embedded {@code subProcess} (#486, ADR-0020): a scope with its own none start event, steps and end
-         * events, entered and left through its own node. An event sub-process ({@code triggeredByEvent}) is not
-         * supported yet, and a loop or multi-instance marker is named as unsupported like on any other activity.
+         * events, entered and left through its own node. An event sub-process ({@code triggeredByEvent}, #487) has no
+         * flow in or out: its own start event, which carries the trigger, starts it. A loop or multi-instance marker is
+         * named as unsupported like on any other activity.
          */
         private FlowElement subProcess() throws XMLStreamException {
             String id = id();
             String name = attr("name");
             boolean byEvent = "true".equals(attr("triggeredByEvent"));
-            if (byEvent) {
-                unsupported("subProcess with triggeredByEvent", id, BpmnStages.S1);
-            }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
             LoopCharacteristics own = container(elements, artifacts);
@@ -941,8 +948,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     unsupported(quantity, id, BpmnStages.NOT_PLANNED);
                 }
             }
-            if ("false".equals(attr("isInterrupting"))) {
-                unsupported("isInterrupting", id, BpmnStages.S1);
+            if ("false".equals(attr("isInterrupting")) && !"startEvent".equals(xml.getLocalName())) {
+                unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to the start event of an event"
+                        + " sub-process; a boundary event uses cancelActivity");
             }
             if ("true".equals(attr("parallelMultiple"))) {
                 unsupported("parallelMultiple", id, BpmnStages.S3);
@@ -1000,6 +1008,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             int line = line();
             String key = horus("correlationKey");
+            boolean interrupting = !"false".equals(attr("isInterrupting"));
             List<EventDefinition> definitions = new ArrayList<>();
             List<HorusExtension> ext = new ArrayList<>();
             List<ForeignFragment> foreign = new ArrayList<>();
@@ -1020,6 +1029,22 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions.add(signalDefinition(id, element));
                 } else if (start && BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
                     definitions.add(conditionalDefinition(id, element));
+                } else if (start && BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
+                    // #487: the trigger of an event sub-process; where a start event may carry it is checked at compile.
+                    TimerEventDefinition timer = timer(id);
+                    definitions.add(timer);
+                    TimerSchedule.problem(timer).ifPresent(problem -> {
+                        if (problem.startsWith("timeCycle")) {
+                            addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
+                                    "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
+                                    BpmnStages.S1));
+                        } else {
+                            invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line));
+                        }
+                    });
+                } else if (start && BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
+                        || "escalationEventDefinition".equals(local) || "compensateEventDefinition".equals(local))) {
+                    definitions.add(definition(local, id, element, line));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
                     definitions.add(messageDefinition(id));
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
@@ -1037,15 +1062,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (definitions.size() > 1) {
                 unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
-            if (start && !definitions.isEmpty() && key != null) {
-                invalid.add(new DefinitionProblem("CORRELATION_KEY_UNEXPECTED", "A message start event has no instance"
-                        + " yet; the message's key becomes the business key", element, safe(id), line));
-                key = null;
-            }
+            // A message start event of a process has no instance yet, so its key becomes the business key; one of an event
+            // sub-process has the instance, so it names its key variable like a message catch (#487, checked at compile).
             messageExtras(element, id, line, definitions, key, false, ext);
             ElementInfo info = definitions.isEmpty() ? null : info(ext, foreign);
             return start
-                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, true, info)
+                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, interrupting, info)
                     : new EndEvent(id, name, List.of(), List.of(), definitions, List.of(), null, info);
         }
 

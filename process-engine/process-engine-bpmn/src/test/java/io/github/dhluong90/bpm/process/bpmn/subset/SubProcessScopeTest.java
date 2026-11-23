@@ -272,15 +272,17 @@ class SubProcessScopeTest {
     }
 
     @Test
-    void PRE_263_an_event_sub_process_is_refused_with_its_stage_and_a_flow_across_the_boundary_is_refused() {
+    void PRE_263_an_event_sub_process_with_a_flow_in_or_out_is_refused_and_a_flow_across_the_boundary_is_refused() {
         // Given an event sub-process, and a flow from inside the sub-process to the root end
         String byEvent = ONBOARDING.replace("<bpmn:subProcess id=\"onboard\"", "<bpmn:subProcess id=\"onboard\""
                 + " triggeredByEvent=\"true\"");
         String crossing = ONBOARDING.replace("<bpmn:sequenceFlow id=\"s7\"", "<bpmn:sequenceFlow id=\"s8\""
                 + " sourceRef=\"fraud\" targetRef=\"end\"/><bpmn:sequenceFlow id=\"s7\"");
 
-        // Then the first is named unsupported at stage S1, the second is refused when compiled
-        assertThatThrownBy(() -> read(byEvent)).hasMessageContaining("subProcess with triggeredByEvent");
+        // Then the first is refused when compiled, for its flows and its start event without a trigger (#487), and so is the second
+        assertThatThrownBy(() -> kernel(read(byEvent))).isInstanceOfSatisfying(ValidationFailedException.class, e ->
+                assertThat(e.problems()).extracting(DefinitionProblem::code, DefinitionProblem::elementId)
+                        .contains(org.assertj.core.groups.Tuple.tuple("EVENT_SUBPROCESS_HAS_FLOW", "onboard")));
         Process process = read(crossing);
         assertThatThrownBy(() -> kernel(process)).isInstanceOfSatisfying(ValidationFailedException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::code, DefinitionProblem::elementId)

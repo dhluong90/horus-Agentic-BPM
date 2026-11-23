@@ -42,4 +42,15 @@ public interface FlowNodeBehavior<N extends FlowNode> {
     default void trigger(N node, Token token, Command trigger, ExecutionContext ctx) {
         throw new NotExecutableException(node);
     }
+
+    /**
+     * The scope this node opened ended normally (a sub-process or a transaction, #487): the place to push the undo of a
+     * sub-process that has one, before its token leaves. Nothing by default.
+     *
+     * @param node the node
+     * @param scope the scope token that ended
+     * @param ctx the execution context
+     */
+    default void scopeCompleted(N node, Token scope, ExecutionContext ctx) {
+    }
 }

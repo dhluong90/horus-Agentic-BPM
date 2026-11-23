@@ -263,7 +263,10 @@ public final class SubsetBpmnWriter {
         GuardrailSpec guardrail = node.extensions().first(GuardrailSpec.class).orElse(null);
         String messageName = messageName(node);
         switch (node) {
-            case StartEvent s -> tag = "bpmn:startEvent";
+            case StartEvent s -> {
+                tag = "bpmn:startEvent";
+                attributes.append(s.isInterrupting() ? "" : " isInterrupting=\"false\"");
+            }
             case EndEvent e -> {
                 tag = "bpmn:endEvent";
                 inputs = e.extensions().all(InputMapping.class);
@@ -334,7 +337,10 @@ public final class SubsetBpmnWriter {
                         optional("horus:calledVersion", String.valueOf(v.version()))));
                 inputs = c.extensions().all(InputMapping.class);
             }
-            case SubProcess s -> tag = "bpmn:subProcess";
+            case SubProcess s -> {
+                tag = "bpmn:subProcess";
+                attributes.append(s.triggeredByEvent() ? " triggeredByEvent=\"true\"" : "");
+            }
             case Transaction t -> tag = "bpmn:transaction";
             case ParallelGateway g -> tag = "bpmn:parallelGateway";
             case ExclusiveGateway g -> {
