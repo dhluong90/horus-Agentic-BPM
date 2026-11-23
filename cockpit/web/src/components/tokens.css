@@ -40,8 +40,8 @@
   --canvas: #FAFCFB; --dot: rgba(14, 77, 65, .10);
   --node: #FFFFFF; --node-stroke: #6F8A83; --edge: #6F8A83; --edge-label: #3F5650;
   --glow: rgba(21, 131, 112, .40); --token: #158370;
-  --gain: #2A7236; --loss: #B53A36; --net: #2C4640; --ref: #8A9A95; --spark-max: #0E4D41;
-  --rel-1: #0E4D41; --rel-2: #158370; --rel-3: #7FCBBA; --rel-later: #6B7C76;
+  --gain: #2A7236; --loss: #B53A36; --net: #2C4640; --ref: #6F8A83; --spark-max: #0E4D41;
+  --rel-1: #0E4D41; --rel-2: #158370; --rel-3: #3B9C88; --rel-later: #6B7C76;
   --diff-add: #E1EFD4; --diff-del: #FBE4E1; --diff-mod: #E9ECFC;
   --sh-node: 0 4px 10px rgba(14, 47, 41, .16);
   --node-hover: drop-shadow(0 4px 10px rgba(14, 47, 41, .16));
