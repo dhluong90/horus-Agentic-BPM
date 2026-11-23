@@ -173,6 +173,29 @@ public interface ExecutionContext {
         throw new UnsupportedOperationException("fireBoundary");
     }
 
+    /**
+     * The trigger of an event sub-process fired (#487). An interrupting one first cancels every other live token of the
+     * scope, with their tasks, jobs, called children and waits; a non-interrupting one leaves them. Then it opens a
+     * {@code SCOPE} token for the event sub-process under the scope and a flow token at its start event. The caller
+     * ends or keeps its own listener token before it calls.
+     *
+     * @param scope the scope token the event sub-process stands in
+     * @param start the start event of the event sub-process, which carries the trigger
+     * @param trigger {@code TIMER}, {@code MESSAGE}, {@code SIGNAL}, {@code CONDITIONAL}, {@code ERROR} or
+     *     {@code ESCALATION}, for the timeline
+     * @param details more for the timeline, for example the error code
+     * @param exceptWorkOf a token whose job or task is not cancelled because it already ended, or null
+     */
+    default void startEventSubProcess(Token scope, io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent start,
+            String trigger, java.util.Map<String, Object> details, String exceptWorkOf) {
+        throw new UnsupportedOperationException("startEventSubProcess");
+    }
+
+    /** Records that a conditional event sub-process was armed, so the kernel asks its condition once after this apply. */
+    default void conditionArmed() {
+        throw new UnsupportedOperationException("conditionArmed");
+    }
+
     /** @param effect an effect for the shell */
     void effect(Effect effect);
 

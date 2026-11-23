@@ -121,7 +121,35 @@ A `subProcess` groups steps that run from their own start event to their own end
 </bpmn:subProcess>
 ```
 
-A flow from inside to outside is refused at activation (`FLOW_CROSSES_SAGA`). An event sub-process is refused as `S1`.
+A flow from inside to outside is refused at activation (`FLOW_CROSSES_SAGA`).
+
+### Event sub-processes (0.3.0)
+
+An event sub-process is a `subProcess` with `triggeredByEvent="true"`. No flow enters or leaves it; the one start event inside carries the trigger, and the sub-process runs inside the scope it stands in: the process, a sub-process or a transaction. The trigger is a timer (`timeDuration` or `timeDate`), a message (with `horus:correlationKey`, as a message catch has), a signal, a condition, an error, an escalation, or a compensation.
+
+| Trigger | `isInterrupting` | Behaviour |
+|---|---|---|
+| Timer | `true` (default) or `false` | Fires once, 24 hours after the scope opens for `PT24H`. |
+| Message, signal | `true` or `false` | A non-interrupting one starts again for each message of its key, or each broadcast of its name. |
+| Condition | `true` or `false` | Asked in the transaction that changes the variables, and when the scope opens. A non-interrupting one starts again only after the condition has been false. |
+| Error, escalation | error: always `true`; escalation: either | Caught like a boundary event, by `errorRef` or `escalationRef` code, or by any code when none; the handler of the nearest scope wins, and a boundary event on the step wins over it. |
+| Compensation | not used | The undo of the sub-process or transaction it stands in (see below). |
+
+An interrupting event sub-process cancels the other work of its scope, tasks, jobs, called children and waits, and the scope ends when the event sub-process ends. A non-interrupting one runs beside the main flow, and the scope ends when both have ended. A timer or subscription waiting for a trigger is removed when its scope ends. The cockpit draws the event sub-process with a dotted border and its start symbol, closed with a count of its steps or open in place, and the timeline records its start with the trigger and whether it interrupted; none of it is editable there. A worked file is [`loan-application-event-subprocesses.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/process-engine/process-engine-bpmn/src/test/resources/bpmn/loan-application-event-subprocesses.bpmn).
+
+```xml
+<bpmn:subProcess id="reminder" triggeredByEvent="true">
+  <bpmn:startEvent id="after-a-day" isInterrupting="false">
+    <bpmn:timerEventDefinition><bpmn:timeDuration>PT24H</bpmn:timeDuration></bpmn:timerEventDefinition>
+  </bpmn:startEvent>
+  <bpmn:serviceTask id="remind-underwriter" horus:handler="send-underwriter-reminder"/>
+  <bpmn:endEvent id="reminded"/>
+  <bpmn:sequenceFlow id="r1" sourceRef="after-a-day" targetRef="remind-underwriter"/>
+  <bpmn:sequenceFlow id="r2" sourceRef="remind-underwriter" targetRef="reminded"/>
+</bpmn:subProcess>
+```
+
+Refused at import: a timer, error, escalation or compensation start event outside an event sub-process (`START_TRIGGER_MISPLACED`), a flow in or out (`EVENT_SUBPROCESS_HAS_FLOW`), a start event with no trigger (`EVENT_SUBPROCESS_TRIGGER_REQUIRED`), a message trigger with no key (`CORRELATION_KEY_REQUIRED`), an error trigger that does not interrupt (`EVENT_SUBPROCESS_ERROR_NOT_INTERRUPTING`) and a boundary event on an event sub-process. A timer cycle is not supported.
 
 ### Boundary events, errors and escalations (0.3.0)
 
@@ -165,7 +193,7 @@ A **cancel end event** inside a transaction compensates it and leaves through th
 <bpmn:boundaryEvent id="transfer-cancelled" attachedToRef="transfer"><bpmn:cancelEventDefinition/></bpmn:boundaryEvent>
 ```
 
-The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. Not supported: a compensation boundary event on a call activity, a sub-process or a transaction, compensation event sub-processes, and `waitForCompletion="false"`.
+The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. A compensation boundary event may also sit on a call activity, a sub-process or a transaction, and a **compensation event sub-process** (a sub-process with `triggeredByEvent="true"` whose start event is a `compensateEventDefinition`, holding one service task with `horus:handler` between its start and end) does the same for the sub-process or transaction it stands in: when that sub-process completes, one undo entry is pushed on the stack of the scope around it, with the inputs the task declares, and a later compensation runs it before the steps inside. Those steps are still undone after it, where BPMN runs the handler only. Not supported: `waitForCompletion="false"`, and a compensation event sub-process with a body of more than one task.
 
 ### Terminate and link events (0.3.0)
 
@@ -251,22 +279,16 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `S0` | An element of the current stage that this release has not finished: an `intermediateThrowEvent` with no event definition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
 
-Examples: `inclusiveGateway`, an event sub-process, data objects and a timer cycle are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
-Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway` and message events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
-Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `eventBasedGateway`, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `inclusiveGateway`, data objects and a timer cycle are `S1`; `eventBasedGateway` is `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
-These are refused in 0.2.0:
+These are refused:
 
 | Kind | Elements |
 |---|---|
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
-| Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event that is neither a timer nor a link, an intermediate throw event that is neither a compensation, an escalation nor a link, and any start event or an end event with a message or signal definition |
-| Activities | an event sub-process (`subProcess` with `triggeredByEvent="true"`), `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
-| Events | `boundaryEvent`, an `intermediateThrowEvent` that is not a signal throw or a `throwCompensation`, a catch event that is not a timer, signal or conditional event, a start event with a definition other than signal or conditional, an end event with a definition other than signal (timer, message, error, terminate), a conditional end or throw event, and an event with several definitions |
-| Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
-| Events | `boundaryEvent`, an `intermediateThrowEvent` that is not a `throwCompensation` or a message throw, a catch event that is neither a timer nor a message, and any start or end event with an event definition other than message (timer, signal, error, terminate) |
-| Activities | `subProcess`, `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
-| Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
+| Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event with no definition, an intermediate throw event with an error or terminate definition, a start event with a cancel definition, a conditional end or throw event, and an event with several definitions |
+| Activities | `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
+| Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"` on anything but the start event of an event sub-process, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |

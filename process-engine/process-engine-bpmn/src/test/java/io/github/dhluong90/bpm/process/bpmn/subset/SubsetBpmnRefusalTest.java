@@ -143,7 +143,7 @@ class SubsetBpmnRefusalTest {
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
-                        tuple("cnc", "S2"), tuple("err", "not planned"), tuple("none", "S0")));
+                        tuple("cnc", "not planned"), tuple("err", "not planned"), tuple("none", "S0")));
     }
 
     @Test
@@ -191,7 +191,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:subProcess id=\"sc\" triggeredByEvent=\"true\"/><bpmn:choreographyTask id=\"ch\"/>"
+                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:inclusiveGateway id=\"sc\"/><bpmn:choreographyTask id=\"ch\"/>"
                 + "<bpmn:eventBasedGateway id=\"eg\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {
@@ -205,14 +205,16 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_event_definitions_take_the_stage_of_their_kind() {
+        // A compensation, timer, error or escalation start event reads: it starts an event sub-process (#487).
         byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:compensateEventDefinition/></bpmn:startEvent>"
-                + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition/></bpmn:startEvent>"
+                + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition><bpmn:timeDuration>PT1H</bpmn:timeDuration>"
+                + "</bpmn:timerEventDefinition></bpmn:startEvent>"
                 + "<bpmn:endEvent id=\"c\"><bpmn:conditionalEventDefinition/></bpmn:endEvent>"
                 + "<bpmn:startEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:startEvent>" + TAIL)
                 .getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
-                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "S1", "S2", "not planned"));
+                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "not planned"));
     }
 
     private static byte[] bytes(String name) {

@@ -100,6 +100,9 @@ public final class CanonicalProcessWriter {
                 case StartEvent s -> {
                     step.put("type", "start");
                     writeEventDefinition(step, s.eventDefinitions());
+                    if (!s.isInterrupting()) {
+                        step.put("interrupting", false);
+                    }
                 }
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof ErrorEventDefinition d -> {
@@ -365,6 +368,10 @@ public final class CanonicalProcessWriter {
                 case SubProcess sub -> {
                     // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
                     step.put("type", "subProcess");
+                    if (sub.triggeredByEvent()) {
+                        // #487: an event sub-process is started by the trigger of its own start event.
+                        step.put("triggeredByEvent", true);
+                    }
                     writeSteps(step.putArray("steps"), sub.flowElements(), sub.artifacts());
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
@@ -412,12 +419,37 @@ public final class CanonicalProcessWriter {
         }
     }
 
-    /** A start or end event's signal or condition, written only when declared so other definitions keep their hash. */
+    /**
+     * A start or end event's signal or condition, and the trigger of an event sub-process's start event (#487), written
+     * only when declared so other definitions keep their hash.
+     */
     private static void writeEventDefinition(ObjectNode step, List<EventDefinition> definitions) {
         if (definitions.size() != 1) {
             return;
         }
         switch (definitions.get(0)) {
+            case TimerEventDefinition t -> {
+                step.put("trigger", "timer");
+                if (t.timeDuration() != null && t.timeDuration().text() != null) {
+                    step.put("duration", t.timeDuration().text().strip());
+                }
+                if (t.timeDate() != null && t.timeDate().text() != null) {
+                    step.put("until", t.timeDate().text().strip());
+                }
+            }
+            case ErrorEventDefinition e -> {
+                step.put("trigger", "error");
+                if (e.errorCode() != null) {
+                    step.put("errorCode", e.errorCode());
+                }
+            }
+            case EscalationEventDefinition e -> {
+                step.put("trigger", "escalation");
+                if (e.escalationCode() != null) {
+                    step.put("escalationCode", e.escalationCode());
+                }
+            }
+            case CompensateEventDefinition c -> step.put("trigger", "compensation");
             case SignalEventDefinition signal -> step.put("signal", signal.signalRef());
             case ConditionalEventDefinition conditional -> step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
             default -> { }

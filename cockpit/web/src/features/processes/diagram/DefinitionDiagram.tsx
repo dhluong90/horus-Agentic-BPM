@@ -208,6 +208,7 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
       <text aria-hidden="true" className="dg-node__type" x={node.x + padX + TYPE_INDENT} y={typeTop + 13}>
         {node.typeLines.map((line, index) => <tspan key={index} x={node.x + padX + TYPE_INDENT} dy={index === 0 ? 0 : typeRow}>{index < node.typeLines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
+      <TriggerMark node={node} x={node.x + node.width - 28} y={node.y + 4} />
       {steps !== undefined ? <text aria-hidden="true" className="dg-node__steps" x={node.x + padX} y={node.y + node.height - 9}>{steps}</text> : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
       {onToggle !== undefined && toggleLabel !== undefined ? <Toggle x={node.x + node.width - 26} y={node.y + node.height - 24} open={false} label={toggleLabel} onToggle={onToggle} /> : null}
@@ -234,6 +235,19 @@ function Toggle({ x, y, open, label, onToggle }: { x: number; y: number; open: b
   );
 }
 
+/** The start symbol of an event sub-process, in the corner of its box or frame: what starts it, ringed dashed when it does not interrupt (#487). */
+function TriggerMark({ node, x, y }: { node: PlacedNode; x: number; y: number }) {
+  if (node.type !== 'subProcess:event' || node.trigger === undefined) return null;
+  const kind = `startEvent:${node.trigger}`;
+  if (!isKnownNodeType(kind)) return null;
+  return (
+    <g className="dg-trigger" aria-hidden="true" data-trigger={node.trigger} data-interrupting={String(node.interrupting !== false)}>
+      <circle cx={x + 10} cy={y + 10} r={11} strokeDasharray={node.interrupting === false ? '3 2.5' : undefined} />
+      <NodeIcon type={kind} x={x + 2} y={y + 2} />
+    </g>
+  );
+}
+
 /** An open sub-process: a frame with its name, drawn behind its steps. */
 function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: PlacedNode; label: string; interaction: Interaction; onToggle: () => void; toggleLabel: string }) {
   return (
@@ -241,6 +255,7 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={12} />
       <text aria-hidden="true" className="dg-frame__name" x={node.x + FRAME_PAD} y={node.y + FRAME_HEADER - 11}>{node.name ?? node.id}</text>
+      <TriggerMark node={node} x={node.x + node.width - FRAME_PAD - 18 - 30} y={node.y + 2} />
       <Toggle x={node.x + node.width - FRAME_PAD - 18} y={node.y + 6} open label={toggleLabel} onToggle={onToggle} />
     </g>
   );
@@ -253,12 +268,12 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   // that raises or terminates carries its symbol inside the thick ring.
   const boundary = node.type.startsWith('boundaryEvent');
   const intermediate = node.type.startsWith('intermediate') || boundary;
-  const soft = boundary && node.interrupting === false;
+  const soft = (boundary || node.type.startsWith('startEvent')) && node.interrupting === false;
   const marked = intermediate || node.type.includes(':');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
   return (
-    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
+    <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary || node.type.startsWith('startEvent') ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
       {node.shape === 'event' ? (
         <>
