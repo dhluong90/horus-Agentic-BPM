@@ -286,6 +286,16 @@ export const activityEntry = z
     waiters: z.number().int().min(0).optional(),
     /** Message steps only (#491): the name, the key as the host masked it, and the delivery result. */
     message: z.object({ name: z.string(), correlationKey: z.string().optional(), result: z.string() }).loose().optional(),
+    /** The counters of a loop or multi-instance step when the entry was written (#496); `nrOfInstances` is absent for a standard loop. */
+    instances: z
+      .object({
+        loopCounter: z.number().int().min(1).optional(),
+        nrOfInstances: z.number().int().min(0).optional(),
+        nrOfActiveInstances: z.number().int().min(0).optional(),
+        nrOfCompletedInstances: z.number().int().min(0).optional(),
+      })
+      .loose()
+      .optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

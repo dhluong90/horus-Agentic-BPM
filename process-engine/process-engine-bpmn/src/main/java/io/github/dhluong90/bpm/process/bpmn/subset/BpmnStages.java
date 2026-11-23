@@ -37,8 +37,6 @@ final class BpmnStages {
             Map.entry("participant", S1),
             Map.entry("messageFlow", S1),
             Map.entry("loopCharacteristics", S1),
-            Map.entry("standardLoopCharacteristics", S1),
-            Map.entry("multiInstanceLoopCharacteristics", S1),
             Map.entry("error", S1),
             Map.entry("escalation", S1),
             Map.entry("signal", S2),

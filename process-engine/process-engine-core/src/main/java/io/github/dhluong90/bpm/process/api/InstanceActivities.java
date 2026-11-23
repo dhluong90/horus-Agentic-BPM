@@ -137,10 +137,12 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      * @param cause for the start of an undo, the error code that caused it; null otherwise
      * @param message for a message step ({@code MESSAGE_WAITING}, {@code MESSAGE_RECEIVED}, {@code MESSAGE_SENT}), the
      *     keys {@code name}, {@code correlationKey} (as the host's masker made it) and {@code result}; null otherwise
+     * @param instances for the entries of a loop or multi-instance step ({@code MI_*}, #496), the counters when the
+     *     entry was written; null otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause, Integer waiters, java.util.Map<String, String> message) {
+            String handler, String cause, Integer waiters, java.util.Map<String, String> message, Instances instances) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -151,12 +153,12 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
                     new java.util.LinkedHashMap<>(message));
         }
 
-        /** An entry with no count of woken waiters and no message part. */
+        /** An entry with no count of woken waiters, no message part and no loop counters. */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
                 String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
                 String errorCode, String handler, String cause) {
             this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
-                    errorCode, handler, cause, null, null);
+                    errorCode, handler, cause, null, null, null);
         }
 
         /**
@@ -169,7 +171,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         /**
@@ -184,13 +186,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public static Entry signalThrown(String id, String nodeId, String actor, Instant occurredAt, Integer waiters) {
             return new Entry(id, "SIGNAL_THROWN", nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null,
-                    null, null, null, waiters, null);
+                    null, null, null, waiters, null, null);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances);
         }
 
         /**
@@ -201,12 +203,34 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message);
+                    attempt, errorCode, handler, cause, waiters, message, instances);
+        }
+
+        /**
+         * @param counters the counters of a loop or multi-instance step
+         * @return the same entry carrying them
+         */
+        public Entry withInstances(Instances counters) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, counters);
         }
 
         /** @return true for the history types the undo of a saga writes */
         public static boolean isCompensationType(String type) {
             return type.startsWith("COMPENSATION_") || "COMPENSATED".equals(type);
         }
+    }
+
+    /**
+     * The counters of a loop or multi-instance step when an entry was written (#496), so a timeline reads "3 of 5
+     * done" without computing it.
+     *
+     * @param loopCounter the repetition the entry is about, counted from 1; null for an entry about the whole step
+     * @param nrOfInstances how many repetitions the step has; null for a standard loop, which has no fixed number
+     * @param nrOfActiveInstances how many are running
+     * @param nrOfCompletedInstances how many have ended
+     */
+    public record Instances(Integer loopCounter, Integer nrOfInstances, Integer nrOfActiveInstances,
+            Integer nrOfCompletedInstances) {
     }
 }

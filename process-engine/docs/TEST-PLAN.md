@@ -185,6 +185,13 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-235 | `PRE_235_*` in `MessageCorrelationPostgresIT` and `MessageElementsImportTest` | Testcontainers with a recording adapter; kernel run twice from one state | M3 | `TR-STD-12`, `TR-SEC-05` | Done (#491) |
 | PRE-236 | `PRE_236_*` in `MessageCorrelationPostgresIT` | Testcontainers, a message start definition | M3 | `TR-STD-04` | Done (#491) |
 | PRE-237 | `PRE_237_*` in `MessageElementsImportTest` | Import and export round trip of the worked example; two refused files | M3 | `TR-STD-04`, `TR-STD-10` | Done (#491) |
+| PRE-290 | `PRE_290_*` in `MultiInstanceTest` and `MultiInstanceStoreTest` | Unit on the kernel with co-signers, owners and branches; integration on PostgreSQL with the token rows | M3 | `TR-STD-29` | Done (#496) |
+| PRE-291 | `PRE_291_*` in `MultiInstanceTest` | Unit on the kernel, a completion condition on a task and on a call activity | M3 | `TR-STD-29` | Done (#496) |
+| PRE-292 | `PRE_292_*` in `MultiInstanceTest` | Unit on the kernel, the counters and an empty collection | M3 | `TR-STD-29` | Done (#496) |
+| PRE-293 | `PRE_293_*` in `MultiInstanceTest` and `MultiInstanceStoreTest` | Unit on the kernel; integration on PostgreSQL, the cap and a collection that is not a list | M3 | `TR-STD-29` | Done (#496) |
+| PRE-294 | `PRE_294_*` in `MultiInstanceTest` | Unit on the kernel, a failure in one repetition, parallel and sequential | M3 | `TR-STD-29` | Done (#496) |
+| PRE-295 | `PRE_295_*` in `MultiInstanceTest` | Unit on the kernel, a card payment loop | M3 | `TR-STD-29` | Done (#496) |
+| PRE-296 | `PRE_296_*` in `MultiInstanceTest` | Unit on the reader, the compiler and the writer | M3 | `TR-STD-04` | Done (#496) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

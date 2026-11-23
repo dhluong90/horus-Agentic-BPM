@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.internal.exec.ExecutionException;
 import io.github.dhluong90.bpm.process.internal.exec.FlowNodeBehavior;
 import io.github.dhluong90.bpm.process.internal.exec.NotExecutableException;
 import io.github.dhluong90.bpm.process.internal.exec.Token;
+import io.github.dhluong90.bpm.process.internal.exec.TokenKind;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
@@ -29,8 +30,15 @@ final class UserTaskBehavior implements FlowNodeBehavior<UserTask> {
         String taskId = ctx.nextId();
         ctx.update(new Token(token.id(), token.kind(), TokenStatus.WAITING_USER, token.scopeTokenId(), token.nodeId(),
                 taskId, token.locals()));
+        // A repetition of a looped task says which one it is, by its loopCounter only: the element may hold personal
+        // data and stays in the instance (#496).
+        Map<String, Object> repetition = token.scopeTokenId() == null ? Map.of()
+                : ctx.tree().get(token.scopeTokenId()).filter(s -> s.kind() == TokenKind.SCOPE
+                        && s.nodeId().equals(node.id()) && s.locals().containsKey("loopCounter"))
+                        .map(s -> Map.<String, Object>of("loopCounter", s.locals().get("loopCounter")))
+                        .orElse(Map.of());
         ctx.effect(new Effect.CreateUserTask(taskId, token.id(), node.id(), node.name(), assignment.assignee(),
-                assignment.fourEyes(), Map.of(), node.extensions().first(SlaSpec.class).orElse(null),
+                assignment.fourEyes(), repetition, node.extensions().first(SlaSpec.class).orElse(null),
                 node.extensions().first(EscalationSpec.class).orElse(null)));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.task.created.v1", Map.of("taskId", taskId, "nodeId", node.id(),
                 "assignee", assignment.assignee())));

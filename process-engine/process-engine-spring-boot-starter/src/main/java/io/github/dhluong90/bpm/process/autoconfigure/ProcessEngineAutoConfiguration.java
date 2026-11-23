@@ -373,6 +373,8 @@ public class ProcessEngineAutoConfiguration {
         services.useRoleCatalogue(catalogue);
         // #92: how deep one call may sit above another.
         services.useCallDepth(properties.calls().maxDepth());
+        // #496: most repetitions of one looped activity.
+        services.useMaxLoopInstances(properties.multiInstance().max());
         // #445: an imported BPMN file's own diagram is stored as layout revision 1 of the version.
         BpmnLayoutReader layoutReader = new BpmnLayoutReader(reader.limits());
         services.useImportedLayouts(layoutStore, Map.of(SourceFormat.BPMN_XML, layoutReader::read));

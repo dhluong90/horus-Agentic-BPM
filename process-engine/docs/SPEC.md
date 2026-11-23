@@ -2098,3 +2098,73 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
 - **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
 - **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)
+### PRE-290 A parallel multi-instance step opens every repetition at once and the flow continues once, with the output in item order
+- **Traces to:** `TR-STD-29`, `PRE-044`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `loan-cosigning`: a user task `step` over the list `cosigners` (Lan, Minh, Huong, Nam), element variable `cosigner`, output collection `verdicts` taken from `verdict.decision`, then the service task `book`. A second process screens the owners Tran Van An, Le Thi Binh and Pham Quoc Cuong with a sequential service task that passes the owner as input. A third runs a sub-process per branch HCM-01 and HN-02.
+- **When:** The parallel loan starts and the four tasks complete out of order (Huong, Lan, Nam, then Minh). The sequential screening starts and each call is answered in turn. The branches start and each branch's two steps are answered.
+- **Then:** Four tasks open together, one per co-signer in list order, under one `MI_BODY` token with four `SCOPE` tokens whose `loopCounter` is 1 to 4 and whose local `cosigner` is that co-signer. `book` has no token until the fourth completes, then exactly one. `verdicts` is in co-signer order (`APPROVE`, `APPROVE`, `APPROVE`, `REJECT`), not in completion order. The sequential step opens one call at a time; each call's input `party` is that repetition's owner; the next starts only after the previous ends; `flags` is in owner order. The sub-process runs its own steps once per branch under its own scope and the loan is booked once after the last.
+- **Example:** `4 co-signers, completed 3, 1, 4, 2 -> verdicts in order 1, 2, 3, 4; book once`.
+- **Test ID:** `PRE_290_a_parallel_step_opens_every_instance_at_once_and_continues_once_after_the_last`, `PRE_290_a_sequential_step_runs_one_instance_at_a_time_with_its_own_element_as_input`, `PRE_290_a_multi_instance_sub_process_runs_its_own_steps_once_per_item_and_continues_after_the_last` (`MultiInstanceTest`); `PRE_290_one_task_per_co_signer_is_written_under_a_body_and_the_decisions_keep_co_signer_order` (`MultiInstanceStoreTest`)
+
+### PRE-291 A completion condition that holds ends the loop and cancels the repetitions still running
+- **Traces to:** `TR-STD-29`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-cosigning` with four co-signers and the completion condition `nrOfCompletedInstances >= 2`; a process that checks three accounts with a called process under the same kind of condition (`>= 1`).
+- **When:** The second task completes; the second called process ends.
+- **Then:** The two tasks still open are cancelled (`CancelUserTask` for each) and their repetitions are `CANCELLED`; `book` has a token; `verdicts` holds `null` where nobody answered; history records `MI_INSTANCE_CANCELLED` for each repetition stopped and `MI_COMPLETED`. For the call activity, the other two children are cancelled by `CancelChildInstance` for their tokens, and the status list has `CLEAR` only at the position of the account that answered.
+- **Example:** `4 co-signers, 2 approvals -> the other 2 tasks cancelled, book starts`.
+- **Test ID:** `PRE_291_a_completion_condition_that_holds_cancels_the_instances_still_running`, `PRE_291_a_completion_condition_on_a_call_activity_cancels_the_children_still_running` (`MultiInstanceTest`)
+
+### PRE-292 The counters count repetitions, a condition can read them, and an empty collection continues at once
+- **Traces to:** `TR-STD-29`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-cosigning` with four co-signers and the condition `nrOfCompletedInstances * 2 >= nrOfInstances`; the same process with no co-signers.
+- **When:** The loan starts; one task completes; a second completes; and, in the other case, it starts with an empty list.
+- **Then:** After the start, the body has `nrOfInstances` 4, `nrOfActiveInstances` 4 and `nrOfCompletedInstances` 0, and each repetition has its own `loopCounter`. After one completion: 3 active and 1 completed, and the loan has not moved on. After the second, `2 * 2 >= 4` holds and the loop ends; the history entry of that repetition carries `loopCounter` 2, `nrOfInstances` 4 and `nrOfCompletedInstances` 2. The task context holds `loopCounter` and never the element. With an empty list no task opens, `verdicts` is `[]` and `book` starts.
+- **Example:** `1 of 4 done -> 3 active, 1 completed`.
+- **Test ID:** `PRE_292_the_counters_count_instances_active_and_completed_and_a_condition_can_read_them`, `PRE_292_an_empty_collection_continues_at_once_with_an_empty_output` (`MultiInstanceTest`)
+
+### PRE-293 A collection over the cap, or one that is not a list, opens an incident and creates nothing
+- **Traces to:** `TR-STD-29`, `PRE-040`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `multi-instance.max` is 3 (and, on PostgreSQL, 2), and `loan-cosigning` has four co-signers (three, on PostgreSQL); a loan whose `cosigners` is the text `Lan, Minh`.
+- **When:** Each loan starts.
+- **Then:** The first raises `MULTI_INSTANCE_LIMIT` on `step` and the second `MULTI_INSTANCE_COLLECTION_INVALID`. No task, job, body or repetition token is created, the instance stays `RUNNING`, and the token waits on the step so a retry enters it again. On PostgreSQL the incident row is `OPEN` with no `pre_task` row.
+- **Example:** `4 co-signers, cap 3 -> MULTI_INSTANCE_LIMIT, no task`.
+- **Test ID:** `PRE_293_a_collection_over_the_cap_opens_an_incident_and_creates_no_task`, `PRE_293_a_collection_that_is_not_a_list_opens_an_incident_and_a_retry_after_the_fix_starts_the_step` (`MultiInstanceTest`); `PRE_293_a_collection_over_the_cap_opens_an_incident_and_writes_no_task` (`MultiInstanceStoreTest`)
+
+### PRE-294 A failure inside one repetition holds the loop, not the others
+- **Traces to:** `TR-STD-29`, `PRE-040`, `PRE-077`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Three owners (An, Binh, Cuong) screened by a parallel service task; and two owners screened by a sequential one.
+- **When:** The screening of Binh answers the business error `SCREENING_UNAVAILABLE` while the other two complete; in the sequential case the first answers the error.
+- **Then:** The incident is on Binh's own token and the other two repetitions complete (2 completed, 1 active); the loop has not ended and `book` has no token. When Binh's step is retried and answers, the loan is booked and `flags` is in owner order. In the sequential case an incident opens and the second owner is never screened.
+- **Example:** `Binh fails, An and Cuong done -> loop held; retry, Binh done -> book`.
+- **Test ID:** `PRE_294_a_failure_in_one_parallel_instance_holds_the_loop_and_the_others_still_finish`, `PRE_294_a_failure_in_a_sequential_instance_keeps_the_next_one_from_starting` (`MultiInstanceTest`)
+
+### PRE-295 A standard loop repeats while its condition holds, up to its maximum, and may be tested before its first run
+- **Traces to:** `TR-STD-29`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A card payment step `charge` with a standard loop, `loopMaximum` 3 and the condition `payment.status != 'PAID'`; a second loop tested before each run, with the condition `amountDue > 0`.
+- **When:** The first payment is DECLINED, then PAID; another is DECLINED three times; the second loop starts with `amountDue` 0, and then with 1,200,000.
+- **Then:** After DECLINED a second try starts, and after PAID the loop ends with two repetitions. A payment DECLINED three times stops at the maximum and the process goes on, with the repetitions numbered 1, 2, 3. The tested-before loop with nothing due makes no call and goes on; with 1,200,000 due it makes the first call.
+- **Example:** `DECLINED, PAID -> 2 tries; DECLINED x3 -> stops at 3`.
+- **Test ID:** `PRE_295_a_standard_loop_repeats_while_its_condition_holds_and_stops_at_its_maximum`, `PRE_295_a_loop_tested_before_its_first_run_may_not_run_at_all` (`MultiInstanceTest`)
+
+### PRE-296 A loop imports and exports with its settings; one that cannot end, has no source or declares an undo is refused
+- **Traces to:** `TR-STD-04`, `PRE-033`, #496
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The loop files of `PRE-290` to `PRE-295`; the payment loop without `loopMaximum`; the co-signing step without `horus:collection`; the payment loop with `horus:compensate`; the payment loop with a condition in FEEL.
+- **When:** Each is imported and compiled, and each valid one is exported and read back.
+- **Then:** The canonical form states the loop (`kind` `loop`, `parallel` or `sequential`, with the collection, element, cardinality, output and conditions as declared) and the BPMN export reads back to the same canonical form, so the hash is unchanged. The files without a maximum, without a source and with an undo are refused with `LOOP_UNBOUNDED`, `MULTI_INSTANCE_SOURCE` and `LOOP_COMPENSATION_UNSUPPORTED`. The FEEL condition is refused as `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED`.
+- **Example:** `standardLoopCharacteristics without loopMaximum -> LOOP_UNBOUNDED`.
+- **Test ID:** `PRE_296_a_loop_reads_with_its_settings_and_exports_back_to_the_same_definition`, `PRE_296_a_loop_that_cannot_end_or_has_no_source_is_refused_at_import`, `PRE_296_a_loop_condition_in_another_language_is_refused_with_its_stage` (`MultiInstanceTest`)
+

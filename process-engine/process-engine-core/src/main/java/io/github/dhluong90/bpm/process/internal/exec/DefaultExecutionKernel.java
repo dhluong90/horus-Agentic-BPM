@@ -21,6 +21,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private final CompiledProcess process;
     private final BehaviorRegistry behaviors;
     private final ExpressionEvaluator expressions;
+    private final int maxInstances;
+
+    /** Most repetitions of one looped activity when the host does not say ({@code multi-instance.max}). */
+    public static final int DEFAULT_MAX_INSTANCES = 1_000;
 
     /**
      * @param process the compiled definition
@@ -28,6 +32,22 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
      * @param expressions the expression evaluator
      */
     public DefaultExecutionKernel(CompiledProcess process, BehaviorRegistry behaviors, ExpressionEvaluator expressions) {
+        this(process, behaviors, expressions, DEFAULT_MAX_INSTANCES);
+    }
+
+    /**
+     * @param process the compiled definition
+     * @param behaviors registered behaviours
+     * @param expressions the expression evaluator
+     * @param maxInstances most repetitions of one looped activity; a loop that would exceed it opens an incident and
+     *     starts nothing
+     */
+    public DefaultExecutionKernel(CompiledProcess process, BehaviorRegistry behaviors, ExpressionEvaluator expressions,
+            int maxInstances) {
+        if (maxInstances < 1) {
+            throw new IllegalArgumentException("maxInstances must be at least 1");
+        }
+        this.maxInstances = maxInstances;
         this.process = Objects.requireNonNull(process, "process must not be null");
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors must not be null");
         this.expressions = Objects.requireNonNull(expressions, "expressions must not be null");
@@ -42,7 +62,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         if (state.status() != required) {
             throw new ExecutionException("INVALID_STATE", null, "Instance " + state.instanceId() + " is " + state.status());
         }
-        WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command));
+        WorkingContext ctx = new WorkingContext(state, process, expressions, clock, actorOf(command), maxInstances);
         switch (command) {
             case Command.Start start -> start(start, ctx);
             case Command.CompleteTask complete -> trigger(complete.tokenId(), TokenStatus.WAITING_USER, null, complete, ctx);
@@ -245,6 +265,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             FlowNode node = node(token.nodeId());
             ctx.history("NODE_ENTERED", token, Map.of());
             armBoundaries(node, token, ctx);
+            if (ctx.loops().startsLoop(node, token)) {
+                ctx.loops().enter(node, token);
+                continue;
+            }
             behaviorFor(node).enter(node, token, ctx);
         }
     }

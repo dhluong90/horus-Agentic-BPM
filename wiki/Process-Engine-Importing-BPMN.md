@@ -87,6 +87,7 @@ The root element must declare the namespaces, and the process must be executable
 | `startEvent` with a `conditionalEventDefinition` (since 0.3.0) | a `condition` in `urn:horus-bpm:expr:v1` | `name` | `<bpmn:condition>amount >= 1000000</bpmn:condition>` |
 | `intermediateCatchEvent` with a signal or conditional definition (since 0.3.0) | as above | `name` | `<bpmn:signalEventDefinition signalRef="Signal_rate"/>` |
 | `intermediateThrowEvent` and `endEvent` with a signal definition (since 0.3.0) | `signalRef` | `name` | `<bpmn:endEvent id="end"><bpmn:signalEventDefinition signalRef="Signal_done"/></bpmn:endEvent>` |
+| loop or multi-instance marker (since 0.3.0), on a task, a `callActivity` or an embedded `subProcess` | `standardLoopCharacteristics` with `loopMaximum` and an optional `loopCondition`; or `multiInstanceLoopCharacteristics` with `horus:collection` and `horus:elementVariable`, or a `loopCardinality` | `isSequential`, `horus:outputCollection`, `horus:outputElement`, `completionCondition` | `<bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"/>` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
@@ -99,6 +100,23 @@ Inputs to a service or rule step are `horus:input` elements inside `extensionEle
     <horus:input name="txCount" value="${instance.profile.txCount}"/>
   </bpmn:extensionElements>
 </bpmn:businessRuleTask>
+```
+
+### Loops and multi-instance steps (0.3.0)
+
+A task, a `callActivity` or an embedded `subProcess` can repeat. A standard loop runs the step again while its `loopCondition` holds, at most `loopMaximum` times; the maximum is required, and `testBefore="true"` tests the condition before the first run, so the step may not run at all. A multi-instance step runs once per item of a list: `horus:collection` names the list variable and `horus:elementVariable` the name each repetition reads its item by (for example `${instance.cosigner}` in a `horus:input`). Repetitions run in parallel, or one after another with `isSequential="true"`. Each has a `loopCounter` from 1.
+
+`horus:outputCollection` names the list that collects one value per repetition, taken from `horus:outputElement` (or from the step's `horus:resultVariable`). The list is in item order, never in the order the answers came, and holds `null` where a repetition was stopped. A `completionCondition` such as `nrOfCompletedInstances >= 2` ends the step as soon as it holds and cancels the repetitions still running, with their tasks, jobs and called processes. It can read `nrOfInstances`, `nrOfActiveInstances` and `nrOfCompletedInstances`. A repetition that fails holds the step, not the others: an operator retries or resolves it. A collection or `loopMaximum` over `horus.bpm.processes.multi-instance.max` (1,000 by default, lower it if you wish) opens the incident `MULTI_INSTANCE_LIMIT` and creates no task; a variable that is not a list opens `MULTI_INSTANCE_COLLECTION_INVALID`.
+
+A step that repeats cannot declare `horus:compensate` or `horus:onFailure` (`LOOP_COMPENSATION_UNSUPPORTED`), a loop without `loopMaximum` is refused (`LOOP_UNBOUNDED`), and a multi-instance step needs one of a collection or a cardinality (`MULTI_INSTANCE_SOURCE`). Conditions are in `urn:horus-bpm:expr:v1`. The cockpit marks the step on the diagram (three vertical bars for parallel, three horizontal bars for sequential, a circular arrow for a loop), the instance diagram reads "3 of 5 done", and the timeline lists each repetition; it does not edit them. A worked file is [`card-limit-check.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-limit-check.bpmn).
+
+```xml
+<bpmn:userTask id="cosign" name="Co-signer approval" horus:assignee="role:CREDIT_OFFICER" horus:resultVariable="verdict">
+  <bpmn:multiInstanceLoopCharacteristics horus:collection="cosigners" horus:elementVariable="cosigner"
+                                         horus:outputCollection="verdicts" horus:outputElement="verdict.decision">
+    <bpmn:completionCondition>nrOfCompletedInstances &gt;= 2</bpmn:completionCondition>
+  </bpmn:multiInstanceLoopCharacteristics>
+</bpmn:userTask>
 ```
 
 ### Script tasks
@@ -241,6 +259,8 @@ These are refused in 0.2.0:
 | Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Events | `boundaryEvent`, an `intermediateThrowEvent` that is not a `throwCompensation` or a message throw, a catch event that is neither a timer nor a message, and any start or end event with an event definition other than message (timer, signal, error, terminate) |
 | Activities | `subProcess`, `adHocSubProcess`, a `receiveTask` with `instantiate="true"` (start with a message start event instead), and a loop or multi-instance marker |
+| Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
+| Activities | an event sub-process (`subProcess` with `triggeredByEvent="true"`), `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker on a saga block |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |

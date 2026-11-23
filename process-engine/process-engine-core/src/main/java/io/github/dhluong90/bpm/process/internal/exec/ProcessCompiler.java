@@ -204,6 +204,7 @@ public final class ProcessCompiler {
                     }
                 }
             }
+            LoopChecks.check(node, problems);
             if (node instanceof SubProcess sub && sub.triggeredByEvent()) {
                 problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "an event sub-process has no behaviour in"
                         + " this release", "subProcess", node.id(), 0));
