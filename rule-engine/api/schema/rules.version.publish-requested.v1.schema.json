@@ -91,6 +91,12 @@
         "null"
       ],
       "format": "date-time"
+    },
+    "simulationReportId": {
+      "description": "Present when the request attached a simulation report (PD-115, RLE-201): the id of a report of this version, run on the content canonicalHash names. Absent when none was attached. Added within v1; consumers that do not know it ignore it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
     }
   },
   "examples": [
@@ -108,7 +114,8 @@
       "actor": "lan",
       "canonicalHash": "3f1c9a5e0b7d2c4a6e8f0a1b3c5d7e9f1a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d",
       "requestedBy": "lan",
-      "effectiveFrom": "2027-01-01T00:00:00Z"
+      "effectiveFrom": "2027-01-01T00:00:00Z",
+      "simulationReportId": "01KBX9Q3M4R7T2V8W6Y0Z1A2B4"
     }
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "id": "limit-by-segment",
+  "labels": { "en": "Limit by segment", "vi": "Hạn mức theo phân khúc" },
+  "descriptions": {
+    "en": "A daily transfer limit for each customer segment. Exactly one row must match.",
+    "vi": "Hạn mức chuyển tiền mỗi ngày cho từng phân khúc khách hàng. Phải có đúng một dòng khớp."
+  },
+  "document": {
+    "schemaVersion": 1,
+    "description": "Daily limit by customer segment",
+    "hitPolicy": "unique",
+    "inputs": [
+      { "name": "segment", "type": "string", "label": "Segment", "allowed": ["RETAIL", "PREMIUM", "BUSINESS"] }
+    ],
+    "outputs": [
+      { "name": "dailyLimit", "type": "money", "label": "Daily limit" }
+    ],
+    "rules": [
+      { "id": "R1", "when": { "segment": "== 'RETAIL'" }, "then": { "dailyLimit": "20000000 VND" } },
+      { "id": "R2", "when": { "segment": "== 'PREMIUM'" }, "then": { "dailyLimit": "100000000 VND" } },
+      { "id": "R3", "when": { "segment": "== 'BUSINESS'" }, "then": { "dailyLimit": "500000000 VND" } }
+    ]
+  }
+}

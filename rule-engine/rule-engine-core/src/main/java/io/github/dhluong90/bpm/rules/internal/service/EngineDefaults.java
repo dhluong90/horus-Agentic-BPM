@@ -145,6 +145,15 @@ public final class EngineDefaults {
      */
     public static final boolean REQUIRE_CONTENT_HASH = true;
 
+    /**
+     * Default of {@code lifecycle.require-simulation-report} (PD-115, RLE-201): no rule set needs a simulation report
+     * before a publication request, so a host turns it on per rule set.
+     */
+    public static final java.util.List<String> REQUIRE_SIMULATION_REPORT = java.util.List.of();
+
+    /** The most rule set names {@code lifecycle.require-simulation-report} may list. */
+    public static final int REQUIRE_SIMULATION_REPORT_MAX = 1000;
+
     /** Ceiling of {@code simulation.max-history-decisions}: it may be raised to this, never above. */
     public static final int SIMULATION_MAX_HISTORY_DECISIONS_CEILING = 200_000;
 

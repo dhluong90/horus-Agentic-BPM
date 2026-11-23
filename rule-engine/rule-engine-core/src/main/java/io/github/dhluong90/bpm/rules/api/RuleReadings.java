@@ -168,4 +168,83 @@ public final class RuleReadings {
             samples = List.copyOf(samples);
         }
     }
+
+    /** The code of a replayed decision that is not read: a masked input had a value the log does not hold. */
+    public static final String REPLAY_NOT_POSSIBLE = "REPLAY_NOT_POSSIBLE";
+
+    /**
+     * One replayed decision, read. The decision's inputs are never part of it. A decision that could not be replayed
+     * has the {@link #REPLAY_NOT_POSSIBLE} code, the masked input names when that is why, and no reading: the reading
+     * fails closed, so nothing is written for what was not evaluated.
+     *
+     * @param decisionId the logged decision's id
+     * @param loggedVersion the version the decision was made with
+     * @param evalClock the logged clock both sides were evaluated at
+     * @param changed as in {@link HistorySimulationResult.Item#changed()}; false when not replayable
+     * @param code {@link #REPLAY_NOT_POSSIBLE} when the decision was not replayed, otherwise null
+     * @param maskedInputs the masked inputs that had a value, names only; empty when none stopped the replay
+     * @param simulated what the simulated version decides, read in that version; null when not replayable
+     * @param logged what the logged version decides again, read in that version; null when not replayable
+     */
+    public record HistoryItemReading(String decisionId, int loggedVersion, java.time.Instant evalClock,
+            boolean changed, String code, List<String> maskedInputs, OutcomeReading simulated,
+            OutcomeReading logged) implements Serializable {
+
+        public HistoryItemReading {
+            Objects.requireNonNull(decisionId, "decisionId must not be null");
+            Objects.requireNonNull(evalClock, "evalClock must not be null");
+            maskedInputs = List.copyOf(maskedInputs);
+        }
+    }
+
+    /**
+     * The readings of a history simulation (RLE-202).
+     *
+     * @param ruleSet the rule set name
+     * @param version the simulated version
+     * @param status the simulated version's status
+     * @param from the first instant of the period, inclusive
+     * @param to the end of the period, exclusive
+     * @param truncated true when the period held more decisions than were replayed
+     * @param languages the language codes the readings are written in, sorted
+     * @param results one reading per logged decision, newest first
+     */
+    public record HistoryReadings(String ruleSet, int version, VersionStatus status, java.time.Instant from,
+            java.time.Instant to, boolean truncated, List<String> languages, List<HistoryItemReading> results)
+            implements Serializable {
+
+        public HistoryReadings {
+            Objects.requireNonNull(ruleSet, "ruleSet must not be null");
+            Objects.requireNonNull(status, "status must not be null");
+            languages = List.copyOf(languages);
+            results = List.copyOf(results);
+        }
+
+        /**
+         * Counts the decisions that were replayed.
+         *
+         * @return the results that are not marked {@link #REPLAY_NOT_POSSIBLE}
+         */
+        public int replayedCount() {
+            return (int) results.stream().filter(r -> r.code() == null).count();
+        }
+
+        /**
+         * Counts the decisions the simulated version changes.
+         *
+         * @return the results with {@code changed} set
+         */
+        public int changedCount() {
+            return (int) results.stream().filter(HistoryItemReading::changed).count();
+        }
+
+        /**
+         * Counts the decisions that were not replayed.
+         *
+         * @return the results marked {@link #REPLAY_NOT_POSSIBLE}
+         */
+        public int notReplayableCount() {
+            return results.size() - replayedCount();
+        }
+    }
 }

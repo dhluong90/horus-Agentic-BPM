@@ -15,6 +15,12 @@ import io.github.dhluong90.bpm.rules.internal.service.HostFunctions;
 import io.github.dhluong90.bpm.rules.spi.RuleFunctionRegistry;
 import io.github.dhluong90.bpm.rules.internal.service.RuleEngines;
 import io.github.dhluong90.bpm.rules.api.RuleSetHistoryService;
+import io.github.dhluong90.bpm.rules.api.RuleSetTemplateService;
+import io.github.dhluong90.bpm.rules.api.SimulationReportService;
+import io.github.dhluong90.bpm.rules.internal.service.DefaultRuleSetTemplateService;
+import io.github.dhluong90.bpm.rules.internal.service.RuleSetTemplates;
+import io.github.dhluong90.bpm.rules.rest.RuleSetTemplateController;
+import io.github.dhluong90.bpm.rules.rest.SimulationReportController;
 import io.github.dhluong90.bpm.rules.rest.RuleSetHistoryController;
 import io.github.dhluong90.bpm.rules.spi.DecisionExplainer;
 import io.github.dhluong90.bpm.rules.postgres.CacheCoherence;
@@ -336,6 +342,29 @@ class RuleEngineServicesConfiguration {
         return internals.engines().ruleSetHistory();
     }
 
+    @Bean
+    @ConditionalOnMissingBean
+    SimulationReportService ruleEngineSimulationReportService(RuleEngineInternals internals) {
+        return internals.engines().simulationReports();
+    }
+
+    /**
+     * The rule set templates (PD-112, RLE-197, RLE-198): the four built-in ones the host has not hidden, then the files
+     * in {@code horus.bpm.rules.templates.location}. Read once here, so a template file that is not valid stops the
+     * start and names itself; a host bean replaces it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    RuleSetTemplateService ruleEngineRuleSetTemplateService(RuleEngineProperties properties, CallerResolver callers) {
+        RuleEngineProperties.Templates templates = properties.templates();
+        try {
+            return new DefaultRuleSetTemplateService(callers, RuleSetTemplates.of(
+                    TemplateFolder.read(templates.location()), java.util.Set.copyOf(templates.hidden())));
+        } catch (IllegalArgumentException | java.io.UncheckedIOException e) {
+            throw new IllegalStateException("The Rule Engine does not start: " + e.getMessage(), e);
+        }
+    }
+
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
     static class SecurityCallerConfiguration {
@@ -414,6 +443,20 @@ class RuleEngineServicesConfiguration {
         SimulationController ruleEngineSimulationController(RuleEngine engine, VersionService versions,
                 CallerResolver callers) {
             return new SimulationController(engine, versions, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        SimulationReportController ruleEngineSimulationReportController(SimulationReportService reports,
+                CallerResolver callers) {
+            return new SimulationReportController(reports, callers);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean
+        RuleSetTemplateController ruleEngineRuleSetTemplateController(RuleSetTemplateService templates,
+                CallerResolver callers) {
+            return new RuleSetTemplateController(templates, callers);
         }
 
         @Bean

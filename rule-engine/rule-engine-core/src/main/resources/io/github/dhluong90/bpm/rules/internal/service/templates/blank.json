@@ -1,0 +1,21 @@
+{
+  "id": "blank",
+  "labels": { "en": "Blank", "vi": "Trống" },
+  "descriptions": {
+    "en": "One input, one output and one default row to start from.",
+    "vi": "Một đầu vào, một đầu ra và một dòng mặc định để bắt đầu."
+  },
+  "document": {
+    "schemaVersion": 1,
+    "hitPolicy": "first",
+    "inputs": [
+      { "name": "input1", "type": "string", "label": "Input" }
+    ],
+    "outputs": [
+      { "name": "result", "type": "string", "label": "Result" }
+    ],
+    "rules": [
+      { "id": "R1", "when": {}, "then": { "result": "'TBD'" } }
+    ]
+  }
+}

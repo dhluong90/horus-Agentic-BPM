@@ -9,6 +9,16 @@ Design preview: describes the 0.1 target.
 - You know the terms rule set, rule, hit policy and version: [[Concepts]].
 - You have a service with the starter configured: [[Getting Started]].
 
+## Start from a template
+
+You do not have to begin with a blank page. `GET /api/bpm/rules/v1/rule-set-templates` (you need `rules:author`) lists the starting points the host offers: **Fee by tier**, **Eligibility with reason codes**, **Limit by segment** and **Blank**, then any the bank added. Each carries a name and a description in English and Vietnamese, the hit policy, the inputs with their types and the values to pick from, the outputs and the first rows.
+
+```bash
+curl -s http://localhost:8080/api/bpm/rules/v1/rule-set-templates -H "Authorization: Bearer $TOKEN"
+```
+
+Choose one, give the new rule set its own name, edit the rows, and save it as you would a document (`POST /rule-sets`). It becomes draft version 1 and goes through four-eyes approval like any other. A bank adds its own by putting a `.json` file in the folder set by `horus.bpm.rules.templates.location`, for example `deposit-rate-by-term.json`; see [[Rule Engine Configuration]]. A template that is not a valid rule set stops the host from starting and names the file.
+
 ## 1. Name the rule set and choose the hit policy
 
 ```yaml
