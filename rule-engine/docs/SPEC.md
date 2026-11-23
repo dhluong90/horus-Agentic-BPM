@@ -9,6 +9,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-001 `first` hit policy returns top matching rule outputs
 - **Traces to:** `TR-DET-01`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Rule set `card-fee` v1 with `hitPolicy: first`, rules `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 10000 VND`), `R3` (`{} -> fee: 50000 VND`).
 - **When:** Evaluate `inputs = { tier: "GOLD", txCount: 5 }`.
 - **Then:** Result succeeds (`isError = false`), `matchedRuleIds = ["R1"]`, `outputs.fee = Money.ofMinor("VND", 0)`.
@@ -18,6 +19,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-002 `unique` hit policy: one match returns it, zero matches is no match, several matches fail
 - **Traces to:** `TR-DET-04`, `TR-STD-22`, PD-088
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Rule set `loan-pricing` v1 with `hitPolicy: unique`, output `rate` (decimal), rules `R1` (`score >= 700 -> rate: 0.08`) and `R2` (`income >= 20000000 VND -> rate: 0.09`), which overlap.
 - **When:** Evaluate (a) `{ score: 750, income: 10000000 VND }` (1 match), (b) `{ score: 500, income: 5000000 VND }` (0 matches) and (c) `{ score: 750, income: 25000000 VND }` (2 matches).
 - **Then:**
@@ -30,6 +32,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-003 `collect` hit policy returns aligned lists or aggregated scalars, with the DMN 1.5 null rules
 - **Traces to:** `TR-DET-01`, `TR-STD-22`, PD-066, PD-088
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Rule set `risk-flags` v1 with `hitPolicy: collect` and outputs `flags` (`list<string>`, no aggregate), `penalty` (`integer`, `collect: sum`), `worst` (`integer`, `collect: max`) and `hits` (`integer`, `collect: count`); rules `R1` (`flags: "HIGH_VELOCITY", penalty: 10, worst: 10, hits: 1`), `R2` (`flags: null, penalty: 0, worst: 0, hits: null`) and `R3` (`flags: "NEW_DEVICE", penalty: 5, worst: 5, hits: 1`). Rule set `risk-flags-null` is the same except that `R2` has `penalty: null`.
 - **When:** Evaluate `risk-flags` with (a) inputs matching `R1`, `R2` and `R3`, (b) inputs matching only `R2`, (c) inputs matching no rule; and (d) `risk-flags-null` with inputs matching `R1` and `R2`.
 - **Then:**
@@ -49,6 +52,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-004 Publish-time parser and type-checker rejects invalid expressions
 - **Traces to:** `TR-DET-02`, `TR-SEC-01`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Draft rule set referencing unknown input `creditScoreX`, mismatched arithmetic `balance + 100` (`money + integer`), or forbidden method call `T(java.lang.Runtime).getRuntime()`.
 - **When:** Import it, or call `validate` or `requestPublish` on a stored draft.
 - **Then:** Validation fails with row ID (`R1`), column, a stable `code` (`UNKNOWN_INPUT`, `TYPE_MISMATCH`, `FORBIDDEN_CONSTRUCT`) and the character position in the cell as written; status remains `DRAFT`; version cannot transition to `PENDING_APPROVAL` or `PUBLISHED`. A forbidden construct is refused before anything inside it is bound or evaluated. Operands are checked under every operator, in conditions and in output cells computed from inputs. A table whose worst-case step count (the sum of its node counts: every condition, plus the outputs of the rules its hit policy can evaluate) is over the host's step budget is refused the same way with code `EVALUATION_BUDGET_EXCEEDED` on the first rule from which it is over, using the limits evaluation will apply, not the defaults. A cell whose tree is deeper than 64 levels, a left-associative chain such as `a + a + ...` included, is `EXPRESSION_TOO_DEEP`. Failures that depend on the input stay at evaluation and fail closed: a currency mismatch against an input, division by zero, money overflow.
@@ -58,6 +62,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-082 A host sets the evaluation step budget and time backstop, and a decision past them fails with a named reason
 - **Traces to:** `TR-SEC-01`, `TR-STD-23`, `TR-DET-01`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `loyalty-score` v1 of tenant `bank-a`, approved under the default settings: one rule whose `points` cell is `1 + 1 + ... + 1` (twelve terms, about 23 expression nodes). Two hosts: one with the defaults, and one with `horus.bpm.rules.evaluation.step-budget: 10`.
 - **When:** Each host evaluates `{ tier: GOLD }`. The host with the budget of 10 also imports the same document as a new rule set.
 - **Then:**
@@ -71,6 +76,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-083 An evaluation limit outside its range stops start-up and names the property
 - **Traces to:** `TR-SEC-01`, `TR-EXT-03`, `TR-STD-23`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** A host that sets `horus.bpm.rules.evaluation.step-budget` or `horus.bpm.rules.evaluation.timeout-ms`.
 - **When:** The value is `0` or `1000001` for the step budget, or `0` or `30001` for the time backstop; then the ceilings themselves (`1000000` and `30000`).
 - **Then:** Each value outside the range stops start-up with a message that names the property and its range, for example `horus.bpm.rules.evaluation.step-budget must be 1 to 1000000, was 0`; the ceilings are accepted. Nothing is clamped.
@@ -80,6 +86,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-005 Money currency mismatch is rejected deterministically
 - **Traces to:** `TR-DET-03`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Rule condition `balance >= 50000000 VND`.
 - **When:** Evaluate with `balance = Money.ofMinor("USD", 300000)` (3000.00 USD).
 - **Then:** Evaluation fails deterministically with `EVALUATION_ERROR` (`422` over REST), returns no partial outputs, and writes `outcome = EVALUATION_ERROR` to `rle_decision`.
@@ -89,6 +96,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-006 Null follows FEEL three-valued logic; a condition matches only when it is `true`
 - **Traces to:** `TR-DET-01`, `TR-STD-02`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Rule set `null-check` v1 with `hitPolicy: collect`, inputs `income` (money, VND) and `tier` (string), and rules `R1` (`income < 5000000 VND`), `R2` (`income is null`), `R3` (`tier != 'GOLD'`), `R4` (`not(income < 5000000 VND)`), `R5` (`tier not in ['GOLD', 'PLATINUM']`), `R6` (`tier == 'GOLD'`), `R7` (`income < 5000000 VND or tier is null`), `R8` (`income < 5000000 VND and tier is null`).
 - **When:** Evaluate with `income = null` and `tier = null`.
 - **Then:** `R1` is `null` (no match); `R2` is `true` (match); `R3` is `true` (match, `null != "GOLD"` is `true` in FEEL); `R4` is `null` (no match, `not(null)` is `null`); `R5` is `true` (match, `not(null in [...])` is `not(false)`); `R6` is `false` (no match); `R7` is `true` (`null or true`); `R8` is `null` (`null and true`, no match). `matchedRuleIds = ["R2", "R3", "R5", "R7"]`; the decision is logged with outcome `OK`, and replaying it with its logged version and clock gives the same list.
@@ -98,6 +106,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-007 Regex execution is bounded by reads, length and time
 - **Traces to:** `TR-SEC-02`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Rule using `matches('^(a+?)+?$')` evaluated against adversarial input `"aaaaaaaaaaaaaaaaaaaaaaaaaaaa!"` with the defaults `regex-max-reads = 1000000` and `regex-timeout-ms = 50`.
 - **When:** Evaluate the rule set.
 - **Then:** The match stops when it has read 1,000,000 characters, a deterministic budget that gives the same outcome on every machine and on replay, or at the latest after `50 ms` (the backstop on a slow machine), returning `EVALUATION_ERROR` with `REGEX_TIMEOUT` on the decision row, without hanging the thread. A text longer than `regex-max-input-length` (default 4,096) fails with `REGEX_INPUT_TOO_LONG` without running the match; a pattern whose backtracking runs out of thread stack fails with `REGEX_TOO_DEEP`. Every character any `matches` reads in one evaluation also counts against `regex-max-reads-per-decision` (default 5,000,000, lower only), the same deterministic count, so a rule set of many `matches` rows stops at that total: `EVALUATION_ERROR` with `REGEX_TIMEOUT`, no partial outputs, the reason on the decision row, and the `detail` naming `evaluation.regex-max-reads-per-decision`. A request that evaluates many decisions (`:simulate` today, `:evaluate-batch` when it is built) also counts every character its decisions read against `regex-max-reads-per-request` (default 50,000,000, 1 to 5,000,000,000): the item whose match passes it fails with `EVALUATION_ERROR` / `REGEX_TIMEOUT` and a `detail` naming `evaluation.regex-max-reads-per-request`, items before it keep their results, no item after it is evaluated (each is reported failed with the same code and a `detail` saying it was not evaluated), and the same request stops at the same item on every replay. Back-references, look-around, inline flags, possessive quantifiers, character class nesting and intersection, Unicode block names and Java-only escapes are refused at import. Regex engines differ between JVM versions; the example is one the supported JVMs run in exponential time, and the bounds apply to any pattern.
@@ -111,6 +120,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-008 Explicit evaluation clock selects effective version and replays deterministically
 - **Traces to:** `TR-DET-01`, `TR-DET-05`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a` has `v1` (`effectiveFrom: 2026-11-01T00:00:00Z`, fee `50000 VND`) and `v2` (`effectiveFrom: 2026-12-01T00:00:00Z`, fee `30000 VND`), and rule uses `today()`.
 - **When:** Evaluate with `clock = 2026-11-20T10:00:00Z`, then evaluate again after `2026-12-05` using `replay(decisionId)` or pinned `(v1, 2026-11-20T10:00:00Z)`.
 - **Then:** Initial call selects `v1` (`50000 VND`); post-`v2` replay yields identical `v1`, `50000 VND`, and `matchedRuleIds`.
@@ -120,6 +130,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-009 Maker-checker blocks self-approval in service and REST layers
 - **Traces to:** `TR-SEC-04`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** User `alice` (`rules:author`, `rules:approve`) creates `card-fee` v2 and calls `:request-publish`.
 - **When:** `alice` invokes `VersionService.approve(...)` directly OR calls `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:approve`.
 - **Then:** Both Java API and REST (`403 SELF_APPROVAL_FORBIDDEN`) reject the approval; version remains `PENDING_APPROVAL`. Only distinct identity `bob` (`rules:approve`) succeeds. The Rule Engine always applies `makers`: the same refusal holds when the host sets `lifecycle.approver-must-differ-from` to `requester`, and `/api/bpm/meta` reports `makers`.
@@ -129,6 +140,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-010 Multi-replica cache invalidates across pods on publication
 - **Traces to:** `TR-ASY-04`, `TR-DET-01`, `TR-OBS-04`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Two independent Spring Boot replicas (`Pod A`, `Pod B`) sharing one PostgreSQL database, both holding `card-fee` v1 in local compiled cache, `cache.epoch-check-interval = PT5S`. The test runs twice: with a direct connection and `cache.listen-notify = true`; and through PgBouncer in transaction mode with `cache.listen-notify = false`.
 - **When:** `Pod A` approves `card-fee` v2 (`effectiveFrom <= now`); `Pod B` evaluates `card-fee` every 100 ms.
 - **Then:** `Pod A` publishes `rules.version.published.v1`, increments `cache_epoch` and notifies after commit; in the direct run `Pod B` evaluates v2 within 1 s of the commit; in the pooler run, with no notification delivered, `Pod B` evaluates v2 within 5 s of the commit (the epoch sweep bound) and never after; neither run opens a session-mode connection behind the pooler.
@@ -143,6 +155,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-011 Tenant isolation ignores request body tenant and prevents cross-tenant reads
 - **Traces to:** `TR-SEC-03`, `TR-TEN-01`, `TR-TEN-02`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Authenticated security context resolves `tenantId = "tenant-a"`; rule set `secret-tier` exists only in `"tenant-b"`.
 - **When:** Caller sends `POST /api/bpm/rules/v1/decisions/secret-tier:evaluate` with JSON body `{ "tenantId": "tenant-b", "inputs": {...} }` or queries `GET /decisions/{tenantBDecisionId}`.
 - **Then:** Request-body `tenantId` is ignored; both evaluation and decision-log lookup return `404` under `"tenant-a"`.
@@ -152,6 +165,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-012 Masked PII inputs are stored as keyed HMAC-SHA256 and rendered masked
 - **Traces to:** `TR-SEC-05`, `TR-OBS-01`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Input `nationalId` declared with `mask: true` and host `hmac-key` configured.
 - **When:** Evaluate with `nationalId = "079090001234"`.
 - **Then:** Plaintext `"079090001234"` never appears in `rle_decision.masked_inputs` or `GET /decisions/{id}` REST response; instead a deterministic keyed HMAC token (e.g. `hmac:k1:9f4a...`) is stored so exact-match audit search still works. The stored token carries the id of the key that made it (`hmac:<keyId>:<hex>`, for example `hmac:k1:9f4a...`), so a tenant can rotate keys without stranding rows of the permanent log. An auditor with `rules:masked:search` (a permission `rules:log:read` does not imply) who posts the plain value to `POST /decisions:find-by-masked-input` finds every decision of that value, at most `masking.search.max-per-minute` times a minute per caller and replica (default 30; past it `429 RATE_LIMITED` with `Retry-After`, and the refusal is audited): the engine fingerprints it with every key the caller's tenant holds before the query, and the search writes one audit entry (`rules.decision-log.masked-input-searched.v1`: actor, tenant, rule set, input, period, number of matches, key ids, correlation id; never the value or its fingerprint). An output cell or default that reads a `mask: true` input is refused at import, and one that reads an input masked by the tenant default fails the decision closed (`error_code = MASKED_INPUT_IN_OUTPUT`), so the plain value never reaches `outputs`. Each tenant may hold its own key, so tenants `bank-a` and `bank-b` store different fingerprints of one value and neither tenant's read or search returns the other's decisions. A tenant without a key never logs a masked input in plain text: the decision fails closed with `EVALUATION_ERROR` (row `error_code = MASKING_KEY_MISSING`, no input logged). Rotation (#281): given tenant `bank-a` with current key `k2` and previous key `k1` (`masking.previous-keys`, or `masking.tenants.<tenant>.previous-keys`), and one decision about `079090001234` under each key, an auditor's search for that value finds both decisions, and new decisions are stored as `hmac:k2:<hex>`; a previous key is used for search only, never for writing, and a key no longer listed is no longer searched. Moving off the host key (#281): given `bank-a` wrote a decision about `079090001234` under its subkey of host key `k1`, when it gets its own key `a1`, new rows are `hmac:a1:<hex>` and the search still finds the earlier decision through its subkey of `k1` until `k1` is retired.
@@ -161,6 +175,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-013 Decision log participates in host transaction rollback and adds one insert
 - **Traces to:** `TR-EMB-04`, `TR-PERF-03`, `TR-OBS-01`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `decision-log.mode = transactional`. Host service evaluates `card-fee` inside `@Transactional` and subsequently throws `RuntimeException` rolling back the host transaction.
 - **When:** Transaction rolls back, and in a committed case SQL statements are counted.
 - **Then:** Rolled-back transaction leaves `0` rows in `rle_decision`; committed evaluation executes **exactly 1 `INSERT`** into `rle_decision` (no `UPDATE` or `DELETE` paths exist in the engine).
@@ -170,6 +185,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-014 Idempotency key prevents duplicate mutations and rejects payload mismatch
 - **Traces to:** `TR-IDEM-01`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Caller calls `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` with `Idempotency-Key: k-101` and body `B1`.
 - **When:** Caller retries with `k-101` and identical body `B1`, versus `k-101` with different body `B2`.
 - **Then:** First replay returns the original `201` version response without creating `v3`; mismatched body `B2` returns `422 IDEMPOTENCY_KEY_REUSE_MISMATCH` and creates nothing. A second request with `k-101` sent while the first is still running returns `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`.
@@ -179,6 +195,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-015 Simulation evaluates draft against history without polluting decision log
 - **Traces to:** `TR-OBS-01`
 - **Milestone:** M3 (replay against history moved to M3 by PD-042; simulation over sample inputs is M1, `RLE-016`)
+- **Kind:** semantics
 - **Given:** `card-fee` has `v1` published with 100 logged decisions and `v2` in `DRAFT`.
 - **When:** Caller with `rules:simulate` runs historical simulation of `v2` over those 100 decisions.
 - **Then:** Engine returns diff summary (e.g. `18 outcomes changed`) and writes `0` rows to `rle_decision`. Attaching the simulation report to a publication request is M3 and is not part of this statement.
@@ -189,6 +206,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-016 Simulation of a draft over sample inputs returns outputs without writing decision rows
 - **Traces to:** `TR-OBS-01`, `TR-DET-01`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `card-fee` has `v1` published and `v2` in `DRAFT`; caller has `rules:simulate`.
 - **When:** Caller posts `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:simulate` with 5 sample input sets.
 - **Then:** Response lists, per input set, `matchedRuleIds` and outputs for `v2` and for the effective version `v1`, flags the input sets whose outcome changed, and `rle_decision` gains `0` rows.
@@ -198,6 +216,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-075 Two versions are compared over a month of logged decisions with totals side by side
 - **Traces to:** `TR-OBS-01`, `TR-DET-01`, `TR-DET-05`
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` v1 published (`R1` GOLD -> 0 VND, `R2` `txCount >= 3` -> 10000 VND, `R3` default -> 50000 VND); v2 `DRAFT`, equal except `R3` -> 30000 VND. January 2027 holds 10,000 logged `card-fee` decisions: 2,000 matched `R1`, 3,000 `R2` and 5,000 `R3`. Caller `thu` holds `rules:simulate` and `rules:log:read`.
 - **When:** `thu` posts `POST /api/bpm/rules/v1/rule-sets/card-fee:compare` with `{ "base": 1, "candidate": 2, "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z" }`, then repeats it. In Java: `RuleEngine.compare("card-fee", ComparisonRequest.of(1, 2, from, to))`.
 - **Then:** `200` with:
@@ -213,6 +232,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-076 Decisions that cannot be re-evaluated are counted, never guessed
 - **Traces to:** `TR-SEC-05`, `TR-DET-05`
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** `kyc-route` v1 does not read `nationalId`; v2 adds a condition on `nationalId` (`mask: true`); v3 has the content of v1. January holds 1,200 decisions. In 900 of them `nationalId` had a value, of which the log holds only the fingerprint. In 300 it was `null`.
 - **When:** `thu` compares v1 with v2 over January, then v1 with v3. (A version compared with itself is refused, `RLE-077`; v3 stands for it.)
 - **Then:**
@@ -226,6 +246,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-077 A comparison is bounded, permission-checked and tenant-scoped
 - **Traces to:** `TR-SEC-03`, `TR-SEC-02`, `TR-TEN-01`
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** As in `RLE-075`, plus `simulation.max-history-decisions` (default 50,000, from 1 to 200,000; PD-124) set to 5,000 in a test, and a caller `dan` with `rules:log:read` only.
 - **When:** The January comparison runs with the lowered cap; a 32-day period; `base` equal to `candidate`; `base` 9, which does not exist; a `bank-b` caller; `dan`; a run in which `evaluation.regex-max-reads-per-request` runs out part-way; a version whose stored document no longer matches its hash.
 - **Then:**
@@ -244,6 +265,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-017 The decision log is partitioned monthly from the first migration; retention drops whole partitions only
 - **Traces to:** `TR-OPS-04`, `TR-OBS-01`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** A clean database; `TestClock` at `2027-01-26T00:00:00Z`; `decision-log.partitions-ahead = P7D`. Second run: `decision-log.retention = P12M`, clock at `2028-02-03T00:00:00Z`, partitions `2027_01` to `2028_02` present. Third run: a decision row with `created_at = 2027-03-15T00:00:00Z` was inserted while no `2027_03` partition existed.
 - **When:** The engine migration runs and the partition job runs in each case, with SQL captured.
 - **Then:** After migration `rle_decision` is range-partitioned with `rle_decision_default`, `rle_decision_2027_01` and `rle_decision_2027_02` (7 days ahead reaches February). In the retention run only `rle_decision_2027_01` is dropped (its upper bound `2027-02-01` is before `2027-02-03`); no `DELETE` statement on `rle_decision` appears. In the third run the straggler is moved into the new `2027_03` partition before `ATTACH` and the default partition is empty afterwards. With `decision-log.retention` unset, no partition is ever dropped.
@@ -254,6 +276,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-018 `X-Tenant-Id` is accepted only for a tenant in the token's allowed list
 - **Traces to:** `TR-SEC-03`, `TR-TEN-01`
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** `tenancy.switching.enabled = true`; `lan`'s token has `tenant_id: bank-a` and `allowed_tenants: [bank-a, bank-a-fin]`; rule set `card-fee` exists in `bank-a-fin` and `bank-b`. Second case: switching disabled.
 - **When:** `lan` calls `GET /api/bpm/rules/v1/rule-sets/card-fee` with `X-Tenant-Id: bank-a-fin`, then with `X-Tenant-Id: bank-b`; in the second case with `X-Tenant-Id: bank-a-fin`.
 - **Then:** The first call returns `bank-a-fin`'s rule set; the second returns `403 TENANT_NOT_ALLOWED` with no rule set data and a security log entry naming user, requested tenant and `correlationId`; with switching disabled, a header that differs from the token tenant also returns `403 TENANT_NOT_ALLOWED`.
@@ -264,6 +287,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-019 `/api/bpm/meta` and `/api/bpm/me` describe the host and the caller
 - **Traces to:** `TR-UI-08`, `TR-SEC-08`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** A host with the rule engine starter `0.1.3`; caller `lan` holds `rules:read` and `rules:author` in tenant `bank-a`; an unauthenticated request.
 - **When:** `GET /api/bpm/meta` and `GET /api/bpm/me` with `lan`'s token, and `GET /api/bpm/meta` without a token.
 - **Then:** `meta` returns `schemaVersion: 1`, `modules: [{ module: rules, apiVersion: v1, engineVersion: 0.1.3, features: [...] }]` and no process entry; `me` returns user `lan`, `tenant.current: bank-a`, `tenant.allowed: [bank-a]` and exactly the two permissions; the request without a token returns `401`. Both responses validate against `cockpit/api/schema/bpm-meta.v1.schema.json` and `bpm-me.v1.schema.json`.
@@ -277,6 +301,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-020 Import keeps the source document beside the canonical version
 - **Traces to:** `TR-STD-01`, `TR-STD-03`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The YAML file `card-fee.yaml` (1,834 bytes, with comments and keys in author order) in Git, and the SHA-256 of its committed blob computed by the pipeline (`git show HEAD:card-fee.yaml | sha256sum`).
 - **When:** It is imported with `POST /api/bpm/rules/v1/rule-sets`, then read with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1?include=source` and without the parameter.
 - **Then:** `rle_version` stores `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` the SHA-256 of the raw request bytes, equal to the pipeline's hash, and `canonical_hash` the SHA-256 of the RFC 8785 form of the canonical document written from the model, with cells in their normal form (ADR-0026); with `include=source` the response carries the original text including comments and its hash; without it, the canonical document only. Nothing in the source document is evaluated.
@@ -286,6 +311,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-021 Every expression has a FEEL translation that gives the same result
 - **Traces to:** `TR-STD-02`, `TR-DET-01`
 - **Milestone:** M1 (ADR-0019; null cases as `RLE-006`, PD-058)
+- **Kind:** other
 - **Given:** Seeded generators (the project's own, PD-090; a failure prints its seed) for well-typed `horus-expr-v1` expressions over `string`, `integer`, `decimal`, `boolean`, `date`, `datetime` and lists, with inputs including `null`, and the translation table of `standards-compliance.md` section 4.4. The reference FEEL implementation runs in test scope only.
 - **When:** Each expression is evaluated by the engine and its FEEL translation by the reference implementation with the same inputs and clock; 1,000 tries per property in CI, 100,000 nightly. Fixed cases: `7 / 2`, `round(2.5, 0)`, `matches('ab12', '[0-9]+')`, `daysBetween(date('2027-01-01'), date('2027-03-01'))`.
 - **Then:** Results are equal for every try (money expressions excluded, since money is a HORUS extension); the fixed cases give `3.5`, `2`, `true` and `59`.
@@ -295,6 +321,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-022 `today()` uses the rule set's time zone
 - **Traces to:** `TR-DET-01`, `TR-DET-05`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Rule set `same-day-cutoff` v1 with `timeZone: Asia/Ho_Chi_Minh` and rule `R1` (`txDate == today() -> sameDay: true`); a second version v2 without `timeZone` (default `UTC`).
 - **When:** Both are evaluated with `txDate = date('2027-01-16')` and clock `2027-01-15T18:30:00Z` (01:30 on 16 January in Ho Chi Minh City).
 - **Then:** v1 matches `R1` (`today()` is 2027-01-16 in the rule set's zone); v2 does not match (`today()` is 2027-01-15 in UTC); replaying either decision with its logged version and clock gives the same result.
@@ -304,6 +331,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-023 Engine JSON is the engine's own: host Jackson settings change no engine payload
 - **Traces to:** `TR-EMB-07`, `TR-API-06`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The example host with the Rule Engine starter and REST module, rule set `card-fee` v1 published, and host properties `spring.jackson.property-naming-strategy=SNAKE_CASE` and `spring.jackson.serialization.write-dates-as-timestamps=true`; the test runs in the Spring Boot 4.x leg and in the Spring Boot 3.5 leg, where the host's Jackson 2 stays at the version its dependency management pins.
 - **When:** `card-fee.yaml` is imported with `POST /api/bpm/rules/v1/rule-sets`, then `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` is sent with body `{ "inputs": { "tier": "GOLD", "txCount": 5 } }`.
 - **Then:** Both requests succeed; the evaluate response keys are camelCase (`matchedRuleIds`, `decisionId`, `evaluatedAt`), `evaluatedAt` is an ISO 8601 string, and `fee` is `{ "currency": "VND", "amount": 0 }`; the host's own controllers still answer in snake case; in the 3.5 leg the resolved dependency tree has `tools.jackson` artifacts from the engine and the host's `com.fasterxml.jackson` artifacts at the host's pinned version, with no override in the host build.
@@ -313,6 +341,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-024 A v1 rule set reads into the DMN model and writes back to the same canonical JSON
 - **Traces to:** `TR-STD-28`, `TR-STD-03`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `card-fee.yaml` (v1, `hitPolicy: first`, inputs `tier` and `txCount`, output `fee`, rules `R1` to `R3`, every cell already in normal form) and the RFC 8785 hash of that document.
 - **When:** The v1 reader builds the in-memory model and the canonical writer prints it back.
 - **Then:** The model is one `Definitions` named `card-fee` holding one `Decision` `card-fee` whose `DecisionTable` has hit policy `FIRST`, input clauses `tier` and `txCount`, output clause `fee` and rules with ids `R1`, `R2`, `R3` in document order; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document (it is already in normal form) and its SHA-256 equals that hash and the stored `canonical_hash`.
@@ -322,6 +351,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-095 A schema version 1 document that uses a name reserved for full DMN is refused by name with its stage
 - **Traces to:** `TR-STD-04`, `TR-STD-03`, `TR-STD-26`, #38
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `card-fee.yaml` (schema version 1, `hitPolicy: first`) and five copies, each changed in one place: `hitPolicy: priority` (also `any`, `ruleOrder` and `outputOrder`); `expressionLanguage: feel` (also `FEEL` and the OMG FEEL namespace URIs of DMN 1.2 to 1.5, such as `https://www.omg.org/spec/DMN/20230324/FEEL/`); `schemaVersion: 2`; `errorMode: spec`. Control cases: `hitPolicy: cheapest`, `expressionLanguage: javascript`, and `schemaVersion` values of `0`, `-1`, `"2"`, `1.5` and `99999999999`.
 - **When:** Each document is read, and the `priority` copy of a rule set named `dmn-ready-priority` is posted to `POST /api/bpm/rules/v1/rule-sets` as `application/yaml`.
 - **Then:**
@@ -334,6 +364,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-096 `errorMode: strict` is a member of schema version 1 that changes no hash
 - **Traces to:** `TR-STD-23`, `TR-STD-03`, PD-066, PD-125, #38
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `card-fee.yaml` without `errorMode`, and the same document with `errorMode: strict`. Control cases: `errorMode: lenient`, `errorMode: STRICT`, `errorMode: ""` and `errorMode: true`.
 - **When:** Both documents are read. The `strict` one is also exported to DMN 1.5 and the export is read again.
 - **Then:**
@@ -346,6 +377,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-097 An evaluation can name its decision, and only the rule set's own decision is accepted
 - **Traces to:** `TR-STD-28`, `TR-IDEM-01`, `TR-TEN-01`, DN-08, #38
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a` has `card-fee` v1 `PUBLISHED`. A teller holds `rules:evaluate`. Tenant `bank-b` has no `card-fee`.
 - **When:**
   - The teller evaluates `{ tier: GOLD, txCount: 5 }` three times: without a decision id, with `DecisionRequest.withDecision("card-fee")`, and with `withDecision("risk-adj")`.
@@ -368,6 +400,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-025 An approver rejects a pending version with a reason and it returns to draft
 - **Traces to:** `TR-OBS-04`, `TR-IDEM-01`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`; `bob` holds `rules:approve`.
 - **When:** `bob` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:reject` with `Idempotency-Key: k-201`, `If-Match: "3"` and body `{ "reason": "R2 waiver needs pricing committee minutes" }`. Failure cases: the same call with body `{ "reason": "" }`; with `If-Match: "2"`; and a reject of `card-fee` v1, which is `PUBLISHED`. Self-reject case: `fx-margin` v4 is `PENDING_APPROVAL`, requested by `bob`, and `bob` rejects it with reason `"Wrong margin table attached"`.
 - **Then:** `200`; v2 is `DRAFT` with `lockVersion 4`, `requested_by` and `requested_at` cleared, and one `rle_version_history` row `REJECTED` with actor `bob`, the reason, statuses `PENDING_APPROVAL` to `DRAFT` and `lockVersion 4` (`GET .../versions/2/history` returns it after the `CREATED` and `REQUESTED` rows); one `rules.version.rejected.v1` event carries rule set, version, tenant, actor `bob`, reason and timestamp; `alice` can edit v2 again and request publication again. A replay with `k-201` and the same body returns the same `200` and writes no second event. The empty reason returns `400 INPUT_INVALID` naming `reason`; the stale `If-Match` returns `409 VERSION_CONFLICT`; the reject of v1 returns `409 INVALID_STATE`. In each failure case the version, its history and the event count are unchanged. The self-reject returns `403 SELF_APPROVAL_FORBIDDEN` with a detail pointing to `:withdraw`, and `fx-margin` v4 stays `PENDING_APPROVAL` (PD-089; the requester withdraws instead, `RLE-046`).
@@ -377,6 +410,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-046 The requester withdraws their own pending request, and it returns to draft without a rejection
 - **Traces to:** `TR-OBS-04`, `TR-IDEM-01`, `TR-SEC-04`, PD-089
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`; `card-fee` v2 is `PENDING_APPROVAL` with `lockVersion 3`, requested by `alice`, who holds `rules:author` only; `card-fee` v1 is `PUBLISHED` and in effect; `bob` holds `rules:approve`; `carol` holds `rules:author`.
 - **When:** `alice` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:withdraw` with `Idempotency-Key: k-301`, `If-Match: "3"` and body `{ "reason": "Wrong fee for GOLD" }`; then she edits v2 and requests publication again. Failure cases: `bob` withdraws v2; `carol` withdraws v2; `alice` withdraws with `If-Match: "2"`; `alice` withdraws `card-fee` v1 (`PUBLISHED`); `alice` withdraws with a 2,001-character reason.
 - **Then:**
@@ -394,6 +428,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-026 Retiring a published version by hand stops every replica serving it
 - **Traces to:** `TR-OBS-04`, `TR-ASY-04`, `TR-DET-05`, PD-101
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; rule set `tet-fee-waiver` has only v1, `PUBLISHED`, effective since `2027-01-20T00:00:00Z`, `lockVersion 1`; decision `D1` was logged against v1 at `2027-02-01T09:00:00Z` with output `waiveFee: true`; two replicas hold v1 compiled; `bob` holds `rules:approve`; `lifecycle.retire-approval` is `single` and `lifecycle.retire-last-version` is `confirm`, the defaults, so v1 is the last version in effect. The emergency single-approver path (PD-012) is not configured; it is not an M1 feature.
 - **When:** At `2027-02-17T08:00:00Z` `bob` sends `POST /api/bpm/rules/v1/rule-sets/tet-fee-waiver/versions/1:retire` with `Idempotency-Key: k-301`, `If-Match: "1"` and body `{ "reason": "Tet promotion ended", "confirmNoVersionInEffect": true }`; 5 s later each replica evaluates `tet-fee-waiver` with the host clock; then `replay(D1)` runs, and a caller with `rules:simulate` evaluates `tet-fee-waiver` with `clock = 2027-02-01T09:00:00Z`. Failure cases: a retire of a `DRAFT` version; a retire with body `{ "reason": "" }`; the same retire of v1 without `confirmNoVersionInEffect`; and, on a host with `lifecycle.retire-last-version: refuse`, the retire with the confirmation.
 - **Then:** `200`; v1 is `RETIRED` with `retired_at = 2027-02-17T08:00:00Z` and one history row `RETIRED` (actor `bob`, the reason); one `rules.version.retired.v1` event carries rule set, version, tenant, actor `bob`, the reason, the timestamp and `noVersionInEffect: true`, and the history row stores `no_version_in_effect = true`; the same transaction increments the cache epoch and notifies after commit; within `cache.epoch-check-interval` (5 s) both replicas return `404 NO_EFFECTIVE_VERSION` for the evaluation. `replay(D1)` still returns v1 and `waiveFee: true`, because a retired version stays readable for explain and replay. The evaluation at `clock = 2027-02-01T09:00:00Z` selects v1 and returns `waiveFee: true`, because v1 was effective at that instant (selection reads `retired_at`, `DESIGN.md` section 3.3.1). The retire of a `DRAFT` returns `409 INVALID_STATE`, the empty reason `400 INPUT_INVALID`. The retire without the confirmation returns `409 LAST_VERSION_IN_EFFECT` with `ruleSet: tet-fee-waiver`, `version: 1`, `setting: confirm`, `nextEffectiveFrom: null` and a detail saying that evaluations will fail until a new version is approved. Under `refuse` the confirmed retire returns the same code with `setting: refuse`. None of the refusals changes anything. No second approver is needed in the default `single` mode (ADR-0025, PD-080); the event and the history row record the mode `single`.
@@ -403,6 +438,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-027 A published version retires on its own when a newer version becomes effective
 - **Traces to:** `TR-OBS-04`, `TR-DET-01`, `TR-OPS-05`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED`, effective since `2026-11-01T00:00:00Z`; `card-fee` v2 approved at `2026-11-25T10:00:00Z` with `effectiveFrom: 2026-12-01T00:00:00Z`; two replicas share one database; `TestClock` drives both. Second case: rule set `fx-margin` v3 `PUBLISHED` and v4 approved with `effectiveFrom` equal to the approval instant.
 - **When:** The clock moves from `2026-11-30T23:59:59Z` to `2026-12-01T00:00:01Z`; each replica evaluates `card-fee`; then the lifecycle sweep (`DESIGN.md` section 3.3.2) runs on both replicas at the same moment, through PgBouncer in transaction mode in the pooler leg. In the second case v4's approval commits.
 - **Then:** At `2026-11-30T23:59:59Z` v1 is `PUBLISHED` and evaluation selects v1. At `2026-12-01T00:00:01Z` evaluation selects v2 on both replicas whether or not v1's status has changed yet, because selection follows the effective date (`RLE-008`). After the maintenance run v1 is `RETIRED` and exactly one `rules.version.retired.v1` event exists for it, with actor `system:supersession`, reason `SUPERSEDED` and `supersededBy: 2`, and exactly one history row `RETIRED`, although both replicas ran; no advisory lock was taken. An evaluation of v1's decision with `clock = 2026-11-20T10:00:00Z` still selects v1. In the second case v3 is `RETIRED` in the transaction that publishes v4, with one retired event.
@@ -412,6 +448,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-028 The engine returns a row-level diff between two versions of a rule set
 - **Traces to:** `TR-UI-02`, `TR-STD-28`, `TR-STD-03`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED` with rows `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 30000 VND`), `R3` (`{} -> fee: 50000 VND`); v2 `PENDING_APPROVAL` with `R1` unchanged, `R2` output changed to `fee: 0 VND`, new row `R6` (`tier == 'PLATINUM' -> fee: 0 VND`) inserted before `R3`, and `R3` unchanged; v3 `DRAFT` imported from a YAML file that differs from v2's source only in comments and in `effectiveFrom`; v4 `DRAFT` with the same rows as v2 but `R2` placed before `R1`. Caller `bob` holds `rules:read`.
 - **When:** `bob` sends `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/2/diff?base=1`, then `.../versions/3/diff?base=2` and `.../versions/4/diff?base=2`. Failure cases: `base=9`, which does not exist; no `base`; a caller of tenant `bank-b`.
 - **Then:** The v2 against v1 diff lists `R2` as `CHANGED` with the field `/then/fee` from `{ "currency": "VND", "amount": 30000 }` to `{ "currency": "VND", "amount": 0 }`, `R6` as `ADDED` at position 3, no `REMOVED` row, no `MOVED` row (the relative order of `R1`, `R2` and `R3` is unchanged), `unchangedCount: 2`, no change to hit policy, inputs or outputs, and both canonical hashes. The v3 against v2 diff has no row or header change, reports equal canonical hashes, `sourceHashChanged: true` and the `effectiveFrom` change as metadata only, because the diff compares the canonical models (`RLE-024`), not the source text. The v4 against v2 diff lists only `R1` as `MOVED` from `basePosition` 1 to `position` 2: the moved set is the common rows outside the longest common subsequence, ties broken by keeping the earlier rows of v4, so `R2`, `R6` and `R3` are not moved. Repeating a request returns a byte-identical body. `base=9` returns `404 VERSION_NOT_FOUND`; no `base` returns `400 INPUT_INVALID`; the `bank-b` caller gets `404 RULE_SET_NOT_FOUND`. The diff writes nothing.
@@ -425,6 +462,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-029 An auditor lists one rule set's decisions for a period of at most 31 days
 - **Traces to:** `TR-OBS-01`, `TR-SEC-05`, `TR-TEN-01`
 - **Milestone:** M1 (rule set and period only; outcome, rule id and output value filters are the M1 cut candidate, PD-031)
+- **Kind:** control
 - **Given:** Tenant `bank-a` has 250 decisions of `card-fee` between `2027-01-01T00:00:00Z` and `2027-01-31T23:00:00Z`, each with masked input `nationalId`, and 40 decisions of `kyc-risk` in the same month; tenant `bank-b` has 10 decisions of its own `card-fee`. Caller `dan` holds `rules:log:read` in `bank-a`.
 - **When:** `dan` sends `GET /api/bpm/rules/v1/decisions?ruleSet=card-fee&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z`, then follows the returned cursor. Failure cases: `from=2027-01-01T00:00:00Z&to=2027-02-02T00:00:00Z` (32 days); no `ruleSet`; the same first query by a `bank-b` caller; a caller without `rules:log:read`.
 - **Then:** The first page holds 200 `card-fee` decisions of `bank-a`, newest first, and a cursor; the second page holds the other 50 and no cursor; no `kyc-risk` or `bank-b` row appears; every `nationalId` is an `hmac:<keyId>:<hex>` value, never plain text; the query plan reads at most 2 monthly partitions. The 32-day range and the missing rule set return `400 QUERY_INVALID` naming the parameter; the `bank-b` caller gets its own 10 decisions only; the caller without the permission gets `403`. The search writes nothing.
@@ -434,6 +472,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-030 A decision is explained in plain language from its log entry and its version
 - **Traces to:** `TR-OBS-05`, `TR-DET-05`; PD-027 option 1, decided 2026-11-19
 - **Milestone:** M1 (generated explanation, PD-027 option 1; author templates are M3, RE-F-19)
+- **Kind:** other
 - **Given:** Tenant `bank-a`; `card-fee` v1 (`hitPolicy: first`) with `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 10000 VND`), `R3` (`{} -> fee: 50000 VND`); decision `D7` logged with inputs `tier: "SILVER"`, `txCount: 5`, `matchedRuleIds: ["R2"]`, output `fee: 10000 VND`, clock `2026-11-20T10:00:00Z`. `risk-flags` v1 (`hitPolicy: collect`) and decision `D8` with `matchedRuleIds: ["R1", "R3"]` as in `RLE-003`. v2 of `card-fee` was published after both decisions. Caller `dan` holds `rules:log:read`.
 - **When:** `dan` sends `GET /api/bpm/rules/v1/decisions/D7/explain`, again, and `GET /api/bpm/rules/v1/decisions/D8/explain`. Failure cases: an unknown id; `D7` requested by a caller of tenant `bank-b`.
 - **Then:** The `D7` response names rule set `card-fee`, version 1, hit policy `FIRST`, outcome `OK` and evaluation clock; lists matched row `R2` with one condition entry (input `txCount`, recorded value `5`, test `>= 3`, result `true`) and its output `fee` `{ "currency": "VND", "amount": 10000 }`; carries `reasons` `[ { "code": "RULE_MATCHED", "params": { "ruleId": "R2", "version": 1 } } ]`, which the cockpit renders in English or Vietnamese; and carries the English `text`, with names in words (`tx count`, or the input's declared `label`) and numbers grouped for the language, money keeping its currency code, "Rule R2 of card-fee version 1 matched because tx count is 5, which is at least 3. Result: fee 10,000 VND."; in `vi` the amount reads `10.000 VND`, and a boolean reads Yes or No (`Có`, `Không`) (#392) The second request returns a byte-identical body. The explanation is built from the decision row and the stored version 1 only: v2 does not change it, nothing is re-evaluated and `rle_decision` gains no row. The `D8` response lists `R1` and `R3` in order with their conditions and the aggregated outputs `flags: [HIGH_VELOCITY, NEW_DEVICE]` and `penalty: 15`. The unknown id and the `bank-b` caller get `404 DECISION_NOT_FOUND`.
@@ -443,6 +482,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-031 Explanations keep masked inputs masked and explain no match, null inputs and failures
 - **Traces to:** `TR-OBS-05`, `TR-SEC-05`, `TR-STD-02`; PD-027 option 1, decided 2026-11-19
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`. Rule set `minor-review` v1 (`hitPolicy: first`) with input `nationalId` (`mask: true`) and `age`, rows `R1` (`nationalId is not null and age < 18 -> route: "MANUAL"`) and `R2` (`age >= 18 -> route: "AUTO"`); decision `D11` with `nationalId = "079090001234"` and `age = 16`. Decision `D12` of `card-fee` v1 with no matched row (a version without the catch-all `R3`). Decision `D13` of `null-check` v1 (`RLE-006`) with `income = null`, `tier = null`. Decision `D14` of `loan-pricing` v1 with outcome `UNIQUE_HIT_VIOLATION` and `matchedRuleIds: ["R1", "R2"]` (`RLE-002`).
 - **When:** `GET /api/bpm/rules/v1/decisions/{id}/explain` for `D11` to `D14`, with log capture on.
 - **Then:** `D11`: the condition on `nationalId` shows the recorded value as `hmac:<keyId>:<hex>` with `masked: true`, reason `VALUE_MASKED` and the word "masked" in `text` (`national id is masked`), the condition on `age` shows `16` against `< 18`, and `079090001234` appears in no response field and no log line. `D12`: "No rule of card-fee version 1 matched. No output was produced." `D13`: the `R2` condition has `missing: true`, reason `VALUE_MISSING` and reads "income has no value", and no row is reported as matched through a condition whose result was `null`. No row that did not match is explained, and no expression is evaluated. `D14`: outcome `UNIQUE_HIT_VIOLATION`, `matched` lists `R1` and `R2` from the stored `matched_rule_ids`, "Rules R1 and R2 of loan-pricing version 1 both matched; this table allows one. No output was produced."
@@ -452,6 +492,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-072 A decision is explained with the author's sentence in the requested language
 - **Traces to:** `TR-OBS-05`, `TR-DET-05`; PD-123, decided 2026-11-20 (option 1)
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` v1 with `R2` templated (`explain`) in `en` and `vi`, `R1` without a template, and `explanations.noMatch` in both languages. Decision `D7` matched `R2` with `txCount = 5` and `fee = 10000 VND`; `D8` matched `R1`; `D9` matched nothing. v2, published later, changes the `R2` wording. Caller `dan` holds `rules:log:read`.
 - **When:** `dan` requests `GET /api/bpm/rules/v1/decisions/D7/explain?lang=vi`, then `?lang=en`, then `?lang=th`; then `D8` and `D9` in `en`.
 - **Then:** `D7` in `vi`: `text` is "Phí thẻ của bạn là 10.000 VND vì bạn đã thực hiện 5 giao dịch trong tháng.", `textSource: TEMPLATE`; in `en`: "Your card fee is 10,000 VND because you made 5 transactions this month." Placeholder values are written as in the generated sentence (grouped for the language, `RLE-030`). In `th`, which has no template: the generated sentence in the default language, `textSource: GENERATED`; a template of another language is never shown. `D8`: the generated sentence, `GENERATED`. `D9`: "No card fee applies to this account.", `TEMPLATE`. When several rows matched, the sentences of the rows are joined in rule order by one space, and only when every matched row has one in that language; otherwise the generated sentence explains the whole decision. `reasons` and `matched` are identical to the response without templates; v2 does not change `D7`; a repeated request returns identical bytes and writes nothing.
@@ -461,6 +502,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-073 A template is checked at import and is part of the approved content
 - **Traces to:** `TR-DET-02`, `TR-SEC-04`, `TR-STD-03`; PD-123
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** Caller `lan` holds `rules:author`. A template is plain text with the placeholders `{input.<name>}`, `{output.<name>}`, `{ruleId}`, `{ruleSet}` and `{version}`, per BCP 47 language, in `rules[].explain` and `explanations.noMatch` (which allows `{input.<name>}`, `{ruleSet}` and `{version}` only).
 - **When:** `lan` imports files whose `R2` template uses (a) `{input.txCnt}`, an undeclared input; (b) `{output.fee | upper}`; (c) `{input.nationalId}` where `nationalId` is `mask: true`; (d) a language tag `english`; (e) 501 characters; (f) the valid `card-fee` as v2, where v1 is equal except for the `en` wording of `R2`.
 - **Then:** (a) to (e) are `422 VALIDATION_FAILED` with a violation on `R2` and column `explain`, with codes `UNKNOWN_PLACEHOLDER` (a, b), `MASKED_INPUT_IN_TEMPLATE` (c), `INPUT_INVALID` (d) and `TEMPLATE_TOO_LONG` (e); nothing is stored. (f) imports with a canonical hash different from v1's, and `GET .../versions/2/diff?base=1` lists `R2` as `CHANGED` with the field `/explain/en`. The approver is neither author nor requester (`RLE-009`). Export keeps the templates: DMN carries them as `<horus:explain horus:lang>` and `<horus:noMatch horus:lang>` in `extensionElements`, namespace `urn:horus-bpm:dmn:extensions:v1`, and the round trip keeps the hash (`RLE-045`). At most 500 characters per language and 10 languages per template.
@@ -470,6 +512,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-074 Templates keep masked values masked, and say what they cannot say
 - **Traces to:** `TR-OBS-05`, `TR-SEC-05`; PD-123
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** `decision-log.mask-default: true`. `minor-review` v1 declares `nationalId` with no `mask`, so it is masked by default; `R1`'s template is "Sent to manual review: applicant {input.nationalId} is {input.age}." Decision `D11` has `age = 16`; a decision with `age = null` matches a templated row naming `{input.age}`. `risk-flags` v1 (`collect`) has `R1` and `R3` templated, both matched in `D15`. `loan-pricing` decision `D14` failed with `UNIQUE_HIT_VIOLATION` and its rows have templates.
 - **When:** each is explained in `en`.
 - **Then:** `D11`: "Sent to manual review: applicant (masked) is 16."; a masked value renders the catalogue word `template.masked`, never the fingerprint or the plain value, which appears in no field. The null input renders the catalogue phrase "no value". `D15`: the sentences of `R1` and `R3`, joined in rule order by one space. `D14`: the generated failure sentence of `RLE-031`; templates explain matches and no match only.
@@ -479,6 +522,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-070 Decisions are found by the host's case reference across the tenant's rule sets
 - **Traces to:** `TR-OBS-01`, `TR-TEN-01`, `TR-SEC-05`
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** Tenant `bank-a`. Loan application `LA-2027-000123` was decided on 2027-01-10 by `kyc-risk` (1 decision), `loan-pricing` (1) and `card-fee` (2), all with `correlation_id = LA-2027-000123`, and with input `nationalId` (`mask: true`) on `kyc-risk`. 500 other `bank-a` decisions in January have other correlation ids. Tenant `bank-b` has one decision with the same correlation id. Caller `dan` holds `rules:log:read`.
 - **When:** `dan` sends `GET /api/bpm/rules/v1/decisions?correlationId=LA-2027-000123&from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z`. Failure cases: no `from`/`to`; a 32-day period; an empty `correlationId`; one outside the stored format `[A-Za-z0-9._:-]{1,128}` (for example `LA 2027/123`); a caller without `rules:log:read`; the same query by a `bank-b` caller.
 - **Then:**
@@ -493,6 +537,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-071 Decisions are found by the exact value of a plain input, never of a masked one
 - **Traces to:** `TR-SEC-05`, `TR-OBS-01`
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** Tenant `bank-a`; `loan-pricing` declares `productCode` (string, `mask: false`), `amount` (money) and `nationalId` (`mask: true`). In January 2027 it has 30 decisions with `productCode = "HOME-30Y"`, 2 of them with `amount = 2500000000 VND`.
 - **When:** `dan` posts `POST /api/bpm/rules/v1/decisions:find-by-input` with `{ "ruleSet": "loan-pricing", "input": "productCode", "value": "HOME-30Y", "from": "2027-01-01T00:00:00Z", "to": "2027-02-01T00:00:00Z" }`, then with `"input": "amount", "value": { "currency": "VND", "amount": 2500000000 }`. Failure cases: `"input": "nationalId"`; an input no version of `loan-pricing` declares; an input that a tenant default masks (`decision-log.mask-default: true`, `RLE-052`); a value of the wrong type; a body over 16,384 bytes.
 - **Then:**
@@ -506,6 +551,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-085 Every multi-row read of the Rule Engine store is a registered list query with a declared bound
 - **Traces to:** `TR-PERF-07`, `TR-TEN-01`
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `rule-engine-postgres` with `RuleListQueries`, the registry of every statement that returns more than one row: the rule set, version and history pages, the rule set events, the decision log searches by rule set, by correlation id and by input, and the engine-internal sweeps. A seeded PostgreSQL with two tenants, 3,000 rule sets each and three monthly decision partitions.
 - **When:** The build runs the ArchUnit rule and the query-plan check on the oldest and the newest supported PostgreSQL; a store method is added that groups every decision of a tenant without the registry; a registered query is declared as a page without `LIMIT :limit`, without a tenant filter, or a decision search without a period on the partition key.
 - **Then:**
@@ -523,6 +569,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-067 A batch returns one result per item in order, and a failing item does not stop the rest
 - **Traces to:** `TR-DET-01`, `TR-OBS-01`
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` v1 (`first`) published as in `RLE-001`; `loan-pricing` v1 (`unique`, overlapping rows) as in `RLE-002`; caller `svc-eod` holds `rules:evaluate`.
 - **When:** `svc-eod` posts `POST /api/bpm/rules/v1/decisions/card-fee:evaluate-batch` with four items: (0) `{ tier: GOLD, txCount: 5 }`, (1) `{ tier: SILVER, txCount: 4 }`, (2) `{ tier: SILVER, txCount: "four" }`, (3) `{ tier: STANDARD, txCount: 0 }`, each with `correlationId` `eod-2027-01-31-000<n>`. Then it posts two `loan-pricing` items: one matching `R1` only, and one matching `R1` and `R2`.
 - **Then:**
@@ -537,6 +584,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-068 A batch is bounded as a whole and per item
 - **Traces to:** `TR-SEC-02`, `TR-SEC-07`
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** `evaluation.max-batch` at 1,000, and `evaluation.regex-max-reads-per-request` lowered in a test so that it runs out at item 3 of 5.
 - **When:** Posting 0 items; 1,001 items; a body over the batch limit (4,194,304 bytes); a batch for a rule set with no version in effect; a batch whose item 3 trips the request regex budget; a batch whose item 1 exceeds the step budget.
 - **Then:**
@@ -549,6 +597,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-069 A batch is idempotent, commits with its transaction and stays in the caller's tenant
 - **Traces to:** `TR-IDEM-01`, `TR-EMB-04`, `TR-TEN-01`
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** The batch of `RLE-067` with `Idempotency-Key: k-701`.
 - **When:** It is repeated with `k-701` and the same body, then sent with `k-701` and a changed item. A Java host calls `evaluateBatch` inside `@Transactional` and rolls back. A caller of `bank-b` posts the batch with `"tenantId": "bank-a"` in the body. A caller sends `"clock"` without `rules:simulate`.
 - **Then:**
@@ -566,6 +615,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-032 An exported version imports back as a draft with the same canonical hash
 - **Traces to:** `TR-STD-03`, `TR-STD-28`, `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED`, imported from `card-fee.yaml` with comments and `effectiveFrom: 2026-11-01T00:00:00Z`, canonical hash `H1` (computed without `effectiveFrom`); caller `lan` holds `rules:read` and `rules:author` in `bank-a` and in `bank-a-fin`.
 - **When:** `lan` exports v1 with `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=json` and with `format=yaml`; imports the JSON file with `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` in `bank-a`; and imports the YAML file with `POST /api/bpm/rules/v1/rule-sets` in `bank-a-fin`, where no `card-fee` exists. Failure cases: `format=xlsx`; version 9.
 - **Then:** The JSON export is the RFC 8785 canonical document written from the DMN model (`RLE-024`), byte for byte, with a `Content-Disposition` file name `card-fee-v1.json`; the YAML export holds the same model. Neither file carries tenant, status, `lockVersion`, `effectiveFrom`, requester, approver or decision data. The JSON import creates `card-fee` v2 as `DRAFT` in `bank-a` with canonical hash `H1`; the YAML import creates `card-fee` v1 as `DRAFT` in `bank-a-fin` with canonical hash `H1`. Each import stores its own file as the source document (`RLE-020`); the original comments stay available on v1 through `?include=source`. Both drafts have no `effective_from` until `:request-publish` sets one. `format=xlsx` returns `400 INPUT_INVALID`; version 9 returns `404 VERSION_NOT_FOUND`. Export writes nothing.
@@ -575,6 +625,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-033 Importing a file as a new version creates the next draft; a mismatched file is refused whole
 - **Traces to:** `TR-STD-01`, `TR-IDEM-01`, `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` has v1 `PUBLISHED` and v2 `DRAFT`; caller `lan` holds `rules:author`. Files: `card-fee-v3.yaml` (valid, `ruleSet: card-fee`); `kyc-risk.yaml` (`ruleSet: kyc-risk`); `card-fee-bad.yaml` whose row `R4` has `balance >= 50000000` with no currency.
 - **When:** `lan` posts `card-fee-v3.yaml` to `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` with `Idempotency-Key: k-401`, then repeats the call; posts `kyc-risk.yaml` to the same `card-fee` path; posts `card-fee-bad.yaml` to it; posts `card-fee-v3.yaml` to `POST /api/bpm/rules/v1/rule-sets`, where `card-fee` already exists.
 - **Then:** The first post returns `201` with `card-fee` v3 `DRAFT`; the repeat returns the same `201` and creates no v4. The `kyc-risk` file returns `400 INPUT_INVALID` naming the mismatch between the path and the document's `ruleSet`. The bad file returns `422 VALIDATION_FAILED` naming row `R4` and column `balance`. The post to `/rule-sets` returns `409 RULE_SET_EXISTS`. In every failure case no version and no source document is stored, and v1 and v2 are unchanged.
@@ -584,6 +635,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-191 A version exports as a spreadsheet file that Excel opens, with the shorthand cells
 - **Traces to:** `TR-STD-03`, `TR-UI-02`, PD-107, PD-142, #39
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Tenant `bank-a`; `card-fee` v1 `PUBLISHED` with hit policy `first`, inputs `tier` (string), `balance` (money) and `opened` (date), outputs `fee` (money) and `waived` (boolean), and rules `R1` (`tier in ['GOLD', 'PLATINUM'] -> fee 0 VND, waived true`, description "Gold and Platinum are free"), `R2` (`tier == 'SILVER'`, `balance >= 50000000 VND -> fee 50000 VND`), `R3` (`opened` between 2025-01-01 and 2025-12-31 -> fee 20000 VND) and `R4` (`{} -> fee 100000 VND`); caller `dan` holds `rules:read`.
 - **When:** `dan` calls `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/1/export?format=csv`.
 - **Then:**
@@ -597,6 +649,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-192 A spreadsheet file imports as the next draft against a base version, with the checks of a document
 - **Traces to:** `TR-STD-01`, `TR-IDEM-01`, `TR-TEN-01`, `TR-UI-02`, PD-107, PD-142, #39
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** The file of `RLE-191` in which R2's fee reads `30000 VND` instead of `50000 VND`; caller `lan` holds `rules:author` in `bank-a`.
 - **When:** `lan` posts it to `POST /api/bpm/rules/v1/rule-sets/card-fee/versions?base=1` with `Content-Type: text/csv` and `Idempotency-Key: k-39-1`, then repeats it.
 - **Then:**
@@ -612,6 +665,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-193 A damaged or refused cell is named by rule and column and never quoted
 - **Traces to:** `TR-STD-01`, `TR-SEC-04`, `TR-DET-02`, PD-107, PD-142, #39
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The file of `RLE-191` with one cell changed at a time: R2's `balance` reads `>= 50000000`; `>= 5E+07 VND`; `">= 50,000,000 VND"`; `>= 50.000.000 VND`; R3's `opened` reads `20/11/2026`; R2's `balance` reads `>= about fifty million VND`; R2's `fee` is empty. A second version of `card-fee` has a masked input `nationalId` (integer) and a cell `CCCD 079123456789` in that column.
 - **When:** Each file is imported with `?base=1`.
 - **Then:**
@@ -625,6 +679,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-194 A file cannot add, remove, rename or reorder a column, and its rows must be well formed
 - **Traces to:** `TR-STD-01`, `TR-STD-03`, PD-107, PD-142, #39
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The file of `RLE-191` with, one at a time: `balance` renamed `segment`; the `waived` column removed; `tier` and `balance` swapped; R2's id changed to `R1`; R4 cut to three cells; a file saved as Windows-1252; an empty file.
 - **When:** Each is imported with `?base=1`.
 - **Then:**
@@ -637,6 +692,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-047 The author replaces their draft in place, with the import checks and without a new version
 - **Traces to:** `TR-STD-01`, `TR-STD-03`, `TR-IDEM-01`, `TR-SEC-04`, `TR-UI-02`, PD-094
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a` with `horus.bpm.rules.authoring.cockpit-drafts: true`; `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` from `card-fee.yaml` (`R2`: `txCount >= 3 -> fee: 10000 VND`), `lockVersion 0`, canonical hash `H2`; `lan` holds `rules:author`, `minh` holds `rules:author` and `rules:approve`, `dan` holds `rules:read`. File `card-fee-r2-zero.yaml` is `card-fee.yaml` with `R2` writing `fee: "0 VND"`.
 - **When:** `lan` sends `PUT /api/bpm/rules/v1/rule-sets/card-fee/versions/2` with `card-fee-r2-zero.yaml`, `Idempotency-Key: k-501` and `If-Match: "0"`, then repeats it. Failure cases: the same `PUT` with `If-Match: "0"` again and a new key; without `If-Match`; without `Idempotency-Key`; a file whose `R4` has `balance >= 50000000` with no currency; a file whose `ruleSet` is `kyc-risk`; a `PUT` of v1; `minh` replaces v2; `dan` replaces v2; a caller of `bank-b` replaces v2; the host with `cockpit-drafts: false`; two `PUT` requests with `If-Match: "0"` and different keys at the same moment.
 - **Then:**
@@ -651,6 +707,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-090 A draft's edited table is validated as a save would validate it, and nothing is stored
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-02`, `TR-TEN-01`, PD-113
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** Tenant `bank-a` with `horus.bpm.rules.authoring.cockpit-drafts: true`; `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` from `card-fee.yaml`, `lockVersion 0`; `lan` holds `rules:author`, `dan` holds `rules:read`; a caller of `bank-b` holds `rules:author`. Tenant `bank-a` declares `kyc-routing` v1 `DRAFT` whose input `nationalId` has `mask: true` and whose `R1` tests `nationalId == '079123456789'`.
 - **When:** `lan` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:validate` with (a) `card-fee.yaml` with `R2` writing `fee: "0 VND"`; (b) `card-fee.yaml` with `R2` testing `txCount: ">= tierX"`. Failure cases: the same body for v1; for v9; as `dan`; as the `bank-b` caller; with `ruleSet: fx-margin`; with a body of 1,048,577 bytes; with drafts off. `lan` also validates `kyc-routing`.
 - **Then:**
@@ -666,6 +723,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-091 Every row of a version has a plain reading in each language and in two styles
 - **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027, PD-123, PD-077
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** Tenant `bank-a`; `account-tier` v1 `PUBLISHED` with inputs `balance` (money, label `Balance`), `segment` and `nationalId` (`mask: true`), outputs `tier` (label `Tier`) and `fee`, and rows `R1` (`balance >= 50000000 VND`, `segment == 'VIP'`, then `tier 'GOLD'`, `fee 0 VND`), `R2` (`balance between 10000000 VND and 49999999 VND`, `nationalId == '079123456789'`), `R3` (`segment in ['STAFF', 'PARTNER']`, with the English sentence "Staff and partners hold {output.tier} and pay {output.fee}."), `R4` (`segment == 'MASS'`, with the English sentence "Mass customers: {input.segment}.") and `R5` (no condition). `dan` holds `rules:read`, `teller` holds only `rules:evaluate`, a caller of `bank-b` holds `rules:read`. A version `big-table` has 501 rows.
 - **When:** `dan` sends `GET /api/bpm/rules/v1/rule-sets/account-tier/versions/1/readings`. Failure cases: as `teller`; as the `bank-b` caller; for version 7; for `big-table`.
 - **Then:**
@@ -684,6 +742,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-092 A diff of two versions has the old and the new reading of each changed row
 - **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027, PD-099
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `account-tier` v1 as in `RLE-091`; v2 raises the threshold of `R1` to `60000000 VND` and drops `R4`; a v3 differs from v1 only in a description of `R5`.
 - **When:** `dan` sends `GET .../rule-sets/account-tier/versions/2/diff/readings?base=1`, then `versions/3/diff/readings?base=1`. Failure cases: no `base`; `base` equal to the version; a diff that lists 501 rows; as `teller`.
 - **Then:**
@@ -697,6 +756,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-093 A simulation result is read in plain language, each side in the version that decided it
 - **Traces to:** `TR-UI-02`, `TR-DET-01`, `TR-SEC-02`, `TR-TEN-01`, PD-027
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** `account-tier` v1 in force and v2 a `DRAFT` as in `RLE-092`; `analyst` holds `rules:simulate` and `rules:read`; `viewer` holds only `rules:read`.
 - **When:** `analyst` sends `POST .../rule-sets/account-tier/versions/2:simulate-readings` with a sample of a VIP customer whose balance is 55,000,000 VND and whose `nationalId` is `079123456789`, labelled "VIP customer, balance 55,000,000 VND", and one of a MASS customer with no label. A sample with a label of 101 characters, one with a label that is not text and one with an empty label. Failure cases: as `viewer`; as `analyst` without `rules:read`; 501 samples.
 - **Then:**
@@ -710,6 +770,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-098 An author discards a draft that is no longer wanted; it stays in the history
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, `TR-TEN-01`, #418
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`. `card-fee` v1 `PUBLISHED`; v2 `DRAFT` created by `lan` (`rules:author`), `lockVersion 0`, canonical hash `H2`. `minh` holds `rules:author`; `bob` holds `rules:approve`; a caller of `bank-b` holds `rules:author`; `dan` holds `rules:read`. The host sets `authoring.cockpit-drafts` to `false` in one case.
 - **When:** `lan` sends `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/2:discard` with `Idempotency-Key: k-910`, `If-Match: "0"` and the reason "Started from the wrong version", then repeats it. Failure cases: `minh`; `bob`; `dan`; the `bank-b` caller; `lan` on v1 (published); `lan` on v2 again with a new key; a stale `If-Match`; no `If-Match`; no key; a reason of 2,001 characters. Then `lan` imports a new version and lists the versions.
 - **Then:**
@@ -724,6 +785,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-099 A syntax error names the expected token, the position and an example, in English and Vietnamese
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-02`, #419
 - **Milestone:** M2
+- **Kind:** semantics
 - **Given:** As `RLE-090`: `lan` validates draft v2 of `card-fee`. Tenant `bank-a` also declares `kyc-routing` v1 `DRAFT` whose input `nationalId` has `mask: true`.
 - **When:** `lan` sends `:validate` with (a) `R2` testing `txCount: ">= (3 + 1"`; (b) `R1` testing `tier: "= 'GOLD'"`; (c) `R2` testing `txCount: ">= tierX"`; (d) `kyc-routing` with `R1` testing `nationalId: "== '079123456789"`.
 - **Then:**
@@ -738,6 +800,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-100 From 1.0 an unset decision log retention refuses start-up outside dev
 - **Traces to:** `TR-OPS-01`, `TR-SEC-04`, PD-050, PD-130, #373
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** A host on Rule Engine `1.0.0` or later with `horus.bpm.rules.decision-log.retention` unset. The same host on `0.3.0` is the case before 1.0.
 - **When:** The host starts on the profile `prod`, on no profile, on `dev, prod`, and on `dev` (optionally with `test`); then with `keep-forever` and with `P12M`; then the same unset host on `0.3.0-SNAPSHOT`.
 - **Then:**
@@ -752,6 +815,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-062 An earlier version is restored as the next draft and needs four-eyes approval
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`, PD-121
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`, with `authoring.cockpit-drafts` at its default (`false`). `card-fee` v1 (fee for `SILVER` with 3 or more transactions: 10000 VND, canonical hash `H1`) was `PUBLISHED` and is now `RETIRED`, superseded by v2 (same row at 30000 VND, `H2`), which is in effect. `lan` holds `rules:author`; `minh` holds `rules:approve`.
 - **When:** `lan` sends `POST .../rule-sets/card-fee/versions?copyOf=1` with no body and `Idempotency-Key: k-601`, then repeats it. Then `lan` requests publication of v3, `lan` tries to approve it, `minh` reads `GET .../versions/3/diff?base=2` and `?base=1`, and `minh` approves. The Java form is `VersionService.copyVersion("card-fee", 1, options)`.
 - **Then:**
@@ -769,6 +833,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-063 A restore passes today's import checks and refuses what it cannot copy
 - **Traces to:** `TR-SEC-05`, `TR-DET-02`, `TR-TEN-01`, PD-121
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-b` sets `masking.tenants.bank-b.require-explicit-mask: true`. Its `kyc-routing` v1, approved before strict mode, has input `nationalId` with no `mask`. Tenant `bank-a`'s `card-fee` as in `RLE-062`. Caller `dan` holds `rules:read` only.
 - **When:** An author in `bank-b` sends `?copyOf=1` for `kyc-routing`. In `bank-a`: `?copyOf=9`; `?copyOf=0`; `?copyOf=1` with a non-empty body; `dan` sends `?copyOf=1`; a `bank-b` caller sends `?copyOf=1` for `card-fee`. On a host whose `evaluation.step-budget` was lowered after v1 was approved, an author restores v1.
 - **Then:**
@@ -783,6 +848,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-048 The diff marks look-alike characters and reports header and column changes
 - **Traces to:** `TR-UI-02`, `TR-STD-03`, ADR-0026 decision 6
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Tenant `bank-a`; `kyc-route` v1 with input `country` (string) and rule `R1` (`country != 'VN' -> route: "MANUAL"`); v2 equal except that `R1` reads `country != 'ВN'` with a Cyrillic `В`; v3 equal to v1 except that `R1` reads `country != 'V\u200BN'` (an escaped zero-width space); v4 equal to v1 except that the hit policy is `unique`, the input `country` has `mask: true` and a new input `segment` (string) is declared. Caller `bob` holds `rules:read`.
 - **When:** `bob` sends `GET .../rule-sets/kyc-route/versions/2/diff?base=1`, then `versions/3/diff?base=1` and `versions/4/diff?base=1`.
 - **Then:** The v2 diff lists `R1` as `CHANGED` with field `/when/country` from `!= 'VN'` to `!= 'ВN'` and `nonAscii: true`, and different canonical hashes. The v3 diff lists the same field with `to` `!= 'V\u200BN'` and `nonAscii: true`. In both, a field whose values are printable ASCII has `nonAscii: false`. The v4 diff has no row change and `unchangedCount: 1`; `header` holds `{ path: /hitPolicy, from: first, to: unique }`; `inputs.added` is `[segment]`; `inputs.changed` holds `country` with field `/mask` from null to `true`.
@@ -792,6 +858,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-049 An undeclared input whose name looks like personal data is a warning the approver sees
 - **Traces to:** `TR-SEC-05`, PD-099 (mitigation 1)
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenants `bank-a` and `bank-b`. Rule set `kyc-routing` with inputs `nationalId` (string, no `mask`), `age` (integer, `mask: false`) and `segment` (string, `mask: false`). Rule set `lien-he` with inputs `so_dien_thoai` and `ngaySinh` (no `mask`) and `kenh`. Rule set `company-fee` with inputs `company` and `tier` (no `mask`), `customerEmail` (`mask: true`) and `homeAddress` (`mask: false`). `bank-a` uses the built-in personal-data names; `bank-b` sets `horus.bpm.rules.masking.tenants.bank-b.personal-data-names: [segment]`. `lan` holds `rules:author`, `bob` holds `rules:approve`.
 - **When:** `lan` imports `kyc-routing`, `lien-he` and `company-fee` in `bank-a`, requests publication of `kyc-routing` v1, and `bob` reads it; `lan` imports `kyc-routing` in `bank-b`; the import is repeated with the same `Idempotency-Key`.
 - **Then:**
@@ -806,6 +873,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-050 Strict mode refuses an input that declares no mask, and names it
 - **Traces to:** `TR-SEC-05`, PD-099 (mitigation 2), PD-074
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** `bank-b` sets `horus.bpm.rules.masking.tenants.bank-b.require-explicit-mask: true`; `bank-a` keeps the default `decision-log.require-explicit-mask: false`. Rule set `kyc-routing` as in `RLE-049`, and the same table with `nationalId` declared `mask: true`. In `bank-a`, a draft of `kyc-routing` imported while strict mode was off.
 - **When:** `lan` imports `kyc-routing` in `bank-b`, then the declared table; replaces a declared draft in `bank-b` with the undeclared table; `bank-a` turns strict mode on and `lan` requests publication of its older draft; in `bank-a`, a version requested while strict mode was off is approved by `bob` after strict mode is turned on.
 - **Then:** The undeclared import is `422 VALIDATION_FAILED` with one violation per undeclared input, its `column` `nationalId`, the detail naming `decision-log.require-explicit-mask`; no rule set, version, event or idempotency record is stored. The declared import answers `201`. The replacement is refused the same way and the draft is unchanged. The publication request of the older draft is refused naming `nationalId`, and the version stays `DRAFT`. `bob`'s approval is refused the same way: the version stays `PENDING_APPROVAL` with its lock version, and no event is written. `bank-a` without strict mode imports the undeclared table with a warning only. `/api/bpm/meta` shows `decision-log.require-explicit-mask` for the caller's tenant.
@@ -815,6 +883,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-051 The version diff shows each input's masking status and marks changes
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, PD-099 (mitigation 3)
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** `kyc-routing` v1 `PUBLISHED` with `nationalId` `mask: true`; v2 a draft with `nationalId` `mask: false`. In a tenant that masks undeclared inputs by default, v1 with `nationalId` `mask: true` and v2 with no `mask` on `nationalId` and without the input `segment`.
 - **When:** `bob` reads `GET .../rule-sets/kyc-routing/versions/2/diff?base=1`.
 - **Then:** `masking` lists every input of either version: `{ input: nationalId, from: MASKED, to: NOT_MASKED, changed: true }`, then `age` and `segment` with `changed: false`. In the tenant that masks by default, `nationalId` is `MASKED` to `MASKED_BY_DEFAULT` with `changed: true` and `personalDataName: "national id"`, and `segment` is `NOT_MASKED` to null with `changed: true`. `inputs.changed` still reports the `/mask` member as before.
@@ -824,6 +893,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-052 A change of the masking default is logged at start-up and the value in force is shown
 - **Traces to:** `TR-SEC-05`, `TR-OBS-01`, PD-099 (mitigation 4)
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** The example host on one database: `bank-a` has rule sets and no masking setting of its own, `bank-b` sets `require-explicit-mask: true`; the host masking default is `false`. Then the host restarts with `horus.bpm.rules.masking.tenants.bank-a.mask-default: true` and a masking key.
 - **When:** The host starts, `lan` (`bank-a`) and `binh` (`bank-b`) read `GET /api/bpm/meta`; the host restarts; `lan` reads `/api/bpm/meta` again; the host restarts a third time unchanged.
 - **Then:** The first start records the host default and every known tenant in `rle_setting_seen`. `/api/bpm/meta` shows `decision-log.mask-default: false` and `decision-log.require-explicit-mask: false` in the `rules` settings for `lan`, and `require-explicit-mask: true` for `binh`. The restart logs exactly one line, `decision-log.mask-default for tenant bank-a changed from false to true since the last start-up`, at INFO (WARN when masking is turned off), and none for `bank-b`; `/api/bpm/meta` then shows `true` for `lan`. A tenant first seen since the last start-up is compared with the host default it followed then. The third start logs nothing. No line carries the key.
@@ -835,6 +905,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-053 Approving a version with an unmasked personal-data warning needs an acknowledgement on the record
 - **Traces to:** `TR-SEC-04`, `TR-SEC-05`, `TR-OBS-04`, PD-099 (mitigation 1), PD-104
 - **Milestone:** M1
+- **Kind:** control
 - **Given:**
   - Tenant `bank-a`, at its default `decision-log.mask-default: false`.
   - `kyc-routing` v1 is `PENDING_APPROVAL` with `lockVersion 2`, requested by `lan`. Its inputs `nationalId` and `contactNote` declare no `mask`, and `age` declares `mask: false`. With the built-in names, the version carries `UNMASKED_PERSONAL_DATA` for `nationalId` only (`RLE-049`).
@@ -868,6 +939,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-054 A pending version with no recorded author cannot be approved
 - **Traces to:** `TR-SEC-04`, PD-105, PD-096
 - **Milestone:** M1
+- **Kind:** control
 - **Given:**
   - Tenant `bank-a`. `card-fee` v1 is `PENDING_APPROVAL`, requested by `lan`, and has no recorded author: it was written before schema V2 added `created_by`, and the upgrade assigned none.
   - `bob` and `carol` hold `rules:approve`; neither requested v1.
@@ -887,6 +959,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-084 An approval or a rejection binds to the exact content that was reviewed
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-IDEM-01`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:**
   - Tenant `bank-a`. `lan` authored `card-fee` v1 with `R2` at 10,000 VND and requested publication; `bob` holds `rules:approve` and reviewed that content, whose `canonicalHash` is `H1`, at lock version `L1`.
   - `lan` then withdrew the request, replaced the draft with `R2` at 12,000 VND and requested publication again under the same number: the version is `PENDING_APPROVAL` with `canonicalHash` `H2` and lock version `L2`.
@@ -909,6 +982,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-190 The pending approvals list shows every version waiting for a second person, with the hash to review against
 - **Traces to:** `TR-SEC-04`, `TR-SEC-11`, `TR-TEN-01`, `TR-PERF-07`, PD-139, #31
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** At `bank-a` `lan` authors and requests `card-fee` v1 (10 January) and v2 (12 January) and `ana` requests `fx-margin` v1 (11 January); v1 of `card-fee` stays pending when v2 is requested. `bob` holds `rules:read` and `rules:approve`, `dan` holds `rules:read` only, an auditor of `bank-b` holds `rules:read`. The V30 index `idx_rle_version_pending` on `(tenant_id, requested_at, id)` over `PENDING_APPROVAL` versions exists.
 - **When:** Each of them calls `GET /approvals`, and `bob` pages it one version at a time with `limit=1` and the `nextCursor` of each page.
 - **Then:**
@@ -923,6 +997,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-195 Inputs that declare no `mask` are listed as reminders and never block
 - **Traces to:** `TR-SEC-05`, PD-146, PD-132, #438
 - **Milestone:** M2
+- **Kind:** control
 - **Given:** `card-fee` with inputs `tier` (no `mask`), `channel` (`mask: false`) and `cardNumber` (`mask: true`); `horus.bpm.rules.classification.warn-unclassified` at its default `true`. `lan` authors, `bob` approves.
 - **When:** `lan` imports it, validates an edit that also drops `channel`'s `mask`, and requests publication; `bob` reads the version and approves it; the engine starts outside `dev`; then the same with the setting `false`.
 - **Then:**
@@ -936,6 +1011,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-196 Readable names of roles, groups and users
 - **Traces to:** `TR-UI-08`, PD-110, #442
 - **Milestone:** M2
+- **Kind:** other
 - **Given:** The host's `DisplayNames` (default: `horus.bpm.display-names.roles|groups|users.<id>.<language>`) knows `lan` as "Tran Thi Lan" and no name for `ana`. `lan` requested `card-fee` v1 and v2, `ana` requested `fx-margin` v1.
 - **When:** `bob` lists `GET /approvals`; a screen asks `GET /api/bpm/display-names?roles=...&groups=...&users=...` with `Accept-Language: vi`.
 - **Then:** Each approval item carries `requestedByName`: "Tran Thi Lan" for `lan`'s versions and `ana` for `ana`'s, while `requestedBy` keeps the id for the four-eyes checks. `/display-names` returns the names it knows in the caller's language, falling back to `display-names.default-language` (`en`), and leaves out identifiers it does not know; a host bean of type `DisplayNames` replaces the default and receives the caller's tenant and language. More than 100 identifiers of one kind, or a malformed one, is `400 INPUT_INVALID`; an anonymous call is `401`. Names grant nothing.
@@ -947,6 +1023,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-034 The compiled cache holds at most `cache.max-entries` versions and heap stays flat
 - **Traces to:** `TR-PERF-06`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The example host with `cache.max-entries = 50`; tenant `bank-a` has 100 published rule sets `fee-001` to `fee-100`, each with one 200-row `first` table; the eviction counter `horus_rle_cache_evictions_total` (Micrometer `horus.rle.cache.evictions`, tag `cause`) reads 0.
 - **When:** The host evaluates the 100 rule sets in rotation for 10 rounds (1,000 evaluations) after a warm-up round, measuring retained heap after a full garbage collection at the end of round 2 and of round 10.
 - **Then:** The compiled store never holds more than 50 entries; the eviction counter reads at least 950 after the 10 rounds; every evaluation returns the same result as with an unbounded cache; retained heap at the end of round 10 is within 10 percent or 8 MB of the end of round 2, whichever is larger, each the median of three measurements after a full garbage collection; the gauge `horus_rle_cache_size` never exceeds 50.
@@ -956,6 +1033,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-035 The host refuses to start without a valid masking key, and the key never leaks
 - **Traces to:** `TR-SEC-10`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Rule set `minor-review` with input `nationalId` (`mask: true`) loaded at start-up through `definitions`. Case A: no `horus.bpm.rules.masking.hmac-key`. Case B: a Base64 key that decodes to 31 bytes. Case C: a Base64 key `k32` that decodes to 32 bytes, with log capture on.
 - **When:** The host starts in each case; in case C it evaluates `minor-review` with `nationalId = "079090001234"`, reads the decision through `GET /decisions/{id}` and its explanation, and computes HMAC-SHA256 of `079090001234` under `k32` in the test.
 - **Then:** Cases A and B fail start-up with a message that names `horus.bpm.rules.masking.hmac-key` and the rule set `minor-review`, and no decision is accepted. The check covers every version that is not retired, in every tenant, and an input masked by the tenant's `decision-log.mask-default` as well as by `mask: true`; a tenant with its own key setting (`masking.tenants.<tenant>.hmac-key`) is checked against that key only. Case C starts; no log line, response body, problem body, event or metric label contains `k32` or `079090001234`; the stored `masked_inputs.nationalId` equals `hmac:`, the key id (`k1` by default), `:` and the hex of the HMAC-SHA256, under the tenant's HKDF subkey of `k32` (DESIGN section 6), of `079090001234`, which the test computes on its own, so an exact-match lookup by the masked value finds the decision (`RLE-012`). Key ids (#281, `TR-SEC-10`): two keys with the same id for one tenant (or among the host keys), a tenant key id equal to a host key id, or a previous key equal to a configured key fail start-up naming the setting and never the key; a key id already recorded in `rle_masking_key_check` with a different check value fails start-up naming the key id and both check values, never the key; a key id recorded for the host and then configured for a tenant (for example `bank-a` taking `k1` after the host retired it), or the reverse, fails start-up and records nothing; a tenant configured as `*` fails start-up naming the setting; and a host `MaskingPolicy` that hands out a key for a tenant with live rule sets without declaring it in `configuredKeys()` fails start-up naming the policy class, the tenant and the key id.
@@ -965,6 +1043,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-036 Every Rule Engine REST error is a Problem Details body with a stable code
 - **Traces to:** `TR-SEC-08`
 - **Milestone:** M1 (rules; process engine errors are M2)
+- **Kind:** semantics
 - **Given:** The example host with the Rule Engine REST module; the error matrix in `DESIGN.md` section 4.2; a test hook that makes the version repository throw `SQLException("relation rle_version does not exist")` on demand.
 - **When:** Each code in the matrix that exists at merge time is triggered once (for example `RULE_SET_NOT_FOUND`, `VALIDATION_FAILED`, `SELF_APPROVAL_FORBIDDEN`, `VERSION_CONFLICT`, `QUERY_INVALID`), then the injected failure is triggered on `GET /api/bpm/rules/v1/rule-sets/card-fee`.
 - **Then:** Every response has `Content-Type: application/problem+json` with `type` equal to `https://github.com/dhluong90/horus-Agentic-BPM/wiki/Common-Error-Codes#<code in lower case>`, `status`, `code`, `detail` and `correlationId`, and the status matches the matrix. The injected failure returns `500` with code `INTERNAL_ERROR` and a `correlationId` that also appears in the server log; its body contains no stack trace, Java class name, `SQLException` or table name.
@@ -978,6 +1057,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-037 The tenant comes from the authenticated principal, session or token, never from what the browser sends
 - **Traces to:** `TR-SEC-03`, `TR-TEN-01`, `TR-EXT-02`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Host A embeds the cockpit in its own web application with a server-side login session; the session principal carries the attribute `tenant_id = bank-a`. Host B uses bearer tokens with claim `tenant_id: bank-a`. Both use the default `TenantResolver` with `tenancy.claim = tenant_id` and switching disabled. Rule set `card-fee` exists in `bank-a` and `bank-b`. Host C registers its own `TenantResolver` bean that returns `bank-c` for every caller. Case D: a session principal without the attribute.
 - **When:** On hosts A and B the caller sends `GET /api/bpm/rules/v1/rule-sets/card-fee`, then `POST /api/bpm/rules/v1/decisions/card-fee:evaluate` with body `{ "tenantId": "bank-b", "inputs": { "tier": "GOLD", "txCount": 5 } }`, then the read again with header `X-Forwarded-Tenant: bank-b`. On host C the same read. In case D the same read.
 - **Then:** Hosts A and B return `bank-a`'s rule set and evaluate `bank-a`'s version; the body `tenantId` and the extra header are ignored and the decision row has `tenant_id = bank-a`. Host C uses its own resolver: the engine's default is not called and the read is served for `bank-c`. Case D returns `401 UNAUTHENTICATED` and reads nothing. The starter registers no resolver that reads a request header.
@@ -987,6 +1067,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-038 In `four-eyes` mode a manual retirement needs a second approver, and the version serves until it is confirmed
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-05`
 - **Milestone:** M3
+- **Kind:** control
 - **Given:** `lifecycle.retire-approval = four-eyes`; tenant `bank-a`; `tet-fee-waiver` v1 `PUBLISHED`, `lockVersion 1`, the only version; `bob` and `carol` hold `rules:approve`; `/api/bpm/meta` lists the setting `lifecycle.retire-approval: four-eyes`.
 - **When:** `bob` sends `POST .../rule-sets/tet-fee-waiver/versions/1:retire` with `If-Match: "1"` and `{ "reason": "Tet promotion ended", "confirmNoVersionInEffect": true }` (v1 is the last version in effect, PD-101); the host evaluates `tet-fee-waiver`; `bob` sends `POST .../versions/1:confirm-retire`; `carol` sends `POST .../versions/1:confirm-retire`. Failure cases: a retire request with `{ "reason": "" }`; a second retire request while one is pending; `:confirm-retire` with no pending request. Then `:cancel-retire` with a reason on a new request.
 - **Then:** The request returns `200` with v1 still `PUBLISHED` and a pending retirement (`retireRequestedBy: bob`), one history row `RETIRE_REQUESTED` and one `rules.version.retire-requested.v1` event; the evaluation still selects v1. `bob`'s confirmation returns `403 SELF_APPROVAL_FORBIDDEN` and changes nothing. `carol`'s confirmation returns `200`: v1 is `RETIRED` with the same effects as `RLE-026` (retired event, cache epoch, `404 NO_EFFECTIVE_VERSION` on every replica within 5 s), and the event and the history row record `approvalMode: four-eyes`, requester `bob`, confirmer `carol` and the reason. The empty reason returns `400 INPUT_INVALID`; the second request and the confirmation without a request return `409 INVALID_STATE`; none changes anything. A cancellation leaves v1 `PUBLISHED` with no pending request and one history row `RETIRE_CANCELLED`.
@@ -1000,6 +1081,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-039 A caller lists the rule sets of their own tenant, by name, a page at a time
 - **Traces to:** `TR-TEN-01`, `TR-SEC-03`, `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a` has `card-fee` (v1 `PUBLISHED` effective since `2026-12-01T00:00:00Z`, v2 `PENDING_APPROVAL` requested at `2026-12-10T03:00:00Z`), `fx-margin` (v1 `DRAFT`) and `kyc-risk` (v1 `DRAFT`); tenant `bank-b` has its own `aml-score`. Caller `lan` holds `rules:read` in `bank-a`; the host clock reads `2026-12-10T03:00:00Z`.
 - **When:** `lan` sends `GET /api/bpm/rules/v1/rule-sets?limit=2`, then the same request with the returned `cursor`. Failure cases: `limit=0`, `limit=201`, a `cursor` that was not issued by the endpoint, a cursor whose decoded key is not a rule set name (for example a NUL byte), a cursor issued to `lan` replayed by a `bank-b` caller, and a caller without `rules:read`.
 - **Then:** The first page lists `card-fee` (`latestVersion: 2`, `latestStatus: PENDING_APPROVAL`, `publishedVersion: 1`, `lastChangedAt: 2026-12-10T03:00:00Z`) and `fx-margin` (`latestVersion: 1`, `latestStatus: DRAFT`, `publishedVersion: null`) and a `nextCursor`; the second page lists `kyc-risk` alone and `nextCursor: null`. `aml-score` never appears. `limit=0`, `limit=201`, the forged cursor, the NUL key and the replayed cursor return `400 QUERY_INVALID`, never `500`: a cursor is signed (HMAC-SHA256 over tenant, list and position, with a key stored once per database), so only a cursor issued to the same tenant for the same list is accepted; the caller without the permission gets `403 PERMISSION_DENIED`. `GET /rule-sets/card-fee` returns the same summary as the list item, and a `bank-b` caller reading it gets `404 RULE_SET_NOT_FOUND`. A name that cannot be a rule set name (`card\u0000fee`, upper case) is `404 RULE_SET_NOT_FOUND` on every endpoint that takes one. The list writes nothing.
@@ -1009,6 +1091,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-040 A caller lists the versions of one rule set, newest first, with who created, requested and approved each
 - **Traces to:** `TR-TEN-01`, `TR-SEC-04`, `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`; `card-fee` v1 created by `lan`, requested by `lan` and approved by `minh`; v2 created and requested by `lan`; v3 `DRAFT` created by `lan`. Caller `minh` holds `rules:read` and `rules:approve`.
 - **When:** `minh` sends `GET /api/bpm/rules/v1/rule-sets/card-fee/versions?limit=2`, then follows `nextCursor`. Failure cases: the same request from a `bank-b` caller; `GET /rule-sets/no-such-set/versions`; `limit=500`.
 - **Then:** The first page lists v3 (`DRAFT`, `createdBy: lan`, `requestedBy: null`) then v2 (`PENDING_APPROVAL`, `requestedBy: lan`, `approvedBy: null`); the second page lists v1 (`PUBLISHED`, `approvedBy: minh`) and `nextCursor: null`. Items carry no definition. The `bank-b` caller and the unknown name get `404 RULE_SET_NOT_FOUND`; `limit=500` returns `400 QUERY_INVALID`. The list writes nothing.
@@ -1018,6 +1101,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-041 A refused document lists every cell problem with its rule id and column
 - **Traces to:** `TR-DET-02`, `TR-UI-02`, `TR-SEC-08`
 - **Milestone:** M1
+- **Kind:** other
 - **Given:** Tenant `bank-a`; caller `lan` holds `rules:author`. File `card-fee-bad.yaml` with inputs `tier` (string) and `balance` (money), output `fee` (money), and rows `R2` (`balance: ">= 50000000"`, a number compared with money) and `R4` (`then: { fee: "+ 1" }`, which does not parse). Second file: a document with an unknown root property `maks`.
 - **When:** `lan` posts each file to `POST /api/bpm/rules/v1/rule-sets`.
 - **Then:** The first returns `422 VALIDATION_FAILED` whose `violations` are, in document order (rule by rule; within a rule the conditions, then the outputs, each in the order written, nested `any` and `all` groups after the plain conditions), `{ ruleId: R2, column: balance, message: ... }` and `{ ruleId: R4, column: fee, message: ... }`; each `message` carries no rule id or column prefix. The second returns `422 VALIDATION_FAILED` with one violation whose `ruleId` and `column` are null and whose `message` names `maks`. Neither stores a rule set, a version or a source document. Both carry `violationsTruncated: false`; a document with 150 bad output cells lists the first 100 in document order with `violationsTruncated: true`.
@@ -1027,6 +1111,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-042 A money output written without a currency is refused at import, not at evaluation
 - **Traces to:** `TR-DET-02`, `TR-DET-03`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`; `card-fee.yaml` whose output `fee` is `money`, with row `R2` (`txCount >= 3 -> fee: "30000"`) and a second file where `R2` writes `fee: 30000` (a YAML number). Third file: output `waived` of type `boolean` with `R1` writing `waived: "'yes'"`. Fourth file: `R2` writes `fee: "30000 VND"`.
 - **When:** `lan` imports each file.
 - **Then:** The first three return `422 VALIDATION_FAILED` with a violation `{ ruleId: R2, column: fee }` (`{ ruleId: R1, column: waived }` for the third) whose message says the output is `money` and must carry a currency (is `boolean` for the third); nothing is stored, so no decision can ever fail with `EVALUATION_ERROR` for this reason. The fourth imports as `DRAFT`, and once approved, evaluating it with `tier = "SILVER"`, `txCount = 5` returns `fee: { "currency": "VND", "amount": 30000 }` from `R2`.
@@ -1036,6 +1121,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-043 A version tells the caller which lifecycle actions they may take, with four eyes applied
 - **Traces to:** `TR-SEC-04`, `TR-UI-02`
 - **Milestone:** M1
+- **Kind:** control
 - **Given:** Tenant `bank-a`; `card-fee` v2 `PENDING_APPROVAL`, created and requested by `lan`; v3 `DRAFT` created by `lan`; v1 `PUBLISHED`. `lan` holds `rules:read`, `rules:author` and `rules:approve`; `minh` holds `rules:read` and `rules:approve`; `dan` holds `rules:read` only.
 - **When:** Each of them reads v1, v2 and v3 with `GET .../versions/{v}` and lists the versions.
 - **Then:** On v2 `lan` gets `allowedActions: ["withdraw"]` (`approve` and `reject` are absent because `lan` requested it; `withdraw` is the requester's action, `RLE-046`), `minh` gets `["approve", "reject"]`, `dan` gets `[]`. On v3 `lan` gets `["request-publish"]` and `minh` gets `[]`. On v1 `lan` and `minh` get `["retire"]` (they hold `rules:approve`, #28) and `dan` gets `[]`; a retired version gives everyone `[]`. The list items carry the same values. `lan`'s `approve` of v2 is still refused with `403 SELF_APPROVAL_FORBIDDEN`, because `allowedActions` is a hint and the command checks again. An idempotent replay of a command returns the actions computed for the caller at replay time, not the stored ones.
@@ -1045,6 +1131,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-044 Command and evaluation bodies are read up to their limit; a larger body is `413 PAYLOAD_TOO_LARGE`
 - **Traces to:** `TR-SEC-07`, `TR-SEC-08`
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Tenant `bank-a`; `card-fee` v1 published and v2 `PENDING_APPROVAL`; caller `minh` holds `rules:approve` and `rules:evaluate`. The limits are 16,384 bytes for `:approve` and `:reject` bodies and 1,048,576 bytes for `:evaluate` (`EngineDefaults`), the import limit of `RuleSetReader`.
 - **When:** `minh` sends `:reject` and `:approve` of v2 with a 16,385-byte body; `:reject` with a body that has no `Content-Length` (chunked) and never ends; `:evaluate` of `card-fee` with a 1,048,577-byte body; `POST /rule-sets` with a 1,048,577-byte YAML body, declared and chunked; the same import by a caller with only `rules:read`; and `:reject` with `{ "reason": "R2 waiver needs pricing committee minutes" }`.
 - **Then:** The oversized and endless bodies return `413 PAYLOAD_TOO_LARGE` as problem details; a declared `Content-Length` above the limit is refused before the body is read, and an undeclared one is read at most one byte past the limit. The caller with only `rules:read` gets `403 PERMISSION_DENIED`, because every endpoint checks its permission before it reads the body. None of them changes v2, creates a rule set, writes an event, a history row, a decision row or an idempotency record. The normal reject returns `200`.
@@ -1058,6 +1145,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-045 The same behaviour has one hash in any style and serialisation, and different behaviour never shares one
 - **Traces to:** `TR-STD-03`, `TR-STD-25`, `TR-STD-28`, `TR-DEF-04`, ADR-0026
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Rule set `style-check` v1 (`hitPolicy: first`) with inputs `x` (integer), `y` (integer), `country` (string), `at` (datetime) and `amount` (money, USD), and output `rate` (decimal), written twice. Document A uses author style: `x >= 3`, `x between 1 and 5`, `x is not null`, `country != 'VN'`, `country in ['VN','SG']`, `at == datetime('2026-12-01T00:00:00+07:00')`, `amount == 12.5 USD`. Document B uses the normal form: `>= 3`, `between 1 and 5`, `is not null`, `!= 'VN'`, `in ['VN', 'SG']`, `== datetime('2026-11-30T17:00:00Z')`, `== 12.50 USD`. Both have `rate: "0.10"`.
 - **When:** A and B are imported as YAML in two tenants. A is exported as DMN and imported again, then exported and imported once more. Separately, the DMN cells `money(12.5, "USD")`, `money(10000.00, "VND")` and `money(-5, "USD")` go through import, export and import. Then each negative case below is imported as its own version of `style-check`.
 - **Scope in schema v1 (ADR-0026 decision 2):** "one hash per behaviour" covers simple cells (a single comparison, range, list or literal). A compound cell (arithmetic, `and`/`or`, a function call) keeps its written spacing, so two spellings of the same compound cell hash differently in v1; different behaviour still never shares a hash.
@@ -1085,6 +1173,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-060 A CMMN file is refused by name at the rule set import, before any other check
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** `claim-case.cmmn`, whose root is `definitions` in namespace `http://www.omg.org/spec/CMMN/20151109/MODEL` (CMMN 1.1), with a `casePlanModel` on line 4.
 - **When:** It is posted to `POST /api/bpm/rules/v1/rule-sets/{name}/versions` with `Content-Type: application/xml`.
 - **Then:**
@@ -1097,6 +1186,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-061 A DMN element outside the current stage is refused by name with its id, line and stage
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
+- **Kind:** semantics
 - **Given:** `fees.dmn` contains a decision table `fee-table` (supported), a second `decision` `risk-adj` with an `informationRequirement` that names a required decision on line 40 (`S1`), a `businessKnowledgeModel` `bkm-1` on line 55 (`S2`), a `decisionService` `ds-1` on line 70 (`S2`), and a `context` boxed expression on line 81 (`S2`).
 - **When:** It is imported as a rule set version.
 - **Then:**
@@ -1114,6 +1204,7 @@ A host registers named functions that rule cells may call next to the built-in f
 ### RLE-055 A registered host function can be called in a rule cell
 - **Traces to:** `TR-SEC-01`, `TR-DET-01`, PD-119, #34
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The host registers `segmentOf(balance: money, tenureMonths: number) -> string`, version `2027.1`, step cost 1. It returns `PRIORITY` when the balance is at least 500,000,000 VND and the tenure is at least 24 months, otherwise `MASS`. Tenant `bank-a` publishes `card-fee` v1 (`first`): `R1` (`segmentOf(balance, tenureMonths) == 'PRIORITY' -> fee: 0 VND`), `R2` (`{} -> fee: 50000 VND`).
 - **When:** Evaluate (a) `{ balance: 600000000 VND, tenureMonths: 36 }`, (b) `{ balance: 600000000 VND, tenureMonths: 12 }`, (c) `{ balance: null, tenureMonths: 36 }`; then replay (a).
 - **Then:**
@@ -1127,6 +1218,7 @@ A host registers named functions that rule cells may call next to the built-in f
 ### RLE-056 A call to an unknown function, or with the wrong arguments, is refused at import
 - **Traces to:** `TR-SEC-01`, `TR-DET-02`, PD-119, #34
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The registry of `RLE-055`; caller `lan` holds `rules:author`.
 - **When:** `lan` imports four files: in the first, `R1` calls `riskScore(balance)`, which is not registered; in the second, `segmentOf(tenureMonths, balance)`; in the third, `segmentOf(balance)`; in the fourth, `segmentOf(balance, tenureMonths) > 3`.
 - **Then:**
@@ -1139,6 +1231,7 @@ A host registers named functions that rule cells may call next to the built-in f
 ### RLE-057 A function that fails, or returns the wrong type, fails the decision closed
 - **Traces to:** `TR-SEC-01`, `TR-SEC-08`, PD-119, #34
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `card-fee` v1 of `RLE-055` is published.
 - **When:** The implementation (a) throws `IllegalStateException("upstream timeout")`; (b) returns an `Integer` where a `string` is declared; (c) is registered with step cost 20,000 and `card-fee` is imported again as v2 under a step budget of 10,000; (d) costs 20 steps under a budget of 15 for a version approved at the default budget.
 - **Then:**
@@ -1151,6 +1244,7 @@ A host registers named functions that rule cells may call next to the built-in f
 ### RLE-058 The registry is checked at start-up, and each decision records the function versions it used
 - **Traces to:** `TR-SEC-01`, `TR-DET-05`, PD-119, #34
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** (a) a host that registers `segmentOf` twice; (b) one that registers `round`, a built-in name; (c) one that registers `Segment-Of`, outside `^[a-z][A-Za-z0-9]{0,63}$`; (d) `card-fee` v1 approved and decision `D1` made with `segmentOf` version `2027.1`, after which the host redeploys with version `2027.2`.
 - **When:** The host starts; in (d), `card-fee` is evaluated and `D1` is replayed; then the host starts with `evaluation.function-version-change: refuse`.
 - **Then:**
@@ -1167,6 +1261,7 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 ### RLE-059 A rule set file is tested in JUnit with the engine's own evaluation and a fixed clock
 - **Traces to:** `TR-QA-01`, `TR-DET-01`, #35
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** `src/test/resources/rules/card-fee.yaml` (`first`): `R1` (`tier == 'GOLD' -> fee: 0 VND`), `R2` (`txCount >= 3 -> fee: 10000 VND`), `R3` (`{} -> fee: 50000 VND`). A test class annotated `@RuleSetTest("rules/card-fee.yaml")` with the default clock `2027-01-01T00:00:00Z`, overridable per class (`clock = "..."`) or per test (`@RuleSetClock("2027-06-30T17:00:00Z")`).
 - **When:** A test calls `rules.evaluate(Map.of("tier", "SILVER", "txCount", 5))` and, in a second test, `rules.evaluate(Map.of("tier", "GOLD", "extra", 1))`.
 - **Then:**
@@ -1180,6 +1275,7 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 ### RLE-064 The run writes a row coverage report that names every row no test matched
 - **Traces to:** `TR-QA-01`, #35
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** Two test classes over `card-fee.yaml` whose tests match `R1` and `R2` and never `R3`; a third class over `kyc-route.yaml` (`unique`, rows `K1`, `K2`) whose test hits `K1` and `K2` together (`UNIQUE_HIT_VIOLATION`).
 - **When:** The tests run (`mvn test`).
 - **Then:**
@@ -1194,6 +1290,7 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 ### RLE-065 The build fails on uncovered rows only when the project sets a threshold
 - **Traces to:** `TR-QA-01`, PD-120, #35
 - **Milestone:** M1
+- **Kind:** semantics
 - **Given:** The run of `RLE-064`, and the setting `horus.rules.coverage.fail-on` (in `junit-platform.properties` or as a system property) with the values `none` (the default), `unique` or `any`.
 - **When:** The run ends with each value.
 - **Then:**

@@ -2,22 +2,4 @@
 # The spec-to-test gate (tools/spec-coverage.py, TR-QA-01) skips these ids and warns when one gains a test.
 # Remove the line in the pull request that adds the test. Format: <ID> <milestone>, the milestone as in SPEC.md.
 
-# CKP-001: cases A (embedded) and B (standalone, #11) have tests; stays listed until the rule set list step.
-CKP-001 M1
 CKP-011 M3
-# CKP-016: automatic layout ships as CKP-069; stays listed until stored layouts (slice 8.8) and the instance view.
-CKP-016 M2
-CKP-018 M2
-CKP-019 M2
-CKP-020 M2
-CKP-021 M2
-CKP-023 M2
-CKP-025 M3
-CKP-026 M3
-CKP-028 M2
-# CKP-029: node types and the generic node ship as CKP-070; stays listed until a second host and the stage in the host details.
-CKP-029 M2
-CKP-031 M1
-CKP-032 M1
-CKP-035 M2
-CKP-036 M3

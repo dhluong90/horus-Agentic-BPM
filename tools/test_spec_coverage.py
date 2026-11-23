@@ -19,7 +19,7 @@ gate = importlib.util.module_from_spec(_SPEC)
 sys.modules["spec_coverage"] = gate
 _SPEC.loader.exec_module(gate)
 
-SPEC_ONE = "# Spec\n\n### RLE-001 First\n- **Milestone:** M1\n"
+SPEC_ONE = "# Spec\n\n### RLE-001 First\n- **Milestone:** M1\n- **Kind:** control\n"
 
 
 class Repo:
@@ -83,7 +83,7 @@ class SpecCoverageGateTest(unittest.TestCase):
         self.assertCovered(self.java("@Test void RLE_001_first_works() {}"))
 
     def TR_QA_01_longer_number_does_not_cover_a_shorter_id(self):
-        spec = "### RLE-010 Tenth\n- **Milestone:** M1\n"
+        spec = "### RLE-010 Tenth\n- **Milestone:** M1\n- **Kind:** control\n"
         result = self.java("@Test void RLE_0100_not_rle_010() {}", spec=spec)
         self.assertNotCovered(result, "RLE-010")
         self.assertIn("RLE_0100_not_rle_010", result.test_names["m"])
@@ -213,19 +213,19 @@ class SpecCoverageGateTest(unittest.TestCase):
     # S2: statement headings ---------------------------------------------------
 
     def TR_QA_01_two_and_four_hash_headings_are_statements(self):
-        spec = "## RLE-016 Two\n- **Milestone:** M1\n\n#### RLE-017 Four\n- **Milestone:** M1\n"
+        spec = "## RLE-016 Two\n- **Milestone:** M1\n- **Kind:** control\n\n#### RLE-017 Four\n- **Milestone:** M1\n- **Kind:** control\n"
         result = self.java("", spec=spec)
         self.assertNotCovered(result, "RLE-016")
         self.assertNotCovered(result, "RLE-017")
 
     def TR_QA_01_four_digit_id_is_a_statement(self):
-        spec = "### RLE-1000 Four digits\n- **Milestone:** M1\n"
+        spec = "### RLE-1000 Four digits\n- **Milestone:** M1\n- **Kind:** control\n"
         self.assertNotCovered(self.java("@Test void RLE_100_x() {}", spec=spec), "RLE-1000")
         self.repo.write("m/src/test/java/U.java", "class U { @Test void RLE_1000_x() {} }")
         self.assertTrue(self.repo.check().passed)
 
     def TR_QA_01_duplicate_statement_heading_fails(self):
-        spec = SPEC_ONE + "\n### RLE-001 Again\n- **Milestone:** M9\n"
+        spec = SPEC_ONE + "\n### RLE-001 Again\n- **Milestone:** M9\n- **Kind:** control\n"
         result = self.java("@Test void RLE_001_x() {}", spec=spec)
         self.assertTrue(any("RLE-001 is defined twice" in e for e in result.errors), result.errors)
 
@@ -233,8 +233,37 @@ class SpecCoverageGateTest(unittest.TestCase):
         result = self.java("@Test void RLE_001_x() {}", spec="### RLE-001 No milestone\n- **Given:** x\n")
         self.assertTrue(any("RLE-001 has no '- **Milestone:** M<n>' line" in e for e in result.errors), result.errors)
 
+    def TR_QA_01_statement_without_kind_fails_and_names_the_id(self):
+        spec = "### RLE-001 No kind\n- **Milestone:** M1\n"
+        result = self.java("@Test void RLE_001_x() {}", spec=spec)
+        self.assertTrue(any("RLE-001 has no '- **Kind:**" in e for e in result.errors), result.errors)
+
+    def TR_QA_01_unknown_kind_fails(self):
+        spec = "### RLE-001 Odd\n- **Milestone:** M1\n- **Kind:** misc\n"
+        result = self.java("@Test void RLE_001_x() {}", spec=spec)
+        self.assertTrue(any("RLE-001 has Kind 'misc'" in e for e in result.errors), result.errors)
+
+    def TR_QA_01_control_statement_without_test_fails_and_names_the_id(self):
+        result = self.java("", spec="### RLE-001 C\n- **Milestone:** M1\n- **Kind:** control\n")
+        self.assertNotCovered(result)
+
+    def TR_QA_01_semantics_statement_without_test_fails_and_names_the_id(self):
+        result = self.java("", spec="### RLE-001 S\n- **Milestone:** M1\n- **Kind:** semantics\n")
+        self.assertNotCovered(result)
+
+    def TR_QA_01_other_statement_without_test_passes_with_a_warning_naming_the_id(self):
+        result = self.java("", spec="### RLE-001 O\n- **Milestone:** M1\n- **Kind:** other\n")
+        self.assertTrue(result.passed, result.errors)
+        self.assertTrue(any("RLE-001 is kind other and has no test" in w for w in result.warnings), result.warnings)
+
+    def TR_QA_01_allow_listed_id_with_a_test_is_a_warning_to_remove_the_line(self):
+        self.repo.write("m/docs/spec-pending.txt", "RLE-001 M1\n")
+        result = self.java("@Test void RLE_001_x() {}")
+        self.assertTrue(result.passed, result.errors)
+        self.assertTrue(any("RLE-001 is on the allow-list but has a test" in w for w in result.warnings), result.warnings)
+
     def TR_QA_01_malformed_id_heading_fails(self):
-        result = self.java("", spec=SPEC_ONE + "\n### RLE-01 Two digits\n- **Milestone:** M1\n")
+        result = self.java("", spec=SPEC_ONE + "\n### RLE-01 Two digits\n- **Milestone:** M1\n- **Kind:** control\n")
         self.assertTrue(any("starts like a statement id" in e for e in result.errors), result.errors)
 
     def TR_QA_01_ids_in_fenced_code_are_ignored(self):
