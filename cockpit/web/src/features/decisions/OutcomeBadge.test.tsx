@@ -31,4 +31,11 @@ describe('decision outcome as the API names it', () => {
     expect(isFailedOutcome(knownOutcome('UNIQUE_HIT_VIOLATION'))).toBe(true);
     expect(isFailedOutcome(knownOutcome('SOMETHING_NEW'))).toBe(true);
   });
+
+  it('CKP_071_the_stored_outcome_OK_reads_as_a_match_with_rules_and_no_match_without', () => {
+    expect(knownOutcome('OK', ['R2'])).toBe('MATCHED');
+    expect(knownOutcome('OK', [])).toBe('NO_MATCH');
+    expect(isFailedOutcome(knownOutcome('OK', ['R2']))).toBe(false);
+    expect(isFailedOutcome(knownOutcome('OK', []))).toBe(false);
+  });
 });

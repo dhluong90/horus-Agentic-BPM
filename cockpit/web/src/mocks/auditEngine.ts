@@ -323,9 +323,12 @@ export function createAuditRoutes({ versions, problem, hash, now, options = {} }
     const d = decisions.find((item) => item.decisionId === id);
     if (!d) return problem(404, 'DECISION_NOT_FOUND', `Decision ${id} not found`);
     const v = versionOf(d.ruleSet, d.version);
-    if (tail === undefined) return json(logged(d, v));
+    // As the engine does: the detail and the explanation carry the stored outcome, OK for a match and for no match;
+    // only the list names MATCHED and NO_MATCH.
+    const stored = d.outcome === 'MATCHED' || d.outcome === 'NO_MATCH' ? 'OK' : d.outcome;
+    if (tail === undefined) return json({ ...logged(d, v), outcome: stored });
     const asked = url.searchParams.get('lang') ?? request.headers['accept-language'] ?? 'en';
-    return json(explanation(d, v, asked.startsWith('vi') ? 'vi' : 'en'));
+    return json({ ...explanation(d, v, asked.startsWith('vi') ? 'vi' : 'en'), outcome: stored });
   }
 
   function history(name: string, request: AuditRequest): AuditResponse {

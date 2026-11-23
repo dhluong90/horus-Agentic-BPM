@@ -123,6 +123,14 @@ describe('one decision', () => {
     expect(marked[0]).toHaveTextContent(/^R2/);
   });
 
+  it('CKP_071_a_decision_the_engine_stores_as_OK_opens_as_a_match_never_as_failed', async () => {
+    open(`#/decisions/${NAMED}`);
+    // The detail and explanation endpoints answer outcome OK (the stored value) with matched rules.
+    expect(await screen.findByText(/Rule R2 matched/)).toBeInTheDocument();
+    expect(screen.queryByText('Failed')).not.toBeInTheDocument();
+    expect(document.querySelector('.why--failed')).toBeNull();
+  });
+
   it('CKP_072_decision_shows_engine_sentence_conditions_and_masked_inputs', async () => {
     open(`#/decisions/${NAMED}`);
     expect(await screen.findByRole('heading', { level: 1, name: 'card-fee decision' })).toBeInTheDocument();

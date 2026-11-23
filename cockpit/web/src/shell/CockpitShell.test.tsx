@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import { meLan } from '../mocks/fixtures';
 import { mockHost, setScenario } from '../mocks/node';
 
 /** Paths the cockpit asked for, in order. */
@@ -235,5 +236,20 @@ describe('embedded shell, tenant switcher', () => {
     render(<App />);
     await screen.findByTestId('header-user');
     expect(screen.queryByTestId('tenant-switcher')).not.toBeInTheDocument();
+  });
+
+  it('CKP_022_a_development_tenant_the_session_does_not_allow_is_never_offered', async () => {
+    const user = userEvent.setup();
+    setScenario('embedded-two-tenants');
+    // The host also reports a development tenant, but the session's allowed list does not contain it.
+    mockHost.use(http.get('*/api/bpm/me', () => HttpResponse.json({
+      ...meLan, tenant: { current: 'bank-a', allowed: ['bank-a', 'bank-b'], names: { 'bank-a': 'Bank A', 'bank-b': 'Bank B', dev: 'Dev tenant' } },
+    })));
+    render(<App />);
+
+    await user.click(await screen.findByTestId('tenant-switcher'));
+    const menu = screen.getByRole('list', { name: /tenant/i });
+    expect(within(menu).getAllByRole('button')).toHaveLength(2);
+    expect(within(menu).queryByRole('button', { name: /dev/i })).not.toBeInTheDocument();
   });
 });
