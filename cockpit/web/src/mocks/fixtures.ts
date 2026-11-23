@@ -21,6 +21,19 @@ export const metaRulesOnly: BpmMetaV1 = {
   limits: { maxPageSize: 200 },
 };
 
+/**
+ * A host with rule set templates and simulation reports (PD-112, PD-115): it announces both as features and asks for a
+ * report with every publication request of card-fee.
+ */
+export const metaWithReports: BpmMetaV1 = {
+  ...metaRulesOnly,
+  modules: [{
+    module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1',
+    features: ['rules.history-readings', 'rules.simulation-reports', 'rules.templates'],
+    settings: { 'authoring.cockpit-drafts': true, 'lifecycle.require-simulation-report': 'card-fee' },
+  }],
+};
+
 /** A module name no cockpit of this release knows: what a newer host with a third engine module reports. */
 export const UNKNOWN_MODULE = 'cases';
 
@@ -167,7 +180,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'rules-author-templates', 'rules-approver-report'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -208,6 +221,11 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
         meta: json({ ...metaRulesOnly, modules: [{ ...metaRulesOnly.modules[0], settings: { 'authoring.cockpit-drafts': false } }] }),
         me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate'] }),
       };
+    case 'rules-author-templates':
+      // An author who may simulate, on a host with templates and required reports.
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate'] }) };
+    case 'rules-approver-report':
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate', 'rules:simulate'] }) };
     case 'rules-reader':
       return { ...ok, me: json(meDan) };
     case 'processes-reviewer':
@@ -317,7 +335,7 @@ export function scenarioUser(scenario: Scenario): string {
   if (scenario === 'tasks-supervisor') return meSau.user.id;
   if (scenario === 'incidents-operator') return meTuan.user.id;
   if (scenario === 'incidents-proposer') return meLinh.user.id;
-  return scenario === 'ready-approver' || scenario === 'rules-approver' || scenario === 'processes-approver' || scenario === 'migration-approver' ? meMinh.user.id : meLan.user.id;
+  return scenario === 'ready-approver' || scenario === 'rules-approver' || scenario === 'rules-approver-report' || scenario === 'processes-approver' || scenario === 'migration-approver' ? meMinh.user.id : meLan.user.id;
 }
 
 /** The permissions /me lists in a scenario, which the mock Rule Engine uses for allowedActions and checks. */

@@ -7,6 +7,7 @@ import { mapLoadable, useEveryRuleSet, useRuleSetsCut } from '../overview/useRul
 import { useRulesSession } from './api/rulesContext';
 import { useImportRuleSet } from './api/useRules';
 import { ImportFileButton } from './components/ImportFileButton';
+import { NewRuleSetDialog } from './components/NewRuleSetDialog';
 import { ProblemNotice } from './components/ProblemNotice';
 import { columnLabel } from './model/reading';
 import { RuleSetPage } from './RuleSetPage';
@@ -26,19 +27,22 @@ const FILTERS: readonly Filter[] = ['all', 'DRAFT', 'PENDING_APPROVAL', 'PUBLISH
 
 function RuleSetList({ pageLimit }: { pageLimit: number }) {
   const { t } = useI18n();
-  const { can } = useRulesSession();
+  const { can, templates, cockpitDrafts } = useRulesSession();
   const ruleSets = useEveryRuleSet(pageLimit);
   const cut = useRuleSetsCut(pageLimit);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [pickedFile, setPickedFile] = useState<string | undefined>(undefined);
+  const [creating, setCreating] = useState(false);
   const importFile = useImportRuleSet((version) => {
     window.location.hash = formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' });
   });
   // Import from a file stays available when the host turns cockpit drafts off (PD-075, CKP-032).
   const mayImport = can('rules:author');
+  // A new rule set from a template needs the host's templates and the right to author; it opens in the grid when the host allows cockpit drafts.
+  const mayCreate = mayImport && templates;
   const counts = (items: readonly RuleSetSummary[]) => (status: Filter) => (status === 'all' ? items.length : items.filter((item) => item.latestStatus === status).length);
-  const shown = mapLoadable(ruleSets, (items) => items.filter((item) => (filter === 'all' || item.latestStatus === filter) && item.ruleSet.includes(query.trim().toLowerCase())));
+  const shown = mapLoadable(ruleSets, (items) => items.filter((item) => (filter === 'all' || item.latestStatus === filter) && `${item.ruleSet} ${item.displayName.toLowerCase()}`.includes(query.trim().toLowerCase())));
   const count = ruleSets.status === 'ready' ? counts(ruleSets.data) : undefined;
   return (
     <section className="workspace" aria-labelledby="rules-title">
@@ -46,8 +50,19 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
         id="rules-title"
         title={t('rulesArea.title')}
         subtitle={t('rulesArea.subtitle')}
-        action={mayImport ? <ImportFileButton label={t('rulesArea.import')} busyLabel={t('rulesArea.importing')} busy={importFile.isPending} primary onDocument={(document, fileName) => { setPickedFile(fileName); importFile.start(document); }} /> : undefined}
+        action={mayImport ? (
+          <>
+            <ImportFileButton label={t('rulesArea.import')} busyLabel={t('rulesArea.importing')} busy={importFile.isPending} primary={!mayCreate} onDocument={(document, fileName) => { setPickedFile(fileName); importFile.start(document); }} />
+            {mayCreate ? <button type="button" className="btn btn--primary" onClick={() => { setCreating(true); }}><span aria-hidden="true">＋</span> {t('rulesArea.new')}</button> : null}
+          </>
+        ) : undefined}
       />
+      {creating ? (
+        <NewRuleSetDialog onClose={() => { setCreating(false); }}
+          onCreated={(version) => {
+            window.location.hash = formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: cockpitDrafts ? 'edit' : 'table' });
+          }} />
+      ) : null}
       {importFile.isError ? (
         <div className="page-alert">
           <ProblemNotice error={importFile.error} located refusedFile={pickedFile !== undefined ? { fileName: pickedFile, columnLabel: (name) => columnLabel(name, undefined) } : undefined} />

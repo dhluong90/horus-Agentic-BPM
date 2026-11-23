@@ -78,9 +78,9 @@ describe('Home (PD-092: content by role)', () => {
     open('');
 
     const recent = await card(/Recent rule sets/);
-    await within(recent).findByRole('link', { name: 'card-fee' });
+    await within(recent).findByRole('link', { name: 'Card fee' });
     const links = within(recent).getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('#/rules/'));
-    expect(links.map((link) => link.textContent)).toEqual(['card-fee', 'kyc-risk']);
+    expect(links.map((link) => link.textContent)).toEqual(['Card fee', 'Kyc risk']);
     expect(within(recent).getAllByText('Version 2').length).toBeGreaterThan(0);
   });
 
@@ -112,7 +112,7 @@ describe('Home (PD-092: content by role)', () => {
     expect(alert).toHaveTextContent('INTERNAL_ERROR');
     failing = false;
     await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
-    expect(await within(recent).findByRole('link', { name: 'card-fee' })).toBeInTheDocument();
+    expect(await within(recent).findByRole('link', { name: 'Card fee' })).toBeInTheDocument();
   });
 
   it('TR_UI_08_an_engine_without_the_list_endpoint_says_so_instead_of_a_failure', async () => {
@@ -220,20 +220,20 @@ describe('Rules', () => {
   it('TR_UI_08_approvers_have_no_import', async () => {
     setScenario('ready-approver');
     open('#/rules');
-    await screen.findByRole('link', { name: 'card-fee' });
+    await screen.findByRole('link', { name: 'Card fee' });
     expect(screen.queryByRole('button', { name: 'Import rule set' })).not.toBeInTheDocument();
   });
 
   it('the_status_filter_and_the_search_narrow_the_list', async () => {
     open('#/rules');
-    await screen.findByRole('link', { name: 'kyc-risk' });
+    await screen.findByRole('link', { name: 'Kyc risk' });
 
     await userEvent.click(screen.getByRole('button', { name: /^Waiting/ }));
-    expect(screen.queryByRole('link', { name: 'kyc-risk' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'card-fee' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Kyc risk' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Card fee' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /^All/ }));
     await userEvent.type(screen.getByRole('searchbox', { name: 'Find a rule set' }), 'kyc');
-    expect(screen.queryByRole('link', { name: 'card-fee' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Card fee' })).not.toBeInTheDocument();
   });
 });
 

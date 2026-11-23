@@ -50,6 +50,8 @@ export const ruleSetDefinition = z
     outputs: z.array(outputClause),
     rules: z.array(rule),
     description: z.string().optional(),
+    /** The name people read; optional in the document (the list then shows the rule set name made readable). */
+    displayName: z.string().optional(),
   })
   .loose();
 export type RuleSetDefinition = z.infer<typeof ruleSetDefinition>;
@@ -100,6 +102,8 @@ export type VersionSummary = z.infer<typeof versionSummary>;
 export const ruleSetSummary = z
   .object({
     ruleSet: z.string(),
+    /** The name people read, never empty; `ruleSet` stays the key behind it. */
+    displayName: z.string().min(1),
     latestVersion: z.number().int().min(1),
     latestStatus: z.enum(VERSION_STATUSES),
     publishedVersion: z.number().int().nullable(),
@@ -410,3 +414,55 @@ export interface SimulationSample {
   label?: string | undefined;
   inputs: Readonly<Record<string, unknown>>;
 }
+
+/*
+ * Rule set templates (listRuleSetTemplates, RLE-197) and simulation reports (RLE-199 to RLE-201). A template is the
+ * host's; a report is stored once, bound to the content hash it was run on, and never holds an input value.
+ */
+const byLanguage = z.record(z.string(), z.string());
+
+export const ruleSetTemplate = z
+  .object({
+    id: z.string().min(1),
+    labels: byLanguage,
+    descriptions: byLanguage,
+    source: z.enum(['BUILT_IN', 'HOST']),
+    hitPolicy: z.string(),
+    inputs: z.array(z.object({ name: z.string(), type: z.string(), allowed: z.array(z.string()) }).loose()),
+    outputs: z.array(z.object({ name: z.string(), type: z.string() }).loose()),
+    rows: z.array(z.object({ id: z.string(), when: z.record(z.string(), z.string()), then: z.record(z.string(), thenValue) }).loose()),
+  })
+  .loose();
+export type RuleSetTemplate = z.infer<typeof ruleSetTemplate>;
+export const ruleSetTemplates = z.object({ templates: z.array(ruleSetTemplate) }).loose();
+
+const reportOutcome = z.object({ kind: z.string(), ruleIds: z.array(z.string()), readings: readingsByLanguage }).loose();
+
+export const REPORT_STATUSES = ['CURRENT', 'OUT_OF_DATE'] as const;
+export const simulationReport = z
+  .object({
+    id: z.string().min(1),
+    ruleSet: z.string(),
+    version: z.number().int().min(1),
+    canonicalHash: z.string(),
+    status: z.enum(REPORT_STATUSES),
+    attached: z.boolean(),
+    createdBy: z.string(),
+    createdAt: z.string(),
+    scope: z.object({ source: z.enum(['SAMPLES', 'REPLAY']), from: z.string().nullable(), to: z.string().nullable(), limit: z.number().int().nullable(), truncated: z.boolean() }).loose(),
+    counts: z.object({ total: z.number().int(), changed: z.number().int(), unchanged: z.number().int(), failed: z.number().int(), notReplayable: z.number().int() }).loose(),
+    languages: z.array(z.string()),
+    rows: z.array(
+      z.object({ reference: z.string().nullable(), decisionId: z.string().nullable(), category: z.enum(['CHANGED', 'FAILED']), before: reportOutcome.nullable(), after: reportOutcome.nullable() }).loose(),
+    ),
+    rowsTruncated: z.boolean(),
+  })
+  .loose();
+export type SimulationReport = z.infer<typeof simulationReport>;
+export type SimulationReportRow = SimulationReport['rows'][number];
+export const simulationReportList = z.object({ reports: z.array(simulationReport) }).loose();
+
+/** What a new report is run over: the sample inputs, or the decisions logged in a period (createSimulationReport). */
+export type ReportRequest =
+  | { source: 'SAMPLES'; samples: readonly { inputs: Readonly<Record<string, unknown>> }[] }
+  | { source: 'REPLAY'; from: string; to: string; limit: number };

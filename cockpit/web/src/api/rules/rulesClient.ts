@@ -30,6 +30,12 @@ import {
   type RuleSetReadings,
   type SimulationReadings,
   type SimulationSample,
+  ruleSetTemplates,
+  simulationReport,
+  simulationReportList,
+  type ReportRequest,
+  type RuleSetTemplate,
+  type SimulationReport,
 } from './schemas';
 import {
   decisionExplanation,
@@ -125,8 +131,16 @@ export interface RulesClient {
   replaceDraft(name: string, version: number, lockVersion: number, document: RuleDocument, idempotencyKey: string): Promise<RuleSetVersion>;
   /** validateDraft: the checks of a save, answered as cell problems; stores nothing, so no key and no If-Match (RLE-090) */
   validateDraft(name: string, version: number, document: RuleDocument, signal?: AbortSignal): Promise<DraftValidation>;
-  /** requestPublish */
-  requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string): Promise<RuleSetVersion>;
+  /** requestPublish; `simulationReportId` attaches a report of this version (RLE-201), required when the host lists the rule set in lifecycle.require-simulation-report */
+  requestPublish(name: string, version: number, lockVersion: number, idempotencyKey: string, simulationReportId?: string): Promise<RuleSetVersion>;
+  /** listRuleSetTemplates: the host's templates a new rule set starts from (RLE-197); writes nothing */
+  listTemplates(signal?: AbortSignal): Promise<RuleSetTemplate[]>;
+  /** listSimulationReports: at most 50 reports of a version, newest first, without rows (RLE-200) */
+  listSimulationReports(name: string, version: number, signal?: AbortSignal): Promise<SimulationReport[]>;
+  /** getSimulationReport: one stored report with its changed rows; it never changes (RLE-200) */
+  getSimulationReport(name: string, version: number, reportId: string, signal?: AbortSignal): Promise<SimulationReport>;
+  /** createSimulationReport: runs the simulation and stores the report bound to the version's content (RLE-199) */
+  createSimulationReport(name: string, version: number, request: ReportRequest, idempotencyKey: string): Promise<SimulationReport>;
   /** approve; `reviewedHash` is the canonicalHash of the content the reviewer saw, never re-read at approval time (RLE-084); `acknowledgedWarnings` are the exact { code, input } pairs the approver accepted (PD-104, RLE-053) */
   approve(name: string, version: number, lockVersion: number, reviewedHash: string, comment: string | undefined, idempotencyKey: string, acknowledgedWarnings?: readonly AcknowledgedWarning[]): Promise<RuleSetVersion>;
   /** searchDecisions: one page, newest first (RLE-029); writes nothing */
@@ -295,10 +309,35 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
       );
       return answer.data;
     },
-    async requestPublish(name, version, lockVersion, idempotencyKey) {
+    async requestPublish(name, version, lockVersion, idempotencyKey, simulationReportId) {
       const answer = await call(
-        { method: 'POST', path: `${versionPath(name, version)}:request-publish`, headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) } },
+        {
+          method: 'POST',
+          path: `${versionPath(name, version)}:request-publish`,
+          headers: { 'Idempotency-Key': idempotencyKey, 'If-Match': ifMatch(lockVersion) },
+          // A body only when a report is attached: a request without one is the request of a client written before reports.
+          ...(simulationReportId !== undefined ? { body: { contentType: 'application/json', text: JSON.stringify({ simulationReportId }) } } : {}),
+        },
         ruleSetVersion,
+      );
+      return answer.data;
+    },
+    async listTemplates(signal) {
+      const answer = await call({ method: 'GET', path: `${RULES_BASE}/rule-set-templates`, ...(signal ? { signal } : {}) }, ruleSetTemplates);
+      return answer.data.templates;
+    },
+    async listSimulationReports(name, version, signal) {
+      const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/simulation-reports`, ...(signal ? { signal } : {}) }, simulationReportList);
+      return answer.data.reports;
+    },
+    async getSimulationReport(name, version, reportId, signal) {
+      const answer = await call({ method: 'GET', path: `${versionPath(name, version)}/simulation-reports/${segment(reportId)}`, ...(signal ? { signal } : {}) }, simulationReport);
+      return answer.data;
+    },
+    async createSimulationReport(name, version, request, idempotencyKey) {
+      const answer = await call(
+        { method: 'POST', path: `${versionPath(name, version)}/simulation-reports`, headers: { 'Idempotency-Key': idempotencyKey }, body: { contentType: 'application/json', text: JSON.stringify(request) } },
+        simulationReport,
       );
       return answer.data;
     },

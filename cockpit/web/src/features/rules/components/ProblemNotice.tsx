@@ -21,6 +21,9 @@ const KNOWN_CODES = [
   'EVALUATION_ERROR',
   'QUERY_INVALID',
   'PAYLOAD_TOO_LARGE',
+  'SIMULATION_REPORT_REQUIRED',
+  'SIMULATION_REPORT_OUT_OF_DATE',
+  'SIMULATION_REPORT_NOT_FOUND',
 ] as const;
 
 function messageKey(error: HostError): MessageKey {

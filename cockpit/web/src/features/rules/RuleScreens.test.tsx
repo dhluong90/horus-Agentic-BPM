@@ -67,7 +67,7 @@ describe('rule set list and version view', () => {
   it('RLE_039_a_list_cut_short_by_the_page_guard_says_so', async () => {
     let n = 0;
     mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json({
-      data: [{ ruleSet: `rs-${String((n += 1))}`, latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }],
+      data: [{ ruleSet: `rs-${String((n += 1))}`, displayName: `Rs ${String(n)}`, latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }],
       nextCursor: 'more', hasNext: true,
     })));
     open('#/rules');
@@ -83,7 +83,7 @@ describe('rule set list and version view', () => {
     const document_ = { schemaVersion: 1, ruleSet: 'fx-margin', hitPolicy: 'first', inputs: [{ name: 'tier', type: 'string' }], outputs: [{ name: 'fee', type: 'money' }],
       rules: [{ id: 'R1', when: { tier: "== 'GOLD'" }, then: { fee: '0 VND' } }] };
     await user.upload(input, new File([JSON.stringify(document_)], 'fx-margin.json', { type: 'application/json' }));
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('fx-margin');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Fx margin');
     expect(await versionLine(1)).toBeInTheDocument();
     expect(contentTypes).toEqual(['application/yaml']);
   });
@@ -97,7 +97,7 @@ describe('rule set list and version view', () => {
   it('CKP_030_version_reads_as_a_table_and_the_source_only_on_purpose', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee');
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Card fee');
     expect(await versionLine(1)).toHaveTextContent('Version 1 · in effect · first matching row wins');
     expect(screen.getByText('50,000,000 VND')).toBeInTheDocument();
     expect(screen.getAllByText('Gold').length).toBeGreaterThan(0);

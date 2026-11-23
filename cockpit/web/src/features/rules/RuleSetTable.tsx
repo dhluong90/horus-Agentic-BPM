@@ -42,7 +42,9 @@ export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, 
         {rows.map((item) => (
           <tr key={item.ruleSet}>
             <th scope="row">
-              <a className="qtable__link" href={formatRoute({ name: 'rule-set', ruleSet: item.ruleSet, version: undefined, lens: undefined })}>{item.ruleSet}</a>
+              <a className="qtable__link" href={formatRoute({ name: 'rule-set', ruleSet: item.ruleSet, version: undefined, lens: undefined })}>{item.displayName}</a>
+              {/* The key stays visible behind the name people read, for support and for the Details of the rule set. */}
+              <span className="qtable__key">{item.ruleSet}</span>
             </th>
             <td><StatusBadge status={item.latestStatus} /></td>
             <td className="tnum">{version(item.latestVersion)}</td>
