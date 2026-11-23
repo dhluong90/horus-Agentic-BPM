@@ -1,9 +1,12 @@
-import type { DefinitionStatus } from '../../api/processes/schemas';
+import type { DefinitionStatus, DefinitionSummary } from '../../api/processes/schemas';
 import { DOCS } from '../../app/links';
 import { formatRoute } from '../../app/route';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
+import { RecentCard } from '../../components/RecentCard';
+import { InitialDisc, TintTiles } from '../../components/TintTiles';
 import { useI18n } from '../../i18n/I18nProvider';
-import { formatDateTime } from '../rules/model/dates';
+import { formatDate, formatDateTime } from '../rules/model/dates';
+import { readableName } from '../tasks/model/queue';
 import { useProcessesSession } from './api/processesContext';
 import { useDefinitions } from './api/useProcesses';
 
@@ -36,21 +39,49 @@ export function ProcessesPage({ pageLimit }: { pageLimit: number }) {
   return (
     <section className="workspace" aria-labelledby="processes-title">
       <PageHead id="processes-title" title={t('processes.title')} subtitle={t('processes.subtitle')} />
-      <article className="card card--table" aria-labelledby="processes-title">
-        {can('processes:read') ? <DefinitionTable pageLimit={pageLimit} /> : <div className="card__pad"><EmptyState icon="processes" text={t('processes.noRead')} /></div>}
-      </article>
+      {can('processes:read') ? <DefinitionList pageLimit={pageLimit} /> : (
+        <article className="card card--table" aria-labelledby="processes-title"><div className="card__pad"><EmptyState icon="processes" text={t('processes.noRead')} /></div></article>
+      )}
     </section>
   );
 }
 
-function DefinitionTable({ pageLimit }: { pageLimit: number }) {
+/** The name people read: the definition's own name, or its key in words when it has none. */
+const nameOf = (item: DefinitionSummary) => item.name ?? readableName(item.key);
+
+function DefinitionList({ pageLimit }: { pageLimit: number }) {
   const { t, locale } = useI18n();
   const definitions = useDefinitions(pageLimit);
-  if (definitions.isPending) return <div className="card__pad"><LoadingRows rows={4} /></div>;
-  if (definitions.isError) return <div className="card__pad"><AreaError error={definitions.error} onRetry={() => { void definitions.refetch(); }} /></div>;
+  if (definitions.isPending) return <article className="card card--table"><div className="card__pad"><LoadingRows rows={4} /></div></article>;
+  if (definitions.isError) return <article className="card card--table"><div className="card__pad"><AreaError error={definitions.error} onRetry={() => { void definitions.refetch(); }} /></div></article>;
   if (definitions.data.length === 0) {
-    return <div className="card__pad"><EmptyState icon="processes" text={t('processes.empty')} action={{ label: t('processes.guide'), href: DOCS.processEngine }} /></div>;
+    return <article className="card card--table"><div className="card__pad"><EmptyState icon="processes" text={t('processes.empty')} action={{ label: t('processes.guide'), href: DOCS.processEngine }} /></div></article>;
   }
+  const count = (status: DefinitionStatus) => definitions.data.filter((item) => item.latestStatus === status).length;
+  const recent = [...definitions.data].sort((a, b) => Date.parse(b.lastChangedAt) - Date.parse(a.lastChangedAt)).slice(0, 4);
+  return (
+    <>
+      <TintTiles label={t('list.tiles')} tiles={[
+        { key: 'active', value: String(count('ACTIVE')), label: t('processes.tile.active'), tint: 'lime' },
+        { key: 'pending', value: String(count('PENDING_APPROVAL')), label: t('processes.tile.pending'), tint: 'amber' },
+        { key: 'draft', value: String(count('DRAFT')), label: t('processes.tile.draft'), tint: 'mint' },
+      ]} />
+      <div className="listing">
+        <article className="card card--table dense" aria-labelledby="processes-title">
+          <DefinitionTable items={definitions.data} />
+        </article>
+        <RecentCard title={t('processes.recent.title')} empty={t('list.recent.none')}
+          items={recent.map((item) => ({
+            key: item.key, name: nameOf(item),
+            status: t(`processStatus.${item.latestStatus}`), when: formatDateTime(item.lastChangedAt, locale) ?? '',
+          }))} />
+      </div>
+    </>
+  );
+}
+
+function DefinitionTable({ items }: { items: readonly DefinitionSummary[] }) {
+  const { t, locale } = useI18n();
   const version = (value: number) => t('rules.version', { version: String(value) });
   return (
     <table className="qtable qtable--links">
@@ -65,25 +96,30 @@ function DefinitionTable({ pageLimit }: { pageLimit: number }) {
         </tr>
       </thead>
       <tbody>
-        {definitions.data.map((item) => (
+        {items.map((item) => (
           <tr key={item.key}>
             <th scope="row">
-              <a className="qtable__link" href={formatRoute({ name: 'process', key: item.key, version: item.effectiveVersion ?? item.latestVersion })}>
-                {item.name ?? item.key}
-              </a>
+              <div className="dense__name">
+                <InitialDisc name={nameOf(item)} />
+                <a className="qtable__link" href={formatRoute({ name: 'process', key: item.key, version: item.effectiveVersion ?? item.latestVersion })} title={item.key}>{nameOf(item)}</a>
+              </div>
             </th>
             <td><DefinitionStatusPill status={item.latestStatus} /></td>
             <td className="tnum">{version(item.latestVersion)}</td>
             <td className="tnum">{item.effectiveVersion !== null && item.effectiveVersion !== undefined ? version(item.effectiveVersion) : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
-            <td className="tnum muted">{formatDateTime(item.lastChangedAt, locale)}</td>
-            {item.latestStatus === 'PENDING_APPROVAL' ? (
-              <td className="qtable__action">
+            <td className="tnum muted">{formatDate(item.lastChangedAt, locale)}</td>
+            <td className="qtable__action">
+              {item.latestStatus === 'PENDING_APPROVAL' ? (
                 <a className="btn btn--small hit" href={formatRoute({ name: 'process', key: item.key, version: item.latestVersion, lens: 'changes' })}
-                  aria-label={`${t('processes.reviewChange')}: ${item.name ?? item.key}, ${version(item.latestVersion)}`}>
+                  aria-label={`${t('processes.reviewChange')}: ${nameOf(item)}, ${version(item.latestVersion)}`}>
                   {t('processes.reviewChange')}
                 </a>
-              </td>
-            ) : <td className="qtable__chevron" aria-hidden="true">›</td>}
+              ) : (
+                <a className="btn btn--small btn--quiet hit" href={formatRoute({ name: 'process', key: item.key, version: item.effectiveVersion ?? item.latestVersion })} aria-label={t('list.openName', { name: nameOf(item) })}>
+                  {t('list.open')}
+                </a>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>

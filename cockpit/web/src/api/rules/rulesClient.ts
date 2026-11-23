@@ -26,6 +26,9 @@ import {
   readingsDiff,
   ruleSetReadings,
   simulationReadings,
+  historyReadings,
+  type HistoryReadings,
+  type ReplayRequest,
   type ReadingsDiff,
   type RuleSetReadings,
   type SimulationReadings,
@@ -159,6 +162,8 @@ export interface RulesClient {
   readDiff(name: string, version: number, base: number, signal?: AbortSignal): Promise<ReadingsDiff>;
   /** simulateReadings: runs the samples beside the version in effect and reads each outcome (RLE-093); logs nothing */
   simulateReadings(name: string, version: number, samples: readonly SimulationSample[], signal?: AbortSignal): Promise<SimulationReadings>;
+  /** simulateHistoryReadings: replays the logged decisions of a period through the version and reads each in words (RLE-202); logs nothing */
+  simulateHistoryReadings(name: string, version: number, request: ReplayRequest, signal?: AbortSignal): Promise<HistoryReadings>;
   /** evaluate: runs the version in effect at the host clock and logs one decision */
   evaluate(ruleSet: string, inputs: Readonly<Record<string, unknown>>, idempotencyKey: string): Promise<DecisionResult>;
 }
@@ -436,6 +441,15 @@ export function createRulesClient(baseUrl: string, fetchImpl: Fetch = fetch): Ru
           ...(signal ? { signal } : {}),
         },
         simulationReadings,
+      );
+      return answer.data;
+    },
+    async simulateHistoryReadings(name, version, request, signal) {
+      // A read: the engine writes nothing, so no Idempotency-Key. Only from, to and limit are sent (RLE-202).
+      const body = { from: request.from, to: request.to, ...(request.limit !== undefined ? { limit: request.limit } : {}) };
+      const answer = await call(
+        { method: 'POST', path: `${versionPath(name, version)}:simulate-history-readings`, body: { contentType: 'application/json', text: JSON.stringify(body) }, ...(signal ? { signal } : {}) },
+        historyReadings,
       );
       return answer.data;
     },

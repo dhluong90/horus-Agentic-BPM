@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, ReportRequest, RuleSetVersion, SimulationReport, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, ReportRequest, ReplayRequest, RuleSetVersion, SimulationReport, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -417,4 +417,22 @@ export function useCreateReport(name: string, version: number, onDone: (report: 
       onDone(report);
     },
   );
+}
+
+/**
+ * Replays the logged decisions of a period through a draft and reads each in plain language (RLE-202). A read: no
+ * Idempotency-Key, nothing is logged. `cancel` abandons the wait; the engine writes nothing, so nothing is left behind.
+ */
+export function useReplay(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
+  const { client } = useRulesSession();
+  const controller = useRef<AbortController | undefined>(undefined);
+  const mutation = useMutation({
+    mutationFn: (request: ReplayRequest) => {
+      const abort = new AbortController();
+      controller.current = abort;
+      return client.simulateHistoryReadings(version.ruleSet, version.version, request, abort.signal);
+    },
+  });
+  const cancel = () => { controller.current?.abort(); };
+  return { ...mutation, cancel };
 }

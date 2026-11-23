@@ -18,6 +18,8 @@ export interface RulesSession {
   templates: boolean;
   /** Whether the host stores simulation reports (/meta feature rules.simulation-reports). */
   simulationReports: boolean;
+  /** Whether the host announces replay of logged decisions in plain words (/meta feature rules.history-readings). */
+  historyReadings: boolean;
   /** True when the host lists this rule set in lifecycle.require-simulation-report: a publication request must carry a report. */
   requiresReport: (ruleSet: string) => boolean;
 }
@@ -26,6 +28,7 @@ export interface RulesSession {
 export interface ReportHostSettings {
   templates?: boolean;
   simulationReports?: boolean;
+  historyReadings?: boolean;
   /** The rule set names of lifecycle.require-simulation-report; empty when the host requires none. */
   requireReport?: readonly string[];
 }
@@ -54,7 +57,7 @@ export function RulesProvider({
   const { permissions } = me;
   const tenant = me.tenant.current;
   const userId = me.user.id;
-  const { templates = false, simulationReports = false, requireReport } = hostSettings;
+  const { templates = false, simulationReports = false, historyReadings = false, requireReport } = hostSettings;
   const required = requireReport?.join(',') ?? '';
   const value = useMemo<RulesSession>(() => {
     const granted = new Set(permissions);
@@ -68,9 +71,10 @@ export function RulesProvider({
       readingStyle,
       templates,
       simulationReports,
+      historyReadings,
       requiresReport: (ruleSet) => required.split(',').includes(ruleSet),
     };
-  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, readingStyle, templates, simulationReports, required, fetchImpl]);
+  }, [baseUrl, hostId, permissions, tenant, userId, cockpitDrafts, readingStyle, templates, simulationReports, historyReadings, required, fetchImpl]);
   return <RulesContext.Provider value={value}>{children}</RulesContext.Provider>;
 }
 

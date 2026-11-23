@@ -2,7 +2,10 @@ import { useState } from 'react';
 import type { RuleSetSummary, VersionStatus } from '../../api/rules/schemas';
 import { formatRoute, type Route } from '../../app/route';
 import { PageHead } from '../../components/PageParts';
+import { RecentCard } from '../../components/RecentCard';
+import { TintTiles } from '../../components/TintTiles';
 import { useI18n } from '../../i18n/I18nProvider';
+import { formatDateTime } from './model/dates';
 import { mapLoadable, useEveryRuleSet, useRuleSetsCut } from '../overview/useRuleOverview';
 import { useRulesSession } from './api/rulesContext';
 import { useImportRuleSet } from './api/useRules';
@@ -26,7 +29,7 @@ type Filter = 'all' | VersionStatus;
 const FILTERS: readonly Filter[] = ['all', 'DRAFT', 'PENDING_APPROVAL', 'PUBLISHED'];
 
 function RuleSetList({ pageLimit }: { pageLimit: number }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { can, templates, cockpitDrafts } = useRulesSession();
   const ruleSets = useEveryRuleSet(pageLimit);
   const cut = useRuleSetsCut(pageLimit);
@@ -68,6 +71,13 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
           <ProblemNotice error={importFile.error} located refusedFile={pickedFile !== undefined ? { fileName: pickedFile, columnLabel: (name) => columnLabel(name, undefined) } : undefined} />
         </div>
       ) : null}
+      {count !== undefined ? (
+        <TintTiles label={t('list.tiles')} tiles={[
+          { key: 'live', value: String(count('PUBLISHED')), label: t('rulesArea.tile.live'), tint: 'lime' },
+          { key: 'pending', value: String(count('PENDING_APPROVAL')), label: t('rulesArea.tile.pending'), tint: 'amber' },
+          { key: 'draft', value: String(count('DRAFT')), label: t('rulesArea.tile.draft'), tint: 'mint' },
+        ]} />
+      ) : null}
       <div className="toolbar">
         <label className="search">
           <span className="sr-only">{t('rulesArea.find')}</span>
@@ -83,9 +93,18 @@ function RuleSetList({ pageLimit }: { pageLimit: number }) {
         </div>
       </div>
       {cut !== undefined ? <p className="list-note" role="note">{t('rulesArea.cut', { count: String(cut) })}</p> : null}
-      <article className="card card--table">
-        <RuleSetTable ruleSets={shown} emptyText={ruleSets.status === 'ready' && ruleSets.data.length > 0 ? t('rulesArea.noMatch') : t('rulesArea.empty')} />
-      </article>
+      <div className="listing">
+        <article className="card card--table dense">
+          <RuleSetTable dense ruleSets={shown} emptyText={ruleSets.status === 'ready' && ruleSets.data.length > 0 ? t('rulesArea.noMatch') : t('rulesArea.empty')} />
+        </article>
+        {ruleSets.status === 'ready' && ruleSets.data.length > 0 ? (
+          <RecentCard title={t('rulesArea.recent.title')} empty={t('list.recent.none')}
+            items={[...ruleSets.data].sort((a, b) => Date.parse(b.lastChangedAt) - Date.parse(a.lastChangedAt)).slice(0, 4).map((item) => ({
+              key: item.ruleSet, name: item.displayName,
+              status: t(`status.${item.latestStatus}`), when: formatDateTime(item.lastChangedAt, locale) ?? '',
+            }))} />
+        ) : null}
+      </div>
     </section>
   );
 }

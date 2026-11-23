@@ -826,6 +826,57 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     return json({ ruleSet: name, version: v.version, baselineVersion: effective?.version ?? null, languages: LANGUAGES, results });
   }
 
+  /**
+   * `:simulate-history-readings` (RLE-202): the logged decisions of a period replayed through this version and read in
+   * plain language, in the same order and counts as the OpenAPI. The mock has no decision log: it walks the synthetic
+   * one of the reports, newest first. A decision whose masked input had a value, or whose logged version cannot be
+   * evaluated again (the rule set has no version that was in effect), is REPLAY_NOT_POSSIBLE with the masked names
+   * and no reading; no input value is ever part of the answer.
+   */
+  function replayReadings(name: string, number: number, request: FakeRequest): FakeResponse {
+    for (const permission of ['rules:simulate', 'rules:log:read', 'rules:read']) {
+      if (!request.permissions.includes(permission)) return problem(403, 'PERMISSION_DENIED', `The caller lacks permission ${permission}`);
+    }
+    if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+    const v = find(name, number);
+    if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(number)} of rule set ${name} not found`);
+    let body: { from?: unknown; to?: unknown; limit?: unknown };
+    try { body = JSON.parse(request.body || '{}') as typeof body; } catch { return problem(400, 'INPUT_INVALID', 'The body is not JSON'); }
+    const from = typeof body.from === 'string' ? Date.parse(body.from) : Number.NaN;
+    const to = typeof body.to === 'string' ? Date.parse(body.to) : Number.NaN;
+    if (Number.isNaN(from) || Number.isNaN(to)) return problem(400, 'QUERY_INVALID', 'from and to must be ISO 8601 instants');
+    if (to <= from) return problem(400, 'QUERY_INVALID', 'to must be after from');
+    if (to - from > 31 * 86_400_000) return problem(400, 'QUERY_INVALID', 'The period is at most 31 days (query.max-range)');
+    if (body.limit !== undefined && body.limit !== null && (typeof body.limit !== 'number' || !Number.isInteger(body.limit) || body.limit < 1)) return problem(400, 'QUERY_INVALID', 'limit must be a whole number from 1');
+    const limit = typeof body.limit === 'number' ? body.limit : READINGS_MAX;
+    if (limit > READINGS_MAX) return problem(422, 'READINGS_TOO_LARGE', `One request reads at most ${String(READINGS_MAX)} decisions, this one asks for ${String(limit)}; read fewer at a time`);
+    const logged = [...versionsOf(name)].reverse().find((candidate) => candidate.status === 'PUBLISHED' && candidate.version !== v.version);
+    const maskedNames = v.definition.inputs.filter((input) => input.mask === true).map((input) => input.name);
+    const total = Math.min(limit, LOG_SIZE);
+    const step = (to - from) / (total + 1);
+    const results = syntheticInputs(v.definition.inputs, total).map((inputs, index) => {
+      const base = { decisionId: decisionIdOf(index), loggedVersion: logged?.version ?? Math.max(1, v.version - 1), evalClock: new Date(Math.round(to - (index + 1) * step)).toISOString() };
+      // Every fourth decision held a value in a masked input: the log keeps only its fingerprint.
+      const hadMasked = maskedNames.length > 0 && index % 4 === 1;
+      if (logged === undefined || hadMasked) {
+        return { ...base, changed: false, code: 'REPLAY_NOT_POSSIBLE', maskedInputs: hadMasked ? maskedNames : [], simulated: null, logged: null };
+      }
+      const known = { ...inputs };
+      for (const masked of maskedNames) known[masked] = null;
+      const now = outcomeOf(v, known);
+      const then = outcomeOf(logged, known);
+      const changed = now.kind !== then.kind || JSON.stringify(now.then) !== JSON.stringify(then.then);
+      const strip = ({ kind, ruleIds, readings }: Outcome) => ({ kind, ruleIds, readings });
+      return { ...base, changed, code: null, maskedInputs: [], simulated: strip(now), logged: strip(then) };
+    });
+    const notReplayableCount = results.filter((r) => r.code !== null).length;
+    return json({
+      ruleSet: name, version: v.version, status: v.status, from: new Date(from).toISOString(), to: new Date(to).toISOString(),
+      decisionCount: results.length, replayedCount: results.length - notReplayableCount, changedCount: results.filter((r) => r.changed).length, notReplayableCount,
+      truncated: limit < LOG_SIZE, languages: LANGUAGES, results,
+    });
+  }
+
   /** The stored simulation reports (RLE-199): written once, never changed. */
   const reports: StoredReport[] = [];
 
@@ -923,6 +974,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
+    if (request.method === 'POST' && (m = /^\/rule-sets\/([^/]+)\/versions\/(\d+):simulate-history-readings$/.exec(path))) return replayReadings(m[1] ?? '', Number(m[2]), request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/readings|\/diff\/readings|:simulate-readings)$/.exec(path))) return readings(m[1] ?? '', Number(m[2]), m[3] ?? '', url, request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw|:discard)?$/.exec(path))) {
       const name = m[1] ?? '';
