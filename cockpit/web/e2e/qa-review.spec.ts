@@ -24,7 +24,7 @@ const SCREENS: { name: string; scenario: Scenario; hash: string; prepare?: (p: P
   { name: 'list', scenario: 'rules-author', hash: '#/rules' },
   { name: 'table', scenario: 'rules-author', hash: '#/rules/card-fee/1' },
   { name: 'editor-error', scenario: 'rules-author', hash: '#/rules/card-fee/1', prepare: async (p, l) => {
-    await p.getByRole('button', { name: l === 'en' ? 'New draft' : 'Tạo bản nháp' }).click();
+    await p.getByRole('button', { name: l === 'en' ? 'Start from this version' : 'Bắt đầu từ phiên bản này' }).click();
     await p.getByRole('button', { name: l === 'en' ? 'Actions for row R2' : 'Thao tác cho dòng R2' }).click();
     await p.getByRole('menuitem', { name: l === 'en' ? 'Duplicate row R2' : 'Nhân bản dòng R2' }).click();
     await p.getByLabel(l === 'en' ? 'Row R6, Balance' : 'Dòng R6, Số dư', { exact: true }).fill('');
@@ -115,7 +115,7 @@ test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
     if (route.request().method() !== 'PUT') { await route.fallback(); return; }
     await route.fulfill({ status: 413, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Content Too Large', status: 413, code: 'PAYLOAD_TOO_LARGE', detail: 'The document is larger than 1048576 bytes', correlationId: '01JQA413' }) });
   });
-  await page.getByRole('button', { name: 'New draft' }).click();
+  await page.getByRole('button', { name: 'Start from this version' }).click();
   await page.getByLabel('Row R3, Fee').fill('35000');
   await page.getByRole('button', { name: 'Save draft' }).click();
   await expect(page.getByRole('alert').first()).toContainText('The text is too long for the service.');
@@ -127,7 +127,7 @@ test('QA_413_on_save_draft_keeps_the_edits', async ({ page }) => {
 test('QA_double_click_request_publish_sends_one_request', async ({ page }) => {
   await open(page, 'rules-author', '#/rules/card-fee/1');
   // make a draft first
-  await page.getByRole('button', { name: 'New draft' }).click();
+  await page.getByRole('button', { name: 'Start from this version' }).click();
   await page.getByRole('button', { name: 'Actions for row R2' }).click();
   await page.getByRole('menuitem', { name: 'Duplicate row R2' }).click();
   await page.getByRole('button', { name: 'Save draft' }).click();

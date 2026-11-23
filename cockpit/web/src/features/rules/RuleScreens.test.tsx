@@ -113,8 +113,8 @@ describe('rule set list and version view', () => {
     open('#/rules/card-fee/1', 'rules-author', 'vi');
     expect(await versionLine(1, 'Phiên bản')).toBeInTheDocument();
     expect(screen.getByText('50.000.000 VND')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Tạo bản nháp' })).toBeInTheDocument();
-    expect(screen.queryByText('New draft')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bắt đầu từ phiên bản này' })).toBeInTheDocument();
+    expect(screen.queryByText('Start from this version')).not.toBeInTheDocument();
   });
 });
 
@@ -122,7 +122,7 @@ describe('minimal draft editing', () => {
   it('CKP_032_minimal_draft_editing_shows_errors_on_cells', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
-    await user.click(await screen.findByRole('button', { name: 'New draft' }));
+    await user.click(await screen.findByRole('button', { name: 'Start from this version' }));
     // The draft is stored first, as a copy of version 1; the grid edits that draft, never version 1.
     expect(await screen.findByText('Editing version 3', { selector: '.rs-head__sub' })).toBeInTheDocument();
     expect(writes().map((c) => c.path)).toEqual(['/rule-sets/card-fee/versions']);
@@ -171,7 +171,7 @@ describe('minimal draft editing', () => {
   it('CKP_032_request_publish_sends_the_lock_version_and_waits_for_the_engine', async () => {
     const user = userEvent.setup();
     open('#/rules/card-fee/1');
-    await user.click(await screen.findByRole('button', { name: 'New draft' }));
+    await user.click(await screen.findByRole('button', { name: 'Start from this version' }));
     await user.clear(await screen.findByLabelText('Row R3, Fee'));
     await user.type(screen.getByLabelText('Row R3, Fee'), '35000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));
@@ -340,7 +340,7 @@ describe('four eyes', () => {
   it('PD_094_without_the_setting_draft_editing_is_off_and_import_stays', async () => {
     open('#/rules/card-fee/1', 'rules-author-drafts-default');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start from this version' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import new version' })).toBeEnabled();
     window.location.hash = '#/rules';
     expect(await screen.findByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
@@ -348,14 +348,14 @@ describe('four eyes', () => {
 
   it('PD_094_a_host_that_turns_drafts_on_offers_editing', async () => {
     open('#/rules/card-fee/1', 'rules-author');
-    expect(await screen.findByRole('button', { name: 'New draft' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Start from this version' })).toBeInTheDocument();
     expect(screen.queryByText('Changes to this environment arrive through your release pipeline.')).not.toBeInTheDocument();
   });
 
   it('PD_075_cockpit_drafts_off_hides_editing_and_keeps_import', async () => {
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
     expect(await screen.findByText('Changes to this environment arrive through your release pipeline.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start from this version' })).not.toBeInTheDocument();
     window.location.hash = '#/rules';
     expect(await screen.findByRole('button', { name: 'Import rule set' })).toBeInTheDocument();
   });
@@ -444,7 +444,7 @@ describe('import of the next version (CKP-030)', () => {
   it('PD_075_import_stays_available_when_cockpit_drafts_are_off', async () => {
     open('#/rules/card-fee/1', 'rules-author-drafts-off');
     expect(await screen.findByRole('button', { name: 'Import new version' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'New draft' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start from this version' })).not.toBeInTheDocument();
   });
 });
 
@@ -467,7 +467,7 @@ describe('payload limits (413)', () => {
       { status: 413, headers: { 'Content-Type': 'application/problem+json' } },
     )));
     open('#/rules/card-fee/1');
-    await user.click(await screen.findByRole('button', { name: 'New draft' }));
+    await user.click(await screen.findByRole('button', { name: 'Start from this version' }));
     await user.clear(await screen.findByLabelText('Row R3, Fee'));
     await user.type(screen.getByLabelText('Row R3, Fee'), '35000');
     await user.click(screen.getByRole('button', { name: 'Save draft' }));

@@ -417,6 +417,8 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 
 /* Toast */
 .toast-host { position: fixed; right: 24px; bottom: 24px; z-index: 50; }
+/* The save dock holds Save draft at the bottom right: a message sits above it, never over it. */
+body:has(.edit-dock) .toast-host { bottom: 96px; }
 .toast {
   display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 16px; border-radius: var(--radius-l); background: var(--surface); color: var(--ink);
   border: 1px solid var(--line); box-shadow: var(--sh-pop, 0 16px 40px -8px rgba(15, 23, 42, .18), 0 2px 6px rgba(15, 23, 42, .06));

@@ -9,6 +9,8 @@ import { toHostError } from '../../../api/hostError';
 import { asksForReview } from '../../processes/approval/ApprovalDock';
 import { PersonalDataWarnings } from './PersonalDataWarnings';
 import { RequestPublishDialog } from './RequestPublishDialog';
+import { WithdrawDialog } from '../../approvals/WithdrawDialog';
+import { useNames, useWantNames } from '../../processes/api/displayNames';
 import { ProblemNotice } from './ProblemNotice';
 
 export interface Action<TArgs = void> {
@@ -57,16 +59,17 @@ function EditButton({ version, onEdit }: { version: RuleSetVersion; onEdit: () =
 }
 
 /**
- * Actions beside the version picker: New draft, Edit draft, Request publish. One primary per screen: where the
+ * Actions beside the version picker: Start from this version, Edit draft, Request publish, Withdraw. One primary per screen: where the
  * view has its own focal action (the Simulate view's Run), Request publish is drawn secondary.
  */
-export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDiscarded, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action<string | undefined>; onDiscarded: (discarded: DiscardedVersion) => void; demoteRequest?: boolean }) {
+export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDiscarded, onWithdrawn, demoteRequest = false }: { version: RuleSetVersion; onEdit: () => void; newDraft: Action; requestPublish: Action<string | undefined>; onDiscarded: (discarded: DiscardedVersion) => void; onWithdrawn: (message: string) => void; demoteRequest?: boolean }) {
   const { t } = useI18n();
   const session = useRulesSession();
   // Every edit is of a stored draft: it needs rules:author, and the host may keep changes in its release pipeline.
   const author = session.can('rules:author') && session.cockpitDrafts;
   const edit = showsEdit(version, session) ? <EditButton version={version} onEdit={onEdit} /> : null;
   const [asking, setAsking] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   if (version.status === 'DRAFT') {
     const canRequest = version.allowedActions.includes('request-publish');
     // When the host lists this rule set in lifecycle.require-simulation-report, the request goes through the report dialog.
@@ -85,11 +88,24 @@ export function HeaderActions({ version, onEdit, newDraft, requestPublish, onDis
       </>
     );
   }
-  if (version.status === 'PUBLISHED' && author) {
+  // A published or retired version starts a new draft with the same content (RLE-062): the way back to an earlier version.
+  if ((version.status === 'PUBLISHED' || version.status === 'RETIRED') && author) {
     return (
-      <button type="button" className="btn btn--primary" disabled={newDraft.isPending} aria-busy={newDraft.isPending} onClick={() => { newDraft.start(); }}>
+      <button type="button" className={version.status === 'PUBLISHED' ? 'btn btn--primary' : 'btn'} disabled={newDraft.isPending} aria-busy={newDraft.isPending} onClick={() => { newDraft.start(); }}>
         <span aria-hidden="true">＋</span> {newDraft.isPending ? t('editor.creating') : t('editor.newDraft')}
       </button>
+    );
+  }
+  // The requester takes their own request back to a draft; the engine lists withdraw only for them (PD-089).
+  if (version.status === 'PENDING_APPROVAL' && version.allowedActions.includes('withdraw')) {
+    return (
+      <>
+        {/* The requester's one action; a disabled Edit draft beside it would only repeat that the version cannot change. */}
+        <button type="button" className="btn" onClick={() => { setWithdrawing(true); }}>
+          <span aria-hidden="true">↩</span> {t('approvals.withdraw')}
+        </button>
+        {withdrawing ? <WithdrawDialog request={{ ruleSet: version.ruleSet, version: version.version, lockVersion: version.lockVersion }} onClose={() => { setWithdrawing(false); }} onDone={(message) => { setWithdrawing(false); onWithdrawn(message); }} /> : null}
+      </>
     );
   }
   return edit;
@@ -248,14 +264,17 @@ function Step({ title, when }: { title: string; when: string | undefined }) {
 /** `importedFrom` is the file this version was imported from in this session, when the user imported it here. */
 export function DetailsPanel({ version, importedFrom }: { version: RuleSetVersion; importedFrom?: string | undefined }) {
   const { t, locale } = useI18n();
+  // The people who drafted, requested and approved read by name, as the header does, never by login.
+  const { user } = useNames();
+  useWantNames({ users: [version.createdBy, version.requestedBy, version.approvedBy].filter((id): id is string => typeof id === 'string' && id !== '') });
   const policy = version.hitPolicy.toUpperCase();
   const policyKey = policy === 'UNIQUE' ? 'policy.UNIQUE' : policy === 'COLLECT' ? 'policy.COLLECT' : 'policy.FIRST';
   return (
     <div className="details">
       <ol className="timeline">
-        {version.createdBy ? <Step title={importedFrom !== undefined ? t('details.imported', { who: version.createdBy, file: importedFrom }) : t('details.drafted', { who: version.createdBy })} when={formatDateTime(version.createdAt, locale)} /> : null}
-        {version.requestedBy ? <Step title={t('details.requested', { who: version.requestedBy })} when={formatDateTime(version.requestedAt, locale)} /> : null}
-        {version.approvedBy ? <Step title={t('details.approved', { who: version.approvedBy })} when={formatDateTime(version.approvedAt, locale)} /> : null}
+        {version.createdBy ? <Step title={importedFrom !== undefined ? t('details.imported', { who: user(version.createdBy), file: importedFrom }) : t('details.drafted', { who: user(version.createdBy) })} when={formatDateTime(version.createdAt, locale)} /> : null}
+        {version.requestedBy ? <Step title={t('details.requested', { who: user(version.requestedBy) })} when={formatDateTime(version.requestedAt, locale)} /> : null}
+        {version.approvedBy ? <Step title={t('details.approved', { who: user(version.approvedBy) })} when={formatDateTime(version.approvedAt, locale)} /> : null}
         {version.effectiveFrom ? <Step title={t('details.inEffect')} when={t('details.from', { when: formatDateTime(version.effectiveFrom, locale) ?? '' })} /> : null}
       </ol>
       <dl className="dock__facts">
