@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="m-application" name="loan-application"/>
+  <bpmn:signal id="s-batch" name="branch-batch-opened"/>
+  <bpmn:process id="loan-intake" isExecutable="true">
+    <bpmn:eventBasedGateway id="intake" instantiate="true"/>
+    <bpmn:intermediateCatchEvent id="online"><bpmn:messageEventDefinition messageRef="m-application"/></bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="branch"><bpmn:signalEventDefinition signalRef="s-batch"/></bpmn:intermediateCatchEvent>
+    <bpmn:scriptTask id="route-online" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="route"><bpmn:script>'online'</bpmn:script></bpmn:scriptTask>
+    <bpmn:scriptTask id="route-branch" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="route"><bpmn:script>'branch'</bpmn:script></bpmn:scriptTask>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="intake" targetRef="online"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="intake" targetRef="branch"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="online" targetRef="route-online"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="branch" targetRef="route-branch"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="route-online" targetRef="end"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="route-branch" targetRef="end"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_loan-intake">
+    <bpmndi:BPMNPlane id="Plane_loan-intake" bpmnElement="loan-intake">
+      <bpmndi:BPMNShape id="intake_di" bpmnElement="intake"><dc:Bounds x="150" y="95" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="online_di" bpmnElement="online"><dc:Bounds x="260" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="branch_di" bpmnElement="branch"><dc:Bounds x="260" y="232" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="route-online_di" bpmnElement="route-online"><dc:Bounds x="356" y="80" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="route-branch_di" bpmnElement="route-branch"><dc:Bounds x="356" y="210" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="516" y="102" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="200" y="120"/><di:waypoint x="260" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="200" y="120"/><di:waypoint x="230" y="120"/><di:waypoint x="230" y="250"/><di:waypoint x="260" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="296" y="120"/><di:waypoint x="356" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="296" y="250"/><di:waypoint x="356" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="456" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f6_di" bpmnElement="f6"><di:waypoint x="456" y="250"/><di:waypoint x="486" y="250"/><di:waypoint x="486" y="120"/><di:waypoint x="516" y="120"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
