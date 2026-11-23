@@ -33,6 +33,7 @@ import { NavRail } from './NavRail';
 import { hostReadingStyle } from '../preferences/readingStyle';
 import type { ReadingStyle } from '../preferences/storage';
 import '../components/frame.css';
+import '../components/lists.css';
 
 /**
  * The host's authoring.cockpit-drafts setting from the rules module of /meta (PD-075, PD-036, PD-094).
@@ -61,6 +62,7 @@ export function reportHostOf(meta: BpmMetaV1): ReportHostSettings {
   return {
     templates: module?.features.includes('rules.templates') === true,
     simulationReports: module?.features.includes('rules.simulation-reports') === true,
+    historyReadings: module?.features.includes('rules.history-readings') === true,
     requireReport: typeof required === 'string' ? required.split(',').map((name) => name.trim()).filter((name) => name !== '') : [],
   };
 }

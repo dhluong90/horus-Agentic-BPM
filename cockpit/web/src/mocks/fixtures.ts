@@ -189,7 +189,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report', 'rules-author-replay', 'rules-author-replay-no-log'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -232,6 +232,11 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       };
     case 'rules-author-templates':
       // An author who may simulate, on a host with templates and required reports.
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate'] }) };
+    case 'rules-author-replay':
+      // An author who may simulate and read the decision log, on a host that announces replay.
+      return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate', 'rules:log:read'] }) };
+    case 'rules-author-replay-no-log':
       return { ...ok, meta: json(metaWithReports), me: json({ ...meLan, permissions: [...meLan.permissions, 'rules:evaluate', 'rules:simulate'] }) };
     case 'rules-approver-report':
       return { ...ok, meta: json(metaWithReports), me: json({ ...meMinh, permissions: [...meMinh.permissions, 'rules:evaluate', 'rules:simulate'] }) };

@@ -409,6 +409,50 @@ export const simulationReadings = z
 export type SimulationReadings = z.infer<typeof simulationReadings>;
 export type SimulationReadingResult = SimulationReadings['results'][number];
 
+/**
+ * A replay of logged decisions in plain language (simulateHistoryReadings, RLE-202): each decision read in the
+ * version that made it and in the draft. A decision that could not be replayed carries `REPLAY_NOT_POSSIBLE`, the names
+ * of the masked inputs and no reading; no logged input, masked or not, is ever part of the answer.
+ */
+export const historyReadings = z
+  .object({
+    ruleSet: z.string(),
+    version: z.number().int(),
+    status: z.string(),
+    from: z.string(),
+    to: z.string(),
+    decisionCount: z.number().int(),
+    replayedCount: z.number().int(),
+    changedCount: z.number().int(),
+    notReplayableCount: z.number().int(),
+    truncated: z.boolean(),
+    languages: z.array(z.string()),
+    results: z.array(
+      z
+        .object({
+          decisionId: z.string(),
+          loggedVersion: z.number().int(),
+          evalClock: z.string(),
+          changed: z.boolean(),
+          code: z.string().nullable(),
+          maskedInputs: z.array(z.string()),
+          simulated: outcomeReading.nullable(),
+          logged: outcomeReading.nullable(),
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+export type HistoryReadings = z.infer<typeof historyReadings>;
+export type HistoryReadingResult = HistoryReadings['results'][number];
+
+/** The period of a replay: `from` inclusive, `to` exclusive (ISO 8601), and the most decisions to replay. */
+export interface ReplayRequest {
+  from: string;
+  to: string;
+  limit?: number | undefined;
+}
+
 /** One sample of a simulation request: its inputs by name, money as `Money`, and an optional name of 1 to 100 characters. */
 export interface SimulationSample {
   label?: string | undefined;
