@@ -218,6 +218,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-297 | `PRE_297_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Lane hint, own assignee kept, no lane refused; task of a message-started instance | M3 | `TR-STD-04` | Done (#497) |
 | PRE-298 | `PRE_298_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Message flows kept; export and read back, per pool | M3 | `TR-STD-04`, `TR-STD-10` | Done (#497) |
 | PRE-299 | `PRE_299_*` in `CollaborationImportTest` | A choreography element and a file of two processes with no collaboration | M3 | `TR-STD-04` | Done (#497) |
+| PRE-254 | `PRE_254_*` in `PendingApprovalsKindsPostgresIT` | Migration plans and calendar changes in the approvals queue: order, cursor, four eyes, the reviewed hash | M3 | `TR-SEC-04` | Done (#473) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

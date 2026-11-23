@@ -284,7 +284,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
                   navigate(versions.some((v) => v.version !== discarded.version) ? { name: 'rule-set', ruleSet: discarded.ruleSet, version: undefined, lens: undefined } : { name: 'rule-sets' });
                 }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
-                requestPublish={{ start: (report) => { requestPublish.start({ version, report }); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
+                requestPublish={{ start: ({ report, effectiveFrom }) => { requestPublish.start({ version, report, effectiveFrom }); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
           ) : null}
         </div>

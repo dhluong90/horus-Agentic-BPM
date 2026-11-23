@@ -5,7 +5,7 @@ import {
 } from './processDemo';
 import { demoCases } from './caseDemo';
 import { DIRECTORY, QUEUE_NOW, QUEUE_SEED, type QueueSeedTask } from './taskQueueDemo';
-import { MIGRATION_DEFINITIONS } from './migrationDemo';
+import { fakeHash, MIGRATION_DEFINITIONS } from './migrationDemo';
 import { createMigrationApi, type MigrationSeed } from './migrationEngine';
 import { demoIncidents, type StoredIncident } from './incidentDemo';
 
@@ -113,6 +113,8 @@ export interface ProcessSeed {
   resolveApproval?: 'four-eyes' | 'single';
   /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
   unclassified?: boolean;
+  /** A pending change of the `vn-banking-hours` calendar, proposed by lan (#473): in the approvals list and under Calendar changes. */
+  calendar?: boolean;
 }
 
 /** A command on an incident, as the engine received it. */
@@ -364,28 +366,73 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
    * listPendingApprovals (PRE-190): every pending version of the tenant, oldest request first, with what this caller
    * may send and why approve or reject is not offered. One page holds the demo; `limit` is checked as the engine does.
    */
+  /** The demo calendar change (#473): lan proposes the holiday 1 January 2028 for the banking hours calendar. */
+  const calendarChange = seed.calendar !== true ? undefined : {
+    id: '01KB2R6Q3C0000000000000CAL', calendarKey: 'vn-banking-hours', status: 'PENDING', approval: 'FOUR_EYES', baseVersion: 3,
+    previous: { zone: 'Asia/Ho_Chi_Minh', week: { MONDAY: ['08:00-17:00'], FRIDAY: ['08:00-17:00'] }, holidays: {} },
+    proposed: { zone: 'Asia/Ho_Chi_Minh', week: { MONDAY: ['08:00-17:00'], FRIDAY: ['08:00-17:00'] }, holidays: { '2028-01-01': 'New Year' } },
+    reason: 'New Year 2028 is a public holiday', proposedBy: 'lan', proposedAt: '2026-11-21T02:00:00Z', decidedBy: null as string | null, decidedAt: null as string | null, comment: null as string | null,
+  };
+  const calendarHash = () => (calendarChange === undefined ? '' : fakeHash(JSON.stringify([calendarChange.calendarKey, calendarChange.baseVersion, calendarChange.proposed])));
+  const calendarBody = () => ({ ...calendarChange, contentHash: calendarHash() });
+  /** Approvals sent to the calendar-change endpoints, as the engine received them. */
+  const calendarDecisions: { id: string; command: 'approve' | 'reject'; actor: string; body: Record<string, unknown> }[] = [];
+  function calendarRoute(request: ProcessRequest, path: string): ProcessAnswer | undefined {
+    const m = /^\/api\/bpm\/processes\/v1\/calendar-changes(?:\/([^/:]+)(:approve|:reject)?)?$/.exec(path);
+    if (m === null) return undefined;
+    if (calendarChange === undefined) return problem(404, 'CALENDAR_NOT_FOUND');
+    if (m[1] === undefined) {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      return json(200, { data: calendarChange.status === 'PENDING' ? [calendarBody()] : [], nextCursor: null, hasNext: false });
+    }
+    if (m[1] !== calendarChange.id) return problem(404, 'CALENDAR_NOT_FOUND');
+    if (m[2] === undefined) return request.permissions.includes('processes:read') ? json(200, calendarBody()) : problem(403, 'PERMISSION_DENIED');
+    if (!request.permissions.includes('processes:calendar:manage')) return problem(403, 'PERMISSION_DENIED');
+    if (calendarChange.status !== 'PENDING') return problem(409, 'INVALID_STATE');
+    const body = request.body === '' ? {} : (JSON.parse(request.body) as Record<string, unknown>);
+    const command = m[2] === ':approve' ? 'approve' : 'reject';
+    calendarDecisions.push({ id: calendarChange.id, command, actor: request.user, body });
+    if (command === 'approve') {
+      if (request.user === calendarChange.proposedBy) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
+      if (body['expectedChangeHash'] !== undefined && body['expectedChangeHash'] !== calendarHash()) return problem(409, 'CONTENT_CHANGED');
+    }
+    Object.assign(calendarChange, { status: command === 'approve' ? 'APPROVED' : 'REJECTED', decidedBy: request.user, decidedAt: '2026-11-21T03:00:00Z', comment: typeof body['comment'] === 'string' ? body['comment'] : null });
+    return json(200, calendarBody());
+  }
+
   function pendingApprovals(url: URL, request: ProcessRequest): ProcessAnswer {
     if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
     const limitText = url.searchParams.get('limit');
     const limit = limitText === null ? 50 : Number(limitText);
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) return problem(400, 'QUERY_INVALID');
     const approver = request.permissions.includes('processes:approve');
-    const data = definitions
+    const data: (Record<string, unknown> & { requestedAt: string; key: string })[] = definitions
       .filter((d) => d.status === 'PENDING_APPROVAL')
       .map((d) => {
         const requestedBy = d.requestedBy ?? d.createdBy ?? 'lan';
         const self = request.user === requestedBy || request.user === (d.createdBy ?? 'lan');
         const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : undefined;
         return {
+          kind: 'DEFINITION', id: null, sourceVersion: null, reason: null, contentHash: d.definitionHash ?? DEFAULT_HASH,
           key: d.key, name: d.name, version: d.version, definitionHash: d.definitionHash ?? DEFAULT_HASH, lockVersion: d.lockVersion,
           requestedBy, requestedByName: DEMO_NAMES[locale].users[requestedBy] ?? requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
           allowedActions: denial === undefined ? ['approve', 'reject'] : [],
           deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
         };
-      })
-      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key))
-      .slice(0, limit);
-    return json(200, { data, nextCursor: null, hasNext: false });
+      });
+    if (calendarChange?.status === 'PENDING') {
+      const self = request.user === calendarChange.proposedBy;
+      const manager = request.permissions.includes('processes:calendar:manage');
+      data.push({
+        kind: 'CALENDAR_CHANGE', id: calendarChange.id, sourceVersion: null, reason: calendarChange.reason, contentHash: calendarHash(),
+        key: calendarChange.calendarKey, name: null, version: calendarChange.baseVersion + 1, definitionHash: null, lockVersion: calendarChange.baseVersion,
+        requestedBy: calendarChange.proposedBy, requestedByName: DEMO_NAMES[locale].users[calendarChange.proposedBy] ?? calendarChange.proposedBy, requestedAt: calendarChange.proposedAt,
+        allowedActions: !manager ? [] : [...(self ? [] : ['approve']), 'reject'],
+        deniedActions: !manager ? { approve: 'PERMISSION_REQUIRED', reject: 'PERMISSION_REQUIRED' } : self ? { approve: 'SELF_APPROVAL_FORBIDDEN' } : {},
+      });
+    }
+    data.sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key));
+    return json(200, { data: data.slice(0, limit), nextCursor: null, hasNext: false });
   }
 
   /** allowedActions of an incident for this caller (PRE-077, PRE-078): empty without processes:incident:manage. */
@@ -494,6 +541,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return json(200, { data, nextCursor: null, hasNext: false });
     }
     if (request.method === 'GET' && path === `${BASE}/approvals`) return pendingApprovals(url, request);
+    const calendar = calendarRoute(request, path);
+    if (calendar !== undefined) return calendar;
     if (seed.migration !== undefined) {
       const migration = migrations.handle(request, path, url);
       if (migration !== undefined) return migration;
@@ -617,5 +666,5 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (item) item.lockVersion += 1;
   };
 
-  return { handle, overrides, requests, decisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
+  return { handle, overrides, requests, decisions, calendarDecisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
 }

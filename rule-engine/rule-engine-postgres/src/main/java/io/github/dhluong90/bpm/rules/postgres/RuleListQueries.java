@@ -348,7 +348,7 @@ final class RuleListQueries {
                 new Bound.Page("oldest request first on idx_rle_version_pending (tenant_id, requested_at, id)"),
                 """
                         SELECT v.id, s.name, v.version_num, v.canonical_hash, v.lock_version, v.created_by,
-                          v.requested_by, v.requested_at
+                          v.requested_by, v.requested_at, v.effective_from
                         FROM rle_version v
                         JOIN rle_rule_set s ON s.tenant_id = v.tenant_id AND s.id = v.rule_set_id
                         WHERE v.tenant_id = :tenant AND v.status = 'PENDING_APPROVAL'

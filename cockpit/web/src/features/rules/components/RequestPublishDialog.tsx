@@ -12,18 +12,36 @@ import { AreaError, LoadingRows } from '../../../components/PageParts';
 const REPLAY_DAYS = 30;
 const REPLAY_LIMIT = 100;
 
+/** What a request carries beyond the version: the report to attach (RLE-201) and the date it takes effect (RLE-210). */
+export interface PublishArgs { report: string | undefined; effectiveFrom: string | undefined }
+
+/** A `datetime-local` value ("2027-01-01T09:00") as the instant it names in the browser's zone; undefined when it is empty or not a date. */
+export function instantOf(local: string): string | undefined {
+  const time = Date.parse(local);
+  return local === '' || Number.isNaN(time) ? undefined : new Date(time).toISOString();
+}
+
 /**
- * Request publish when the host lists the rule set in lifecycle.require-simulation-report (PD-115): the author
- * attaches a report that was run on the content the version has now, or runs one here. Request publish stays disabled,
- * with its reason, until one is chosen; the engine refuses a request without a current report all the same.
+ * Request publish with a start date (RLE-210, #470): the author picks when the version takes effect once approved, or
+ * leaves it at approval. When the host lists the rule set in lifecycle.require-simulation-report (PD-115) the dialog
+ * also asks for a report that was run on the content the version has now, or runs one here; Request publish stays
+ * disabled, with its reason, until one is chosen. The engine refuses a request without a current report, or with a date
+ * that has passed, all the same.
  */
-export function RequestPublishDialog({ version, request, onClose }: { version: VersionSummary; request: Action<string | undefined>; onClose: () => void }) {
+export function RequestPublishDialog({ version, request, needsReport, onClose }: { version: VersionSummary; request: Action<PublishArgs>; needsReport: boolean; onClose: () => void }) {
   const { t } = useI18n();
   const { can } = useRulesSession();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const reasonId = useId();
-  const reports = useReports(version.ruleSet, version.version);
+  const whenId = useId();
+  const [onDate, setOnDate] = useState(false);
+  const [local, setLocal] = useState('');
+  // Read when the dialog opens: the minimum of the picker, and what "has passed" means on screen.
+  const [opened] = useState(() => Date.now());
+  const effectiveFrom = onDate ? instantOf(local) : undefined;
+  const dateProblem = onDate && (effectiveFrom === undefined || Date.parse(effectiveFrom) < opened);
+  const reports = useReports(version.ruleSet, version.version, needsReport);
   const [chosen, setChosen] = useState<string | undefined>(undefined);
   // Run once per click; the replay covers the last 30 days up to the moment of the click.
   const run = useCreateReport(version.ruleSet, version.version, (report) => { setChosen(report.id); });
@@ -45,33 +63,56 @@ export function RequestPublishDialog({ version, request, onClose }: { version: V
     const from = new Date(to.getTime() - REPLAY_DAYS * 86_400_000);
     run.start({ source: 'REPLAY', from: from.toISOString(), to: to.toISOString(), limit: REPLAY_LIMIT });
   };
+  const blocked = (needsReport && picked === undefined) || dateProblem;
 
   return (
     <dialog ref={dialog} className="dialog dialog--wide" aria-labelledby={titleId} onClose={onClose}>
       <div className="dialog__body">
         <h2 id={titleId} className="dialog__title">{t('publish.title', { version: String(version.version) })}</h2>
-        <p className="dialog__text">{t('publish.text')}</p>
         <fieldset className="report-pick">
-          <legend className="field__label">{t('publish.pick')}</legend>
-          {reports.isPending ? <LoadingRows rows={2} /> : null}
-          {reports.isError ? <AreaError error={reports.error} onRetry={() => { void reports.refetch(); }} /> : null}
-          {reports.isSuccess && reports.data.length === 0 ? <p className="muted" role="status">{t('publish.none')}</p> : null}
-          {current.map((report) => <Choice key={report.id} report={report} checked={picked === report.id} onPick={() => { setChosen(report.id); }} />)}
-          {stale.map((report) => <Choice key={report.id} report={report} checked={false} disabled onPick={() => undefined} />)}
+          <legend className="field__label">{t('publish.when')}</legend>
+          <label className="tpl tpl--row">
+            <input type="radio" name="when" checked={!onDate} onChange={() => { setOnDate(false); }} />
+            <span className="tpl__label">{t('publish.whenApproved')}</span>
+          </label>
+          <label className="tpl tpl--row">
+            <input type="radio" name="when" checked={onDate} onChange={() => { setOnDate(true); }} />
+            <span className="tpl__label">{t('publish.onDate')}</span>
+          </label>
+          {onDate ? (
+            <div>
+              <label htmlFor={whenId} className="field__label">{t('publish.dateLabel')}</label>
+              <input id={whenId} type="datetime-local" className="field__input" value={local} onChange={(event) => { setLocal(event.target.value); }} />
+              {dateProblem && local !== '' ? <p className="field__error" role="alert">{t('publish.datePast')}</p> : null}
+            </div>
+          ) : null}
         </fieldset>
-        <div className="report-pick__run">
-          <button type="button" className="btn" disabled={!mayRun || run.isPending} aria-busy={run.isPending} onClick={startRun}>
-            {run.isPending ? t('publish.running') : t('publish.run')}
-          </button>
-          <span className="muted">{mayRun ? t('publish.runHint', { days: String(REPLAY_DAYS), limit: formatCount(REPLAY_LIMIT, 'en') }) : t('publish.cannotRun')}</span>
-        </div>
-        {run.isError ? <ProblemNotice error={run.error} /> : null}
+        {needsReport ? (
+          <>
+            <p className="dialog__text">{t('publish.text')}</p>
+            <fieldset className="report-pick">
+              <legend className="field__label">{t('publish.pick')}</legend>
+              {reports.isPending ? <LoadingRows rows={2} /> : null}
+              {reports.isError ? <AreaError error={reports.error} onRetry={() => { void reports.refetch(); }} /> : null}
+              {reports.isSuccess && reports.data.length === 0 ? <p className="muted" role="status">{t('publish.none')}</p> : null}
+              {current.map((report) => <Choice key={report.id} report={report} checked={picked === report.id} onPick={() => { setChosen(report.id); }} />)}
+              {stale.map((report) => <Choice key={report.id} report={report} checked={false} disabled onPick={() => undefined} />)}
+            </fieldset>
+            <div className="report-pick__run">
+              <button type="button" className="btn" disabled={!mayRun || run.isPending} aria-busy={run.isPending} onClick={startRun}>
+                {run.isPending ? t('publish.running') : t('publish.run')}
+              </button>
+              <span className="muted">{mayRun ? t('publish.runHint', { days: String(REPLAY_DAYS), limit: formatCount(REPLAY_LIMIT, 'en') }) : t('publish.cannotRun')}</span>
+            </div>
+            {run.isError ? <ProblemNotice error={run.error} /> : null}
+          </>
+        ) : null}
         {request.error !== undefined && request.error !== null ? <ProblemNotice error={request.error} /> : null}
         <div className="dialog__actions">
-          {picked === undefined ? <p id={reasonId} className="reason-line new-set__reason"><span aria-hidden="true">⊘</span> {t('publish.reason')}</p> : null}
+          {needsReport && picked === undefined ? <p id={reasonId} className="reason-line new-set__reason"><span aria-hidden="true">⊘</span> {t('publish.reason')}</p> : null}
           <button type="button" className="btn btn--quiet" onClick={onClose}>{t('action.cancel')}</button>
-          <button type="button" className="btn btn--primary" disabled={picked === undefined || request.isPending} aria-busy={request.isPending}
-            {...(picked === undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { request.start(picked); }}>
+          <button type="button" className="btn btn--primary" disabled={blocked || request.isPending} aria-busy={request.isPending}
+            {...(needsReport && picked === undefined ? { 'aria-describedby': reasonId } : {})} onClick={() => { request.start({ report: needsReport ? picked : undefined, effectiveFrom }); }}>
             {request.isPending ? t('dock.requesting') : t('dock.requestPublish')}
           </button>
         </div>

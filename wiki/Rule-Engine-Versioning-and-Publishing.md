@@ -54,7 +54,9 @@ The restore works on a version in any status and on a host with `authoring.cockp
 
 ## Schedule a change for a date
 
-Set `effectiveFrom` in the document, or in the `:request-publish` body, before requesting publication:
+Set `effectiveFrom` in the document, or send it in the `:request-publish` body (`{"effectiveFrom": "2027-01-01T00:00:00+07:00"}`, 0.3.0, #470). The body date replaces the document's and is fixed once requested: only a draft can be replaced, so another date needs a withdrawal and a new request. A date before the request is `422 EFFECTIVE_DATE_IN_PAST` and the draft stays a draft. The approver sees the date in `GET /approvals` (`effectiveFrom`, null for "when approved"), in the version and in `rules.version.publish-requested.v1`. In the cockpit, Choose a start date beside Request publish opens the choice. A date that has passed by the time of approval puts the version in effect at once.
+
+In the document:
 
 ```yaml
 effectiveFrom: 2027-01-01T00:00:00+07:00

@@ -64,7 +64,7 @@ export function useProposeMigration(id: string) {
 /** Approve names the proposal the approver was shown (its lockVersion), never one read again at decision time. */
 export function useApproveMigration(id: string) {
   const { client } = useProcessesSession();
-  return useCommand<{ lockVersion: number }>(id, 'approve', ({ lockVersion }, key) => client.approveMigration(id, lockVersion, key));
+  return useCommand<{ lockVersion: number; planHash: string }>(id, 'approve', ({ lockVersion, planHash }, key) => client.approveMigration(id, lockVersion, key, planHash));
 }
 
 export function useRejectMigration(id: string) {

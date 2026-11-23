@@ -47,7 +47,7 @@ import tools.jackson.databind.node.ObjectNode;
 public class CalendarController {
 
     private static final Set<String> PROPOSAL_FIELDS = Set.of("calendar", "reason");
-    private static final Set<String> DECISION_FIELDS = Set.of("comment");
+    private static final Set<String> DECISION_FIELDS = Set.of("comment", "expectedChangeHash");
 
     private final CalendarService calendars;
 
@@ -113,8 +113,11 @@ public class CalendarController {
     public ResponseEntity<byte[]> approve(@PathVariable("id") String id, HttpServletRequest http,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
         requireKey(idempotencyKey);
-        String comment = text(body(http, DECISION_FIELDS), "comment");
-        return json(HttpStatus.OK, change(calendars.approve(id, comment, idempotencyKey)), null);
+        JsonNode body = body(http, DECISION_FIELDS);
+        String comment = text(body, "comment");
+        // PD-139, #473: the change the approver reviewed; optional
+        String expectedChangeHash = text(body, "expectedChangeHash");
+        return json(HttpStatus.OK, change(calendars.approve(id, comment, idempotencyKey, expectedChangeHash)), null);
     }
 
     /** Rejects a pending change; the calendar stays as it is. Body: {@code comment}, required. */
@@ -167,6 +170,9 @@ public class CalendarController {
         putNullable(node, "decidedBy", c.decidedBy());
         putNullable(node, "decidedAt", c.decidedAt() == null ? null : c.decidedAt().toString());
         putNullable(node, "comment", c.comment());
+        // PD-139, #473: what an approver names as expectedChangeHash; the same value as the item of GET /approvals
+        node.put("contentHash", io.github.dhluong90.bpm.process.internal.service.Calendars.changeHash(c.calendarKey(),
+                c.baseVersion(), c.proposed()));
         return node;
     }
 

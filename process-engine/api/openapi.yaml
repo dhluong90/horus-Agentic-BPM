@@ -66,18 +66,26 @@ paths:
     get:
       tags: [lifecycle]
       operationId: listPendingApprovals
-      summary: List the definition versions waiting for a second person, oldest request first
+      summary: List the proposals waiting for a second person (definition versions, migration plans, calendar changes), oldest first
       description: |
         The pending approvals queue of the caller's tenant (#31, `PRE-190`): every definition version in
-        `PENDING_APPROVAL` across all keys, including one that is not the latest version of its key. Permission
+        `PENDING_APPROVAL` across all keys, including one that is not the latest version of its key, and, since #473,
+        every migration plan whose execution is `PROPOSED` and every calendar change that is `PENDING`. `kind` says which
+        (`DEFINITION`, `MIGRATION_PLAN`, `CALENDAR_CHANGE`), `id` is the id of the version, plan or change. Migration
+        plans are listed only for a caller holding `processes:migration:manage`; calendar changes and definition
+        versions for any caller holding `processes:read`, with `PERMISSION_REQUIRED` where the caller may not decide.
+        A proposer never has `approve` (`SELF_APPROVAL_FORBIDDEN`). Permission
         `processes:read`; the answer shows what the caller may do, it does not need `processes:approve`. Ordered by
         `(requestedAt, id)`, keyset-paged with a signed cursor bound to the tenant and this list; at most
         `query.max-page-size` (200) per page, 50 by default. A cursor from another list, another tenant or an edited
         one is `400 QUERY_INVALID`.
 
-        Each item has what a reviewer needs to open the version and to approve exactly the content that was reviewed
-        (`PRE-177`, PD-139): the `definitionHash` to send back as `expectedDefinitionHash` and the `lockVersion` to
-        send as `If-Match`. Items never carry the definition, the source or a variable.
+        Each item has what a reviewer needs to open it and to approve exactly the content that was reviewed
+        (`PRE-177`, PD-139): the `contentHash` to send back (a definition: `expectedDefinitionHash`, equal to
+        `definitionHash`; a migration plan: `expectedPlanHash` on `:approve`, the plan hash; a calendar change:
+        `expectedChangeHash` on `:approve`, the hash of the key, the base version and the proposed calendar) and the
+        `lockVersion` to send as `If-Match` (for a calendar change, the version it was proposed against). Items never
+        carry the definition, the source, a calendar's hours or a variable. `reason` is what the proposer wrote.
 
         `allowedActions` is what the caller may send now, in the order `approve`, `reject`. `deniedActions` gives, for
         `approve` and `reject` only, why the caller may not send one, as a code: `PERMISSION_REQUIRED` (no
@@ -95,10 +103,15 @@ paths:
               schema: { $ref: '#/components/schemas/PendingApprovalPage' }
               example:
                 data:
-                  - key: kyc-onboarding
+                  - kind: DEFINITION
+                    id: 01KB2R6Q3C0000000000000001
+                    key: kyc-onboarding
                     name: KYC onboarding
                     version: 2
+                    sourceVersion: null
                     definitionHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b
+                    contentHash: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b
+                    reason: null
                     lockVersion: 1
                     requestedBy: alice
                     requestedByName: Nguyễn Thị Alice
@@ -1724,6 +1737,9 @@ paths:
         `409 VERSION_CONFLICT`, missing `428 PRECONDITION_REQUIRED`. The plan becomes `APPROVED`; the runner moves the
         instances in batches of `migration.batch-size`, and `GET /migrations/{id}/execution` shows the progress.
         Publishes `processes.migration.approved.v1` with both people. Permission `processes:migration:manage`.
+
+        The optional body `{"expectedPlanHash": "<64 hex>"}` (PD-139, #473) names the plan the approver reviewed, the
+        `contentHash` of its item in `GET /approvals`; another value is `409 CONTENT_CHANGED` and nothing is written.
       parameters:
         - $ref: '#/components/parameters/MigrationId'
         - name: If-Match
@@ -1732,6 +1748,15 @@ paths:
           description: The proposal's `lockVersion`, quoted.
           schema: { type: string, example: '"1"' }
         - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expectedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
       responses:
         '200':
           description: The execution, `APPROVED`
@@ -2284,7 +2309,8 @@ paths:
         (`403 SELF_APPROVAL_FORBIDDEN`, and the table refuses it too). A change that is no longer `PENDING` is
         `409 INVALID_STATE`; a calendar that changed since the proposal is `409 VERSION_CONFLICT` and the change stays
         `PENDING`. A change needs no `If-Match`: it cannot be edited, and the calendar version it was proposed against
-        is checked under the lock. A repeat with the same `Idempotency-Key` returns the first answer and writes
+        is checked under the lock. The optional body member `expectedChangeHash` (PD-139, #473) names the change the
+        approver reviewed; another value is `409 CONTENT_CHANGED` and nothing is written. A repeat with the same `Idempotency-Key` returns the first answer and writes
         nothing. Permission `processes:calendar:manage`.
       parameters:
         - $ref: '#/components/parameters/CalendarChangeId'
@@ -2575,6 +2601,12 @@ components:
       additionalProperties: false
       properties:
         comment: { type: string, maxLength: 500, description: Optional on approval; required, with a reason, on rejection }
+        expectedChangeHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: |
+            On approval only (PD-139, #473): the `contentHash` of the change as `GET /approvals` showed it. Another
+            value is `409 CONTENT_CHANGED` and nothing is written. Optional.
     CalendarChange:
       type: object
       required: [id, calendarKey, status, approval, baseVersion, previous, proposed, reason, proposedBy, proposedAt,
@@ -2596,6 +2628,10 @@ components:
         decidedBy: { type: [string, 'null'] }
         decidedAt: { type: [string, 'null'], format: date-time }
         comment: { type: [string, 'null'] }
+        contentHash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: The hash of the key, the base version and the proposed calendar, to send back as `expectedChangeHash` on approval (PD-139, #473); the value of the item in `GET /approvals`
     CalendarChangePage:
       type: object
       required: [data, nextCursor, hasNext]
@@ -2936,15 +2972,35 @@ components:
         lastChangedAt: { type: string, format: date-time }
     PendingApproval:
       type: object
-      required: [key, version, definitionHash, lockVersion, requestedBy, requestedByName, requestedAt, allowedActions, deniedActions]
+      required: [kind, id, key, version, sourceVersion, definitionHash, contentHash, lockVersion, requestedBy,
+        requestedByName, requestedAt, reason, allowedActions, deniedActions]
       properties:
-        key: { type: string }
+        kind:
+          type: string
+          enum: [DEFINITION, MIGRATION_PLAN, CALENDAR_CHANGE]
+        id:
+          type: [string, 'null']
+          description: The id of the definition version, the migration plan or the calendar change
+        key: { type: string, description: The definition key, or the calendar key of a calendar change }
         name: { type: [string, 'null'] }
-        version: { type: integer, minimum: 1 }
+        version:
+          type: integer
+          minimum: 1
+          description: The definition version; for a migration plan the version it moves to; for a calendar change the version the calendar takes when approved
+        sourceVersion:
+          type: [integer, 'null']
+          description: For a migration plan the version the instances run on, otherwise null
         definitionHash:
+          type: [string, 'null']
+          pattern: '^[0-9a-f]{64}$'
+          description: The value the reviewer sends back as `expectedDefinitionHash` (`PRE-177`, PD-139); null for a migration plan and a calendar change
+        contentHash:
           type: string
           pattern: '^[0-9a-f]{64}$'
-          description: The value the reviewer sends back as `expectedDefinitionHash` (`PRE-177`, PD-139)
+          description: The hash of what the reviewer was shown, to send back with the approval (PD-139); a mismatch is `409 CONTENT_CHANGED`
+        reason:
+          type: [string, 'null']
+          description: What the proposer wrote for a migration plan or a calendar change; null for a definition version
         lockVersion: { type: integer, format: int64, description: The value to send as `If-Match` }
         requestedBy: { type: string, description: The requester's user id, which the four-eyes checks compare }
         requestedByName:

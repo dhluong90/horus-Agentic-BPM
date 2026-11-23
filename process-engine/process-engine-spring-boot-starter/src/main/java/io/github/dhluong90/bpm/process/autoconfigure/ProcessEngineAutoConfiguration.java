@@ -615,7 +615,7 @@ public class ProcessEngineAutoConfiguration {
      */
     @Bean
     @ConditionalOnMissingBean(io.github.dhluong90.bpm.process.api.MigrationExecutionService.class)
-    io.github.dhluong90.bpm.process.api.MigrationExecutionService processEngineMigrationExecutions(
+    io.github.dhluong90.bpm.process.internal.service.MigrationExecutions processEngineMigrationExecutions(
             ObjectProvider<TenantResolver> tenants, ObjectProvider<CallerResolver> callers,
             ObjectProvider<Clock> clock, ProcessEngineTransactions transactions, JdbcProcessStore store,
             JdbcMigrationStore migrationStore, Migrations migrations, ProcessEventPublisher publisher,
@@ -700,8 +700,11 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(ProcessQueryService.class)
     ProcessQueryService processQueryService(ProcessServices services, LiveNodeCountService liveCounts,
-            NodeWindowStatsService windowStats, InstanceActivityService activities, JdbcProcessStore store) {
-        return new ProcessQueries(services, liveCounts, windowStats, activities, store);
+            NodeWindowStatsService windowStats, InstanceActivityService activities, JdbcProcessStore store,
+            ObjectProvider<io.github.dhluong90.bpm.process.internal.service.PendingApprovalSource> pendingSources) {
+        // #473: migration plans and calendar changes show in the pending approvals list when those features run.
+        return new ProcessQueries(services, liveCounts, windowStats, activities, store)
+                .withPendingSources(pendingSources.orderedStream().toList());
     }
 
     @Bean

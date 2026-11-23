@@ -93,6 +93,25 @@ public interface CalendarService {
     CalendarChange approve(String changeId, String comment, String idempotencyKey);
 
     /**
+     * Approves as {@link #approve(String, String, String)} does, only if the change is still the one the approver
+     * reviewed (PD-139, #473).
+     *
+     * @param changeId the change
+     * @param comment an optional comment, at most 500 characters
+     * @param idempotencyKey 1 to 200 characters, or null for no replay protection
+     * @param expectedChangeHash the {@code contentHash} of the change as shown in the pending approvals list, or null
+     *     for no check; another value is {@code CONTENT_CHANGED} and nothing is written
+     * @return the change as the first call returned it
+     */
+    default CalendarChange approve(String changeId, String comment, String idempotencyKey,
+            String expectedChangeHash) {
+        if (expectedChangeHash != null) {
+            throw new UnsupportedOperationException("a reviewed hash is not supported by this service");
+        }
+        return approve(changeId, comment, idempotencyKey);
+    }
+
+    /**
      * Rejects as {@link #reject(String, String)} does, once per idempotency key (PRE-182).
      *
      * @param changeId the change

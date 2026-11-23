@@ -204,6 +204,19 @@ public final class JdbcMigrationStore implements MigrationStore {
     }
 
     @Override
+    public List<ProposedRow> proposedExecutions(String tenant, Instant afterAt, String afterId, int limit) {
+        org.springframework.jdbc.core.RowMapper<ProposedRow> mapper = (rs, row) -> new ProposedRow(rs.getString("id"),
+                rs.getString("definition_key"), rs.getInt("source_version"), rs.getInt("target_version"),
+                rs.getString("plan_hash"), rs.getLong("lock_version"), rs.getString("proposed_by"),
+                instant(rs, "proposed_at"), rs.getString("reason"));
+        if (afterAt == null) {
+            return ProcessListQueries.PROPOSED_MIGRATIONS.list(jdbc, List.of(tenant, limit), mapper);
+        }
+        return ProcessListQueries.PROPOSED_MIGRATIONS_AFTER.list(jdbc, List.of(tenant, ts(afterAt), afterId, limit),
+                mapper);
+    }
+
+    @Override
     public Optional<Execution> findExecution(String tenant, String migrationId) {
         return jdbc.sql("SELECT " + EXECUTION_COLUMNS + " FROM pre_migration WHERE tenant_id = ? AND id = ?")
                 .params(tenant, migrationId).query(JdbcMigrationStore::execution).optional();

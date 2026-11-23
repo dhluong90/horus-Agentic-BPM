@@ -76,6 +76,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-077 | `CKP_077_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest, Playwright with the approval dock above the fold, axe-core | M2 | `TR-UI-02`, `TR-UI-04`, `RLE-092` | Automated |
 | CKP-078 | `CKP_078_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with request body capture, Playwright with the result above the fold, axe-core | M2 | `TR-UI-02`, `TR-UI-04`, `RLE-093` | Automated |
 | CKP-081 | `CKP_081_*` (`cockpit/web/src/features/rules/DiscardDraft.test.tsx`, `cockpit/web/e2e/discard.spec.ts`) | Vitest with the fake engine; Playwright for every state, keyboard and axe-core | M2 | `TR-UI-02`, `TR-IDEM-01` | Automated |
+| CKP-090 | `CKP_090_*` (`cockpit/web/src/features/rules/EffectiveDate.test.tsx`) | Vitest with the fake engine | M3 | `TR-SEC-04` | Done (#470) |
+| CKP-091 | `CKP_091_*` (`cockpit/web/src/features/processes/calendars/CalendarChanges.test.tsx`, `cockpit/web/src/features/approvals/kinds.test.ts`) | Vitest with the fake engine | M3 | `TR-SEC-04` | Done (#473) |
 | CKP-079 | `CKP_079_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with problem answers, Playwright for every state, axe-core | M2 | `TR-SEC-05`, `TR-UI-02`, `TR-UI-04` | Automated |
 
 ## Known gaps
