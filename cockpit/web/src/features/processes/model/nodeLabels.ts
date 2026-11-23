@@ -17,7 +17,29 @@ const KEYS: Record<KnownNodeType, MessageKey> = {
   'intermediateCatchEvent:timer': 'node.timer',
   callActivity: 'node.callActivity',
   transaction: 'node.transaction',
+  subProcess: 'node.subProcess',
   'intermediateThrowEvent:compensate': 'node.compensate',
+  'boundaryEvent:timer': 'node.boundaryTimer',
+  'boundaryEvent:error': 'node.boundaryError',
+  'boundaryEvent:escalation': 'node.boundaryEscalation',
+  'endEvent:error': 'node.errorEnd',
+  'endEvent:escalation': 'node.escalationEnd',
+  'endEvent:terminate': 'node.terminateEnd',
+  'intermediateThrowEvent:escalation': 'node.escalationThrow',
+  'intermediateThrowEvent:link': 'node.linkThrow',
+  'intermediateCatchEvent:link': 'node.linkCatch',
+  'startEvent:signal': 'node.signal',
+  'startEvent:conditional': 'node.conditional',
+  'endEvent:signal': 'node.signal',
+  'intermediateCatchEvent:signal': 'node.signal',
+  'intermediateThrowEvent:signal': 'node.signal',
+  'intermediateCatchEvent:conditional': 'node.conditional',
+  'startEvent:message': 'node.messageStart',
+  'endEvent:message': 'node.messageEnd',
+  'intermediateCatchEvent:message': 'node.messageCatch',
+  'intermediateThrowEvent:message': 'node.messageThrow',
+  receiveTask: 'node.receiveTask',
+  sendTask: 'node.sendTask',
 };
 
 /** Event definitions a node of an unknown element type can still be named by: `boundaryEvent:timer` is a timer. */
@@ -29,6 +51,8 @@ const KIND_KEYS: Readonly<Record<string, MessageKey>> = {
   escalation: 'node.escalation',
   conditional: 'node.conditional',
   compensate: 'node.compensate',
+  terminate: 'node.terminate',
+  link: 'node.link',
 };
 
 /** The icon a node is drawn with: its own type, the timer icon for any timer, or the generic icon. */

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { setCrumbLabel } from '../../app/crumbs';
+import { setCrumbLabel, setCrumbRuleSetName } from '../../app/crumbs';
+import { nameOf } from '../../app/names';
+import { CopyButton } from '../../components/CopyButton';
 import { isUnclassified, type RuleSetVersion, type VersionSummary } from '../../api/rules/schemas';
 import { UnclassifiedNote } from '../../components/UnclassifiedNote';
 import { useI18n } from '../../i18n/I18nProvider';
@@ -30,6 +32,8 @@ import { ReadingsDiffView } from './components/ReadingsDiffView';
 import { ReadingStyleSwitch } from './components/ReadingParts';
 import { SimulatePanel } from './components/SimulatePanel';
 import { SimulationScreen } from './components/SimulationScreen';
+import { ReplayScreen } from './components/ReplayScreen';
+import { ReportView } from './components/ReportView';
 import { formatDateTime } from './model/dates';
 import { columnLabel } from './model/reading';
 import { formatRoute, type Lens, type Route } from '../../app/route';
@@ -139,6 +143,10 @@ function LensContent({ lens, version, base, matched, onOpenTable, onEdit, seen }
       return <SourceView version={version} />;
     case 'simulate':
       return <SimulationScreen version={version} onEdit={onEdit} />;
+    case 'report':
+      return <ReportView version={version} />;
+    case 'replay':
+      return <ReplayScreen version={version} />;
   }
 }
 
@@ -215,11 +223,13 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
   const drafting = version.status === 'DRAFT';
   // Simulation runs on drafts only: on another version no tab is active, as the body is not any of them.
   const simulateOnOther = lens === 'simulate' && !drafting;
-  const tabLens: 'table' | 'readings' | 'changes' | 'history' | 'simulate' | undefined = simulateOnOther ? undefined : lens === 'source' || lens === 'edit' ? 'table' : lens;
+  // Replay, like simulation, is for drafts on a host that announces it.
+  const replayOnOther = lens === 'replay' && !(drafting && session.historyReadings);
+  const tabLens: 'table' | 'readings' | 'changes' | 'report' | 'history' | 'simulate' | 'replay' | undefined = simulateOnOther || replayOnOther ? undefined : lens === 'source' || lens === 'edit' ? 'table' : lens;
   // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
-  const comparing = !editing && lens === 'changes';
+  const comparing = !editing && (lens === 'changes' || lens === 'report');
   // The samples and their results need the full width too; the inspector steps aside.
-  const wide = comparing || (!editing && lens === 'simulate');
+  const wide = comparing || (!editing && (lens === 'simulate' || lens === 'replay'));
   // Approve only what is on screen: the diff shown must be of this version's content, and the content must be what
   // the user opened. The same query as the Changes view, so nothing is fetched twice.
   const diff = useVersionDiff(version, comparing && version.status === 'PENDING_APPROVAL' ? base?.version : undefined);
@@ -238,6 +248,11 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
     setCrumbLabel(crumb);
     return () => { setCrumbLabel(undefined); };
   }, [crumb]);
+  const title = nameOf('rule set', version.ruleSet, version);
+  useEffect(() => {
+    setCrumbRuleSetName(title);
+    return () => { setCrumbRuleSetName(undefined); };
+  }, [title]);
 
   const main: ReactNode = (
     <div className="card workbench__main">
@@ -251,9 +266,10 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
         <div className="rs-head__row">
           <div className="rs-head__titles">
             <h1 id="rule-set-title" className="rs-head__title" tabIndex={-1}>
-              {version.ruleSet} {editing ? <StatusBadge status="DRAFT" /> : <StatusBadge status={version.status} />}
+              {title} {editing ? <StatusBadge status="DRAFT" /> : <StatusBadge status={version.status} />}
             </h1>
             <Subtitle version={version} editing={editing} />
+            <p className="key-chip"><span className="key-chip__term">{t('ruleSet.key')}</span> <code className="key-chip__value">{version.ruleSet}</code> <CopyButton value={version.ruleSet} label={t('ruleSet.copyKey')} iconOnly /></p>
           </div>
           {!editing ? (
             <div className="rs-head__actions">
@@ -261,14 +277,14 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
               <select id="version-picker" className="field__input field__input--compact" value={version.version} onChange={(e) => { go({ version: Number(e.target.value) }); }}>
                 {versions.map((v) => <option key={v.version} value={v.version}>{t(`versionState.${v.status}`, { version: String(v.version) })}</option>)}
               </select>
-              <HeaderActions version={version} demoteRequest={lens === 'simulate'} onEdit={() => { go({ lens: 'edit' }); }}
+              <HeaderActions version={version} demoteRequest={lens === 'simulate' || lens === 'replay'} onEdit={() => { go({ lens: 'edit' }); }}
                 onDiscarded={(discarded) => {
                   say(t('discard.done', { version: String(discarded.version) }));
                   // Back to where the author came from: the rule set's version in front, or the list when none is left.
                   navigate(versions.some((v) => v.version !== discarded.version) ? { name: 'rule-set', ruleSet: discarded.ruleSet, version: undefined, lens: undefined } : { name: 'rule-sets' });
                 }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
-                requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
+                requestPublish={{ start: (report) => { requestPublish.start({ version, report }); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
           ) : null}
         </div>
@@ -281,14 +297,19 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
         {picker.input}
         {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located refusedFile={importVersion.fileName !== undefined ? { fileName: importVersion.fileName, columnLabel: label } : undefined} /> : null}
         {exportFile.error ? <ProblemNotice error={exportFile.error} located columnLabel={label} message={refusedWith(exportFile.error, 'CSV_NO_TABLE_FORM') ? t('export.noTable') : undefined} /> : null}
-        {requestPublish.error ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
+        {requestPublish.error && !(session.simulationReports && session.requiresReport(version.ruleSet)) ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
         {!editing ? (
           <div className="rs-head__tabs">
             <Tabs label={t('lens.label')} className="rs-tabs" selected={tabLens} onSelect={(id) => { go({ lens: id }); }}
               items={[
-                { id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') },
+                { id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') },
+                // The report attached to a publication request opens beside the diff, once the version was requested (PD-115).
+                ...(session.simulationReports && version.status !== 'DRAFT' ? [{ id: 'report', label: t('lens.report') } as const] : []),
+                { id: 'history', label: t('lens.history') },
                 // Simulation runs on drafts only (CKP-004).
                 ...(drafting ? [{ id: 'simulate', label: t('lens.simulate') } as const] : []),
+                // Replay of logged decisions, where the host announces it (/meta feature rules.history-readings).
+                ...(drafting && session.historyReadings ? [{ id: 'replay', label: t('lens.replay') } as const] : []),
               ]}>
               {null}
             </Tabs>

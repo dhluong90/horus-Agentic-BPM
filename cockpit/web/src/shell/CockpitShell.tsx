@@ -9,6 +9,7 @@ import { FederationProvider, useFederatedHosts } from '../app/federation/federat
 import { registryQueryKey, useHostSession, type SessionDependencies } from '../app/session/useHostSession';
 import { useHostInAddress, useHostProbe, useSignIn } from '../app/session/useStandaloneSession';
 import { HostPicker } from '../components/HostPicker';
+import { tenantName } from '../app/names';
 import { TenantRefusedNotice, TenantSwitcher } from '../components/TenantSwitcher';
 import { switchableTenants, type TenantRefusal } from '../app/tenant/tenantFetch';
 import { capabilities, SessionHeader, type SessionSummary } from '../components/SessionHeader';
@@ -26,7 +27,7 @@ function summary(host: RegistryHost, me: BpmMeV1, label: string): SessionSummary
   return {
     hostLabel: label,
     environment: host.environment,
-    tenant: me.tenant.current,
+    tenant: tenantName(me.tenant.names, me.tenant.current),
     userName: me.user.displayName ?? me.user.id,
     userId: me.user.id,
     capabilities: capabilities(me.permissions),
@@ -185,10 +186,10 @@ function HostScreens({ registry, host, session, baseFetch, signOut, tenant, onSe
   const ready = state.status === 'ready';
   // Switching is offered only when the host has it on and the token allows more than one tenant; else hidden.
   const tenants = ready ? switchableTenants(state.meta, state.me) : [];
-  const switcher = ready && tenants.length > 0 ? <TenantSwitcher tenants={tenants} current={state.me.tenant.current} onSelect={onSelectTenant} /> : null;
+  const switcher = ready && tenants.length > 0 ? <TenantSwitcher tenants={tenants} current={state.me.tenant.current} names={state.me.tenant.names} onSelect={onSelectTenant} /> : null;
   const picker = (
     <>
-      <HostPicker hosts={enabledHosts(registry)} current={host} tenant={ready && switcher === null ? state.me.tenant.current : undefined} ready={ready} />
+      <HostPicker hosts={enabledHosts(registry)} current={host} tenant={ready && switcher === null ? tenantName(state.me.tenant.names, state.me.tenant.current) : undefined} ready={ready} />
       {switcher}
     </>
   );

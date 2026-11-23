@@ -30,7 +30,7 @@ describe('CKP-046 claim from Available to me', () => {
       'Credit reviewCase LN-2026-0142', 'Credit reviewCase LN-2026-0145', 'Verify income documentsCase LN-2026-0147',
     ]);
     // Overdue in words, from the engine's slaBreached list; the role in words, never role:credit-officer.
-    expect(within(rows[0] as HTMLElement).getByText('Overdue')).toBeInTheDocument();
+    expect(within(rows[0] as HTMLElement).getByText(/Overdue by 1 h 30 min/)).toBeInTheDocument();
     expect(screen.getByText('1 overdue')).toBeInTheDocument();
     expect(within(rows[0] as HTMLElement).getByText('Role: Credit officer')).toBeInTheDocument();
     expect(within(rows[2] as HTMLElement).getByText('Group: Loans operations')).toBeInTheDocument();

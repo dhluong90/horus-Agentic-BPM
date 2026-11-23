@@ -15,7 +15,7 @@ final class ConditionCompileStep implements CompileStep {
         for (FlowElement element : process.allFlowElements()) {
             if (element instanceof SequenceFlow flow && flow.conditionExpression() != null
                     && flow.conditionExpression().text() != null) {
-                Condition.parse(flow.conditionExpression().text());
+                Condition.parse(flow.conditionExpression().text(), flow.conditionExpression().language());
             }
         }
     }

@@ -31,6 +31,11 @@ public interface JobStore {
      * so that transaction never locks the parent, and fired in a transaction of its own that does.
      */
     String CALL_RESULT = "CALL_RESULT";
+    /**
+     * Job kind that wakes one waiting signal subscription (#492): written for each waiter in the broadcast's own
+     * transaction and fired in a transaction of its own that locks the waiter's instance, so the thrower never does.
+     */
+    String SIGNAL_DELIVERY = "SIGNAL_DELIVERY";
 
     /**
      * @param jobKind a job kind

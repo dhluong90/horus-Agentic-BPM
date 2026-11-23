@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("30");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("32");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -200,7 +200,7 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12, V14 to V21 and V24 to V26 and V28.
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 to V6, V10 to V12, V14 to V21 and V24 to V26, V28, V30 to V32.
         assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__rle_baseline.sql",
                 "2 V2__rle_version_created_by.sql", "3 V3__rle_version_history.sql",
                 "4 V4__rle_version_history_append_only.sql", "5 V5__rle_engine_key.sql",
@@ -215,7 +215,8 @@ class RuleEngineOnlyHostIT {
                 "24 io.github.dhluong90.bpm.rules.postgres.migration.V24__rle_version_history_rule_set_events",
                 "25 V25__rle_decision_function_versions.sql", "26 V26__rle_version_function.sql",
                 "28 V28__rle_version_discarded.sql",
-                "30 io.github.dhluong90.bpm.rules.postgres.migration.V30__rle_version_pending_index");
+                "30 io.github.dhluong90.bpm.rules.postgres.migration.V30__rle_version_pending_index",
+                "31 V31__rle_simulation_report.sql", "32 V32__rle_simulation_report_attachment.sql");
     }
 
     @Test

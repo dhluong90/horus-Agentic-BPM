@@ -41,10 +41,7 @@ final class BpmnStages {
             Map.entry("multiInstanceLoopCharacteristics", S1),
             Map.entry("error", S1),
             Map.entry("escalation", S1),
-            Map.entry("message", S2),
             Map.entry("signal", S2),
-            Map.entry("sendTask", S2),
-            Map.entry("receiveTask", S2),
             Map.entry("eventBasedGateway", S2),
             Map.entry("complexGateway", S3),
             Map.entry("adHocSubProcess", S3));

@@ -9,7 +9,7 @@ import java.util.Objects;
 /**
  * Outputs of the kernel, applied by the shell. The kernel never performs them itself.
  */
-public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
+public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Effect.CreateSubscription, Effect.DeleteSubscription, Effect.BroadcastSignal, Effect.CreateUserTask, Effect.CancelUserTask, Effect.InvokeService, Effect.ThrowMessage, Effect.StartChildInstance, Effect.CancelChildInstance, Effect.PushCompensation, Effect.StartCompensation, Effect.RaiseIncident, Effect.RecordResult, Effect.EmitEvent {
 
     /**
      * Insert a job in {@code pre_timer}.
@@ -45,6 +45,17 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
      * @param nodeId node
      */
     record CreateSubscription(String subscriptionId, String kind, String name, String correlationKey, String tokenId, String nodeId) implements Effect {    }
+
+    /**
+     * Broadcast a signal to every subscription of the instance's tenant and start the definitions with a start event
+     * for it (#492). The shell writes the broadcast and the wake-up jobs in the transaction; it wakes nobody inline.
+     *
+     * @param signalId id of this broadcast, derived like other kernel ids, so a replay is the same broadcast
+     * @param name the signal name
+     * @param tokenId the token that threw it
+     * @param nodeId the throwing event
+     */
+    record BroadcastSignal(String signalId, String name, String tokenId, String nodeId) implements Effect {    }
 
     /**
      * Delete a subscription.
@@ -134,12 +145,18 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
     /**
      * Hand a message to the host's MessageAdapter through the outbox.
      *
+     * @param messageId stable id derived like other kernel ids (instance id and sequence), so a retried step carries
+     *     the same id and the host writes the message once
      * @param messageName message
      * @param correlationKey key or null
      * @param payload payload
+     * @param tokenId the sending token
+     * @param nodeId the sending step
      */
-    record ThrowMessage(String messageName, String correlationKey, Map<String, Object> payload) implements Effect {
+    record ThrowMessage(String messageId, String messageName, String correlationKey, Map<String, Object> payload,
+            String tokenId, String nodeId) implements Effect {
         public ThrowMessage {
+            Objects.requireNonNull(messageId, "messageId must not be null");
             payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
         }
     }
@@ -184,6 +201,20 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
     record PushCompensation(String scopeTokenId, String nodeId, String attemptId, String handler, Map<String, Object> inputSnapshot) implements Effect {
         public PushCompensation {
             inputSnapshot = inputSnapshot == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(inputSnapshot));
+        }
+    }
+
+    /**
+     * The step waiting on a called child was cancelled by a boundary event or a terminate end (#489, #493): the child
+     * instance started for that token is cancelled with the reason {@code parent step cancelled}, so a result that
+     * arrives later finds no waiting token and is dropped.
+     *
+     * @param tokenId the cancelled token of the call step
+     * @param attemptId the call attempt the token waited on
+     */
+    record CancelChildInstance(String tokenId, String attemptId) implements Effect {
+        public CancelChildInstance {
+            Objects.requireNonNull(tokenId, "tokenId must not be null");
         }
     }
 

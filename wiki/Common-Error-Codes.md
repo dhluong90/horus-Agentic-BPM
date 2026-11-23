@@ -34,6 +34,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 404 | [RULE_SET_NOT_FOUND](#rule_set_not_found) | both | rules M1; processes M3 (candidate of an agent replay) |
 | 404 | [VERSION_NOT_FOUND](#version_not_found) | rules | M1 |
 | 404 | [DECISION_NOT_FOUND](#decision_not_found) | rules | M1 |
+| 404 | [SIMULATION_REPORT_NOT_FOUND](#simulation_report_not_found) | rules | 0.3.0 |
 | 404 | [DEFINITION_NOT_FOUND](#definition_not_found) | processes | M2 |
 | 404 | [INSTANCE_NOT_FOUND](#instance_not_found) | processes | M2 |
 | 404 | [TASK_NOT_FOUND](#task_not_found) | processes | M2 |
@@ -59,6 +60,8 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 409 | [LAST_VERSION_IN_EFFECT](#last_version_in_effect) | both | 0.2.0 |
 | 409 | [WARNINGS_NOT_ACKNOWLEDGED](#warnings_not_acknowledged) | rules | 0.2.0 |
 | 409 | [AUTHOR_UNKNOWN](#author_unknown) | rules | 0.2.0 |
+| 409 | [SIMULATION_REPORT_REQUIRED](#simulation_report_required) | rules | 0.3.0 |
+| 409 | [SIMULATION_REPORT_OUT_OF_DATE](#simulation_report_out_of_date) | rules | 0.3.0 |
 | 413 | [PAYLOAD_TOO_LARGE](#payload_too_large) | rules | M1 |
 | 422 | [VALIDATION_FAILED](#validation_failed) | both | M1 |
 | 422 | [IDEMPOTENCY_KEY_REUSE_MISMATCH](#idempotency_key_reuse_mismatch) | both | M1 |
@@ -143,6 +146,15 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 `409`. The version carries a warning the host requires the approver to accept, for example an input that looks like personal data and would be logged without masking (PD-104). The body lists the `warnings` (`code`, `input`, `matchedName`) and the codes the host requires (`setting`, from `lifecycle.acknowledge-warnings`). Nothing was published.
 - **What to do:** read the warnings. To publish anyway, send the approval again with exactly the pairs in `warnings`, for example `"acknowledgedWarnings": [{ "code": "UNMASKED_PERSONAL_DATA", "input": "nationalId" }]`. The engine accepts only the exact current set; the acceptance is recorded on the approval history row and the published event.
 - **What not to do:** a client never retries on its own with the codes added. Otherwise nobody would have accepted the risk.
+
+### SIMULATION_REPORT_REQUIRED
+`409`. The host lists the rule set in `lifecycle.require-simulation-report` and the `:request-publish` call carried no `simulationReportId`. Run `POST .../versions/{v}/simulation-reports` on the draft and send the report's id. The draft stays a draft; nothing was written.
+
+### SIMULATION_REPORT_OUT_OF_DATE
+`409`. The report was run on content the version no longer has, because the draft was replaced after the report. Run a new report on the draft as it is now and attach that. The draft stays a draft; the old report is kept and reads `status: OUT_OF_DATE`.
+
+### SIMULATION_REPORT_NOT_FOUND
+`404`. The version has no report with that id in your tenant. It is the same answer for a report of another tenant, another rule set or another version, so the code never says whether one exists.
 
 ### AUTHOR_UNKNOWN
 `409`. The pending rule set version has no recorded author, so four eyes cannot tell whether the approver made it (PD-105). Only versions written before the author was recorded (schema V2) have none. Nobody can approve it, and the engine never assigns an author. Import the change again, which records you as its author, and have someone else approve that version; reject or withdraw the old one.
@@ -320,7 +332,7 @@ One shape in both engines (PD-141), so a client needs one parser:
    "message":"<businessKnowledgeModel id=\"bkm-1\"> is not supported; it is added in stage S2 (line 55)"}],...}
 ```
 
-A BPMN refusal is the same, with `"code":"BPMN_UNSUPPORTED_ELEMENT"` and a BPMN element such as `boundaryEvent`.
+A BPMN refusal is the same, with `"code":"BPMN_UNSUPPORTED_ELEMENT"` and a BPMN element such as `inclusiveGateway`.
 
 ### EXPRESSION_LANGUAGE_UNSUPPORTED
 `422`. A DMN file names an `expressionLanguage` or `typeLanguage` other than FEEL, for example JUEL or Groovy. `unsupportedElements` holds the element that names it with its `line` and `stage` (`not planned`). Nothing is stored.

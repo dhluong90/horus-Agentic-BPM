@@ -214,3 +214,6 @@ body { background: var(--bg); background-image: none; }
 .tenant-refusal { position: fixed; right: 24px; bottom: 24px; z-index: 60; max-width: 440px; box-shadow: var(--sh-pop); background: var(--surface); }
 .tenant-refusal.alert--error { background: var(--bad-soft); border: 0; border-left: 3px solid var(--bad-fill); }
 .tenant-refusal__back { color: var(--ink-2); font: var(--type-label); }
+
+/* The tenant's key under its name in the tenant menu (#510). */
+.host-picker__key { display: block; color: var(--muted); font: var(--type-caption); font-weight: 400; }

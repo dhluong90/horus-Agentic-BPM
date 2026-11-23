@@ -42,3 +42,21 @@ export function useCrumbTrail(): readonly Crumb[] | undefined {
     () => undefined,
   );
 }
+
+/** The display name of the rule set on screen, which only its page knows; the breadcrumb shows it instead of the key (#510). */
+let ruleSetName: string | undefined;
+const nameListeners = new Set<() => void>();
+
+export function setCrumbRuleSetName(next: string | undefined): void {
+  if (next === ruleSetName) return;
+  ruleSetName = next;
+  for (const listener of nameListeners) listener();
+}
+
+export function useCrumbRuleSetName(): string | undefined {
+  return useSyncExternalStore(
+    (onChange) => { nameListeners.add(onChange); return () => { nameListeners.delete(onChange); }; },
+    () => ruleSetName,
+    () => undefined,
+  );
+}

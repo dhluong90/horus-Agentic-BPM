@@ -50,6 +50,7 @@ public final class CanonicalCells {
         ToIntFunction<String> slots = inputs::indexOf;
         // Descriptions do not change behaviour, but approvers read them: no bidirectional controls there either.
         refuseBidiIn(document, "description", "Description");
+        refuseBidiIn(document, "displayName", "Display name");
         document.get("inputs").forEach(n -> {
             refuseBidiIn(n, "description", "Input " + n.get("name").stringValue());
             refuseBidiIn(n, "label", "Input " + n.get("name").stringValue());

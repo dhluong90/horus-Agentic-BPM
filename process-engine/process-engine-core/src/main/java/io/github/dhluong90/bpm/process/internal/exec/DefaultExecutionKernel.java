@@ -1,7 +1,9 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
+import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.time.Clock;
 import java.util.Map;
@@ -47,8 +49,18 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             case Command.AsyncResult result -> trigger(result.tokenId(), TokenStatus.WAITING_ASYNC, result.attemptId(),
                     result, ctx);
             case Command.JobDue due -> trigger(due.tokenId(), TokenStatus.WAITING_TIMER, due.jobId(), due, ctx);
+            case Command.DeliverSignal signal -> trigger(signal.tokenId(), TokenStatus.WAITING_EVENT,
+                    signal.subscriptionId(), signal, ctx);
             case Command.ChildEnded ended -> trigger(ended.tokenId(), TokenStatus.WAITING_CHILD, ended.attemptId(),
                     ended, ctx);
+            case Command.CorrelateMessage message -> {
+                // The subscription id is the activity instance id of the waiting token.
+                Token waiting = ctx.tree().all().stream().filter(t -> t.status() == TokenStatus.WAITING_EVENT
+                        && message.subscriptionId().equals(t.activityInstanceId())).findFirst().orElseThrow(() ->
+                        new ExecutionException("STALE_SUBSCRIPTION", null, "No token waits on subscription "
+                                + message.subscriptionId()));
+                trigger(waiting.id(), TokenStatus.WAITING_EVENT, message.subscriptionId(), message, ctx);
+            }
             case Command.MoveToken move -> moveToken(move, ctx);
             case Command.RouteToReview review -> trigger(review.tokenId(), TokenStatus.WAITING_ASYNC, review.attemptId(),
                     review, ctx);
@@ -60,7 +72,43 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     command.getClass().getSimpleName() + " is not supported in this release");
         }
         drain(ctx);
+        settleConditions(ctx);
         return ctx.transition();
+    }
+
+    /**
+     * Conditional events (#492): when a command changed the instance variables, every token waiting on a conditional
+     * catch event asks its condition again, in this transaction and for this instance only, never by polling. A token
+     * that moves on may change variables itself, so the pass repeats until nothing fires, within the step budget.
+     */
+    private void settleConditions(WorkingContext ctx) {
+        int passes = 0;
+        boolean changed = ctx.variablesChanged();
+        while (changed) {
+            if (++passes > MAX_STEPS_PER_APPLY) {
+                throw new ExecutionException("STEP_LIMIT", null, "Conditional events fire without end in one transaction");
+            }
+            java.util.Set<String> waiting = new java.util.LinkedHashSet<>();
+            ctx.tree().all().stream().filter(t -> t.status() == TokenStatus.WAITING_EVENT)
+                    .forEach(t -> waiting.add(t.id()));
+            for (String id : waiting) {
+                Token token = ctx.tree().get(id).orElseThrow();
+                if (token.status() != TokenStatus.WAITING_EVENT) {
+                    continue;
+                }
+                FlowNode node = node(token.nodeId());
+                if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent catchEvent
+                        && catchEvent.eventDefinitions().size() == 1 && catchEvent.eventDefinitions().get(0)
+                                instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition)) {
+                    // Only a conditional wait asks its condition again; a signal, message or boundary wait is woken by its own command.
+                    continue;
+                }
+                behaviorFor(node).trigger(node, token, new Command.VariablesChanged(Map.of(), ctx.actor()), ctx);
+            }
+            drain(ctx);
+            changed = waiting.stream().anyMatch(id -> ctx.tree().get(id).map(Token::status).orElse(null)
+                    != TokenStatus.WAITING_EVENT);
+        }
     }
 
     private void start(Command.Start start, WorkingContext ctx) {
@@ -73,9 +121,13 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.history("INSTANCE_STARTED", root, Map.of("definitionId", process.definitionId()));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.started.v1",
                 Map.of("instanceId", ctx.snapshot().instanceId(), "definitionId", process.definitionId())));
-        StartEvent startEvent = process.nodes().stream().filter(StartEvent.class::isInstance)
+        // A process has exactly one start event of its own scope (the compiler checks): a none, signal, message or
+        // conditional one. A none start event wins if a process also has an event start.
+        StartEvent startEvent = process.process().flowElements().stream().filter(StartEvent.class::isInstance)
                 .map(StartEvent.class::cast).filter(s -> s.eventDefinitions().isEmpty()).findFirst()
-                .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No none start event"));
+                .or(() -> process.process().flowElements().stream().filter(StartEvent.class::isInstance)
+                        .map(StartEvent.class::cast).findFirst())
+                .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No start event"));
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
     }
@@ -192,7 +244,25 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             }
             FlowNode node = node(token.nodeId());
             ctx.history("NODE_ENTERED", token, Map.of());
+            armBoundaries(node, token, ctx);
             behaviorFor(node).enter(node, token, ctx);
+        }
+    }
+
+    /**
+     * #489: an activity with timer boundary events parks one timer token per boundary before it runs. Error and
+     * escalation boundaries hold no token: they are found when something is thrown. A step entered again by a retry
+     * keeps the timers it already has.
+     */
+    private void armBoundaries(FlowNode node, Token token, WorkingContext ctx) {
+        for (BoundaryEvent boundary : process.boundariesOf(node.id())) {
+            if (boundary.eventDefinitions().size() != 1
+                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition)
+                    || ctx.hasLiveBoundaryToken(boundary, token.scopeTokenId())) {
+                continue;
+            }
+            Token waiting = ctx.createToken(TokenKind.FLOW, boundary.id(), token.scopeTokenId());
+            behaviorFor(boundary).enter(boundary, waiting, ctx);
         }
     }
 

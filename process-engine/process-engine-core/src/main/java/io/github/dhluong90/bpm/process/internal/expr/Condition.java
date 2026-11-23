@@ -2,18 +2,18 @@ package io.github.dhluong90.bpm.process.internal.expr;
 
 import io.github.dhluong90.bpm.expr.api.ExpressionEvaluationException;
 import io.github.dhluong90.bpm.expr.api.ExpressionInvalidException;
-import io.github.dhluong90.bpm.expr.internal.HorusExprV1;
+import io.github.dhluong90.bpm.expr.languages.ExpressionLanguages;
 import io.github.dhluong90.bpm.expr.spi.CompiledExpression;
 import io.github.dhluong90.bpm.expr.spi.EvaluationContext;
-import io.github.dhluong90.bpm.expr.spi.ExpressionLanguage;
 import io.github.dhluong90.bpm.expr.spi.TypeEnvironment;
 import java.util.Map;
 import java.util.Objects;
 
 /**
- * A compiled sequence-flow condition in {@code urn:horus-bpm:expr:v1}, compiled and evaluated through the
+ * A compiled sequence-flow condition in {@code urn:horus-bpm:expr:v1} or FEEL, compiled and evaluated through the
  * {@link ExpressionLanguage} SPI of {@code bpm-expression} (ADR-0027): the same parser and evaluator as the Rule
- * Engine's decision tables.
+ * Engine's decision tables. FEEL conditions ({@code amount > 1000 and tier = "gold"}) parse into the same tree, so the
+ * rules below hold in both languages.
  *
  * <p>Process variables are typed only at evaluation, so a condition compiles in an
  * {@linkplain TypeEnvironment#untyped() untyped} environment: names may be dotted paths ({@code customer.tier}) that
@@ -30,10 +30,15 @@ public final class Condition {
     /** Longest condition text accepted. */
     public static final int MAX_LENGTH = 1000;
 
-    /** The language every condition of this release is compiled with. */
-    static final ExpressionLanguage LANGUAGE = new HorusExprV1();
-
     private final CompiledExpression compiled;
+
+    /**
+     * @param languageId a language id from a BPMN file
+     * @return true when conditions and scripts can be written in it: the HORUS language or FEEL
+     */
+    public static boolean isSupportedLanguage(String languageId) {
+        return ExpressionLanguages.supports(languageId);
+    }
 
     private Condition(CompiledExpression compiled) {
         this.compiled = compiled;
@@ -47,12 +52,28 @@ public final class Condition {
      * @throws ConditionException with the position when the text is not valid
      */
     public static Condition parse(String source) {
+        return parse(source, null);
+    }
+
+    /**
+     * Parses a condition in a given language.
+     *
+     * @param source the text
+     * @param languageId {@code urn:horus-bpm:expr:v1} or a FEEL URI; null is {@code urn:horus-bpm:expr:v1}
+     * @return the compiled condition
+     * @throws ConditionException with the position when the text is not valid, or the language is not supported
+     */
+    public static Condition parse(String source, String languageId) {
         Objects.requireNonNull(source, "source must not be null");
+        String id = languageId == null ? ExpressionLanguages.V1_ID : languageId;
+        if (!ExpressionLanguages.supports(id)) {
+            throw new ConditionException("Expression language " + id + " is not supported");
+        }
         if (source.isBlank() || source.length() > MAX_LENGTH) {
             throw new ConditionException("A condition must have 1 to " + MAX_LENGTH + " characters");
         }
         try {
-            return new Condition(LANGUAGE.compile(source, TypeEnvironment.untyped()));
+            return new Condition(ExpressionLanguages.of(id).compile(source, TypeEnvironment.untyped()));
         } catch (ExpressionInvalidException e) {
             throw new ConditionException(e.getMessage());
         }

@@ -21,10 +21,48 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <><path d="M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2.5" {...common} /></>;
       case 'callActivity':
         return <><rect x="1.5" y="2.5" width="13" height="11" rx="2" {...common} /><path d="M8 5.5v5M5.5 8h5" {...common} /></>;
+      case 'subProcess':
+        return <><rect x="1.5" y="2.5" width="13" height="11" rx="2" {...common} /><rect x="5.5" y="8" width="5" height="3.5" {...common} /></>;
       case 'transaction':
         return <path d="M5 2.5H2.5v11H5M11 2.5h2.5v11H11" {...common} />;
       case 'intermediateCatchEvent:timer':
         return <><circle cx="8" cy="8" r="6" {...common} /><path d="M8 4.5V8l2.5 1.5" {...common} /></>;
+      case 'boundaryEvent:timer':
+        return <><circle cx="8" cy="8" r="6" {...common} /><path d="M8 4.5V8l2.5 1.5" {...common} /></>;
+      case 'boundaryEvent:error':
+        return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} />;
+      case 'endEvent:error':
+        return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} fill="currentColor" />;
+      case 'boundaryEvent:escalation':
+      case 'intermediateThrowEvent:escalation':
+        return <path d="M8 2l5 11-5-3-5 3z" {...common} />;
+      case 'endEvent:escalation':
+        return <path d="M8 2l5 11-5-3-5 3z" {...common} fill="currentColor" />;
+      case 'endEvent:terminate':
+        return <circle cx="8" cy="8" r="5" {...common} fill="currentColor" />;
+      case 'intermediateThrowEvent:link':
+        return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} fill="currentColor" />;
+      case 'intermediateCatchEvent:link':
+        return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} />;
+      case 'startEvent:signal':
+      case 'intermediateCatchEvent:signal':
+        return <path d="M8 2.5l6 10.5H2z" {...common} />;
+      case 'endEvent:signal':
+      case 'intermediateThrowEvent:signal':
+        return <path d="M8 2.5l6 10.5H2z" {...common} fill="currentColor" />;
+      case 'startEvent:conditional':
+      case 'intermediateCatchEvent:conditional':
+        return <path d="M3.5 2.5h9v11h-9zM5.5 5.5h5M5.5 8h5M5.5 10.5h5" {...common} />;
+      case 'startEvent:message':
+      case 'intermediateCatchEvent:message':
+      case 'receiveTask':
+        // A hollow envelope: the message is awaited.
+        return <><rect x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path d="M2 4.5L8 9l6-4.5" {...common} /></>;
+      case 'endEvent:message':
+      case 'intermediateThrowEvent:message':
+      case 'sendTask':
+        // A filled envelope: the message is sent.
+        return <><rect className="icon--filled" x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path className="icon--knockout" d="M2 4.5L8 9l6-4.5" {...common} /></>;
       case 'intermediateThrowEvent:compensate':
         return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} />;
       case 'generic':

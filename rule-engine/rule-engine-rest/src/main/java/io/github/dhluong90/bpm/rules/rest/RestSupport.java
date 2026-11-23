@@ -82,6 +82,7 @@ final class RestSupport {
     static ObjectNode ruleSetSummary(RuleSetSummary summary) {
         ObjectNode node = EngineJson.NODES.objectNode();
         node.put("ruleSet", summary.ruleSet());
+        node.put("displayName", summary.displayName());
         node.put("latestVersion", summary.latestVersion());
         node.put("latestStatus", summary.latestStatus().name());
         node.set("publishedVersion", EngineValues.value(summary.publishedVersion()));
@@ -324,6 +325,35 @@ final class RestSupport {
             item.put("changed", sample.changed());
             item.set("simulated", outcomeReading(sample.simulated()));
             item.set("baseline", outcomeReading(sample.baseline()));
+        }
+        return node;
+    }
+
+    /** Writes the readings of a history simulation (RLE-202); no logged input is part of it. */
+    static ObjectNode historyReadings(io.github.dhluong90.bpm.rules.api.RuleReadings.HistoryReadings result) {
+        ObjectNode node = EngineJson.NODES.objectNode();
+        node.put("ruleSet", result.ruleSet());
+        node.put("version", result.version());
+        node.put("status", result.status().name());
+        node.put("from", result.from().toString());
+        node.put("to", result.to().toString());
+        node.put("decisionCount", result.results().size());
+        node.put("replayedCount", result.replayedCount());
+        node.put("changedCount", result.changedCount());
+        node.put("notReplayableCount", result.notReplayableCount());
+        node.put("truncated", result.truncated());
+        node.set("languages", strings(result.languages()));
+        ArrayNode items = node.putArray("results");
+        for (io.github.dhluong90.bpm.rules.api.RuleReadings.HistoryItemReading item : result.results()) {
+            ObjectNode out = items.addObject();
+            out.put("decisionId", item.decisionId());
+            out.put("loggedVersion", item.loggedVersion());
+            out.put("evalClock", item.evalClock().toString());
+            out.put("changed", item.changed());
+            out.set("code", EngineValues.value(item.code()));
+            out.set("maskedInputs", strings(item.maskedInputs()));
+            out.set("simulated", io.github.dhluong90.bpm.rules.internal.json.ReadingsJson.outcome(item.simulated()));
+            out.set("logged", io.github.dhluong90.bpm.rules.internal.json.ReadingsJson.outcome(item.logged()));
         }
         return node;
     }

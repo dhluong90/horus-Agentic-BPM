@@ -60,7 +60,7 @@ describe('CKP-081 discard a draft', () => {
   it('CKP_081_a_draft_without_discard_in_allowed_actions_shows_no_discard_button', { timeout: 15000 }, async () => {
     // Minh may not author: the engine lists no discard for him on Lan's draft.
     open('#/rules/card-fee/2', 'rules-approver');
-    expect(await screen.findByRole('heading', { level: 1, name: /card-fee/ }, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: /Card fee/ }, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard draft' })).not.toBeInTheDocument();
     // A published version never offers it either.
     window.location.hash = '#/rules/card-fee/1';

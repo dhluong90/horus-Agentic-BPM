@@ -27,7 +27,29 @@ export const KNOWN_NODE_TYPES = [
   'intermediateCatchEvent:timer',
   'callActivity',
   'transaction',
+  'subProcess',
   'intermediateThrowEvent:compensate',
+  'boundaryEvent:timer',
+  'boundaryEvent:error',
+  'boundaryEvent:escalation',
+  'endEvent:error',
+  'endEvent:escalation',
+  'endEvent:terminate',
+  'intermediateThrowEvent:escalation',
+  'intermediateThrowEvent:link',
+  'intermediateCatchEvent:link',
+  'startEvent:signal',
+  'startEvent:conditional',
+  'endEvent:signal',
+  'intermediateCatchEvent:signal',
+  'intermediateThrowEvent:signal',
+  'intermediateCatchEvent:conditional',
+  'startEvent:message',
+  'endEvent:message',
+  'intermediateCatchEvent:message',
+  'intermediateThrowEvent:message',
+  'receiveTask',
+  'sendTask',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 
@@ -42,6 +64,14 @@ export interface DiagramNode {
   type: string;
   /** The variable a script task stores its result in, shown beside the step in the timeline. */
   resultVariable?: string;
+  /** The id of the sub-process or saga block this step stands in; absent for a step of the process itself (#486). */
+  parentId?: string;
+  /** For a boundary event (#489): the id of the task, call activity or sub-process it sits on. */
+  attachedTo?: string;
+  /** For a boundary event: whether it cancels what it sits on when it fires; false is drawn with a dashed ring. */
+  interrupting?: boolean;
+  /** For a link throw or catch (#493): the name that pairs the two. */
+  linkName?: string;
 }
 
 export interface DiagramEdge {
@@ -51,6 +81,8 @@ export interface DiagramEdge {
   label: string | undefined;
   /** The default flow of a gateway. */
   isDefault: boolean;
+  /** A link between a throw and its catch of the same name (#493), drawn dashed; not a sequence flow. */
+  isLink?: boolean;
 }
 
 export interface DiagramGraph {
@@ -91,6 +123,14 @@ function eventKind(element: Element): string | undefined {
   return undefined;
 }
 
+/** The name of the link event definition of an event, if it has one (#493). */
+function linkNameOf(element: Element): string | undefined {
+  for (const child of elementChildren(element)) {
+    if (child.namespaceURI === BPMN && child.localName === 'linkEventDefinition') return nonEmpty(child.getAttribute('name'));
+  }
+  return undefined;
+}
+
 /** The node type key of a flow element. */
 export function nodeType(element: Element): string {
   const local = element.localName;
@@ -104,6 +144,46 @@ export function nodeType(element: Element): string {
   }
   if (local === 'subProcess' && element.getAttribute('triggeredByEvent') === 'true') return 'subProcess:event';
   return local;
+}
+
+/** Elements that hold steps of their own: a sub-process (not an event sub-process) and a saga block. */
+function isContainer(element: Element): boolean {
+  return (element.localName === 'subProcess' && element.getAttribute('triggeredByEvent') !== 'true') || element.localName === 'transaction';
+}
+
+/** Nested sub-processes the cockpit follows; a deeper one is drawn as a plain box, never skipped. */
+const MAX_NESTING = 8;
+
+/** Reads the steps and flows of one container into the flat lists; a step inside names its container in `parentId`. */
+function readContainer(container: Element, parentId: string | undefined, nodes: DiagramNode[], edges: DiagramEdge[], defaults: Set<string>, depth: number): void {
+  for (const child of elementChildren(container)) {
+    if (child.namespaceURI !== BPMN) continue;
+    const id = nonEmpty(child.getAttribute('id'));
+    if (id === undefined) continue;
+    if (child.localName === 'sequenceFlow') {
+      const source = nonEmpty(child.getAttribute('sourceRef'));
+      const target = nonEmpty(child.getAttribute('targetRef'));
+      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false });
+      continue;
+    }
+    if (NOT_A_STEP.has(child.localName)) continue;
+    const defaultFlow = nonEmpty(child.getAttribute('default'));
+    if (defaultFlow !== undefined) defaults.add(defaultFlow);
+    const boundary = child.localName === 'boundaryEvent';
+    const attachedTo = boundary ? nonEmpty(child.getAttribute('attachedToRef')) : undefined;
+    const link = child.localName.startsWith('intermediate') ? linkNameOf(child) : undefined;
+    const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
+    nodes.push({
+      id,
+      name: nonEmpty(child.getAttribute('name')),
+      type: nodeType(child),
+      ...(resultVariable !== undefined ? { resultVariable } : {}),
+      ...(parentId !== undefined ? { parentId } : {}),
+      ...(attachedTo !== undefined ? { attachedTo, interrupting: child.getAttribute('cancelActivity') !== 'false' } : {}),
+      ...(link !== undefined ? { linkName: link } : {}),
+    });
+    if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);
+  }
 }
 
 /**
@@ -121,28 +201,13 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   const nodes: DiagramNode[] = [];
   const edges: DiagramEdge[] = [];
   const defaults = new Set<string>();
-  for (const child of elementChildren(process)) {
-    if (child.namespaceURI !== BPMN) continue;
-    const id = nonEmpty(child.getAttribute('id'));
-    if (id === undefined) continue;
-    if (child.localName === 'sequenceFlow') {
-      const source = nonEmpty(child.getAttribute('sourceRef'));
-      const target = nonEmpty(child.getAttribute('targetRef'));
-      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false });
-      continue;
-    }
-    if (NOT_A_STEP.has(child.localName)) continue;
-    const defaultFlow = nonEmpty(child.getAttribute('default'));
-    if (defaultFlow !== undefined) defaults.add(defaultFlow);
-    const resultVariable = child.localName === 'scriptTask' ? nonEmpty(child.getAttributeNS(HORUS, 'resultVariable')) : undefined;
-    nodes.push({
-      id,
-      name: nonEmpty(child.getAttribute('name')),
-      type: nodeType(child),
-      ...(resultVariable !== undefined ? { resultVariable } : {}),
-    });
-  }
+  readContainer(process, undefined, nodes, edges, defaults, 0);
   const ids = new Set(nodes.map((node) => node.id));
+  // A link throw is joined to the catch of the same name in the same container by a dashed line (#493).
+  for (const thrown of nodes.filter((node) => node.type === 'intermediateThrowEvent:link' && node.linkName !== undefined)) {
+    const caught = nodes.find((node) => node.type === 'intermediateCatchEvent:link' && node.linkName === thrown.linkName && node.parentId === thrown.parentId);
+    if (caught !== undefined) edges.push({ id: `link:${thrown.id}`, source: thrown.id, target: caught.id, label: thrown.linkName, isDefault: false, isLink: true });
+  }
   return {
     name: nonEmpty(process.getAttribute('name')),
     nodes,
@@ -151,25 +216,50 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   };
 }
 
-/** Steps in flow order: breadth first from the start events, then any step no flow reaches, in document order. */
+/** Steps in flow order: breadth first from the start events, then any step no flow reaches, in document order. A sub-process's own steps follow it, in their own flow order. */
 export function flowOrder(graph: DiagramGraph): DiagramNode[] {
+  const order = (scope: string | undefined): DiagramNode[] => {
+    const nodes = graph.nodes.filter((node) => node.parentId === scope);
+    const ids = new Set(nodes.map((node) => node.id));
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const next = new Map<string, string[]>();
+    const incoming = new Set<string>();
+    for (const edge of graph.edges) {
+      if (!ids.has(edge.source) || !ids.has(edge.target)) continue;
+      next.set(edge.source, [...(next.get(edge.source) ?? []), edge.target]);
+      incoming.add(edge.target);
+    }
+    const queue = nodes.filter((node) => node.type.startsWith('startEvent') || !incoming.has(node.id)).map((node) => node.id);
+    const seen = new Set<string>();
+    const ordered: DiagramNode[] = [];
+    while (queue.length > 0) {
+      const id = queue.shift();
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      const node = byId.get(id);
+      if (node) ordered.push(node);
+      queue.push(...(next.get(id) ?? []));
+    }
+    return [...ordered, ...nodes.filter((node) => !seen.has(node.id))].flatMap((node) => [node, ...order(node.id)]);
+  };
+  return order(undefined);
+}
+
+/** The container ids around a step, outermost first; empty for a step of the process itself. */
+export function ancestorsOf(graph: DiagramGraph, id: string): DiagramNode[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-  const next = new Map<string, string[]>();
-  const incoming = new Set<string>();
-  for (const edge of graph.edges) {
-    next.set(edge.source, [...(next.get(edge.source) ?? []), edge.target]);
-    incoming.add(edge.target);
+  const out: DiagramNode[] = [];
+  let parent = byId.get(id)?.parentId;
+  while (parent !== undefined && out.length <= MAX_NESTING) {
+    const node = byId.get(parent);
+    if (node === undefined) break;
+    out.unshift(node);
+    parent = node.parentId;
   }
-  const queue = graph.nodes.filter((node) => node.type.startsWith('startEvent') || !incoming.has(node.id)).map((node) => node.id);
-  const seen = new Set<string>();
-  const ordered: DiagramNode[] = [];
-  while (queue.length > 0) {
-    const id = queue.shift();
-    if (id === undefined || seen.has(id)) continue;
-    seen.add(id);
-    const node = byId.get(id);
-    if (node) ordered.push(node);
-    queue.push(...(next.get(id) ?? []));
-  }
-  return [...ordered, ...graph.nodes.filter((node) => !seen.has(node.id))];
+  return out;
+}
+
+/** True for a node that holds steps of its own in this graph. */
+export function isContainerNode(graph: DiagramGraph, id: string): boolean {
+  return graph.nodes.some((node) => node.parentId === id);
 }

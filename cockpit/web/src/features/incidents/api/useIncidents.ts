@@ -29,12 +29,13 @@ function jittered(seconds: number): () => number {
 }
 
 /** One status's first page, newest first. */
-export function useIncidentList(status: IncidentStatus, refreshSeconds: number) {
+export function useIncidentList(status: IncidentStatus, refreshSeconds: number, enabled = true) {
   const { client } = useProcessesSession();
   const keys = useKeys();
   return useQuery({
     queryKey: keys.list(status),
     queryFn: ({ signal }) => client.listIncidents({ status, limit: INCIDENT_LIMIT, signal }),
+    enabled,
     refetchInterval: jittered(refreshSeconds),
     staleTime: 5_000,
   });

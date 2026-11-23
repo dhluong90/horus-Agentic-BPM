@@ -9,9 +9,10 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 /**
  * `edit` is the grid editor of a draft; on any other version it opens the table, read only. `simulate` runs samples
- * against a draft; on any other version it says simulation is for drafts.
+ * against a draft; on any other version it says simulation is for drafts. `replay` runs the logged decisions of a period
+ * against a draft, on a host that announces it.
  */
-export const LENSES = ['table', 'readings', 'changes', 'history', 'source', 'edit', 'simulate'] as const;
+export const LENSES = ['table', 'readings', 'changes', 'report', 'history', 'source', 'edit', 'simulate', 'replay'] as const;
 export type Lens = (typeof LENSES)[number];
 
 /** The views of one process definition version: its diagram, its steps as a list, what it changes, and the cases of its key. */

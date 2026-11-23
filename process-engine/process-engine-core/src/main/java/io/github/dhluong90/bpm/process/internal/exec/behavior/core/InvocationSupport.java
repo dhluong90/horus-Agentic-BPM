@@ -84,6 +84,10 @@ final class InvocationSupport {
                 // stays on the step and the shell opens an incident in this transaction; nothing is retried, because
                 // a business error is not technical. Error events (S1) will catch it before this point. The
                 // handler's message never leaves the engine log: it may carry personal data.
+                if (ctx.throwError(token, error.code(), true)) {
+                    // #489: an error boundary on the step or on a scope around it catches the code first; no incident.
+                    return;
+                }
                 if (compensates(node)) {
                     // PRE-073: the step declares onFailure compensate, so its scope is undone instead.
                     ctx.compensate(token, error.code());

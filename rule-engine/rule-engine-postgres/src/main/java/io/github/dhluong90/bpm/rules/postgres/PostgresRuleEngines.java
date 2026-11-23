@@ -137,7 +137,8 @@ public final class PostgresRuleEngines {
             HostFunctions.VersionChange onVersionChange) {
         JdbcIdempotencyStore idempotency = new JdbcIdempotencyStore(dataSource);
         EngineContext context = new EngineContext(tenants, callers, clock, transactions, idempotency, settings,
-                masking, HostFunctions.of(functions, new JdbcFunctionVersionStore(dataSource), onVersionChange));
+                masking, HostFunctions.of(functions, new JdbcFunctionVersionStore(dataSource), onVersionChange),
+                new JdbcSimulationReportStore(dataSource));
         return RuleEngines.create(context, new JdbcRuleStore(dataSource), new JdbcDecisionLog(dataSource),
                 new JdbcEventOutbox(dataSource), querySettings, explainer);
     }

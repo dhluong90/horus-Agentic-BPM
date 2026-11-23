@@ -57,6 +57,18 @@ final class ProcessListQueries {
             "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE status = 'ACTIVE' "
                     + "ORDER BY tenant_id, key_name, version_num LIMIT ?");
 
+    /**
+     * The active versions of one tenant whose start event is a signal start for a name (#492), found in the stored
+     * canonical form by JSON containment, over {@code idx_pre_definition_active} (V45); the caller keeps the effective
+     * version of each key.
+     */
+    static final ListQuery SIGNAL_START_DEFINITIONS = new ListQuery("signal-start-definitions",
+            new Bound.Page("at most the requested number of active versions of one tenant, on idx_pre_definition_active (V45)"),
+            "SELECT " + DEFINITION_COLUMNS + " FROM pre_definition WHERE tenant_id = ? AND status = 'ACTIVE' "
+                    + "AND definition_json @> jsonb_build_object('steps', jsonb_build_array("
+                    + "jsonb_build_object('type', 'start', 'signal', ?::text))) "
+                    + "ORDER BY key_name, version_num DESC LIMIT ?");
+
     /** The lifecycle actions of one definition version. */
     static final ListQuery DEFINITION_HISTORY = new ListQuery("definition-history",
             new Bound.ParentKey("definition_id", "the lifecycle actions of one definition version"),
@@ -178,6 +190,14 @@ final class ProcessListQueries {
      * The children of one parent instance that have not ended, in id order, on {@code idx_pre_instance_parent} (V43).
      * A cancel of the parent reads them to cancel them (#92, PRE-213). Parameters: tenant, parent instance, limit.
      */
+    static final ListQuery MESSAGE_SUBSCRIPTIONS = new ListQuery("message-subscriptions",
+            new Bound.ParentKey("correlation_key", "the waiting tokens of one message and key; the caller reads at most"
+                    + " two, one to deliver to and one to prove the match is not unique, on idx_pre_message_subscription_lookup"
+                    + " (V47)"),
+            "SELECT id, instance_id, token_id, node_id, message_name, correlation_key, created_at "
+                    + "FROM pre_message_subscription WHERE tenant_id = ? AND message_name = ? AND correlation_key = ? "
+                    + "ORDER BY id LIMIT ?");
+
     static final ListQuery INSTANCE_CHILDREN = new ListQuery("instance-children",
             new Bound.ParentKey("parent_instance_id", "the calls of one instance, bounded by its definition's steps "
                     + "and the retries of each; read a page at a time"),
@@ -468,13 +488,13 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, SIGNAL_START_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
                 OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
                 CALENDAR_HOLIDAYS, MIGRATION_LIVE_NODES, MIGRATION_INSTANCES_AT_NODE, MIGRATION_MOVABLE_INSTANCES, MIGRATION_IN_FLIGHT_INSTANCES,
-                INSTANCE_CHILDREN,
+                INSTANCE_CHILDREN, MESSAGE_SUBSCRIPTIONS,
                 MIGRATION_BATCH, MIGRATION_INSTANCE_TOKENS, MIGRATION_OUTCOMES, MIGRATION_OUTCOMES_OF, MIGRATION_FAILURES_WITHOUT_INCIDENT, LAYOUT_REVISIONS,
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,
