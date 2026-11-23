@@ -3,7 +3,7 @@ import { useRef } from 'react';
 import { HostCallError } from '../../../api/hostError';
 import { allVersions } from '../../../api/rules/catalogue';
 import type { ExportedFile, ExportFormat, RuleDocument } from '../../../api/rules/rulesClient';
-import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, RuleSetVersion, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
+import type { AcknowledgedWarning, DecisionResult, DiscardedVersion, DraftValidation, ReportRequest, ReplayRequest, RuleSetVersion, SimulationReport, SimulationSample, VersionSummary } from '../../../api/rules/schemas';
 import { useRulesSession } from './rulesContext';
 
 /*
@@ -229,11 +229,12 @@ export function useDraftCheck(ruleSet: string, version: number, document: RuleDo
   });
 }
 
+/** `report` is the simulation report to attach to the request (RLE-201); without one the request carries none. */
 export function useRequestPublish(onDone: (version: RuleSetVersion) => void) {
   const { client } = useRulesSession();
   const refresh = useRefreshVersions();
   return useSingleFlight(
-    (version: VersionSummary, key) => client.requestPublish(version.ruleSet, version.version, version.lockVersion, key),
+    ({ version, report }: { version: VersionSummary; report?: string | undefined }, key) => client.requestPublish(version.ruleSet, version.version, version.lockVersion, key, report),
     async (version) => {
       await refresh();
       onDone(version);
@@ -376,4 +377,62 @@ export function useSimulateReadings(version: Pick<RuleSetVersion, 'ruleSet' | 'v
 export function useSimulateSamples(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
   const { client } = useRulesSession();
   return useMutation({ mutationFn: (samples: readonly SimulationSample[]) => client.simulateReadings(version.ruleSet, version.version, samples) });
+}
+
+/** The templates a new rule set can start from; the host's own, the same for every author (RLE-197). */
+export function useTemplates(enabled: boolean) {
+  const { client, hostId, tenant } = useRulesSession();
+  return useQuery({ queryKey: [hostId, tenant, 'rules', 'templates'], queryFn: ({ signal }) => client.listTemplates(signal), enabled, staleTime: 300_000 });
+}
+
+/** The stored reports of a version, newest first, without rows (RLE-200). */
+export function useReports(name: string, version: number, enabled = true) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery({ queryKey: [...keys.version(name, version), 'reports'], queryFn: ({ signal }) => client.listSimulationReports(name, version, signal), enabled, staleTime: 5_000 });
+}
+
+/** One report with its rows. A report never changes, so it is read once; keyed by its id. */
+export function useReport(name: string, version: number, reportId: string | undefined) {
+  const { client } = useRulesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: [...keys.version(name, version), 'report', reportId ?? ''],
+    queryFn: ({ signal }) => client.getSimulationReport(name, version, reportId ?? '', signal),
+    enabled: reportId !== undefined,
+    staleTime: 60_000,
+    retry: retryReading,
+  });
+}
+
+/** Runs a simulation and stores the report (RLE-199); one request per intent, the repeat of it reuses its key. */
+export function useCreateReport(name: string, version: number, onDone: (report: SimulationReport) => void) {
+  const { client } = useRulesSession();
+  const queryClient = useQueryClient();
+  const keys = useKeys();
+  return useSingleFlight(
+    (request: ReportRequest, key) => client.createSimulationReport(name, version, request, key),
+    async (report) => {
+      await queryClient.invalidateQueries({ queryKey: [...keys.version(name, version), 'reports'] });
+      onDone(report);
+    },
+  );
+}
+
+/**
+ * Replays the logged decisions of a period through a draft and reads each in plain language (RLE-202). A read: no
+ * Idempotency-Key, nothing is logged. `cancel` abandons the wait; the engine writes nothing, so nothing is left behind.
+ */
+export function useReplay(version: Pick<RuleSetVersion, 'ruleSet' | 'version'>) {
+  const { client } = useRulesSession();
+  const controller = useRef<AbortController | undefined>(undefined);
+  const mutation = useMutation({
+    mutationFn: (request: ReplayRequest) => {
+      const abort = new AbortController();
+      controller.current = abort;
+      return client.simulateHistoryReadings(version.ruleSet, version.version, request, abort.signal);
+    },
+  });
+  const cancel = () => { controller.current?.abort(); };
+  return { ...mutation, cancel };
 }

@@ -3,7 +3,7 @@ import { scenarioPermissions, scenarioResponses, scenarioUser, type MockResponse
 import { displayNamesAnswer } from './displayNames';
 import { createFakeProcessEngine, type ProcessSeed } from './processEngine';
 import type { AuditOptions } from './auditEngine';
-import { createFakeEngine, demoSeed, type AcknowledgementSettings, type StoredVersion } from './ruleEngine';
+import { createFakeEngine, demoSeed, type AcknowledgementSettings, type ReportOptions, type StoredVersion } from './ruleEngine';
 
 function reply(response: MockResponse) {
   const headers: Record<string, string> = { 'Content-Type': response.contentType };
@@ -11,14 +11,15 @@ function reply(response: MockResponse) {
   return new HttpResponse(response.location !== undefined ? null : JSON.stringify(response.body), { status: response.status, headers });
 }
 
-let engine = createFakeEngine(demoSeed());
+// The dev server's engine: card-fee must carry a simulation report with its publication request, and the pending version already does.
+let engine = createFakeEngine(demoSeed(), {}, {}, { required: ['card-fee'], demoReport: true });
 
 /**
  * A fresh mock Rule Engine with the demo data, or the given versions, for test isolation; optionally with the
  * acknowledgement settings the engine marks warnings by (PD-104, RLE-053), and the audit options (decision log, evidence limit).
  */
-export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}, audit: AuditOptions = {}): ReturnType<typeof createFakeEngine> {
-  engine = createFakeEngine(seed, acknowledgement, audit);
+export function resetRuleEngine(seed: StoredVersion[] = demoSeed(), acknowledgement: AcknowledgementSettings = {}, audit: AuditOptions = {}, reports: ReportOptions = {}): ReturnType<typeof createFakeEngine> {
+  engine = createFakeEngine(seed, acknowledgement, audit, reports);
   return engine;
 }
 

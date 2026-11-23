@@ -34,7 +34,7 @@ describe('embedded shell, case A', () => {
     // No backend of its own: the registry, then the host's two metadata endpoints, then only engine endpoints, same origin.
     expect(requested[0]).toMatch(/\/cockpit-hosts\.json$/);
     expect([...requested.slice(1, 3)].sort()).toEqual(['/api/bpm/me', '/api/bpm/meta']);
-    await screen.findByRole('link', { name: 'kyc-risk' });
+    await screen.findByRole('link', { name: 'Kyc risk' });
     expect(requested.slice(3).every((path) => path.startsWith('/api/bpm/rules/v1/'))).toBe(true);
   });
 

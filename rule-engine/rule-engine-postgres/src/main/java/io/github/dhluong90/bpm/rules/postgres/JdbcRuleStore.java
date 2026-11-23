@@ -594,7 +594,7 @@ public final class JdbcRuleStore implements RuleStore {
     private static RuleSetSummary summary(ResultSet rs, int row) throws SQLException {
         int published = rs.getInt("published_version");
         Integer publishedVersion = rs.wasNull() ? null : published;
-        return new RuleSetSummary(rs.getString("name"), rs.getInt("latest_version"),
+        return new RuleSetSummary(rs.getString("name"), rs.getString("display_name"), rs.getInt("latest_version"),
                 VersionStatus.valueOf(rs.getString("latest_status")), publishedVersion, instant(rs, "last_changed_at"));
     }
 

@@ -14,13 +14,15 @@ import { DEMO_NAMES } from './displayNames';
 import { createAuditRoutes, type AuditOptions } from './auditEngine';
 import { fromCsv, toCsv } from './csvTable';
 import { readNoMatch, readRule, sameReadings, LANGUAGES, type Readings } from './ruleReadings';
+import { TEMPLATES } from './ruleTemplates';
+import { decisionIdOf, LOG_SIZE, runReport, syntheticInputs, type Outcome, type StoredReport } from './ruleReports';
 
 /** The most rows or samples one readings request covers, as the engine's limit. */
 const READINGS_MAX = 500;
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 interface Rule { id: string; when: Record<string, string>; then: Record<string, Json>; explain?: Partial<Record<'en' | 'vi', string>> }
-interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string; label?: ClauseLabel }[]; outputs: { name: string; type: string; label?: ClauseLabel }[]; rules: Rule[]; description?: string }
+interface Definition { schemaVersion: number; ruleSet: string; hitPolicy: string; inputs: { name: string; type: string; allowed?: string[]; mask?: boolean; description?: string; label?: ClauseLabel }[]; outputs: { name: string; type: string; label?: ClauseLabel }[]; rules: Rule[]; description?: string; displayName?: string }
 
 export interface StoredHistory { action: 'CREATED' | 'DRAFT_UPDATED' | 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'RETIRED' | 'WITHDRAWN' | 'DISCARDED'; fromStatus: string | null; toStatus: string; actor: string; reason: string | null; lockVersion: number; occurredAt: string }
 
@@ -39,6 +41,8 @@ export interface StoredVersion {
   source: string;
   definition: Definition;
   history?: StoredHistory[];
+  /** The simulation report the latest publication request carries (RLE-201); null when it carried none. */
+  simulationReportId?: string | null;
 }
 
 export interface FakeRequest { method: string; path: string; headers: Record<string, string>; body: string; user: string; permissions: readonly string[] }
@@ -54,7 +58,7 @@ const hash = (text: string) => Array.from({ length: 8 }, (_, seed) => {
   return h.toString(16).padStart(8, '0');
 }).join('');
 
-interface Violation { ruleId: string | null; column: string | null; message: string; code: string }
+interface Violation { ruleId: string | null; column: string | null; message: string; code: string; position?: number }
 
 /**
  * The engine's problem catalogue (explain_en / explain_vi.properties): one sentence per code, never the cell's text.
@@ -212,6 +216,30 @@ function view(v: StoredVersion, request: FakeRequest, marks: Marker, withSource 
   return json(body, { ETag: `"${String(v.lockVersion)}"` });
 }
 
+const SHORTHAND_START = /^(==|!=|<|>|in\s|in\[|not in|is\s|between\s)/;
+const WORDS_OF_THE_LANGUAGE = new Set(['and', 'or', 'not', 'in', 'is', 'null', 'true', 'false', 'between']);
+
+/**
+ * The first problem of a full expression (not a shorthand), as the engine places it: an unknown name at its first
+ * character, a money input compared with a bare number at the operator. A stand-in for the engine's parser, enough
+ * for the condition builder's screens; positions count characters of the cell as written.
+ */
+function fullExpressionProblem(text: string, types: ReadonlyMap<string, string>): { code: string; message: string; position: number } | undefined {
+  if (SHORTHAND_START.test(text.trim()) || !/\b(and|or|not)\b|==|!=|<|>/.test(text)) return undefined;
+  const names = /'(?:[^'\\]|\\.)*'|[A-Za-z_]\w*|\d+(?:\.\d+)?(?:\s+[A-Z]{3}\b)?|(?:==|!=|<=|>=|<|>)|\S/g;
+  const tokens = [...text.matchAll(names)].map((m) => ({ text: m[0], at: m.index }));
+  for (const [index, token] of tokens.entries()) {
+    if (/^[A-Za-z_]\w*$/.test(token.text) && !WORDS_OF_THE_LANGUAGE.has(token.text) && !types.has(token.text)) {
+      return { code: 'UNKNOWN_INPUT', message: `Unknown input '${token.text}'`, position: token.at };
+    }
+    const name = tokens[index - 1]?.text ?? '';
+    if (/^(==|!=|<=|>=|<|>)$/.test(token.text) && types.get(name) === 'money' && /^\d+(\.\d+)?$/.test(tokens[index + 1]?.text ?? '')) {
+      return { code: 'TYPE_MISMATCH', message: 'compares a money with a number', position: token.at };
+    }
+  }
+  return undefined;
+}
+
 const MONEY_TEXT = /^-?\d+(\.\d+)?\s+[A-Z]{3}$/;
 
 /** The engine's static checks that the screens show, every cell at once, in the engine's words. */
@@ -232,6 +260,11 @@ function validate(definition: Definition): Violation[] {
       // Arithmetic on a money input with a plain number ("balance + 100 > 0") is a type error in the engine.
       if (types.get(input) === 'money' && /[A-Za-z_]\w*\s*[-+*/]\s*\d/.test(condition)) {
         found.push({ ruleId: rule.id, column: input, message: 'adds a number to a money', code: 'TYPE_MISMATCH' });
+        continue;
+      }
+      const full = fullExpressionProblem(condition, types);
+      if (full !== undefined) {
+        found.push({ ruleId: rule.id, column: input, message: full.message, code: full.code, position: full.position });
         continue;
       }
       const bare = /^(==|!=)\s*([A-Za-z_]\w*)$/.exec(condition);
@@ -467,7 +500,19 @@ function exportOf(v: StoredVersion, format: string | null): FakeResponse {
   return problem(400, 'INPUT_INVALID', 'format must be one of json, dmn, csv');
 }
 
-export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}, auditOptions: AuditOptions = {}) {
+/** The fake engine's report settings: the rule sets `lifecycle.require-simulation-report` lists, and whether the demo seeds a report on a pending version. */
+export interface ReportOptions { required?: readonly string[]; demoReport?: boolean }
+
+/** The rule set name made readable, as the engine's displayName fallback: card-fee reads Card fee. */
+const readable = (name: string) => { const text = name.replaceAll('-', ' '); return text.charAt(0).toUpperCase() + text.slice(1); };
+
+/** What a version decides for the inputs, with its readings in every language; what a report reads before and after. */
+function outcomeOf(version: { definition: Definition; version: number; ruleSet: string }, inputs: Record<string, Json>): Outcome {
+  const rule = version.definition.rules.find((r) => Object.entries(r.when).every(([input, cell]) => matches(cell, inputs[input])));
+  return rule ? { kind: 'MATCHED', ruleIds: [rule.id], readings: readRule(rule, version.definition, true), then: rule.then } : { kind: 'NO_MATCH', ruleIds: [], readings: readNoMatch(version.ruleSet, version.version), then: null };
+}
+
+export function createFakeEngine(seed: StoredVersion[], acknowledgement: AcknowledgementSettings = {}, auditOptions: AuditOptions = {}, reportOptions: ReportOptions = {}) {
   /** First answers by Idempotency-Key and request, replayed when the same request comes again. */
   const replays = new Map<string, FakeResponse>();
   const store: StoredVersion[] = seed.map((v) => structuredClone(v));
@@ -580,7 +625,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     }
     const found = validate(checked.document);
     const problems = found.slice(0, PROBLEM_LIMIT).map((f) => ({
-      ruleId: f.ruleId, column: f.column, code: f.code, position: null,
+      ruleId: f.ruleId, column: f.column, code: f.code, position: f.position ?? null,
       message: PROBLEM_CATALOGUE[f.code] ?? PROBLEM_CATALOGUE[f.column !== null ? 'RULE_INVALID' : 'DOCUMENT_INVALID'],
     }));
     // The engine reads a valid draft with the reader of RLE-091 and answers each row's full sentence.
@@ -627,7 +672,15 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     const from = v.status;
     if (action === 'request-publish') {
       if (v.status !== 'DRAFT') return problem(409, 'INVALID_STATE', `${v.ruleSet} v${String(v.version)} is ${v.status}`);
-      Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1 });
+      // RLE-201: an optional report to attach, required for the rule sets the host lists; it must have been run on this content.
+      const sent = request.body === '' ? {} : (JSON.parse(request.body) as { simulationReportId?: string });
+      if (sent.simulationReportId === undefined && (reportOptions.required ?? []).includes(v.ruleSet)) return problem(409, 'SIMULATION_REPORT_REQUIRED', `${v.ruleSet} needs a simulation report with the request`);
+      if (sent.simulationReportId !== undefined) {
+        const attached = reports.find((r) => r.id === sent.simulationReportId && r.ruleSet === v.ruleSet && r.version === v.version);
+        if (!attached) return problem(404, 'SIMULATION_REPORT_NOT_FOUND', `Report ${sent.simulationReportId} not found on ${v.ruleSet} v${String(v.version)}`);
+        if (attached.canonicalHash !== hash(JSON.stringify(v.definition))) return problem(409, 'SIMULATION_REPORT_OUT_OF_DATE', 'The draft changed after the report was run');
+      }
+      Object.assign(v, { status: 'PENDING_APPROVAL', requestedBy: request.user, requestedAt: now(), lockVersion: v.lockVersion + 1, simulationReportId: sent.simulationReportId ?? null });
       record(v, 'REQUESTED', from, request.user, null);
       return view(v, request, marks);
     }
@@ -676,7 +729,7 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     const latest = versions.reduce((a, b) => (b.version > a.version ? b : a));
     const published = [...versions].reverse().find((v) => v.status === 'PUBLISHED');
     const times = versions.flatMap((v) => [v.createdAt, v.requestedAt, v.approvedAt, ...(v.history ?? []).map((h) => h.occurredAt)]).filter((x): x is string => typeof x === 'string');
-    return { ruleSet: name, latestVersion: latest.version, latestStatus: latest.status, publishedVersion: published?.version ?? null, lastChangedAt: times.sort().at(-1) ?? latest.createdAt };
+    return { ruleSet: name, displayName: latest.definition.displayName ?? readable(name), latestVersion: latest.version, latestStatus: latest.status, publishedVersion: published?.version ?? null, lastChangedAt: times.sort().at(-1) ?? latest.createdAt };
   }
 
   function listRuleSets(url: URL): FakeResponse {
@@ -802,6 +855,125 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     return json({ ruleSet: name, version: v.version, baselineVersion: effective?.version ?? null, languages: LANGUAGES, results });
   }
 
+  /**
+   * `:simulate-history-readings` (RLE-202): the logged decisions of a period replayed through this version and read in
+   * plain language, in the same order and counts as the OpenAPI. The mock has no decision log: it walks the synthetic
+   * one of the reports, newest first. A decision whose masked input had a value, or whose logged version cannot be
+   * evaluated again (the rule set has no version that was in effect), is REPLAY_NOT_POSSIBLE with the masked names
+   * and no reading; no input value is ever part of the answer.
+   */
+  function replayReadings(name: string, number: number, request: FakeRequest): FakeResponse {
+    for (const permission of ['rules:simulate', 'rules:log:read', 'rules:read']) {
+      if (!request.permissions.includes(permission)) return problem(403, 'PERMISSION_DENIED', `The caller lacks permission ${permission}`);
+    }
+    if (versionsOf(name).length === 0) return problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`);
+    const v = find(name, number);
+    if (!v) return problem(404, 'VERSION_NOT_FOUND', `Version ${String(number)} of rule set ${name} not found`);
+    let body: { from?: unknown; to?: unknown; limit?: unknown };
+    try { body = JSON.parse(request.body || '{}') as typeof body; } catch { return problem(400, 'INPUT_INVALID', 'The body is not JSON'); }
+    const from = typeof body.from === 'string' ? Date.parse(body.from) : Number.NaN;
+    const to = typeof body.to === 'string' ? Date.parse(body.to) : Number.NaN;
+    if (Number.isNaN(from) || Number.isNaN(to)) return problem(400, 'QUERY_INVALID', 'from and to must be ISO 8601 instants');
+    if (to <= from) return problem(400, 'QUERY_INVALID', 'to must be after from');
+    if (to - from > 31 * 86_400_000) return problem(400, 'QUERY_INVALID', 'The period is at most 31 days (query.max-range)');
+    if (body.limit !== undefined && body.limit !== null && (typeof body.limit !== 'number' || !Number.isInteger(body.limit) || body.limit < 1)) return problem(400, 'QUERY_INVALID', 'limit must be a whole number from 1');
+    const limit = typeof body.limit === 'number' ? body.limit : READINGS_MAX;
+    if (limit > READINGS_MAX) return problem(422, 'READINGS_TOO_LARGE', `One request reads at most ${String(READINGS_MAX)} decisions, this one asks for ${String(limit)}; read fewer at a time`);
+    const logged = [...versionsOf(name)].reverse().find((candidate) => candidate.status === 'PUBLISHED' && candidate.version !== v.version);
+    const maskedNames = v.definition.inputs.filter((input) => input.mask === true).map((input) => input.name);
+    const total = Math.min(limit, LOG_SIZE);
+    const step = (to - from) / (total + 1);
+    const results = syntheticInputs(v.definition.inputs, total).map((inputs, index) => {
+      const base = { decisionId: decisionIdOf(index), loggedVersion: logged?.version ?? Math.max(1, v.version - 1), evalClock: new Date(Math.round(to - (index + 1) * step)).toISOString() };
+      // Every fourth decision held a value in a masked input: the log keeps only its fingerprint.
+      const hadMasked = maskedNames.length > 0 && index % 4 === 1;
+      if (logged === undefined || hadMasked) {
+        return { ...base, changed: false, code: 'REPLAY_NOT_POSSIBLE', maskedInputs: hadMasked ? maskedNames : [], simulated: null, logged: null };
+      }
+      const known = { ...inputs };
+      for (const masked of maskedNames) known[masked] = null;
+      const now = outcomeOf(v, known);
+      const then = outcomeOf(logged, known);
+      const changed = now.kind !== then.kind || JSON.stringify(now.then) !== JSON.stringify(then.then);
+      const strip = ({ kind, ruleIds, readings }: Outcome) => ({ kind, ruleIds, readings });
+      return { ...base, changed, code: null, maskedInputs: [], simulated: strip(now), logged: strip(then) };
+    });
+    const notReplayableCount = results.filter((r) => r.code !== null).length;
+    return json({
+      ruleSet: name, version: v.version, status: v.status, from: new Date(from).toISOString(), to: new Date(to).toISOString(),
+      decisionCount: results.length, replayedCount: results.length - notReplayableCount, changedCount: results.filter((r) => r.changed).length, notReplayableCount,
+      truncated: limit < LOG_SIZE, languages: LANGUAGES, results,
+    });
+  }
+
+  /** The stored simulation reports (RLE-199): written once, never changed. */
+  const reports: StoredReport[] = [];
+
+  /** A report as GET answers it: the status from the version's current content, `attached` from its latest request, decision ids only for rules:log:read. */
+  function reportView(r: StoredReport, request: FakeRequest, withRows: boolean) {
+    const v = find(r.ruleSet, r.version);
+    const logReader = request.permissions.includes('rules:log:read');
+    return {
+      id: r.id, ruleSet: r.ruleSet, version: r.version, canonicalHash: r.canonicalHash,
+      status: v !== undefined && hash(JSON.stringify(v.definition)) === r.canonicalHash ? 'CURRENT' : 'OUT_OF_DATE',
+      attached: v?.simulationReportId === r.id, createdBy: r.createdBy, createdAt: r.createdAt, scope: r.scope, counts: r.counts, languages: LANGUAGES,
+      rows: withRows ? r.rows.map((row) => ({ ...row, decisionId: logReader ? row.decisionId : null })) : [], rowsTruncated: r.rowsTruncated,
+    };
+  }
+
+  /** Runs the simulation over samples or a replayed period and stores the report bound to the version's content (RLE-199). */
+  function createReport(v: StoredVersion, request: FakeRequest, createdAt: string = now()): FakeResponse {
+    if (!request.permissions.includes('rules:simulate')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:simulate');
+    if (request.body.length > IMPORT_LIMIT) return problem(413, 'PAYLOAD_TOO_LARGE', `The body is larger than ${String(IMPORT_LIMIT)} bytes`);
+    let body: { source?: string; samples?: { inputs: Record<string, Json> }[]; from?: string; to?: string; limit?: number };
+    try { body = JSON.parse(request.body || '{}') as typeof body; } catch { return problem(400, 'INPUT_INVALID', 'The body is not JSON'); }
+    const baselineVersion = [...versionsOf(v.ruleSet)].reverse().find((candidate) => candidate.status === 'PUBLISHED' && candidate.version !== v.version);
+    const baseline = baselineVersion ? (inputs: Record<string, Json>) => outcomeOf(baselineVersion, inputs) : null;
+    const current = (inputs: Record<string, Json>) => outcomeOf(v, inputs);
+    let scope: StoredReport['scope'];
+    let items: Parameters<typeof runReport>[0];
+    if (body.source === 'SAMPLES') {
+      const samples = body.samples ?? [];
+      if (samples.length < 1 || samples.length > 1000) return problem(400, 'INPUT_INVALID', 'samples must hold 1 to 1000 input sets');
+      scope = { source: 'SAMPLES', from: null, to: null, limit: null, truncated: false };
+      items = samples.map((sample, index) => ({ reference: `S${String(index + 1)}`, decisionId: null, inputs: sample.inputs, masked: false }));
+    } else if (body.source === 'REPLAY') {
+      const from = Date.parse(body.from ?? ''); const to = Date.parse(body.to ?? '');
+      if (Number.isNaN(from) || Number.isNaN(to) || to <= from || to - from > 31 * 86_400_000) return problem(400, 'QUERY_INVALID', 'from and to must be a period of at most 31 days');
+      const limit = body.limit ?? 100;
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1000) return problem(400, 'INPUT_INVALID', 'limit must be 1 to 1000');
+      const total = Math.min(limit, LOG_SIZE);
+      scope = { source: 'REPLAY', from: new Date(from).toISOString(), to: new Date(to).toISOString(), limit, truncated: limit < LOG_SIZE };
+      // A masked input had a value the log holds only as a fingerprint: such a decision cannot be replayed.
+      const masked = v.definition.inputs.some((input) => input.mask === true);
+      items = syntheticInputs(v.definition.inputs, total).map((inputs, index) => ({ reference: null, decisionId: decisionIdOf(index), inputs, masked }));
+    } else {
+      return problem(400, 'INPUT_INVALID', 'source must be SAMPLES or REPLAY');
+    }
+    const stored: StoredReport = { id: `01KB2R6Q3C${String(reports.length + 1).padStart(16, '0')}`, ruleSet: v.ruleSet, version: v.version, canonicalHash: hash(JSON.stringify(v.definition)), createdBy: request.user, createdAt, scope, ...runReport(items, current, baseline) };
+    reports.push(stored);
+    return { ...json(reportView(stored, request, true)), status: 201 };
+  }
+
+  function reportRoute(v: StoredVersion, reportId: string | undefined, request: FakeRequest): FakeResponse {
+    if (request.method === 'POST' && reportId === undefined) return createReport(v, request);
+    if (request.method !== 'GET') return problem(404, 'VERSION_NOT_FOUND', `No route ${request.method}`);
+    if (!request.permissions.includes('rules:read')) return problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:read');
+    const own = reports.filter((r) => r.ruleSet === v.ruleSet && r.version === v.version);
+    if (reportId === undefined) return json({ reports: [...own].reverse().slice(0, 50).map((r) => reportView(r, request, false)) });
+    const found = own.find((r) => r.id === reportId);
+    return found ? json(reportView(found, request, true)) : problem(404, 'SIMULATION_REPORT_NOT_FOUND', `Report ${reportId} not found`);
+  }
+
+  /** The demo's report: a replay of the first weeks of November, attached to the request that is waiting for approval. */
+  if (reportOptions.demoReport === true) {
+    for (const pending of store.filter((v) => v.status === 'PENDING_APPROVAL' && v.requestedBy !== null)) {
+      const asLan: FakeRequest = { method: 'POST', path: '', headers: {}, user: pending.requestedBy ?? 'lan', permissions: ['rules:simulate'], body: JSON.stringify({ source: 'REPLAY', from: '2026-11-01T00:00:00Z', to: '2026-11-18T00:00:00Z', limit: 100 }) };
+      const made = JSON.parse(createReport(pending, asLan, '2026-11-18T08:20:00Z').body) as { id: string };
+      pending.simulationReportId = made.id;
+    }
+  }
+
   function handle(request: FakeRequest): FakeResponse {
     const key = request.headers['idempotency-key'];
     if ((request.method !== 'POST' && request.method !== 'PUT') || key === undefined) return route(request);
@@ -818,12 +990,20 @@ export function createFakeEngine(seed: StoredVersion[], acknowledgement: Acknowl
     const path = decodeURIComponent(url.pathname).replace(/^.*\/api\/bpm\/rules\/v1/, '');
     let m: RegExpExecArray | null;
     if (path === '/approvals' && request.method === 'GET') return listPendingApprovals(url, request);
+    if (path === '/rule-set-templates' && request.method === 'GET') {
+      return request.permissions.includes('rules:author') ? json({ templates: TEMPLATES }) : problem(403, 'PERMISSION_DENIED', 'The caller lacks permission rules:author');
+    }
+    if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)\/simulation-reports(?:\/([^/]+))?$/.exec(path))) {
+      const owner = find(m[1] ?? '', Number(m[2]));
+      return owner ? reportRoute(owner, m[3], request) : problem(404, 'VERSION_NOT_FOUND', `Version ${m[2] ?? ''} of rule set ${m[1] ?? ''} not found`);
+    }
     if (path === '/rule-sets') return request.method === 'GET' ? listRuleSets(url) : importVersion(undefined, request);
     if (request.method === 'GET' && (m = /^\/rule-sets\/([^/]+)$/.exec(path))) {
       const name = m[1] ?? '';
       return versionsOf(name).length === 0 ? problem(404, 'RULE_SET_NOT_FOUND', `Rule set ${name} not found`) : json(summary(name));
     }
     if ((m = /^\/rule-sets\/([^/]+)\/versions$/.exec(path))) return request.method === 'GET' ? listVersions(m[1] ?? '', url, request) : importVersion(m[1], request);
+    if (request.method === 'POST' && (m = /^\/rule-sets\/([^/]+)\/versions\/(\d+):simulate-history-readings$/.exec(path))) return replayReadings(m[1] ?? '', Number(m[2]), request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/readings|\/diff\/readings|:simulate-readings)$/.exec(path))) return readings(m[1] ?? '', Number(m[2]), m[3] ?? '', url, request);
     if ((m = /^\/rule-sets\/([^/]+)\/versions\/(\d+)(\/history|\/diff|\/export|:request-publish|:approve|:reject|:validate|:withdraw|:discard)?$/.exec(path))) {
       const name = m[1] ?? '';

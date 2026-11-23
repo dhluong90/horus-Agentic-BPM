@@ -36,6 +36,10 @@ To take back your own request: `POST .../versions/3:withdraw` with `Idempotency-
 
 Find what waits for you. `GET /approvals` lists every version of your tenant that is waiting for a second person, oldest request first, including an older version of a rule set that has a newer one (0.3.0, #31). Each item gives the `canonicalHash` and `lockVersion` to send back with your decision, and what you may do: the person who requested a version gets neither `approve` nor `reject` (`SELF_APPROVAL_FORBIDDEN`; they can withdraw), the author gets `reject` but not `approve`, a caller without `rules:approve` gets `PERMISSION_REQUIRED`, and a version with no recorded author cannot be approved by anyone (`AUTHOR_UNKNOWN`). The list needs only `rules:read`, so a reviewer sees why a button is missing; the commands still decide.
 
+### Attach a simulation report
+
+When the approver should see the impact first, run a report on the draft (see [[Rule Engine Simulation and Testing]]) and send its id with the request: `POST .../versions/2:request-publish` with `{"simulationReportId":"..."}`. The report must be of this version and run on the content it has now; otherwise the answer is `404 SIMULATION_REPORT_NOT_FOUND` or `409 SIMULATION_REPORT_OUT_OF_DATE` and the draft stays a draft. A host can require a report for chosen rule sets with `lifecycle.require-simulation-report`.
+
 ## Roll a change back
 
 History is never rewritten: to undo a fee change, restore an earlier version as the next draft and publish it the normal way.

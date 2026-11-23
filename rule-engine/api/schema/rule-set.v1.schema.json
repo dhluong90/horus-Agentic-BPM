@@ -17,6 +17,7 @@
       "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
       "maxLength": 100
     },
+    "displayName": { "type": "string", "minLength": 1, "maxLength": 100, "description": "The name people read in lists and headings, for example Card fee. Optional; when it is left out the list shows the rule set name made readable. Part of the version, so a change is approved like any other." },
     "description": { "type": "string", "maxLength": 2000 },
     "expressionLanguage": {
       "description": "Language of every expression in this document. Only urn:horus-bpm:expr:v1 is accepted in schema version 1; FEEL (feel or an OMG FEEL namespace URI) is refused by name until it arrives with a later schema version in stage S1 (ADR-0017, ADR-0019). Stored with the version.",

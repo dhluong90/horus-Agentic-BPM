@@ -91,8 +91,8 @@ describe('rule set browser (CKP-030)', () => {
     await user.clear(screen.getByPlaceholderText('Find a rule set'));
 
     // Open card-fee, then version 1 from the version picker: a table, no YAML or JSON.
-    await user.click(await screen.findByRole('link', { name: 'card-fee' }));
-    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('card-fee');
+    await user.click(await screen.findByRole('link', { name: 'Card fee' }));
+    expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Card fee');
     await user.selectOptions(await screen.findByLabelText('Versions'), '1');
     expect(await versionLine(1)).toHaveTextContent('first matching row wins');
     expect(screen.getByText('50,000,000 VND')).toBeInTheDocument();

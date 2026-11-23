@@ -74,6 +74,29 @@ function worded(raw: string, language: Language): string {
 
 interface Test { full: string; short: string }
 
+/**
+ * A full expression of nested and, or and not (the condition builder writes these) as words: each comparison becomes its
+ * sentence, and the connectors become the language's words, so the mock never shows an expression in a reading.
+ */
+function compoundWords(text: string, definition: ReadableDefinition, language: Language): string {
+  const w = WORDS[language];
+  const sw = SHORT_WORDS[language];
+  const who = (name: string) => nameOf(name, definition.inputs.find((i) => i.name === name)?.description, language, true);
+  const items = (list: string) => list.split(',').map((item) => worded(item, language)).join(', ');
+  const verb = (op: string) => (op === '==' ? w.is : op === '!=' ? w.not : w[COMPARE[op] ?? 'atLeast']);
+  const empty = language === 'vi' ? 'để trống' : 'is empty';
+  const filled = language === 'vi' ? 'không để trống' : 'is not empty';
+  return text
+    .replace(/(\w+)\s+not in\s*\[([^\]]*)\]/g, (_m, n: string, l: string) => `${who(n)} ${sw.not} ${sw.oneOf} ${items(l)}`)
+    .replace(/(\w+)\s+in\s*\[([^\]]*)\]/g, (_m, n: string, l: string) => `${who(n)} ${w.oneOf} ${items(l)}`)
+    .replace(/(\w+)\s+is not null/g, (_m, n: string) => `${who(n)} ${filled}`)
+    .replace(/(\w+)\s+is null/g, (_m, n: string) => `${who(n)} ${empty}`)
+    .replace(/(\w+)\s*(==|!=|>=|<=|>|<)\s*('[^']*'|\d+(?:\.\d+)?(?:\s+[A-Z]{3})?|true|false)/g, (_m, n: string, op: string, v: string) => `${who(n)} ${verb(op)} ${worded(v, language)}`)
+    .replace(/\bnot\s*\(/g, language === 'vi' ? 'không phải (' : 'not (')
+    .replace(/\band\b/g, w.and)
+    .replace(/\bor\b/g, language === 'vi' ? 'hoặc' : 'or');
+}
+
 function condition(name: string, cell: string, definition: ReadableDefinition, language: Language): Test {
   const input = definition.inputs.find((i) => i.name === name);
   const who = nameOf(name, input?.description, language, true);
@@ -81,6 +104,10 @@ function condition(name: string, cell: string, definition: ReadableDefinition, l
   const sw = SHORT_WORDS[language];
   if (input?.mask === true) return { full: `${who} ${w.masked}`, short: `${who} ${sw.masked}` };
   const text = cell.trim();
+  if (/\b(and|or)\b|^not\b|\bnot\s*\(/.test(text) && !/^(==|!=|<|>|in\s|in\[|not in|is\s)/.test(text)) {
+    const words = compoundWords(text, definition, language);
+    return { full: words, short: words };
+  }
   let m = /^(==|!=)\s*(.+)$/.exec(text);
   if (m) {
     const operand = worded(m[2] ?? '', language);

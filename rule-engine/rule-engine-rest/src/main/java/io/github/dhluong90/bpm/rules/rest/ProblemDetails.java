@@ -26,7 +26,7 @@ import tools.jackson.databind.node.ObjectNode;
  */
 @RestControllerAdvice(assignableTypes = {RuleSetController.class, DecisionController.class,
     DecisionLogController.class, SimulationController.class, RuleSetHistoryController.class,
-    ApprovalController.class})
+    ApprovalController.class, SimulationReportController.class, RuleSetTemplateController.class})
 public class ProblemDetails {
 
     private static final System.Logger LOG = System.getLogger(ProblemDetails.class.getName());
@@ -60,6 +60,9 @@ public class ProblemDetails {
             Map.entry("WARNINGS_NOT_ACKNOWLEDGED", HttpStatus.CONFLICT),
             Map.entry("LAST_VERSION_IN_EFFECT", HttpStatus.CONFLICT),
             Map.entry("AUTHOR_UNKNOWN", HttpStatus.CONFLICT),
+            Map.entry("SIMULATION_REPORT_REQUIRED", HttpStatus.CONFLICT),
+            Map.entry("SIMULATION_REPORT_OUT_OF_DATE", HttpStatus.CONFLICT),
+            Map.entry("SIMULATION_REPORT_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.PAYLOAD_TOO_LARGE),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.PRECONDITION_REQUIRED),
             Map.entry("DRAFT_AUTHORING_DISABLED", HttpStatus.FORBIDDEN),

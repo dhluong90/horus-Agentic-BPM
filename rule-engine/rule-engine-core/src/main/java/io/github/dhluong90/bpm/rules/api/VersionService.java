@@ -184,6 +184,22 @@ public interface VersionService {
     RuleReadings.SimulationReadings readSimulation(SimulationResult result, List<String> labels);
 
     /**
+     * Reads the items of a history simulation in plain language (RLE-202): each logged decision's outcome in the
+     * version that decided it and the simulated outcome in the simulated version. A decision that could not be
+     * replayed, because a masked input had a value the log holds only as a fingerprint, or because its logged version
+     * cannot be evaluated again, is listed with the code {@code REPLAY_NOT_POSSIBLE}, the names of the masked inputs
+     * and no reading. No input value is part of the reading. Writes nothing. Needs {@code rules:read}.
+     *
+     * @param result the result of {@link RuleEngine#simulateHistory}
+     * @return one reading per logged decision, in the order of the result
+     * @throws VersionNotFoundException when the simulated version no longer exists
+     * @throws ReadingsTooLargeException when the result has more decisions than one request reads
+     */
+    default RuleReadings.HistoryReadings readHistorySimulation(HistorySimulationResult result) {
+        throw new UnsupportedOperationException("readHistorySimulation is not supported by " + getClass().getName());
+    }
+
+    /**
      * Imports a spreadsheet file (CSV) as the next draft version of a rule set (PD-107, PD-142, RLE-192). The file's
      * columns must be exactly the inputs and outputs of {@code base}, in its order, with an optional
      * {@code Description}; the hit policy, the masks and everything else outside the rows are the base version's.

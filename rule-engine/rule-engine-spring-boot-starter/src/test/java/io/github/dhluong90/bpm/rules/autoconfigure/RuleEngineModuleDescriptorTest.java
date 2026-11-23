@@ -36,7 +36,8 @@ class RuleEngineModuleDescriptorTest {
             assertThat(rules.apiVersion()).isEqualTo("v1");
             assertThat(rules.engineVersion()).isEqualTo(System.getProperty("rule-engine.version"))
                     .doesNotContain("${").matches("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$");
-            assertThat(rules.features()).isEmpty();
+            assertThat(rules.features()).containsExactly("rules.history-readings", "rules.simulation-reports",
+                    "rules.templates");
             assertThat(rules.permissions()).containsExactly(
                     "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
                     "rules:masked:search", "rules:pin");
@@ -94,7 +95,8 @@ class RuleEngineModuleDescriptorTest {
                         Map.entry("lifecycle.retire-approval", "single"),
                         Map.entry("lifecycle.retire-last-version", "confirm"),
                         Map.entry("lifecycle.acknowledge-warnings", "UNMASKED_PERSONAL_DATA"),
-                        Map.entry("approval.require-content-hash", true)));
+                        Map.entry("approval.require-content-hash", true),
+                        Map.entry("lifecycle.require-simulation-report", "")));
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=single")
                 .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
                         .containsEntry("lifecycle.retire-approval", "single"));
@@ -104,6 +106,76 @@ class RuleEngineModuleDescriptorTest {
         runner.withPropertyValues("horus.bpm.lifecycle.retire-approval=dual")
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageContaining("horus.bpm.lifecycle.retire-approval"));
+    }
+
+    @Test
+    void RLE_201_the_rule_sets_that_need_a_simulation_report_are_published_and_checked_at_start_up() {
+        // PD-115: none by default; a host lists rule sets by name, shown comma-separated like the other lists
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.require-simulation-report=card-fee,loan-pricing")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).settings())
+                        .containsEntry("lifecycle.require-simulation-report", "card-fee,loan-pricing"));
+        runner.withPropertyValues("horus.bpm.rules.lifecycle.require-simulation-report=Card Fee")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.lifecycle.require-simulation-report")
+                        .hasMessageContaining("kebab-case"));
+    }
+
+    @Test
+    void RLE_201_the_features_the_build_announces_match_the_pattern_the_cockpit_accepts() {
+        assertThat(RuleEngineModule.FEATURES).containsExactly("rules.history-readings", "rules.simulation-reports",
+                "rules.templates").allMatch(feature -> feature.matches("^[a-z]+(\\.[a-z0-9-]+)+$"));
+    }
+
+    @Test
+    void RLE_197_the_template_service_offers_the_built_in_four_and_the_host_folder(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path folder) throws Exception {
+        // Given the bank's deposit-rate-by-term in its folder and the blank template hidden
+        java.nio.file.Files.writeString(folder.resolve("deposit-rate-by-term.json"), """
+                { "id": "deposit-rate-by-term",
+                  "labels": { "en": "Deposit rate by term", "vi": "Lãi suất theo kỳ hạn" },
+                  "descriptions": { "en": "Annual rate for each term.", "vi": "Lãi suất năm theo kỳ hạn." },
+                  "document": { "schemaVersion": 1, "hitPolicy": "first",
+                    "inputs": [ { "name": "termMonths", "type": "integer" } ],
+                    "outputs": [ { "name": "annualRate", "type": "decimal" } ],
+                    "rules": [ { "id": "R1", "when": {}, "then": { "annualRate": "4.2" } } ] } }
+                """);
+        var author = new io.github.dhluong90.bpm.rules.spi.CallerResolver() {
+            @Override
+            public String currentCallerId() {
+                return "lan";
+            }
+
+            @Override
+            public java.util.Set<String> currentPermissions() {
+                return java.util.Set.of("rules:author");
+            }
+        };
+
+        // When the host starts with the folder configured
+        runner.withBean(io.github.dhluong90.bpm.rules.spi.CallerResolver.class, () -> author)
+                .withPropertyValues("horus.bpm.rules.templates.location=" + folder,
+                        "horus.bpm.rules.templates.hidden=blank")
+                .run(context -> {
+                    // Then Lan lists the three built-in ones left and the bank's own, after them
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(io.github.dhluong90.bpm.rules.api.RuleSetTemplateService.class).list())
+                            .extracting(io.github.dhluong90.bpm.rules.api.RuleSetTemplate::id)
+                            .containsExactly("fee-by-tier", "eligibility-with-reason", "limit-by-segment",
+                                    "deposit-rate-by-term");
+                });
+    }
+
+    @Test
+    void RLE_198_a_template_file_that_is_not_valid_stops_the_start_and_names_the_file(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path folder) throws Exception {
+        java.nio.file.Files.writeString(folder.resolve("broken-template.json"), "{ \"id\": \"broken\" }");
+
+        runner.withPropertyValues("horus.bpm.rules.templates.location=" + folder)
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("Template file broken-template.json"));
+        runner.withPropertyValues("horus.bpm.rules.templates.hidden=fee-by-teir")
+                .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
+                        .hasMessageContaining("horus.bpm.rules.templates.hidden").hasMessageContaining("fee-by-teir"));
     }
 
     @Test

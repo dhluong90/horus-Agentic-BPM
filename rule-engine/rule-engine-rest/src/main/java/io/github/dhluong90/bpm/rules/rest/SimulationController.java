@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.rules.rest;
 import io.github.dhluong90.bpm.rules.api.ComparisonRequest;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
 import io.github.dhluong90.bpm.rules.api.HistorySimulation;
+import io.github.dhluong90.bpm.rules.api.HistorySimulationResult;
 import io.github.dhluong90.bpm.rules.api.InputInvalidException;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
@@ -161,6 +162,13 @@ public class SimulationController {
         // Both permissions first, then a bounded read: the answer is built from logged inputs (RLE-015).
         RestSupport.require(callers, "rules:simulate");
         RestSupport.require(callers, "rules:log:read");
+        HistorySimulation period = historyPeriod(requestBody, contentLength);
+        return RestSupport.json(HttpStatus.OK,
+                EngineValues.historySimulation(engine.simulateHistory(name, version, period)));
+    }
+
+    /** Reads {@code from}, {@code to} and the optional {@code limit} of a history simulation body (RLE-015). */
+    private static HistorySimulation historyPeriod(InputStream requestBody, Long contentLength) throws IOException {
         byte[] body = RestSupport.boundedBody(requestBody, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES);
         JsonNode request = EngineValues.readRequest(body);
         if (!request.isObject()) {
@@ -174,9 +182,41 @@ public class SimulationController {
             }
             limit = limitNode.intValue();
         }
-        HistorySimulation period = new HistorySimulation(instant(request, "from"), instant(request, "to"), limit);
-        return RestSupport.json(HttpStatus.OK,
-                EngineValues.historySimulation(engine.simulateHistory(name, version, period)));
+        return new HistorySimulation(instant(request, "from"), instant(request, "to"), limit);
+    }
+
+    /**
+     * {@code POST /rule-sets/{name}/versions/{v}:simulate-history-readings}, the body of {@code :simulate-history}: the
+     * replay in plain language, each decision's outcome read in the version that decided it (RLE-202). Needs
+     * {@code rules:simulate}, {@code rules:log:read} and {@code rules:read}, all checked before the body is read. A
+     * decision with a masked input that had a value, or whose logged version cannot be evaluated again, is listed as
+     * {@code REPLAY_NOT_POSSIBLE} with the names of the masked inputs and no reading. Without a {@code limit} the run is
+     * the most one request reads (500); a larger {@code limit} is {@code 422 READINGS_TOO_LARGE}. Nothing is logged.
+     *
+     * @param name the rule set name
+     * @param version the version to simulate
+     * @param requestBody the body, read up to {@link EngineDefaults#COMMAND_BODY_MAX_BYTES}
+     * @param contentLength the declared length, or null
+     * @return one reading per logged decision, newest first
+     * @throws IOException when the body cannot be read
+     */
+    @PostMapping("/{name}/versions/{version:\\d+}:simulate-history-readings")
+    public ResponseEntity<byte[]> simulateHistoryReadings(
+            @PathVariable("name") String name,
+            @PathVariable("version") int version,
+            InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength) throws IOException {
+        RestSupport.require(callers, "rules:simulate");
+        RestSupport.require(callers, "rules:log:read");
+        RestSupport.require(callers, "rules:read");
+        HistorySimulation period = historyPeriod(requestBody, contentLength);
+        int limit = period.limit() == null ? EngineDefaults.READINGS_MAX : period.limit();
+        if (limit > EngineDefaults.READINGS_MAX) {
+            throw new io.github.dhluong90.bpm.rules.api.ReadingsTooLargeException("decisions", limit,
+                    EngineDefaults.READINGS_MAX);
+        }
+        HistorySimulationResult result = engine.simulateHistory(name, version, period.withLimit(limit));
+        return RestSupport.json(HttpStatus.OK, RestSupport.historyReadings(versions.readHistorySimulation(result)));
     }
 
     private static Instant instant(JsonNode request, String member) {
