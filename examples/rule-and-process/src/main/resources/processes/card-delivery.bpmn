@@ -4,6 +4,9 @@
      the process goes on to the welcome call only after the sub-process ends. Not loaded at start-up; import it with
      the steps in the Process Engine import guide. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_card-delivery"
                   targetNamespace="urn:horus-bpm:examples"
@@ -27,4 +30,22 @@
     <bpmn:sequenceFlow id="f2" sourceRef="hand-over" targetRef="welcome-call"/>
     <bpmn:sequenceFlow id="f3" sourceRef="welcome-call" targetRef="end"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_card-delivery">
+    <bpmndi:BPMNPlane id="BPMNPlane_card-delivery" bpmnElement="card-delivery">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="30" y="147" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="hand-over_di" bpmnElement="hand-over" isExpanded="true"><dc:Bounds x="146" y="45" width="632" height="240"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="hand-over-start_di" bpmnElement="hand-over-start"><dc:Bounds x="206" y="162" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="yearly-fee_di" bpmnElement="yearly-fee"><dc:Bounds x="322" y="140" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="post-card_di" bpmnElement="post-card"><dc:Bounds x="502" y="140" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="hand-over-end_di" bpmnElement="hand-over-end"><dc:Bounds x="682" y="162" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="h1_di" bpmnElement="h1"><di:waypoint x="242" y="180"/><di:waypoint x="322" y="180"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="h2_di" bpmnElement="h2"><di:waypoint x="422" y="180"/><di:waypoint x="502" y="180"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="h3_di" bpmnElement="h3"><di:waypoint x="602" y="180"/><di:waypoint x="682" y="180"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="welcome-call_di" bpmnElement="welcome-call"><dc:Bounds x="858" y="125" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="1038" y="147" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="66" y="165"/><di:waypoint x="146" y="165"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="778" y="165"/><di:waypoint x="858" y="165"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="958" y="165"/><di:waypoint x="1038" y="165"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>

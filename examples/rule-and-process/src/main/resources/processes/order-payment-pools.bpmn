@@ -5,6 +5,9 @@
      payment-requested starts the payment desk (message start), payment-received wakes the order desk by orderId.
      The user task has no assignee, so the work group comes from its lane: "Back office" gives group back-office. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_order-payment-pools" targetNamespace="urn:horus-bpm:examples"
                   expressionLanguage="urn:horus-bpm:expr:v1">
@@ -51,4 +54,30 @@
     <bpmn:sequenceFlow id="g2" sourceRef="confirm-payment" targetRef="report-payment"/>
     <bpmn:sequenceFlow id="g3" sourceRef="report-payment" targetRef="audited"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_order-to-cash">
+    <bpmndi:BPMNPlane id="BPMNPlane_order-to-cash" bpmnElement="order-to-cash">
+      <bpmndi:BPMNShape id="pool-order_di" bpmnElement="pool-order" isHorizontal="true"><dc:Bounds x="160" y="60" width="602" height="130"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="220" y="107" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="request-payment_di" bpmnElement="request-payment"><dc:Bounds x="336" y="85" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="wait-for-payment_di" bpmnElement="wait-for-payment"><dc:Bounds x="516" y="85" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="done_di" bpmnElement="done"><dc:Bounds x="696" y="107" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="256" y="125"/><di:waypoint x="336" y="125"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="436" y="125"/><di:waypoint x="516" y="125"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="616" y="125"/><di:waypoint x="696" y="125"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="pool-payment_di" bpmnElement="pool-payment" isHorizontal="true"><dc:Bounds x="160" y="260" width="602" height="260"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-back-office_di" bpmnElement="lane-back-office" isHorizontal="true"><dc:Bounds x="190" y="260" width="572" height="130"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-treasury_di" bpmnElement="lane-treasury" isHorizontal="true"><dc:Bounds x="190" y="390" width="572" height="130"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="payment-start_di" bpmnElement="payment-start"><dc:Bounds x="220" y="437" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="confirm-payment_di" bpmnElement="confirm-payment"><dc:Bounds x="336" y="285" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="report-payment_di" bpmnElement="report-payment"><dc:Bounds x="516" y="415" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="audited_di" bpmnElement="audited"><dc:Bounds x="696" y="437" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="738" y="439" width="90" height="30"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="g1_di" bpmnElement="g1"><di:waypoint x="256" y="455"/><di:waypoint x="296" y="455"/><di:waypoint x="296" y="325"/><di:waypoint x="336" y="325"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="g2_di" bpmnElement="g2"><di:waypoint x="436" y="325"/><di:waypoint x="476" y="325"/><di:waypoint x="476" y="455"/><di:waypoint x="516" y="455"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="g3_di" bpmnElement="g3"><di:waypoint x="616" y="455"/><di:waypoint x="696" y="455"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="pool-auditor_di" bpmnElement="pool-auditor" isHorizontal="true"><dc:Bounds x="160" y="590" width="602" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="mf-request_di" bpmnElement="mf-request"><di:waypoint x="386" y="165"/><di:waypoint x="386" y="225"/><di:waypoint x="238" y="225"/><di:waypoint x="238" y="437"/><bpmndi:BPMNLabel><dc:Bounds x="396" y="198" width="90" height="14"/></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="mf-received_di" bpmnElement="mf-received"><di:waypoint x="566" y="415"/><di:waypoint x="566" y="165"/><bpmndi:BPMNLabel><dc:Bounds x="576" y="232" width="90" height="14"/></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="mf-audit_di" bpmnElement="mf-audit"><di:waypoint x="714" y="473"/><di:waypoint x="714" y="590"/><bpmndi:BPMNLabel><dc:Bounds x="724" y="528" width="90" height="14"/></bpmndi:BPMNLabel></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>

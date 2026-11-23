@@ -3,6 +3,9 @@
      account only notifies the officer, and a high risk score raises the case. Meanwhile the order waits for the payment
      message or the reversal message, or two hours, whichever comes first. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_payment-review"
                   targetNamespace="urn:horus-bpm:examples"
@@ -53,4 +56,34 @@
     <bpmn:sequenceFlow id="reversed__refunded" sourceRef="reversed" targetRef="refunded"/>
     <bpmn:sequenceFlow id="two-hours__expired" sourceRef="two-hours" targetRef="expired"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_payment-review">
+    <bpmndi:BPMNPlane id="BPMNPlane_payment-review" bpmnElement="payment-review">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="30" y="82" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="review_di" bpmnElement="review"><dc:Bounds x="146" y="60" width="260" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="wait-payment_di" bpmnElement="wait-payment"><dc:Bounds x="486" y="75" width="50" height="50"/><bpmndi:BPMNLabel><dc:Bounds x="413" y="25" width="90" height="44"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="paid_di" bpmnElement="paid"><dc:Bounds x="616" y="82" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reversed_di" bpmnElement="reversed"><dc:Bounds x="616" y="227" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="two-hours_di" bpmnElement="two-hours"><dc:Bounds x="616" y="357" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="settled_di" bpmnElement="settled"><dc:Bounds x="732" y="82" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="refunded_di" bpmnElement="refunded"><dc:Bounds x="732" y="227" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="expired_di" bpmnElement="expired"><dc:Bounds x="732" y="357" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="withdrawn_di" bpmnElement="withdrawn"><dc:Bounds x="493" y="747" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="noted_di" bpmnElement="noted"><dc:Bounds x="493" y="617" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="raised_di" bpmnElement="raised"><dc:Bounds x="493" y="487" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="cancelled-by-customer_di" bpmnElement="cancelled-by-customer"><dc:Bounds x="178" y="122" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="200" y="162" width="74" height="30"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="account-frozen_di" bpmnElement="account-frozen"><dc:Bounds x="258" y="122" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="280" y="162" width="74" height="30"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="high-risk_di" bpmnElement="high-risk"><dc:Bounds x="338" y="122" width="36" height="36"/><bpmndi:BPMNLabel><dc:Bounds x="360" y="162" width="74" height="30"/></bpmndi:BPMNLabel></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="start__review_di" bpmnElement="start__review"><di:waypoint x="66" y="100"/><di:waypoint x="146" y="100"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="review__wait-payment_di" bpmnElement="review__wait-payment"><di:waypoint x="406" y="100"/><di:waypoint x="486" y="100"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="cancelled__withdrawn_di" bpmnElement="cancelled__withdrawn"><di:waypoint x="196" y="158"/><di:waypoint x="196" y="765"/><di:waypoint x="493" y="765"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="frozen__noted_di" bpmnElement="frozen__noted"><di:waypoint x="276" y="158"/><di:waypoint x="276" y="635"/><di:waypoint x="493" y="635"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="risk__raised_di" bpmnElement="risk__raised"><di:waypoint x="356" y="158"/><di:waypoint x="356" y="505"/><di:waypoint x="493" y="505"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="gw__paid_di" bpmnElement="gw__paid"><di:waypoint x="536" y="100"/><di:waypoint x="616" y="100"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="gw__reversed_di" bpmnElement="gw__reversed"><di:waypoint x="511" y="125"/><di:waypoint x="511" y="245"/><di:waypoint x="616" y="245"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="gw__two-hours_di" bpmnElement="gw__two-hours"><di:waypoint x="511" y="125"/><di:waypoint x="511" y="375"/><di:waypoint x="616" y="375"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="paid__settled_di" bpmnElement="paid__settled"><di:waypoint x="652" y="100"/><di:waypoint x="732" y="100"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="reversed__refunded_di" bpmnElement="reversed__refunded"><di:waypoint x="652" y="245"/><di:waypoint x="732" y="245"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="two-hours__expired_di" bpmnElement="two-hours__expired"><di:waypoint x="652" y="375"/><di:waypoint x="732" y="375"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>

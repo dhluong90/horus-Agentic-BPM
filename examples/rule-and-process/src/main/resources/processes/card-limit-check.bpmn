@@ -4,6 +4,9 @@
      reviews the batch (a manual task, done outside the engine). Start it with {"cards": [{"limit": 30000000},
      {"limit": 80000000}]}. Not loaded at start-up; import it with the steps in the Process Engine import guide. -->
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
                   xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
                   id="Definitions_card-limit-check"
                   targetNamespace="urn:horus-bpm:examples"
@@ -21,4 +24,15 @@
     <bpmn:sequenceFlow id="f2" sourceRef="check-limit" targetRef="review-batch"/>
     <bpmn:sequenceFlow id="f3" sourceRef="review-batch" targetRef="end"/>
   </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_card-limit-check">
+    <bpmndi:BPMNPlane id="BPMNPlane_card-limit-check" bpmnElement="card-limit-check">
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="30" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="check-limit_di" bpmnElement="check-limit"><dc:Bounds x="146" y="45" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="review-batch_di" bpmnElement="review-batch"><dc:Bounds x="326" y="45" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end_di" bpmnElement="end"><dc:Bounds x="506" y="67" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="66" y="85"/><di:waypoint x="146" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="246" y="85"/><di:waypoint x="326" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="426" y="85"/><di:waypoint x="506" y="85"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
 </bpmn:definitions>
