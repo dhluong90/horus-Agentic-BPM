@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-issue" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:subProcess id="print">
+      <bpmn:startEvent id="print-start"/>
+      <bpmn:serviceTask id="emboss" horus:handler="cards.emboss"/>
+      <bpmn:endEvent id="print-end"/>
+      <bpmn:sequenceFlow id="p1" sourceRef="print-start" targetRef="emboss"/>
+      <bpmn:sequenceFlow id="p2" sourceRef="emboss" targetRef="print-end"/>
+    </bpmn:subProcess>
+    <bpmn:intermediateCatchEvent id="cooling-off">
+      <bpmn:timerEventDefinition><bpmn:timeDuration>PT24H</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="print"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="print" targetRef="cooling-off"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="cooling-off" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

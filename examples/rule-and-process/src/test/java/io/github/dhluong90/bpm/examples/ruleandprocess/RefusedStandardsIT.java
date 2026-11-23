@@ -81,7 +81,7 @@ class RefusedStandardsIT {
                 + "<bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" id=\"d\" targetNamespace=\"urn:t\">\n"
                 + "<bpmn:process id=\"loan-refusal\" isExecutable=\"true\">\n"
                 + "<bpmn:startEvent id=\"start\"/>\n"
-                + "<bpmn:dataObject id=\"do-1\"/>\n"
+                + "<bpmn:globalTask id=\"do-1\"/>\n"
                 + "<bpmn:eventBasedGateway id=\"notify\" instantiate=\"true\"/>\n"
                 + "</bpmn:process></bpmn:definitions>\n";
 
@@ -91,7 +91,7 @@ class RefusedStandardsIT {
         JsonNode body = JSON.readTree(response.body());
         assertThat(body.get("code").stringValue()).isEqualTo("BPMN_UNSUPPORTED_ELEMENT");
         assertThat(body.get("unsupportedElements")).extracting(p -> p.get("element").stringValue() + ":" + p.get("stage").stringValue()
-                + ":" + p.get("line").intValue()).containsExactly("dataObject:S1:5", "eventBasedGateway with instantiate:S3:6");
+                + ":" + p.get("line").intValue()).containsExactly("globalTask:not planned:5", "eventBasedGateway with instantiate:S3:6");
         assertThat(count("pre_definition")).isEqualTo(before);
     }
 

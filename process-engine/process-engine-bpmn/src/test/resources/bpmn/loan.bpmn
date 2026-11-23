@@ -54,7 +54,7 @@
 
 
 
-    <bpmn:dataObject id="do-1"/>
+    <bpmn:globalTask id="do-1"/>
 
 
 

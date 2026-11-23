@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="kyc-parallel" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:parallelGateway id="fork"/>
+    <bpmn:userTask id="id-check" horus:assignee="role:KYC_OFFICER" horus:resultVariable="idResult"/>
+    <bpmn:userTask id="aml-check" horus:assignee="role:AML_OFFICER" horus:resultVariable="amlResult"/>
+    <bpmn:parallelGateway id="join"/>
+    <bpmn:manualTask id="open-account"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="fork"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="fork" targetRef="id-check"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="fork" targetRef="aml-check"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="id-check" targetRef="join"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="aml-check" targetRef="join"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="join" targetRef="open-account"/>
+    <bpmn:sequenceFlow id="f7" sourceRef="open-account" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

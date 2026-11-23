@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:dataStore id="ledger-notes" name="Ledger notes"/>
+  <bpmn:process id="loan-data" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="score" name="Score the applicant" horus:handler="credit.score">
+      <bpmn:ioSpecification id="io-score">
+        <bpmn:dataInput id="in-profile" name="profile"/>
+        <bpmn:dataOutput id="out-score" name="score"/>
+        <bpmn:inputSet><bpmn:dataInputRefs>in-profile</bpmn:dataInputRefs></bpmn:inputSet>
+        <bpmn:outputSet><bpmn:dataOutputRefs>out-score</bpmn:dataOutputRefs></bpmn:outputSet>
+      </bpmn:ioSpecification>
+      <bpmn:dataInputAssociation id="a-in"><bpmn:sourceRef>profile-ref</bpmn:sourceRef><bpmn:targetRef>in-profile</bpmn:targetRef></bpmn:dataInputAssociation>
+      <bpmn:dataOutputAssociation id="a-out"><bpmn:sourceRef>out-score</bpmn:sourceRef><bpmn:targetRef>score-ref</bpmn:targetRef></bpmn:dataOutputAssociation>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end"/>
+    <bpmn:dataObject id="profile" name="Applicant profile"/>
+    <bpmn:dataObject id="creditScore" name="Credit score"/>
+    <bpmn:dataObjectReference id="profile-ref" name="Applicant profile" dataObjectRef="profile"/>
+    <bpmn:dataObjectReference id="score-ref" name="Credit score" dataObjectRef="creditScore"/>
+    <bpmn:dataStoreReference id="notes-ref" name="Ledger notes" dataStoreRef="ledger-notes"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="score"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="score" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

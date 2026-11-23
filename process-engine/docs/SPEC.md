@@ -1030,7 +1030,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Milestone:** M3
 - **Kind:** other
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `dataObject` `do-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), a `globalTask` `do-1` on line 57 (`not planned`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` with a compensation definition on line 42 (stage `S2`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` with `instantiate="true"` on line 63 (`S3`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
@@ -2564,3 +2564,23 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The officer is refused with `403 PERMISSION_DENIED` and nothing changes. The manager's replay returns the first answer and opens one task. The completion cancels the screening task in the same transaction and opens `open-account`. The REST action is `POST /instances/{id}:start-ad-hoc-activity` with `If-Match` and `Idempotency-Key`; a missing one is `428`.
 - **Example:** `officer-lan -> 403; manager-hoa -> collect-id opens once`.
 - **Test ID:** `PRE_336_the_operator_starts_activities_with_task_manage_and_the_condition_cancels_the_rest` (`AdHocPostgresIT`)
+
+### PRE-337 A data output association writes the step result into a data object; a data input association hands it to a step
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-data` with a service task `score` that has a data input association from the data object reference `profile-ref` and a data output association from its output `score` to the reference `score-ref`; the instance starts with `profile` set.
+- **When:** `score` completes with `{score: 712, band: "B"}`.
+- **Then:** The variable `creditScore` holds `712`, the timeline records `DATA_OBJECT_WRITTEN` with the data object's name, and the step received `profile` as its input `profile`. An output the result does not contain is `DATA_OUTPUT_MISSING`; an input data object with no value is `DATA_OBJECT_UNSET`. Data store references are kept, exported and hashed; they are not run in this release.
+- **Example:** `score -> 712 into creditScore`.
+- **Test ID:** `a_data_output_association_leaves_the_result_in_the_data_object_and_a_data_input_reads_it` (`ConformanceSuiteTest`)
+
+### PRE-338 Every conformance file keeps its elements, flows and hash through export and import
+- **Traces to:** #499
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** the files under `bpmn/conformance`: data objects, an exclusive gateway with a default flow, a parallel fork and join, a sub-process followed by a timer catch.
+- **When:** Each is imported, run with every call, task and timer answered, then exported and imported again.
+- **Then:** The token takes the expected path and the instance completes; the second import has the same number of flow elements and the same canonical form, so the same definition hash.
+- **Example:** `amount 2,500,000 -> large; amount 40,000 -> small (default)`.
+- **Test ID:** `every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import` (`ConformanceSuiteTest`)
