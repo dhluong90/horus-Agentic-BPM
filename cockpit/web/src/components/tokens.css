@@ -1,5 +1,5 @@
 /*
- * Cockpit design tokens: the approved cockpit palette after its colour review.
+ * Cockpit design tokens: the light Green theme (default) and the dark theme.
  * Light is the default; dark applies with data-theme="dark" on <html>. Before the script sets
  * data-theme, a dark system preference already gets the dark values (no light flash); the two dark
  * blocks must stay identical.
@@ -11,48 +11,48 @@
   --font-label: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-data: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  --bg: #F4F6F9; --grid: rgba(15, 23, 42, .035);
-  --surface: #FFFFFF; --surface-2: #F8FAFC; --surface-3: #EEF1F5; --glass: rgba(255, 255, 255, .88);
-  --line: #DCE1E8; --line-strong: #B8C1CD; --hi: rgba(255, 255, 255, 1);
-  --ink: #0F172A; --ink-2: #334155; --muted: #526075; --control: #6B7686;
-  --accent: #0369A1; --accent-fill: #0284C7; --accent-soft: #E6F2FA; --on-accent: #FFFFFF;
-  --teal: #0F766E; --teal-soft: #E0F2EF;
-  --ok: #047857; --ok-fill: #059669; --ok-soft: #E3F6EC;
-  --warn: #92400E; --warn-fill: #D97706; --warn-soft: #FDF3DC;
-  --bad: #B91C1C; --bad-fill: #DC2626; --bad-soft: #FCEBEB;
+  --bg: #F7F7F7; --grid: rgba(14, 47, 41, .035);
+  --surface: #FFFFFF; --surface-2: #F9FAF9; --surface-3: #EEF3F1; --glass: rgba(255, 255, 255, .88);
+  --line: #ECEEED; --line-strong: #B5C2BE; --hi: rgba(255, 255, 255, 1);
+  --ink: #0E2F29; --ink-2: #2C4640; --muted: #5B6B66; --control: #6B7C76;
+  --accent: #0F7362; --accent-fill: #158370; --accent-soft: #DDF3EC; --on-accent: #FFFFFF;
+  --teal: #0E4D41; --teal-soft: #D6F0E8;
+  --ok: #2A7236; --ok-fill: #3A8F47; --ok-soft: #E1EFD4;
+  --warn: #8A5A00; --warn-fill: #D99A0B; --warn-soft: #FBEFCF;
+  --bad: #B53A36; --bad-fill: #C8453F; --bad-soft: #FBE4E1;
   --indigo: #4338CA; --indigo-soft: #E9ECFC;
   --violet: #6D28D9; --violet-soft: #F1ECFD;
   /* Environment tag other than Demo (Production, UAT): neutral, so amber keeps its one meaning */
-  --env-tag: #F1F4F8; --env-tag-ink: #334155; --env-tag-line: #B8C1CD;
+  --env-tag: #F1F4F3; --env-tag-ink: #2C4640; --env-tag-line: #B5C2BE;
   --focus: #2563EB;
-  --sh-1: 0 1px 2px rgba(15, 23, 42, .06), 0 0 0 1px rgba(15, 23, 42, .02);
-  --sh-2: 0 6px 18px -8px rgba(15, 23, 42, .16), 0 1px 3px rgba(15, 23, 42, .06);
-  --sh-3: 0 22px 56px -18px rgba(15, 23, 42, .30), 0 2px 8px rgba(15, 23, 42, .08);
-  --scrim: rgba(15, 23, 42, .40);
-  --select: #E6F2FA;
+  --sh-1: 0 1px 2px rgba(14, 47, 41, .06), 0 0 0 1px rgba(14, 47, 41, .02);
+  --sh-2: 0 6px 18px -8px rgba(14, 47, 41, .16), 0 1px 3px rgba(14, 47, 41, .06);
+  --sh-3: 0 22px 56px -18px rgba(14, 47, 41, .30), 0 2px 8px rgba(14, 47, 41, .08);
+  --scrim: rgba(14, 47, 41, .40);
+  --select: #EAF6F2;
   --on-accent-fill: #FFFFFF;
   /* Primary action fill (ux-design 6.3): --accent in light, white text 5.93:1; --accent-fill in dark, 5.95:1. */
-  --primary-fill: #0369A1; --on-primary: #FFFFFF;
+  --primary-fill: #158370; --on-primary: #FFFFFF;
 
   --radius-s: 6px; --radius-m: 8px; --radius-l: 12px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px;
   /* Diagram canvas, money direction, charts, diffs, releases (ux-design.md section 6.4) */
-  --canvas: #FAFBFC; --dot: rgba(15, 23, 42, .09);
-  --node: #FFFFFF; --node-stroke: #7B879A; --edge: #7E8A9C; --edge-label: #475569;
-  --glow: rgba(2, 132, 199, .40); --token: #0369A1;
-  --gain: #059669; --loss: #DC2626; --net: #334155; --ref: #8792A3; --spark-max: #075985;
-  --rel-1: #075985; --rel-2: #0284C7; --rel-3: #38BDF8; --rel-later: #64748B;
-  --diff-add: #E3F6EC; --diff-del: #FCEBEB; --diff-mod: #E9ECFC;
-  --sh-node: 0 4px 10px rgba(15, 23, 42, .16);
-  --node-hover: drop-shadow(0 4px 10px rgba(15, 23, 42, .16));
+  --canvas: #FAFCFB; --dot: rgba(14, 77, 65, .10);
+  --node: #FFFFFF; --node-stroke: #6F8A83; --edge: #6F8A83; --edge-label: #3F5650;
+  --glow: rgba(21, 131, 112, .40); --token: #158370;
+  --gain: #2A7236; --loss: #B53A36; --net: #2C4640; --ref: #8A9A95; --spark-max: #0E4D41;
+  --rel-1: #0E4D41; --rel-2: #158370; --rel-3: #7FCBBA; --rel-later: #6B7C76;
+  --diff-add: #E1EFD4; --diff-del: #FBE4E1; --diff-mod: #E9ECFC;
+  --sh-node: 0 4px 10px rgba(14, 47, 41, .16);
+  --node-hover: drop-shadow(0 4px 10px rgba(14, 47, 41, .16));
   --target-min: 44px;
   color-scheme: light;
 
   /* Styleguide (docs/product/ux/styleguide.md section 12): contrast card, primary states, menu, type, layout. */
-  --surface-contrast: #0F172A; --contrast-line: transparent;
-  --on-contrast: #F8FAFC; --on-contrast-muted: #A9B4C6; --on-contrast-accent: #7DD3FC;
-  --contrast-action: #F8FAFC; --on-contrast-action: #0F172A;
-  --primary-hover: #075985; --primary-active: #0C4A6E;
+  --surface-contrast: #E1EFD4; --contrast-line: #CFE3BE;
+  --on-contrast: #0E2F29; --on-contrast-muted: #3F5650; --on-contrast-accent: #0E4D41;
+  --contrast-action: #158370; --on-contrast-action: #FFFFFF;
+  --primary-hover: #0E6B5C; --primary-active: #0E4D41;
   --rail: #FFFFFF; --rail-line: var(--line);
   --type-display: 700 32px/1.25 var(--font-ui);
   --type-h1: 650 24px/1.4 var(--font-ui);
@@ -64,8 +64,8 @@
   --radius-xs: 4px; --radius-seg: 10px; --radius-xl: 16px; --radius-pill: 999px;
   --topbar-h: 64px; --rail-w: 248px; --rail-w-collapsed: 72px; --inspector-w: 360px;
   --card-pad: 20px; --gap: 16px;
-  --sh-dock: 0 -8px 24px -12px rgba(15, 23, 42, .18);
-  --sh-pop: 0 16px 40px -8px rgba(15, 23, 42, .18), 0 2px 6px rgba(15, 23, 42, .06);
+  --sh-dock: 0 -8px 24px -12px rgba(14, 47, 41, .18);
+  --sh-pop: 0 16px 40px -8px rgba(14, 47, 41, .18), 0 2px 6px rgba(14, 47, 41, .06);
 }
 
 :root[data-theme="dark"] {
