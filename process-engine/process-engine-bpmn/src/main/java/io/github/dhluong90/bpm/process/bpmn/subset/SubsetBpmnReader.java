@@ -39,6 +39,8 @@ import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Expression;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExtensionBag;
@@ -408,6 +410,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), t.incoming(),
                             t.outgoing(), signalsOf("intermediateThrowEvent", t.id(), t.eventDefinitions()),
                             t.eventDefinitionRefs(), t.data(), t.info());
+                    case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), b.incoming(), b.outgoing(),
+                            signalsOf("boundaryEvent", b.id(), b.eventDefinitions()), b.eventDefinitionRefs(), b.data(),
+                            b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(), b.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveSignals(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     default -> e;
@@ -486,6 +493,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             t.operationRef(), t.info());
                     case SendTask t -> new SendTask(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.implementation(), nameOf(t.messageRef(), t.id(), "sendTask"), t.operationRef(), t.info());
+                    case BoundaryEvent b -> new BoundaryEvent(b.id(), b.name(), b.incoming(), b.outgoing(),
+                            named(b.eventDefinitions(), b.id(), "boundaryEvent"), b.eventDefinitionRefs(), b.data(),
+                            b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(), b.info());
+                    case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.triggeredByEvent(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
                             t.method(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
                     default -> e;
@@ -630,6 +642,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         elements.add(new ParallelGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED,
                                 children.info()));
                     }
+                    case "eventBasedGateway" -> elements.add(eventBasedGateway());
                     case "sequenceFlow" -> elements.add(sequenceFlow());
                     case "textAnnotation" -> artifacts.add(textAnnotation());
                     case "association" -> artifacts.add(association());
@@ -646,6 +659,28 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                 }
             }
+        }
+
+        /**
+         * An {@code eventBasedGateway} (#495) of the exclusive type, which waits on the catch events it leads to. The
+         * instantiating form and the parallel type are named as unsupported with stage S3.
+         */
+        private FlowElement eventBasedGateway() throws XMLStreamException {
+            String id = id();
+            String gwName = attr("name");
+            boolean instantiate = "true".equals(attr("instantiate"));
+            boolean parallel = "Parallel".equals(attr("eventGatewayType"));
+            if (instantiate) {
+                unsupported("eventBasedGateway with instantiate", id, BpmnStages.S3, "is not supported in this release;"
+                        + " stage S3 adds the instantiating event-based gateway");
+            }
+            if (parallel) {
+                unsupported("eventBasedGateway with eventGatewayType Parallel", id, BpmnStages.S3, "is not supported in"
+                        + " this release; stage S3 adds the parallel event-based gateway");
+            }
+            Node children = children("eventBasedGateway", id, false);
+            return new EventBasedGateway(id, gwName, List.of(), List.of(), GatewayDirection.UNSPECIFIED, instantiate,
+                    parallel ? EventBasedGatewayType.PARALLEL : EventBasedGatewayType.EXCLUSIVE, children.info());
         }
 
         /**
@@ -945,9 +980,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
-         * A {@code boundaryEvent} (#489): attached to a task, a call activity or a sub-process, with a timer, an error
-         * or an escalation definition, interrupting ({@code cancelActivity} true, the default) or not. Message, signal
-         * and conditional boundaries are named as unsupported with their stage.
+         * A {@code boundaryEvent} (#489, #490): attached to a task, a call activity or a sub-process, with a timer, an
+         * error, an escalation, a message, a signal or a conditional definition, interrupting
+         * ({@code cancelActivity} true, the default) or not. A message boundary names its correlation key with
+         * {@code horus:correlationKey} and may map payload fields with {@code horus:output}, as a message catch does.
          */
         private FlowElement boundaryEvent() throws XMLStreamException {
             String element = "boundaryEvent";
@@ -955,8 +991,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             String attachedTo = attr("attachedToRef");
             boolean cancel = !"false".equals(attr("cancelActivity"));
+            String key = horus("correlationKey");
             int line = line();
             List<EventDefinition> definitions = new ArrayList<>();
+            List<HorusExtension> ext = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "timerEventDefinition".equals(local)) {
@@ -974,12 +1013,19 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 } else if (BPMN.equals(xml.getNamespaceURI()) && ("errorEventDefinition".equals(local)
                         || "escalationEventDefinition".equals(local))) {
                     definitions.add(definition(local, id, element, line));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
+                    definitions.add(messageDefinition(id));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
+                    definitions.add(signalDefinition(id, element));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
+                    definitions.add(conditionalDefinition(id, element));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
+                    extensions(element, id, false, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions.add(null);
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
-                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
-                        && !"extensionElements".equals(local)) {
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)) {
                     unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
@@ -988,7 +1034,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             if (definitions.isEmpty()) {
                 unsupported(element, id, BpmnStages.NOT_PLANNED, "has no event definition; a boundary event needs a"
-                        + " timer, an error or an escalation");
+                        + " timer, an error, an escalation, a message, a signal or a condition");
             } else if (definitions.size() > 1) {
                 unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
@@ -997,8 +1043,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         + " attached to with attachedToRef", element, safe(id), line));
             }
             definitions.removeIf(java.util.Objects::isNull);
+            messageExtras(element, id, line, definitions, key, true, ext);
             return new BoundaryEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, attachedTo,
-                    cancel, null);
+                    cancel, definitions.isEmpty() || !(definitions.get(0) instanceof MessageEventDefinition) ? null
+                            : info(ext, foreign));
         }
 
         /** Fills in the code of each error and escalation definition from the root elements, once all are read. */
@@ -2269,6 +2317,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         b.eventDefinitionRefs(), b.data(), b.parallelMultiple(), b.attachedToRef(), b.cancelActivity(),
                         b.info());
                 case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
+                case EventBasedGateway g -> new EventBasedGateway(g.id(), g.name(), in, o, g.gatewayDirection(),
+                        g.instantiate(), g.eventGatewayType(), g.info());
                 case Transaction t -> new Transaction(t.id(), t.name(), in, o, t.activity(), t.method(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 case SubProcess t -> new SubProcess(t.id(), t.name(), in, o, t.activity(), t.triggeredByEvent(),

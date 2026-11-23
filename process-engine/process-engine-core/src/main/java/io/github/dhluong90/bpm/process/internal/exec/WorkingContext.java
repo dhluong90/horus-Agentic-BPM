@@ -209,6 +209,7 @@ final class WorkingContext implements ExecutionContext {
     public void takeOutgoing(Token token, FlowNode from) {
         // #489: the activity is left, so the timers of its boundary events never fire.
         disarmBoundaries(from.id(), token.scopeTokenId(), null);
+        resolveEventGateway(token, from);
         List<SequenceFlow> outgoing = process.outgoing(from.id());
         if (outgoing.isEmpty()) {
             throw new ExecutionException("NO_OUTGOING_FLOW", from.id(), from.id() + " has no outgoing sequence flow");
@@ -409,9 +410,42 @@ final class WorkingContext implements ExecutionContext {
                     if (t.status() == TokenStatus.WAITING_TIMER && t.activityInstanceId() != null) {
                         effect(new Effect.CancelJob(t.activityInstanceId()));
                     }
+                    if (t.status() == TokenStatus.WAITING_EVENT && t.activityInstanceId() != null) {
+                        // #490: a message or signal boundary leaves a subscription; a conditional one has none.
+                        effect(new Effect.DeleteSubscription(t.activityInstanceId()));
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * #495: an event of an event-based gateway arrived, so its token leaves the catch event. The other catch events of
+     * the same gateway are cancelled in this apply, which the shell runs under the instance row lock: of two events
+     * that reach two replicas at the same moment, the second finds its token cancelled and is refused as stale.
+     */
+    private void resolveEventGateway(Token winner, FlowNode from) {
+        Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> gateway =
+                process.eventGatewayOf(from.id());
+        if (gateway.isEmpty()) {
+            return;
+        }
+        List<String> targets = process.outgoing(gateway.get().id()).stream().map(SequenceFlow::targetRef).toList();
+        List<String> lost = new ArrayList<>();
+        for (Token other : List.copyOf(tokens)) {
+            if (other.kind() == TokenKind.FLOW && other.status().live() && !other.id().equals(winner.id())
+                    && targets.contains(other.nodeId())
+                    && java.util.Objects.equals(other.scopeTokenId(), winner.scopeTokenId())) {
+                cancelTree(other, null);
+                disarmBoundaries(other.nodeId(), other.scopeTokenId(), null);
+                lost.add(other.nodeId());
+            }
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("gatewayId", gateway.get().id());
+        details.put("winner", from.id());
+        details.put("cancelled", lost);
+        history("EVENT_GATEWAY_RESOLVED", winner, details);
     }
 
     /** Cancels a token and everything under it, with the work each waits on. */
@@ -434,6 +468,9 @@ final class WorkingContext implements ExecutionContext {
             effect(new Effect.CancelJob(token.activityInstanceId()));
         } else if (work && token.status() == TokenStatus.WAITING_CHILD) {
             effect(new Effect.CancelChildInstance(token.id(), token.activityInstanceId()));
+        } else if (work && token.status() == TokenStatus.WAITING_EVENT) {
+            // A message or signal wait is a subscription row; a conditional wait has none and the delete is a no-op.
+            effect(new Effect.DeleteSubscription(token.activityInstanceId()));
         }
         history("TOKEN_CANCELLED", token, Map.of());
         return 1;
@@ -454,21 +491,31 @@ final class WorkingContext implements ExecutionContext {
 
     @Override
     public void fireBoundary(Token boundaryToken, BoundaryEvent boundary) {
+        fireBoundary(boundaryToken, boundary, "TIMER", Map.of(), false);
+    }
+
+    @Override
+    public void fireBoundary(Token boundaryToken, BoundaryEvent boundary, String trigger, Map<String, Object> extra,
+            boolean keepWaiting) {
         Optional<Token> host = hostOf(boundary.attachedToRef(), boundaryToken.scopeTokenId());
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("boundaryId", boundary.id());
         details.put("attachedTo", boundary.attachedToRef());
-        details.put("trigger", "TIMER");
+        details.put("trigger", trigger);
         details.put("interrupting", boundary.cancelActivity());
+        details.putAll(extra);
         if (boundary.cancelActivity()) {
             host.ifPresent(h -> interrupt(h, null, boundaryToken.id()));
         }
+        // A non-interrupting message or signal boundary stays armed; its flow runs on a token of its own.
+        Token flow = keepWaiting && !boundary.cancelActivity()
+                ? createToken(TokenKind.FLOW, boundary.id(), boundaryToken.scopeTokenId()) : boundaryToken;
         // The boundary is entered when it fires, not when it is armed, so an unfired one never shows as running.
-        history("NODE_ENTERED", boundaryToken, Map.of());
-        history("BOUNDARY_FIRED", boundaryToken, details);
-        Token active = boundaryToken.withStatus(TokenStatus.ACTIVE);
+        history("NODE_ENTERED", flow, Map.of());
+        history("BOUNDARY_FIRED", flow, details);
+        Token active = flow.withStatus(TokenStatus.ACTIVE);
         update(active);
-        history("NODE_COMPLETED", boundaryToken, Map.of());
+        history("NODE_COMPLETED", flow, Map.of());
         takeOutgoing(active, boundary);
     }
 

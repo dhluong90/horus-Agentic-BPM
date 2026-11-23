@@ -286,6 +286,15 @@ export const activityEntry = z
     waiters: z.number().int().min(0).optional(),
     /** Message steps only (#491): the name, the key as the host masked it, and the delivery result. */
     message: z.object({ name: z.string(), correlationKey: z.string().optional(), result: z.string() }).loose().optional(),
+    /** `BOUNDARY_FIRED` and `EVENT_GATEWAY_RESOLVED` entries only (#490, #495): what fired, or which catch won and which were cancelled. */
+    event: z.object({
+      trigger: z.string().optional(),
+      name: z.string().optional(),
+      interrupting: z.boolean().optional(),
+      gateway: z.string().optional(),
+      winner: z.string().optional(),
+      cancelled: z.array(z.string()).optional(),
+    }).loose().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

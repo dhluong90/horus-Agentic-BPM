@@ -149,6 +149,24 @@ public interface ExecutionContext {
         throw new UnsupportedOperationException("fireBoundary");
     }
 
+    /**
+     * A boundary event of a message, a signal or a condition fired (#490): the same as {@link #fireBoundary(Token,
+     * io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent)} with the trigger and its details named in
+     * the timeline. An interrupting boundary cancels its host. A non-interrupting one that {@code keepWaiting} leaves
+     * its own token armed on the same subscription, so the next message or signal fires it again, and runs its flow on
+     * a new token.
+     *
+     * @param boundaryToken the token that waited on the boundary event
+     * @param boundary the boundary event
+     * @param trigger {@code MESSAGE}, {@code SIGNAL} or {@code CONDITION}
+     * @param details what fired it, for the timeline
+     * @param keepWaiting whether a non-interrupting boundary stays armed
+     */
+    default void fireBoundary(Token boundaryToken, io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent
+            boundary, String trigger, java.util.Map<String, Object> details, boolean keepWaiting) {
+        throw new UnsupportedOperationException("fireBoundary");
+    }
+
     /** @param effect an effect for the shell */
     void effect(Effect effect);
 

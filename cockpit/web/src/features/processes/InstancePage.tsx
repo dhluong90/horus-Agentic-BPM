@@ -395,6 +395,34 @@ function MessageDetail({ message }: { message: NonNullable<ActivityEntry['messag
   );
 }
 
+const FIRED_TRIGGERS = ['timer', 'message', 'signal', 'condition', 'error', 'escalation'] as const;
+
+/**
+ * A boundary event that fired names its trigger (the message, the signal or the condition) and whether it stopped the
+ * step; an event-based gateway names the catch that came first and the ones it stopped (#490, #495). Names come from the
+ * diagram, never the ids the engine sent.
+ */
+function EventDetail({ event, stepName }: { event: NonNullable<ActivityEntry['event']>; stepName: (id: string) => string }) {
+  const { t } = useI18n();
+  if (event.winner !== undefined) {
+    const others = (event.cancelled ?? []).map(stepName).join(', ');
+    return (
+      <span className="muted">
+        {' · '}{t('instance.timeline.gateway.won', { winner: stepName(event.winner) })}
+        {others !== '' ? <>{' · '}{t('instance.timeline.gateway.stopped', { others })}</> : null}
+      </span>
+    );
+  }
+  const trigger = event.trigger?.toLowerCase();
+  const known = FIRED_TRIGGERS.find((item) => item === trigger);
+  return (
+    <span className="muted">
+      {known !== undefined ? <>{' · '}{t(`instance.timeline.fired.${known}` as MessageKey, { name: event.name ?? '' })}</> : null}
+      {event.interrupting !== undefined ? <>{' · '}{t(event.interrupting ? 'instance.timeline.fired.interrupting' : 'instance.timeline.fired.beside')}</> : null}
+    </span>
+  );
+}
+
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
 function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
@@ -443,6 +471,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                     {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
                     {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
+                    {entry.event !== undefined ? <EventDetail event={entry.event} stepName={stepName} /> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

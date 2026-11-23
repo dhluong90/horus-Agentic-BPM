@@ -621,6 +621,19 @@ public class ProcessController {
                 ObjectNode message = item.putObject("message");
                 entry.message().forEach(message::put);
             }
+            if (entry.event() != null) {
+                ObjectNode event = item.putObject("event");
+                entry.event().forEach((k, v) -> {
+                    if (v instanceof java.util.List<?> list) {
+                        tools.jackson.databind.node.ArrayNode array = event.putArray(k);
+                        list.forEach(x -> array.add(String.valueOf(x)));
+                    } else if (v instanceof Boolean b) {
+                        event.put(k, b);
+                    } else {
+                        event.put(k, String.valueOf(v));
+                    }
+                });
+            }
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {

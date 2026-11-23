@@ -137,10 +137,15 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      * @param cause for the start of an undo, the error code that caused it; null otherwise
      * @param message for a message step ({@code MESSAGE_WAITING}, {@code MESSAGE_RECEIVED}, {@code MESSAGE_SENT}), the
      *     keys {@code name}, {@code correlationKey} (as the host's masker made it) and {@code result}; null otherwise
+     * @param event for {@code BOUNDARY_FIRED} the {@code trigger} (timer, message, signal, condition, error or
+     *     escalation), the {@code name} of the message, signal or code, the condition text, and whether it interrupted;
+     *     for {@code EVENT_GATEWAY_RESOLVED} the {@code gateway}, the {@code winner} and the {@code cancelled} catches
+     *     (#490, #495); never a variable value; null otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause, Integer waiters, java.util.Map<String, String> message) {
+            String handler, String cause, Integer waiters, java.util.Map<String, String> message,
+            java.util.Map<String, Object> event) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -149,6 +154,15 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
             Objects.requireNonNull(kind, "kind");
             message = message == null ? null : java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(message));
+            event = event == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(event));
+        }
+
+        /** An entry with no event part. */
+        public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
+                String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
+                String errorCode, String handler, String cause, Integer waiters, java.util.Map<String, String> message) {
+            this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
+                    errorCode, handler, cause, waiters, message, null);
         }
 
         /** An entry with no count of woken waiters and no message part. */
@@ -156,7 +170,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
                 String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
                 String errorCode, String handler, String cause) {
             this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
-                    errorCode, handler, cause, null, null);
+                    errorCode, handler, cause, null, null, null);
         }
 
         /**
@@ -169,7 +183,8 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null, null,
+                    null);
         }
 
         /**
@@ -184,13 +199,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public static Entry signalThrown(String id, String nodeId, String actor, Instant occurredAt, Integer waiters) {
             return new Entry(id, "SIGNAL_THROWN", nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null,
-                    null, null, null, waiters, null);
+                    null, null, null, waiters, null, null);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, event);
         }
 
         /**
@@ -201,7 +216,18 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message);
+                    attempt, errorCode, handler, cause, waiters, message, event);
+        }
+
+        /**
+         * A boundary event's or an event-based gateway's entry (#490, #495).
+         *
+         * @param event the event part
+         * @return the same entry with it
+         */
+        public Entry withEvent(java.util.Map<String, Object> event) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, event);
         }
 
         /** @return true for the history types the undo of a saga writes */

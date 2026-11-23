@@ -1,7 +1,10 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
@@ -97,10 +100,12 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     continue;
                 }
                 FlowNode node = node(token.nodeId());
-                if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent catchEvent
+                if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.CatchEvent catchEvent
+                        && (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent
+                                || node instanceof BoundaryEvent)
                         && catchEvent.eventDefinitions().size() == 1 && catchEvent.eventDefinitions().get(0)
-                                instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition)) {
-                    // Only a conditional wait asks its condition again; a signal, message or boundary wait is woken by its own command.
+                                instanceof ConditionalEventDefinition)) {
+                    // Only a conditional wait, on a catch event or a boundary, asks its condition again; a signal or message wait is woken by its own command.
                     continue;
                 }
                 behaviorFor(node).trigger(node, token, new Command.VariablesChanged(Map.of(), ctx.actor()), ctx);
@@ -257,7 +262,10 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
     private void armBoundaries(FlowNode node, Token token, WorkingContext ctx) {
         for (BoundaryEvent boundary : process.boundariesOf(node.id())) {
             if (boundary.eventDefinitions().size() != 1
-                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition)
+                    || !(boundary.eventDefinitions().get(0) instanceof TimerEventDefinition
+                            || boundary.eventDefinitions().get(0) instanceof MessageEventDefinition
+                            || boundary.eventDefinitions().get(0) instanceof SignalEventDefinition
+                            || boundary.eventDefinitions().get(0) instanceof ConditionalEventDefinition)
                     || ctx.hasLiveBoundaryToken(boundary, token.scopeTokenId())) {
                 continue;
             }

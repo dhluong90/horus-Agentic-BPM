@@ -45,15 +45,18 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'intermediateCatchEvent:link':
         return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} />;
       case 'startEvent:signal':
+      case 'boundaryEvent:signal':
       case 'intermediateCatchEvent:signal':
         return <path d="M8 2.5l6 10.5H2z" {...common} />;
       case 'endEvent:signal':
       case 'intermediateThrowEvent:signal':
         return <path d="M8 2.5l6 10.5H2z" {...common} fill="currentColor" />;
       case 'startEvent:conditional':
+      case 'boundaryEvent:conditional':
       case 'intermediateCatchEvent:conditional':
         return <path d="M3.5 2.5h9v11h-9zM5.5 5.5h5M5.5 8h5M5.5 10.5h5" {...common} />;
       case 'startEvent:message':
+      case 'boundaryEvent:message':
       case 'intermediateCatchEvent:message':
       case 'receiveTask':
         // A hollow envelope: the message is awaited.

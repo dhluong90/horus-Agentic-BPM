@@ -134,7 +134,7 @@
       "required": ["id", "type"],
       "properties": {
         "type": {
-          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "subProcess", "throwCompensation", "signalCatch", "signalThrow", "conditionalCatch"]
+          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "subProcess", "throwCompensation", "signalCatch", "signalThrow", "conditionalCatch", "eventBasedGateway"]
         }
       },
       "allOf": [
@@ -153,7 +153,8 @@
         { "if": { "properties": { "type": { "const": "throwCompensation" } } }, "then": { "$ref": "#/$defs/throwCompensationStep" } },
         { "if": { "properties": { "type": { "const": "signalCatch" } } }, "then": { "$ref": "#/$defs/signalCatchStep" } },
         { "if": { "properties": { "type": { "const": "signalThrow" } } }, "then": { "$ref": "#/$defs/signalThrowStep" } },
-        { "if": { "properties": { "type": { "const": "conditionalCatch" } } }, "then": { "$ref": "#/$defs/conditionalCatchStep" } }
+        { "if": { "properties": { "type": { "const": "conditionalCatch" } } }, "then": { "$ref": "#/$defs/conditionalCatchStep" } },
+        { "if": { "properties": { "type": { "const": "eventBasedGateway" } } }, "then": { "$ref": "#/$defs/eventBasedGatewayStep" } }
       ]
     },
     "signalName": {
@@ -400,6 +401,17 @@
             { "$ref": "#/$defs/nodeId" },
             { "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/nodeId" } }
           ]
+        }
+      }
+    },
+    "eventBasedGatewayStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["next"],
+      "properties": {
+        "next": {
+          "description": "The catch events (message, signal, timer, conditional) or receive tasks the gateway waits on; the first to fire wins and the others are cancelled.",
+          "type": "array", "minItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/nodeId" }
         }
       }
     },

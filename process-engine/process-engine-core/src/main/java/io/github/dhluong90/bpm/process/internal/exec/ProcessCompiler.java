@@ -9,6 +9,8 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefini
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGatewayType;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElementsContainer;
@@ -159,6 +161,32 @@ public final class ProcessCompiler {
                             + " cancels its activity; remove cancelActivity=\"false\"", node.id()));
                 }
             }
+            if (node instanceof EventBasedGateway gateway) {
+                // #495: a gateway waits on two or more catch events; each is entered by this gateway alone, and no flow has a condition.
+                if (gateway.instantiate() || gateway.eventGatewayType() == EventBasedGatewayType.PARALLEL) {
+                    problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "an instantiating or parallel"
+                            + " event-based gateway has no behaviour in this release", "eventBasedGateway", node.id(), 0));
+                }
+                if (out.size() < 2) {
+                    problems.add(DefinitionProblem.of("EVENT_GATEWAY_BRANCHES", "An event-based gateway waits on at"
+                            + " least two catch events; it has " + out.size(), node.id()));
+                }
+                for (SequenceFlow f : out) {
+                    FlowNode target = nodes.get(f.targetRef());
+                    if (f.conditionExpression() != null) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_FLOW_CONDITION", "A flow of an event-based"
+                                + " gateway has no condition; the event decides", f.id()));
+                    }
+                    if (target != null && !waitsForEvent(target)) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_TARGET_INVALID", "An event-based gateway leads"
+                                + " to a message, signal, timer or conditional catch event or a receive task; "
+                                + target.id() + " is not one", f.id()));
+                    } else if (target != null && flows.stream().filter(x -> x.targetRef().equals(target.id())).count() > 1) {
+                        problems.add(DefinitionProblem.of("EVENT_GATEWAY_TARGET_SHARED", "A catch event after an"
+                                + " event-based gateway has no other incoming flow", target.id()));
+                    }
+                }
+            }
             if (isLinkThrow(node)) {
                 String name = CompiledProcess.linkName(node).orElse(null);
                 if (name == null || name.isBlank()) {
@@ -305,6 +333,18 @@ public final class ProcessCompiler {
         return node instanceof IntermediateThrowEvent t && t.eventDefinitions().size() == 1
                 && t.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
                         .LinkEventDefinition;
+    }
+
+    /** The catch events and tasks an event-based gateway may lead to (#495). */
+    static boolean waitsForEvent(FlowNode node) {
+        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask) {
+            return true;
+        }
+        return node instanceof IntermediateCatchEvent c && c.eventDefinitions().size() == 1
+                && (c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition
+                || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.SignalEventDefinition
+                || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition
+                || c.eventDefinitions().get(0) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition);
     }
 
     static boolean throwsCompensation(FlowNode node) {

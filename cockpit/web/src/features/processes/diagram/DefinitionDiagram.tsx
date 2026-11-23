@@ -270,6 +270,14 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
         <>
           <path d={`M${String(centre.x)} ${String(centre.y - GATEWAY_HALF)} L${String(centre.x + GATEWAY_HALF)} ${String(centre.y)} L${String(centre.x)} ${String(centre.y + GATEWAY_HALF)} L${String(centre.x - GATEWAY_HALF)} ${String(centre.y)} Z`} />
           {glyph !== undefined ? <text x={centre.x} y={centre.y + 7} textAnchor="middle" className="dg-node__glyph" aria-hidden="true">{glyph}</text> : null}
+          {node.type === 'eventBasedGateway' ? (
+            // #495: a double ring around a pentagon, the symbol of a gateway that waits for the first of several events.
+            <g className="dg-node__event-gateway" aria-hidden="true">
+              <circle cx={centre.x} cy={centre.y} r={11} />
+              <circle cx={centre.x} cy={centre.y} r={8.5} />
+              <path d={`M${String(centre.x)} ${String(centre.y - 5.5)} L${String(centre.x + 5.2)} ${String(centre.y - 1.7)} L${String(centre.x + 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 5.2)} ${String(centre.y - 1.7)} Z`} />
+            </g>
+          ) : null}
         </>
       )}
       {node.lines.length > 0 ? (

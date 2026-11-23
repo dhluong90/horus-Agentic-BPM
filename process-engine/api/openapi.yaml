@@ -3198,6 +3198,22 @@ components:
                   name: { type: string }
                   correlationKey: { type: string, description: The masked key; absent when the step has none }
                   result: { type: string, enum: [WAITING, DELIVERED, HANDED_OVER] }
+              event:
+                type: object
+                description: >-
+                  `BOUNDARY_FIRED` and `EVENT_GATEWAY_RESOLVED` entries only (#490, #495): what fired a boundary event, or
+                  which catch event of an event-based gateway won and which were cancelled. Names, codes and condition
+                  text; never a variable value
+                properties:
+                  trigger: { type: string, enum: [TIMER, MESSAGE, SIGNAL, CONDITION, ERROR, ESCALATION], description: '`BOUNDARY_FIRED`: what fired it' }
+                  name: { type: string, description: '`BOUNDARY_FIRED`: the message name, the signal name, the condition text or the error or escalation code; absent for a timer' }
+                  interrupting: { type: boolean, description: '`BOUNDARY_FIRED`: whether it cancelled the step it sits on' }
+                  gateway: { type: string, description: '`EVENT_GATEWAY_RESOLVED`: the id of the gateway' }
+                  winner: { type: string, description: '`EVENT_GATEWAY_RESOLVED`: the id of the catch event that fired first' }
+                  cancelled:
+                    type: array
+                    items: { type: string }
+                    description: '`EVENT_GATEWAY_RESOLVED`: the ids of the catch events that were cancelled'
         compensations:
           type: array
           description: >-

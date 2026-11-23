@@ -150,6 +150,15 @@ public final class CanonicalProcessWriter {
                                     step.put("escalationCode", e.escalationCode());
                                 }
                             }
+                            case MessageEventDefinition m -> step.put("trigger", "message");
+                            case SignalEventDefinition sg -> {
+                                step.put("trigger", "signal");
+                                step.put("signal", sg.signalRef());
+                            }
+                            case ConditionalEventDefinition c -> {
+                                step.put("trigger", "condition");
+                                step.put("condition", normal(c.condition().language(), c.condition().text().strip()));
+                            }
                             default -> step.put("trigger", "other");
                         }
                     }
@@ -315,6 +324,12 @@ public final class CanonicalProcessWriter {
                     step.put("type", "signalThrow");
                     step.put("signal", signal.signalRef());
                 }
+                case io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g -> {
+                    // #495: the catch events it waits on, in document order.
+                    step.put("type", "eventBasedGateway");
+                    ArrayNode next = step.putArray("next");
+                    out.forEach(f -> next.add(f.targetRef()));
+                }
                 case ParallelGateway g -> {
                     step.put("type", "parallelGateway");
                     // A fork lists every branch in document order; a single next is written below.
@@ -375,7 +390,8 @@ public final class CanonicalProcessWriter {
                     mapped.forEach(o -> received.put(o.name(), o.from()));
                 }
             }
-            if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
+            if (!(node instanceof ExclusiveGateway) && !(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway)
+                    && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
         }

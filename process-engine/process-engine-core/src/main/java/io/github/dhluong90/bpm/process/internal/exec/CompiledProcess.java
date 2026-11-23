@@ -25,6 +25,7 @@ public final class CompiledProcess {
     private final Map<FacetKey<?>, Object> facets;
     private final Map<String, String> containers;
     private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries;
+    private final Map<String, io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> gatewayOfCatch;
 
     private CompiledProcess(Builder builder) {
         this.containers = Map.copyOf(builder.containers);
@@ -39,6 +40,22 @@ public final class CompiledProcess {
         builder.outgoing.forEach((k, v) -> out.put(k, List.copyOf(v)));
         this.outgoing = Collections.unmodifiableMap(out);
         this.facets = Map.copyOf(builder.facets);
+        Map<String, io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> byCatch = new HashMap<>();
+        builder.nodes.values().forEach(n -> {
+            if (n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway gateway) {
+                out.getOrDefault(gateway.id(), List.of()).forEach(f -> byCatch.put(f.targetRef(), gateway));
+            }
+        });
+        this.gatewayOfCatch = Map.copyOf(byCatch);
+    }
+
+    /**
+     * @param nodeId a node
+     * @return the event-based gateway that has a flow to the node (#495), when it is one of the catches the gateway
+     *     waits on; a catch event of a gateway has no other incoming flow
+     */
+    public Optional<io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway> eventGatewayOf(String nodeId) {
+        return Optional.ofNullable(gatewayOfCatch.get(nodeId));
     }
 
     /**
