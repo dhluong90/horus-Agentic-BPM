@@ -68,7 +68,6 @@ class ConformanceSuiteTest {
         List<Effect> all = new ArrayList<>(t.effects());
         record Seen(Set<String> done) { }
         Set<String> handled = new LinkedHashSet<>();
-        List<Effect> all = new ArrayList<>(t.effects());
         collect(t, visited);
         boolean progressed = true;
         while (progressed && t.state().status() == InstanceStatus.RUNNING) {
