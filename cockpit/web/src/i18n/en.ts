@@ -850,6 +850,7 @@ export const en = {
   'editor.draftChanges': 'Changes in this draft',
   'editor.noDraftChanges': 'Changed cells show here once you leave them.',
   'editor.newDraftOf': 'New draft from version {version}',
+  'cellError.amount': 'Enter a number, for example 50,000,000.',
   'cellError.currency': 'Add a currency, for example 10,000 VND.',
   'cellError.value': 'Enter a value.',
   'cellError.choice': 'Choose a value from the list.',

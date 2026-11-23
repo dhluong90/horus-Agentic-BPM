@@ -59,7 +59,7 @@ export function readConditionCell(text: string | undefined, kind: ColumnKind): C
     }
   }
   if (kind === 'number' || kind === 'money') {
-    const compare = /^(==|>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)?(?:\s+([A-Z]{3}))?$/.exec(value);
+    const compare = /^(==|>=|<=|>|<)\s*(\S+?)?(?:\s+([A-Z]{3}))?$/.exec(value);
     const op = compare ? FROM_ENGINE[compare[1] ?? ''] : undefined;
     if (compare && op) return { kind: 'compare', op, amount: compare[2] ?? '', currency: compare[3] };
   }
@@ -94,7 +94,7 @@ export function readOutputCell(text: string, kind: ColumnKind, currency: string 
   const value = text.trim();
   if (value === '') return kind === 'money' && currency !== undefined ? { kind: 'money', amount: '', currency } : { kind: 'any' };
   if (kind === 'money') {
-    const money = /^(-?\d+(?:\.\d+)?)\s+([A-Z]{3})$/.exec(value);
+    const money = /^(\S+)\s+([A-Z]{3})$/.exec(value);
     if (money) return { kind: 'money', amount: money[1] ?? '', currency: money[2] ?? '' };
   }
   if (kind === 'bool' && (value === 'true' || value === 'false')) return { kind: 'bool', value: value === 'true' };

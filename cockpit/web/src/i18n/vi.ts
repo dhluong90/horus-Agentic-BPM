@@ -852,6 +852,7 @@ export const vi: Record<MessageKey, string> = {
   'editor.draftChanges': 'Thay đổi trong bản nháp',
   'editor.noDraftChanges': 'Ô đã sửa sẽ hiện ở đây khi bạn rời ô.',
   'editor.newDraftOf': 'Bản nháp mới từ phiên bản {version}',
+  'cellError.amount': 'Nhập một số, ví dụ 50.000.000.',
   'cellError.currency': 'Thêm loại tiền, ví dụ 10.000 VND.',
   'cellError.value': 'Nhập một giá trị.',
   'cellError.choice': 'Chọn một giá trị trong danh sách.',

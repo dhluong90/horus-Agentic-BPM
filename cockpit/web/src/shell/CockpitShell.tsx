@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { BpmMeV1 } from '../api/generated/bpm-me.v1';
 import { browserDependencies, type OidcDependencies, type TokenSession } from '../app/auth/oidc';
 import { enabledHosts } from '../app/auth/standalone';
-import { hostLabel, loadRegistry, type HostRegistry, type RegistryHost } from '../app/config/registry';
+import { hostLabel, loadRegistry, selectHost, type HostRegistry, type RegistryHost } from '../app/config/registry';
 import { splitHost, useRoute, withHost } from '../app/route';
 import { FederationProvider, useFederatedHosts } from '../app/federation/federation';
 import { registryQueryKey, useHostSession, type SessionDependencies } from '../app/session/useHostSession';
@@ -76,7 +76,32 @@ export function CockpitShell(dependencies: ShellDependencies) {
 
 /** Embedded mode: one host, on the host's own session (CKP-001). */
 function EmbeddedShell({ registry, dependencies }: { registry: HostRegistry; dependencies: ShellDependencies }) {
-  const state = useHostSession(registry, dependencies);
+  const queryClient = useQueryClient();
+  const hostId = selectHost(registry)?.id;
+  // One selected tenant for the host; none means the session's own tenant (CKP-022, same as standalone mode).
+  const [tenant, setTenant] = useState<string | undefined>(undefined);
+  const [refusal, setRefusal] = useState<TenantRefusal | undefined>(undefined);
+  const selectTenant = useCallback((next: string | undefined) => {
+    // Nothing read for the previous tenant may show under the next one: drop the host's cached answers.
+    queryClient.removeQueries({ predicate: (query) => query.queryKey[0] === hostId });
+    setTenant(next);
+  }, [queryClient, hostId]);
+  const onRefused = useCallback((found: TenantRefusal) => {
+    setRefusal(found);
+    selectTenant(undefined);
+  }, [selectTenant]);
+  // A new tenant is a new subtree: nothing of the previous screens or drafts survives the switch.
+  return (
+    <>
+      <EmbeddedScreens key={tenant ?? ''} registry={registry} dependencies={dependencies} tenant={tenant}
+        onSelectTenant={(next) => { setRefusal(undefined); selectTenant(next); }} onRefused={onRefused} />
+      {refusal !== undefined ? <TenantRefusedNotice correlationId={refusal.correlationId} onDismiss={() => { setRefusal(undefined); }} /> : null}
+    </>
+  );
+}
+
+function EmbeddedScreens({ registry, dependencies, tenant, onSelectTenant, onRefused }: { registry: HostRegistry; dependencies: ShellDependencies } & TenantProps) {
+  const state = useHostSession(registry, dependencies, tenant, onRefused);
   const { locale } = useI18n();
   const banner = registry.ui?.environmentBanner;
   if (state.status !== 'ready') {
@@ -87,10 +112,18 @@ function EmbeddedShell({ registry, dependencies }: { registry: HostRegistry; dep
     );
   }
   const label = hostLabel(state.host.label, locale) || state.meta.hostId || state.host.id;
+  // Switching is offered only when the host has it on and the session allows more than one tenant; else hidden.
+  const tenants = switchableTenants(state.meta, state.me);
+  const service = tenants.length > 0 ? (
+    <>
+      <HostPicker hosts={[state.host]} current={state.host} tenant={undefined} ready />
+      <TenantSwitcher tenants={tenants} current={state.me.tenant.current} names={state.me.tenant.names} onSelect={onSelectTenant} />
+    </>
+  ) : undefined;
   return (
     <div className="app">
-      <SessionHeader session={summary(state.host, state.me, label)} banner={banner} breadcrumb={<Breadcrumb />} />
-      <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={dependencies.fetchImpl} inboxSeconds={registry.refresh?.inboxSeconds} incidentsSeconds={registry.refresh?.incidentsSeconds} />
+      <SessionHeader session={summary(state.host, state.me, label)} banner={banner} breadcrumb={<Breadcrumb />} service={service} />
+      <AppFrame host={state.host} meta={state.meta} me={state.me} fetchImpl={state.fetchImpl} inboxSeconds={registry.refresh?.inboxSeconds} incidentsSeconds={registry.refresh?.incidentsSeconds} />
     </div>
   );
 }

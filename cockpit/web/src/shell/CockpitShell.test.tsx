@@ -212,3 +212,28 @@ describe('language', () => {
     expect(await screen.findByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
   });
 });
+
+describe('embedded shell, tenant switcher', () => {
+  it('CKP_022_embedded_cockpit_offers_the_tenants_the_session_allows_and_sends_the_chosen_one', async () => {
+    const user = userEvent.setup();
+    setScenario('embedded-two-tenants');
+    const tenants: (string | null)[] = [];
+    mockHost.events.on('request:start', ({ request }) => {
+      if (new URL(request.url).pathname === '/api/bpm/me') tenants.push(request.headers.get('X-Tenant-Id'));
+    });
+    render(<App />);
+
+    await screen.findByTestId('header-user');
+    await user.click(await screen.findByTestId('tenant-switcher'));
+    const menu = screen.getByRole('list', { name: /tenant/i });
+    expect(within(menu).getAllByRole('button').map((item) => item.textContent)).toEqual([expect.stringContaining('Bank A'), expect.stringContaining('Bank B')]);
+    await user.click(within(menu).getByRole('button', { name: /Bank B/ }));
+    await vi.waitFor(() => { expect(tenants.at(-1)).toBe('bank-b'); });
+  });
+
+  it('CKP_022_embedded_cockpit_shows_no_switcher_with_one_allowed_tenant', async () => {
+    render(<App />);
+    await screen.findByTestId('header-user');
+    expect(screen.queryByTestId('tenant-switcher')).not.toBeInTheDocument();
+  });
+});

@@ -185,6 +185,11 @@ function Results({ search, results, decisions }: { search: DecisionSearchKey | u
   );
 }
 
+/** A decision failed when the engine reported an error or several rules hit; a match or no match is a normal answer. */
+export function isFailedOutcome(outcome: (typeof DECISION_OUTCOMES)[number] | 'OTHER'): boolean {
+  return outcome !== 'MATCHED' && outcome !== 'NO_MATCH';
+}
+
 export function knownOutcome(outcome: string): (typeof DECISION_OUTCOMES)[number] | 'OTHER' {
   return (DECISION_OUTCOMES as readonly string[]).includes(outcome) ? (outcome as (typeof DECISION_OUTCOMES)[number]) : 'OTHER';
 }

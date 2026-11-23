@@ -12,7 +12,7 @@ export interface StoredDecision {
   decisionId: string;
   ruleSet: string;
   version: number;
-  outcome: 'OK' | 'UNIQUE_HIT_VIOLATION' | 'EVALUATION_ERROR';
+  outcome: 'MATCHED' | 'NO_MATCH' | 'UNIQUE_HIT_VIOLATION' | 'EVALUATION_ERROR';
   errorCode: string | null;
   inputs: Record<string, Json>;
   outputs: Record<string, Json> | null;
@@ -72,19 +72,19 @@ const vnd = (amount: number): Json => ({ currency: 'VND', amount });
 /** Sao Mai Bank's decision log for November 2026: three named card-fee decisions, a failure, a kyc-risk case and 120 more. */
 export function demoDecisions(): StoredDecision[] {
   const named: StoredDecision[] = [
-    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7T9', ruleSet: 'card-fee', version: 1, outcome: 'OK', errorCode: null,
+    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7T9', ruleSet: 'card-fee', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { tier: 'GOLD', balance: vnd(60_000_000), txCount: 5, nationalId: MASKED_ID }, outputs: { fee: vnd(0), waived: true },
       matchedRuleIds: ['R2'], correlationId: 'LN-2026-0042', evaluatedAt: '2026-11-20T10:00:00Z' },
-    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TA', ruleSet: 'card-fee', version: 1, outcome: 'OK', errorCode: null,
+    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TA', ruleSet: 'card-fee', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { tier: 'CLASSIC', balance: vnd(5_000_000), txCount: 25, nationalId: 'hmac:k1:2b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfe' }, outputs: { fee: vnd(15_000), waived: false },
       matchedRuleIds: ['R4'], correlationId: 'LN-2026-0057', evaluatedAt: '2026-11-19T09:15:00Z' },
-    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TB', ruleSet: 'card-fee', version: 1, outcome: 'OK', errorCode: null,
+    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TB', ruleSet: 'card-fee', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { tier: 'CLASSIC', balance: vnd(2_000_000), txCount: 3, nationalId: null }, outputs: { fee: vnd(50_000), waived: false },
       matchedRuleIds: ['R5'], correlationId: 'LN-2026-0061', evaluatedAt: '2026-11-18T16:40:00Z' },
     { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TC', ruleSet: 'card-fee', version: 1, outcome: 'EVALUATION_ERROR', errorCode: 'EVALUATION_ERROR',
       inputs: { tier: 'GOLD', balance: null, txCount: 2, nationalId: MASKED_ID }, outputs: null,
       matchedRuleIds: [], correlationId: 'LN-2026-0063', evaluatedAt: '2026-11-17T11:05:00Z' },
-    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TD', ruleSet: 'kyc-risk', version: 1, outcome: 'OK', errorCode: null,
+    { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TD', ruleSet: 'kyc-risk', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { country: 'VN', monthlyIncome: vnd(250_000_000), pep: false }, outputs: { risk: 'MEDIUM' },
       matchedRuleIds: ['K2'], correlationId: 'LN-2026-0042', evaluatedAt: '2026-11-20T09:58:00Z' },
   ];
@@ -95,7 +95,7 @@ export function demoDecisions(): StoredDecision[] {
     const fee = tier === 'PLATINUM' ? 0 : tier === 'GOLD' ? 30_000 : 50_000;
     const day = 1 + (n % 16);
     return {
-      decisionId: generatedId(n + 1), ruleSet: 'card-fee', version: 1, outcome: 'OK', errorCode: null,
+      decisionId: generatedId(n + 1), ruleSet: 'card-fee', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { tier, balance: vnd(1_000_000 * (1 + (n % 40))), txCount: n % 12, nationalId: MASKED_ID }, outputs: { fee: vnd(fee), waived: fee === 0 },
       matchedRuleIds: [rule], correlationId: `LN-2026-${String(100 + n).padStart(4, '0')}`,
       evaluatedAt: `2026-11-${String(day).padStart(2, '0')}T${String(8 + (n % 9)).padStart(2, '0')}:${String((n * 7) % 60).padStart(2, '0')}:00Z`,
@@ -190,7 +190,7 @@ function testText(test: string, words: Words): string {
  * needs one, else the generated sentence explains the whole decision. Masked inputs read "(masked)".
  */
 function templated(d: StoredDecision, v: AuditVersion | undefined, language: 'en' | 'vi'): string | undefined {
-  if (d.outcome !== 'OK' || d.matchedRuleIds.length === 0) return undefined;
+  if (d.outcome !== 'MATCHED' || d.matchedRuleIds.length === 0) return undefined;
   const words = CATALOGUE[language];
   const masked = new Set((v?.inputs ?? []).filter((input) => input.mask === true).map((input) => input.name));
   const sentences: string[] = [];
@@ -224,7 +224,7 @@ function explanation(d: StoredDecision, v: AuditVersion | undefined, language: '
       const value = d.inputs[input] ?? null;
       return { input, path: `/when/${input}`, test, value, masked: isMasked(input, value), missing: value === null, result: true };
     });
-    return { ruleId, position: Math.max(position, 1), conditions, outputs: d.outcome === 'OK' ? (d.outputs ?? {}) : {} };
+    return { ruleId, position: Math.max(position, 1), conditions, outputs: d.outcome === 'MATCHED' ? (d.outputs ?? {}) : {} };
   });
   const reasons: { code: string; params: Record<string, Json> }[] = [];
   const sentences: string[] = [];

@@ -9,6 +9,6 @@ export function OutcomeBadge({ outcome, matched }: { outcome: DecisionOutcome | 
   const { t } = useI18n();
   if (outcome === 'UNIQUE_HIT_VIOLATION') return <span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('dlog.outcome.unique')}</span>;
   if (outcome === 'EVALUATION_ERROR' || outcome === 'OTHER') return <span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('dlog.outcome.failed')}</span>;
-  if (matched.length === 0) return <span className="badge badge--neutral"><span aria-hidden="true">–</span> {t('dlog.outcome.noMatch')}</span>;
+  if (outcome === 'NO_MATCH' || matched.length === 0) return <span className="badge badge--neutral"><span aria-hidden="true">–</span> {t('dlog.outcome.noMatch')}</span>;
   return <span className="badge badge--accent"><span aria-hidden="true">✓</span> {t('dlog.outcome.matched', { rules: matched.join(', ') })}</span>;
 }
