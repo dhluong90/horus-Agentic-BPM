@@ -34,6 +34,12 @@ const KEYS: Record<KnownNodeType, MessageKey> = {
   'intermediateCatchEvent:signal': 'node.signal',
   'intermediateThrowEvent:signal': 'node.signal',
   'intermediateCatchEvent:conditional': 'node.conditional',
+  'startEvent:message': 'node.messageStart',
+  'endEvent:message': 'node.messageEnd',
+  'intermediateCatchEvent:message': 'node.messageCatch',
+  'intermediateThrowEvent:message': 'node.messageThrow',
+  receiveTask: 'node.receiveTask',
+  sendTask: 'node.sendTask',
 };
 
 /** Event definitions a node of an unknown element type can still be named by: `boundaryEvent:timer` is a timer. */

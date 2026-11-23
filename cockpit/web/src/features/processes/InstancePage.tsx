@@ -337,6 +337,20 @@ function TaskAction({ taskId, noActivity }: { taskId: string; noActivity: boolea
   );
 }
 
+/** A message step in the timeline: the message name, the key as the host masked it, and the delivery result (#491). */
+function MessageDetail({ message }: { message: NonNullable<ActivityEntry['message']> }) {
+  const { t } = useI18n();
+  const result = `instance.timeline.messageResult.${message.result}` as MessageKey;
+  const known = ['WAITING', 'DELIVERED', 'HANDED_OVER'].includes(message.result);
+  return (
+    <span className="muted">
+      {' · '}{t('instance.timeline.message', { name: message.name })}
+      {message.correlationKey !== undefined ? <>{' · '}{t('instance.timeline.messageKey', { key: message.correlationKey })}</> : null}
+      {known ? <>{' · '}{t(result)}</> : null}
+    </span>
+  );
+}
+
 /** Every history entry in time order, with the step name and who acted, as the engine returned them. */
 function Timeline({ graph, activities }: { graph: DiagramGraph; activities: InstanceActivities }) {
   const { t, locale } = useI18n();
@@ -384,6 +398,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                       ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
                     {entry.type === 'SIGNAL_THROWN' && entry.waiters !== undefined
                       ? <span className="muted"> · {t(entry.waiters === 1 ? 'instance.timeline.woke.one' : 'instance.timeline.woke.many', { count: String(entry.waiters) })}</span> : null}
+                    {entry.message !== undefined ? <MessageDetail message={entry.message} /> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

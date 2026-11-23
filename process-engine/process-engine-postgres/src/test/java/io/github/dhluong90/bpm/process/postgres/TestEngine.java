@@ -183,6 +183,7 @@ final class TestEngine {
         if (b.roleCatalogue != null) {
             services.useRoleCatalogue(b.roleCatalogue);
         }
+        services.useMessageAdapter(b.messageAdapter);
         if (b.importedLayouts) {
             // #445: an imported BPMN file's own diagram becomes layout revision 1, as in the starter.
             this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
@@ -335,6 +336,7 @@ final class TestEngine {
         private DataSource dataSource;
         private io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue;
         private boolean importedLayouts;
+        private io.github.dhluong90.bpm.process.spi.MessageAdapter messageAdapter;
         private io.github.dhluong90.bpm.process.internal.service.Calendars.Approval calendarApproval =
                 io.github.dhluong90.bpm.process.internal.service.Calendars.Approval.FOUR_EYES;
         private io.github.dhluong90.bpm.process.spi.OutputSchemaValidator outputSchemas =
@@ -478,6 +480,12 @@ final class TestEngine {
 
         Builder outputSchemas(io.github.dhluong90.bpm.process.spi.OutputSchemaValidator value) {
             outputSchemas = value;
+            return this;
+        }
+
+        /** The host's outbox port for the messages a process sends (#491); none by default. */
+        Builder messageAdapter(io.github.dhluong90.bpm.process.spi.MessageAdapter value) {
+            messageAdapter = value;
             return this;
         }
 

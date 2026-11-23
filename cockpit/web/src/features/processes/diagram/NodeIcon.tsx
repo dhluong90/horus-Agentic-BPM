@@ -53,6 +53,16 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'startEvent:conditional':
       case 'intermediateCatchEvent:conditional':
         return <path d="M3.5 2.5h9v11h-9zM5.5 5.5h5M5.5 8h5M5.5 10.5h5" {...common} />;
+      case 'startEvent:message':
+      case 'intermediateCatchEvent:message':
+      case 'receiveTask':
+        // A hollow envelope: the message is awaited.
+        return <><rect x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path d="M2 4.5L8 9l6-4.5" {...common} /></>;
+      case 'endEvent:message':
+      case 'intermediateThrowEvent:message':
+      case 'sendTask':
+        // A filled envelope: the message is sent.
+        return <><rect className="icon--filled" x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path className="icon--knockout" d="M2 4.5L8 9l6-4.5" {...common} /></>;
       case 'intermediateThrowEvent:compensate':
         return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} />;
       case 'generic':

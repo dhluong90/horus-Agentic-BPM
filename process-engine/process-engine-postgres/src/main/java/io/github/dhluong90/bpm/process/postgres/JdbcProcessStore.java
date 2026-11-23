@@ -97,6 +97,21 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
             Object waiters = Values.readMap(rs.getString("details")).get("waiters");
             return InstanceActivities.Entry.signalThrown(id, node, actor, at, waiters instanceof Number n ? n.intValue() : null);
         }
+        if (type.startsWith("MESSAGE_")) {
+            // #491: the name and the already masked key, never the plain key; the result is the entry's meaning.
+            Map<String, Object> details = Values.readMap(rs.getString("details"));
+            Map<String, String> message = new java.util.LinkedHashMap<>();
+            message.put("name", String.valueOf(details.get("message")));
+            if (details.get("correlationKey") != null) {
+                message.put("correlationKey", String.valueOf(details.get("correlationKey")));
+            }
+            message.put("result", switch (type) {
+                case "MESSAGE_RECEIVED" -> "DELIVERED";
+                case "MESSAGE_SENT" -> "HANDED_OVER";
+                default -> "WAITING";
+            });
+            return new InstanceActivities.Entry(id, type, node, actor, at).withMessage(message);
+        }
         if (!InstanceActivities.Entry.isCompensationType(type)) {
             return new InstanceActivities.Entry(id, type, node, actor, at);
         }
@@ -416,6 +431,32 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 throw new IllegalStateException("Token " + t.id() + " belongs to another instance");
             }
         }
+    }
+
+    // ---- message subscriptions (#491) ----------------------------------------------------------------------
+
+    @Override
+    public void insertSubscription(MessageSubscriptionRow r) {
+        jdbc.sql("INSERT INTO pre_message_subscription (tenant_id, id, instance_id, token_id, node_id, message_name, "
+                        + "correlation_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+                .params(r.tenantId(), r.id(), r.instanceId(), r.tokenId(), r.nodeId(), r.messageName(),
+                        r.correlationKey(), ts(r.createdAt()))
+                .update();
+    }
+
+    @Override
+    public void retainSubscriptions(String tenant, String instanceId, java.util.Collection<String> keep) {
+        jdbc.sql("DELETE FROM pre_message_subscription WHERE tenant_id = ? AND instance_id = ? "
+                        + "AND NOT (id = ANY (?::text[]))")
+                .params(tenant, instanceId, keep.toArray(new String[0])).update();
+    }
+
+    @Override
+    public List<MessageSubscriptionRow> subscriptions(String tenant, String messageName, String correlationKey,
+            int limit) {
+        return ProcessListQueries.MESSAGE_SUBSCRIPTIONS.list(jdbc, List.of(tenant, messageName, correlationKey, limit),
+                (rs, n) -> new MessageSubscriptionRow(tenant, rs.getString(1), rs.getString(2), rs.getString(3),
+                        rs.getString(4), rs.getString(5), rs.getString(6), instant(rs, "created_at")));
     }
 
     // ---- tasks --------------------------------------------------------------------------------------------

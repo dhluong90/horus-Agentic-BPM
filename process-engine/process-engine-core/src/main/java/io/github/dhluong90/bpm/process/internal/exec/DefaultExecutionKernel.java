@@ -53,6 +53,14 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     signal.subscriptionId(), signal, ctx);
             case Command.ChildEnded ended -> trigger(ended.tokenId(), TokenStatus.WAITING_CHILD, ended.attemptId(),
                     ended, ctx);
+            case Command.CorrelateMessage message -> {
+                // The subscription id is the activity instance id of the waiting token.
+                Token waiting = ctx.tree().all().stream().filter(t -> t.status() == TokenStatus.WAITING_EVENT
+                        && message.subscriptionId().equals(t.activityInstanceId())).findFirst().orElseThrow(() ->
+                        new ExecutionException("STALE_SUBSCRIPTION", null, "No token waits on subscription "
+                                + message.subscriptionId()));
+                trigger(waiting.id(), TokenStatus.WAITING_EVENT, message.subscriptionId(), message, ctx);
+            }
             case Command.MoveToken move -> moveToken(move, ctx);
             case Command.RouteToReview review -> trigger(review.tokenId(), TokenStatus.WAITING_ASYNC, review.attemptId(),
                     review, ctx);
@@ -89,6 +97,12 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
                     continue;
                 }
                 FlowNode node = node(token.nodeId());
+                if (!(node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent catchEvent
+                        && catchEvent.eventDefinitions().size() == 1 && catchEvent.eventDefinitions().get(0)
+                                instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ConditionalEventDefinition)) {
+                    // Only a conditional wait asks its condition again; a signal, message or boundary wait is woken by its own command.
+                    continue;
+                }
                 behaviorFor(node).trigger(node, token, new Command.VariablesChanged(Map.of(), ctx.actor()), ctx);
             }
             drain(ctx);
@@ -107,9 +121,12 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         ctx.history("INSTANCE_STARTED", root, Map.of("definitionId", process.definitionId()));
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.instance.started.v1",
                 Map.of("instanceId", ctx.snapshot().instanceId(), "definitionId", process.definitionId())));
-        // A process has exactly one start event (the compiler checks), a none, signal or conditional one (#492).
+        // A process has exactly one start event of its own scope (the compiler checks): a none, signal, message or
+        // conditional one. A none start event wins if a process also has an event start.
         StartEvent startEvent = process.process().flowElements().stream().filter(StartEvent.class::isInstance)
-                .map(StartEvent.class::cast).findFirst()
+                .map(StartEvent.class::cast).filter(s -> s.eventDefinitions().isEmpty()).findFirst()
+                .or(() -> process.process().flowElements().stream().filter(StartEvent.class::isInstance)
+                        .map(StartEvent.class::cast).findFirst())
                 .orElseThrow(() -> new ExecutionException("NO_START_EVENT", null, "No start event"));
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);

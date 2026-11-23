@@ -30,6 +30,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.AssociationDirection;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.EventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SendTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ElementInfo;
@@ -119,6 +124,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
     private static final String HORUS = BpmnNamespaces.HORUS;
     /** A signal name: what a broadcast and a signal event match on, at most 100 characters. */
     static final Pattern SIGNAL_NAME = io.github.dhluong90.bpm.process.api.SignalRequest.NAME;
+    private static final Pattern MESSAGE_NAME = Pattern.compile("^[A-Za-z][A-Za-z0-9_.:-]{0,99}$");
+    private static final Pattern VARIABLE = Pattern.compile("^[A-Za-z_][A-Za-z0-9_]{0,63}$");
+    /** Elements whose {@code horus:output} maps a delivered message or a finished child into variables. */
+    private static final Set<String> OUTPUT_ELEMENTS = Set.of("callActivity", "receiveTask", "intermediateCatchEvent");
     private static final Pattern KEY = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
     /** The longest SLA a user task may declare: a year of working time is already beyond any service level. */
     static final java.time.Duration MAX_SLA = java.time.Duration.ofDays(366);
@@ -293,6 +302,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         signalNames.put(signalId, attr("name"));
                     }
                     skip();
+                } else if (BPMN.equals(ns) && "message".equals(local)) {
+                    message();
                 } else if (BPMN.equals(ns)) {
                     if (local.endsWith("EventDefinition") && attr("id") != null) {
                         sharedDefinitionIds.add(attr("id"));
@@ -303,6 +314,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                 }
             }
+            process = withMessageNames(process);
             for (DefinitionProblem ref : unresolvedRefs) {
                 if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
@@ -425,6 +437,82 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
             return out;
         }
+        /** Message id to message name, from the document-level {@code message} elements. */
+        private final Map<String, String> messageNames = new HashMap<>();
+        /** Elements that name a message, to resolve once the whole document is read: element, id, line, reference. */
+        private final List<Object[]> messageRefs = new ArrayList<>();
+
+        /** A document-level {@code message}: its name is what a sender and a receiver agree on. */
+        private void message() throws XMLStreamException {
+            String messageId = id();
+            String messageName = attr("name");
+            int at = line();
+            if (messageName == null || !MESSAGE_NAME.matcher(messageName).matches()) {
+                invalid.add(new DefinitionProblem("MESSAGE_NAME_INVALID", "A message needs a name of 1 to 100"
+                        + " letters, digits, '_', '.', ':' or '-', starting with a letter", "message",
+                        safe(messageId), at));
+            } else {
+                messageNames.put(messageId, messageName);
+            }
+            children("message", messageId, false);
+        }
+
+        /** Replaces the message reference of every message element by the message's name. */
+        private Process withMessageNames(Process p) {
+            if (p == null) {
+                return null;
+            }
+            return new Process(p.id(), p.name(), p.processType(), p.isExecutable(), p.isClosed(),
+                    resolveMessages(p.flowElements()), p.artifacts(), p.laneSets(), p.info());
+        }
+
+        private List<FlowElement> resolveMessages(List<FlowElement> elements) {
+            List<FlowElement> out = new ArrayList<>();
+            for (FlowElement e : elements) {
+                out.add(switch (e) {
+                    case StartEvent s -> new StartEvent(s.id(), s.name(), s.incoming(), s.outgoing(),
+                            named(s.eventDefinitions(), s.id(), "startEvent"), s.eventDefinitionRefs(), s.data(),
+                            s.parallelMultiple(), s.isInterrupting(), s.info());
+                    case EndEvent s -> new EndEvent(s.id(), s.name(), s.incoming(), s.outgoing(),
+                            named(s.eventDefinitions(), s.id(), "endEvent"), s.eventDefinitionRefs(), s.data(), s.info());
+                    case IntermediateCatchEvent c -> new IntermediateCatchEvent(c.id(), c.name(), c.incoming(),
+                            c.outgoing(), named(c.eventDefinitions(), c.id(), "intermediateCatchEvent"),
+                            c.eventDefinitionRefs(), c.data(), c.parallelMultiple(), c.info());
+                    case IntermediateThrowEvent t -> new IntermediateThrowEvent(t.id(), t.name(), t.incoming(),
+                            t.outgoing(), named(t.eventDefinitions(), t.id(), "intermediateThrowEvent"),
+                            t.eventDefinitionRefs(), t.data(), t.info());
+                    case ReceiveTask t -> new ReceiveTask(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.implementation(), t.instantiate(), nameOf(t.messageRef(), t.id(), "receiveTask"),
+                            t.operationRef(), t.info());
+                    case SendTask t -> new SendTask(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.implementation(), nameOf(t.messageRef(), t.id(), "sendTask"), t.operationRef(), t.info());
+                    case Transaction t -> new Transaction(t.id(), t.name(), t.incoming(), t.outgoing(), t.activity(),
+                            t.method(), resolveMessages(t.flowElements()), t.artifacts(), t.laneSets(), t.info());
+                    default -> e;
+                });
+            }
+            return out;
+        }
+
+        private List<EventDefinition> named(List<EventDefinition> definitions, String id, String element) {
+            return definitions.stream().map(d -> d instanceof MessageEventDefinition m
+                    ? (EventDefinition) new MessageEventDefinition(m.id(), nameOf(m.messageRef(), id, element),
+                            m.operationRef(), m.info())
+                    : d).toList();
+        }
+
+        /** The name of a message reference; an unresolved one is a problem naming the element. */
+        private String nameOf(String ref, String id, String element) {
+            String found = ref == null ? null : messageNames.get(ref);
+            if (found == null) {
+                int at = messageLines.getOrDefault(id, 1);
+                invalid.add(new DefinitionProblem("MESSAGE_REF_UNRESOLVED", ref == null
+                        ? "Name the message with messageRef" : "messageRef '" + safe(ref)
+                        + "' does not resolve to a message of this document", element, safe(id), at));
+            }
+            return found;
+        }
+        private final Map<String, Integer> messageLines = new HashMap<>();
 
         /** A document-level category: only its values are kept, as labels of the groups that refer to them. */
         private void category() throws XMLStreamException {
@@ -521,6 +609,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case "userTask" -> elements.add(userTask());
                     case "callActivity" -> elements.add(callActivity());
                     case "boundaryEvent" -> elements.add(boundaryEvent());
+                    case "receiveTask" -> elements.add(messageTask(true));
+                    case "sendTask" -> elements.add(messageTask(false));
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
                     case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
                     case "transaction" -> elements.add(saga());
@@ -618,6 +708,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             CompensateEventDefinition compensate = null;
             EventDefinition other = null;
             List<EventDefinition> signals = new ArrayList<>();
+            MessageEventDefinition message = null;
+            String key = horus("correlationKey");
+            List<HorusExtension> ext = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
             int definitions = 0;
             while (nextChild()) {
                 String local = xml.getLocalName();
@@ -642,12 +736,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "signalEventDefinition".equals(local)) {
                     definitions++;
                     signals.add(signalDefinition(id, element));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
+                    definitions++;
+                    message = messageDefinition(id);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
+                    extensions(element, id, true, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions++;
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
-                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
-                        && !"extensionElements".equals(local)) {
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)) {
                     unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
@@ -662,9 +760,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 invalid.add(new DefinitionProblem("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", element, safe(id), line));
             }
-            List<EventDefinition> defined = compensate != null ? List.of(compensate)
-                    : other != null ? List.of(other) : signals;
-            return new IntermediateThrowEvent(id, name, List.of(), List.of(), defined, List.of(), null, null);
+            List<EventDefinition> defs = compensate != null ? List.<EventDefinition>of(compensate)
+                    : message != null ? List.<EventDefinition>of(message)
+                    : other != null ? List.<EventDefinition>of(other) : signals;
+            messageExtras(element, id, line, defs, key, false, ext);
+            return new IntermediateThrowEvent(id, name, List.of(), List.of(), defs, List.of(), null,
+                    message == null ? null : info(ext, foreign));
         }
 
         /**
@@ -765,7 +866,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String id = id();
             String name = attr("name");
             int line = line();
+            String key = horus("correlationKey");
             List<EventDefinition> definitions = new ArrayList<>();
+            List<HorusExtension> ext = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
             while (nextChild()) {
                 String local = xml.getLocalName();
                 if (BPMN.equals(xml.getNamespaceURI()) && "eventDefinitionRef".equals(local)) {
@@ -783,11 +887,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions.add(signalDefinition(id, element));
                 } else if (start && BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
                     definitions.add(conditionalDefinition(id, element));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
+                    definitions.add(messageDefinition(id));
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
+                    extensions(element, id, true, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
                     skip();
-                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
-                        && !"extensionElements".equals(local)) {
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)) {
                     unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
@@ -797,9 +904,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (definitions.size() > 1) {
                 unsupported(element, id, BpmnStages.S3, "has several event definitions; multiple events are not supported");
             }
+            if (start && !definitions.isEmpty() && key != null) {
+                invalid.add(new DefinitionProblem("CORRELATION_KEY_UNEXPECTED", "A message start event has no instance"
+                        + " yet; the message's key becomes the business key", element, safe(id), line));
+                key = null;
+            }
+            messageExtras(element, id, line, definitions, key, false, ext);
+            ElementInfo info = definitions.isEmpty() ? null : info(ext, foreign);
             return start
-                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, true, null)
-                    : new EndEvent(id, name, List.of(), List.of(), definitions, List.of(), null, null);
+                    ? new StartEvent(id, name, List.of(), List.of(), definitions, List.of(), null, false, true, info)
+                    : new EndEvent(id, name, List.of(), List.of(), definitions, List.of(), null, info);
         }
 
         /**
@@ -978,6 +1092,77 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         /**
+         * The {@code messageEventDefinition} being read: its {@code messageRef} is resolved to the message's name once
+         * the whole document is read.
+         */
+        private MessageEventDefinition messageDefinition(String ownerId) throws XMLStreamException {
+            String definitionId = attr("id");
+            String ref = attr("messageRef");
+            messageLines.putIfAbsent(ownerId, line());
+            children("messageEventDefinition", ownerId, false);
+            return new MessageEventDefinition(definitionId, ref, null, null);
+        }
+
+        /**
+         * Checks the {@code horus:correlationKey} of a message element and adds it to the extensions. An event
+         * without a message definition may not carry message extensions.
+         */
+        private void messageExtras(String element, String id, int line, List<EventDefinition> definitions, String key,
+                boolean keyRequired, List<HorusExtension> ext) {
+            boolean message = !definitions.isEmpty() && definitions.get(0) instanceof MessageEventDefinition;
+            if (!message) {
+                if (key != null || ext.stream().anyMatch(e -> e instanceof InputMapping || e instanceof OutputMapping)) {
+                    invalid.add(new DefinitionProblem("MESSAGE_EXTENSION_MISPLACED", "horus:correlationKey, horus:input"
+                            + " and horus:output apply to message events and message tasks only", element, safe(id),
+                            line));
+                }
+                ext.clear();
+                return;
+            }
+            correlation(element, id, line, key, keyRequired, ext);
+        }
+
+        private void correlation(String element, String id, int line, String key, boolean required,
+                List<HorusExtension> ext) {
+            if (key == null) {
+                if (required) {
+                    invalid.add(new DefinitionProblem("CORRELATION_KEY_REQUIRED", "A step that waits for a message"
+                            + " needs horus:correlationKey, the variable whose value the message must carry", element,
+                            safe(id), line));
+                }
+            } else if (!VARIABLE.matcher(key).matches()) {
+                invalid.add(new DefinitionProblem("CORRELATION_KEY_INVALID", "horus:correlationKey is the name of a"
+                        + " variable: letters, digits and _", element, safe(id), line));
+            } else {
+                ext.add(new CorrelationKey(key));
+            }
+        }
+
+        /** A {@code receiveTask} (waits for a message) or {@code sendTask} (hands one to the host). */
+        private FlowElement messageTask(boolean receive) throws XMLStreamException {
+            String element = receive ? "receiveTask" : "sendTask";
+            String id = id();
+            int line = line();
+            String name = attr("name");
+            String ref = attr("messageRef");
+            String key = horus("correlationKey");
+            if (receive && "true".equals(attr("instantiate"))) {
+                unsupported("instantiate", id, BpmnStages.NOT_PLANNED, "is not supported; start a process with a message"
+                        + " start event");
+            }
+            messageLines.putIfAbsent(id, line);
+            Node children = children(element, id, true);
+            List<HorusExtension> ext = new ArrayList<>();
+            correlation(element, id, line, key, receive, ext);
+            ext.addAll(children.horus());
+            return receive
+                    ? new ReceiveTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, false, ref,
+                            null, info(ext, children.foreign()))
+                    : new SendTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, ref, null,
+                            info(ext, children.foreign()));
+        }
+
+        /**
          * An intermediate catch event with one {@code timerEventDefinition}: {@code timeDuration} or {@code timeDate}.
          * Every other event definition, and {@code timeCycle}, is named as unsupported.
          */
@@ -989,6 +1174,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             TimerEventDefinition timer = null;
             EventDefinition link = null;
             EventDefinition other = null;
+            MessageEventDefinition message = null;
+            String key = horus("correlationKey");
+            List<HorusExtension> ext = new ArrayList<>();
+            List<ForeignFragment> foreign = new ArrayList<>();
             int definitions = 0;
             while (nextChild()) {
                 String local = xml.getLocalName();
@@ -1005,6 +1194,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 } else if (BPMN.equals(xml.getNamespaceURI()) && "conditionalEventDefinition".equals(local)) {
                     definitions++;
                     other = conditionalDefinition(id, element);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "messageEventDefinition".equals(local)) {
+                    definitions++;
+                    message = messageDefinition(id);
+                } else if (BPMN.equals(xml.getNamespaceURI()) && "extensionElements".equals(local)) {
+                    extensions(element, id, false, ext, foreign);
                 } else if (BPMN.equals(xml.getNamespaceURI()) && local.endsWith("EventDefinition")) {
                     definitions++;
                     unsupported(element + " with " + local, id, BpmnStages.of(local));
@@ -1013,8 +1207,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions++;
                     unsupported(element + " with eventDefinitionRef", id, BpmnStages.S1);
                     skip();
-                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)
-                        && !"extensionElements".equals(local)) {
+                } else if (BPMN.equals(xml.getNamespaceURI()) && !IGNORED_CHILDREN.contains(local)) {
                     unsupported(element + " child " + local, id, BpmnStages.of(local));
                     skip();
                 } else {
@@ -1037,9 +1230,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     }
                 });
             }
-            return new IntermediateCatchEvent(id, name, List.of(), List.of(),
-                    timer != null ? List.of(timer) : link != null ? List.of(link) : other != null ? List.of(other)
-                            : List.of(), List.of(), null, false, null);
+            List<EventDefinition> defs = timer != null ? List.<EventDefinition>of(timer)
+                    : message != null ? List.<EventDefinition>of(message)
+                    : link != null ? List.<EventDefinition>of(link)
+                    : other != null ? List.<EventDefinition>of(other) : List.of();
+            messageExtras(element, id, line, defs, key, true, ext);
+            return new IntermediateCatchEvent(id, name, List.of(), List.of(), defs, List.of(), null, false,
+                    message == null ? null : info(ext, foreign));
         }
 
         private TimerEventDefinition timer(String eventId) throws XMLStreamException {
@@ -1806,7 +2003,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     skip();
                     continue;
                 }
-                if (HORUS.equals(ns) && "output".equals(xml.getLocalName()) && "callActivity".equals(element)) {
+                if (HORUS.equals(ns) && "output".equals(xml.getLocalName()) && OUTPUT_ELEMENTS.contains(element)) {
                     String outputName = attr("name");
                     String from = attr("from");
                     if (outputName == null || from == null || !outputName.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}$")

@@ -1,6 +1,7 @@
 package io.github.dhluong90.bpm.process.rest;
 
 import io.github.dhluong90.bpm.process.api.AsyncStepService;
+import io.github.dhluong90.bpm.process.api.MessageService;
 import io.github.dhluong90.bpm.process.api.StepCompletion;
 import io.github.dhluong90.bpm.process.spi.AdapterResult;
 
@@ -616,6 +617,10 @@ public class ProcessController {
             if (entry.waiters() != null) {
                 item.put("waiters", entry.waiters());
             }
+            if (entry.message() != null) {
+                ObjectNode message = item.putObject("message");
+                entry.message().forEach(message::put);
+            }
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {
@@ -767,6 +772,42 @@ public class ProcessController {
         body.put("jobId", completion.jobId());
         body.put("attemptId", completion.attemptId());
         body.put("outcome", completion.outcome().name());
+        return json(HttpStatus.OK, body, null, null);
+    }
+
+    /**
+     * Delivers a message to the instance that waits for it, or starts the process whose message start event has its
+     * name ({@code processes:message:correlate}, #491). Body: {@code messageName}, {@code correlationKey} (optional
+     * only for a message that starts a process) and {@code payload}. {@code Idempotency-Key} is required; a replay
+     * returns the first answer. {@code 422 MESSAGE_NOT_CORRELATED} when nothing waits and nothing starts, and
+     * {@code 409 MESSAGE_CORRELATION_AMBIGUOUS} when two instances match: in both nothing is stored or run.
+     */
+    @PostMapping(value = "/messages:correlate", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> correlateMessage(HttpServletRequest http,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        if (!(engine instanceof MessageService messages)) {
+            throw new InputInvalidException("This engine does not correlate messages");
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new PreconditionRequiredException("Send an Idempotency-Key so a retry cannot deliver twice");
+        }
+        JsonNode request = parse(boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES));
+        String name = text(request, "messageName");
+        if (name == null) {
+            throw new InputInvalidException("messageName is required");
+        }
+        JsonNode payload = request.get("payload");
+        if (payload != null && !payload.isNull() && !payload.isObject()) {
+            throw new InputInvalidException("payload must be an object");
+        }
+        MessageService.MessageDelivery delivery = messages.correlate(name, text(request, "correlationKey"),
+                Views.variables(payload), idempotencyKey);
+        tools.jackson.databind.node.ObjectNode body = EngineJson.NODES.objectNode();
+        body.put("outcome", delivery.outcome().name());
+        body.put("instanceId", delivery.instanceId());
+        if (delivery.nodeId() != null) {
+            body.put("nodeId", delivery.nodeId());
+        }
         return json(HttpStatus.OK, body, null, null);
     }
 

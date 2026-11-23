@@ -49,6 +49,8 @@ tags:
     description: List, read, claim, unclaim, reassign, delegate and complete user tasks
   - name: async-steps
     description: Report the result of a remote step whose adapter handed the call off
+  - name: messages
+    description: Deliver a message to the process instance that waits for it, or start the process it names
   - name: agent-replays
     description: Replay recorded agent answers against a candidate guardrail or output schema
   - name: migrations
@@ -1082,6 +1084,49 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /messages:correlate:
+    post:
+      tags: [messages]
+      operationId: correlateMessage
+      summary: Deliver a message to the instance that waits for it
+      description: |
+        The host's consumer, or a partner, calls this once for each message it receives; the engine never listens
+        (#491). The tenant comes from the caller and is never read from the body, so a message cannot reach an instance
+        of another tenant. A message goes to exactly one place. When `correlationKey` is given and exactly one token
+        waits for `messageName` and that key (a message catch event or a receive task), the token continues, the
+        message fields named by the step's `horus:output` become variables, and the answer is `DELIVERED`. When
+        nothing waits for the key and exactly one effective definition has a message start event of that name, a new
+        instance starts with `payload` as its variables and `correlationKey` as its business key (a second message with
+        the same key returns the existing instance), and the answer is `STARTED`. When two or more tokens wait for the
+        same name and key, or two definitions start on the name, the answer is `409 MESSAGE_CORRELATION_AMBIGUOUS` and
+        nothing runs. When nothing waits and nothing starts, the answer is `422 MESSAGE_NOT_CORRELATED` and nothing is
+        stored: a message is not buffered. `Idempotency-Key` is required; a replay with the same key and request returns
+        the first answer, `DELIVERED` or `STARTED`, and delivers nothing twice. Permission `processes:message:correlate`.
+      parameters:
+        - $ref: '#/components/parameters/RequiredIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageCorrelation' }
+            examples:
+              payment:
+                value: { messageName: payment-received, correlationKey: ORD-20481, payload: { reference: TT-77120, amount: '1250000' } }
+      responses:
+        '200':
+          description: Where the message went
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageDelivery' }
+              example: { outcome: DELIVERED, instanceId: 01JD3K7Q9X2M4N6P8R0S2T4V6W, nodeId: wait-for-payment }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /tasks:
     get:
@@ -2650,6 +2695,27 @@ components:
           type: boolean
           default: true
           description: For `FAILED`; `false` fails the job without a retry
+    MessageCorrelation:
+      type: object
+      required: [messageName]
+      properties:
+        messageName: { type: string, minLength: 1, maxLength: 100, pattern: '^[A-Za-z][A-Za-z0-9_.:-]*$' }
+        correlationKey:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Required for a message that a waiting step receives; optional for a message that starts a process
+        payload:
+          type: object
+          additionalProperties: true
+          description: Only the fields a step names with `horus:output` are kept; a start message keeps all of them as variables
+    MessageDelivery:
+      type: object
+      required: [outcome, instanceId]
+      properties:
+        outcome: { type: string, enum: [DELIVERED, STARTED] }
+        instanceId: { type: string }
+        nodeId: { type: string, description: The step that received the message; absent for STARTED }
     AsyncStepCompletion:
       type: object
       required: [jobId, attemptId, outcome]
@@ -3121,6 +3187,17 @@ components:
               handler: { type: string, description: 'Undo steps: the name of the undo handler' }
               cause: { type: string, description: 'The start of an undo: the error code that caused it' }
               waiters: { type: integer, minimum: 0, description: 'A `SIGNAL_THROWN` entry: how many waiting subscriptions of the tenant the broadcast woke (#492)' }
+              message:
+                type: object
+                description: >-
+                  Message steps only (`MESSAGE_WAITING`, `MESSAGE_RECEIVED`, `MESSAGE_SENT`, #491): the message name, the
+                  correlation key as the host's `InputMasker` made it (a keyed fingerprint or `***`, never the plain key)
+                  and the delivery result
+                required: [name, result]
+                properties:
+                  name: { type: string }
+                  correlationKey: { type: string, description: The masked key; absent when the step has none }
+                  result: { type: string, enum: [WAITING, DELIVERED, HANDED_OVER] }
         compensations:
           type: array
           description: >-
@@ -3621,7 +3698,7 @@ components:
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
             INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, MIGRATION_PLAN_INVALID, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND, ASSIGNEE_NOT_ALLOWED,
-            OUTPUT_INVALID, INTERNAL]
+            OUTPUT_INVALID, MESSAGE_NOT_CORRELATED, MESSAGE_CORRELATION_AMBIGUOUS, INTERNAL]
         detail: { type: string }
         correlationId: { type: string }
         problems:

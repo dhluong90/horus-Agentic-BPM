@@ -177,6 +177,14 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-273 | `PRE_273_*` in `SignalEventsPostgresIT` | Permission, idempotency key, tenant of the broadcast, signal start | M3 | `TR-IDEM-01` | Done (#492) |
 | PRE-274 | `PRE_274_*` in `SignalAndConditionalEventsTest` | Conditional catch on arrival, on change of variables, conditional start | M3 | `TR-STD-11` | Done (#492) |
 | PRE-275 | `PRE_275_*` in `SignalAndConditionalEventsImportTest` | Import, refusal and export of signal and conditional events | M3 | `TR-STD-05` | Done (#492) |
+| PRE-230 | `PRE_230_*` in `MessageCorrelationPostgresIT` | Testcontainers, two orders and one message | M3 | `TR-STD-04` | Done (#491) |
+| PRE-231 | `PRE_231_*` in `MessageCorrelationPostgresIT` | Testcontainers, two waiters with one key | M3 | `TR-STD-13` | Done (#491) |
+| PRE-232 | `PRE_232_*` in `MessageCorrelationPostgresIT` | Testcontainers, a message with no waiter; no rows left | M3 | `TR-STD-13` | Done (#491) |
+| PRE-233 | `PRE_233_*` in `MessageCorrelationPostgresIT` | Testcontainers, a caller of another tenant | M3 | `TR-TEN-01` | Done (#491) |
+| PRE-234 | `PRE_234_*` in `MessageCorrelationPostgresIT` | Testcontainers, replay, key reuse and a consumed message | M3 | `TR-STD-13` | Done (#491) |
+| PRE-235 | `PRE_235_*` in `MessageCorrelationPostgresIT` and `MessageElementsImportTest` | Testcontainers with a recording adapter; kernel run twice from one state | M3 | `TR-STD-12`, `TR-SEC-05` | Done (#491) |
+| PRE-236 | `PRE_236_*` in `MessageCorrelationPostgresIT` | Testcontainers, a message start definition | M3 | `TR-STD-04` | Done (#491) |
+| PRE-237 | `PRE_237_*` in `MessageElementsImportTest` | Import and export round trip of the worked example; two refused files | M3 | `TR-STD-04`, `TR-STD-10` | Done (#491) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

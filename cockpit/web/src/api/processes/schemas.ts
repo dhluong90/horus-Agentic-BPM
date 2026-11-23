@@ -284,6 +284,8 @@ export const activityEntry = z
     cause: z.string().optional(),
     /** A `SIGNAL_THROWN` entry: how many waiting subscriptions of the tenant the broadcast woke (#492). */
     waiters: z.number().int().min(0).optional(),
+    /** Message steps only (#491): the name, the key as the host masked it, and the delivery result. */
+    message: z.object({ name: z.string(), correlationKey: z.string().optional(), result: z.string() }).loose().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

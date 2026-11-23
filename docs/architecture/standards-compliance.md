@@ -303,11 +303,11 @@ Source: [`diagrams/message-correlation.mmd`](diagrams/message-correlation.mmd).
 
 | Topic | Design |
 |---|---|
-| API | `MessageService.correlate(CorrelateRequest)` with `name`, `correlationKey`, `messageId`, `variables`; REST `POST /messages:correlate` (`processes:message:correlate`). Result is sealed: `Correlated(instanceId)`, `Started(instanceId)`, `NotCorrelated` |
+| API | As built (#491): `MessageService.correlate(messageName, correlationKey, payload, idempotencyKey)`; REST `POST /messages:correlate` (`processes:message:correlate`). It answers `DELIVERED` or `STARTED`; no waiting instance and no start definition is `422 MESSAGE_NOT_CORRELATED` |
 | Transaction | Sync in-transaction: runs in the caller's transaction and does no network I/O. The host's consumer commits its offset or acknowledgement after the commit |
-| Idempotency | `messageId` is the idempotency key (operation `correlate`, ADR-0006): a redelivery returns the stored result and has no second effect (`TR-STD-13`) |
+| Idempotency | As built (#491): the `Idempotency-Key` header is the key (operation `message-correlate`, ADR-0006): a redelivery returns the stored result and has no second effect (`TR-STD-13`). A refused message stores nothing, not even the key |
 | Matching | One unique index probe on `(tenant_id, event_name, correlation_key)`. The correlation key is evaluated with FEEL or `horus-expr-v1` when the subscription is created, so correlation never evaluates expressions per waiting instance |
-| One receiver per key | The unique index allows one waiting instance subscription per message name and key. Two instances waiting for the same key is a modelling defect reported at the second subscription as incident `MESSAGE_KEY_AMBIGUOUS`, never a silent choice |
+| One receiver per key | As built (#491): `pre_message_subscription` (V47) holds one row per waiting token, found by `(tenant_id, message_name, correlation_key)`. Two waiting tokens for one name and key are not refused when they subscribe; the correlate call answers `409 MESSAGE_CORRELATION_AMBIGUOUS` and nothing runs, never a silent choice. The boundary event stage keeps the unique-index design of the table above |
 | Message start | A definition-level subscription of the effective version starts an instance; the business key can come from the message |
 | Early messages | BPMN does not define buffering. Default: `NotCorrelated` with nothing stored, so the host retries or parks it. Optional per-host buffer with a time to live is an S3 feature (`messages.buffer-ttl`, default off) |
 | Across services | Each pool runs in the service that deployed it. A message flow between pools in different services is a throw through `MessageAdapter` (outbox in the same transaction) and a correlate in the receiving host. The engine never consumes from a broker (section 7.5) |
@@ -366,7 +366,7 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Conditional events | Evaluated in the transaction that changes the instance's variables, for that instance's conditional subscriptions only; never by polling |
 | Terminate end event | Cancels every token of its scope under the instance lock |
 | Manual task, none task | Pass through, with a history row |
-| Receive task, send task | As message catch and message throw (S2) |
+| Receive task, send task | As message catch and message throw (#491) |
 | Script task | FEEL or `horus-expr-v1` only (section 7.1) |
 | Lanes and pools | Display; lanes have no execution semantics in BPMN and assignment stays on the task |
 | Ad-hoc subprocess (S3) | Activities available in the scope; started by the host through `startAdHocActivity` or all at once for `ordering="Parallel"` with `cancelRemainingInstances` and `completionCondition` |
@@ -393,6 +393,10 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | |
 | Signal start, catch, boundary, throw and end | Refused | Import | Execute | Start, intermediate catch, intermediate throw and end execute since 0.3.0 (#492); boundary with the boundary events |
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | Intermediate catch and a process-level start execute since 0.3.0 (#492); the start of an event subprocess and the boundary come with them |
+| Message start, intermediate catch and throw, end; receive and send tasks (#491) | Execute | | | |
+| Message boundary | Refused | Execute | | |
+| Signal start, catch, boundary, throw and end | Refused | Import | Execute | |
+| Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |
 | Event-based gateway | Refused | Import | Execute | Instantiating forms |
 | Full compensation (compensation activities, `activityRef`, compensation event subprocess) and transaction cancel | Refused | Import | Execute | |
 | Collaboration: pools, lanes, message flows, artifacts | Refused | Import and display | Message flows execute between pools through 5.4 | |

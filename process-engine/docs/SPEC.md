@@ -1009,7 +1009,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-STD-04`, `TR-STD-26`, #112
 - **Milestone:** M3
 - **Kind:** other
-- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), a `sendTask` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
+- **Given:** `loan.bpmn` contains a `boundaryEvent` `be-timeout` on line 42 (stage `S1`), an `inclusiveGateway` `ig-1` on line 57 (`S1`), an `eventBasedGateway` `notify` on line 63 (`S2`), an `adHocSubProcess` `adhoc-1` on line 70 (`S3`), a `conditionExpression` with `language="http://www.w3.org/1999/XPath"` on line 88 (`not planned`, a deviation in section 12 of the standards page) and `camunda:class` on a `serviceTask` on line 30.
 - **When:** It is imported.
 - **Then:**
   - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 5 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
@@ -1017,7 +1017,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
   - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `parallelMultiple="true"` (`S3`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
   - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
-  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` or `messageEventDefinition` throw is `S2`, an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
+  - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` throw is `S2` (a message throw is supported, `PRE-235`), an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
 - **Example:** `5 unsupported -> 422 with stages S1, S1, S2, S3, not planned; camunda:class -> warning`.
 - **Test ID:** `PRE_108_every_element_and_language_outside_the_stage_is_listed_with_id_line_and_stage`, `PRE_108_a_vendor_attribute_is_a_warning_with_its_namespace_and_line_and_is_not_refused`, `PRE_108_a_file_with_only_a_vendor_attribute_is_not_refused`, `PRE_108_a_throw_event_takes_its_stage_from_its_event_definition`, `PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name`, `PRE_108_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `PRE_108_ids_lose_control_characters_and_are_cut_at_200_characters`, `PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date`, `PRE_108_event_definitions_take_the_stage_of_their_kind`, `PRE_108_each_entry_carries_element_id_line_and_stage_and_the_list_says_when_it_was_cut`, `PRE_108_unsupported_bpmn_elements_are_listed_with_their_stage_and_nothing_is_stored`
 
@@ -2019,3 +2019,82 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The first reads with the signal name on both signal events. The second is `422 VALIDATION_FAILED` with `SIGNAL_REF_INVALID` and `CONDITION_INVALID`; the third with `SIGNAL_NAME_INVALID`; nothing is stored. The export reads back to the same canonical definition.
 - **Example:** `signalRef Signal_missing -> SIGNAL_REF_INVALID`.
 - **Test ID:** `PRE_275_a_signal_event_carries_the_name_of_the_signal_it_refers_to_wherever_the_signal_is_declared`, `PRE_275_a_signal_reference_to_no_signal_and_a_broken_condition_are_refused_by_name`, `PRE_275_a_signal_name_outside_the_allowed_characters_is_refused`, `PRE_275_the_export_of_signal_and_conditional_events_reads_back_to_the_same_definition`, `PRE_275_the_worked_example_reads_and_compiles` (`SignalAndConditionalEventsImportTest`), `PRE_275_signal_and_conditional_events_are_known_symbols_not_generic_nodes`, `PRE_275_the_timeline_names_the_signal_and_condition_entries` (cockpit `signalEvents.test.ts`)
+### PRE-230 A message continues exactly the instance whose key it carries
+- **Traces to:** `TR-STD-04`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `order-payment` with a receive task `wait-for-payment` for message `payment-received`, correlated by the variable `orderId`, and `<horus:output name="paymentRef" from="reference"/>`; instances for orders `ORD-20481` and `ORD-20482` are waiting there.
+- **When:** The host calls `POST /messages:correlate` with `messageName` `payment-received`, `correlationKey` `ORD-20481` and payload `reference: TT-77120, ignored: x`.
+- **Then:** The answer is `DELIVERED` with the instance of `ORD-20481` and node `wait-for-payment`. That instance completes with `paymentRef = TT-77120` and no variable `ignored`; its subscription row is gone. The instance of `ORD-20482` still waits with its subscription.
+- **Example:** ``payment-received` for `ORD-20481` -> only that order continues`
+- **Test ID:** `PRE_230_a_message_continues_exactly_the_instance_with_its_key` (`MessageCorrelationPostgresIT`)
+
+### PRE-231 A message that matches two waiting instances is a conflict and nothing runs
+- **Traces to:** `TR-STD-13`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Two instances of `order-payment` wait at `wait-for-payment` with the same `orderId` `ORD-30001`.
+- **When:** `payment-received` for `ORD-30001` arrives.
+- **Then:** The answer is `409 MESSAGE_CORRELATION_AMBIGUOUS`, which does not echo the key. Both instances stay `RUNNING`, no `MESSAGE_RECEIVED` is written, and no idempotency record is kept.
+- **Example:** `two orders with `ORD-30001` -> 409, both still waiting`
+- **Test ID:** `PRE_231_two_waiting_instances_with_the_same_key_are_a_conflict_and_nothing_runs` (`MessageCorrelationPostgresIT`)
+
+### PRE-232 A message with no waiting instance is refused with a problem code and nothing is stored
+- **Traces to:** `TR-STD-13`, `TR-TEN-01`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** One order `ORD-40001` waits at `wait-for-payment`, and no process starts on `payment-received`.
+- **When:** `payment-received` for `ORD-99999` arrives.
+- **Then:** The answer is `422 MESSAGE_NOT_CORRELATED`. No history row, instance or idempotency record is written, so a retry after the receiver starts is a fresh call. Messages are not buffered.
+- **Example:** `key `ORD-99999` -> 422 MESSAGE_NOT_CORRELATED`
+- **Test ID:** `PRE_232_a_message_with_no_waiting_instance_is_refused_and_nothing_is_stored` (`MessageCorrelationPostgresIT`)
+
+### PRE-233 A message never reaches an instance of another tenant
+- **Traces to:** `TR-TEN-01`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `bank-a` has an order `ORD-50001` waiting for `payment-received`.
+- **When:** A caller of `bank-b` sends `payment-received` for `ORD-50001`.
+- **Then:** The answer is `422 MESSAGE_NOT_CORRELATED`. The tenant is the resolver's, never read from the body; the `bank-a` instance is unchanged and no `MESSAGE_RECEIVED` is written.
+- **Example:** ``bank-b` sends `ORD-50001` -> not correlated`
+- **Test ID:** `PRE_233_a_message_never_reaches_an_instance_of_another_tenant` (`MessageCorrelationPostgresIT`)
+
+### PRE-234 Delivering the same message twice with one Idempotency-Key runs it once
+- **Traces to:** `TR-STD-13`, #491
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Order `ORD-60001` waits at `wait-for-payment`; `payment-received` was delivered with `Idempotency-Key` `pay-5`.
+- **When:** The same request is sent again with `pay-5`; then the same key with another payload; then the same message with the new key `pay-6`.
+- **Then:** The first repeat returns the first answer, and `MESSAGE_RECEIVED` was written once. The other payload is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`. The new key finds nothing waiting and is `422 MESSAGE_NOT_CORRELATED`.
+- **Example:** ``pay-5` twice -> one delivery`
+- **Test ID:** `PRE_234_delivering_the_same_message_twice_with_one_key_runs_it_once` (`MessageCorrelationPostgresIT`)
+
+### PRE-235 A send step hands its message to the host once, with only the named values and a masked key
+- **Traces to:** `TR-STD-12`, `TR-SEC-05`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `order-payment` has a send task `request-payment` for `payment-requested`, key variable `orderId`, and `<horus:input name="amount" value="${instance.amount}"/>`; the host registers a `MessageAdapter`.
+- **When:** An instance starts with `orderId` `ORD-70001` and `amount` `1250000`; the same state is run again after a rollback.
+- **Then:** The adapter receives one message of tenant `bank-a`, name `payment-requested`, key `ORD-70001`, payload `amount: 1250000` only, and a 26-character message id. A repeat from the same state carries the same id, so the host's outbox keeps one row. History keeps the key only as the `InputMasker` makes it, never `ORD-70001`.
+- **Example:** `send once, same id on retry`
+- **Test ID:** `PRE_235_a_send_step_hands_its_message_to_the_host_once_with_only_the_named_values_and_a_masked_key` (`MessageCorrelationPostgresIT`), `PRE_235_a_retried_send_step_hands_over_the_same_message_id` (`MessageElementsImportTest`)
+
+### PRE-236 A message starts the process with a message start event
+- **Traces to:** `TR-STD-04`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `order-intake` whose start event is a message start event for `order-submitted`.
+- **When:** `order-submitted` arrives for key `ORD-80001` with payload `customer: C-778`, twice with different Idempotency-Keys; then a caller of `bank-b` sends it.
+- **Then:** The first answer is `STARTED`: one instance with business key `ORD-80001` and the payload as variables. The second returns the same instance and creates no other. `bank-b` has no such process and is `422 MESSAGE_NOT_CORRELATED`.
+- **Example:** ``order-submitted` + `ORD-80001` -> one instance`
+- **Test ID:** `PRE_236_a_message_starts_the_process_with_a_message_start_event_and_the_same_key_finds_the_same_instance` (`MessageCorrelationPostgresIT`)
+
+### PRE-237 Message elements import and export to the same definition; a missing message or key is refused with its code
+- **Traces to:** `TR-STD-04`, `TR-STD-10`, #491
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The worked example `order-payment.bpmn` (send task, receive task, message end event); a receive task naming a message the file does not declare; a receive task with no `horus:correlationKey`.
+- **When:** Each file is imported; the example is exported and imported again.
+- **Then:** The example reads, compiles, and exports to a file that gives the same canonical definition. The undeclared message is `422 VALIDATION_FAILED` with `MESSAGE_REF_UNRESOLVED`; the missing key is `CORRELATION_KEY_REQUIRED`. `sendTask`, `receiveTask` and `message` are no longer in the refusal list.
+- **Example:** `receive task without a key -> CORRELATION_KEY_REQUIRED`
+- **Test ID:** `PRE_237_the_worked_example_reads_exports_to_the_same_definition_and_compiles`, `PRE_237_a_message_that_is_not_declared_or_a_waiting_step_without_a_key_is_refused_with_its_code` (`MessageElementsImportTest`)

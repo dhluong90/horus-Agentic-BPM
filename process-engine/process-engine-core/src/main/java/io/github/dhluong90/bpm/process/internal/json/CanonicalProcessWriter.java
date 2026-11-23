@@ -10,6 +10,11 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CallActivity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Event;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.MessageEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SendTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CorrelationKey;
 import io.github.dhluong90.bpm.process.internal.model.horus.CalledVersion;
 import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
@@ -341,6 +346,11 @@ public final class CanonicalProcessWriter {
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
                         && t.eventDefinitions().get(0) instanceof CompensateEventDefinition ->
                         step.put("type", "throwCompensation");
+                // #491: message steps. The message name, the key variable and the mappings follow below.
+                case IntermediateCatchEvent c when messageOf(c) != null -> step.put("type", "messageCatch");
+                case IntermediateThrowEvent t when messageOf(t) != null -> step.put("type", "messageThrow");
+                case ReceiveTask t -> step.put("type", "receiveTask");
+                case SendTask t -> step.put("type", "sendTask");
                 default -> step.put("type", node.getClass().getSimpleName());
             }
             // #67: only when declared, so the hash of a step without them is unchanged.
@@ -355,6 +365,16 @@ public final class CanonicalProcessWriter {
             boolean ends = node instanceof IntermediateThrowEvent t && (t.eventDefinitions().isEmpty()
                     || t.eventDefinitions().get(0) instanceof CompensateEventDefinition
                     || t.eventDefinitions().get(0) instanceof LinkEventDefinition);
+            String message = messageOf(node);
+            if (message != null) {
+                step.put("message", message);
+                node.extensions().first(CorrelationKey.class).ifPresent(k -> step.put("correlationKey", k.variable()));
+                List<OutputMapping> mapped = node.extensions().all(OutputMapping.class);
+                if (!mapped.isEmpty() && !(node instanceof CallActivity)) {
+                    ObjectNode received = step.putObject("outputs");
+                    mapped.forEach(o -> received.put(o.name(), o.from()));
+                }
+            }
             if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());
             }
@@ -371,6 +391,17 @@ public final class CanonicalProcessWriter {
             case ConditionalEventDefinition conditional -> step.put("condition", normal(conditional.condition().language(), conditional.condition().text().strip()));
             default -> { }
         }
+    }
+
+    /** @return the message name of a message event or task, or null for any other node */
+    private static String messageOf(FlowNode node) {
+        return switch (node) {
+            case ReceiveTask t -> t.messageRef();
+            case SendTask t -> t.messageRef();
+            case Event e -> e.eventDefinitions().stream().filter(MessageEventDefinition.class::isInstance)
+                    .map(d -> ((MessageEventDefinition) d).messageRef()).findFirst().orElse(null);
+            default -> null;
+        };
     }
 
     /**

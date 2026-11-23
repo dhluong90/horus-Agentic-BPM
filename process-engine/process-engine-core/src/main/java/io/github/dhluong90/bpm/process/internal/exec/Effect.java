@@ -145,12 +145,18 @@ public sealed interface Effect permits Effect.ScheduleJob, Effect.CancelJob, Eff
     /**
      * Hand a message to the host's MessageAdapter through the outbox.
      *
+     * @param messageId stable id derived like other kernel ids (instance id and sequence), so a retried step carries
+     *     the same id and the host writes the message once
      * @param messageName message
      * @param correlationKey key or null
      * @param payload payload
+     * @param tokenId the sending token
+     * @param nodeId the sending step
      */
-    record ThrowMessage(String messageName, String correlationKey, Map<String, Object> payload) implements Effect {
+    record ThrowMessage(String messageId, String messageName, String correlationKey, Map<String, Object> payload,
+            String tokenId, String nodeId) implements Effect {
         public ThrowMessage {
+            Objects.requireNonNull(messageId, "messageId must not be null");
             payload = payload == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
         }
     }

@@ -60,7 +60,7 @@
 
 
 
-    <bpmn:sendTask id="notify"/>
+    <bpmn:eventBasedGateway id="notify"/>
 
 
 

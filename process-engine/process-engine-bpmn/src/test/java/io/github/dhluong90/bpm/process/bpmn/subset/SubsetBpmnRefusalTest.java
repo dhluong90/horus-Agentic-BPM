@@ -76,7 +76,7 @@ class SubsetBpmnRefusalTest {
                     DefinitionProblem::line, DefinitionProblem::stage).containsExactly(
                     tuple("boundaryEvent with messageEventDefinition", "be-timeout", 42, "S2"),
                     tuple("inclusiveGateway", "ig-1", 57, "S1"),
-                    tuple("sendTask", "notify", 63, "S2"),
+                    tuple("eventBasedGateway", "notify", 63, "S2"),
                     tuple("adHocSubProcess", "adhoc-1", 70, "S3"),
                     tuple("conditionExpression", "f2", 88, "not planned"));
             assertThat(e.problems().get(4).code()).isEqualTo("BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED");
@@ -138,13 +138,12 @@ class SubsetBpmnRefusalTest {
     void PRE_108_a_throw_event_takes_its_stage_from_its_event_definition() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
                 + "<bpmn:intermediateThrowEvent id=\"cnc\"><bpmn:cancelEventDefinition/></bpmn:intermediateThrowEvent>"
-                + "<bpmn:intermediateThrowEvent id=\"msg\"><bpmn:messageEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"err\"><bpmn:errorEventDefinition/></bpmn:intermediateThrowEvent>"
                 + "<bpmn:intermediateThrowEvent id=\"none\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::elementId, DefinitionProblem::stage).containsExactly(
-                        tuple("cnc", "S2"), tuple("msg", "S2"), tuple("err", "not planned"), tuple("none", "S0")));
+                        tuple("cnc", "S2"), tuple("err", "not planned"), tuple("none", "S0")));
     }
 
     @Test
@@ -206,7 +205,7 @@ class SubsetBpmnRefusalTest {
 
     @Test
     void PRE_108_event_definitions_take_the_stage_of_their_kind() {
-        byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:messageEventDefinition/></bpmn:startEvent>"
+        byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:compensateEventDefinition/></bpmn:startEvent>"
                 + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition/></bpmn:startEvent>"
                 + "<bpmn:endEvent id=\"c\"><bpmn:conditionalEventDefinition/></bpmn:endEvent>"
                 + "<bpmn:endEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:endEvent>" + TAIL)

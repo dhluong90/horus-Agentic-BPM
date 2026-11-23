@@ -250,6 +250,7 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const intermediate = node.type.startsWith('intermediate') || boundary;
   const endSymbol = node.type.startsWith('endEvent:');
   const soft = boundary && node.interrupting === false;
+  const marked = intermediate || node.type.includes(':');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
   return (
@@ -259,7 +260,7 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
         <>
           <circle cx={centre.x} cy={centre.y} r={EVENT_RADIUS} />
           {intermediate ? <circle cx={centre.x} cy={centre.y} r={EVENT_RADIUS - 4} /> : null}
-          {intermediate || endSymbol ? <NodeIcon type={nodeIconKind(node.type)} x={centre.x - 8} y={centre.y - 8} /> : null}
+          {marked ? <NodeIcon type={nodeIconKind(node.type)} x={centre.x - 8} y={centre.y - 8} /> : null}
         </>
       ) : (
         <>

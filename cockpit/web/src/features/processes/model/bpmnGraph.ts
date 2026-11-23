@@ -44,6 +44,12 @@ export const KNOWN_NODE_TYPES = [
   'intermediateCatchEvent:signal',
   'intermediateThrowEvent:signal',
   'intermediateCatchEvent:conditional',
+  'startEvent:message',
+  'endEvent:message',
+  'intermediateCatchEvent:message',
+  'intermediateThrowEvent:message',
+  'receiveTask',
+  'sendTask',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 
