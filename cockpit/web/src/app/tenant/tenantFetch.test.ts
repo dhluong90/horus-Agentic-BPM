@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../../api/generated/bpm-meta.v1';
-import { switchableTenants, tenantFetch, type TenantRefusal } from './tenantFetch';
+import { switchableTenants, tenantFetch, tenantLabel, type TenantRefusal } from './tenantFetch';
 
 const meta = (switching: boolean): BpmMetaV1 => ({ schemaVersion: 1, modules: [{ module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1', features: [] }], tenancy: { switching }, limits: { maxPageSize: 200 } });
 const me = (current: string, allowed: string[]): BpmMeV1 => ({ schemaVersion: 1, user: { id: 'lan' }, tenant: { current, allowed }, permissions: ['rules:read'] });
@@ -13,6 +13,16 @@ describe('tenant switching (CKP-022)', () => {
     expect(switchableTenants(meta(false), me('bank-a', ['bank-a', 'bank-a-fin']))).toEqual([]);
     // One tenant only: nothing to switch to.
     expect(switchableTenants(meta(true), me('bank-a', ['bank-a']))).toEqual([]);
+  });
+
+  it('CKP_022_the_switcher_never_offers_a_tenant_the_token_does_not_list_and_shows_the_hosts_display_names', () => {
+    // A development tenant is the signed-in tenant of a dev host only; it is not in the token's list, so it is not offered.
+    expect(switchableTenants(meta(true), me('dev-local', ['bank-a', 'bank-a-fin']))).toEqual(['bank-a', 'bank-a-fin']);
+    expect(switchableTenants(meta(true), me('dev-local', ['dev-local']))).toEqual([]);
+    const named: BpmMeV1 = { ...me('bank-a', ['bank-a', 'bank-a-fin']), tenant: { current: 'bank-a', allowed: ['bank-a', 'bank-a-fin'], names: { 'bank-a': 'Bank A Retail' } } };
+    expect(tenantLabel(named, 'bank-a')).toBe('Bank A Retail');
+    // No name from the host: the id itself.
+    expect(tenantLabel(named, 'bank-a-fin')).toBe('bank-a-fin');
   });
 
   it('CKP_022_a_selected_tenant_is_sent_as_x_tenant_id_and_none_sends_no_header', async () => {

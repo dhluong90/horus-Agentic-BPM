@@ -613,6 +613,7 @@ public class ProcessController {
             putIfPresent(item, "errorCode", entry.errorCode());
             putIfPresent(item, "handler", entry.handler());
             putIfPresent(item, "cause", entry.cause());
+            putIfPresent(item, "resultVariable", entry.resultVariable());
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {

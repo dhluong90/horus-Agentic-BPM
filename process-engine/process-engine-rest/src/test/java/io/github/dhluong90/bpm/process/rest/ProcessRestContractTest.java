@@ -151,7 +151,8 @@ class ProcessRestContractTest {
                 .contains("\"kind\":\"COMPENSATION\"").contains("\"compensates\":\"verify-docs\"")
                 .contains("\"scope\":\"kyc-saga\"").contains("\"errorCode\":\"ACCOUNT_FROZEN\"")
                 .contains("\"state\":\"NOT_FULLY_UNDONE\"").contains("\"blockedStep\":\"verify-docs\"")
-                .contains("\"incidentId\":\"01JD0000000000000000000101\"").contains("\"kind\":\"STEP\"");
+                .contains("\"incidentId\":\"01JD0000000000000000000101\"").contains("\"kind\":\"STEP\"")
+                .contains("\"resultVariable\":\"fee2\"");
         assertProblem(get(BASE + "/instances/01JD0000000000000000000077/activities"), 404, "INSTANCE_NOT_FOUND");
         assertProblem(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "0"), 400,
                 "QUERY_INVALID");
@@ -519,16 +520,19 @@ class ProcessRestContractTest {
                     java.time.Duration.ofSeconds(190), 2, "svc-kyc", null, null);
             var entry = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry("01JD0000000000000000000099",
                     "NODE_ENTERED", "verify-docs", null, NOW);
+            var scripted = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
+                    "01JD0000000000000000000102", "NODE_COMPLETED", "double-fee", null, NOW.plusSeconds(1))
+                    .withResultVariable("fee2");
             var undoStep = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
                     "01JD0000000000000000000100", "COMPENSATION_STEP_FAILED", "verify-docs", "system:compensation",
                     NOW.plusSeconds(200), "COMPENSATION", "verify-docs", "01JD0000000000000000000098",
-                    "01JD0000000000000000000090", "kyc-saga", 3, "ACCOUNT_FROZEN", "undo-verify", null);
+                    "01JD0000000000000000000090", "kyc-saga", 3, "ACCOUNT_FROZEN", "undo-verify", null, null);
             var scope = new io.github.dhluong90.bpm.process.api.InstanceActivities.Compensation(
                     "01JD0000000000000000000090", "kyc-saga", io.github.dhluong90.bpm.process.api.InstanceActivities
                             .CompensationState.NOT_FULLY_UNDONE, NOW.plusSeconds(195), null, "PARTNER_REFUSED",
                     "notify-partner", 0, "verify-docs", "01JD0000000000000000000101", "COMPENSATION_FAILED");
             return new io.github.dhluong90.bpm.process.api.InstanceActivities(instanceId, NOW, null, List.of(verify),
-                    List.of(entry, undoStep), false, List.of(scope));
+                    List.of(entry, scripted, undoStep), false, List.of(scope));
         }
     }
 

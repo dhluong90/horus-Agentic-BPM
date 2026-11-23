@@ -10,7 +10,7 @@ import { registryQueryKey, useHostSession, type SessionDependencies } from '../a
 import { useHostInAddress, useHostProbe, useSignIn } from '../app/session/useStandaloneSession';
 import { HostPicker } from '../components/HostPicker';
 import { TenantRefusedNotice, TenantSwitcher } from '../components/TenantSwitcher';
-import { switchableTenants, type TenantRefusal } from '../app/tenant/tenantFetch';
+import { switchableTenants, tenantLabel, type TenantRefusal } from '../app/tenant/tenantFetch';
 import { capabilities, SessionHeader, type SessionSummary } from '../components/SessionHeader';
 import { ConfigErrorPanel, HostChooserPanel, HostErrorPanel, LoadingPanel, SignInFailedPanel, SigningInPanel, UnsupportedVersionPanel } from '../components/StatePanels';
 import { useI18n } from '../i18n/I18nProvider';
@@ -26,7 +26,7 @@ function summary(host: RegistryHost, me: BpmMeV1, label: string): SessionSummary
   return {
     hostLabel: label,
     environment: host.environment,
-    tenant: me.tenant.current,
+    tenant: tenantLabel(me, me.tenant.current),
     userName: me.user.displayName ?? me.user.id,
     userId: me.user.id,
     capabilities: capabilities(me.permissions),
@@ -185,10 +185,10 @@ function HostScreens({ registry, host, session, baseFetch, signOut, tenant, onSe
   const ready = state.status === 'ready';
   // Switching is offered only when the host has it on and the token allows more than one tenant; else hidden.
   const tenants = ready ? switchableTenants(state.meta, state.me) : [];
-  const switcher = ready && tenants.length > 0 ? <TenantSwitcher tenants={tenants} current={state.me.tenant.current} onSelect={onSelectTenant} /> : null;
+  const switcher = ready && tenants.length > 0 ? <TenantSwitcher tenants={tenants.map((id) => ({ id, label: tenantLabel(state.me, id) }))} current={state.me.tenant.current} label={tenantLabel(state.me, state.me.tenant.current)} onSelect={onSelectTenant} /> : null;
   const picker = (
     <>
-      <HostPicker hosts={enabledHosts(registry)} current={host} tenant={ready && switcher === null ? state.me.tenant.current : undefined} ready={ready} />
+      <HostPicker hosts={enabledHosts(registry)} current={host} tenant={ready && switcher === null ? tenantLabel(state.me, state.me.tenant.current) : undefined} ready={ready} />
       {switcher}
     </>
   );

@@ -344,7 +344,6 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
   useWantNames({ users: peopleOf(activities.entries.map((entry) => entry.actor)) });
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
   const stepName = (id: string) => names.get(id) ?? wordsOf(id);
-  const results = new Map(graph.nodes.flatMap((node) => (node.resultVariable !== undefined ? [[node.id, node.resultVariable] as const] : [])));
   const scopes = activities.compensations ?? [];
   if (activities.entries.length === 0) return <div className="card__pad"><EmptyState icon="processes" text={t('instance.timeline.empty')} /></div>;
   return (
@@ -377,8 +376,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                   </td>
                   <td>
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
-                    {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
-                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}
+                    {entry.type === 'NODE_COMPLETED' && entry.resultVariable !== undefined
+                      ? <span className="muted"> · {t('instance.timeline.sets', { variable: entry.resultVariable })}</span> : null}
                   </td>
                   <td>{actorText(entry.actor)}</td>
                 </tr>

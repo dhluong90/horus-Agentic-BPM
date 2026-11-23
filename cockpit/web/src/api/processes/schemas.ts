@@ -282,6 +282,8 @@ export const activityEntry = z
     errorCode: z.string().optional(),
     handler: z.string().optional(),
     cause: z.string().optional(),
+    /** The `NODE_COMPLETED` of a script step: the variable it set, as recorded when it ran (#518). */
+    resultVariable: z.string().optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;

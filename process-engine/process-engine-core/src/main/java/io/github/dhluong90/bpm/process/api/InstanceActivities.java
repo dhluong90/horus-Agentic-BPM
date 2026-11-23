@@ -135,10 +135,12 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      * @param errorCode for an undo step that failed, its error code; null otherwise
      * @param handler for an undo step, the undo handler's name; null otherwise
      * @param cause for the start of an undo, the error code that caused it; null otherwise
+     * @param resultVariable for the {@code NODE_COMPLETED} of a script step, the variable it set, as recorded when it
+     *     ran (#518); null otherwise
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
-            String handler, String cause) {
+            String handler, String cause, String resultVariable) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -157,13 +159,24 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          * @param occurredAt when
          */
         public Entry(String id, String type, String nodeId, String actor, Instant occurredAt) {
-            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null);
+            this(id, type, nodeId, actor, occurredAt, KIND_STEP, null, null, null, null, null, null, null, null, null);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause);
+                    scopeNodeId, attempt, errorCode, handler, cause, resultVariable);
+        }
+
+        /**
+         * The same entry carrying the result variable a script step recorded.
+         *
+         * @param variable the variable name
+         * @return the entry with {@code resultVariable} set
+         */
+        public Entry withResultVariable(String variable) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, variable);
         }
 
         /** @return true for the history types the undo of a saga writes */

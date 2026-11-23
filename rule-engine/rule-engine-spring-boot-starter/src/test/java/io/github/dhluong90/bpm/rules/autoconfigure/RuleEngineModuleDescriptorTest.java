@@ -37,7 +37,7 @@ class RuleEngineModuleDescriptorTest {
             assertThat(rules.engineVersion()).isEqualTo(System.getProperty("rule-engine.version"))
                     .doesNotContain("${").matches("^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$");
             assertThat(rules.features()).containsExactly("rules.history-readings", "rules.simulation-reports",
-                    "rules.templates");
+                    "rules.templates", "rules.condition-builder");
             assertThat(rules.permissions()).containsExactly(
                     "rules:evaluate", "rules:read", "rules:author", "rules:approve", "rules:simulate", "rules:log:read",
                     "rules:masked:search", "rules:pin");
@@ -124,6 +124,15 @@ class RuleEngineModuleDescriptorTest {
     void RLE_201_the_features_the_build_announces_match_the_pattern_the_cockpit_accepts() {
         assertThat(RuleEngineModule.FEATURES).containsExactly("rules.history-readings", "rules.simulation-reports",
                 "rules.templates").allMatch(feature -> feature.matches("^[a-z]+(\\.[a-z0-9-]+)+$"));
+    }
+
+    @Test
+    void the_condition_builder_feature_is_announced_by_default_and_a_host_can_turn_it_off() {
+        runner.run(context -> assertThat(context.getBean(ModuleDescriptor.class).features())
+                .contains("rules.condition-builder"));
+        runner.withPropertyValues("horus.bpm.rules.authoring.condition-builder=false")
+                .run(context -> assertThat(context.getBean(ModuleDescriptor.class).features())
+                        .doesNotContain("rules.condition-builder").contains("rules.templates"));
     }
 
     @Test

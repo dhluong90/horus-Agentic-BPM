@@ -330,8 +330,20 @@ public record RuleEngineProperties(
      *     to clients as the rules setting {@code authoring.cockpit-drafts} of {@code GET /api/bpm/meta}, and enforced by
      *     the engine: when false, replacing a draft ({@code PUT .../versions/{v}}) is refused with
      *     {@code 403 DRAFT_AUTHORING_DISABLED}. Import from a file is not affected
+     * @param conditionBuilder whether {@code GET /api/bpm/meta} announces the feature {@code rules.condition-builder},
+     *     which lets the cockpit offer the nested And, Or and Not condition builder; default true. Set false to hide
+     *     the lens. It changes what the cockpit offers only, not what the engine accepts
      */
-    public record Authoring(Boolean cockpitDrafts) {
+    public record Authoring(Boolean cockpitDrafts, Boolean conditionBuilder) {
+
+        /**
+         * Returns whether the nested condition builder is announced.
+         *
+         * @return false only when the host set it false; default true
+         */
+        public boolean conditionBuilderOrDefault() {
+            return !Boolean.FALSE.equals(conditionBuilder);
+        }
     }
 
     /**

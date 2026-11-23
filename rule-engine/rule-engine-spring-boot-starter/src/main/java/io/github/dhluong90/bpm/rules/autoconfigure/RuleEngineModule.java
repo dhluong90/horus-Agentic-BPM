@@ -32,6 +32,12 @@ final class RuleEngineModule {
     static final List<String> FEATURES = List.of("rules.history-readings", "rules.simulation-reports",
             "rules.templates");
 
+    /**
+     * The feature announced while {@code horus.bpm.rules.authoring.condition-builder} is on (default): the nested
+     * And, Or and Not condition builder of the cockpit (#501). A host that does not want the lens sets it false.
+     */
+    static final String CONDITION_BUILDER_FEATURE = "rules.condition-builder";
+
     /** The rules setting clients read to offer or hide draft editing (PD-075, PD-094). */
     static final String COCKPIT_DRAFTS = "authoring.cockpit-drafts";
 
@@ -129,6 +135,27 @@ final class RuleEngineModule {
     static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
             String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings,
             boolean requireContentHash, List<String> requireSimulationReport) {
+        return descriptor(rolePermissions, cockpitDrafts, retireApproval, retireLastVersion, acknowledgeWarnings,
+                requireContentHash, requireSimulationReport, true);
+    }
+
+    /**
+     * The descriptor for this host.
+     *
+     * @param rolePermissions {@code horus.bpm.rules.security.role-permissions}
+     * @param cockpitDrafts {@code horus.bpm.rules.authoring.cockpit-drafts}; null (unset) is published as false
+     * @param retireApproval the validated {@code horus.bpm.lifecycle.retire-approval}
+     * @param retireLastVersion the validated {@code horus.bpm.lifecycle.retire-last-version}
+     * @param acknowledgeWarnings the validated {@code lifecycle.acknowledge-warnings}
+     * @param requireContentHash the validated {@code approval.require-content-hash}
+     * @param requireSimulationReport the validated {@code lifecycle.require-simulation-report}
+     * @param conditionBuilder whether {@code rules.condition-builder} is announced
+     *     ({@code horus.bpm.rules.authoring.condition-builder})
+     * @throws IllegalArgumentException when the mapping grants a permission the engine does not check
+     */
+    static ModuleDescriptor descriptor(Map<String, List<String>> rolePermissions, Boolean cockpitDrafts,
+            String retireApproval, String retireLastVersion, List<String> acknowledgeWarnings,
+            boolean requireContentHash, List<String> requireSimulationReport, boolean conditionBuilder) {
         // Always published, so clients never guess: draft editing false unless the host turns it on (PD-094), and
         // the retirement mode in force (PD-080). The approver rule is always makers here, whatever the host sets
         // (#273): V2 rle_version_four_eyes refuses an approval by the author in the database.
@@ -141,11 +168,20 @@ final class RuleEngineModule {
         settings.put(REQUIRE_CONTENT_HASH, requireContentHash);
         settings.put(REQUIRE_SIMULATION_REPORT, String.join(",", requireSimulationReport));
         return ModuleDescriptor.builder("rules", engineVersion(), "v1")
-                .features(FEATURES)
+                .features(features(conditionBuilder))
                 .settings(settings)
                 .permissions(PERMISSIONS)
                 .rolePermissions(rolePermissions)
                 .build();
+    }
+
+    private static List<String> features(boolean conditionBuilder) {
+        if (!conditionBuilder) {
+            return FEATURES;
+        }
+        List<String> all = new java.util.ArrayList<>(FEATURES);
+        all.add(CONDITION_BUILDER_FEATURE);
+        return List.copyOf(all);
     }
 
     /**

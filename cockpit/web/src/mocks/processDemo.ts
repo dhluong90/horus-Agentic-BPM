@@ -34,6 +34,7 @@ export const LOAN_ORIGINATION_BPMN = `${HEAD}
     <bpmn:businessRuleTask id="credit-decision" name="Credit decision" horus:ruleSet="credit-limit"/>
     <bpmn:exclusiveGateway id="approved" name="Approved?" default="to-decline"/>
     <bpmn:serviceTask id="book-loan" name="Book loan" horus:handler="loans.book"/>
+    <bpmn:scriptTask id="compute-offer" name="Compute offer terms" horus:resultVariable="offerTerms"><bpmn:script>decision.limit * 12</bpmn:script></bpmn:scriptTask>
     <bpmn:serviceTask id="send-offer" name="Send offer" horus:handler="loans.sendOffer"/>
     <bpmn:endEvent id="booked" name="Loan booked"/>
     <bpmn:serviceTask id="send-decline" name="Send decline letter" horus:handler="loans.sendDecline"/>
@@ -44,7 +45,8 @@ export const LOAN_ORIGINATION_BPMN = `${HEAD}
     ${flow('f4', 'credit-decision', 'approved')}
     ${flow('to-book', 'approved', 'book-loan', 'Approved', 'decision.approved == true')}
     ${flow('to-decline', 'approved', 'send-decline', 'Declined')}
-    ${flow('f5', 'book-loan', 'send-offer')}
+    ${flow('f5', 'book-loan', 'compute-offer')}
+    ${flow('f5b', 'compute-offer', 'send-offer')}
     ${flow('f6', 'send-offer', 'booked')}
     ${flow('f7', 'send-decline', 'declined')}
     ${flow('f8', 'no-documents', 'remind')}
