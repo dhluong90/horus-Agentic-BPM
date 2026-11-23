@@ -547,6 +547,9 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | `serviceTask` | `serviceTask` | `horus:handler`, `horus:mode`, `horus:compensate` |
 | `serviceTask` with `horus:type="agentTask"` | `agentTask` | `horus:agent`, a `<horus:outputSchema>` element (JSON object) and a `<horus:guardrail>` element are required; `horus:timeout`, `horus:input`, `horus:resultVariable` optional (0.2.0, #52, section 4.1) |
 | `businessRuleTask` | `decision` | `horus:ruleSet` |
+| `task` | `task` | Passes through; history records it as done by the engine (`PRE-251`, #485) |
+| `manualTask` | `manualTask` | Passes through, as `task`. The engine opens no work item: the work happens outside it |
+| `scriptTask` | `scriptTask` | The `<bpmn:script>` is one expression in `urn:horus-bpm:expr:v1` (at most 1,000 characters, 500 evaluation steps); its value goes to the required `horus:resultVariable`. Any other `scriptFormat` is `BPMN_SCRIPT_FORMAT_UNSUPPORTED` (FEEL: stage S1). Runs in the step transaction with no host code (`PRE-250`, `PRE-253`, #485) |
 | `exclusiveGateway` with `conditionExpression` and `default` | `exclusiveGateway` | Conditions in our expression language, `language="urn:horus-bpm:expr:v1"` |
 | `parallelGateway` | `parallelGateway` | |
 | `intermediateCatchEvent` with `timerEventDefinition` (`timeDuration` or `timeDate`) | `timer` | |
@@ -555,7 +558,7 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | `intermediateThrowEvent` with `compensateEventDefinition` | `throwCompensation` | |
 | `sequenceFlow` | `next`, `branches[]` | |
 | `bpmndi:BPMNShape`, `bpmndi:BPMNEdge` | layout revision 1 | Bounds and waypoints |
-| Anything else (message, signal, error and boundary events, inclusive and event-based gateways, lanes with semantics, scripts, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
+| Anything else (message, signal, error and boundary events, inclusive and event-based gateways, lanes with semantics, multi-instance markers) | rejected in M3 | `422 BPMN_UNSUPPORTED_ELEMENT` listing `unsupportedElements` of element, `elementId`, line, stage and message (PD-141) and the stage that adds it ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 6.1, `TR-STD-04`). From S1 every element is imported and displayed, and activation of a definition with an element not yet executable is `422 BPMN_NOT_EXECUTABLE` |
 | A CMMN document | rejected | `422 CMMN_UNSUPPORTED` (ADR-0017, `TR-STD-26`) |
 
 The reader uses `XMLInputFactory` with `SUPPORT_DTD=false` and `IS_SUPPORTING_EXTERNAL_ENTITIES=false`; any `DOCTYPE` is `422 BPMN_UNSAFE_XML`. Limits: 1 MB, nesting depth 32, 5,000 elements. Export writes the same subset with the `horus` namespace and BPMNDI from the latest layout (or from an automatic layout computed by the cockpit and sent with the request). Until layout revisions are stored (PRE-026), `SubsetBpmnWriter` generates a left-to-right layout: columns by shortest distance from the start event, rows in document order, back edges routed below the diagram. The export reads the stored source again and checks the recorded `definition_hash` before writing, the same integrity check as execution. Round trip: export then import of a definition gives the same `definition_hash`; CI checks this for every example definition and validates exported XML against the BPMN 2.0 XSD.

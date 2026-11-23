@@ -9,7 +9,12 @@ import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.bpmn.xml.Limits;
 import io.github.dhluong90.bpm.process.bpmn.xml.XmlHardening;
+import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
+import io.github.dhluong90.bpm.process.internal.expr.Script;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.AssociationDirection;
@@ -359,6 +364,19 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case "endEvent" -> elements.add(event(false));
                     case "serviceTask" -> elements.add(serviceTask());
                     case "businessRuleTask" -> elements.add(businessRuleTask());
+                    case "task" -> {
+                        String id = id();
+                        String name = attr("name");
+                        elements.add(new Task(id, name, List.of(), List.of(), ActivityAttributes.defaults(),
+                                children(local, id, false).info()));
+                    }
+                    case "manualTask" -> {
+                        String id = id();
+                        String name = attr("name");
+                        elements.add(new ManualTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(),
+                                children(local, id, false).info()));
+                    }
+                    case "scriptTask" -> elements.add(scriptTask());
                     case "userTask" -> elements.add(userTask());
                     case "callActivity" -> elements.add(callActivity());
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
@@ -1198,6 +1216,58 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     called == null ? "" : called, info(ext, children.foreign()));
         }
 
+        /** The text and line of the {@code script} child being read by {@link #scriptTask()}. */
+        private String scriptText;
+        private int scriptLine;
+
+        /**
+         * A {@code scriptTask}: the script is an expression in {@code urn:horus-bpm:expr:v1} and its value goes to
+         * {@code horus:resultVariable}. Any other {@code scriptFormat} is refused with its stage; a script that does not
+         * parse is refused with the line of the {@code script} element.
+         */
+        private FlowElement scriptTask() throws XMLStreamException {
+            String id = id();
+            int line = line();
+            String name = attr("name");
+            String format = attr("scriptFormat");
+            String result = horus("resultVariable");
+            scriptText = null;
+            scriptLine = line;
+            Node children = children("scriptTask", id, false);
+            String script = scriptText;
+            int scriptAt = scriptLine;
+            String language = format != null ? format : documentLanguage;
+            if (language != null && !BpmnNamespaces.EXPR_V1.equals(language)) {
+                String stage = BpmnNamespaces.FEEL.equals(language) ? BpmnStages.S1 : BpmnStages.NOT_PLANNED;
+                addProblem(new DefinitionProblem("BPMN_SCRIPT_FORMAT_UNSUPPORTED", "scriptFormat " + safe(language)
+                        + " is not supported; use " + BpmnNamespaces.EXPR_V1, "scriptTask", safe(id), line, stage));
+            } else if (script == null || script.isBlank()) {
+                invalid.add(new DefinitionProblem("SCRIPT_MISSING", "A scriptTask needs a script element with an"
+                        + " expression", "scriptTask", safe(id), line));
+            } else {
+                try {
+                    Script.parse(script);
+                } catch (ConditionException e) {
+                    invalid.add(new DefinitionProblem("SCRIPT_INVALID", e.getMessage(), "scriptTask", safe(id),
+                            scriptAt));
+                }
+            }
+            if (result == null) {
+                invalid.add(new DefinitionProblem("RESULT_VARIABLE_REQUIRED", "A scriptTask needs"
+                        + " horus:resultVariable, the variable that receives the result", "scriptTask", safe(id), line));
+            } else if (!result.matches("^[A-Za-z_][A-Za-z0-9_]{0,63}$")) {
+                invalid.add(new DefinitionProblem("RESULT_VARIABLE_INVALID", "horus:resultVariable of a scriptTask is"
+                        + " a name of letters, digits and _", "scriptTask", safe(id), line));
+            }
+            List<HorusExtension> ext = new ArrayList<>();
+            if (result != null) {
+                ext.add(new ResultVariable(result));
+            }
+            ext.addAll(children.horus());
+            return new ScriptTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), BpmnNamespaces.EXPR_V1,
+                    script == null ? null : script.strip(), info(ext, children.foreign()));
+        }
+
         private FlowElement businessRuleTask() throws XMLStreamException {
             String id = id();
             int line = line();
@@ -1297,6 +1367,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 String local = xml.getLocalName();
                 if (BPMN.equals(ns) && IGNORED_CHILDREN.contains(local)) {
                     skip();
+                } else if (BPMN.equals(ns) && "script".equals(local) && "scriptTask".equals(element)) {
+                    scriptLine = line();
+                    scriptText = text();
                 } else if (BPMN.equals(ns) && "extensionElements".equals(local)) {
                     extensions(element, id, inputs, horus, foreign);
                 } else if (BPMN.equals(ns)) {

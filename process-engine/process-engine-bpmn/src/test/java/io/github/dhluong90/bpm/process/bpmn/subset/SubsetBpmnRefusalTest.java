@@ -192,7 +192,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_no_stage_label_names_a_sprint_a_release_or_a_date() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:scriptTask id=\"sc\"/><bpmn:choreographyTask id=\"ch\"/>"
+                + "<bpmn:intermediateThrowEvent id=\"x\"/><bpmn:subProcess id=\"sc\"/><bpmn:choreographyTask id=\"ch\"/>"
                 + "<bpmn:eventBasedGateway id=\"eg\"/>" + TAIL).getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e -> {

@@ -4,6 +4,9 @@ import io.github.dhluong90.bpm.process.bpmn.xml.BpmnNamespaces;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BusinessRuleTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ManualTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ScriptTask;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Task;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
@@ -117,6 +120,7 @@ public final class SubsetBpmnWriter {
         String tag;
         StringBuilder attributes = new StringBuilder(" id=" + attr(node.id()) + optional("name", node.name()));
         List<InputMapping> inputs = List.of();
+        String script = null;
         AgentTaskSpec agent = node.extensions().first(AgentTaskSpec.class).orElse(null);
         GuardrailSpec guardrail = node.extensions().first(GuardrailSpec.class).orElse(null);
         switch (node) {
@@ -134,6 +138,13 @@ public final class SubsetBpmnWriter {
                         h.handler())).append(optional("horus:mode", h.mode()))
                         .append(optional("horus:timeout", h.timeout() == null ? null : h.timeout().toString())));
                 inputs = t.extensions().all(InputMapping.class);
+            }
+            case Task t -> tag = "bpmn:task";
+            case ManualTask t -> tag = "bpmn:manualTask";
+            case ScriptTask t -> {
+                tag = "bpmn:scriptTask";
+                attributes.append(optional("scriptFormat", t.scriptFormat()));
+                script = t.script();
             }
             case BusinessRuleTask t -> {
                 tag = "bpmn:businessRuleTask";
@@ -175,7 +186,7 @@ public final class SubsetBpmnWriter {
         node.extensions().first(OnFailure.class).ifPresent(f -> attributes.append(optional("horus:onFailure",
                 f.action())));
         List<OutputMapping> outputs = node.extensions().all(OutputMapping.class);
-        if (inputs.isEmpty() && outputs.isEmpty() && agent == null && node.incoming().isEmpty()
+        if (inputs.isEmpty() && outputs.isEmpty() && agent == null && script == null && node.incoming().isEmpty()
                 && node.outgoing().isEmpty()) {
             xml.line(2, "<" + tag + attributes + "/>");
             return;
@@ -215,6 +226,9 @@ public final class SubsetBpmnWriter {
                 }
             }
             xml.line(3, "</bpmn:extensionElements>");
+        }
+        if (script != null) {
+            xml.line(3, "<bpmn:script>" + text(script) + "</bpmn:script>");
         }
         node.incoming().forEach(id -> xml.line(3, "<bpmn:incoming>" + text(id) + "</bpmn:incoming>"));
         node.outgoing().forEach(id -> xml.line(3, "<bpmn:outgoing>" + text(id) + "</bpmn:outgoing>"));

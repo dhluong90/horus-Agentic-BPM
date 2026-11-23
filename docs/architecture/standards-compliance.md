@@ -380,13 +380,14 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 | Element group | S0 (M3) | S1 (1.1) | S2 (1.2) | S3 (1.3) |
 |---|---|---|---|---|
 | Start, end (none), user, service, business rule tasks, exclusive and parallel gateways, timer catch, call activity, transaction as `saga`, compensate throw | Import, execute (ADR-0013 subset) | | | |
-| Embedded subprocess, terminate end, manual and none tasks, link events, standard loop | Refused | Execute | | |
+| Manual and none tasks | Execute (#485) | | | |
+| Embedded subprocess, terminate end, link events, standard loop | Refused | Execute | | |
 | Boundary timer, error, escalation (interrupting and non-interrupting); error and escalation end and throw events | Refused | Execute | | |
 | Event subprocess with timer, error, escalation start | Refused | Execute | | |
 | Inclusive gateway | Refused | Execute | | |
 | Multi-instance (parallel, sequential) on tasks and subprocesses | Refused | Execute | | |
 | Data objects, data associations, data stores (references) | Refused | Execute | | |
-| Script task (FEEL or `horus-expr-v1`) | Refused | Execute with `horus-expr-v1` | Execute with FEEL | |
+| Script task (FEEL or `horus-expr-v1`) | Execute with `horus-expr-v1` (#485) | Execute with FEEL | | |
 | Message start, catch, boundary, throw and end; receive and send tasks | Refused | Import | Execute | |
 | Signal start, catch, boundary, throw and end | Refused | Import | Execute | |
 | Conditional start (event subprocess), catch and boundary | Refused | Import | Execute | |

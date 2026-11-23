@@ -131,12 +131,13 @@ class KernelContractArchitectureTest {
     @Test
     void core_reaches_expression_internals_only_through_the_language() {
         noClasses().should().dependOnClassesThat(com.tngtech.archunit.base.DescribedPredicate.describe(
-                        "expression internals other than the horus-expr-v1 language",
+                        "expression internals other than the horus-expr-v1 language and the bounds a script task sets",
                         (com.tngtech.archunit.core.domain.JavaClass c) ->
                                 c.getPackageName().startsWith("io.github.dhluong90.bpm.expr.internal")
-                                        && !c.getName().equals("io.github.dhluong90.bpm.expr.internal.HorusExprV1")))
+                                        && !java.util.Set.of("HorusExprV1", "Evaluator", "EvaluationLimits",
+                                                "RegexLimits").contains(c.getSimpleName())))
                 .because("gateway conditions compile through the ExpressionLanguage SPI, never parser classes "
-                        + "(ADR-0027)")
+                        + "(ADR-0027); only Script builds the language with its own step budget")
                 .check(CORE);
     }
 

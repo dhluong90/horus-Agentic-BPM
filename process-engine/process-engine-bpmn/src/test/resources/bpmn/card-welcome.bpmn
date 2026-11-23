@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Card welcome: a script works out the yearly fee from the monthly fee, a clerk posts the card (a manual task, done
+     outside the engine) and a plain task marks the end of the hand-over. Not loaded at start-up; import it with the
+     steps in the Process Engine import guide. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_card-welcome"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="card-welcome" name="Card welcome" isExecutable="true">
+    <bpmn:startEvent id="start" name="Card approved"/>
+    <bpmn:scriptTask id="yearly-fee" name="Work out the yearly fee" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="yearlyFee">
+      <bpmn:script>monthlyFee * 12</bpmn:script>
+    </bpmn:scriptTask>
+    <bpmn:manualTask id="post-card" name="Post the card to the customer"/>
+    <bpmn:task id="handed-over" name="Card handed over"/>
+    <bpmn:endEvent id="end" name="Welcome complete"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="yearly-fee"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="yearly-fee" targetRef="post-card"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="post-card" targetRef="handed-over"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="handed-over" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

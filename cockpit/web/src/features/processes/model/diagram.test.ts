@@ -78,6 +78,25 @@ describe('CKP-069 a definition without stored layout is laid out automatically',
   });
 });
 
+describe('PRE-250 task, manual task and script task are viewable steps', () => {
+  it('PRE_250_the_three_tasks_are_known_nodes_and_a_script_task_names_its_result_variable', () => {
+    const xml = `<?xml version="1.0"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d">
+  <bpmn:process id="card-fee-review" isExecutable="true">
+    <bpmn:task id="note" name="Note"/>
+    <bpmn:manualTask id="post-letter" name="Post letter"/>
+    <bpmn:scriptTask id="double-fee" name="Double fee" horus:resultVariable="fee2"><bpmn:script>amount * 2</bpmn:script></bpmn:scriptTask>
+  </bpmn:process>
+</bpmn:definitions>`;
+    const nodes = readBpmnGraph(xml).nodes;
+
+    expect(nodes.map((node) => node.type)).toEqual(['task', 'manualTask', 'scriptTask']);
+    expect(nodes.every((node) => isKnownNodeType(node.type))).toBe(true);
+    expect(nodes[2]?.resultVariable).toBe('fee2');
+    expect(nodes[0]?.resultVariable).toBeUndefined();
+  });
+});
+
 describe('CKP-070 diagram nodes are keyed by BPMN element type; unknown types render as generic nodes', () => {
   it('CKP_070_steps_are_keyed_by_bpmn_type_with_the_horus_subtype', () => {
     const types = Object.fromEntries(readBpmnGraph(LOAN_ORIGINATION_BPMN).nodes.map((node) => [node.id, node.type]));
