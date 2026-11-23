@@ -38,6 +38,9 @@ public final class EngineDefaults {
     /** Largest value {@code query.max-roles} may be raised to. */
     public static final int MAX_ROLES_LIMIT = 1_000;
 
+    /** Default {@code query.due-soon-window}: how long before its due time a task item reads {@code DUE_SOON} (PD-111). */
+    public static final Duration DUE_SOON_WINDOW = Duration.ofHours(1);
+
     /** Page size of a list when the request names none (the maximum when that is lower). */
     public static final int DEFAULT_PAGE_SIZE = 50;
 

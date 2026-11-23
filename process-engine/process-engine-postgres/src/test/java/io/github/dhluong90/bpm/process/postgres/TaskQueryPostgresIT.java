@@ -158,6 +158,12 @@ class TaskQueryPostgresIT {
         assertThat(breached.items()).extracting(TaskSummary::id).containsExactly(
                 "KCO" + "%023d".formatted(3), "KCO" + "%023d".formatted(2), "KCO" + "%023d".formatted(1));
         assertThat(breached.items()).allSatisfy(t -> assertThat(t.dueAt()).isBefore(NOW));
+        // And each reports BREACHED with the clock time since its due time in whole minutes (PD-111)
+        assertThat(breached.items()).allSatisfy(t -> {
+            assertThat(t.slaState()).isEqualTo("BREACHED");
+            assertThat(t.overdueBy()).isEqualTo(java.time.Duration.between(t.dueAt(), NOW)
+                    .truncatedTo(java.time.temporal.ChronoUnit.MINUTES));
+        });
 
         // When he asks for 500 at once, then the limit is refused naming the maximum
         assertThatThrownBy(() -> list(null, 500, null, false))

@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.api;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -20,10 +21,13 @@ import java.util.Objects;
  * @param claimedBy the claimant while {@code CLAIMED}, or null
  * @param createdAt when the task was created
  * @param dueAt when the task is due, or null for a task without an SLA
+ * @param slaState {@code NONE} without a due time, {@code ON_TIME}, {@code DUE_SOON} within the configured window
+ *     before the due time, or {@code BREACHED} once it has passed (PD-111)
+ * @param overdueBy clock time since {@code dueAt} in whole minutes while {@code BREACHED}, else null
  */
 public record TaskSummary(String id, String instanceId, String definitionKey, int definitionVersion,
         String businessKey, String nodeId, String name, String assignee, String status, long lockVersion,
-        String claimedBy, Instant createdAt, Instant dueAt) {
+        String claimedBy, Instant createdAt, Instant dueAt, String slaState, Duration overdueBy) {
 
     public TaskSummary {
         Objects.requireNonNull(id, "id must not be null");
