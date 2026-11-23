@@ -1058,7 +1058,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-200 A report is immutable, bound to the version's content, and never holds a masked value
 - **Traces to:** `TR-SEC-04`, `TR-SEC-02`, `TR-TEN-01`, `TR-OBS-04`, PD-115
 - **Milestone:** M3
-- **Kind:** semantics
+- **Kind:** control
 - **Given:** A report on `card-fee` v2 as in `RLE-199`; `id-check-fee` with the input `nationalId` (`mask: true`), v1 in force with one decision whose `nationalId` was `079201001234` and one with a null one, and draft v2 that lowers the fee; `bank-b` has its own `card-fee` v1.
 - **When:** The draft is replaced with a fee of 20,000 VND and the report is read; two reports are listed; SQL runs `UPDATE`, `DELETE` and `TRUNCATE` on the report table; `lan` runs a report on `id-check-fee` v2 for November; `bank-b` asks for `bank-a`'s report by id under its own `card-fee`, under `bank-a`'s version number, and lists it; `bank-c`, with no `card-fee`, lists it.
 - **Then:**
@@ -1073,7 +1073,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-201 A publication request carries a report, and a host can require one
 - **Traces to:** `TR-SEC-04`, `TR-OBS-04`, `TR-EXT-04`, PD-115, #109
 - **Milestone:** M3
-- **Kind:** semantics
+- **Kind:** control
 - **Given:** Reports on `card-fee` v2 as in `RLE-199`. Case A: the default settings. Case B: the host sets `horus.bpm.rules.lifecycle.require-simulation-report: [card-fee]`; `loan-fee` is not listed. Case C: the draft is replaced after the report was run. Case D: draft v3 of `card-fee` and a report of v2.
 - **When:** `lan` sends `POST .../versions/2:request-publish` with `{"simulationReportId": "<report>"}`; `lan` does so with the replaced draft; with v2's report on v3, and with an id nobody issued; in case B without a report on `card-fee` v2 and on `loan-fee` v2; with a body member that is not text. The settings are given `Card Fee` and `card-fee` twice. `GET /api/bpm/meta`.
 - **Then:**
