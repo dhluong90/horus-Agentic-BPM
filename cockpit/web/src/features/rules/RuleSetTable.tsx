@@ -1,4 +1,5 @@
 import type { RuleSetSummary } from '../../api/rules/schemas';
+import { nameOf } from '../../app/names';
 import { formatRoute } from '../../app/route';
 import { AreaError, EmptyState, LoadingRows, type NextAction } from '../../components/PageParts';
 import { useI18n } from '../../i18n/I18nProvider';
@@ -42,7 +43,7 @@ export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, 
         {rows.map((item) => (
           <tr key={item.ruleSet}>
             <th scope="row">
-              <a className="qtable__link" href={formatRoute({ name: 'rule-set', ruleSet: item.ruleSet, version: undefined, lens: undefined })}>{item.ruleSet}</a>
+              <a className="qtable__link" href={formatRoute({ name: 'rule-set', ruleSet: item.ruleSet, version: undefined, lens: undefined })} title={item.ruleSet}>{nameOf('rule set', item.ruleSet, item)}</a>
             </th>
             <td><StatusBadge status={item.latestStatus} /></td>
             <td className="tnum">{version(item.latestVersion)}</td>

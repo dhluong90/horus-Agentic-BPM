@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { nameOf } from '../../app/names';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { VersionSummary } from '../../api/rules/schemas';
 import { usePersonName } from '../../app/people';
@@ -148,7 +149,7 @@ function FocusCard({ focus }: { focus: Focus }) {
   return (
     <article className="focus-card" aria-labelledby="focus-title">
       <p className="focus-card__eyebrow">{t('home.focus.continue')}</p>
-      <h2 id="focus-title" className="focus-card__title">{t('rules.nameDraft', { name: version.ruleSet, version: String(version.version) })}</h2>
+      <h2 id="focus-title" className="focus-card__title">{t('rules.nameDraft', { name: nameOf('rule set', version.ruleSet, version), version: String(version.version) })}</h2>
       <p className="focus-card__meta tnum">{t('home.savedAt', { date: formatDateTime(version.createdAt, locale) ?? '' })}</p>
       <div className="focus-card__actions">
         <a className="btn btn--contrast" href={formatRoute({ name: 'rule-set', ruleSet: version.ruleSet, version: version.version, lens: 'table' })}>{t('home.focus.continueEditing')}</a>

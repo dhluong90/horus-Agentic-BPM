@@ -239,7 +239,15 @@
 .instance .page-head { margin-bottom: 12px; }
 .instance-grid { display: grid; grid-template-columns: minmax(0, 1fr) var(--inspector-w); gap: var(--gap); align-items: start; margin-top: 8px; }
 @media (max-width: 1180px) { .instance-grid { grid-template-columns: minmax(0, 1fr); } }
+.instance-grid--wide { grid-template-columns: minmax(0, 1fr); }
+.instance-grid--wide .inspector, .inspector[hidden] { display: none; }
 .instance-grid__canvas { min-width: 0; }
+.instance-panel-toggle { margin-right: auto; }
+.case-tiles { display: flex; align-items: stretch; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.case-tile { display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-m, 10px); background: var(--surface-2, var(--surface)); }
+.case-tile__term { margin: 0; color: var(--muted); font: var(--type-caption); }
+.case-tile__value { margin: 0; color: var(--ink); font: var(--type-label); font-weight: 600; }
+.case-tiles .inspector__blocked, .case-tiles > .btn { align-self: center; margin-left: auto; }
 .inspector {
   display: flex; flex-direction: column; gap: 12px; padding: var(--card-pad);
   border: 1px solid var(--line); border-radius: var(--radius-l); background: var(--surface);

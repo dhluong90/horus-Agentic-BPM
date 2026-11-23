@@ -642,3 +642,7 @@ textarea.field__input { min-height: 64px; resize: vertical; line-height: 1.45; }
 .reading-line { display: block; max-width: 96ch; }
 .picker__not { white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 4px; }
 .picker__option--not { border-top: 1px solid var(--line); }
+
+/* The rule set's key under its name: muted, copied from the chip (#510). */
+.key-chip { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font: var(--type-label); }
+.key-chip__value { font-family: var(--font-mono, monospace); color: var(--ink-2); background: var(--surface-3); border-radius: var(--radius-s); padding: 1px 6px; }

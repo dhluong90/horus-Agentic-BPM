@@ -214,6 +214,9 @@ export function overlaps(a: Pick<PlacedNode, 'x' | 'y' | 'width' | 'height'>, b:
 /** The scale "100 %" draws at, and the smallest Fit uses for a definition: its smallest text is then the 12 px caption stop. */
 export const MIN_SCALE = 1;
 
+/** The scale a case's Fit never goes below: the smallest text, the 12 px caption, is then 13 px (#509). */
+export const READABLE_SCALE = 13 / 12;
+
 /** The smallest scale of the "Whole case" overview; below it the drawing scrolls rather than become unreadable. */
 export const WHOLE_FIT_MIN_SCALE = 0.4;
 

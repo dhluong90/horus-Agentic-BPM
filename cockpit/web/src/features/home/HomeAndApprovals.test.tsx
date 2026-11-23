@@ -35,7 +35,7 @@ describe('Home (PD-092: content by role)', () => {
     open('');
 
     const pending = await card(/Your drafts and requests/);
-    expect(await within(pending).findByText('card-fee · Version 2')).toBeInTheDocument();
+    expect(await within(pending).findByText('Card fee · Version 2')).toBeInTheDocument();
     expect(within(pending).getByText(/waits for an approver/)).toBeInTheDocument();
     expect(within(pending).queryByRole('link', { name: /^Review/ })).not.toBeInTheDocument();
   });
@@ -44,12 +44,12 @@ describe('Home (PD-092: content by role)', () => {
     setScenario('ready-approver');
     open('');
 
-    const focus = await card(/card-fee · Version 2/);
+    const focus = await card(/Card fee · Version 2/);
     expect(within(focus).getByText('Waiting for your review')).toBeInTheDocument();
     expect(within(focus).getByRole('link', { name: 'Review' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
     const pending = await card(/Pending approvals/);
     expect(within(pending).getByText('Nothing else is waiting for your review.')).toBeInTheDocument();
-    expect(within(pending).queryByText('card-fee · Version 2')).not.toBeInTheDocument();
+    expect(within(pending).queryByText('Card fee · Version 2')).not.toBeInTheDocument();
   });
 
   it('TR_UI_02_the_focal_request_is_the_oldest_and_the_others_are_rows_that_open_on_click', async () => {
@@ -57,9 +57,9 @@ describe('Home (PD-092: content by role)', () => {
     mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z'), ruleItem('fx-margin', '2026-11-19T01:40:00Z')]))));
     open('');
 
-    expect(await card(/card-fee · Version 2/)).toHaveTextContent('Waiting for your review');
+    expect(await card(/Card fee · Version 2/)).toHaveTextContent('Waiting for your review');
     const pending = await card(/Pending approvals/);
-    const row = within(pending).getByRole('link', { name: 'fx-margin · Version 2' });
+    const row = within(pending).getByRole('link', { name: 'Fx margin · Version 2' });
     expect(row).toHaveAttribute('href', '#/rules/fx-margin/2/changes');
     expect(within(pending).queryByRole('link', { name: /^Review/ })).not.toBeInTheDocument();
   });
@@ -69,7 +69,7 @@ describe('Home (PD-092: content by role)', () => {
     mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z', { requestedBy: 'lan', requestedByName: 'Nguyễn Thị Lan' })]))));
     open('');
 
-    const focus = await card(/card-fee · Version 2/);
+    const focus = await card(/Card fee · Version 2/);
     expect(within(focus).getByText(/by Nguyễn Thị Lan/)).toBeInTheDocument();
     expect(within(focus).queryByText(/by lan$/)).not.toBeInTheDocument();
   });
@@ -78,9 +78,9 @@ describe('Home (PD-092: content by role)', () => {
     open('');
 
     const recent = await card(/Recent rule sets/);
-    await within(recent).findByRole('link', { name: 'card-fee' });
+    await within(recent).findByRole('link', { name: 'Card fee' });
     const links = within(recent).getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('#/rules/'));
-    expect(links.map((link) => link.textContent)).toEqual(['card-fee', 'kyc-risk']);
+    expect(links.map((link) => link.textContent)).toEqual(['Card fee', 'Kyc risk']);
     expect(within(recent).getAllByText('Version 2').length).toBeGreaterThan(0);
   });
 
@@ -112,7 +112,7 @@ describe('Home (PD-092: content by role)', () => {
     expect(alert).toHaveTextContent('INTERNAL_ERROR');
     failing = false;
     await userEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
-    expect(await within(recent).findByRole('link', { name: 'card-fee' })).toBeInTheDocument();
+    expect(await within(recent).findByRole('link', { name: 'Card fee' })).toBeInTheDocument();
   });
 
   it('TR_UI_08_an_engine_without_the_list_endpoint_says_so_instead_of_a_failure', async () => {
@@ -147,7 +147,7 @@ describe('Approvals', () => {
     open('#/approvals');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Approvals' })).toBeInTheDocument();
-    const preview = await card(/card-fee · Version 2/);
+    const preview = await card(/Card fee · Version 2/);
     const approve = within(preview).getByRole('button', { name: /Approve/ });
     expect(approve).toBeDisabled();
     expect(approve).toHaveAccessibleDescription('You made this change, so someone else approves it.');
@@ -165,10 +165,10 @@ describe('Approvals', () => {
     ]))));
     open('#/approvals');
 
-    const first = await card(/card-fee · Version 2/);
+    const first = await card(/Card fee · Version 2/);
     expect(within(first).getByRole('button', { name: /Approve/ })).toHaveAccessibleDescription('No author is recorded, so no one can approve it.');
-    await userEvent.click(screen.getByRole('button', { name: /fx-margin · Version 2/ }));
-    const second = await card(/fx-margin · Version 2/);
+    await userEvent.click(screen.getByRole('button', { name: /Fx margin · Version 2/ }));
+    const second = await card(/Fx margin · Version 2/);
     expect(within(second).getByRole('button', { name: /Approve/ })).toHaveAccessibleDescription('You cannot approve this change.');
     expect(screen.getByRole('main')).not.toHaveTextContent(/SOMETHING_NEW|AUTHOR_UNKNOWN/);
   });
@@ -178,7 +178,7 @@ describe('Approvals', () => {
     open('#/approvals');
 
     expect(await screen.findByRole('link', { name: 'Review next' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
-    const preview = await card(/card-fee · Version 2/);
+    const preview = await card(/Card fee · Version 2/);
     expect(within(preview).getByRole('link', { name: /Review and approve/ })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
     expect(within(preview).queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument();
   });
@@ -199,7 +199,7 @@ describe('Approvals', () => {
     open('#/approvals');
 
     await userEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
-    const dialog = screen.getByRole('dialog', { name: 'Withdraw card-fee version 2?' });
+    const dialog = screen.getByRole('dialog', { name: 'Withdraw Card fee version 2?' });
     await userEvent.type(within(dialog).getByLabelText('Reason (optional)'), 'Wrong fee for GOLD');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
 
@@ -220,20 +220,20 @@ describe('Rules', () => {
   it('TR_UI_08_approvers_have_no_import', async () => {
     setScenario('ready-approver');
     open('#/rules');
-    await screen.findByRole('link', { name: 'card-fee' });
+    await screen.findByRole('link', { name: 'Card fee' });
     expect(screen.queryByRole('button', { name: 'Import rule set' })).not.toBeInTheDocument();
   });
 
   it('the_status_filter_and_the_search_narrow_the_list', async () => {
     open('#/rules');
-    await screen.findByRole('link', { name: 'kyc-risk' });
+    await screen.findByRole('link', { name: 'Kyc risk' });
 
     await userEvent.click(screen.getByRole('button', { name: /^Waiting/ }));
-    expect(screen.queryByRole('link', { name: 'kyc-risk' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'card-fee' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Kyc risk' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Card fee' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /^All/ }));
     await userEvent.type(screen.getByRole('searchbox', { name: 'Find a rule set' }), 'kyc');
-    expect(screen.queryByRole('link', { name: 'card-fee' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Card fee' })).not.toBeInTheDocument();
   });
 });
 

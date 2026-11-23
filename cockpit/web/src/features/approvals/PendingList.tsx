@@ -1,4 +1,5 @@
 import { formatRoute } from '../../app/route';
+import { nameOf } from '../../app/names';
 import { useI18n } from '../../i18n/I18nProvider';
 import type { OwnWork } from '../overview/useRuleOverview';
 import { StatusPill } from '../rules/components/StatusPill';
@@ -27,7 +28,7 @@ function OwnRow({ item }: { item: OwnWork }) {
   return (
     <li className="row row--link">
       <div className="row__text">
-        <a className="row__main" href={href}>{t('rules.nameVersion', { name: version.ruleSet, version: String(version.version) })}</a>
+        <a className="row__main" href={href}>{t('rules.nameVersion', { name: nameOf('rule set', version.ruleSet, version), version: String(version.version) })}</a>
         <span className="row__meta tnum">{item.kind === 'request' ? t('home.sentWaiting', { date }) : t('home.savedAt', { date })}</span>
       </div>
       <StatusPill status={version.status} />

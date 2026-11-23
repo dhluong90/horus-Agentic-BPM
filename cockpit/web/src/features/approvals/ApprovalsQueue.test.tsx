@@ -27,7 +27,7 @@ describe('Approvals queue across both engines (#31)', () => {
     setScenario('processes-approver');
     open('#/approvals');
 
-    expect(await queueTitles()).toEqual(['card-fee · Version 2', 'Customer onboarding (KYC) · Version 3']);
+    expect(await queueTitles()).toEqual(['Card fee · Version 2', 'Customer onboarding (KYC) · Version 3']);
     const menu = screen.getByRole('navigation', { name: 'Cockpit menu' });
     expect(within(menu).getByRole('link', { name: /Approvals/ })).toHaveTextContent('2');
     await userEvent.click(screen.getByRole('button', { name: /Customer onboarding \(KYC\) · Version 3/ }));
@@ -42,7 +42,7 @@ describe('Approvals queue across both engines (#31)', () => {
     setScenario('processes-approver');
     open('');
 
-    const focus = await screen.findByRole('article', { name: 'card-fee · Version 2' });
+    const focus = await screen.findByRole('article', { name: 'Card fee · Version 2' });
     expect(within(focus).getByRole('link', { name: '2 waiting' })).toHaveAttribute('href', '#/approvals');
     const pending = await screen.findByRole('article', { name: /Pending approvals/ });
     expect(await within(pending).findByRole('link', { name: 'Customer onboarding (KYC) · Version 3' })).toHaveAttribute('href', '#/processes/kyc-onboarding/3/changes');
@@ -52,11 +52,11 @@ describe('Approvals queue across both engines (#31)', () => {
     setScenario('processes-requester');
     open('#/approvals');
 
-    expect(await queueTitles()).toEqual(['card-fee · Version 2', 'Customer onboarding (KYC) · Version 3']);
+    expect(await queueTitles()).toEqual(['Card fee · Version 2', 'Customer onboarding (KYC) · Version 3']);
     expect(screen.getByRole('button', { name: /Your requests/ })).toHaveAttribute('aria-pressed', 'true');
     // Lan may approve processes but not rules: the engine names the reason that applies to each change.
     const reasons = [
-      ['card-fee · Version 2', 'Only an approver can approve this change.'],
+      ['Card fee · Version 2', 'Only an approver can approve this change.'],
       ['Customer onboarding (KYC) · Version 3', 'You made this change, so someone else approves it.'],
     ] as const;
     for (const [name, reason] of reasons) {
@@ -75,7 +75,7 @@ describe('Approvals queue across both engines (#31)', () => {
     mockHost.use(http.get('*/api/bpm/processes/v1/approvals', () => (failing ? problem(500, 'INTERNAL_ERROR') : undefined)));
     open('#/approvals');
 
-    expect(await queueTitles()).toEqual(['card-fee · Version 2']);
+    expect(await queueTitles()).toEqual(['Card fee · Version 2']);
     const notice = screen.getByText('Process changes could not be read. This list may be incomplete.').closest('.notice');
     expect(notice).not.toBeNull();
     failing = false;
@@ -133,11 +133,11 @@ describe('Approvals queue across both engines (#31)', () => {
     open('#/approvals');
 
     // The process request of 20 Nov waits until the Rule Engine's next page is read.
-    expect(await queueTitles()).toEqual(['card-fee · Version 2']);
+    expect(await queueTitles()).toEqual(['Card fee · Version 2']);
     expect(screen.getByRole('button', { name: /To review/ })).toHaveTextContent('1+');
     await userEvent.click(screen.getByRole('button', { name: 'Show more' }));
-    expect(await screen.findByRole('button', { name: /fx-margin · Version 2/ })).toBeInTheDocument();
-    expect(await queueTitles()).toEqual(['card-fee · Version 2', 'Customer onboarding (KYC) · Version 3', 'fx-margin · Version 2']);
+    expect(await screen.findByRole('button', { name: /Fx margin · Version 2/ })).toBeInTheDocument();
+    expect(await queueTitles()).toEqual(['Card fee · Version 2', 'Customer onboarding (KYC) · Version 3', 'Fx margin · Version 2']);
     expect(cursors).toEqual([null, 'page-2']);
     expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
   });
