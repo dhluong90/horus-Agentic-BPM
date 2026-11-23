@@ -40,28 +40,27 @@ describe('Home (PD-092: content by role)', () => {
     expect(within(pending).queryByRole('link', { name: /^Review/ })).not.toBeInTheDocument();
   });
 
-  it('TR_UI_02_an_approver_gets_one_focal_review_card_and_the_list_does_not_repeat_it', async () => {
+  it('TR_UI_02_an_approver_sees_the_requests_to_approve_and_approve_and_reject_open_the_review', async () => {
     setScenario('ready-approver');
     open('');
 
-    const focus = await card(/card-fee · Version 2/);
-    expect(within(focus).getByText('Waiting for your review')).toBeInTheDocument();
-    expect(within(focus).getByRole('link', { name: 'Review' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
-    const pending = await card(/Pending approvals/);
-    expect(within(pending).getByText('Nothing else is waiting for your review.')).toBeInTheDocument();
-    expect(within(pending).queryByText('card-fee · Version 2')).not.toBeInTheDocument();
+    const waiting = await card(/Awaiting approval/);
+    expect(await within(waiting).findByText('card-fee · Version 2')).toBeInTheDocument();
+    // No decision is taken on Home: both buttons open the review, where the reviewed hash is shown.
+    expect(within(waiting).getByRole('link', { name: 'Approve card-fee · Version 2' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
+    expect(within(waiting).getByRole('link', { name: 'Reject card-fee · Version 2' })).toHaveAttribute('href', '#/rules/card-fee/2/changes');
+    expect(within(waiting).queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('TR_UI_02_the_focal_request_is_the_oldest_and_the_others_are_rows_that_open_on_click', async () => {
+  it('TR_UI_02_the_requests_are_oldest_first_and_the_tile_counts_them', async () => {
     setScenario('ready-approver');
     mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z'), ruleItem('fx-margin', '2026-11-19T01:40:00Z')]))));
     open('');
 
-    expect(await card(/card-fee · Version 2/)).toHaveTextContent('Waiting for your review');
-    const pending = await card(/Pending approvals/);
-    const row = within(pending).getByRole('link', { name: 'fx-margin · Version 2' });
-    expect(row).toHaveAttribute('href', '#/rules/fx-margin/2/changes');
-    expect(within(pending).queryByRole('link', { name: /^Review/ })).not.toBeInTheDocument();
+    const waiting = await card(/Awaiting approval/);
+    await within(waiting).findByText('fx-margin · Version 2');
+    expect(within(waiting).getAllByText(/ · Version 2$/).map((node) => node.textContent)).toEqual(['card-fee · Version 2', 'fx-margin · Version 2']);
+    expect(within(await screen.findByRole('link', { name: /Awaiting approval/ })).getByText('2')).toBeInTheDocument();
   });
 
   it('TR_UI_08_people_show_by_display_name_when_the_engine_sends_one_and_by_login_otherwise', async () => {
@@ -69,9 +68,19 @@ describe('Home (PD-092: content by role)', () => {
     mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z', { requestedBy: 'lan', requestedByName: 'Nguyễn Thị Lan' })]))));
     open('');
 
-    const focus = await card(/card-fee · Version 2/);
-    expect(within(focus).getByText(/by Nguyễn Thị Lan/)).toBeInTheDocument();
-    expect(within(focus).queryByText(/by lan$/)).not.toBeInTheDocument();
+    const waiting = await card(/Awaiting approval/);
+    expect(await within(waiting).findByText(/Nguyễn Thị Lan ·/)).toBeInTheDocument();
+    expect(within(waiting).queryByText(/^lan ·/)).not.toBeInTheDocument();
+  });
+
+  it('TR_UI_08_tiles_appear_only_for_the_modules_the_host_has', async () => {
+    setScenario('ready-approver');
+    open('');
+
+    await card(/Awaiting approval/);
+    expect(screen.queryByRole('link', { name: /Tasks due today/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Overdue tasks/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Open incidents/ })).not.toBeInTheDocument();
   });
 
   it('TR_UI_08_recent_rule_sets_are_newest_first_and_rows_open_the_rule_set', async () => {
@@ -122,6 +131,20 @@ describe('Home (PD-092: content by role)', () => {
     const recent = await card(/Recent rule sets/);
     expect(await within(recent).findByText("This service's engine does not offer this list yet.")).toBeInTheDocument();
     expect(within(recent).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('TR_UI_08_task_tiles_come_from_the_engine_and_a_figure_without_an_api_is_left_out', async () => {
+    setScenario('tasks-operator');
+    open('');
+
+    const overdue = await screen.findByRole('link', { name: /Overdue tasks/ });
+    expect(await within(overdue).findByText('0')).toBeInTheDocument();
+    expect(within(overdue).getByText('Nothing is late')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Tasks due today/ })).toBeInTheDocument();
+    // An operator has no incident or approval rights here: those tiles and the chart are not drawn, not zeroed.
+    expect(screen.queryByRole('link', { name: /Open incidents/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Awaiting approval/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('Decisions per hour')).not.toBeInTheDocument();
   });
 
   it('TR_UI_08_a_user_with_no_rule_permission_sees_one_line_home_only_and_no_rule_calls', async () => {
