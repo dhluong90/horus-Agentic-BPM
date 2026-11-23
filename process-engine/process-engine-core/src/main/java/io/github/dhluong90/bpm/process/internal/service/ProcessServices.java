@@ -222,6 +222,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
+    /** The host's task forms (PRE-031); none until the starter installs them, so no declared form is accepted. */
+    private volatile TaskForms forms = TaskForms.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.RoleCatalogue roleCatalogue =
             io.github.dhluong90.bpm.process.spi.RoleCatalogue.ACCEPT_ALL;
     /** {@code calls.max-depth} (#92). */
@@ -632,6 +634,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         final List<DefinitionProblem> importWarnings = warnings;
         compiler.compile("validation", process);
         checkBindings(process);
+        checkForms(tenant, process);
         checkGuardrailContracts(tenant, process);
         String canonical = CanonicalProcessWriter.canonicalText(process);
         String hash = Hashes.sha256(canonical);
@@ -1584,6 +1587,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private void checkServiceRegistrations(String tenant, Process process) {
         List<DefinitionProblem> problems = serviceRegistrationProblems(process);
         problems.addAll(escalationRoleProblems(tenant, process));
+        problems.addAll(forms.check(tenant, process));
+        if (!problems.isEmpty()) {
+            throw new ValidationFailedException(problems);
+        }
+    }
+
+    /**
+     * PRE-031, PRE-219: every form a user task declares is usable in this host: a link is relative or on an allowed
+     * origin, a key or schema path is registered and its schema and hints are in the task-form subset. Refused as
+     * {@code 422 VALIDATION_FAILED} before anything is written.
+     */
+    private void checkForms(String tenant, Process process) {
+        List<DefinitionProblem> problems = forms.check(tenant, process);
         if (!problems.isEmpty()) {
             throw new ValidationFailedException(problems);
         }
@@ -3688,6 +3704,58 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public io.github.dhluong90.bpm.process.api.TaskForm form(String taskId) {
+        String tenant = tenant();
+        callerWith(PERMISSION_TASK_WORK);
+        return transactions.inTransaction(() -> {
+            TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
+            InstanceRow row = store.findInstance(tenant, task.instanceId()).orElseThrow();
+            TaskForms.Resolved resolved = resolveForm(tenant, row, task).orElseThrow(
+                    () -> new io.github.dhluong90.bpm.process.api.FormNotDeclaredException(
+                            "The step of task " + taskId + " declares no form"));
+            return switch (resolved) {
+                case TaskForms.Resolved.Form f -> new io.github.dhluong90.bpm.process.api.TaskForm(task.id(),
+                        task.lockVersion(), f.schema(), f.hints(),
+                        TaskForms.prefill(f.schema(), Values.readMap(row.variablesJson())), null);
+                case TaskForms.Resolved.Link l -> new io.github.dhluong90.bpm.process.api.TaskForm(task.id(),
+                        task.lockVersion(), null, null, null, TaskForms.link(l.template(), task.id(), row.id()));
+            };
+        });
+    }
+
+    /** What the task's step declares, or empty for a review task and for a step without a form. */
+    private java.util.Optional<TaskForms.Resolved> resolveForm(String tenant, InstanceRow row, TaskRow task) {
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElseThrow();
+        if (!(compiled(definition).process().node(task.nodeId()).orElse(null) instanceof UserTask node)) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return forms.resolve(tenant, node);
+        } catch (TaskForms.FormUnavailableException e) {
+            throw new io.github.dhluong90.bpm.process.api.FormNotDeclaredException(e.getMessage());
+        }
+    }
+
+    /** PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen. */
+    private void checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
+        java.util.Optional<TaskForms.Resolved> resolved;
+        try {
+            resolved = resolveForm(tenant, row, task);
+        } catch (io.github.dhluong90.bpm.process.api.FormNotDeclaredException e) {
+            // Fail closed: a form that cannot be evaluated is never skipped.
+            throw new io.github.dhluong90.bpm.process.api.FormValidationException(
+                    "The form of this task cannot be used", List.of("$: the form is not available"));
+        }
+        if (resolved.orElse(null) instanceof TaskForms.Resolved.Form form) {
+            List<String> violations = forms.validate(form.schema(), result);
+            if (!violations.isEmpty()) {
+                throw new io.github.dhluong90.bpm.process.api.FormValidationException(
+                        "The result does not meet the task's form", violations);
+            }
+        }
+    }
+
+    @Override
     public TaskView claim(String taskId, long expectedLockVersion, String idempotencyKey) {
         String tenant = tenant();
         String caller = callerWith(PERMISSION_TASK_WORK);
@@ -3846,6 +3914,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Installs the host's task forms (PRE-031): the registry that resolves a declared form key or schema path, and
+     * the origins a form link may point to besides relative links. Called once while the engine is wired; without
+     * it every definition that declares a form is refused at import.
+     *
+     * @param registry the host's forms, or null for none
+     * @param linkOrigins allowed link origins such as {@code https://loans.example}, or null for none
+     */
+    public void useFormRegistry(io.github.dhluong90.bpm.process.spi.FormRegistry registry,
+            java.util.Collection<String> linkOrigins) {
+        this.forms = new TaskForms(registry, outputSchemas, linkOrigins);
+    }
+
+    /**
      * Installs the host's role list, which approval asks about the target role of every escalation level (PRE-180).
      * Called once while the engine is wired; without it no role is checked.
      *
@@ -3954,6 +4035,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + " task of it cannot complete this four-eyes task");
             }
             java.util.Optional<JobRow> reviewed = checkReviewResult(tenant, row, taskId, values);
+            if (reviewed.isEmpty()) {
+                checkForm(tenant, row, task, values);
+            }
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
                 throw new VersionConflictException("Task " + taskId + " changed concurrently");

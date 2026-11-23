@@ -257,7 +257,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** The operator submits `T5` with `decision: REJECT` and no reason, then with a reason; then opens `T6`.
 - **Then:** The first submit shows the field error under `reason` (from the client check, and the API's `422 FORM_VALIDATION_FAILED` if the client check is bypassed); the second completes with `200` and the task leaves the inbox; `T6` opens `/loans/review/T6` with `rel="noopener noreferrer"` and no form.
 - **Example:** `REJECT without reason -> error at /reason; with reason -> 200, removed from inbox`.
-- **Test ID:** `CKP_021_task_form_completion_and_link`
+- **Test ID:** `CKP_021_task_form_completion_and_link`, `CKP_021_a_task_declared_with_a_link_opens_the_hosts_screen_and_shows_no_form`, `CKP_021_a_task_whose_step_declares_no_form_says_so`, `CKP_021_the_form_reads_in_vietnamese_with_vietnamese_separators`, `TR_SEC_05_a_masked_field_is_never_shown_or_sent_unless_the_operator_replaces_it`, `TR_IDEM_01_a_retry_of_the_same_completion_sends_the_same_key_and_the_same_version`, `PRE_031_the_screen_shows_the_engines_refusal_under_the_field_it_names_and_sends_no_value_back`
 
 ### CKP-046 An operator claims a task from Available to me, and a task claimed first by a colleague says who
 - **Traces to:** `TR-UI-02`, `TR-UI-03`, `TR-UI-04`, `TR-IDEM-01`, PD-110, PD-111

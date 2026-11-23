@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Credit review completed through a declared form (PRE-031): the officer decides APPROVE or REJECT, and a reason is
+     required when the decision is REJECT. The form is forms/credit-review.form.json in the host. A second task is
+     completed in the bank's own screen (a relative link). -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-review-form"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-review-form" name="Loan review through a form" isExecutable="true">
+    <bpmn:startEvent id="start" name="Application received"/>
+    <bpmn:userTask id="approve" name="Credit review" horus:assignee="role:credit-officer"
+                   horus:resultVariable="review"
+                   horus:formSchema="forms/approve.schema.json"
+                   horus:formHints='{"order":["decision","reason"],"labels":{"reason":{"en":"Reason","vi":"Lý do"}}}'/>
+    <bpmn:userTask id="screen" name="Collateral check" horus:assignee="role:credit-officer"
+                   horus:resultVariable="collateral"
+                   horus:formLink="/loans/review/{taskId}"/>
+    <bpmn:userTask id="plain" name="Free note" horus:assignee="role:credit-officer"
+                   horus:resultVariable="note"/>
+    <bpmn:endEvent id="end" name="Reviewed"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="approve"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="approve" targetRef="screen"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="screen" targetRef="plain"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="plain" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

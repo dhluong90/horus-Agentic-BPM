@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A user task whose form link points to a foreign origin (PRE-031): refused at import while
+     tasks.form-link-origins is empty. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-review-evil"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-review-evil" name="Loan review with a foreign link" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:userTask id="review" name="Review" horus:assignee="role:credit-officer" horus:resultVariable="review"
+                   horus:formLink="https://evil.example/t/{taskId}"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="review"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="review" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

@@ -1,0 +1,247 @@
+import type { Locale } from '../../../i18n/I18nProvider';
+import { currencyDigits, formatDecimalText, toMinorUnits } from '../../rules/model/money';
+import { fieldLabel, isMoney } from '../model/review';
+
+/*
+ * What the form screen of a task draws and sends (CKP-021). The engine decides everything that matters: which fields
+ * exist, which are required in which case, and whether the result meets the schema. This module only reads the
+ * schema and the hints it was given and checks the format of what the operator typed. A rule it does not know
+ * (a field required only when another has a value) is left to the engine's 422, shown under the field it names.
+ */
+
+export type FieldKind =
+  | { kind: 'text'; multiline: boolean; maxLength: number | undefined }
+  | { kind: 'number'; integer: boolean }
+  | { kind: 'money'; currencies: readonly string[] }
+  | { kind: 'date' }
+  | { kind: 'datetime' }
+  | { kind: 'choice'; options: readonly string[]; radio: boolean }
+  | { kind: 'yesno' };
+
+export interface FormField {
+  name: string;
+  label: string;
+  kind: FieldKind;
+  required: boolean;
+  readOnly: boolean;
+  /** The schema marks it `mask: true` and the task holds a value: the screen never shows or sends it. */
+  masked: boolean;
+}
+
+type Json = Readonly<Record<string, unknown>>;
+
+const asRecord = (value: unknown): Json | undefined => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined);
+const asStrings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
+
+function kindOf(property: Json, widget: string | undefined): FieldKind | undefined {
+  const options = asStrings(property['enum']);
+  if (options.length > 0) return { kind: 'choice', options, radio: widget === 'radio' || (widget === undefined && options.length <= 3) };
+  switch (property['type']) {
+    case 'string': {
+      if (property['format'] === 'date') return { kind: 'date' };
+      if (property['format'] === 'date-time') return { kind: 'datetime' };
+      const max = property['maxLength'];
+      return { kind: 'text', multiline: widget === 'textarea' || (typeof max === 'number' && max > 120), maxLength: typeof max === 'number' ? max : undefined };
+    }
+    case 'integer':
+      return { kind: 'number', integer: true };
+    case 'number':
+      return { kind: 'number', integer: false };
+    case 'boolean':
+      return { kind: 'yesno' };
+    case 'object': {
+      const currency = asRecord(asRecord(property['properties'])?.['currency']);
+      const fixed = typeof currency?.['const'] === 'string' ? [currency['const']] : asStrings(currency?.['enum']);
+      return isMoneySchema(property) ? { kind: 'money', currencies: fixed } : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function isMoneySchema(property: Json): boolean {
+  const properties = asRecord(property['properties']);
+  return properties !== undefined && Object.keys(properties).sort().join() === 'amount,currency';
+}
+
+/** The fields of the form in the hints' order, then the rest in the schema's order. A field the cockpit cannot draw is left out. */
+export function fieldsOf(form: { schema: Json; hints: Json; data: Json }, locale: Locale): FormField[] {
+  const properties = asRecord(form.schema['properties']) ?? {};
+  const required = new Set(asStrings(form.schema['required']));
+  const widgets = asRecord(form.hints['widgets']) ?? {};
+  const labels = asRecord(form.hints['labels']) ?? {};
+  const readOnly = new Set(asStrings(form.hints['readOnly']));
+  const order = asStrings(form.hints['order']).filter((name) => name in properties);
+  const names = [...order, ...Object.keys(properties).filter((name) => !order.includes(name))];
+  const fields: FormField[] = [];
+  for (const name of names) {
+    const property = asRecord(properties[name]);
+    if (property === undefined) continue;
+    const widget = typeof widgets[name] === 'string' ? widgets[name] : undefined;
+    const kind = kindOf(property, widget);
+    if (kind === undefined) continue;
+    const named = asRecord(labels[name]);
+    const label = typeof named?.[locale] === 'string' ? named[locale] : typeof named?.['en'] === 'string' ? named['en'] : fieldLabel(name);
+    fields.push({
+      name,
+      label,
+      kind,
+      required: required.has(name),
+      readOnly: readOnly.has(name) || widget === 'readonly',
+      masked: property['mask'] === true && form.data[name] !== undefined && form.data[name] !== null,
+    });
+  }
+  return fields;
+}
+
+/** What the operator typed, by field name; money keeps its currency apart under `<name>.currency`. */
+export type Drafts = Readonly<Record<string, string>>;
+
+export const currencyKey = (name: string) => `${name}.currency`;
+
+/** Integer minor units as the decimal text of major units, by string arithmetic: {VND, 2500000} -> "2500000", {USD, 1250} -> "12.50". */
+function minorToText(amount: number, currency: string): string {
+  const digits = currencyDigits(currency);
+  const negative = amount < 0;
+  const padded = BigInt(negative ? -amount : amount).toString().padStart(digits + 1, '0');
+  const integer = digits === 0 ? padded : padded.slice(0, -digits);
+  const fraction = digits === 0 ? '' : `.${padded.slice(-digits)}`;
+  return `${negative ? '-' : ''}${integer}${fraction}`;
+}
+
+/** A moment as the local `datetime-local` text the browser's field takes. */
+function localInput(iso: string): string {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return '';
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${String(when.getFullYear())}-${two(when.getMonth() + 1)}-${two(when.getDate())}T${two(when.getHours())}:${two(when.getMinutes())}`;
+}
+
+/** The starting texts: the task's prefilled values, in the language's separators. A masked value is never put in a text. */
+export function initialDrafts(fields: readonly FormField[], data: Json, locale: Locale): Drafts {
+  const drafts: Record<string, string> = {};
+  for (const field of fields) {
+    const value = data[field.name];
+    if (field.masked) continue;
+    if (field.kind.kind === 'money') {
+      const currency = isMoney(value) ? value.currency : field.kind.currencies[0] ?? '';
+      drafts[currencyKey(field.name)] = currency;
+      if (isMoney(value)) {
+        const plain = minorToText(value.amount, value.currency);
+        drafts[field.name] = (plain.startsWith('-') ? '-' : '') + (formatDecimalText(plain.replace('-', ''), locale) ?? plain);
+      }
+      continue;
+    }
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') drafts[field.name] = field.kind.kind === 'datetime' ? localInput(value) : value;
+    else if (typeof value === 'number') drafts[field.name] = locale === 'vi' ? String(value).replace('.', ',') : String(value);
+    else if (typeof value === 'boolean') drafts[field.name] = String(value);
+  }
+  return drafts;
+}
+
+export type Problem = 'required' | 'number' | 'integer' | 'money' | 'moneyScale' | 'moneyRange' | 'moneyCurrency' | 'date' | 'datetime' | 'choice' | 'tooLong';
+
+export interface Built {
+  result: Record<string, unknown>;
+  problems: Record<string, Problem>;
+}
+
+const DECIMAL = /^-?\d+(\.\d+)?$/;
+
+function validDate(text: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const parsed = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(text);
+}
+
+/**
+ * The result to send and the format problems found. A field left empty is omitted; a masked field the operator did
+ * not replace is omitted too, and one they replaced goes as typed. Only format is checked here: whether the result
+ * meets the form is the engine's check (422 FORM_VALIDATION_FAILED).
+ */
+export function build(fields: readonly FormField[], drafts: Drafts, data: Json, locale: Locale, replaced: ReadonlySet<string>): Built {
+  const result: Record<string, unknown> = {};
+  const problems: Record<string, Problem> = {};
+  for (const field of fields) {
+    const name = field.name;
+    if (field.readOnly) {
+      if (!field.masked && data[name] !== undefined && data[name] !== null) result[name] = data[name];
+      continue;
+    }
+    if (field.masked && !replaced.has(name)) {
+      if (field.required) problems[name] = 'required';
+      continue;
+    }
+    const text = (drafts[name] ?? '').trim();
+    if (text === '') {
+      if (field.required) problems[name] = 'required';
+      continue;
+    }
+    switch (field.kind.kind) {
+      case 'text':
+        if (field.kind.maxLength !== undefined && text.length > field.kind.maxLength) problems[name] = 'tooLong';
+        else result[name] = text;
+        break;
+      case 'number': {
+        const plain = locale === 'vi' ? text.replace(',', '.') : text;
+        if (!DECIMAL.test(plain)) problems[name] = 'number';
+        else if (field.kind.integer && (!/^-?\d+$/.test(plain) || !Number.isSafeInteger(Number(plain)))) problems[name] = 'integer';
+        else result[name] = Number(plain);
+        break;
+      }
+      case 'money': {
+        const currency = (drafts[currencyKey(name)] ?? field.kind.currencies[0] ?? '').trim();
+        if (!/^[A-Z]{3}$/.test(currency)) {
+          problems[name] = 'moneyCurrency';
+          break;
+        }
+        const minor = toMinorUnits(text, currency, locale);
+        if (minor.ok) result[name] = { currency, amount: minor.amount };
+        else problems[name] = minor.reason === 'scale' ? 'moneyScale' : minor.reason === 'range' ? 'moneyRange' : 'money';
+        break;
+      }
+      case 'date':
+        if (validDate(text)) result[name] = text;
+        else problems[name] = 'date';
+        break;
+      case 'datetime': {
+        const when = new Date(text);
+        if (Number.isNaN(when.getTime())) problems[name] = 'datetime';
+        else result[name] = when.toISOString();
+        break;
+      }
+      case 'choice':
+        if (field.kind.options.includes(text)) result[name] = text;
+        else problems[name] = 'choice';
+        break;
+      case 'yesno':
+        result[name] = text === 'true';
+        break;
+    }
+  }
+  return { result, problems };
+}
+
+export interface ApiFieldErrors {
+  /** The engine's words by field name, from the JSON Pointer of each failure. */
+  byField: Record<string, string>;
+  /** Failures of the whole result, with no field. */
+  other: string[];
+}
+
+/** The 422 FORM_VALIDATION_FAILED `errors`: one `{pointer, rule}` per failing field. Never a submitted value. */
+export function apiErrorsOf(errors: unknown): ApiFieldErrors {
+  const out: ApiFieldErrors = { byField: {}, other: [] };
+  if (!Array.isArray(errors)) return out;
+  for (const item of errors) {
+    const entry = asRecord(item);
+    const rule = typeof entry?.['rule'] === 'string' ? entry['rule'] : undefined;
+    if (rule === undefined) continue;
+    const pointer = typeof entry?.['pointer'] === 'string' ? entry['pointer'] : '';
+    const name = /^\/([^/]+)/.exec(pointer)?.[1]?.replace(/~1/g, '/').replace(/~0/g, '~');
+    if (name === undefined) out.other.push(rule);
+    else out.byField[name] = rule;
+  }
+  return out;
+}

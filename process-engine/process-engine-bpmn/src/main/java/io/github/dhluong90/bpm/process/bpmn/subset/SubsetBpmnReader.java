@@ -60,6 +60,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.MemoryEntry;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
 import io.github.dhluong90.bpm.process.internal.model.horus.RetryPolicy;
 import io.github.dhluong90.bpm.process.internal.model.horus.EscalationSpec;
+import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.SlaSpec;
 import io.github.dhluong90.bpm.process.internal.model.horus.TaskAssignment;
 import java.io.StringReader;
@@ -1166,6 +1167,70 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     : java.util.Optional.empty();
         }
 
+        /**
+         * The form of a user task (PRE-031): at most one of {@code horus:form} (a key the host registered),
+         * {@code horus:formSchema} (a schema path, with optional {@code horus:formHints} as a JSON object) and
+         * {@code horus:formLink} (a URL template). Keys and paths are plain relative names; whether they are
+         * registered, and whether a link's origin is allowed, is the host's check at import.
+         */
+        private java.util.Optional<FormSpec> form(String id, int line) {
+            String key = horus("form");
+            String schema = horus("formSchema");
+            String hints = horus("formHints");
+            String link = horus("formLink");
+            if (key == null && schema == null && hints == null && link == null) {
+                return java.util.Optional.empty();
+            }
+            if ((key == null ? 0 : 1) + (schema == null ? 0 : 1) + (link == null ? 0 : 1) != 1) {
+                formProblem("A userTask declares exactly one of horus:form, horus:formSchema and horus:formLink", id,
+                        line);
+                return java.util.Optional.empty();
+            }
+            if (hints != null && schema == null) {
+                formProblem("horus:formHints goes with horus:formSchema", id, line);
+                return java.util.Optional.empty();
+            }
+            String reference = key != null ? key : schema;
+            if (reference != null && (!FORM_REFERENCE.matcher(reference).matches() || reference.contains(".."))) {
+                formProblem("The form key or schema path is a relative name of letters, digits and . _ - /, without ..",
+                        id, line);
+                return java.util.Optional.empty();
+            }
+            String canonicalHints = null;
+            if (hints != null) {
+                canonicalHints = canonicalObject(hints);
+                if (canonicalHints == null) {
+                    formProblem("horus:formHints is a JSON object of at most " + MAX_FORM_HINTS + " characters", id,
+                            line);
+                    return java.util.Optional.empty();
+                }
+            }
+            return java.util.Optional.of(new FormSpec(key, schema, canonicalHints, link));
+        }
+
+        private static final int MAX_FORM_HINTS = 20_000;
+        private static final java.util.regex.Pattern FORM_REFERENCE = java.util.regex.Pattern.compile(
+                "^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}(/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}){0,9}$");
+
+        /** The RFC 8785 form of a JSON object, or null for anything else. */
+        private static String canonicalObject(String text) {
+            if (text.length() > MAX_FORM_HINTS) {
+                return null;
+            }
+            try {
+                tools.jackson.databind.JsonNode node = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON
+                        .readTree(text);
+                return node != null && node.isObject()
+                        ? io.github.dhluong90.bpm.process.internal.json.CanonicalJson.write(node) : null;
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        private void formProblem(String message, String id, int line) {
+            invalid.add(new DefinitionProblem("FORM_INVALID", message, "userTask", safe(id), line));
+        }
+
         private void escalationProblem(String message, String id, int line) {
             invalid.add(new DefinitionProblem("ESCALATION_INVALID", message, "userTask", safe(id), line));
         }
@@ -1312,6 +1377,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             java.util.Optional<SlaSpec> sla = sla(id, line);
             sla.ifPresent(ext::add);
             escalation(id, line, assignee, sla.isPresent()).ifPresent(ext::add);
+            form(id, line).ifPresent(ext::add);
             Node children = children("userTask", id, false);
             return new UserTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
                     info(ext, children.foreign()));

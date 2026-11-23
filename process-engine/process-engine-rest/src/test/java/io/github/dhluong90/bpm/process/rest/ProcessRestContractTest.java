@@ -94,6 +94,43 @@ class ProcessRestContractTest {
     }
 
     @Test
+    void PRE_031_the_task_form_body_matches_the_contract_and_carries_the_task_etag() throws Exception {
+        MvcResult form = exchange(get(BASE + "/tasks/" + FakeEngine.TASK + "/form"));
+
+        assertThat(form.getResponse().getStatus()).isEqualTo(200);
+        assertThat(form.getResponse().getHeader("ETag")).isEqualTo("\"1\"");
+        tools.jackson.databind.JsonNode body = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON
+                .readTree(form.getResponse().getContentAsString());
+        assertThat(body.at("/form/data/idNumber").stringValue()).isEqualTo("***");
+        assertThat(body.at("/form/hints/labels/reason/vi").stringValue()).isEqualTo("Lý do");
+        assertThat(body.has("link")).isFalse();
+
+        MvcResult link = exchange(get(BASE + "/tasks/" + FakeEngine.LINK_TASK + "/form"));
+        assertThat(link.getResponse().getStatus()).isEqualTo(200);
+        assertThat(link.getResponse().getContentAsString()).contains("\"link\":\"/loans/review/")
+                .doesNotContain("\"form\"");
+    }
+
+    @Test
+    void PRE_031_a_task_without_a_form_is_404_and_a_result_that_breaks_the_form_is_422_with_pointers()
+            throws Exception {
+        assertProblem(get(BASE + "/tasks/" + FakeEngine.PLAIN_TASK + "/form"), 404, "FORM_NOT_DECLARED");
+        assertProblem(get(BASE + "/tasks/01JD0000000000000000000098/form"), 404, "TASK_NOT_FOUND");
+        exchange(post(BASE + "/instances").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"definitionKey\":\"card-fee-review\",\"businessKey\":\"APP-1003\"}"));
+
+        MvcResult refused = assertProblem(post(BASE + "/tasks/" + FakeEngine.TASK + ":complete")
+                .contentType(MediaType.APPLICATION_JSON).header("If-Match", "\"0\"")
+                .header("Idempotency-Key", "c-form-1").content("{\"result\":{\"decision\":\"REJECT\"}}"), 422,
+                "FORM_VALIDATION_FAILED");
+        tools.jackson.databind.JsonNode body = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON
+                .readTree(refused.getResponse().getContentAsString());
+        assertThat(body.at("/violations/0").stringValue()).isEqualTo("$.reason: required");
+        assertThat(body.at("/errors/0/pointer").stringValue()).isEqualTo("/reason");
+        assertThat(body.at("/errors/0/rule").stringValue()).isEqualTo("required");
+    }
+
+    @Test
     void list_and_live_count_bodies_match_the_contract() throws Exception {
         MvcResult definitions = exchange(get(BASE + "/definitions").param("limit", "10"));
         assertThat(definitions.getResponse().getStatus()).isEqualTo(200);
@@ -575,6 +612,10 @@ class ProcessRestContractTest {
                 throw new TaskNotFoundException("No task " + taskId);
             }
             ProcessInstance.Task task = current.tasks().get(0);
+            if ("REJECT".equals(result.get("decision")) && !result.containsKey("reason")) {
+                throw new io.github.dhluong90.bpm.process.api.FormValidationException(
+                        "The result does not meet the task's form", List.of("$.reason: required"));
+            }
             if (!"CLAIMED".equals(task.status())) {
                 throw new InvalidStateException("Task " + taskId + " is " + task.status());
             }
@@ -601,6 +642,36 @@ class ProcessRestContractTest {
         @Override
         public TaskView task(String taskId) {
             throw new UnsupportedOperationException("not used by this test");
+        }
+
+        static final String LINK_TASK = "01JD0000000000000000000013";
+        static final String PLAIN_TASK = "01JD0000000000000000000014";
+
+        @Override
+        public io.github.dhluong90.bpm.process.api.TaskForm form(String taskId) {
+            switch (taskId) {
+                case TASK -> {
+                    Map<String, Object> schema = new LinkedHashMap<>();
+                    schema.put("type", "object");
+                    schema.put("required", List.of("decision"));
+                    schema.put("properties", Map.of("decision", Map.of("enum", List.of("APPROVE", "REJECT")),
+                            "reason", Map.of("type", "string"), "idNumber", Map.of("type", "string", "mask", true)));
+                    schema.put("if", Map.of("required", List.of("decision"), "properties",
+                            Map.of("decision", Map.of("const", "REJECT"))));
+                    schema.put("then", Map.of("required", List.of("reason")));
+                    return new io.github.dhluong90.bpm.process.api.TaskForm(TASK, 1, schema,
+                            Map.of("order", List.of("decision", "reason"), "labels",
+                                    Map.of("reason", Map.of("en", "Reason", "vi", "Lý do"))),
+                            Map.of("idNumber", "***"), null);
+                }
+                case LINK_TASK -> {
+                    return new io.github.dhluong90.bpm.process.api.TaskForm(LINK_TASK, 0, null, null, null,
+                            "/loans/review/" + LINK_TASK);
+                }
+                case PLAIN_TASK -> throw new io.github.dhluong90.bpm.process.api.FormNotDeclaredException(
+                        "The step of task " + taskId + " declares no form");
+                default -> throw new TaskNotFoundException("No task " + taskId);
+            }
         }
 
         @Override

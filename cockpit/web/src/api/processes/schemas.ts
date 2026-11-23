@@ -150,6 +150,28 @@ export const task = z
 export type Task = z.infer<typeof task>;
 
 /**
+ * The form a task is completed through, or the link to the host's own screen (`GET /tasks/{id}/form`, PRE-031). The
+ * schema and hints stay open: the engine checks them at import, the cockpit only draws what it understands.
+ */
+export const taskForm = z
+  .object({
+    schemaVersion: z.number().int(),
+    taskId: z.string(),
+    lockVersion: z.number().int(),
+    form: z
+      .object({
+        schema: z.record(z.string(), z.unknown()),
+        hints: z.record(z.string(), z.unknown()),
+        data: z.record(z.string(), z.unknown()),
+      })
+      .loose()
+      .optional(),
+    link: z.string().optional(),
+  })
+  .loose();
+export type TaskForm = z.infer<typeof taskForm>;
+
+/**
  * How a task stands against its deadline, when the engine says so (PD-111, #81). Until the list carries it, the
  * queue reads which tasks are overdue from the engine's own `slaBreached=true` query; the browser computes neither.
  */

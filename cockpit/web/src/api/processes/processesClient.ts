@@ -21,6 +21,7 @@ import {
   INSTANCE_STATUSES,
   processInstance,
   task,
+  taskForm,
   taskSummaryPage,
   type DefinitionSummary,
   type DefinitionVersion,
@@ -35,6 +36,7 @@ import {
   type MigrationStepMapping,
   type ProcessInstance,
   type Task,
+  type TaskForm,
   type TaskSummary,
 } from './schemas';
 
@@ -45,7 +47,8 @@ export const PROCESSES_BASE = '/api/bpm/processes/v1';
 /** What a reviewer answers on the review task of a refused agent answer: the result and why (#59). */
 export interface TaskAnswer {
   result: Readonly<Record<string, unknown>>;
-  reason: string;
+  /** Asked of a review; a task completed through its declared form sends none. */
+  reason?: string;
 }
 
 /** What listTasks filters by; each member maps one to one to a query parameter of `GET /tasks`. */
@@ -123,6 +126,8 @@ export interface ProcessesClient {
   listTasks(query: TaskQuery): Promise<Page<TaskSummary>>;
   /** listTasks as a conditional read: sends If-None-Match when `etag` is given; 304 is `changed: false` (CKP-019) */
   readTasks(query: TaskQuery, etag?: string): Promise<Conditional<Page<TaskSummary>>>;
+  /** getTaskForm: the form the task's step declares, masked fields still masked, or the link to the host's screen (404 when none) */
+  getTaskForm(id: string, signal?: AbortSignal): Promise<TaskForm>;
   /** claimTask */
   claimTask(id: string, lockVersion: number, idempotencyKey: string): Promise<Task>;
   /** unclaimTask: hand a claimed task back to its candidates */
@@ -263,6 +268,9 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       if (request.cursor !== undefined) query.set('cursor', request.cursor);
       const answer = await call({ method: 'GET', path: `${PROCESSES_BASE}/tasks?${query.toString()}`, ...withSignal(request.signal) }, taskSummaryPage);
       return answer.data;
+    },
+    async getTaskForm(id, signal) {
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/tasks/${segment(id)}/form`, ...withSignal(signal) }, taskForm)).data;
     },
     async claimTask(id, lockVersion, idempotencyKey) {
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:claim`, headers: command(lockVersion, idempotencyKey) }, task)).data;

@@ -25,4 +25,34 @@ public final class FormValidationException extends ProcessException {
     public List<String> violations() {
         return violations;
     }
+
+    /**
+     * The failing fields as JSON Pointers (RFC 6901), one per violation in the same order: {@code $.reason: required}
+     * is {@code /reason}, {@code $.items[0].qty: below the minimum} is {@code /items/0/qty}, a violation of the whole
+     * result is the empty pointer.
+     *
+     * @return the pointers
+     */
+    public List<String> pointers() {
+        return violations.stream().map(FormValidationException::pointer).toList();
+    }
+
+    /**
+     * @param violation a violation as the validator words it, {@code <path>: <rule>}
+     * @return its JSON Pointer
+     */
+    static String pointer(String violation) {
+        int colon = violation.indexOf(": ");
+        String path = colon < 0 ? violation : violation.substring(0, colon);
+        if (!path.startsWith("$")) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder();
+        for (String part : path.substring(1).replace("[", ".").replace("]", "").split("\\.")) {
+            if (!part.isEmpty()) {
+                out.append('/').append(part.replace("~", "~0").replace("/", "~1"));
+            }
+        }
+        return out.toString();
+    }
 }
