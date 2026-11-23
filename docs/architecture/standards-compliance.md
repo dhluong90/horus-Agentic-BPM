@@ -381,7 +381,8 @@ On scope entry the engine creates the timer jobs and subscriptions of the scope'
 |---|---|---|---|---|
 | Start, end (none), user, service, business rule tasks, exclusive and parallel gateways, timer catch, call activity, transaction as `saga`, compensate throw | Import, execute (ADR-0013 subset) | | | |
 | Manual and none tasks | Execute (#485) | | | |
-| Embedded subprocess, terminate end, link events, standard loop | Refused | Execute | | |
+| Embedded subprocess | Execute (#486) | | | |
+| Terminate end, link events, standard loop | Refused | Execute | | |
 | Boundary timer, error, escalation (interrupting and non-interrupting); error and escalation end and throw events | Refused | Execute | | |
 | Event subprocess with timer, error, escalation start | Refused | Execute | | |
 | Inclusive gateway | Refused | Execute | | |

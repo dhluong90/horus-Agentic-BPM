@@ -203,7 +203,8 @@ public final class Layouts implements LayoutService {
     /** The ids of the steps of the definition. */
     private static Set<String> steps(Process process) {
         Set<String> ids = new HashSet<>();
-        for (FlowElement element : process.flowElements()) {
+        // The steps inside a sub-process or a saga block are steps too (#486).
+        for (FlowElement element : process.allFlowElements()) {
             if (element instanceof FlowNode node) {
                 ids.add(node.id());
             }

@@ -79,6 +79,7 @@ The root element must declare the namespaces, and the process must be executable
 | `task`, `manualTask` | | `name` | `<bpmn:manualTask id="post-card"/>`. Both pass the token on at once and the timeline records them as done by the engine; a manual task opens no work item |
 | `scriptTask` | `horus:resultVariable`; a `<bpmn:script>` child with one expression in `urn:horus-bpm:expr:v1` | `scriptFormat` set to `urn:horus-bpm:expr:v1` | `<bpmn:script>amount * 2</bpmn:script>` |
 | `callActivity` (a `callProcess` step, 0.3.0) | `calledElement`, the key of the definition to call, in your tenant | `horus:calledVersion` to pin a version, `horus:input` and `horus:output` elements, `horus:compensate`, `horus:onFailure="compensate"` | `calledElement="kyc-check"` |
+| `subProcess` (embedded, since 0.3.0) | a none `startEvent`, steps and at least one `endEvent` inside it | `name`. It reads and writes the process variables like the rest of the process; no flow crosses its border | `<bpmn:subProcess id="hand-over">` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
@@ -96,6 +97,22 @@ Inputs to a service or rule step are `horus:input` elements inside `extensionEle
 ### Script tasks
 
 A script is one expression, not a program. It reads the process variables, has at most 1,000 characters and 500 evaluation steps, and its value is stored in `horus:resultVariable`. It cannot call host code, name a Java class, assign a variable or loop. A script that does not parse is refused at import with `SCRIPT_INVALID` and its line; a script over the step budget fails its step with `SCRIPT_ERROR`. The language is the one the gateway conditions use ([[Rule Engine Expression Language|Rule-Engine-Expression-Language]]); a script may also be FEEL (`scriptFormat` the FEEL URI). A worked file is [`card-welcome.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-welcome.bpmn).
+
+### Sub-processes (0.3.0)
+
+A `subProcess` groups steps that run from their own start event to their own end event. The process goes on after it only when the inner end is reached, and a parallel join inside it waits only for the branches of the same sub-process. It reads the process variables and writes them back, so a value set inside, such as `yearlyFee`, is there for the steps after it. Cancelling the instance cancels every step, task and call inside it. The cockpit draws it closed, with the count of its steps, or open in place, and the timeline nests its steps; it does not edit it. A worked file is [`card-delivery.bpmn`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/src/main/resources/processes/card-delivery.bpmn).
+
+```xml
+<bpmn:subProcess id="hand-over" name="Hand the card over">
+  <bpmn:startEvent id="hand-over-start"/>
+  <bpmn:manualTask id="post-card" name="Post the card to the customer"/>
+  <bpmn:endEvent id="hand-over-end"/>
+  <bpmn:sequenceFlow id="h1" sourceRef="hand-over-start" targetRef="post-card"/>
+  <bpmn:sequenceFlow id="h2" sourceRef="post-card" targetRef="hand-over-end"/>
+</bpmn:subProcess>
+```
+
+A flow from inside to outside is refused at activation (`FLOW_CROSSES_SAGA`). An event sub-process is refused as `S1`.
 
 ### Calling another process (0.3.0)
 
@@ -164,7 +181,7 @@ The answer lists every unsupported element in the file, each with its id, its li
 | `not planned` | A deviation the engine keeps by design, for example an XPath condition |
 | `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` |
 
-Examples: `boundaryEvent`, `inclusiveGateway`, `subProcess`, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
+Examples: `boundaryEvent`, `inclusiveGateway`, an event sub-process, data objects, `terminate`, `error` and `escalation` events are `S1`; `sendTask`, `receiveTask`, `eventBasedGateway`, message, signal and conditional events are `S2`; `complexGateway` and `adHocSubProcess` are `S3`.
 
 These are refused in 0.2.0:
 
@@ -172,7 +189,7 @@ These are refused in 0.2.0:
 |---|---|
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
 | Events | `boundaryEvent`, `intermediateThrowEvent`, a catch event that is not a timer, and any start or end event with an event definition (timer, message, signal, error, terminate) |
-| Activities | `subProcess`, `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
+| Activities | an event sub-process (`subProcess` with `triggeredByEvent="true"`), `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
 | Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |

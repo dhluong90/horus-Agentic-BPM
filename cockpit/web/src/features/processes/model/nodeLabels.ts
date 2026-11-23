@@ -17,6 +17,7 @@ const KEYS: Record<KnownNodeType, MessageKey> = {
   'intermediateCatchEvent:timer': 'node.timer',
   callActivity: 'node.callActivity',
   transaction: 'node.transaction',
+  subProcess: 'node.subProcess',
   'intermediateThrowEvent:compensate': 'node.compensate',
 };
 

@@ -27,6 +27,7 @@ export const KNOWN_NODE_TYPES = [
   'intermediateCatchEvent:timer',
   'callActivity',
   'transaction',
+  'subProcess',
   'intermediateThrowEvent:compensate',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
@@ -42,6 +43,8 @@ export interface DiagramNode {
   type: string;
   /** The variable a script task stores its result in, shown beside the step in the timeline. */
   resultVariable?: string;
+  /** The id of the sub-process or saga block this step stands in; absent for a step of the process itself (#486). */
+  parentId?: string;
 }
 
 export interface DiagramEdge {
@@ -106,22 +109,17 @@ export function nodeType(element: Element): string {
   return local;
 }
 
-/**
- * Reads the first executable process of a BPMN document. A document with a DOCTYPE, one that does not parse, or one
- * without a process is refused; the engine never exports such a document, so it is shown as an error, not guessed.
- */
-export function readBpmnGraph(xml: string): DiagramGraph {
-  if (/<!DOCTYPE/i.test(xml)) throw new DiagramReadError('The document declares a DOCTYPE');
-  const document = new DOMParser().parseFromString(xml, 'application/xml');
-  if (document.getElementsByTagName('parsererror').length > 0) throw new DiagramReadError('The document is not well-formed XML');
-  const processes = Array.from(document.getElementsByTagNameNS(BPMN, 'process'));
-  const process = processes.find((p) => p.getAttribute('isExecutable') === 'true') ?? processes[0];
-  if (process === undefined) throw new DiagramReadError('The document has no process');
+/** Elements that hold steps of their own: a sub-process (not an event sub-process) and a saga block. */
+function isContainer(element: Element): boolean {
+  return (element.localName === 'subProcess' && element.getAttribute('triggeredByEvent') !== 'true') || element.localName === 'transaction';
+}
 
-  const nodes: DiagramNode[] = [];
-  const edges: DiagramEdge[] = [];
-  const defaults = new Set<string>();
-  for (const child of elementChildren(process)) {
+/** Nested sub-processes the cockpit follows; a deeper one is drawn as a plain box, never skipped. */
+const MAX_NESTING = 8;
+
+/** Reads the steps and flows of one container into the flat lists; a step inside names its container in `parentId`. */
+function readContainer(container: Element, parentId: string | undefined, nodes: DiagramNode[], edges: DiagramEdge[], defaults: Set<string>, depth: number): void {
+  for (const child of elementChildren(container)) {
     if (child.namespaceURI !== BPMN) continue;
     const id = nonEmpty(child.getAttribute('id'));
     if (id === undefined) continue;
@@ -140,8 +138,28 @@ export function readBpmnGraph(xml: string): DiagramGraph {
       name: nonEmpty(child.getAttribute('name')),
       type: nodeType(child),
       ...(resultVariable !== undefined ? { resultVariable } : {}),
+      ...(parentId !== undefined ? { parentId } : {}),
     });
+    if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);
   }
+}
+
+/**
+ * Reads the first executable process of a BPMN document. A document with a DOCTYPE, one that does not parse, or one
+ * without a process is refused; the engine never exports such a document, so it is shown as an error, not guessed.
+ */
+export function readBpmnGraph(xml: string): DiagramGraph {
+  if (/<!DOCTYPE/i.test(xml)) throw new DiagramReadError('The document declares a DOCTYPE');
+  const document = new DOMParser().parseFromString(xml, 'application/xml');
+  if (document.getElementsByTagName('parsererror').length > 0) throw new DiagramReadError('The document is not well-formed XML');
+  const processes = Array.from(document.getElementsByTagNameNS(BPMN, 'process'));
+  const process = processes.find((p) => p.getAttribute('isExecutable') === 'true') ?? processes[0];
+  if (process === undefined) throw new DiagramReadError('The document has no process');
+
+  const nodes: DiagramNode[] = [];
+  const edges: DiagramEdge[] = [];
+  const defaults = new Set<string>();
+  readContainer(process, undefined, nodes, edges, defaults, 0);
   const ids = new Set(nodes.map((node) => node.id));
   return {
     name: nonEmpty(process.getAttribute('name')),
@@ -151,25 +169,50 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   };
 }
 
-/** Steps in flow order: breadth first from the start events, then any step no flow reaches, in document order. */
+/** Steps in flow order: breadth first from the start events, then any step no flow reaches, in document order. A sub-process's own steps follow it, in their own flow order. */
 export function flowOrder(graph: DiagramGraph): DiagramNode[] {
+  const order = (scope: string | undefined): DiagramNode[] => {
+    const nodes = graph.nodes.filter((node) => node.parentId === scope);
+    const ids = new Set(nodes.map((node) => node.id));
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const next = new Map<string, string[]>();
+    const incoming = new Set<string>();
+    for (const edge of graph.edges) {
+      if (!ids.has(edge.source) || !ids.has(edge.target)) continue;
+      next.set(edge.source, [...(next.get(edge.source) ?? []), edge.target]);
+      incoming.add(edge.target);
+    }
+    const queue = nodes.filter((node) => node.type.startsWith('startEvent') || !incoming.has(node.id)).map((node) => node.id);
+    const seen = new Set<string>();
+    const ordered: DiagramNode[] = [];
+    while (queue.length > 0) {
+      const id = queue.shift();
+      if (id === undefined || seen.has(id)) continue;
+      seen.add(id);
+      const node = byId.get(id);
+      if (node) ordered.push(node);
+      queue.push(...(next.get(id) ?? []));
+    }
+    return [...ordered, ...nodes.filter((node) => !seen.has(node.id))].flatMap((node) => [node, ...order(node.id)]);
+  };
+  return order(undefined);
+}
+
+/** The container ids around a step, outermost first; empty for a step of the process itself. */
+export function ancestorsOf(graph: DiagramGraph, id: string): DiagramNode[] {
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-  const next = new Map<string, string[]>();
-  const incoming = new Set<string>();
-  for (const edge of graph.edges) {
-    next.set(edge.source, [...(next.get(edge.source) ?? []), edge.target]);
-    incoming.add(edge.target);
+  const out: DiagramNode[] = [];
+  let parent = byId.get(id)?.parentId;
+  while (parent !== undefined && out.length <= MAX_NESTING) {
+    const node = byId.get(parent);
+    if (node === undefined) break;
+    out.unshift(node);
+    parent = node.parentId;
   }
-  const queue = graph.nodes.filter((node) => node.type.startsWith('startEvent') || !incoming.has(node.id)).map((node) => node.id);
-  const seen = new Set<string>();
-  const ordered: DiagramNode[] = [];
-  while (queue.length > 0) {
-    const id = queue.shift();
-    if (id === undefined || seen.has(id)) continue;
-    seen.add(id);
-    const node = byId.get(id);
-    if (node) ordered.push(node);
-    queue.push(...(next.get(id) ?? []));
-  }
-  return [...ordered, ...graph.nodes.filter((node) => !seen.has(node.id))];
+  return out;
+}
+
+/** True for a node that holds steps of its own in this graph. */
+export function isContainerNode(graph: DiagramGraph, id: string): boolean {
+  return graph.nodes.some((node) => node.parentId === id);
 }

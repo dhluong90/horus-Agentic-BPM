@@ -276,6 +276,7 @@ export const en = {
   'instance.entry.INSTANCE_STARTED': 'Case started',
   'instance.entry.NODE_ENTERED': 'Step started',
   'instance.entry.NODE_COMPLETED': 'Step completed',
+  'instance.entry.SCOPE_ENTERED': 'Group of steps started',
   'instance.entry.TASK_CLAIMED': 'Task taken',
   'instance.entry.TASK_UNCLAIMED': 'Task released',
   'instance.entry.TASK_COMPLETED': 'Task completed',
@@ -303,6 +304,9 @@ export const en = {
   'diagram.wholeProcessNote': 'Overview of the whole process; text is smaller.',
   'diagram.pan': 'Diagram canvas. Use the arrow keys to move around.',
   'diagram.defaultFlow': 'Default flow',
+  'diagram.stepCount': 'Steps: {count}',
+  'diagram.expand': 'Open {name}',
+  'diagram.collapse': 'Close {name}',
 
   /* Process approval with the graph diff (CKP-024) */
   'definition.lens.changes': 'Changes',
@@ -404,6 +408,7 @@ export const en = {
   'node.timer': 'Timer',
   'node.callActivity': 'Call activity',
   'node.transaction': 'Saga',
+  'node.subProcess': 'Sub-process',
   'node.compensate': 'Compensation',
   'node.message': 'Message',
   'node.signal': 'Signal',

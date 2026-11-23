@@ -21,6 +21,8 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <><path d="M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2.5" {...common} /></>;
       case 'callActivity':
         return <><rect x="1.5" y="2.5" width="13" height="11" rx="2" {...common} /><path d="M8 5.5v5M5.5 8h5" {...common} /></>;
+      case 'subProcess':
+        return <><rect x="1.5" y="2.5" width="13" height="11" rx="2" {...common} /><rect x="5.5" y="8" width="5" height="3.5" {...common} /></>;
       case 'transaction':
         return <path d="M5 2.5H2.5v11H5M11 2.5h2.5v11H11" {...common} />;
       case 'intermediateCatchEvent:timer':
