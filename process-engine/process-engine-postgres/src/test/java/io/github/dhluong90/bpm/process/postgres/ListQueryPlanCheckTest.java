@@ -170,7 +170,7 @@ class ListQueryPlanCheckTest {
         Map<String, List<Object>> samples = new LinkedHashMap<>();
         samples.put("live-token-counts", List.of("bank-a", DEFINITION));
         samples.put("active-definition-versions", List.of(1000));
-        samples.put("signal-start-definitions", List.of("bank-a", "rate-card-updated", "rate-card-updated", 50));
+        samples.put("signal-start-definitions", List.of("bank-a", "rate-card-updated", "rate-card-updated", "rate-card-updated", 50));
         samples.put("lock-definition-versions", List.of("bank-a", "loan-origination"));
         samples.put("definition-history", List.of("bank-a", DEFINITION));
         samples.put("instance-tokens", List.of("bank-a", INSTANCE));
