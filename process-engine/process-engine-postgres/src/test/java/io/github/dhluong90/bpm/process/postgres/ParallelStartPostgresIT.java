@@ -83,7 +83,7 @@ class ParallelStartPostgresIT {
     }
 
     @Test
-    void PRE_PD149_the_instance_starts_only_when_the_message_and_the_signal_have_both_arrived() {
+    void PRE_350_the_instance_starts_only_when_the_message_and_the_signal_have_both_arrived() {
         // Given application APP-2026-0042 whose request message arrives before the KYC signal
         MessageDelivery first = request("APP-2026-0042", "m-1");
 
@@ -110,7 +110,7 @@ class ParallelStartPostgresIT {
     }
 
     @Test
-    void PRE_PD149_a_signal_that_comes_first_is_held_and_the_message_starts_the_instance() {
+    void PRE_350_a_signal_that_comes_first_is_held_and_the_message_starts_the_instance() {
         // Given the KYC signal arrives first
         assertThat(kycCleared("s-2").startedInstances()).isEmpty();
         assertThat(instances()).isZero();

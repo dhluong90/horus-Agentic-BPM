@@ -2565,7 +2565,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `officer-lan -> 403; manager-hoa -> collect-id opens once`.
 - **Test ID:** `PRE_336_the_operator_starts_activities_with_task_manage_and_the_condition_cancels_the_rest` (`AdHocPostgresIT`)
 
-### PRE-337 A data output association writes the step result into a data object; a data input association hands it to a step
+### PRE-347 A data output association writes the step result into a data object; a data input association hands it to a step
 - **Traces to:** #499
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2573,9 +2573,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** `score` completes with `{score: 712, band: "B"}`.
 - **Then:** The variable `creditScore` holds `712`, the timeline records `DATA_OBJECT_WRITTEN` with the data object's name, and the step received `profile` as its input `profile`. An output the result does not contain is `DATA_OUTPUT_MISSING`; an input data object with no value is `DATA_OBJECT_UNSET`. A data store reference that an association names is read and written through the host (`PRE-341`); one that no association names is kept, exported and hashed and runs nothing.
 - **Example:** `score -> 712 into creditScore`.
-- **Test ID:** `a_data_output_association_leaves_the_result_in_the_data_object_and_a_data_input_reads_it` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_347_a_data_output_association_leaves_the_result_in_the_data_object_and_a_data_input_reads_it` (`ConformanceSuiteTest`)
 
-### PRE-338 Every conformance file keeps its elements, flows and hash through export and import
+### PRE-348 Every conformance file keeps its elements, flows and hash through export and import
 - **Traces to:** #499
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2583,9 +2583,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** Each is imported, run with every call, task and timer answered, then exported and imported again.
 - **Then:** The token takes the expected path and the instance completes; the second import has the same number of flow elements and the same canonical form, so the same definition hash.
 - **Example:** `amount 2,500,000 -> large; amount 40,000 -> small (default)`.
-- **Test ID:** `every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_348_every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import` (`ConformanceSuiteTest`)
 
-### PRE-339 A compensation throw with `waitForCompletion="false"` lets the flow go on while the undo runs, and each undo runs once
+### PRE-349 A compensation throw with `waitForCompletion="false"` lets the flow go on while the undo runs, and each undo runs once
 - **Traces to:** `TR-STD-04`, #499, PD-149
 - **Milestone:** M3
 - **Kind:** control
@@ -2596,9 +2596,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - The walk schedules one `COMPENSATION` job at a time, newest first, under the instance lock; an undo already running, done or failed for good is not scheduled again, so the second throw, a retry and a replayed command undo nothing twice. A failed or manual undo opens its incident and pauses that walk only; the flow beside it is not touched.
   - When the last entry is `DONE` the shell sends `EndBackgroundCompensation`, the walk token completes and the scope can end; the command is safe to repeat. An undo in flight when its instance ended (a terminate end) is still recorded.
 - **Example:** `reserve-funds -> release-funds called once, loan registration untouched, instance COMPLETED after it`.
-- **Test ID:** `PRE_PD149_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it` (`SagaCompensationTest`), `control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_349_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it` (`SagaCompensationTest`), `PRE_349_control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done` (`ConformanceSuiteTest`)
 
-### PRE-340 A parallel multiple process start waits for all its definitions
+### PRE-350 A parallel multiple process start waits for all its definitions
 - **Traces to:** `TR-STD-04`, #499, PD-149
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2606,9 +2606,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** The message with key `APP-2026-0042` arrives, then the signal; and in another run the signal first, then the message.
 - **Then:** The first arrival is held (`pre_start_arrival`, V50) and a message answers `WAITING`; the last one starts exactly one instance with the message key as business key and the message payload as variables, and consumes the held rows. A repeat of an arrival with the same key replaces the held one and starts nothing; a replayed request returns its first answer. A signal is a latch with no key and completes the oldest held message. Definitions of a parallel start are messages and signals only, one message at most; the versions of the key are locked while an arrival is counted, so two arrivals that complete the set together start one instance.
 - **Example:** `APP-2026-0042 request + kyc-cleared -> one instance, business key APP-2026-0042`.
-- **Test ID:** `PRE_PD149_the_instance_starts_only_when_the_message_and_the_signal_have_both_arrived`, `PRE_PD149_a_signal_that_comes_first_is_held_and_the_message_starts_the_instance` (`ParallelStartPostgresIT`), `a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_350_the_instance_starts_only_when_the_message_and_the_signal_have_both_arrived`, `PRE_350_a_signal_that_comes_first_is_held_and_the_message_starts_the_instance` (`ParallelStartPostgresIT`), `PRE_350_a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started` (`ConformanceSuiteTest`)
 
-### PRE-341 A multiple throw or end event throws every definition
+### PRE-351 A multiple throw or end event throws every definition
 - **Traces to:** `TR-STD-04`, #499, PD-149
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2616,9 +2616,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** The instance runs.
 - **Then:** Each definition is thrown, messages, signals and background compensations in document order and escalations last (an escalation an interrupting handler catches takes the token over), then the flow goes on or the token ends. Only message, signal, escalation and compensation with `waitForCompletion="false"` are allowed together; an error, terminate, cancel, link or waiting compensation is `MULTIPLE_THROW_DEFINITION_INVALID`. A multiple throw is part of the definition hash.
 - **Example:** `announce -> loan-approved sent and credit-line-opened broadcast, then close -> loan-approved and booking-closed`.
-- **Test ID:** `a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on` (`ConformanceSuiteTest`), `PRE_334_a_misplaced_ad_hoc_sub_process_or_multiple_event_is_refused_with_its_code` (`ComplexAdHocMultipleTest`)
+- **Test ID:** `PRE_351_a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on` (`ConformanceSuiteTest`), `PRE_334_a_misplaced_ad_hoc_sub_process_or_multiple_event_is_refused_with_its_code` (`ComplexAdHocMultipleTest`)
 
-### PRE-339 An instantiating event-based gateway starts the process on the first of its message or signal catches
+### PRE-352 An instantiating event-based gateway starts the process on the first of its message or signal catches
 - **Traces to:** #499
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2626,9 +2626,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** (a) The message `loan-application` is correlated in `bank-a` with `{applicant: "Tran Thi Mai"}`. (b) `bank-a` broadcasts `branch-batch-opened`. (c) A message no catch waits for arrives, or the instance is started through the API with no trigger.
 - **Then:** (a) One instance is created and continues after `online` with the payload as its variables; nothing waits on `branch`, so there is nothing to cancel, and history records `EVENT_GATEWAY_STARTED`. (b) One instance of `bank-a` starts after `branch`; `bank-b` starts none. (c) The message is `MESSAGE_NOT_CORRELATED`; the start is refused with `START_TRIGGER_REQUIRED` and nothing is stored. The import refuses, with their codes, a gateway with an incoming flow, one that is not in the process itself, and one that leads to a timer or conditional catch (`EVENT_GATEWAY_INSTANTIATE_INCOMING`, `EVENT_GATEWAY_INSTANTIATE_SCOPE`, `EVENT_GATEWAY_INSTANTIATE_TARGET`). A catch after the gateway needs no `horus:correlationKey`: no instance exists to hold the key. `eventGatewayType="Parallel"` stays refused (`S3`).
 - **Example:** `loan-application APP-9001 -> instance at review-online; branch-batch-opened -> instance at review-branch`.
-- **Test ID:** `GW_001_the_first_message_creates_the_instance_after_its_catch_and_the_others_are_not_waited_for`, `GW_002_a_signal_creates_an_instance_of_its_own_tenant_after_the_signal_catch`, `GW_003_a_message_no_catch_waits_for_starts_nothing_and_a_plain_start_is_refused` (`DataStoreAndGatewayStartPostgresIT`), `an_instantiating_event_gateway_starts_after_the_catch_that_fired_and_waits_for_no_other` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_352_the_first_message_creates_the_instance_after_its_catch_and_the_others_are_not_waited_for`, `PRE_352_a_signal_creates_an_instance_of_its_own_tenant_after_the_signal_catch`, `PRE_352_a_message_no_catch_waits_for_starts_nothing_and_a_plain_start_is_refused` (`DataStoreAndGatewayStartPostgresIT`), `PRE_352_an_instantiating_event_gateway_starts_after_the_catch_that_fired_and_waits_for_no_other` (`ConformanceSuiteTest`)
 
-### PRE-340 A compensation event sub-process may hold several service tasks, which run in flow order
+### PRE-353 A compensation event sub-process may hold several service tasks, which run in flow order
 - **Traces to:** #499
 - **Milestone:** M3
 - **Kind:** semantics
@@ -2636,9 +2636,9 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** The undo of the process runs.
 - **Then:** When `disburse` ends the kernel pushes the step's entry, then one entry per task from the last to the first, so the walk (newest first) runs `reverse-disbursement`, `notify-treasury` and then `release-funds`, each once (`PRE-290`), each with the inputs read when the sub-process ended. A body that is not a line of service tasks with handlers from the start event to the one end event (a gateway, a branch, a user task) is `COMPENSATION_EVENT_SUBPROCESS_SHAPE`. The rest of `PRE-326` is unchanged.
 - **Example:** `reverse-disbursement, notify-treasury, release-funds`.
-- **Test ID:** `PRE_326_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside` (`SagaCompensationTest`), `PRE_326_a_compensation_event_sub_process_with_several_tasks_undoes_them_in_flow_order`, `PRE_326_an_undo_that_branches_or_holds_anything_but_service_tasks_is_refused` (`EventSubProcessTest`), `a_compensation_event_sub_process_of_two_tasks_pushes_them_so_the_walk_runs_them_in_flow_order` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_353_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside` (`SagaCompensationTest`), `PRE_353_a_compensation_event_sub_process_with_several_tasks_undoes_them_in_flow_order`, `PRE_353_an_undo_that_branches_or_holds_anything_but_service_tasks_is_refused` (`EventSubProcessTest`), `PRE_353_a_compensation_event_sub_process_of_two_tasks_pushes_them_so_the_walk_runs_them_in_flow_order` (`ConformanceSuiteTest`)
 
-### PRE-341 A data store association reads and writes through the host's adapter, for the tenant of the instance only
+### PRE-354 A data store association reads and writes through the host's adapter, for the tenant of the instance only
 - **Traces to:** #499
 - **Milestone:** M3
 - **Kind:** control
@@ -2646,4 +2646,4 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** (a) Each bank starts an instance, one of them with a variable `tenantId` that names the other bank. (b) The definition is imported in a host with no adapter for `score-ledger`. (c) The adapter for `score-ledger` has no write.
 - **Then:** (a) Each step receives its own bank's limit as `limit` and its score is written under its own bank; every call to an adapter carries the tenant of the instance and the variable changes nothing. History records `DATA_STORE_READ` and `DATA_STORE_WRITTEN` with the store and the item. A read or write runs in the step transaction; `DataStoreAccess.idempotencyKey()` is the same when the step runs again. (b) The import is `422 VALIDATION_FAILED` with `DATA_STORE_ADAPTER_NOT_REGISTERED`, naming the step and the store, and nothing is stored. (c) The step fails with `DATA_STORE_WRITE_UNSUPPORTED`, or `DATA_STORE_READ_UNSUPPORTED` for a read; any other failure of an adapter is `DATA_STORE_FAILED` with the exception class only, never its message, which may hold a row. A store that returns no value is `DATA_STORE_VALUE_MISSING`. A data store reference that no association names needs no adapter and runs nothing.
 - **Example:** `bank-a limit 50,000,000 -> score 712 under bank-a; bank-b is untouched`.
-- **Test ID:** `DS_001_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance`, `DS_002_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time`, `DS_003_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete` (`DataStoreAndGatewayStartPostgresIT`), `a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance` (`ConformanceSuiteTest`)
+- **Test ID:** `PRE_354_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance`, `PRE_354_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time`, `PRE_354_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete` (`DataStoreAndGatewayStartPostgresIT`), `PRE_354_a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance` (`ConformanceSuiteTest`)

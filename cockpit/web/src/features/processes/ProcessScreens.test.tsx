@@ -251,6 +251,23 @@ describe('#499 data objects and data stores', () => {
     expect(diagram).toHaveAttribute('aria-label', 'Diagram of Loan origination, 14 steps');
   });
 
+  it('CKP_499_a_diagram_with_data_symbols_keeps_room_under_them_for_the_minimap', async () => {
+    // jsdom has no layout: report a canvas that is smaller than its drawing, so the minimap is shown.
+    const heights = { scrollHeight: 1200, clientHeight: 400 };
+    for (const [name, value] of Object.entries(heights)) {
+      Object.defineProperty(HTMLElement.prototype, name, { configurable: true, get: () => value });
+    }
+    try {
+      setScenario('processes-reviewer');
+      open('#/processes/loan-origination/3');
+      const diagram = await screen.findByRole('group', { name: /Diagram of Loan origination/ });
+      await waitFor(() => { expect(document.querySelector('[data-minimap]')).not.toBeNull(); });
+      expect(diagram.closest('.dg__frame')).toHaveClass('dg__frame--clear-map');
+    } finally {
+      for (const name of Object.keys(heights)) delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    }
+  });
+
   it('CKP_499_the_timeline_names_the_data_a_step_read_and_wrote', async () => {
     const table = await openTimeline(BOOKED_INSTANCE_ID);
     const rows = within(table).getAllByRole('row').slice(1);

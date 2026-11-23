@@ -26,6 +26,8 @@
   background-image: radial-gradient(var(--dot) 1px, transparent 1px);
   background-size: 16px 16px;
 }
+/* The data band is the lowest row: room under it, so the minimap (96 high, 12 from the edge, 6 padding) never covers a data symbol (#499). */
+.dg__frame--clear-map { padding-bottom: 128px; }
 .dg__svg { display: block; margin: 0 auto; }
 
 .dg-edge path { fill: none; stroke: var(--edge); stroke-width: 1.5; }

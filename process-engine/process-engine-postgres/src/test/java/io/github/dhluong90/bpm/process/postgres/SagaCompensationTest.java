@@ -886,7 +886,7 @@ class SagaCompensationTest {
     }
 
     @Test
-    void PRE_326_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside() {
+    void PRE_353_a_compensation_event_sub_process_of_two_tasks_runs_them_in_flow_order_before_the_step_inside() {
         // Given loan-booking-undo-tasks: the funds reserved in the sub-process, whose undo is two tasks; the partner refuses
         TestEngine engine = engine();
         deploy(engine, "loan-booking-undo-tasks");
@@ -966,7 +966,7 @@ class SagaCompensationTest {
     }
 
     @Test
-    void PRE_PD149_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it() {
+    void PRE_349_control_a_background_undo_runs_once_while_the_flow_goes_on_and_the_instance_ends_after_it() {
         // Given loan-undo-background: the loan registered, the funds reserved, then two throws of the reservation that
         // do not wait for the undo, then a customer notice
         TestEngine engine = engine();

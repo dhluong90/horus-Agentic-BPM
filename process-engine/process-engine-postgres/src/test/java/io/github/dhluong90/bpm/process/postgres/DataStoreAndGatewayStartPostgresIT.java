@@ -169,7 +169,7 @@ class DataStoreAndGatewayStartPostgresIT {
     }
 
     @Test
-    void DS_001_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance() {
+    void PRE_354_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance() {
         // Given bank-a limit 50,000,000 VND and bank-b limit 5,000,000 VND under the same item name
         limits.rows.put("bank-a/limit", 50_000_000);
         limits.rows.put("bank-b/limit", 5_000_000);
@@ -198,7 +198,7 @@ class DataStoreAndGatewayStartPostgresIT {
     }
 
     @Test
-    void DS_002_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time() {
+    void PRE_354_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time() {
         // Given a host that registers no adapter for score-ledger
         engine.close();
         TestEngine.reset();
@@ -215,7 +215,7 @@ class DataStoreAndGatewayStartPostgresIT {
     }
 
     @Test
-    void DS_003_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete() {
+    void PRE_354_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete() {
         // Given a read-only store: no write is implemented
         engine.close();
         TestEngine.reset();
@@ -245,7 +245,7 @@ class DataStoreAndGatewayStartPostgresIT {
     }
 
     @Test
-    void GW_001_the_first_message_creates_the_instance_after_its_catch_and_the_others_are_not_waited_for() {
+    void PRE_352_the_first_message_creates_the_instance_after_its_catch_and_the_others_are_not_waited_for() {
         // Given a loan intake that starts on a loan-application message or a branch-batch-opened signal
         deploy("bank-a", "loan-intake", INTAKE);
 
@@ -270,7 +270,7 @@ class DataStoreAndGatewayStartPostgresIT {
     }
 
     @Test
-    void GW_002_a_signal_creates_an_instance_of_its_own_tenant_after_the_signal_catch() {
+    void PRE_352_a_signal_creates_an_instance_of_its_own_tenant_after_the_signal_catch() {
         // Given the intake deployed for bank-a and bank-b
         deploy("bank-a", "loan-intake", INTAKE);
         deploy("bank-b", "loan-intake", INTAKE);
@@ -288,7 +288,7 @@ class DataStoreAndGatewayStartPostgresIT {
     }
 
     @Test
-    void GW_003_a_message_no_catch_waits_for_starts_nothing_and_a_plain_start_is_refused() {
+    void PRE_352_a_message_no_catch_waits_for_starts_nothing_and_a_plain_start_is_refused() {
         deploy("bank-a", "loan-intake", INTAKE);
 
         engine.identity.as("bank-a", "intake-consumer", PIPELINE);

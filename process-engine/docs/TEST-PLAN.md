@@ -228,6 +228,14 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-298 | `PRE_298_*` in `CollaborationImportTest` and `CollaborationPostgresIT` | Message flows kept; export and read back, per pool | M3 | `TR-STD-04`, `TR-STD-10` | Done (#497) |
 | PRE-299 | `PRE_299_*` in `CollaborationImportTest` | A choreography element and a file of two processes with no collaboration | M3 | `TR-STD-04` | Done (#497) |
 | PRE-346 | `PRE_346_*` in `PendingApprovalsKindsPostgresIT` | Migration plans and calendar changes in the approvals queue: order, cursor, four eyes, the reviewed hash | M3 | `TR-SEC-04` | Done (#473) |
+| PRE-347 | `PRE_347_*` in `ConformanceSuiteTest` | Unit on the kernel, data objects read and written through associations | M3 | `TR-STD-04` | Done (#499) |
+| PRE-348 | `PRE_348_*` in `ConformanceSuiteTest` | Every conformance file round-trips with the same hash | M3 | `TR-STD-04` | Done (#499) |
+| PRE-349 | `PRE_349_*` in `SagaCompensationTest` and `ConformanceSuiteTest` | Integration on PostgreSQL, a background undo that runs once while the flow goes on | M3 | `TR-COMP-01`, `TR-IDEM-04` | Done (PD-149) |
+| PRE-350 | `PRE_350_*` in `ParallelStartPostgresIT` and `ConformanceSuiteTest` | Integration on PostgreSQL, a parallel multiple start held until every arrival | M3 | `TR-STD-04` | Done (PD-149) |
+| PRE-351 | `PRE_351_*` in `ConformanceSuiteTest` | Unit on the kernel, a multiple throw and a multiple end event | M3 | `TR-STD-04` | Done (PD-149) |
+| PRE-352 | `PRE_352_*` in `DataStoreAndGatewayStartPostgresIT` and `ConformanceSuiteTest` | Integration on PostgreSQL, an instantiating event-based gateway per tenant | M3 | `TR-STD-04`, `TR-TEN-01` | Done (#499) |
+| PRE-353 | `PRE_353_*` in `SagaCompensationTest`, `EventSubProcessTest` and `ConformanceSuiteTest` | A compensation event sub-process of several tasks, run in flow order | M3 | `TR-COMP-01` | Done (#499) |
+| PRE-354 | `PRE_354_*` in `DataStoreAndGatewayStartPostgresIT` and `ConformanceSuiteTest` | Integration on PostgreSQL, a data store read and write through the host adapter, per tenant | M3 | `TR-STD-04`, `TR-TEN-01` | Done (#499) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

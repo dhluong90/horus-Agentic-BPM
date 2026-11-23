@@ -626,7 +626,7 @@ class EventSubProcessTest {
             </bpmn:subProcess>""";
 
     @Test
-    void PRE_326_a_compensation_event_sub_process_with_several_tasks_undoes_them_in_flow_order() {
+    void PRE_353_a_compensation_event_sub_process_with_several_tasks_undoes_them_in_flow_order() {
         // Given an undo of two service tasks: reverse the disbursement of 25,000,000 VND, then tell the treasury
         DefaultExecutionKernel kernel = kernel(booking(UNDO_TWO_TASKS));
         Transition started = start(kernel, Map.of("account", "0011-223344", "amount", 25_000_000));
@@ -648,7 +648,7 @@ class EventSubProcessTest {
     }
 
     @Test
-    void PRE_326_an_undo_that_branches_or_holds_anything_but_service_tasks_is_refused() {
+    void PRE_353_an_undo_that_branches_or_holds_anything_but_service_tasks_is_refused() {
         // A user task in the line, a second flow out of the first task, and a task with no flow into the line
         refused(booking(UNDO_TWO_TASKS.replaceAll("(?s)<bpmn:serviceTask id=\"notify-treasury\".*?</bpmn:serviceTask>",
                 "<bpmn:task id=\"notify-treasury\"/>")), "COMPENSATION_EVENT_SUBPROCESS_SHAPE", "undo-disbursement");

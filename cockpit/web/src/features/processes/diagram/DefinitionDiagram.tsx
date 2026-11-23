@@ -601,7 +601,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
         </div>
       </div>
       <div className="dg__stage">
-        <div ref={frame} className={`dg__frame${fill ? ' dg__frame--fill' : ''}${pannable ? ' dg__frame--pannable' : ''}`} onScroll={readView}
+        <div ref={frame} className={`dg__frame${fill ? ' dg__frame--fill' : ''}${pannable ? ' dg__frame--pannable' : ''}${view !== undefined && layout.data !== undefined ? ' dg__frame--clear-map' : ''}`} onScroll={readView}
           tabIndex={pannable ? 0 : undefined} role={pannable ? 'region' : undefined} aria-label={pannable ? t('diagram.pan') : undefined}
           onKeyDown={onKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
           <svg className="dg__svg" role="group" aria-label={label} width={width} height={height}

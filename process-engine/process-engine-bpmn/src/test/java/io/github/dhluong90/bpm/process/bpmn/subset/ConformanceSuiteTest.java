@@ -106,7 +106,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void a_data_output_association_leaves_the_result_in_the_data_object_and_a_data_input_reads_it() throws IOException {
+    void PRE_347_a_data_output_association_leaves_the_result_in_the_data_object_and_a_data_input_reads_it() throws IOException {
         Process process = read("data-objects.bpmn");
 
         Outcome out = run(process, Map.of("creditScore", 0, "profile", Map.of("name", "Nguyen Van An")),
@@ -148,7 +148,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done()
+    void PRE_349_control_a_compensation_throw_that_does_not_wait_lets_the_flow_go_on_and_holds_the_end_until_the_undo_is_done()
             throws IOException {
         Process process = read("compensation-background.bpmn");
 
@@ -178,7 +178,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started() throws IOException {
+    void PRE_350_a_parallel_multiple_process_start_imports_compiles_and_runs_once_it_has_been_started() throws IOException {
         Outcome out = run(read("parallel-multiple-start.bpmn"), Map.of("customer", "Tran Thi Mai"), Map.of());
 
         assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
@@ -186,7 +186,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on() throws IOException {
+    void PRE_351_a_multiple_throw_and_a_multiple_end_event_throw_every_definition_and_then_go_on() throws IOException {
         Outcome out = run(read("multiple-throw-and-end.bpmn"), Map.of(), Map.of());
 
         assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
@@ -198,7 +198,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void an_instantiating_event_gateway_starts_after_the_catch_that_fired_and_waits_for_no_other() throws IOException {
+    void PRE_352_an_instantiating_event_gateway_starts_after_the_catch_that_fired_and_waits_for_no_other() throws IOException {
         Process process = read("event-gateway-start.bpmn");
 
         Outcome message = run(process, new Command.Start(Map.of("applicant", "Tran Thi Mai"), "officer.hoa", "online"),
@@ -217,7 +217,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void a_compensation_event_sub_process_of_two_tasks_pushes_them_so_the_walk_runs_them_in_flow_order()
+    void PRE_353_a_compensation_event_sub_process_of_two_tasks_pushes_them_so_the_walk_runs_them_in_flow_order()
             throws IOException {
         Outcome out = run(read("compensation-event-subprocess.bpmn"), Map.of(), Map.of("reserve-funds", Map.of()));
 
@@ -228,7 +228,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance()
+    void PRE_354_a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance()
             throws IOException {
         Map<String, Object> rows = new HashMap<>();
         rows.put("bank-a/limit", 50_000_000);
@@ -267,7 +267,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import() throws IOException {
+    void PRE_348_every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import() throws IOException {
         for (String file : List.of("data-objects.bpmn", "gateways.bpmn", "parallel-join.bpmn",
                 "sub-process-and-timer.bpmn", "compensation-background.bpmn", "parallel-multiple-start.bpmn",
                 "multiple-throw-and-end.bpmn", "event-gateway-start.bpmn", "compensation-event-subprocess.bpmn",
