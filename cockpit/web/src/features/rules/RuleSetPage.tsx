@@ -32,6 +32,7 @@ import { ReadingsDiffView } from './components/ReadingsDiffView';
 import { ReadingStyleSwitch } from './components/ReadingParts';
 import { SimulatePanel } from './components/SimulatePanel';
 import { SimulationScreen } from './components/SimulationScreen';
+import { ReportView } from './components/ReportView';
 import { formatDateTime } from './model/dates';
 import { columnLabel } from './model/reading';
 import { formatRoute, type Lens, type Route } from '../../app/route';
@@ -141,6 +142,8 @@ function LensContent({ lens, version, base, matched, onOpenTable, onEdit, seen }
       return <SourceView version={version} />;
     case 'simulate':
       return <SimulationScreen version={version} onEdit={onEdit} />;
+    case 'report':
+      return <ReportView version={version} />;
   }
 }
 
@@ -217,9 +220,9 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
   const drafting = version.status === 'DRAFT';
   // Simulation runs on drafts only: on another version no tab is active, as the body is not any of them.
   const simulateOnOther = lens === 'simulate' && !drafting;
-  const tabLens: 'table' | 'readings' | 'changes' | 'history' | 'simulate' | undefined = simulateOnOther ? undefined : lens === 'source' || lens === 'edit' ? 'table' : lens;
+  const tabLens: 'table' | 'readings' | 'changes' | 'report' | 'history' | 'simulate' | undefined = simulateOnOther ? undefined : lens === 'source' || lens === 'edit' ? 'table' : lens;
   // Two versions side by side need the full width: one view at a time, and the decision docks below the diff.
-  const comparing = !editing && lens === 'changes';
+  const comparing = !editing && (lens === 'changes' || lens === 'report');
   // The samples and their results need the full width too; the inspector steps aside.
   const wide = comparing || (!editing && lens === 'simulate');
   // Approve only what is on screen: the diff shown must be of this version's content, and the content must be what
@@ -276,7 +279,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
                   navigate(versions.some((v) => v.version !== discarded.version) ? { name: 'rule-set', ruleSet: discarded.ruleSet, version: undefined, lens: undefined } : { name: 'rule-sets' });
                 }}
                 newDraft={{ start: () => { newDraft.start(version.version); }, isPending: newDraft.isPending, error: newDraft.error }}
-                requestPublish={{ start: () => { requestPublish.start(version); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
+                requestPublish={{ start: (report) => { requestPublish.start({ version, report }); }, isPending: requestPublish.isPending, error: requestPublish.error }} />
             </div>
           ) : null}
         </div>
@@ -289,12 +292,15 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
         {picker.input}
         {importVersion.error !== undefined && importVersion.error !== null ? <ProblemNotice error={importVersion.error} located refusedFile={importVersion.fileName !== undefined ? { fileName: importVersion.fileName, columnLabel: label } : undefined} /> : null}
         {exportFile.error ? <ProblemNotice error={exportFile.error} located columnLabel={label} message={refusedWith(exportFile.error, 'CSV_NO_TABLE_FORM') ? t('export.noTable') : undefined} /> : null}
-        {requestPublish.error ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
+        {requestPublish.error && !(session.simulationReports && session.requiresReport(version.ruleSet)) ? <ProblemNotice error={requestPublish.error} onReload={() => { window.location.reload(); }} /> : null}
         {!editing ? (
           <div className="rs-head__tabs">
             <Tabs label={t('lens.label')} className="rs-tabs" selected={tabLens} onSelect={(id) => { go({ lens: id }); }}
               items={[
-                { id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') }, { id: 'history', label: t('lens.history') },
+                { id: 'table', label: t('lens.table') }, { id: 'readings', label: t('lens.readings') }, { id: 'changes', label: t('lens.changes') },
+                // The report attached to a publication request opens beside the diff, once the version was requested (PD-115).
+                ...(session.simulationReports && version.status !== 'DRAFT' ? [{ id: 'report', label: t('lens.report') } as const] : []),
+                { id: 'history', label: t('lens.history') },
                 // Simulation runs on drafts only (CKP-004).
                 ...(drafting ? [{ id: 'simulate', label: t('lens.simulate') } as const] : []),
               ]}>

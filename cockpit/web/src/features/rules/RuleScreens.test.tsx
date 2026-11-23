@@ -67,7 +67,7 @@ describe('rule set list and version view', () => {
   it('RLE_039_a_list_cut_short_by_the_page_guard_says_so', async () => {
     let n = 0;
     mockHost.use(http.get('*/api/bpm/rules/v1/rule-sets', () => HttpResponse.json({
-      data: [{ ruleSet: `rs-${String((n += 1))}`, latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }],
+      data: [{ ruleSet: `rs-${String((n += 1))}`, displayName: `Rs ${String(n)}`, latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }],
       nextCursor: 'more', hasNext: true,
     })));
     open('#/rules');

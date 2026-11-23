@@ -253,7 +253,6 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   // that raises or terminates carries its symbol inside the thick ring.
   const boundary = node.type.startsWith('boundaryEvent');
   const intermediate = node.type.startsWith('intermediate') || boundary;
-  const endSymbol = node.type.startsWith('endEvent:');
   const soft = boundary && node.interrupting === false;
   const marked = intermediate || node.type.includes(':');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
