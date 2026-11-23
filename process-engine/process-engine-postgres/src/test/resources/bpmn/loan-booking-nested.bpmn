@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A loan booking whose disbursement is a sub-process with a fee sub-process inside (#488). The loan is registered in
+     the root scope; when the partner refuses at the end, the undo of the root scope walks into the completed
+     sub-processes and takes every entry newest first: the account, the fee, the funds, then the registration. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-booking-nested"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-booking-nested" name="Loan booking with nested sub-processes" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="register-loan" horus:handler="register-loan" horus:compensate="cancel-loan"
+                      horus:resultVariable="registration"/>
+    <bpmn:subProcess id="disburse" name="Disburse">
+      <bpmn:startEvent id="disburse-start"/>
+      <bpmn:serviceTask id="reserve-funds" horus:handler="reserve-funds" horus:compensate="release-funds"
+                        horus:resultVariable="reservation"/>
+      <bpmn:subProcess id="fees" name="Charge the fees">
+        <bpmn:startEvent id="fees-start"/>
+        <bpmn:serviceTask id="charge-fee" horus:handler="charge-fee" horus:compensate="refund-fee"
+                          horus:resultVariable="fee"/>
+        <bpmn:endEvent id="fees-end"/>
+        <bpmn:sequenceFlow id="g1" sourceRef="fees-start" targetRef="charge-fee"/>
+        <bpmn:sequenceFlow id="g2" sourceRef="charge-fee" targetRef="fees-end"/>
+      </bpmn:subProcess>
+      <bpmn:serviceTask id="open-account" horus:handler="open-account" horus:compensate="close-account"
+                        horus:resultVariable="account"/>
+      <bpmn:endEvent id="disburse-end"/>
+      <bpmn:sequenceFlow id="d1" sourceRef="disburse-start" targetRef="reserve-funds"/>
+      <bpmn:sequenceFlow id="d2" sourceRef="reserve-funds" targetRef="fees"/>
+      <bpmn:sequenceFlow id="d3" sourceRef="fees" targetRef="open-account"/>
+      <bpmn:sequenceFlow id="d4" sourceRef="open-account" targetRef="disburse-end"/>
+    </bpmn:subProcess>
+    <bpmn:serviceTask id="notify-partner" horus:handler="partner-hub" horus:mode="remote"
+                      horus:onFailure="compensate" horus:resultVariable="notice"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="register-loan"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="register-loan" targetRef="disburse"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="disburse" targetRef="notify-partner"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="notify-partner" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

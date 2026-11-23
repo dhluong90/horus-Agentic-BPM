@@ -17,6 +17,7 @@ export const KNOWN_NODE_TYPES = [
   'userTask',
   'serviceTask',
   'serviceTask:agentTask',
+  'serviceTask:compensation',
   'businessRuleTask',
   'task',
   'manualTask',
@@ -32,6 +33,10 @@ export const KNOWN_NODE_TYPES = [
   'boundaryEvent:timer',
   'boundaryEvent:error',
   'boundaryEvent:escalation',
+  'boundaryEvent:compensate',
+  'boundaryEvent:cancel',
+  'endEvent:compensate',
+  'endEvent:cancel',
   'endEvent:error',
   'endEvent:escalation',
   'endEvent:terminate',
@@ -71,6 +76,8 @@ export interface DiagramEdge {
   isDefault: boolean;
   /** A link between a throw and its catch of the same name (#493), drawn dashed; not a sequence flow. */
   isLink?: boolean;
+  /** An association from a compensation boundary event to its compensation activity (#488), drawn dotted; not a sequence flow. */
+  isAssociation?: boolean;
 }
 
 export interface DiagramGraph {
@@ -124,6 +131,8 @@ export function nodeType(element: Element): string {
   const local = element.localName;
   if (local === 'serviceTask') {
     const subtype = nonEmpty(element.getAttributeNS(HORUS, 'type'));
+    // #488: a task that is the undo of another step, run by compensation and never by a flow.
+    if (subtype === undefined && element.getAttribute('isForCompensation') === 'true') return `${local}:compensation`;
     return subtype === undefined ? local : `${local}:${subtype}`;
   }
   if (local.endsWith('Event')) {
@@ -152,6 +161,13 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       const source = nonEmpty(child.getAttribute('sourceRef'));
       const target = nonEmpty(child.getAttribute('targetRef'));
       if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false });
+      continue;
+    }
+    if (child.localName === 'association') {
+      // #488: only the line from a compensation boundary event to its compensation activity is drawn; the ends decide below.
+      const source = nonEmpty(child.getAttribute('sourceRef'));
+      const target = nonEmpty(child.getAttribute('targetRef'));
+      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: undefined, isDefault: false, isAssociation: true });
       continue;
     }
     if (NOT_A_STEP.has(child.localName)) continue;

@@ -25,8 +25,10 @@ public final class CompiledProcess {
     private final Map<FacetKey<?>, Object> facets;
     private final Map<String, String> containers;
     private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries;
+    private final Map<String, String> compensationActivities;
 
     private CompiledProcess(Builder builder) {
+        this.compensationActivities = Map.copyOf(builder.compensationActivities);
         this.containers = Map.copyOf(builder.containers);
         Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> attached = new HashMap<>();
         builder.boundaries.forEach((k, v) -> attached.put(k, List.copyOf(v)));
@@ -116,6 +118,17 @@ public final class CompiledProcess {
     }
 
     /**
+     * The compensation activity of a step (#488): the {@code isForCompensation} task that a compensation boundary event
+     * attached to the step points at by an association. Its handler is the step's undo.
+     *
+     * @param activityId the id of the step that has the boundary
+     * @return the compensation activity, if the step has a compensation boundary event
+     */
+    public Optional<FlowNode> compensationActivityOf(String activityId) {
+        return Optional.ofNullable(compensationActivities.get(activityId)).map(nodes::get);
+    }
+
+    /**
      * @param node a node
      * @return the name of its link event definition when it is a link throw or catch event (#493), else empty
      */
@@ -165,11 +178,28 @@ public final class CompiledProcess {
         private final Map<String, String> containers = new HashMap<>();
         private final Map<String, List<io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent>> boundaries =
                 new HashMap<>();
+        private final Map<String, String> compensationActivities = new HashMap<>();
 
         private Builder(String definitionId, Process process) {
             this.definitionId = Objects.requireNonNull(definitionId, "definitionId must not be null");
             this.process = Objects.requireNonNull(process, "process must not be null");
             index(process.id(), process.flowElements());
+            indexCompensation();
+        }
+
+        /** Ties each compensation boundary event to the activity its association points at (#488). */
+        private void indexCompensation() {
+            for (io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact artifact : process.allArtifacts()) {
+                if (artifact instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Association a
+                        && nodes.get(a.sourceRef()) instanceof io.github.dhluong90.bpm.process.internal.model.bpmn
+                                .BoundaryEvent b
+                        && b.eventDefinitions().size() == 1
+                        && b.eventDefinitions().get(0) instanceof
+                                io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition
+                        && b.attachedToRef() != null && nodes.containsKey(a.targetRef())) {
+                    compensationActivities.putIfAbsent(b.attachedToRef(), a.targetRef());
+                }
+            }
         }
 
         private void index(String containerId, List<io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement>

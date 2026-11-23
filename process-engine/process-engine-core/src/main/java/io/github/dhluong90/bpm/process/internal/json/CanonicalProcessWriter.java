@@ -66,7 +66,7 @@ public final class CanonicalProcessWriter {
         if (process.name() != null) {
             doc.put("name", process.name());
         }
-        writeSteps(doc.putArray("steps"), process.flowElements());
+        writeSteps(doc.putArray("steps"), process.flowElements(), process.artifacts());
         return doc;
     }
 
@@ -74,7 +74,8 @@ public final class CanonicalProcessWriter {
      * The steps of one container. A {@code saga} block ({@code transaction}, #67) is a step of type {@code saga}
      * whose own steps are nested under {@code steps}, so a definition without one keeps the hash it had.
      */
-    private static void writeSteps(ArrayNode steps, List<FlowElement> elements) {
+    private static void writeSteps(ArrayNode steps, List<FlowElement> elements,
+            List<io.github.dhluong90.bpm.process.internal.model.bpmn.Artifact> artifacts) {
         List<SequenceFlow> flows = elements.stream().filter(SequenceFlow.class::isInstance)
                 .map(SequenceFlow.class::cast).toList();
         for (FlowElement element : elements) {
@@ -105,6 +106,18 @@ public final class CanonicalProcessWriter {
                 case EndEvent e when e.eventDefinitions().size() == 1
                         && e.eventDefinitions().get(0) instanceof TerminateEventDefinition ->
                         step.put("type", "terminateEnd");
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof CompensateEventDefinition d -> {
+                    // #488: an end event that undoes its scope, or one activity of it, before it ends.
+                    step.put("type", "compensationEnd");
+                    if (d.activityRef() != null) {
+                        step.put("activity", d.activityRef());
+                    }
+                }
+                case EndEvent e when e.eventDefinitions().size() == 1
+                        && e.eventDefinitions().get(0) instanceof
+                                io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition ->
+                        step.put("type", "cancelEnd");
                 case EndEvent e -> step.put("type", "end");
                 case BoundaryEvent b -> {
                     // #489: a boundary event, with its trigger, what it is attached to and whether it interrupts.
@@ -136,6 +149,17 @@ public final class CanonicalProcessWriter {
                                     step.put("escalationCode", e.escalationCode());
                                 }
                             }
+                            case CompensateEventDefinition c -> {
+                                // #488: the compensation activity is part of the step, so it is part of the hash.
+                                step.put("trigger", "compensation");
+                                artifacts.stream().filter(a -> a instanceof
+                                        io.github.dhluong90.bpm.process.internal.model.bpmn.Association x
+                                        && b.id().equals(x.sourceRef())).findFirst().ifPresent(a ->
+                                        step.put("compensatedBy", ((io.github.dhluong90.bpm.process.internal.model
+                                                .bpmn.Association) a).targetRef()));
+                            }
+                            case io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition c ->
+                                    step.put("trigger", "cancel");
                             default -> step.put("trigger", "other");
                         }
                     }
@@ -306,16 +330,20 @@ public final class CanonicalProcessWriter {
                 }
                 case Transaction saga -> {
                     step.put("type", "saga");
-                    writeSteps(step.putArray("steps"), saga.flowElements());
+                    writeSteps(step.putArray("steps"), saga.flowElements(), saga.artifacts());
                 }
                 case SubProcess sub -> {
                     // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
                     step.put("type", "subProcess");
-                    writeSteps(step.putArray("steps"), sub.flowElements());
+                    writeSteps(step.putArray("steps"), sub.flowElements(), sub.artifacts());
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
-                        && t.eventDefinitions().get(0) instanceof CompensateEventDefinition ->
-                        step.put("type", "throwCompensation");
+                        && t.eventDefinitions().get(0) instanceof CompensateEventDefinition d -> {
+                    step.put("type", "throwCompensation");
+                    if (d.activityRef() != null) {
+                        step.put("activity", d.activityRef());
+                    }
+                }
                 default -> step.put("type", node.getClass().getSimpleName());
             }
             // #67: only when declared, so the hash of a step without them is unchanged.
@@ -327,8 +355,11 @@ public final class CanonicalProcessWriter {
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity a
+                    && a.activity().isForCompensation()) {
+                step.put("forCompensation", true);
+            }
             boolean ends = node instanceof IntermediateThrowEvent t && (t.eventDefinitions().isEmpty()
-                    || t.eventDefinitions().get(0) instanceof CompensateEventDefinition
                     || t.eventDefinitions().get(0) instanceof LinkEventDefinition);
             if (!(node instanceof ExclusiveGateway) && !ends && out.size() == 1) {
                 step.put("next", out.get(0).targetRef());

@@ -141,7 +141,7 @@ function Edge({ edge, marker, defaultLabel, mark }: { edge: PlacedEdge; marker: 
   const at = edge.labelAt;
   const pill = edge.label !== undefined ? Math.ceil(edge.label.length * LABEL_CHAR) + 14 : 0;
   return (
-    <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
+    <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}${edge.isAssociation === true ? ' dg-edge--association' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
       <path d={path(edge.points)} markerEnd={`url(#${marker}${mark !== undefined ? `-${mark}` : ''})`} />
       {tick !== undefined ? <path className="dg-edge__default" d={tick}><title>{defaultLabel}</title></path> : null}
       {edge.label !== undefined && at ? (

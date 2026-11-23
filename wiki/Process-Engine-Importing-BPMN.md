@@ -80,9 +80,11 @@ The root element must declare the namespaces, and the process must be executable
 | `scriptTask` | `horus:resultVariable`; a `<bpmn:script>` child with one expression in `urn:horus-bpm:expr:v1` | `scriptFormat` set to `urn:horus-bpm:expr:v1` | `<bpmn:script>amount * 2</bpmn:script>` |
 | `callActivity` (a `callProcess` step, 0.3.0) | `calledElement`, the key of the definition to call, in your tenant | `horus:calledVersion` to pin a version, `horus:input` and `horus:output` elements, `horus:compensate`, `horus:onFailure="compensate"` | `calledElement="kyc-check"` |
 | `subProcess` (embedded, since 0.3.0) | a none `startEvent`, steps and at least one `endEvent` inside it | `name`. It reads and writes the process variables like the rest of the process; no flow crosses its border | `<bpmn:subProcess id="hand-over">` |
-| `boundaryEvent` (since 0.3.0) | `attachedToRef`, the id of a task, call activity or sub-process in the same scope; one `timerEventDefinition` (`timeDuration` or `timeDate`), `errorEventDefinition` or `escalationEventDefinition`; at least one outgoing flow | `cancelActivity="false"` for a non-interrupting one (timer and escalation only); `errorRef` or `escalationRef` naming a root `error` or `escalation` | `<bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="false">` |
-| `endEvent` with an `errorEventDefinition`, `escalationEventDefinition` or `terminateEventDefinition` (since 0.3.0) | for an error: `errorRef` to a root `error` with an `errorCode` | `escalationRef` on an escalation end | `<bpmn:endEvent id="refused"><bpmn:errorEventDefinition errorRef="Err_limit"/></bpmn:endEvent>` |
-| `intermediateThrowEvent` with an `escalationEventDefinition`, or a `linkEventDefinition`; `intermediateCatchEvent` with a `linkEventDefinition` (since 0.3.0) | `name` on each link definition; a throw needs a catch of the same name in the same scope | `escalationRef` | `<bpmn:linkEventDefinition name="notify"/>` |
+| `transaction` (since 0.3.0; the saga block) | a none `startEvent`, steps and at least one `endEvent` inside it; no flow crosses its border | `name`; `method` left out or `##Compensate` | `<bpmn:transaction id="transfer">` |
+| `boundaryEvent` (since 0.3.0) | `attachedToRef`, the id of a task, call activity or sub-process in the same scope; one `timerEventDefinition` (`timeDuration` or `timeDate`), `errorEventDefinition` or `escalationEventDefinition`; at least one outgoing flow. A `compensateEventDefinition` (on a service task or agent task) or a `cancelEventDefinition` (on a transaction) follows the rules of [Transactions, cancel and compensation](#transactions-cancel-and-compensation-030) | `cancelActivity="false"` for a non-interrupting one (timer and escalation only); `errorRef` or `escalationRef` naming a root `error` or `escalation` | `<bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="false">` |
+| `serviceTask` with `isForCompensation="true"` (since 0.3.0) | `horus:handler` (and `horus:mode`) of the undo; no sequence flow in or out; the target of one compensation boundary event's association | | `<bpmn:serviceTask id="credit-back-activity" isForCompensation="true" horus:handler="credit-back" horus:mode="remote"/>` |
+| `endEvent` with an `errorEventDefinition`, `escalationEventDefinition`, `terminateEventDefinition`, `compensateEventDefinition` or `cancelEventDefinition` (since 0.3.0) | for an error: `errorRef` to a root `error` with an `errorCode`; a cancel end stands directly in a transaction that has a cancel boundary event | `escalationRef` on an escalation end; `activityRef` on a compensation end | `<bpmn:endEvent id="refused"><bpmn:errorEventDefinition errorRef="Err_limit"/></bpmn:endEvent>` |
+| `intermediateThrowEvent` with an `escalationEventDefinition`, a `compensateEventDefinition` or a `linkEventDefinition`; `intermediateCatchEvent` with a `linkEventDefinition` (since 0.3.0) | `name` on each link definition; a throw needs a catch of the same name in the same scope | `escalationRef`; `activityRef` on a compensation throw | `<bpmn:linkEventDefinition name="notify"/>` |
 | `exclusiveGateway` | | `default`, the id of the flow taken when no condition is true | `default="fee-check__review"` |
 | `sequenceFlow` | `sourceRef`, `targetRef` | `conditionExpression` in `urn:horus-bpm:expr:v1` | `pricing.fee == 0 VND` |
 
@@ -137,6 +139,29 @@ An escalation goes up the same way. An escalation end or throw event that nothin
 ```
 
 The worked example `examples/rule-and-process/src/main/resources/processes/card-dispute.bpmn` has a non-interrupting timer boundary, an error boundary and a link pair. An error cannot be thrown by an intermediate event (it is not BPMN); use an error end event. A boundary on a step with several boundaries is drawn side by side on its lower edge in the cockpit; the diagram and the timeline show them and never edit them.
+
+### Transactions, cancel and compensation (0.3.0)
+
+A `transaction` is a sub-process whose completed steps can be undone. A step is undone by a handler, written one of two ways that run the same: `horus:compensate="release-hold"` on the step, or the standard way, a **compensation boundary event** on the step (`compensateEventDefinition`, no flow) with an `association` to a service task marked `isForCompensation="true"`, whose `horus:handler` is the undo. The undo gets the step's inputs, its result and the keys of the forward attempt, so a remote undo never posts twice.
+
+A **compensation throw event** (intermediate, with a flow; or an end event) undoes the completed steps of its scope, newest first, including the steps of the sub-processes completed in it, and then the flow goes on; `activityRef` limits it to one activity. A step is undone once: a second throw, a retry or a resumed walk finds nothing left to do for it. An intermediate throw with no outgoing flow keeps its earlier meaning: it undoes the scope and the instance ends `FAILED`.
+
+A **cancel end event** inside a transaction compensates it and leaves through the **cancel boundary event** attached to the transaction; the instance goes on, it is not `FAILED`. The instance is `COMPENSATING` while the undos run and cannot be cancelled.
+
+```xml
+<bpmn:transaction id="transfer">
+  <bpmn:startEvent id="transfer-start"/>
+  <bpmn:serviceTask id="debit-source" horus:handler="core-banking" horus:mode="remote"/>
+  <bpmn:boundaryEvent id="debit-undo" attachedToRef="debit-source" cancelActivity="false"><bpmn:compensateEventDefinition/></bpmn:boundaryEvent>
+  <bpmn:serviceTask id="credit-back-activity" isForCompensation="true" horus:handler="credit-back" horus:mode="remote"/>
+  <bpmn:association id="debit-undo-link" associationDirection="One" sourceRef="debit-undo" targetRef="credit-back-activity"/>
+  <bpmn:endEvent id="transfer-cancel"><bpmn:cancelEventDefinition/></bpmn:endEvent>
+  <!-- flows: transfer-start to debit-source, debit-source to a check, the check to transfer-cancel or to the end -->
+</bpmn:transaction>
+<bpmn:boundaryEvent id="transfer-cancelled" attachedToRef="transfer"><bpmn:cancelEventDefinition/></bpmn:boundaryEvent>
+```
+
+The cockpit draws the transaction, both boundary events, the compensation activity and a dotted line from the boundary to it, and the timeline lists each undo newest first with its result; none of it is editable there. Worked examples: `fund-transfer-cancel.bpmn`, `loan-booking-nested.bpmn` and `loan-undo-one.bpmn` in the Process Engine tests. Not supported: a compensation boundary event on a call activity, a sub-process or a transaction, compensation event sub-processes, and `waitForCompletion="false"`.
 
 ### Terminate and link events (0.3.0)
 
@@ -216,7 +241,7 @@ These are refused in 0.2.0:
 | Gateways | `inclusiveGateway`, `eventBasedGateway`, `complexGateway` |
 | Events | a message, signal or conditional boundary event, a boundary event with no definition, an intermediate error or terminate throw, an intermediate catch event that is neither a timer nor a link, an intermediate throw event that is neither a compensation, an escalation nor a link, and any start event or an end event with a message or signal definition |
 | Activities | an event sub-process (`subProcess` with `triggeredByEvent="true"`), `adHocSubProcess`, `sendTask`, `receiveTask`, and a loop or multi-instance marker |
-| Attributes that change how a step runs | `isForCompensation="true"`, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
+| Attributes that change how a step runs | `isForCompensation="true"` on anything but a service task, `isInterrupting="false"`, `parallelMultiple="true"`, `startQuantity` or `completionQuantity` other than 1, `implementation` other than `##unspecified` |
 | Service task variants | any `horus:type` other than `agentTask` (agent steps import since 0.2.0, see [[Guarded Agent Steps]]). A `horus:mode` other than `local` or `remote` is `MODE_INVALID` (below) |
 | Structure | more than one `process`, a collaboration, lanes, data objects and data stores |
 | Conditions | a `conditionExpression` in any language other than `urn:horus-bpm:expr:v1`, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` (FEEL is `S1`; XPath and the others are `not planned`) |
@@ -252,6 +277,10 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | `BOUNDARY_ATTACHED_INVALID`, `BOUNDARY_HAS_INCOMING`, `BOUNDARY_ERROR_NOT_INTERRUPTING` | Attach the boundary event to a task, call activity or sub-process in its own scope with `attachedToRef`; no flow enters a boundary event; an error boundary has no `cancelActivity="false"` |
 | `ERROR_CODE_REQUIRED`, `ERROR_REF_UNRESOLVED`, `ESCALATION_REF_UNRESOLVED` | Point an error end event's `errorRef` at a root `error` that has an `errorCode`; point `errorRef` and `escalationRef` at a root element of the file |
 | `LINK_CATCH_MISSING`, `LINK_CATCH_DUPLICATE`, `LINK_NAME_REQUIRED`, `LINK_THROW_HAS_OUTGOING` | Name every link event, give each link throw one link catch of the same name in its scope, and draw no flow out of a throw |
+| `COMPENSATION_ACTIVITY_MISSING`, `COMPENSATION_ACTIVITY_UNATTACHED`, `COMPENSATION_ACTIVITY_HAS_FLOW`, `COMPENSATION_ACTIVITY_INVALID` | Give each compensation boundary event one association to a service task marked `isForCompensation="true"` in its scope; that task is the target of exactly one such association and has no sequence flow |
+| `COMPENSATION_BOUNDARY_ATTACHED_INVALID`, `COMPENSATION_BOUNDARY_HAS_FLOW`, `COMPENSATION_DUPLICATE` | Put the compensation boundary event on a service task or agent task, draw no flow out of it, and give a step one undo: `horus:compensate` or one boundary, not both |
+| `COMPENSATION_TARGET_INVALID`, `COMPENSATION_TARGET_NEEDS_FLOW` | A throw's `activityRef` names an activity of the throw's own scope, and a throw that names one has an outgoing flow |
+| `CANCEL_END_OUTSIDE_TRANSACTION`, `CANCEL_BOUNDARY_REQUIRED`, `CANCEL_BOUNDARY_NOT_ON_TRANSACTION`, `CANCEL_BOUNDARY_NOT_INTERRUPTING` | Put a cancel end event directly in a transaction, give that transaction a cancel boundary event, attach a cancel boundary only to a transaction, and leave `cancelActivity` out of it |
 | `ASSOCIATION_DIRECTION_INVALID` | Set `associationDirection` on the `association` to `None`, `One` or `Both`, or leave it out |
 | `NOT_BPMN` | The root element must be `definitions` in `http://www.omg.org/spec/BPMN/20100524/MODEL` |
 | `NO_PROCESS` | Add a `process` element |

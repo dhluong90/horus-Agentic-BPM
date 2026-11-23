@@ -150,7 +150,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:serviceTask id=\"undo\" isForCompensation=\"true\" horus:handler=\"h\"/>"
+                + "<bpmn:task id=\"undo\" isForCompensation=\"true\"/>"
                 + "<bpmn:serviceTask id=\"batch\" completionQuantity=\"2\" horus:handler=\"h\"/>"
                 + "<bpmn:serviceTask id=\"ws\" implementation=\"##WebService\" horus:handler=\"h\"/>"
                 + TAIL).getBytes(StandardCharsets.UTF_8);
@@ -158,7 +158,7 @@ class SubsetBpmnRefusalTest {
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::element, DefinitionProblem::elementId,
                         DefinitionProblem::stage).containsExactly(
-                        tuple("isForCompensation", "undo", "S2"),
+                        tuple("isForCompensation", "undo", "not planned"),
                         tuple("completionQuantity", "batch", "not planned"),
                         tuple("implementation", "ws", "not planned")));
     }
@@ -209,11 +209,11 @@ class SubsetBpmnRefusalTest {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"a\"><bpmn:messageEventDefinition/></bpmn:startEvent>"
                 + "<bpmn:startEvent id=\"b\"><bpmn:timerEventDefinition/></bpmn:startEvent>"
                 + "<bpmn:endEvent id=\"c\"><bpmn:signalEventDefinition/></bpmn:endEvent>"
-                + "<bpmn:endEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:endEvent>" + TAIL)
+                + "<bpmn:startEvent id=\"d\"><bpmn:cancelEventDefinition/></bpmn:startEvent>" + TAIL)
                 .getBytes(StandardCharsets.UTF_8);
 
         assertThatThrownBy(() -> reader.read(file)).isInstanceOfSatisfying(BpmnUnsupportedElementException.class, e ->
-                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "S1", "S2", "S2"));
+                assertThat(e.problems()).extracting(DefinitionProblem::stage).containsExactly("S2", "S1", "S2", "not planned"));
     }
 
     private static byte[] bytes(String name) {

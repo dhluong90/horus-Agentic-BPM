@@ -43,6 +43,7 @@
 /* A boundary event that does not interrupt is drawn with a dashed ring, and a link is a dashed line (#489, #493). */
 .dg-node--soft circle { stroke-dasharray: 4 3; }
 .dg-edge--link path:first-child { stroke-dasharray: 5 4; }
+.dg-edge--association path:first-child { stroke-dasharray: 1.5 4; stroke-linecap: round; }
 .dg-node--agent { color: var(--violet); }
 /* An open sub-process is a calm frame behind its steps; a closed one is a task box with a count and a control (#486). */
 .dg-frame rect { fill: var(--surface-2); stroke: var(--node-stroke); stroke-width: 1.5; }

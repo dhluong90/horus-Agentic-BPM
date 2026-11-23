@@ -100,7 +100,7 @@ final class ProcessListQueries {
 
     /** The columns of a compensation stack entry (#67, V31). */
     static final String COMPENSATION_COLUMNS = "tenant_id, id, instance_id, scope_token_id, seq, step_id, forward_job_id, "
-            + "forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, completed_at";
+            + "forward_attempt_id, handler, mode, input_snapshot, status, job_id, pushed_at, completed_at, instance_seq";
 
     /**
      * The compensation stack of one instance (#67), by scope token and newest first, on

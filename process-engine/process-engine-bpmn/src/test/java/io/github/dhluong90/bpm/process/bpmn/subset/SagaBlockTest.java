@@ -244,10 +244,11 @@ class SagaBlockTest {
                 + "targetRef=\"transfer-end\"/>", "<bpmn:sequenceFlow id=\"t3\" sourceRef=\"post-debit\" "
                 + "targetRef=\"transfer-end\"/><bpmn:sequenceFlow id=\"t4\" sourceRef=\"post-debit\" targetRef=\"end\"/>");
 
-        // Then the first is refused at import and the second when compiled, each naming the element
-        assertThatThrownBy(() -> read(outside)).isInstanceOfSatisfying(ValidationFailedException.class, e ->
+        // Then both are refused when compiled, each naming the element
+        Process outsideProcess = read(outside);
+        assertThatThrownBy(() -> kernel(outsideProcess)).isInstanceOfSatisfying(ValidationFailedException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::code)
-                        .containsExactly("THROW_COMPENSATION_OUTSIDE_SAGA"));
+                        .contains("THROW_COMPENSATION_OUTSIDE_SAGA"));
         Process process = read(crossing);
         assertThatThrownBy(() -> kernel(process)).isInstanceOfSatisfying(ValidationFailedException.class, e ->
                 assertThat(e.problems()).extracting(DefinitionProblem::code, DefinitionProblem::elementId)

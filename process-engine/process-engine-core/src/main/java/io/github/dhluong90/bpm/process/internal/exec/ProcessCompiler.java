@@ -4,6 +4,10 @@ import io.github.dhluong90.bpm.process.api.DefinitionProblem;
 import io.github.dhluong90.bpm.process.api.ValidationFailedException;
 import io.github.dhluong90.bpm.process.internal.expr.ConditionException;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Association;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.CancelEventDefinition;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask;
+import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
@@ -128,13 +132,18 @@ public final class ProcessCompiler {
                 }
             }
         }
+        List<Association> associations = process.allArtifacts().stream().filter(Association.class::isInstance)
+                .map(Association.class::cast).toList();
         for (FlowNode node : nodes.values()) {
             List<SequenceFlow> out = flows.stream().filter(f -> f.sourceRef().equals(node.id())).toList();
-            if (!(node instanceof EndEvent) && !throwsCompensation(node) && !isLinkThrow(node) && out.isEmpty()) {
+            compensationProblems(node, out, nodes, containerOf, flows, associations, problems);
+            if (!(node instanceof EndEvent) && !throwsCompensation(node) && !isLinkThrow(node) && out.isEmpty()
+                    && !isCompensationBoundary(node) && !isForCompensation(node)) {
                 problems.add(DefinitionProblem.of("NO_OUTGOING_FLOW", "Only an end event may have no outgoing flow",
                         node.id()));
             }
-            if (throwsCompensation(node) && !(nodes.get(containerOf.get(node.id())) instanceof Transaction)) {
+            if (throwsCompensation(node) && out.isEmpty()
+                    && !(nodes.get(containerOf.get(node.id())) instanceof Transaction)) {
                 problems.add(DefinitionProblem.of("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", node.id()));
             }
@@ -238,7 +247,9 @@ public final class ProcessCompiler {
                 List<SequenceFlow> edges = new ArrayList<>(flows.stream()
                         .filter(f -> container.equals(containerOf.get(f.id()))).toList());
                 // A boundary event is reached from its activity and a link catch from its link throw (#489, #493).
-                for (FlowNode n : inside.values()) {
+                // A compensation boundary and its compensation activity are reached by no token, only by the walk (#488).
+                inside.values().removeIf(n -> isCompensationBoundary(n) || isForCompensation(n));
+                for (FlowNode n : List.copyOf(inside.values())) {
                     if (n instanceof BoundaryEvent b && b.attachedToRef() != null) {
                         edges.add(new SequenceFlow("boundary:" + b.id(), null, b.attachedToRef(), b.id(), null, null, null));
                     } else if (isLinkThrow(n)) {
@@ -260,6 +271,110 @@ public final class ProcessCompiler {
             step.compile(process, builder);
         }
         return builder.build();
+    }
+
+    private static boolean isCompensationBoundary(FlowNode node) {
+        return node instanceof BoundaryEvent b && b.eventDefinitions().size() == 1
+                && b.eventDefinitions().get(0) instanceof CompensateEventDefinition;
+    }
+
+    private static boolean isForCompensation(FlowNode node) {
+        return node instanceof Activity a && a.activity().isForCompensation();
+    }
+
+    /**
+     * The rules of #488 for the compensation elements of one node: a compensation boundary event sits on a service
+     * task and names its compensation activity by an association; a compensation activity has no flows and belongs to
+     * exactly one boundary; a cancel end event stands in a transaction that has a cancel boundary event; a throw
+     * that names an activity names one of its own scope.
+     */
+    private static void compensationProblems(FlowNode node, List<SequenceFlow> out, Map<String, FlowNode> nodes,
+            Map<String, String> containerOf, List<SequenceFlow> flows, List<Association> associations,
+            List<DefinitionProblem> problems) {
+        String id = node.id();
+        if (isForCompensation(node)) {
+            if (!(node instanceof ServiceTask)) {
+                problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_INVALID", "isForCompensation applies to a"
+                        + " service task: the undo of a step is a handler", id));
+            }
+            if (!out.isEmpty() || flows.stream().anyMatch(f -> f.targetRef().equals(id))) {
+                problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_HAS_FLOW", "A compensation activity is run by"
+                        + " compensation, not by a sequence flow; remove its flows", id));
+            }
+            long owners = associations.stream().filter(a -> id.equals(a.targetRef())
+                    && isCompensationBoundary(nodes.get(a.sourceRef()))).count();
+            if (owners != 1) {
+                problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_UNATTACHED", "A compensation activity is the"
+                        + " target of the association of exactly one compensation boundary event, found " + owners,
+                        id));
+            }
+        }
+        if (isCompensationBoundary(node)) {
+            BoundaryEvent boundary = (BoundaryEvent) node;
+            FlowNode host = nodes.get(boundary.attachedToRef());
+            if (!(host instanceof ServiceTask)) {
+                problems.add(DefinitionProblem.of("COMPENSATION_BOUNDARY_ATTACHED_INVALID", "A compensation boundary"
+                        + " event is attached to a service task or agent task, whose undo it names", id));
+            } else if (host.extensions().first(CompensateHandlerRef.class).isPresent()) {
+                problems.add(DefinitionProblem.of("COMPENSATION_DUPLICATE", "Step " + host.id() + " has horus:compensate"
+                        + " and a compensation boundary event; give it one undo", id));
+            }
+            if (!out.isEmpty()) {
+                problems.add(DefinitionProblem.of("COMPENSATION_BOUNDARY_HAS_FLOW", "A compensation boundary event has"
+                        + " an association to its compensation activity and no sequence flow", id));
+            }
+            List<Association> mine = associations.stream().filter(a -> id.equals(a.sourceRef())).toList();
+            FlowNode target = mine.size() == 1 ? nodes.get(mine.get(0).targetRef()) : null;
+            if (!(target instanceof ServiceTask) || !isForCompensation(target)
+                    || !containerOf.get(target.id()).equals(containerOf.get(id))) {
+                problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_MISSING", "A compensation boundary event has"
+                        + " one association to a service task marked isForCompensation in the same scope", id));
+            }
+            if (host != null && nodes.values().stream().anyMatch(n -> n != node && isCompensationBoundary(n)
+                    && host.id().equals(((BoundaryEvent) n).attachedToRef()) && n.id().compareTo(id) < 0)) {
+                problems.add(DefinitionProblem.of("COMPENSATION_DUPLICATE", "A step has one compensation boundary event",
+                        id));
+            }
+        }
+        if (node instanceof BoundaryEvent b && b.eventDefinitions().size() == 1
+                && b.eventDefinitions().get(0) instanceof CancelEventDefinition) {
+            if (!(nodes.get(b.attachedToRef()) instanceof Transaction)) {
+                problems.add(DefinitionProblem.of("CANCEL_BOUNDARY_NOT_ON_TRANSACTION", "A cancel boundary event is"
+                        + " attached to a transaction", id));
+            }
+            if (!b.cancelActivity()) {
+                problems.add(DefinitionProblem.of("CANCEL_BOUNDARY_NOT_INTERRUPTING", "A cancel boundary event always"
+                        + " leaves the transaction; remove cancelActivity=\"false\"", id));
+            }
+        }
+        if (node instanceof EndEvent end && end.eventDefinitions().size() == 1
+                && end.eventDefinitions().get(0) instanceof CancelEventDefinition) {
+            FlowNode container = nodes.get(containerOf.get(id));
+            if (!(container instanceof Transaction)) {
+                problems.add(DefinitionProblem.of("CANCEL_END_OUTSIDE_TRANSACTION", "A cancel end event ends a"
+                        + " transaction; put it directly inside one", id));
+            } else if (nodes.values().stream().noneMatch(n -> n instanceof BoundaryEvent b
+                    && container.id().equals(b.attachedToRef()) && b.eventDefinitions().size() == 1
+                    && b.eventDefinitions().get(0) instanceof CancelEventDefinition)) {
+                problems.add(DefinitionProblem.of("CANCEL_BOUNDARY_REQUIRED", "Transaction " + container.id()
+                        + " has a cancel end event and no cancel boundary event for the flow to leave by", id));
+            }
+        }
+        String target = node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Event event
+                && event.eventDefinitions().size() == 1
+                && event.eventDefinitions().get(0) instanceof CompensateEventDefinition c ? c.activityRef() : null;
+        if (target != null) {
+            FlowNode named = nodes.get(target);
+            if (!(named instanceof Activity) || isForCompensation(named) || !containerOf.get(target)
+                    .equals(containerOf.get(id))) {
+                problems.add(DefinitionProblem.of("COMPENSATION_TARGET_INVALID", "activityRef '" + target + "' names an"
+                        + " activity of the same scope as the throw", id));
+            }
+            if (node instanceof IntermediateThrowEvent && out.isEmpty()) {
+                problems.add(DefinitionProblem.of("COMPENSATION_TARGET_NEEDS_FLOW", "A throw that names an activity"
+                        + " goes on after the undo; give it an outgoing flow", id));
+            }
+        }
     }
 
     private static void reachability(StartEvent start, Map<String, FlowNode> nodes, List<SequenceFlow> flows,
