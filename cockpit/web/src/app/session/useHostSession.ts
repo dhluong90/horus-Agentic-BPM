@@ -4,6 +4,7 @@ import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../../api/generated/bpm-meta.v1';
 import { createHostClient, type HostClient } from '../../api/hostClient';
 import { HostCallError, toHostError, type HostError } from '../../api/hostError';
+import { tenantFetch, type TenantRefusal } from '../tenant/tenantFetch';
 import { selectHost, type HostRegistry, type RegistryHost, type RegistryProblem } from '../config/registry';
 
 export type ConfigProblem = RegistryProblem;
@@ -12,7 +13,7 @@ export type ConfigProblem = RegistryProblem;
 export type SessionState =
   | { status: 'loading' }
   | { status: 'host-error'; error: HostError; retry: () => void }
-  | { status: 'ready'; registry: HostRegistry; host: RegistryHost; meta: BpmMetaV1; me: BpmMeV1 };
+  | { status: 'ready'; registry: HostRegistry; host: RegistryHost; meta: BpmMetaV1; me: BpmMeV1; fetchImpl: typeof fetch | undefined };
 
 export interface SessionDependencies {
   fetchImpl?: typeof fetch;
@@ -21,9 +22,15 @@ export interface SessionDependencies {
 export const registryQueryKey = ['registry'] as const;
 
 /** Embedded mode (`auth.mode: host-session`): the one host, on the host's own session cookie. */
-export function useHostSession(registry: HostRegistry, { fetchImpl }: SessionDependencies = {}): SessionState {
+export function useHostSession(registry: HostRegistry, dependencies: SessionDependencies = {}, tenant?: string, onRefused?: (refusal: TenantRefusal) => void): SessionState {
   const host = selectHost(registry);
   const sessionHost = registry.auth.mode === 'host-session' ? host : undefined;
+  // A chosen tenant is sent as X-Tenant-Id on every call of the host; none means the session's own tenant (CKP-022).
+  const { fetchImpl: baseFetch } = dependencies;
+  const fetchImpl = useMemo(
+    () => (tenant === undefined ? baseFetch : tenantFetch(baseFetch ?? ((input, init) => fetch(input, init)), tenant, (refusal) => { onRefused?.(refusal); })),
+    [baseFetch, tenant, onRefused],
+  );
 
   const client: HostClient | undefined = useMemo(
     () => (sessionHost ? createHostClient(sessionHost.baseUrl, fetchImpl) : undefined),
@@ -62,7 +69,7 @@ export function useHostSession(registry: HostRegistry, { fetchImpl }: SessionDep
   if (meQuery.isError) return { status: 'host-error', error: toHostError(meQuery.error), retry };
   if (metaQuery.isError) return { status: 'host-error', error: toHostError(metaQuery.error), retry };
   if (!metaQuery.data || !meQuery.data) return { status: 'loading' };
-  return { status: 'ready', registry, host, meta: metaQuery.data, me: meQuery.data };
+  return { status: 'ready', registry, host, meta: metaQuery.data, me: meQuery.data, fetchImpl };
 }
 
 function requireClient(client: HostClient | undefined): HostClient {

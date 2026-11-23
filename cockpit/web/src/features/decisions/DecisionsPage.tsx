@@ -166,7 +166,7 @@ function Results({ search, results, decisions }: { search: DecisionSearchKey | u
                 </a>
               </td>
               <td>{decision.ruleSet} <span className="muted">· {t('rules.version', { version: String(decision.version) })}</span></td>
-              <td><OutcomeBadge outcome={knownOutcome(decision.outcome)} matched={decision.matchedRuleIds} /></td>
+              <td><OutcomeBadge outcome={knownOutcome(decision.outcome, decision.matchedRuleIds)} matched={decision.matchedRuleIds} /></td>
               <td className="ref-text">{decision.correlationId ?? <span className="muted">—</span>}</td>
               <td className="ref-text">{shortId(decision.decisionId)}</td>
               <td className="qtable__chevron" aria-hidden="true">›</td>
@@ -185,6 +185,16 @@ function Results({ search, results, decisions }: { search: DecisionSearchKey | u
   );
 }
 
-export function knownOutcome(outcome: string): (typeof DECISION_OUTCOMES)[number] | 'OTHER' {
+/** A decision failed when the engine reported an error or several rules hit; a match or no match is a normal answer. */
+export function isFailedOutcome(outcome: (typeof DECISION_OUTCOMES)[number] | 'OTHER'): boolean {
+  return outcome !== 'MATCHED' && outcome !== 'NO_MATCH';
+}
+
+/**
+ * One reading of an outcome for every screen. The list endpoint names MATCHED and NO_MATCH; the detail and
+ * explanation endpoints return the stored value `OK`, which is a match when rules matched and a no-match when none did.
+ */
+export function knownOutcome(outcome: string, matched: readonly unknown[] = []): (typeof DECISION_OUTCOMES)[number] | 'OTHER' {
+  if (outcome === 'OK') return matched.length === 0 ? 'NO_MATCH' : 'MATCHED';
   return (DECISION_OUTCOMES as readonly string[]).includes(outcome) ? (outcome as (typeof DECISION_OUTCOMES)[number]) : 'OTHER';
 }

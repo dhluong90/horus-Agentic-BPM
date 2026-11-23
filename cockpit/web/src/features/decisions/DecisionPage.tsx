@@ -16,7 +16,7 @@ import { columnLabel, readCondition } from '../rules/model/reading';
 import { useDecision, useExplanation } from './api/useAudit';
 import { AuditError, LoggedValue, statusOf } from './components/AuditParts';
 import { OutcomeBadge } from './components/OutcomeBadge';
-import { DecisionLogLocked, knownOutcome } from './DecisionsPage';
+import { DecisionLogLocked, isFailedOutcome, knownOutcome } from './DecisionsPage';
 import { lastDecisionQuery } from './lastQuery';
 
 type View = 'conditions' | 'inputs' | 'table';
@@ -89,8 +89,8 @@ function DecisionView({ decisionId }: { decisionId: string }) {
  */
 function Explanation({ decision, explanation }: { decision: LoggedDecision; explanation: DecisionExplanation }) {
   const { t } = useI18n();
-  const outcome = knownOutcome(decision.outcome);
-  const failed = outcome !== 'OK';
+  const outcome = knownOutcome(decision.outcome, decision.matchedRuleIds);
+  const failed = isFailedOutcome(outcome);
   return (
     <article className={failed ? 'card why why--failed' : 'card why'} aria-labelledby="why-title">
       <div className="why__head">
@@ -170,7 +170,7 @@ function Views({ decision, explanation, definition, readsRules, versionError }: 
 function Conditions({ explanation, label }: { explanation: DecisionExplanation; label: (name: string) => string }) {
   const { t } = useI18n();
   if (explanation.matched.length === 0) {
-    return <p className="dlog-views__empty">{explanation.outcome === 'OK' ? t('dlog.noRowMatched') : t('dlog.failedNothing')}</p>;
+    return <p className="dlog-views__empty">{knownOutcome(explanation.outcome, explanation.matched) === 'NO_MATCH' ? t('dlog.noRowMatched') : t('dlog.failedNothing')}</p>;
   }
   return (
     <div className="dlog-rows">

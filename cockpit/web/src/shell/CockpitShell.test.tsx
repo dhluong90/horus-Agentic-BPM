@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
+import { meLan } from '../mocks/fixtures';
 import { mockHost, setScenario } from '../mocks/node';
 
 /** Paths the cockpit asked for, in order. */
@@ -210,5 +211,45 @@ describe('language', () => {
     render(<App />);
 
     expect(await screen.findByRole('heading', { level: 1, name: /^Chào buổi/ })).toBeInTheDocument();
+  });
+});
+
+describe('embedded shell, tenant switcher', () => {
+  it('CKP_022_embedded_cockpit_offers_the_tenants_the_session_allows_and_sends_the_chosen_one', async () => {
+    const user = userEvent.setup();
+    setScenario('embedded-two-tenants');
+    const tenants: (string | null)[] = [];
+    mockHost.events.on('request:start', ({ request }) => {
+      if (new URL(request.url).pathname === '/api/bpm/me') tenants.push(request.headers.get('X-Tenant-Id'));
+    });
+    render(<App />);
+
+    await screen.findByTestId('header-user');
+    await user.click(await screen.findByTestId('tenant-switcher'));
+    const menu = screen.getByRole('list', { name: /tenant/i });
+    expect(within(menu).getAllByRole('button').map((item) => item.textContent)).toEqual([expect.stringContaining('Bank A'), expect.stringContaining('Bank B')]);
+    await user.click(within(menu).getByRole('button', { name: /Bank B/ }));
+    await vi.waitFor(() => { expect(tenants.at(-1)).toBe('bank-b'); });
+  });
+
+  it('CKP_022_embedded_cockpit_shows_no_switcher_with_one_allowed_tenant', async () => {
+    render(<App />);
+    await screen.findByTestId('header-user');
+    expect(screen.queryByTestId('tenant-switcher')).not.toBeInTheDocument();
+  });
+
+  it('CKP_022_a_development_tenant_the_session_does_not_allow_is_never_offered', async () => {
+    const user = userEvent.setup();
+    setScenario('embedded-two-tenants');
+    // The host also reports a development tenant, but the session's allowed list does not contain it.
+    mockHost.use(http.get('*/api/bpm/me', () => HttpResponse.json({
+      ...meLan, tenant: { current: 'bank-a', allowed: ['bank-a', 'bank-b'], names: { 'bank-a': 'Bank A', 'bank-b': 'Bank B', dev: 'Dev tenant' } },
+    })));
+    render(<App />);
+
+    await user.click(await screen.findByTestId('tenant-switcher'));
+    const menu = screen.getByRole('list', { name: /tenant/i });
+    expect(within(menu).getAllByRole('button')).toHaveLength(2);
+    expect(within(menu).queryByRole('button', { name: /dev/i })).not.toBeInTheDocument();
   });
 });

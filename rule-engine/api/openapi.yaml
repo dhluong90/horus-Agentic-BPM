@@ -2905,6 +2905,9 @@ components:
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
+          description: |
+            The list names a match and a no-match; `GET /decisions/{id}` returns the stored `OK` for both
+            (`LoggedDecision`). The engine maps `OK` to `MATCHED` or `NO_MATCH` by whether any rule matched.
         matchedRuleIds:
           type: array
           description: Matched rules in rule order; for `UNIQUE_HIT_VIOLATION` every overlapping rule
@@ -4205,7 +4208,10 @@ components:
         outcome:
           type: string
           enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
-          description: OK with an empty matchedRuleIds is a no-match
+          description: |
+            The stored outcome, as the engine returns it on this endpoint: `OK` with an empty `matchedRuleIds` is a
+            no-match. `GET /decisions` names the same outcomes `MATCHED` and `NO_MATCH` (`DecisionLogEntry`); a
+            client reads both with one mapping.
         errorCode:
           type: [string, 'null']
           description: |
@@ -4354,7 +4360,10 @@ components:
         ruleSet: { type: string }
         version: { type: integer }
         hitPolicy: { type: string, enum: [FIRST, UNIQUE, COLLECT] }
-        outcome: { type: string, enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR] }
+        outcome:
+          type: string
+          enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
+          description: The stored outcome, as in `LoggedDecision`; `OK` with an empty `matched` is a no-match.
         errorCode: { type: [string, 'null'] }
         clock:
           type: string

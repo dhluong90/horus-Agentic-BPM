@@ -53,7 +53,7 @@ export function homeDemoAudit(): AuditOptions {
     const cardFee = n % 5 < 3;
     const minute = Math.min(59, Math.floor((n * 60) / count));
     return {
-      decisionId: `01KF4H${String(slot).padStart(2, '0')}${String(n).padStart(18, '0')}`, ruleSet: cardFee ? 'card-fee' : 'kyc-risk', version: 1, outcome: 'OK', errorCode: null,
+      decisionId: `01KF4H${String(slot).padStart(2, '0')}${String(n).padStart(18, '0')}`, ruleSet: cardFee ? 'card-fee' : 'kyc-risk', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { tier: 'GOLD' }, outputs: { fee: 0 }, matchedRuleIds: [cardFee ? 'R3' : 'K2'], correlationId: null,
       evaluatedAt: `2026-11-21T${String(1 + slot).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00Z`,
     };
