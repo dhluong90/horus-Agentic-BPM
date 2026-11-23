@@ -69,6 +69,7 @@ export function build(check = false) {
   if (!check) {
     cpSync(join(wiki, 'images'), join(out, 'images'), { recursive: true });
     cpSync(join(here, '.vitepress', 'config.mjs'), join(out, '.vitepress', 'config.mjs'));
+    cpSync(join(here, '.vitepress', 'theme'), join(out, '.vitepress', 'theme'), { recursive: true });
     writeFileSync(join(out, '.vitepress', 'sidebar.json'), JSON.stringify(sidebar, null, 2));
   }
   console.log(`${pages.size} pages, ${sidebar.length} sidebar groups${check ? ' (checked, nothing written)' : ''}`);

@@ -2,7 +2,7 @@ name: Docs site
 # Builds the documentation site from wiki/ and runs the Getting Started guide. It builds only; it publishes nothing.
 on:
   pull_request:
-    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", ".github/workflows/docs-site.yml"]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,6 +26,10 @@ jobs:
       - name: Install
         working-directory: site
         run: npm ci
+      - name: Licences of the site's packages (TR-LIC-01)
+        # The cockpit's licence script, run over this project's whole tree: every package ends up in the built pages.
+        working-directory: site
+        run: node ../cockpit/web/scripts/check-licences.mjs --include-dev --exceptions=licence-exceptions.json
       - name: Tests of the generator
         working-directory: site
         run: npm test
@@ -46,6 +50,29 @@ jobs:
           name: docs-site
           path: site/.generated/.vitepress/dist
           retention-days: 7
+
+  accessibility:
+    # CKP-065 "Readable": the Mermaid diagram is drawn, code blocks have a copy button and axe-core reports no
+    # serious violation at 1440x900 and 1440x1200, light and dark. Same Playwright image and axe package as the cockpit.
+    name: Site accessibility (axe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --ipc=host
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Build the site
+        working-directory: site
+        run: npm ci && npm run build
+      - name: Install the cockpit's test tools
+        working-directory: cockpit/web
+        run: npm ci
+      - name: axe on the built site
+        working-directory: cockpit/web
+        run: node scripts/axe-site.mjs
 
   guide:
     # CKP-045: the commands of wiki/Getting-Started.md run in order from a fresh checkout; the last one
