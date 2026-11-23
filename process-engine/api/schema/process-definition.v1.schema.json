@@ -134,7 +134,7 @@
       "required": ["id", "type"],
       "properties": {
         "type": {
-          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "throwCompensation"]
+          "enum": ["start", "end", "userTask", "serviceTask", "agentTask", "decision", "exclusiveGateway", "parallelGateway", "timer", "callProcess", "saga", "subProcess", "throwCompensation"]
         }
       },
       "allOf": [
@@ -149,6 +149,7 @@
         { "if": { "properties": { "type": { "const": "timer" } } }, "then": { "$ref": "#/$defs/timerStep" } },
         { "if": { "properties": { "type": { "const": "callProcess" } } }, "then": { "$ref": "#/$defs/callProcessStep" } },
         { "if": { "properties": { "type": { "const": "saga" } } }, "then": { "$ref": "#/$defs/sagaStep" } },
+        { "if": { "properties": { "type": { "const": "subProcess" } } }, "then": { "$ref": "#/$defs/subProcessStep" } },
         { "if": { "properties": { "type": { "const": "throwCompensation" } } }, "then": { "$ref": "#/$defs/throwCompensationStep" } }
       ]
     },
@@ -393,6 +394,15 @@
       }
     },
     "sagaStep": {
+      "$ref": "#/$defs/common",
+      "unevaluatedProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/step" } },
+        "next": { "$ref": "#/$defs/next" }
+      }
+    },
+    "subProcessStep": {
       "$ref": "#/$defs/common",
       "unevaluatedProperties": false,
       "required": ["steps"],

@@ -14,7 +14,7 @@ import { useProcessesSession } from './api/processesContext';
 import { useDefinitionGraph, useDefinitionVersion, useInstance, useInstanceActivities } from './api/useProcesses';
 import type { DiagramOverlay, StepBadge } from './diagram/DefinitionDiagram';
 import { InstanceStatusPill } from './InstanceStatusPill';
-import { flowOrder, type DiagramGraph, type DiagramNode } from './model/bpmnGraph';
+import { ancestorsOf, flowOrder, type DiagramGraph, type DiagramNode } from './model/bpmnGraph';
 import {
   activityOf,
   actorReplica,
@@ -345,6 +345,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
   const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? node.id]));
   const stepName = (id: string) => names.get(id) ?? wordsOf(id);
   const results = new Map(graph.nodes.flatMap((node) => (node.resultVariable !== undefined ? [[node.id, node.resultVariable] as const] : [])));
+  // A step inside a sub-process names the sub-processes around it, outermost first, so the timeline nests its steps (#486).
+  const trail = (id: string | null): string[] => (id === null ? [] : ancestorsOf(graph, id).map((node) => node.name ?? node.id));
   const scopes = activities.compensations ?? [];
   if (activities.entries.length === 0) return <div className="card__pad"><EmptyState icon="processes" text={t('instance.timeline.empty')} /></div>;
   return (
@@ -375,7 +377,8 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                   <td className={isProblemEntry(entry) ? 'timeline__what timeline__what--bad' : 'timeline__what'}>
                     {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type))}
                   </td>
-                  <td>
+                  <td className={trail(entry.nodeId).length > 0 ? 'timeline__step timeline__step--nested' : 'timeline__step'} data-depth={trail(entry.nodeId).length}>
+                    {trail(entry.nodeId).length > 0 ? <span className="muted timeline__trail">{trail(entry.nodeId).join(' › ')} › </span> : null}
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
                     {entry.type === 'NODE_COMPLETED' && entry.nodeId !== null && results.has(entry.nodeId)
                       ? <span className="muted"> · {t('instance.timeline.sets', { variable: results.get(entry.nodeId) ?? '' })}</span> : null}

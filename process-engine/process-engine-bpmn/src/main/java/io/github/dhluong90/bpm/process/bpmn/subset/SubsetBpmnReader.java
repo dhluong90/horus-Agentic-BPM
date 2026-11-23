@@ -33,6 +33,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Group;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateCatchEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.TimerEventDefinition;
 import io.github.dhluong90.bpm.process.internal.exec.behavior.event.TimerSchedule;
@@ -382,6 +383,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     case "intermediateCatchEvent" -> elements.add(catchEvent());
                     case "intermediateThrowEvent" -> elements.add(throwEvent(inSaga));
                     case "transaction" -> elements.add(saga());
+                    case "subProcess" -> elements.add(subProcess());
                     case "exclusiveGateway" -> {
                         String id = id();
                         String gwName = attr("name");
@@ -406,7 +408,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         children(local, id, false);
                         artifacts.add(new Group(id, ref, null));
                     }
-                    case "documentation", "extensionElements" -> skip();
+                    case "documentation", "extensionElements", "incoming", "outgoing" -> skip();
                     default -> {
                         unsupported(local, attr("id"), BpmnStages.of(local));
                         skip();
@@ -440,6 +442,25 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
             }
             return new Transaction(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null,
+                    withRefs(elements), artifacts, List.of(), null);
+        }
+
+        /**
+         * An embedded {@code subProcess} (#486, ADR-0020): a scope with its own none start event, steps and end
+         * events, entered and left through its own node. An event sub-process ({@code triggeredByEvent}) is not
+         * supported yet, and a loop or multi-instance marker is named as unsupported like on any other activity.
+         */
+        private FlowElement subProcess() throws XMLStreamException {
+            String id = id();
+            String name = attr("name");
+            boolean byEvent = "true".equals(attr("triggeredByEvent"));
+            if (byEvent) {
+                unsupported("subProcess with triggeredByEvent", id, BpmnStages.S1);
+            }
+            List<FlowElement> elements = new ArrayList<>();
+            List<Artifact> artifacts = new ArrayList<>();
+            container(elements, artifacts, false);
+            return new SubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), byEvent,
                     withRefs(elements), artifacts, List.of(), null);
         }
 
@@ -1691,6 +1712,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         t.eventDefinitions(), t.eventDefinitionRefs(), t.data(), t.info());
                 case ParallelGateway g -> new ParallelGateway(g.id(), g.name(), in, o, g.gatewayDirection(), g.info());
                 case Transaction t -> new Transaction(t.id(), t.name(), in, o, t.activity(), t.method(),
+                        t.flowElements(), t.artifacts(), t.laneSets(), t.info());
+                case SubProcess t -> new SubProcess(t.id(), t.name(), in, o, t.activity(), t.triggeredByEvent(),
                         t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 default -> e;
             });

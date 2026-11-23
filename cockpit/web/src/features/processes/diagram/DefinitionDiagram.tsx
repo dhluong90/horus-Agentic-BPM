@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { useI18n } from '../../../i18n/I18nProvider';
-import { isKnownNodeType, type DiagramGraph } from '../model/bpmnGraph';
+import { ancestorsOf, isKnownNodeType, type DiagramGraph } from '../model/bpmnGraph';
 import {
   CAPTION_GAP,
   CAPTION_LINE_HEIGHT,
   EVENT_RADIUS,
   fitScale,
+  FRAME_HEADER,
+  FRAME_PAD,
   GATEWAY_HALF,
   layoutGraph,
   MIN_SCALE,
   WHOLE_FIT_MIN_SCALE,
   SYMBOL_SIZE,
   symbolCentre,
+  CLOSED_CONTAINER_EXTRA,
   TASK_TEXT,
   TYPE_INDENT,
   type PlacedEdge,
@@ -181,10 +184,12 @@ function markProps(mark: Mark | undefined, picked: boolean) {
 
 interface NodeProps { node: PlacedNode; label: string; interaction: Interaction; mark: Mark | undefined; picked: boolean }
 
-function TaskNode({ node, kind, label, interaction, mark, picked }: NodeProps & { kind: string }) {
+function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggle, toggleLabel }: NodeProps & { kind: string; steps?: string | undefined; onToggle?: (() => void) | undefined; toggleLabel?: string | undefined }) {
   const { padX, padY, nameLine, typeRow } = TASK_TEXT;
   const content = 2 * padY + node.lines.length * nameLine + node.typeLines.length * typeRow;
-  const top = node.y + padY + Math.max(0, (node.height - content) / 2);
+  // A closed sub-process keeps a row at the foot of its box for the count of its steps and the control that opens it.
+  const reserve = steps !== undefined ? CLOSED_CONTAINER_EXTRA : 0;
+  const top = node.y + padY + Math.max(0, (node.height - reserve - content) / 2);
   const typeTop = top + node.lines.length * nameLine;
   const extra = markProps(mark, picked);
   return (
@@ -198,7 +203,40 @@ function TaskNode({ node, kind, label, interaction, mark, picked }: NodeProps & 
       <text aria-hidden="true" className="dg-node__type" x={node.x + padX + TYPE_INDENT} y={typeTop + 13}>
         {node.typeLines.map((line, index) => <tspan key={index} x={node.x + padX + TYPE_INDENT} dy={index === 0 ? 0 : typeRow}>{index < node.typeLines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
+      {steps !== undefined ? <text aria-hidden="true" className="dg-node__steps" x={node.x + padX} y={node.y + node.height - 9}>{steps}</text> : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
+      {onToggle !== undefined && toggleLabel !== undefined ? <Toggle x={node.x + node.width - 26} y={node.y + node.height - 24} open={false} label={toggleLabel} onToggle={onToggle} /> : null}
+    </g>
+  );
+}
+
+/** The control that opens or closes a sub-process in place: a small square with a plus or a minus, reachable by keyboard. */
+function Toggle({ x, y, open, label, onToggle }: { x: number; y: number; open: boolean; label: string; onToggle: () => void }) {
+  return (
+    <g className="dg-toggle" role="button" tabIndex={0} aria-expanded={open} aria-label={label}
+      onClick={(event) => { event.stopPropagation(); onToggle(); }}
+      onKeyDown={(event: KeyboardEvent<SVGGElement>) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle();
+        }
+      }}>
+      <title>{label}</title>
+      <rect x={x} y={y} width={18} height={18} rx={4} />
+      <path d={open ? `M${String(x + 5)} ${String(y + 9)}H${String(x + 13)}` : `M${String(x + 5)} ${String(y + 9)}H${String(x + 13)}M${String(x + 9)} ${String(y + 5)}V${String(y + 13)}`} />
+    </g>
+  );
+}
+
+/** An open sub-process: a frame with its name, drawn behind its steps. */
+function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: PlacedNode; label: string; interaction: Interaction; onToggle: () => void; toggleLabel: string }) {
+  return (
+    <g className={`dg-frame${interaction.selected ? ' dg-frame--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}`} data-node={node.id} data-type={node.type} data-open="true" tabIndex={0} aria-label={label} {...interactive(interaction)}>
+      <title>{label}</title>
+      <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={12} />
+      <text aria-hidden="true" className="dg-frame__name" x={node.x + FRAME_PAD} y={node.y + FRAME_HEADER - 11}>{node.name ?? node.id}</text>
+      <Toggle x={node.x + node.width - FRAME_PAD - 18} y={node.y + 6} open label={toggleLabel} onToggle={onToggle} />
     </g>
   );
 }
@@ -232,9 +270,10 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   );
 }
 
-function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked }: {
+function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
   node: PlacedNode; typeLabel: string; badge: StepBadge | undefined; interaction: Interaction;
   mark: Mark | undefined; markLabel: ((mark: Mark) => string) | undefined; picked: boolean;
+  steps: string | undefined; onToggle: (() => void) | undefined; toggleLabel: string | undefined;
 }) {
   const known = isKnownNodeType(node.type);
   // A selectable step's name starts with the words drawn on it, in order, so speech input can name it (WCAG 2.5.3).
@@ -244,7 +283,7 @@ function Node({ node, typeLabel, badge, interaction, mark, markLabel, picked }: 
   if (node.shape === 'task' || !known) {
     // A type this cockpit does not draw is laid out and drawn as a dashed box, named in words.
     const kind = node.type === 'serviceTask:agentTask' ? 'agent' : known ? 'task' : 'generic';
-    return <TaskNode node={node} kind={kind} label={label} interaction={interaction} mark={mark} picked={picked} />;
+    return <TaskNode node={node} kind={kind} label={label} interaction={interaction} mark={mark} picked={picked} steps={steps} onToggle={onToggle} toggleLabel={toggleLabel} />;
   }
   return <SymbolNode node={node} label={label} interaction={interaction} mark={mark} picked={picked} />;
 }
@@ -278,7 +317,20 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   const marker = useId().replace(/:/g, '');
   const noteId = useId();
   const withBadges = overlay !== undefined;
-  const layout = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges }), [graph, t, withBadges]);
+  // A sub-process opens by itself when a step inside it carries a badge or is the selected step, so a case never hides
+  // where it is; the reader's own choice, made with the control on the box, wins over that.
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const wanted = [...(overlay?.badges.keys() ?? []), ...(overlay?.selected !== undefined ? [overlay.selected] : []), ...(picked !== undefined ? [picked] : [])].join('\u0000');
+  const open = useMemo(() => {
+    const out = new Set<string>();
+    for (const id of wanted === '' ? [] : wanted.split('\u0000')) ancestorsOf(graph, id).forEach((node) => out.add(node.id));
+    toggled.forEach((value, id) => { if (value) out.add(id); else out.delete(id); });
+    return out;
+  }, [graph, wanted, toggled]);
+  const toggle = useCallback((id: string) => {
+    setToggled((current) => new Map(current).set(id, !open.has(id)));
+  }, [open]);
+  const layout = useMemo(() => layoutGraph(graph, (type) => nodeTypeLabel(type, t), { badges: withBadges, open }), [graph, t, withBadges, open]);
   const [zoom, setZoom] = useState<Zoom>('fit');
   const frame = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<{ width: number; height: number } | undefined>(undefined);
@@ -366,7 +418,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const element = frame.current;
     if (!element || view === undefined || event.button !== 0) return;
-    if ((event.target as Element).closest('.dg-node--pick') !== null) return;
+    if ((event.target as Element).closest('.dg-node--pick, .dg-toggle') !== null) return;
     drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop };
     element.setPointerCapture(event.pointerId);
   };
@@ -424,11 +476,19 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
                 </marker>
               )) : null}
             </defs>
+            <g>{layout.nodes.filter((node) => node.container?.open === true).map((node) => (
+              <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}`}
+                interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
+                onToggle={() => { toggle(node.id); }} toggleLabel={t('diagram.collapse', { name: node.name ?? node.id })} />
+            ))}</g>
             <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
-            <g>{layout.nodes.map((node) => (
+            <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (
               <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} badge={overlay?.badges.get(node.id)}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
-                mark={marks?.nodes.get(node.id)} markLabel={markLabel} picked={picked === node.id} />
+                mark={marks?.nodes.get(node.id)} markLabel={markLabel} picked={picked === node.id}
+                steps={node.container !== undefined ? t('diagram.stepCount', { count: String(node.container.steps) }) : undefined}
+                onToggle={node.container !== undefined ? () => { toggle(node.id); } : undefined}
+                toggleLabel={node.container !== undefined ? t('diagram.expand', { name: node.name ?? node.id }) : undefined} />
             ))}</g>
             {overlay !== undefined ? (
               <g>{layout.nodes.map((node) => {

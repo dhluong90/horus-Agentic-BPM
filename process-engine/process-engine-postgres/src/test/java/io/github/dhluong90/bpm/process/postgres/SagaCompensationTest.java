@@ -733,6 +733,34 @@ class SagaCompensationTest {
     }
 
     @Test
+    void PRE_262_an_embedded_sub_process_is_a_scope_whose_failure_undoes_only_its_own_steps() {
+        // Given loan-booking-embedded: register-loan in the root scope, then the embedded sub-process disburse, whose
+        // notify-partner step is refused by the partner
+        TestEngine engine = engine();
+        deploy(engine, "loan-booking-embedded");
+        engine.identity.as("bank-a", "officer.binh", "processes:start", "processes:read");
+
+        // When the instance starts and the undo runs
+        String id = engine.services.start(new StartRequest("loan-booking-embedded", "LN-2026-0079", Map.of(), null))
+                .id();
+        String root = TestEngine.jdbc().sql("SELECT id FROM pre_token WHERE instance_id = ? AND token_kind = 'SCOPE' AND "
+                + "scope_token_id IS NULL AND current_node_id = 'loan-booking-embedded'").param(id)
+                .query(String.class).single();
+        String disburse = scopeToken(id, "disburse");
+        drain(engine);
+
+        // Then the sub-process had its own scope token under the root, the undos of its two steps ran newest first,
+        // cancel-loan of the root scope never ran, and the sub-process scope ends COMPENSATED
+        assertThat(TestEngine.jdbc().sql("SELECT scope_token_id FROM pre_token WHERE id = ?").param(disburse)
+                .query(String.class).single()).isEqualTo(root);
+        assertThat(stack(id)).containsExactly("open-account:DONE", "reserve-funds:DONE", "register-loan:PENDING");
+        assertThat(undoCalls().stream().filter(c -> !c.isEmpty()).toList()).containsSubsequence(
+                "close-account:open-account", "release-funds:reserve-funds").doesNotContain(
+                "cancel-loan:register-loan");
+        assertThat(tokenStatus(disburse)).isEqualTo("COMPENSATED");
+    }
+
+    @Test
     void PRE_013_failure_executes_reverse_saga_compensation() {
         // Given reserve-funds (undone by release-funds), open-account (undone by close-account) and notify-partner
         // (onFailure compensate), whose partner keeps failing

@@ -278,6 +278,7 @@ export const vi: Record<MessageKey, string> = {
   'instance.entry.INSTANCE_STARTED': 'Hồ sơ bắt đầu',
   'instance.entry.NODE_ENTERED': 'Bước bắt đầu',
   'instance.entry.NODE_COMPLETED': 'Bước hoàn tất',
+  'instance.entry.SCOPE_ENTERED': 'Bắt đầu nhóm bước',
   'instance.entry.TASK_CLAIMED': 'Đã nhận công việc',
   'instance.entry.TASK_UNCLAIMED': 'Đã trả lại công việc',
   'instance.entry.TASK_COMPLETED': 'Công việc hoàn tất',
@@ -305,6 +306,9 @@ export const vi: Record<MessageKey, string> = {
   'diagram.wholeProcessNote': 'Tổng quan cả quy trình; chữ nhỏ hơn.',
   'diagram.pan': 'Khung sơ đồ. Dùng phím mũi tên để di chuyển.',
   'diagram.defaultFlow': 'Luồng mặc định',
+  'diagram.stepCount': 'Số bước: {count}',
+  'diagram.expand': 'Mở {name}',
+  'diagram.collapse': 'Đóng {name}',
 
   /* Process approval with the graph diff (CKP-024) */
   'definition.lens.changes': 'Thay đổi',
@@ -406,6 +410,7 @@ export const vi: Record<MessageKey, string> = {
   'node.timer': 'Hẹn giờ',
   'node.callActivity': 'Gọi quy trình',
   'node.transaction': 'Giao dịch nhiều bước',
+  'node.subProcess': 'Quy trình con',
   'node.compensate': 'Bù trừ',
   'node.message': 'Tin nhắn',
   'node.signal': 'Tín hiệu',

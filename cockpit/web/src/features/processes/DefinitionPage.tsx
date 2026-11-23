@@ -16,7 +16,7 @@ import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
 import { useDockReserve } from './approval/dock';
 import { InstanceStatusPill } from './InstanceStatusPill';
 import { approvalBlock, humanise, reviewedHash, type DiffState } from './model/graphDiff';
-import { flowOrder, type DiagramGraph } from './model/bpmnGraph';
+import { ancestorsOf, flowOrder, type DiagramGraph } from './model/bpmnGraph';
 import { nodeTypeLabel } from './model/nodeLabels';
 import { DefinitionStatusPill } from './ProcessesPage';
 
@@ -160,7 +160,7 @@ function StepList({ graph }: { graph: DiagramGraph }) {
   return (
     <ol className="step-list" aria-label={t('definition.lens.stepsLabel')}>
       {flowOrder(graph).map((node) => (
-        <li key={node.id} className="step-list__item">
+        <li key={node.id} className="step-list__item" data-depth={ancestorsOf(graph, node.id).length}>
           <span className="step-list__name">{node.name ?? node.id}</span>
           <span className={node.type === 'serviceTask:agentTask' ? 'step-list__type step-list__type--agent' : 'step-list__type'}>{nodeTypeLabel(node.type, t)}</span>
         </li>

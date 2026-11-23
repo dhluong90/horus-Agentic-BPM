@@ -10,6 +10,7 @@ import io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.CompensateEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EndEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.IntermediateThrowEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
@@ -234,6 +235,11 @@ public final class CanonicalProcessWriter {
                 case Transaction saga -> {
                     step.put("type", "saga");
                     writeSteps(step.putArray("steps"), saga.flowElements());
+                }
+                case SubProcess sub -> {
+                    // #486: an embedded sub-process nests its steps like a saga block and has no undo of its own.
+                    step.put("type", "subProcess");
+                    writeSteps(step.putArray("steps"), sub.flowElements());
                 }
                 case IntermediateThrowEvent t when t.eventDefinitions().size() == 1
                         && t.eventDefinitions().get(0) instanceof CompensateEventDefinition ->

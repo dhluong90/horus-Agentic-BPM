@@ -129,11 +129,11 @@ Processes fork at a `parallelGateway`, so positions live in `pre_token` rows, no
 
 | Kind | Created | `scope_token_id` | `current_node_id` |
 |---|---|---|---|
-| `SCOPE` | One root scope token at instance start; one per entry into a `saga` block | Null for the root; the enclosing scope token for a `saga` | The definition key for the root; the `saga` block id |
-| `FLOW` | At start, at a fork, after a join, at the first step inside a `saga` | The scope token the position belongs to | The step the token is on |
+| `SCOPE` | One root scope token at instance start; one per entry into a `saga` block or an embedded `subProcess` (#486) | Null for the root; the enclosing scope token for a block | The definition key for the root; the block id |
+| `FLOW` | At start, at a fork, after a join, at the first step inside a `saga` or `subProcess` | The scope token the position belongs to | The step the token is on |
 | `MI_BODY` | From S1, for a multi-instance body | The enclosing scope token | The multi-instance activity |
 
-Joins count only tokens of one scope token, and compensation walks only the stack of one scope token, so subprocesses, event subprocesses and multi-instance (S1) add `SCOPE` and `MI_BODY` rows without changing this table or the join and compensation code ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 5.1).
+Joins count only tokens of one scope token, and compensation walks only the stack of one scope token, so embedded subprocesses (built, #486), event subprocesses and multi-instance (S1) add `SCOPE` and `MI_BODY` rows without changing this table or the join and compensation code ([`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 5.1).
 
 ![Token states](images/token-states.svg)
 
@@ -142,7 +142,7 @@ Source: [`diagrams/token-states.mmd`](diagrams/token-states.mmd).
 | From | Trigger | To | Note |
 |---|---|---|---|
 | none | Instance start, or a `saga` block entered | `WAITING_SCOPE` | `SCOPE` token; the first `FLOW` token of the scope is created `ACTIVE` in the same transaction |
-| `WAITING_SCOPE` | The last live `FLOW` token under the scope token completes (an `end` step for the root; the end of the block's `steps` for a `saga`) | `COMPLETED` | Root: the instance completes. `saga`: a new `FLOW` token continues at the block's `next` in the enclosing scope |
+| `WAITING_SCOPE` | The last live `FLOW` token under the scope token completes (an `end` step for the root; the end of the block's `steps` for a `saga` or `subProcess`) | `COMPLETED` | Root: the instance completes. Block: a new `FLOW` token continues at the block's `next` in the enclosing scope |
 | `WAITING_SCOPE` | A step under the scope failed with `onFailure: compensate`, or `throwCompensation` ran, and the scope's stack was walked to the bottom | `COMPENSATED` | Live `FLOW` tokens under it are `CANCELLED` when the walk starts |
 | `WAITING_SCOPE` | Instance cancelled, or migrated off the `saga` block | `CANCELLED` | Every live `FLOW` token under it is cancelled in the same transaction |
 | none | Start, or fork at a `parallelGateway` | `ACTIVE` | `FLOW` token; one per outgoing branch, under the scope token of the gateway |
@@ -394,6 +394,7 @@ Implemented in 0.3.0 (#67, `PRE-013`, `PRE-044`, `PRE-073` to `PRE-076`).
 - **Walk.** Under the `pre_instance` row lock, the walk takes the highest `PENDING` entry of the scope and gives it a `COMPENSATION` job, keyed by its own job id on every retry, with the `runners.compensation` settings. The job runs on the async lane of section 4: a remote undo calls its adapter with no transaction open and receives `idempotencyKey` (the undo's job id), `forwardJobId` and `forwardAttemptId` on `AdapterCall`; a local undo calls no adapter, and its handler runs in the job's result transaction with `forwardAttemptId` on `ServiceCall`. A completed undo is `DONE` (`COMPENSATION_STEP_COMPLETED`) and the next entry follows in the same transaction, so one undo runs at a time, newest first. With no entry left the scope token is `COMPENSATED`, other live tokens are `CANCELLED`, and the instance ends `FAILED` with `processes.instance.failed.v1`.
 - **Failure.** A failed undo is retried like any job of its lane. When it fails for good, the entry is `FAILED` (`COMPENSATION_STEP_FAILED`) and an incident `COMPENSATION_FAILED` names the entry, the forward job and the cause code; the walk pauses and keeps what it undid. `compensate: manual` sets the entry `MANUAL` and opens `COMPENSATION_MANUAL_REQUIRED`; history records `COMPENSATION_STEP_MANUAL` with the forward ids and the input snapshot, masked inputs as keyed hashes. Section 3.6 describes how both are retried and resolved.
 - **Called child process (#92, `PRE-211` to `PRE-214`, PD-127, PD-144).** See the next section. A completed child is undone only by its call step's own `horus:compensate` handler; the child's stack is never walked.
+- **Embedded sub-process (#486, `PRE-260` to `PRE-263`).** A `subProcess` is the same scope as a `saga` block without the transaction meaning: entering it creates a `SCOPE` token under the arriving token's scope and a flow token at its own none start event; the scope ends when its last live flow token ends, and a new token leaves through its outgoing flow. A flow never crosses its boundary (`FLOW_CROSSES_SAGA`), `throwCompensation` stays in a `saga` only, and an event sub-process (`triggeredByEvent`) is refused with stage `S1`. Variables follow the BPMN default: the sub-process reads the instance variables and writes to them, so a value it sets stays readable by the parent; scope-local variables arrive with data objects (S1). A step inside with `onFailure: compensate` starts the compensation of the sub-process's own scope, and a cancel cancels every token, task and job in every scope under the instance lock. The same `SCOPE` mechanism is what event subprocesses, boundary events on a subprocess and multi-instance bodies attach to. A completed sub-process's undo entries stay under its own scope token and are not walked by a later undo of the enclosing scope until compensation of nested scopes as a unit (S2, [`standards-compliance.md`](../../docs/architecture/standards-compliance.md) section 5.5). The cockpit shows the sub-process in the diagram, closed with a count of its steps or open as a frame, and nests its steps in the timeline; neither edits it.
 - **Out of scope.** Compensation of a called child as a standards-track subprocess compensation (S2, PD-127 option 2), compensation on cancel (PE-F-65, 1.2), and BPMN compensation events beyond `throwCompensation` (S2). A definition with a `saga` block is not yet exported back to BPMN.
 
 ![Saga compensation walk](images/saga-compensation.svg)
@@ -555,6 +556,7 @@ Source: [`diagrams/bpmn-import.mmd`](diagrams/bpmn-import.mmd).
 | `intermediateCatchEvent` with `timerEventDefinition` (`timeDuration` or `timeDate`) | `timer` | |
 | `callActivity` | `callProcess` | `calledElement` is the definition key |
 | `transaction` subprocess | `saga` | |
+| `subProcess` (embedded, not `triggeredByEvent`) | `subProcess` | Its own steps are nested under `steps`, like a `saga` |
 | `intermediateThrowEvent` with `compensateEventDefinition` | `throwCompensation` | |
 | `sequenceFlow` | `next`, `branches[]` | |
 | `bpmndi:BPMNShape`, `bpmndi:BPMNEdge` | layout revision 1 | Bounds and waypoints |

@@ -1795,3 +1795,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** Each of the first six is refused at activation, so no instance exists: the language has no host objects, no calls into Java, no assignment and no loops. The 540-node body fails the step with `SCRIPT_ERROR` (budget of 500 steps spent); the 1,200-character body is refused at activation. The last gives `true` and sets only its result variable, so `amount` is unchanged.
 - **Example:** `System.exit(0) -> refused at activation`.
 - **Test ID:** `PRE_253_a_script_cannot_call_host_code_or_name_a_host_class`, `PRE_253_a_script_reads_variables_and_sets_only_its_result_variable`, `PRE_253_a_script_over_its_step_budget_fails_the_step`, `PRE_253_a_script_longer_than_the_size_limit_is_refused_at_activation`
+
+### PRE-260 An embedded sub-process runs from its own start to its own end inside its own scope, and the parent continues only after that end
+- **Traces to:** `TR-STD-29`, `PRE-044`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `customer-onboarding` with a `subProcess` `onboard` between `start` and the service task `open-account`. Inside `onboard`: a script task `score` (`amount * 2` into `risk`), a `parallelGateway` that forks a service task `bureau` and a service task `fraud`, and a join. An instance starts with `amount = 1500000`.
+- **When:** The instance starts; `bureau` completes first; then `fraud` completes.
+- **Then:** Entering `onboard` opens a `SCOPE` token under the root scope token, and the first flow token runs under it. `score` reads the parent's `amount` and writes `risk` to the instance variables, which stay readable after the sub-process ends. The tokens on `bureau` and `fraud` carry the scope token of `onboard`. When `bureau` completes first, its token waits at the join and `open-account` has no token; the join counts only the tokens of the scope of `onboard` (`PRE-044`). When `fraud` completes, the scope token is `COMPLETED`, no token under it is live, and one flow token continues at `open-account` in the root scope. History records `SCOPE_ENTERED` for `onboard`. The instance completes when `open-account` completes.
+- **Example:** `amount 1500000 -> risk 3000000, open-account starts after the inner end`.
+- **Test ID:** `PRE_260_the_parent_continues_only_after_the_inner_end_and_the_scope_closes`
+
+### PRE-261 A cancel while the instance is inside a sub-process cancels every token, task and job in every scope
+- **Traces to:** `TR-STD-29`, `PRE-041`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding` with `bureau` and `fraud` waiting for their results inside `onboard`.
+- **When:** The instance is cancelled with the reason `customer withdrew`.
+- **Then:** The instance is `CANCELLED`; the scope token of `onboard` and every flow token under it are `CANCELLED`; each of the two calls in flight is cancelled by its job id; no token of any scope is live. A later result for either call is discarded (`PRE-041`).
+- **Example:** `cancel with bureau and fraud in flight -> two jobs cancelled, scope CANCELLED`.
+- **Test ID:** `PRE_261_a_cancel_inside_the_sub_process_cancels_every_inner_token_and_job`
+
+### PRE-262 A failure with `onFailure: compensate` inside a sub-process undoes only the steps of that sub-process
+- **Traces to:** `TR-COMP-01`, `PRE-044`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Process `loan-booking-embedded`: `register-loan` (undone by `cancel-loan`) in the root scope, then a `subProcess` `disburse` with `reserve-funds` (undone by `release-funds`), `open-account` (undone by `close-account`) and `notify-partner` with `onFailure: compensate`, which the partner refuses. A second process `fund` with `hold` (undone by `release-hold`) and `debit` (`onFailure: compensate`) inside a sub-process, after `open` (undone by `close-account`) in the root scope.
+- **When:** `notify-partner` fails for good; and, in the second process, `debit` answers the business error `INSUFFICIENT_FUNDS`.
+- **Then:** Each undo is pushed under the scope token of the scope its step ran in. The compensation started is that of the scope token of the sub-process, never of the root: the undos of `open-account` and `reserve-funds` run newest first, `cancel-loan` never runs and its entry stays `PENDING`, and the sub-process scope token ends `COMPENSATED`. The instance ends `FAILED`. A completed sub-process's entries are not walked by a later undo of the enclosing scope until S2 (DESIGN section 4.2).
+- **Example:** `disburse fails -> close-account, release-funds run; cancel-loan does not`.
+- **Test ID:** `PRE_262_an_undo_started_inside_the_sub_process_walks_that_scope_and_never_the_enclosing_one` (`SubProcessScopeTest`), `PRE_262_an_embedded_sub_process_is_a_scope_whose_failure_undoes_only_its_own_steps` (`SagaCompensationTest`)
+
+### PRE-263 A sub-process imports and exports with its own steps; a scope that is not well formed, or an element not yet supported, is refused
+- **Traces to:** `TR-STD-04`, `PRE-033`, #486
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `customer-onboarding` as above; the same file with `triggeredByEvent="true"` on `onboard`; the same file with a flow from `fraud` to the root `end`; the same file without the end event of `onboard`.
+- **When:** Each file is imported and compiled.
+- **Then:** The first reads with the steps and flows of `onboard` nested under it, and its canonical form holds a step of type `subProcess` with its own `steps`; the BPMN export reads back to the same canonical form. The second is refused as `422 BPMN_UNSUPPORTED_ELEMENT` for `subProcess with triggeredByEvent`, stage `S1`. The third is refused at activation with `FLOW_CROSSES_SAGA` naming the flow, because a flow never crosses the boundary of a scope. The fourth is refused with `NO_END_EVENT` naming `onboard`.
+- **Example:** `flow fraud -> end across the boundary -> FLOW_CROSSES_SAGA`.
+- **Test ID:** `PRE_263_a_sub_process_reads_with_its_steps_and_exports_back_to_the_same_definition`, `PRE_263_an_event_sub_process_is_refused_with_its_stage_and_a_flow_across_the_boundary_is_refused`, `PRE_263_a_sub_process_needs_one_start_event_and_an_end_event_of_its_own` (`SubProcessScopeTest`)

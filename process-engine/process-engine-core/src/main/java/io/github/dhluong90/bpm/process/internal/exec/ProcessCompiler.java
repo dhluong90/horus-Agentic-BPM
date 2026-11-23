@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.SequenceFlow;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.SubProcess;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.Transaction;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable;
@@ -83,21 +84,22 @@ public final class ProcessCompiler {
         }
         List<String> containerIds = new ArrayList<>();
         containerIds.add(process.id());
-        nodes.values().stream().filter(Transaction.class::isInstance).map(FlowNode::id).forEach(containerIds::add);
+        nodes.values().stream().filter(n -> n instanceof Transaction || n instanceof SubProcess)
+                .map(FlowNode::id).forEach(containerIds::add);
         Map<String, StartEvent> startOf = new HashMap<>();
         for (String container : containerIds) {
             boolean root = container.equals(process.id());
             List<StartEvent> starts = nodes.values().stream().filter(StartEvent.class::isInstance)
                     .filter(n -> container.equals(containerOf.get(n.id()))).map(StartEvent.class::cast).toList();
             if (starts.size() != 1) {
-                problems.add(DefinitionProblem.of("START_EVENT_COUNT", (root ? "A process" : "A saga block")
+                problems.add(DefinitionProblem.of("START_EVENT_COUNT", kind(root, nodes.get(container))
                         + " needs exactly one start event, found " + starts.size(), container));
             } else {
                 startOf.put(container, starts.get(0));
             }
             if (nodes.values().stream().noneMatch(n -> n instanceof EndEvent
                     && container.equals(containerOf.get(n.id())))) {
-                problems.add(DefinitionProblem.of("NO_END_EVENT", (root ? "A process" : "A saga block")
+                problems.add(DefinitionProblem.of("NO_END_EVENT", kind(root, nodes.get(container))
                         + " needs at least one end event", container));
             }
         }
@@ -108,9 +110,10 @@ public final class ProcessCompiler {
                         + flow.sourceRef() + " -> " + flow.targetRef(), flow.id()));
             } else if (!containerOf.get(flow.id()).equals(containerOf.get(flow.sourceRef()))
                     || !containerOf.get(flow.id()).equals(containerOf.get(flow.targetRef()))) {
-                // A flow never crosses a saga boundary: the block is entered and left through its own node.
+                // A flow never crosses a scope boundary: a block is entered and left through its own node.
                 problems.add(DefinitionProblem.of("FLOW_CROSSES_SAGA", "Sequence flow " + flow.sourceRef() + " -> "
-                        + flow.targetRef() + " crosses the boundary of a saga block; connect the block itself",
+                        + flow.targetRef() + " crosses the boundary of a saga block or sub-process; connect the block"
+                        + " itself",
                         flow.id()));
             }
             if (flow.conditionExpression() != null && flow.conditionExpression().text() != null) {
@@ -127,7 +130,7 @@ public final class ProcessCompiler {
                 problems.add(DefinitionProblem.of("NO_OUTGOING_FLOW", "Only an end event may have no outgoing flow",
                         node.id()));
             }
-            if (throwsCompensation(node) && containerOf.get(node.id()).equals(process.id())) {
+            if (throwsCompensation(node) && !(nodes.get(containerOf.get(node.id())) instanceof Transaction)) {
                 problems.add(DefinitionProblem.of("THROW_COMPENSATION_OUTSIDE_SAGA", "throwCompensation undoes the"
                         + " steps of its saga block; put it inside a transaction", node.id()));
             }
@@ -149,6 +152,10 @@ public final class ProcessCompiler {
                         }
                     }
                 }
+            }
+            if (node instanceof SubProcess sub && sub.triggeredByEvent()) {
+                problems.add(new DefinitionProblem("BPMN_NOT_EXECUTABLE", "an event sub-process has no behaviour in"
+                        + " this release", "subProcess", node.id(), 0));
             }
             if (node instanceof UserTask task && task.extensions().first(ResultVariable.class).isEmpty()) {
                 problems.add(DefinitionProblem.of("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
@@ -221,6 +228,11 @@ public final class ProcessCompiler {
                 collect(element.id(), nested.flowElements(), all, containerOf);
             }
         }
+    }
+
+    /** The words for a container in a problem text: the process, a saga block or an embedded sub-process. */
+    private static String kind(boolean root, FlowNode container) {
+        return root ? "A process" : container instanceof SubProcess ? "A sub-process" : "A saga block";
     }
 
     /** @return whether the node is a {@code throwCompensation}: a throw event with one compensate definition */
