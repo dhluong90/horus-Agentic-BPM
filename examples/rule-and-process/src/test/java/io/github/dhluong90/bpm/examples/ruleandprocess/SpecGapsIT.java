@@ -8,7 +8,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -96,7 +95,6 @@ class SpecGapsIT {
     }
 
     @Test
-    @Disabled("PRE-039 is pending: GET ...?include=source does not return the original text yet")
     void PRE_039_import_keeps_source_document_and_fixed_hash() throws Exception {
         // Given a BPMN file with a comment
         String source = keepSourceFile();
@@ -107,7 +105,7 @@ class SpecGapsIT {
 
         // Then the original text comes back byte for byte
         assertThat(back.statusCode()).as(back.body()).isEqualTo(200);
-        assertThat(JSON.readTree(back.body()).get("source").stringValue()).isEqualTo(source);
+        assertThat(JSON.readTree(back.body()).get("sourceDocument").stringValue()).isEqualTo(source);
     }
 
     /** What PRE-039 guarantees today: the format and the hash of the source are kept, the definition hash is stable. */

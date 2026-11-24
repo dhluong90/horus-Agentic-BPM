@@ -52,6 +52,11 @@ public interface ProcessStore {
                     lockVersion + 1, null, null, reason, null, null, null);
         }
 
+        /** @return a copy {@code DRAFT} again with the request cleared and no rejection comment (PRE-052) */
+        public StoredDefinition withdrawn() {
+            return rejected(null);
+        }
+
         /** @return a copy {@code RETIRED} by the actor, superseded by a version number or null */
         public StoredDefinition retired(String actor, Instant at, Integer superseded) {
             return new StoredDefinition(tenantId, id, key, version, "RETIRED", name, definitionJson, definitionHash,

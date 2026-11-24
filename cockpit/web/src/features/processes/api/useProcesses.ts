@@ -121,6 +121,26 @@ export function useRejectDefinition(key: string) {
   return useLifecycle<string>(key, (version, reason, idempotencyKey) => client.rejectDefinition(version.key, version.version, version.lockVersion ?? 0, reason, idempotencyKey), 'reject');
 }
 
+/**
+ * The requester takes their own pending version back (PRE-052). One Idempotency-Key per intent, so a repeated click
+ * or a retry replays the first answer; the lists are read again only after the engine confirms.
+ */
+export function useWithdrawDefinition(onDone: (version: DefinitionVersion) => void) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  const queryClient = useQueryClient();
+  const keyFor = useActionKey();
+  return useMutation({
+    mutationFn: ({ key, version, lockVersion, reason }: { key: string; version: number; lockVersion: number; reason: string | undefined }) =>
+      client.withdrawDefinition(key, version, lockVersion, reason, keyFor(JSON.stringify(['withdraw', key, version, lockVersion, reason]))),
+    onSuccess: async (stored) => {
+      queryClient.setQueryData(keys.version(stored.key, stored.version), stored);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: keys.definitions }), queryClient.invalidateQueries({ queryKey: keys.approvals })]);
+      onDone(stored);
+    },
+  });
+}
+
 export function useTask(id: string) {
   const { client } = useProcessesSession();
   const keys = useKeys();

@@ -492,6 +492,17 @@ class ProcessRestContractTest {
         }
 
         @Override
+        public DefinitionVersion withdraw(DefinitionRef ref, long expectedLockVersion, String reason,
+                String idempotencyKey) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String sourceDocument(String key, int version) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public DefinitionVersion retire(DefinitionRef ref, long expectedLockVersion, String reason,
                 boolean confirmNoVersionInEffect, String idempotencyKey) {
             throw new UnsupportedOperationException();

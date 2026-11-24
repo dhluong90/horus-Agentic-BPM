@@ -44,6 +44,8 @@ public record PendingApproval(String kind, String id, String key, String name, i
     public static final String APPROVE = "approve";
     /** See {@link #APPROVE}. */
     public static final String REJECT = "reject";
+    /** The requester takes their own request back (PRE-052). */
+    public static final String WITHDRAW = "withdraw";
     /** The caller does not hold the permission of the decision. */
     public static final String PERMISSION_REQUIRED = "PERMISSION_REQUIRED";
     /** The caller requested or made the version (four eyes, PRE-019, PD-096). */
