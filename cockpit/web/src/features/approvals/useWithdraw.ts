@@ -12,6 +12,8 @@ export interface WithdrawTarget {
   ruleSet: string;
   version: number;
   lockVersion: number;
+  /** What a person reads for the key, when the caller has it; the toast names the request with it. */
+  displayName?: string | undefined;
 }
 
 export function useWithdraw(onDone: (version: RuleSetVersion) => void) {

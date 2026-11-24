@@ -175,6 +175,13 @@ describe('Approvals queue across both engines (#31)', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
 
     expect(await screen.findByText('Nothing is waiting for your review.')).toBeInTheDocument();
+    // UAT v3 BUG: the toast named the process by its key in words, not by its display name.
+    expect(screen.getByText('Request for Customer onboarding (KYC) version 3 withdrawn')).toBeInTheDocument();
+    // The confirmation is a visible toast with a close button, not a screen-reader-only line.
+    expect(screen.getByText('Request for Customer onboarding (KYC) version 3 withdrawn')).toBeVisible();
+    expect(screen.getByText('Request for Customer onboarding (KYC) version 3 withdrawn').closest('.toast')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeVisible();
+    expect(screen.queryByText(/Kyc onboarding/)).not.toBeInTheDocument();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ ifMatch: '"3"', body: { reason: 'Wrong form attached' } });
     expect(sent[0]?.key).toMatch(/^[0-9a-f-]{36}$/);

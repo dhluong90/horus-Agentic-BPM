@@ -5,7 +5,7 @@ import { AreaError, EmptyState, LoadingRows, PageHead } from '../../../component
 import { useI18n } from '../../../i18n/I18nProvider';
 import { ProblemNotice } from '../../rules/components/ProblemNotice';
 import { useProcessesSession } from '../api/processesContext';
-import { useDefinitionGraph, useDefinitionVersion } from '../api/useProcesses';
+import { useDefinitionGraph, useDefinitionVersion, useEarlierVersions, useVersionsWithCases } from '../api/useProcesses';
 import type { DiagramGraph } from '../model/bpmnGraph';
 import { nodeTypeLabel } from '../model/nodeLabels';
 import { migrationRefusal } from './MigrationDock';
@@ -17,7 +17,7 @@ import { openChoices, planInstructions, type StepChoice } from './model/migratio
  * and the new one does not, what happens to the cases waiting there. Creating the plan moves nothing; it opens the
  * plan, where it is checked, proposed and approved. A step the operator leaves open is flagged and blocks the plan.
  */
-export function MigrationBuilder({ definitionKey, target, from }: { definitionKey: string; target: number; from: number | undefined }) {
+export function MigrationBuilder({ definitionKey, target, from, pageLimit }: { definitionKey: string; target: number; from: number | undefined; pageLimit: number }) {
   const { t } = useI18n();
   const { can } = useProcessesSession();
   const version = useDefinitionVersion(definitionKey, target);
@@ -29,7 +29,6 @@ export function MigrationBuilder({ definitionKey, target, from }: { definitionKe
     ]);
     return () => { setCrumbTrail(undefined); };
   }, [name, definitionKey, target, t]);
-  const source = from !== undefined && from < target ? from : target - 1;
   const head = (subtitle: string) => <PageHead id="migrate-title" title={t('migration.title')} subtitle={subtitle} />;
   if (!can('processes:migration:manage')) {
     return <section className="workspace" aria-labelledby="migrate-title">{head(t('migrate.subtitle'))}<article className="card"><EmptyState icon="processes" text={t('migrate.noPermission')} /></article></section>;
@@ -42,10 +41,31 @@ export function MigrationBuilder({ definitionKey, target, from }: { definitionKe
   if (version.data.status !== 'ACTIVE') {
     return <section className="workspace" aria-labelledby="migrate-title">{head(t('migrate.subtitle'))}<article className="card"><EmptyState icon="processes" text={t('migrate.notActive')} /></article></section>;
   }
-  return <Builder definitionKey={definitionKey} target={target} initialSource={source} head={head(t('migrate.subtitle'))} />;
+  return <Sources definitionKey={definitionKey} target={target} from={from} pageLimit={pageLimit} head={head(t('migrate.subtitle'))} />;
 }
 
-function Builder({ definitionKey, target, initialSource, head }: { definitionKey: string; target: number; initialSource: number; head: ReactNode }) {
+/** A version that was never published holds no cases, so it is never offered as the place cases move from. */
+const CAN_HOLD_CASES = new Set(['ACTIVE', 'RETIRED']);
+
+/**
+ * Chooses where the cases are now: a published version with running cases. A version in the link is kept when it was
+ * published; otherwise the newest version with running cases. With none, the page says so instead of offering a plan
+ * that cannot be made.
+ */
+function Sources({ definitionKey, target, from, pageLimit, head }: { definitionKey: string; target: number; from: number | undefined; pageLimit: number; head: ReactNode }) {
+  const { t } = useI18n();
+  const earlier = useEarlierVersions(definitionKey, target);
+  const cases = useVersionsWithCases(definitionKey, pageLimit);
+  if (earlier.pending || cases.pending) return <section className="workspace" aria-busy="true"><LoadingRows rows={6} /></section>;
+  const published = earlier.versions.filter((item) => CAN_HOLD_CASES.has(item.status)).map((item) => item.version).sort((a, b) => b - a);
+  const initial = from !== undefined && published.includes(from) ? from : published.find((version) => cases.versions.has(version));
+  if (initial === undefined) {
+    return <section className="workspace" aria-labelledby="migrate-title">{head}<article className="card"><EmptyState icon="processes" text={t('migrate.noCases')} /></article></section>;
+  }
+  return <Builder definitionKey={definitionKey} target={target} initialSource={initial} sources={published} head={head} />;
+}
+
+function Builder({ definitionKey, target, initialSource, sources, head }: { definitionKey: string; target: number; initialSource: number; sources: readonly number[]; head: ReactNode }) {
   const { t } = useI18n();
   const [source, setSource] = useState(initialSource);
   const sourceGraph = useDefinitionGraph(definitionKey, source);
@@ -62,7 +82,6 @@ function Builder({ definitionKey, target, initialSource, head }: { definitionKey
   const list: StepChoice[] = gone.map((node) => ({ step: node.id, choice: choices[node.id]?.choice ?? '', reason: choices[node.id]?.reason ?? '' }));
   const open = openChoices(list);
   const set = (id: string, next: Partial<{ choice: string; reason: string }>) => { setChoices((current) => ({ ...current, [id]: { choice: '', reason: '', ...current[id], ...next } })); };
-  const versions = Array.from({ length: target - 1 }, (_, index) => target - 1 - index);
   const ready = sourceGraph.data !== undefined && targetGraph.data !== undefined;
   const message = migrationRefusal(create.error);
 
@@ -74,7 +93,7 @@ function Builder({ definitionKey, target, initialSource, head }: { definitionKey
           <label className="field field--inline" htmlFor={selectId}>
             <span className="field__label">{t('migrate.from')}</span>
             <select id={selectId} className="field__input field__input--compact" value={source} onChange={(event) => { setSource(Number(event.target.value)); setChoices({}); }}>
-              {versions.map((value) => <option key={value} value={value}>{t('migrate.fromVersion', { version: String(value) })}</option>)}
+              {sources.map((value) => <option key={value} value={value}>{t('migrate.fromVersion', { version: String(value) })}</option>)}
             </select>
           </label>
         </div>

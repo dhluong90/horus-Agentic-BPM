@@ -21,10 +21,12 @@ export type NodeMark =
   | { kind: 'incident'; code: string }
   | { kind: 'token'; status: LiveStatus; count: number }
   | { kind: 'undone' }
+  /** The step that does the undoing (a compensation activity or compensation event sub-process) has run for a step the engine reports undone. */
+  | { kind: 'undoRan' }
   | { kind: 'done' };
 
 /** The marks of every step: an open incident first, then where tokens wait, then undone steps, then completed ones. */
-export function nodeMarks(instance: ProcessInstance, activities: InstanceActivities | undefined): Map<string, NodeMark> {
+export function nodeMarks(instance: ProcessInstance, activities: InstanceActivities | undefined, graph?: Pick<DiagramGraph, 'nodes' | 'edges'>): Map<string, NodeMark> {
   const marks = new Map<string, NodeMark>();
   for (const node of activities?.nodes ?? []) {
     if (node.incident !== null) marks.set(node.nodeId, { kind: 'incident', code: node.incident.code });
@@ -39,10 +41,26 @@ export function nodeMarks(instance: ProcessInstance, activities: InstanceActivit
       marks.set(entry.compensates, { kind: 'undone' });
     }
   }
+  if (graph !== undefined) {
+    // The engine records an undo against the step it undoes, not against the step that does the work. The model says
+    // which step that is: the activity a compensation boundary event points to, or the compensation event sub-process.
+    for (const [id, mark] of [...marks]) {
+      if (mark.kind !== 'undone') continue;
+      for (const handler of undoHandlers(graph, id)) if (!marks.has(handler)) marks.set(handler, { kind: 'undoRan' });
+    }
+  }
   for (const node of activities?.nodes ?? []) {
     if (!marks.has(node.nodeId) && node.state === 'COMPLETED') marks.set(node.nodeId, { kind: 'done' });
   }
   return marks;
+}
+
+/** The steps that undo `stepId` in the model: its compensation activities, and for a sub-process its compensation event sub-process. */
+function undoHandlers(graph: Pick<DiagramGraph, 'nodes' | 'edges'>, stepId: string): string[] {
+  const boundaries = new Set(graph.nodes.filter((node) => node.attachedTo === stepId && node.type === 'boundaryEvent:compensate').map((node) => node.id));
+  const activities = graph.edges.filter((edge) => edge.isAssociation === true && boundaries.has(edge.source)).map((edge) => edge.target);
+  const eventSubProcesses = graph.nodes.filter((node) => node.parentId === stepId && node.trigger === 'compensate').map((node) => node.id);
+  return [...activities, ...eventSubProcesses];
 }
 
 /** The step to open first: where the case is stuck (an incident), else where it waits, else nothing. */
