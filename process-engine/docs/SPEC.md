@@ -603,7 +603,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Kind:** semantics
 - **Given:** `kyc-onboarding.yaml` in Git (with comments) and the RFC 8785 hash the pipeline computed from it; the same definition later read back after a newer schema version file has been added to the build.
 - **When:** It is imported with `POST /api/bpm/processes/v1/definitions`, then read with `GET .../definitions/kyc-onboarding/versions/1?include=source`.
-- **Then:** `pre_definition` has `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` of those bytes, and `definition_hash` equal to the pipeline's hash; the response carries the original text; with the newer schema version present, `definition_hash` of version 1 is unchanged and no stored document is re-serialised.
+- **Then:** `pre_definition` has `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` of those bytes, and `definition_hash` equal to the pipeline's hash; `?include=source` answers the original text as `sourceDocument`, byte for byte; with the newer schema version present, `definition_hash` of version 1 is unchanged and no stored document is re-serialised.
 - **Example:** `import kyc-onboarding.yaml -> source_format YAML, definitionHash = pipeline hash, unchanged after upgrade`.
 - **Test ID:** `PRE_039_import_keeps_source_document_and_fixed_hash`
 
@@ -698,8 +698,8 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Given:** Definition `card-fee-review` v1 approved (or auto-approved on `dev`), with `sourceHash` and `readerVersion` recorded in `processes.definition.approved.v1` and the approval history row, and one running instance.
 - **When:** (a) The stored `source_document` and `source_hash` are both replaced in the database by a different, internally consistent process. (b) The engine starts with a different BPMN reader version and the same source.
 - **Then:**
-  - (a) Starting or advancing the version is refused. Each affected instance gets an incident naming the integrity check, and one audit entry and one alert are written. The changed process never runs.
-  - (b) The version compiles and runs, and a WARN log line names the definition and both reader versions.
+  - (a) Starting or advancing the version is refused with `500 DEFINITION_INTEGRITY_FAILED` when the stored source does not give its `source_hash`, or its canonical form does not give the stored `definition_hash`; the same check guards export, diff and `?include=source`. One security log entry names the tenant, key and version (never the content). The changed process never runs. Incidents on running instances and an alert are post-1.0.
+  - (b) The version compiles and runs, and a WARN log line names the definition and both reader versions (post-1.0: the reader version is not recorded yet).
 - **Example:** `source swapped with a matching row hash -> refused, incident, audit, alert; reader upgraded -> runs, WARN`.
 - **Test ID:** `PRE_048_kernel_runs_only_the_approved_source`
 

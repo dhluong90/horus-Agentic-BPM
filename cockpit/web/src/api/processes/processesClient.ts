@@ -115,6 +115,8 @@ export interface ProcessesClient {
   approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
   /** rejectDefinition: back to draft with a reason */
   rejectDefinition(key: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<DefinitionVersion>;
+  /** withdrawDefinition: the requester takes a pending version back to draft, with an optional reason (PRE-052) */
+  withdrawDefinition(key: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<DefinitionVersion>;
   /** exportDefinition (format=bpmn): the version's graph as BPMN 2.0 XML; writes nothing */
   exportBpmn(key: string, version: number, signal?: AbortSignal): Promise<string>;
   /** getTask: the task with the actions this caller may take, and the review context of a refused agent answer */
@@ -246,6 +248,10 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async rejectDefinition(key, version, lockVersion, reason, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
       return (await call({ method: 'POST', path: `${versionPath(key, version)}:reject`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
+    },
+    async withdrawDefinition(key, version, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) };
+      return (await call({ method: 'POST', path: `${versionPath(key, version)}:withdraw`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
     },
     async exportBpmn(key, version, signal) {
       const answer = await downloadFromHost(fetchImpl, baseUrl, { method: 'GET', path: `${versionPath(key, version)}/export?format=bpmn`, ...withSignal(signal) }, 'application/bpmn+xml');

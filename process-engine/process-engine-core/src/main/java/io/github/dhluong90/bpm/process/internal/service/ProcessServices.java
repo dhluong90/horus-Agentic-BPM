@@ -897,8 +897,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             // PD-097: as in the Rule Engine, "an approver refused it" is never the requester taking it back.
             if (caller.equals(current.requestedBy())) {
                 throw new SelfApprovalForbiddenException("The requester of " + ref.key() + " v" + ref.version()
-                        + " cannot reject their own request; withdraw it instead (withdraw is planned; until then "
-                        + "ask an approver to reject it)");
+                        + " cannot reject their own request; use :withdraw to take it back");
             }
             requireLock(current, expectedLockVersion);
             Instant now = clock.instant();
@@ -911,6 +910,38 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             payload.put("rejectedBy", caller);
             payload.put("reason", why);
             publishDefinition(updated, "processes.definition.rejected.v1", payload, now);
+            return view(updated);
+        }, Views::definitionToJson, Views::definitionFromJson));
+    }
+
+    @Override
+    public DefinitionVersion withdraw(DefinitionRef ref, long expectedLockVersion, String reason,
+            String idempotencyKey) {
+        String tenant = tenant();
+        String caller = callerWithAny(PERMISSION_AUTHOR, PERMISSION_DEPLOY);
+        String why = boundedComment(reason, false);
+        String requestHash = Hashes.sha256Parts("withdraw", caller, ref.key(), Integer.toString(ref.version()),
+                Long.toString(expectedLockVersion), String.valueOf(why));
+        return transactions.inTransaction(() -> idempotent(tenant, "withdraw", idempotencyKey, requestHash, () -> {
+            StoredDefinition current = lockVersion(tenant, ref).version();
+            requireStatus(current, "PENDING_APPROVAL", "withdraw");
+            // PD-097, as the Rule Engine (PD-089): only the identity that requested approval takes it back; an approver
+            // rejects instead, so the history never records a refusal as the requester's own withdrawal.
+            if (!caller.equals(current.requestedBy())) {
+                throw new PermissionDeniedException("Only the requester of " + ref.key() + " v" + ref.version()
+                        + " can withdraw it; an approver uses :reject");
+            }
+            requireLock(current, expectedLockVersion);
+            Instant now = clock.instant();
+            StoredDefinition updated = current.withdrawn();
+            write(updated);
+            lifecycleHistory(updated, "WITHDRAWN", current.status(), caller, why, Map.of(), now);
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("definitionKey", updated.key());
+            payload.put("version", updated.version());
+            payload.put("withdrawnBy", caller);
+            payload.put("reason", why);
+            publishDefinition(updated, "processes.definition.withdrawn.v1", payload, now);
             return view(updated);
         }, Views::definitionToJson, Views::definitionFromJson));
     }
@@ -1239,6 +1270,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     @Override
+    public String sourceDocument(String key, int version) {
+        String tenant = tenant();
+        callerWith(PERMISSION_READ);
+        StoredDefinition definition = !isKey(key) || version < 1 ? null
+                : store.definitionVersion(tenant, key, version).orElse(null);
+        if (definition == null) {
+            throw new DefinitionNotFoundException("No definition " + safe(key) + " v" + version);
+        }
+        // The same check as a run or an export: a source that no longer gives its hashes is never served.
+        storedProcess(definition);
+        return definition.sourceDocument();
+    }
+
+    @Override
     public io.github.dhluong90.bpm.process.api.GraphDiff diff(DefinitionRef base, DefinitionRef target) {
         String tenant = tenant();
         callerWith(PERMISSION_READ);
@@ -1456,10 +1501,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      */
     private io.github.dhluong90.bpm.process.api.PendingApproval pendingApproval(ProcessStore.PendingApprovalRow row,
             String caller, java.util.Set<String> held) {
-        List<String> allowed = new ArrayList<>(2);
+        List<String> allowed = new ArrayList<>(3);
         Map<String, String> denied = new LinkedHashMap<>(2);
         String approve = io.github.dhluong90.bpm.process.api.PendingApproval.APPROVE;
         String reject = io.github.dhluong90.bpm.process.api.PendingApproval.REJECT;
+        boolean requesterNow = caller.equals(row.requestedBy());
         if (!held.contains(PERMISSION_APPROVE)) {
             denied.put(approve, io.github.dhluong90.bpm.process.api.PendingApproval.PERMISSION_REQUIRED);
             denied.put(reject, io.github.dhluong90.bpm.process.api.PendingApproval.PERMISSION_REQUIRED);
@@ -1477,6 +1523,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             } else {
                 allowed.add(reject);
             }
+        }
+        // PRE-052: the requester may take the request back, with the author permission the request needed.
+        if (requesterNow && (held.contains(PERMISSION_AUTHOR) || held.contains(PERMISSION_DEPLOY))) {
+            allowed.add(io.github.dhluong90.bpm.process.api.PendingApproval.WITHDRAW);
         }
         return io.github.dhluong90.bpm.process.api.PendingApproval.definition(row.id(), row.key(), row.name(),
                 row.version(), row.definitionHash(), row.lockVersion(), row.requestedBy(), row.requestedAt(), allowed,
@@ -5734,16 +5784,22 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Function<byte[], Process> reader = readers.get(SourceFormat.valueOf(definition.sourceFormat()));
         byte[] source = definition.sourceDocument().getBytes(StandardCharsets.UTF_8);
         if (!Hashes.sha256(source).equals(definition.sourceHash())) {
-            throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
-                    + ": the stored source does not match its source hash");
+            throw integrityFailed(definition, "the stored source does not match its source hash");
         }
         Process process = reader instanceof DefinitionReader keyed ? keyed.readKey(source, definition.key())
                 : reader.apply(source);
         if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
-            throw new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version()
-                    + ": the stored source no longer gives the recorded definition hash");
+            throw integrityFailed(definition, "the stored source no longer gives the recorded definition hash");
         }
         return process;
+    }
+
+    /** PRE-048: the refusal is also a security log entry that names the tenant, key and version, never the content. */
+    private static DefinitionIntegrityException integrityFailed(StoredDefinition definition, String detail) {
+        LOG.log(System.Logger.Level.ERROR, "process.definition.integrity-failed tenant={0} key={1} version={2}: {3}",
+                definition.tenantId(), definition.key(), definition.version(), detail);
+        return new DefinitionIntegrityException("Definition " + definition.key() + " v" + definition.version() + ": "
+                + detail);
     }
 
     private ProcessInstance read(String tenant, InstanceRow row) {

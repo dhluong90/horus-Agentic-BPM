@@ -858,6 +858,7 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `processes.definition.publish-requested.v1` | `definitionKey`, `version`, `definitionHash`, `requestedBy`, `effectiveFrom`, `source` |
 | `processes.definition.approved.v1` | Same plus `approvedBy`, `approvedAt`, `sourceHash`, `readerVersion` (5.8), and `reviewedDefinitionHash` when the approval named one (0.3.0, PD-139) |
 | `processes.definition.rejected.v1` | `definitionKey`, `version`, `rejectedBy`, `reason` |
+| `processes.definition.withdrawn.v1` | `definitionKey`, `version`, `withdrawnBy`, `reason` (PRE-052) |
 | `processes.definition.retired.v1` | `definitionKey`, `version`, `retiredBy` or `supersededBy`; for a manual retirement also `reason`, `approvalMode` (`single` or `four-eyes`), `requestedBy` in `four-eyes` mode, and `noVersionInEffect` (PD-101, PD-102) |
 | `processes.migration.proposed.v1`, `.approved.v1`, `.rejected.v1` | `migrationId`, `definitionKey`, `sourceVersion`, `targetVersion`, the actor (`proposedBy`, `approvedBy` or `rejectedBy`), `reason`, `planHash`, the counts of the dry run (#90) |
 | `processes.migration.completed.v1` | `migrationId`, `definitionKey`, both versions, `status`, `migrated`, `failed`, `skipped`, `proposedBy`, `approvedBy` (#90) |

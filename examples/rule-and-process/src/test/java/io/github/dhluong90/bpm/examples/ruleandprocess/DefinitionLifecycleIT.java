@@ -137,6 +137,76 @@ class DefinitionLifecycleIT {
     }
 
     @Test
+    void PRE_052_requester_withdraws_own_pending_definition_to_draft() throws Exception {
+        // Given a pending version requested by lan, with v1 active
+        JsonNode draft = importKyc("Review identity documents, withdrawn", 201);
+        String v = BASE + "/kyc-onboarding/versions/" + draft.get("version").intValue();
+        JsonNode pending = json(send("lan", "POST", v + ":request-approval", "", "\"0\"", "application/json"), 200);
+        assertThat(pending.get("lockVersion").intValue()).isEqualTo(1);
+
+        // When the approver tries to withdraw it, the requester rejects it, and a stale If-Match is sent
+        HttpResponse<String> byApprover = send("minh", "POST", v + ":withdraw", "{}", "\"1\"", "application/json");
+        HttpResponse<String> selfReject = send("lan", "POST", v + ":reject", "{\"reason\":\"changed my mind\"}", "\"1\"",
+                "application/json");
+        HttpResponse<String> stale = send("lan", "POST", v + ":withdraw", "{}", "\"0\"", "application/json");
+        HttpResponse<String> noMatch = send("lan", "POST", v + ":withdraw", "{}", null, "application/json");
+
+        // Then each is refused with its code, and nothing changes
+        assertThat(json(byApprover, 403).get("code").stringValue()).isEqualTo("PERMISSION_DENIED");
+        JsonNode selfRefused = json(selfReject, 403);
+        assertThat(selfRefused.get("code").stringValue()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
+        assertThat(selfRefused.get("detail").stringValue()).contains(":withdraw");
+        assertThat(json(stale, 409).get("code").stringValue()).isEqualTo("VERSION_CONFLICT");
+        assertThat(noMatch.statusCode()).isEqualTo(428);
+        assertThat(json(get("lan", v), 200).get("status").stringValue()).isEqualTo("PENDING_APPROVAL");
+
+        // When lan withdraws with a key, then replays it
+        HttpResponse<String> withdrawn = send("lan", "POST", v + ":withdraw", "{\"reason\":\"wrong form\"}", "\"1\"",
+                "application/json", "withdraw-1");
+        HttpResponse<String> replay = send("lan", "POST", v + ":withdraw", "{\"reason\":\"wrong form\"}", "\"1\"",
+                "application/json", "withdraw-1");
+
+        // Then it is a draft again, no rejection is recorded, the history names the withdrawal once, and the replay is the same answer
+        JsonNode body = json(withdrawn, 200);
+        assertThat(body.get("status").stringValue()).isEqualTo("DRAFT");
+        assertThat(body.get("lockVersion").intValue()).isEqualTo(2);
+        assertThat(body.path("requestedBy").isNull() || body.path("requestedBy").isMissingNode()).isTrue();
+        assertThat(body.path("decisionComment").isNull() || body.path("decisionComment").isMissingNode()).isTrue();
+        assertThat(replay.body()).isEqualTo(withdrawn.body());
+        JsonNode history = json(get("minh", v + "/history"), 200).get("items");
+        assertThat(history).extracting(h -> h.get("action").stringValue() + " " + h.get("actor").stringValue())
+                .containsExactly("IMPORTED lan", "REQUESTED lan", "WITHDRAWN lan");
+
+        // When a draft is withdrawn, then it is not pending and the answer says so
+        assertThat(json(send("lan", "POST", v + ":withdraw", "{}", "\"2\"", "application/json"), 409).get("code")
+                .stringValue()).isEqualTo("INVALID_STATE");
+    }
+
+    @Test
+    void PRE_039_the_original_imported_text_is_served_byte_for_byte_with_include_source() throws Exception {
+        // Given a BPMN file with CRLF line ends, a comment with Vietnamese text and no trailing newline
+        String original = resource().replace("\r\n", "\n").replace("\n", "\r\n").replaceFirst("(<\\?xml[^>]*\\?>)",
+                "$1\r\n<!-- Quy trình mở tài khoản, số tiền tối thiểu 50.000 ₫ -->").stripTrailing();
+        JsonNode imported = json(send("lan", "POST", BASE, original, null, "application/xml"), 201);
+        String v = BASE + "/kyc-onboarding/versions/" + imported.get("version").intValue();
+
+        // When it is read with include=source
+        JsonNode read = json(get("lan", v + "?include=source"), 200);
+
+        // Then the text is the posted text, byte for byte, and the plain read carries no text
+        assertThat(read.get("sourceDocument").stringValue().getBytes(StandardCharsets.UTF_8))
+                .isEqualTo(original.getBytes(StandardCharsets.UTF_8));
+        assertThat(read.get("sourceHash").stringValue()).isEqualTo(sha256(original));
+        assertThat(json(get("lan", v), 200).get("sourceDocument")).isNull();
+        assertThat(json(get("lan", v + "?include=secrets"), 400).get("code").stringValue()).isEqualTo("INPUT_INVALID");
+    }
+
+    private static String sha256(String text) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
     void TR_TEN_02_an_unknown_version_answers_definition_not_found_as_another_tenants_version_does() throws Exception {
         HttpResponse<String> missing = get("minh", BASE + "/kyc-onboarding/versions/99");
 
@@ -167,11 +237,19 @@ class DefinitionLifecycleIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, String ifMatch,
             String contentType) throws Exception {
+        return send(user, method, path, body, ifMatch, contentType, null);
+    }
+
+    private HttpResponse<String> send(String user, String method, String path, String body, String ifMatch,
+            String contentType, String idempotencyKey) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", contentType)
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
         if (ifMatch != null) {
             request.header("If-Match", ifMatch);
+        }
+        if (idempotencyKey != null) {
+            request.header("Idempotency-Key", idempotencyKey);
         }
         return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }

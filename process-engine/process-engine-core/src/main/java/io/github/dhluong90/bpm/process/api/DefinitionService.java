@@ -146,6 +146,33 @@ public interface DefinitionService {
     DefinitionVersion reject(DefinitionRef ref, long expectedLockVersion, String reason, String idempotencyKey);
 
     /**
+     * The original imported text of a version, exactly as it was posted (PRE-039), after the same integrity check as a
+     * run or an export.
+     *
+     * @param key the definition key
+     * @param version the version number
+     * @return the source text
+     * @throws DefinitionNotFoundException when there is no such version in this tenant
+     * @throws DefinitionIntegrityException when the stored source no longer gives its recorded hashes
+     */
+    String sourceDocument(String key, int version);
+
+    /**
+     * The requester takes their own pending version back to {@code DRAFT} (PRE-052, {@code processes:author}). Unlike
+     * {@link #reject} it records no rejection: the history row is {@code WITHDRAWN}, the decision comment stays empty
+     * and {@code processes.definition.withdrawn.v1} is published.
+     *
+     * @param ref the version
+     * @param expectedLockVersion its lock version
+     * @param reason an optional reason, or null
+     * @param idempotencyKey idempotency key, or null
+     * @return the version, now a draft
+     * @throws PermissionDeniedException when the caller is not the requester
+     * @throws InvalidStateException when the version is not pending approval
+     */
+    DefinitionVersion withdraw(DefinitionRef ref, long expectedLockVersion, String reason, String idempotencyKey);
+
+    /**
      * Retires an active version ({@code processes:approve}, PD-102) or withdraws a draft ({@code processes:author}).
      * Retiring stops new starts only: running instances keep their version. A retirement of an active version needs a
      * reason and runs in the {@code single} approval mode ({@code horus.bpm.lifecycle.retire-approval}); the history
