@@ -38,7 +38,7 @@ ENGINES = ("rule-engine", "process-engine")
 MIGRATION = re.compile(r"^(?P<engine>rule-engine|process-engine)/(?:.+/)?migration/(?P<file>V(?P<version>\d+(?:[._]\d+)*)__[^/]+\.sql)$")
 RETIRED_FILE = Path(__file__).with_name("migration-retired-versions.txt")
 # Until the 1.0 release the V1 baseline of each engine may be edited in place (#479). Set to False when 1.0 is cut.
-BASELINE_OPEN = True
+BASELINE_OPEN = False
 BASELINE_FILE = "V1__baseline.sql"
 
 

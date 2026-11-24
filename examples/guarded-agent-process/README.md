@@ -55,7 +55,7 @@ HORUS_DB_PASSWORD=... HORUS_DEMO_PASSWORD=... \
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password, from the environment only |
 | `HORUS_DEMO_PASSWORD` | none | Password of the demo users on the `dev` profile; start-up fails without it |
-| `HORUS_DECISION_LOG_RETENTION` | empty (keep everything, with a warning) | Decision-log retention in whole months, at least 12 |
+| `HORUS_DECISION_LOG_RETENTION` | `keep-forever` | Decision-log retention in whole months, at least 12 |
 | `PORT` | `8080` | HTTP port |
 
 Demo users (on the `dev` profile only, all with `HORUS_DEMO_PASSWORD`): `kim` (teller), `thu` (compliance reviewer), `an` (underwriter) and `pia` (process deployer).

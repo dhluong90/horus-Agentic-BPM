@@ -51,12 +51,10 @@ docker exec horus-pg psql -U horus -d horus -c 'SELECT version, script FROM rle_
 #  1       | V1__baseline.sql
 ```
 
-Decision log retention is off by default: with `HORUS_DECISION_LOG_RETENTION` unset, every decision is kept, nothing is dropped, and every start-up logs a WARN saying so (set `keep-forever` to choose it on purpose; the warning then becomes an INFO):
+From 1.0 a host must choose a decision log retention: outside the `dev` profile the engine refuses to start with it unset. This example sets `keep-forever` through `HORUS_DECISION_LOG_RETENTION` (start-up logs an INFO saying so); set an ISO period in whole months to drop older months:
 
 ```bash
-HORUS_DB_PASSWORD=change-me java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
-# WARN  DecisionLogRetention: Rule Engine decision log retention is unset (horus.bpm.rules.decision-log.retention), so
-# every decision is kept and none is dropped. The log grows by one row per decision, roughly 1 to 3 KB each ...
+HORUS_DB_PASSWORD=change-me HORUS_DECISION_LOG_RETENTION=P12M java -jar examples/rule-engine-only/target/example-rule-engine-only-*.jar
 ```
 
 Only an explicit ISO period in whole months, such as `P12M` (at least `decision-log.retention-floor`), turns drops on; `keep-forever` keeps everything explicitly.
@@ -745,7 +743,7 @@ Cells use a FEEL subset: comparisons (`< 18`, `>= 3`), ranges (`[18..65]`, `(0..
 | `HORUS_DB_USERNAME` | `horus` | Database user |
 | `HORUS_DB_PASSWORD` | none | Database password. Never put it in a file in the repository |
 | `PORT` | `8080` | HTTP port |
-| `HORUS_DECISION_LOG_RETENTION` | unset: keeps everything, warns | `keep-forever`, or an ISO period in whole months of at least `P12M`, such as `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. Unset, nothing is dropped and the host starts normally |
+| `HORUS_DECISION_LOG_RETENTION` | `keep-forever` in this example | `keep-forever`, or an ISO period in whole months of at least `P12M`, such as `P12M` (`horus.bpm.rules.decision-log.retention`). Monthly partitions older than this are dropped, and each drop is recorded in `rle_decision_log_drop`. Required from 1.0 outside `dev`; `keep-forever` drops nothing |
 | `HORUS_BPM_RULES_MASKING_HMAC_KEY` | none | Base64 key, at least 32 bytes after decoding, for the fingerprints of inputs a rule set declares `mask: true`. Needed only once such a rule set is imported: without it the host refuses to start and names the setting. Create one with `openssl rand -base64 32` and keep it in a secret store |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` | none | Issuer of the bearer tokens the host accepts. Unset: no bearer tokens, so only health answers outside `dev` |
 | `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_AUDIENCES` | none | Audience this host requires in every token, for example `rule-engine-only`. Required whenever an issuer, JWK set or public key is set: without it the host does not start (TR-SEC-12) |

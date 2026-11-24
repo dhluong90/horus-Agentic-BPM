@@ -6,12 +6,24 @@ What shipped in each release. The project has one version for every module, and 
 |---|---|---|---|---|
 | 0.1.0 | `v0.1.0` | 20 Nov 2026 | The 13 artifacts pinned by `bpm-bom` 0.1.0, all at `0.1.0`: `bpm-host-metadata`, the Rule Engine (`rule-engine-core`, `-postgres`, `-rest`, `-spring-boot-starter`), the Process Engine preview (`process-engine-core`, `-bpmn`, `-test`, `-postgres`, `-rest`, `-spring-boot-starter`), `cockpit-spring-boot-starter`, and `bpm-bom` itself | First release, published as a GitHub Release with its bill of materials and checksums |
 | 0.2.0 | `v0.2.0` | 21 Nov 2026 | As 0.1.0, at `0.2.0`, plus the new `bpm-expression` (14 artifacts) | **Breaking change of a 0.x release: `Money` and the expression types moved to `bpm-expression`** (see [0.2.0](#020)). **Upgrade note (PD-104): finish a rolling upgrade before relying on approval acknowledgements.** A replica still on 0.1.x approves without asking for an acknowledgement and writes no `acknowledged_warnings` or `masked_by_default_inputs`, so until every replica runs 0.2.0 an approval can reach the decision log without the acknowledgement on the record. **Upgrade note (PD-105): a pending rule set version written before V2 has no recorded author and can no longer be approved** (`409 AUTHOR_UNKNOWN`); import the change again, have it approved, and reject or withdraw the old version. Migrations: see [0.2.0](#020) |
+| 1.0.0 | `v1.0.0` | Pending product owner acceptance | Every module and `bpm-bom`, at `1.0.0` | **The 1.0 baseline.** The first release with a compatibility promise; 0.x had no users and is not supported. See [1.0.0](#100) |
 
 Every release note lists the database migrations it adds (TR-OPS-01) and the "should" requirements it meets ([[Technical Requirements]]).
 
-## 0.3.0 (not yet released)
+## 1.0.0
 
-What `main` holds for the next release. It is still a 0.x release, so it makes no compatibility promise.
+The 1.0 baseline: one version for every module, and the first with a compatibility promise. Migrations that the engines run are the ones listed under 0.3.0 and earlier; 1.0.0 adds none.
+
+- **Rule Engine with simple editing in the cockpit.** Author, test, approve and publish decision tables and rules without code, with four eyes and a full decision log. See [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]].
+- **Every executable BPMN 2.0 element.** The Process Engine imports and runs all of them, from gateways to compensation and event sub-processes. See [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]].
+- **Import from Camunda Modeler or bpmn.io.** Bring a file in as it is; what the engine reads and what it refuses is listed element by element. See [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]].
+- **The cockpit.** One screen set to author, approve and operate rules and processes, embedded in your host. See [[Cockpit: embed, approve, operate|Cockpit]].
+- **Multi-tenancy and security hardening.** Every read and write is scoped to a tenant, the decision log cannot be edited, and sensitive input is masked. See [[Multi-tenancy and security|Multi-Tenancy-and-Security]].
+- **The developer wiki.** Guides for embedding, modelling, testing and operating, with every command run from a clean clone. See [[Home]].
+
+## 0.3.0 (never tagged; part of 1.0.0)
+
+The changes made after 0.2.0 and before the 1.0.0 baseline. No 0.3.0 was tagged; these ship in 1.0.0.
 
 - **Withdraw, integrity check and source text (PRE-052, PRE-048, PRE-039).** The requester takes a pending definition back to draft with `:withdraw`; a stored definition whose source no longer gives its hashes is refused with `DEFINITION_INTEGRITY_FAILED` and logged; `GET .../versions/{v}?include=source` returns the imported text byte for byte as `sourceDocument`. No migration.
 - **Data objects and a conformance suite (#499, PRE-347).** `dataObject`, `dataObjectReference`, `dataStoreReference`, `ioSpecification` and data input and output associations on tasks and call activities are read, stored, exported and hashed. A data output association writes a result value into the data object's variable (named by `horus:variable`, else the data object id); a data input association hands that value to the step. Data store references are kept and exported. No migration.

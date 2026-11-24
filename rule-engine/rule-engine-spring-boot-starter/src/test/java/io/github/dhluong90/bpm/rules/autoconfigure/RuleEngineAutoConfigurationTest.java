@@ -243,20 +243,17 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
-    void RLE_017_a_host_without_a_retention_starts_on_every_profile_drops_nothing_and_warns_it(CapturedOutput output) {
-        ApplicationContextRunner withoutRetention = new ApplicationContextRunner()
+    void RLE_017_a_dev_host_without_a_retention_starts_drops_nothing_and_warns_it(CapturedOutput output) {
+        // From 1.0 an unset retention stops start-up outside dev (RuleEnginePartitionMaintenanceTest); dev keeps the warning.
+        new ApplicationContextRunner()
                 .withConfiguration(AutoConfigurations.of(
                         RuleEngineAutoConfiguration.class, RuleEngineInactiveAutoConfiguration.class))
-                .withUserConfiguration(HostWithEngineStandIns.class, FixedClock.class);
-
-        for (String profile : java.util.List.of("none", "prod", "dev")) {
-            ApplicationContextRunner host = "none".equals(profile)
-                    ? withoutRetention : withoutRetention.withPropertyValues("spring.profiles.active=" + profile);
-            host.run(context -> {
-                assertThat(context).hasNotFailed();
-                verify(context.getBean(DecisionLogPartitions.class), never()).dropExpired(any(), any());
-            });
-        }
+                .withUserConfiguration(HostWithEngineStandIns.class, FixedClock.class)
+                .withPropertyValues("spring.profiles.active=dev")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    verify(context.getBean(DecisionLogPartitions.class), never()).dropExpired(any(), any());
+                });
         assertThat(output).contains("decision log retention is unset");
     }
 

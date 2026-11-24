@@ -28,7 +28,7 @@ cd horus-Agentic-BPM
 mvn -B -q -pl process-engine/process-engine-spring-boot-starter,rule-engine/rule-engine-spring-boot-starter -am install -DskipTests -Dcockpit.bundle.skip=true
 ```
 
-Expected: no output, and the folder `~/.m2/repository/io/github/dhluong90/bpm/process-engine-spring-boot-starter` exists. The version is `0.3.0-SNAPSHOT`. Then start PostgreSQL for your service:
+Expected: no output, and the folder `~/.m2/repository/io/github/dhluong90/bpm/process-engine-spring-boot-starter` exists. The version is `1.0.0`. Then start PostgreSQL for your service:
 
 <!-- guide: skip -->
 ```bash
@@ -42,7 +42,7 @@ Create a Spring Boot project named `loans` (package `com.example.loans`) with We
 
 ```xml
 <properties>
-  <horus.version>0.3.0-SNAPSHOT</horus.version>
+  <horus.version>1.0.0</horus.version>
 </properties>
 <dependencies>
 <dependency>
