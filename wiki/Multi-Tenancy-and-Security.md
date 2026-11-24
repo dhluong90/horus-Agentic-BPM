@@ -87,6 +87,10 @@ Every response under `/api/bpm/**` carries `Cache-Control: no-store`, so rule se
 | `/api/bpm/me` | `private, no-cache`, so a revoked role is never shown from cache (errors: `no-store`) |
 | Host endpoints outside `/api/bpm/**` | Unchanged: the host's own policy |
 
+## Before production
+
+- Set `cursor.keys` and `cursor.active-key-id` for each engine (`horus.bpm.processes.` and `horus.bpm.rules.`) from a secret. Without them the engine logs a WARN at start-up and signs list cursors with a key kept in its own database table.
+
 ## Threat model (STRIDE)
 
 | Category | Asset | Threat and exploit scenario | Control | Verification |

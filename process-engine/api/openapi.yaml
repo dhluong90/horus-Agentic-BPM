@@ -28,7 +28,8 @@ info:
     branch on `code`. Request bodies are read bounded: a BPMN document above `definitions.max-bytes` (1 MB) or a
     JSON body above 256 KB is `413 PAYLOAD_TOO_LARGE` before it is read. Lists are keyset pages
     `{data, nextCursor, hasNext}`; pass `nextCursor` back unchanged as `cursor`. Cursors are signed for the tenant and
-    the list that issued them, so an edited, forged or other-tenant cursor is `400 QUERY_INVALID`.
+    the list that issued them and name the key that signed them (`horus.bpm.processes.cursor.keys`, AUD-13), so an
+    edited, forged, other-tenant or removed-key cursor, or one issued before key ids existed, is `400 QUERY_INVALID`.
   license:
     name: PolyForm Noncommercial 1.0.0
     url: https://polyformproject.org/licenses/noncommercial/1.0.0/
@@ -72,8 +73,9 @@ paths:
         `PENDING_APPROVAL` across all keys, including one that is not the latest version of its key, and, since #473,
         every migration plan whose execution is `PROPOSED` and every calendar change that is `PENDING`. `kind` says which
         (`DEFINITION`, `MIGRATION_PLAN`, `CALENDAR_CHANGE`), `id` is the id of the version, plan or change. Migration
-        plans are listed only for a caller holding `processes:migration:manage`; calendar changes and definition
-        versions for any caller holding `processes:read`, with `PERMISSION_REQUIRED` where the caller may not decide.
+        plans are listed only for a caller holding `processes:migration:manage`; calendar changes only for a caller holding
+        `processes:calendar:manage` (AUD-07); definition versions for any caller holding `processes:read`, with
+        `PERMISSION_REQUIRED` where the caller may not decide.
         A proposer never has `approve` (`SELF_APPROVAL_FORBIDDEN`). Permission
         `processes:read`; the answer shows what the caller may do, it does not need `processes:approve`. Ordered by
         `(requestedAt, id)`, keyset-paged with a signed cursor bound to the tenant and this list; at most
@@ -1882,8 +1884,10 @@ paths:
         instances in batches of `migration.batch-size`, and `GET /migrations/{id}/execution` shows the progress.
         Publishes `processes.migration.approved.v1` with both people. Permission `processes:migration:manage`.
 
-        The optional body `{"expectedPlanHash": "<64 hex>"}` (PD-139, #473) names the plan the approver reviewed, the
-        `contentHash` of its item in `GET /approvals`; another value is `409 CONTENT_CHANGED` and nothing is written.
+        The body `{"expectedPlanHash": "<64 hex>"}` (PD-139, #473, AUD-02) names the plan the approver reviewed, the
+        `contentHash` of its item in `GET /approvals`. Without it the answer is `400 CONTENT_HASH_REQUIRED`; another
+        value is `409 CONTENT_CHANGED`; nothing is written either way. Only the `dev` profile may relax this with
+        `horus.bpm.processes.approval.require-content-hash=false`.
       parameters:
         - $ref: '#/components/parameters/MigrationId'
         - name: If-Match
@@ -1893,12 +1897,13 @@ paths:
           schema: { type: string, example: '"1"' }
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedPlanHash]
               properties:
                 expectedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
       responses:
@@ -2453,8 +2458,10 @@ paths:
         (`403 SELF_APPROVAL_FORBIDDEN`, and the table refuses it too). A change that is no longer `PENDING` is
         `409 INVALID_STATE`; a calendar that changed since the proposal is `409 VERSION_CONFLICT` and the change stays
         `PENDING`. A change needs no `If-Match`: it cannot be edited, and the calendar version it was proposed against
-        is checked under the lock. The optional body member `expectedChangeHash` (PD-139, #473) names the change the
-        approver reviewed; another value is `409 CONTENT_CHANGED` and nothing is written. A repeat with the same `Idempotency-Key` returns the first answer and writes
+        is checked under the lock. The body member `expectedChangeHash` (PD-139, #473, AUD-02) names the change the
+        approver reviewed, the `contentHash` of its item in `GET /approvals`: without it the answer is
+        `400 CONTENT_HASH_REQUIRED`, another value is `409 CONTENT_CHANGED`, and nothing is written either way (only the
+        `dev` profile may relax this with `horus.bpm.processes.approval.require-content-hash=false`). A repeat with the same `Idempotency-Key` returns the first answer and writes
         nothing. Permission `processes:calendar:manage`.
       parameters:
         - $ref: '#/components/parameters/CalendarChangeId'
@@ -2749,8 +2756,9 @@ components:
           type: string
           pattern: '^[0-9a-f]{64}$'
           description: |
-            On approval only (PD-139, #473): the `contentHash` of the change as `GET /approvals` showed it. Another
-            value is `409 CONTENT_CHANGED` and nothing is written. Optional.
+            On approval only (PD-139, #473, AUD-02): the `contentHash` of the change as `GET /approvals` showed it.
+            Required: a missing value is `400 CONTENT_HASH_REQUIRED` and another value is `409 CONTENT_CHANGED`; nothing
+            is written. Ignored on rejection.
     CalendarChange:
       type: object
       required: [id, calendarKey, status, approval, baseVersion, previous, proposed, reason, proposedBy, proposedAt,

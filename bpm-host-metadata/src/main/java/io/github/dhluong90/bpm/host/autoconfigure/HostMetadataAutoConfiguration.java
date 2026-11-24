@@ -45,7 +45,7 @@ public class HostMetadataAutoConfiguration {
     /** {@code GET /api/bpm/display-names} (#442). */
     @Bean
     DisplayNamesController horusBpmDisplayNamesController(EngineAccess access,
-            io.github.dhluong90.bpm.host.spi.DisplayNames names) {
-        return new DisplayNamesController(access, names);
+            io.github.dhluong90.bpm.host.spi.DisplayNames names, ObjectProvider<ModuleDescriptor> modules) {
+        return new DisplayNamesController(access, names, EngineAccessAutoConfiguration.modules(modules));
     }
 }

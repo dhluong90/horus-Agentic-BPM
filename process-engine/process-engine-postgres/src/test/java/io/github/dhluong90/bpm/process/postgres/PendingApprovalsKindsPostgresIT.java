@@ -117,7 +117,7 @@ class PendingApprovalsKindsPostgresIT {
     }
 
     @Test
-    void PRE_346_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required() {
+    void PRE_346_the_proposer_may_not_approve_and_a_reader_sees_no_calendar_change() {
         List<PendingApproval> own = list(PageRequest.first(), "bank-a", "thu", MIGRATE, CALENDAR, "processes:read")
                 .items();
         assertThat(own.get(0).allowedActions()).isEmpty();
@@ -128,8 +128,7 @@ class PendingApprovalsKindsPostgresIT {
         assertThat(own.get(1).deniedActions()).containsEntry("approve", "SELF_APPROVAL_FORBIDDEN");
 
         List<PendingApproval> reader = list(PageRequest.first(), "bank-a", "dan", "processes:read").items();
-        assertThat(reader).extracting(PendingApproval::kind).containsExactly("CALENDAR_CHANGE");
-        assertThat(reader.get(0).deniedActions()).containsEntry("approve", "PERMISSION_REQUIRED");
+        assertThat(reader).isEmpty();
 
         assertThat(list(PageRequest.first(), "bank-b", "eve", MIGRATE, CALENDAR, "processes:read").items()).isEmpty();
     }
@@ -177,5 +176,20 @@ class PendingApprovalsKindsPostgresIT {
                 .isInstanceOf(SelfApprovalForbiddenException.class);
         assertThatThrownBy(() -> executions.approve(plan.id(), proposal.lockVersion(), null, plan.planHash()))
                 .isInstanceOf(SelfApprovalForbiddenException.class);
+    }
+
+    @Test
+    void PRE_372_a_caller_without_calendar_manage_sees_no_pending_calendar_change() {
+        // Given thu's pending calendar change and migration proposal, and callers with one manage permission each
+        List<PendingApproval> migrationOnly = list(PageRequest.first(), "bank-a", "ivy", MIGRATE, "processes:read")
+                .items();
+        List<PendingApproval> calendarOnly = list(PageRequest.first(), "bank-a", "kim", CALENDAR, "processes:read")
+                .items();
+        List<PendingApproval> reader = list(PageRequest.first(), "bank-a", "dan", "processes:read").items();
+
+        // Then each sees only the kind it may decide, and a reader sees none
+        assertThat(migrationOnly).extracting(PendingApproval::kind).containsExactly("MIGRATION_PLAN");
+        assertThat(calendarOnly).extracting(PendingApproval::kind).containsExactly("CALENDAR_CHANGE");
+        assertThat(reader).isEmpty();
     }
 }

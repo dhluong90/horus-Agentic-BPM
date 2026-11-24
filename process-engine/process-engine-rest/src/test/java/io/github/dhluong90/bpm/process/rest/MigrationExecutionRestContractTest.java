@@ -28,6 +28,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
  */
 class MigrationExecutionRestContractTest {
 
+    /** The body of an approval: the hash of the plan the approver reviewed (AUD-02). */
+    private static final String REVIEWED = "{\"expectedPlanHash\":\"" + "a".repeat(64) + "\"}";
+
     private static final OpenApiBodies BODIES = OpenApiBodies.load(ProcessRestContractTest.CONTRACT);
     private static final String BASE = ProcessController.BASE;
     private static final String PLAN = "01JMIGRATI0NPLAN000000000A";
@@ -51,7 +54,7 @@ class MigrationExecutionRestContractTest {
 
         // lan approves with the lock version; the progress and the outcomes read back
         MvcResult approved = exchange(post(BASE + "/migrations/" + PLAN + ":approve").header("If-Match", "\"1\"")
-                .header("Idempotency-Key", "approve-1"));
+                .header("Idempotency-Key", "approve-1").contentType(MediaType.APPLICATION_JSON).content(REVIEWED));
         assertThat(approved.getResponse().getStatus()).isEqualTo(200);
         assertThat(approved.getResponse().getContentAsString()).contains("\"status\":\"APPROVED\"")
                 .contains("\"approvedBy\":\"lan\"");
@@ -74,9 +77,11 @@ class MigrationExecutionRestContractTest {
         assertProblem(get(BASE + "/migrations/01JOTHERTENANTPLAN00000000/execution"), 404, "MIGRATION_NOT_FOUND");
         assertProblem(post(BASE + "/migrations/01JCONFLICTPLAN0000000000:execute")
                 .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"x\"}"), 409, "DRY_RUN_REQUIRED");
-        assertProblem(post(BASE + "/migrations/" + PLAN + ":approve").header("If-Match", "\"0\""), 409,
+        assertProblem(post(BASE + "/migrations/" + PLAN + ":approve").header("If-Match", "\"0\"")
+                .contentType(MediaType.APPLICATION_JSON).content(REVIEWED), 409,
                 "VERSION_CONFLICT");
-        assertProblem(post(BASE + "/migrations/" + PLAN + ":approve").header("If-Match", "\"9\""), 403,
+        assertProblem(post(BASE + "/migrations/" + PLAN + ":approve").header("If-Match", "\"9\"")
+                .contentType(MediaType.APPLICATION_JSON).content(REVIEWED), 403,
                 "SELF_APPROVAL_FORBIDDEN");
         // requests that break the contract on purpose: only the answer is checked
         for (RequestBuilder request : List.of(
@@ -133,6 +138,13 @@ class MigrationExecutionRestContractTest {
             }
             calls.add("propose:" + reason);
             return state("PROPOSED");
+        }
+
+        @Override
+        public MigrationExecution approve(String migrationId, long expectedLockVersion, String idempotencyKey,
+                String expectedPlanHash) {
+            assertThat(expectedPlanHash).as("the reviewed plan hash reaches the service").hasSize(64);
+            return approve(migrationId, expectedLockVersion, idempotencyKey);
         }
 
         @Override

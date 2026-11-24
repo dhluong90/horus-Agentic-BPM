@@ -25,7 +25,9 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code GET /api/bpm/display-names} (#442): the readable names, in the caller's language, of the roles, groups and
  * users a screen shows by identifier, for example the role of a task in the queue or the requester of an approval.
  * Only names the host's {@link DisplayNames} knows are returned; a client shows the identifier for the rest. Needs an
- * authenticated caller and no other permission; the tenant is the caller's, from {@link EngineAccess}. The language
+ * authenticated caller who holds at least one permission of an installed engine, else {@code 403 PERMISSION_DENIED}, so
+ * the user directory is not open to every signed-in account (AUD-09); the tenant is the caller's, from
+ * {@link EngineAccess}. The language
  * is the first of {@code Accept-Language}. Names are labels only and grant nothing.
  */
 @RestController
@@ -40,10 +42,19 @@ final class DisplayNamesController {
 
     private final EngineAccess access;
     private final DisplayNames names;
+    private final java.util.List<io.github.dhluong90.bpm.host.spi.ModuleDescriptor> modules;
 
-    DisplayNamesController(EngineAccess access, DisplayNames names) {
+    DisplayNamesController(EngineAccess access, DisplayNames names,
+            java.util.List<io.github.dhluong90.bpm.host.spi.ModuleDescriptor> modules) {
         this.access = access;
         this.names = names;
+        this.modules = java.util.List.copyOf(modules);
+    }
+
+    /** Whether the caller holds any permission an installed engine declares. */
+    private boolean holdsEnginePermission(EngineCaller caller) {
+        return modules.stream().flatMap(module -> module.permissions().stream())
+                .anyMatch(permission -> access.hasPermission(caller, permission));
     }
 
     @GetMapping("/display-names")
@@ -52,6 +63,11 @@ final class DisplayNamesController {
             @RequestParam(value = "groups", required = false) List<String> groups,
             @RequestParam(value = "users", required = false) List<String> users) {
         EngineCaller caller = access.currentCaller();
+        if (!holdsEnginePermission(caller)) {
+            return ResponseEntity.status(403).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(
+                    io.github.dhluong90.bpm.host.internal.Problem.permissionDenied().toJson(request)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
         Locale locale = request.getLocale();
         Optional<String> invalid = invalid("roles", roles).or(() -> invalid("groups", groups))
                 .or(() -> invalid("users", users));

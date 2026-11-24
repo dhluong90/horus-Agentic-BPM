@@ -285,7 +285,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `404`. Unknown incident id, or an incident of another tenant. Nothing is written by a command that answers it.
 
 ### CONTENT_HASH_REQUIRED
-`400`. An approval of a process definition version did not name `expectedDefinitionHash`, the `definitionHash` of the content the approver reviewed, while `horus.bpm.processes.approval.require-content-hash` is on (the default, PD-139). Nothing is read or written. Send the hash shown with the version you reviewed. Only the `dev` profile may turn the setting off.
+`400`. An approval of a process definition version, a migration plan or a calendar change did not name `expectedDefinitionHash`, `expectedPlanHash` or `expectedChangeHash`, the hash of the content the approver reviewed (the `contentHash` of its item in `GET /approvals`), while `horus.bpm.processes.approval.require-content-hash` is on (the default, PD-139). Nothing is read or written. Send the hash shown with the version you reviewed. Only the `dev` profile may turn the setting off.
 
 ### CONTENT_CHANGED
 `409`. The stored content of the definition version is not the content the approver reviewed: `expectedDefinitionHash` differs from its `definitionHash`. The body carries `currentDefinitionHash` and `currentLockVersion`, and `currentChangeSetHash` when the change set you read page by page is no longer the change set now. Nothing is written, published or recorded. Show the approver the current content and its changes again; never retry with the new hash on your own, because that would approve content nobody reviewed. A change list that was cut off at its limit has no hash to approve, see [CHANGE_SET_TRUNCATED](#change_set_truncated).

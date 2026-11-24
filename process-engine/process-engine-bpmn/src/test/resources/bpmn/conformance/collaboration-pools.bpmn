@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Worked example: a collaboration of three pools. The order desk and the payment desk are executable, so each is a
+     definition of its own; the auditor has no process and is a black box that only receives a message. The message
+     flows are kept and drawn. The engine runs a message through POST /messages:correlate, not through the flow:
+     payment-requested starts the payment desk (message start), payment-received wakes the order desk by orderId.
+     The user task has no assignee, so the work group comes from its lane: "Back office" gives group back-office. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_order-payment-pools" targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="m-requested" name="payment-requested"/>
+  <bpmn:message id="m-received" name="payment-received"/>
+  <bpmn:message id="m-audit" name="payment-audited"/>
+  <bpmn:collaboration id="order-to-cash">
+    <bpmn:participant id="pool-order" name="Order desk" processRef="order-desk"/>
+    <bpmn:participant id="pool-payment" name="Payment desk" processRef="payment-desk"/>
+    <bpmn:participant id="pool-auditor" name="Auditor"/>
+    <bpmn:messageFlow id="mf-request" name="Payment request" sourceRef="request-payment" targetRef="payment-start" messageRef="m-requested"/>
+    <bpmn:messageFlow id="mf-received" name="Payment confirmed" sourceRef="report-payment" targetRef="wait-for-payment" messageRef="m-received"/>
+    <bpmn:messageFlow id="mf-audit" name="Audit copy" sourceRef="audited" targetRef="pool-auditor" messageRef="m-audit"/>
+  </bpmn:collaboration>
+  <bpmn:process id="order-desk" name="Order desk" isExecutable="true">
+    <bpmn:startEvent id="start" name="Order placed"/>
+    <bpmn:sendTask id="request-payment" name="Ask the payment desk" messageRef="m-requested" horus:correlationKey="orderId"/>
+    <bpmn:receiveTask id="wait-for-payment" name="Wait for the payment" messageRef="m-received" horus:correlationKey="orderId"/>
+    <bpmn:endEvent id="done" name="Order paid"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="request-payment"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="request-payment" targetRef="wait-for-payment"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="wait-for-payment" targetRef="done"/>
+  </bpmn:process>
+  <bpmn:process id="payment-desk" name="Payment desk" isExecutable="true">
+    <bpmn:laneSet id="lanes">
+      <bpmn:lane id="lane-back-office" name="Back office">
+        <bpmn:flowNodeRef>confirm-payment</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="lane-treasury" name="Treasury">
+        <bpmn:flowNodeRef>payment-start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>report-payment</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>audited</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="payment-start" name="Payment requested">
+      <bpmn:messageEventDefinition messageRef="m-requested"/>
+    </bpmn:startEvent>
+    <bpmn:userTask id="confirm-payment" name="Confirm the payment" horus:resultVariable="confirmation"/>
+    <bpmn:sendTask id="report-payment" name="Tell the order desk" messageRef="m-received" horus:correlationKey="orderId"/>
+    <bpmn:endEvent id="audited" name="Audit copy sent" horus:correlationKey="orderId">
+      <bpmn:messageEventDefinition messageRef="m-audit"/>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="g1" sourceRef="payment-start" targetRef="confirm-payment"/>
+    <bpmn:sequenceFlow id="g2" sourceRef="confirm-payment" targetRef="report-payment"/>
+    <bpmn:sequenceFlow id="g3" sourceRef="report-payment" targetRef="audited"/>
+  </bpmn:process>
+</bpmn:definitions>
