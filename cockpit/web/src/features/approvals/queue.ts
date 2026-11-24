@@ -50,7 +50,7 @@ export interface ApprovalItem {
   approveDenied: Denial | undefined;
   /** The caller asked for this change. */
   mine: boolean;
-  /** The engine offers withdraw to this caller (rules, PD-089). */
+  /** The engine offers withdraw to this caller (rules, PD-089; process definitions, PRE-052). */
   canWithdraw: boolean;
 }
 
@@ -79,7 +79,7 @@ export function fromProcess(item: PendingDefinitionApproval, userId: string): Ap
     engine: 'processes', type, id: type === 'definition' ? undefined : item.id ?? undefined, sourceVersion: item.sourceVersion ?? undefined, reason: item.reason ?? undefined, effectiveFrom: undefined,
     key: item.key, title: item.name ?? item.key, version: item.version, hash: item.contentHash ?? item.definitionHash ?? '', lockVersion: item.lockVersion,
     requestedBy: item.requestedBy, requesterName: suppliedName(item, 'requestedBy'), requestedAt: item.requestedAt, canApprove,
-    approveDenied: denial(item.deniedActions['approve'], canApprove), mine: item.requestedBy === userId, canWithdraw: false,
+    approveDenied: denial(item.deniedActions['approve'], canApprove), mine: item.requestedBy === userId, canWithdraw: type === 'definition' && item.allowedActions.includes('withdraw'),
   };
 }
 

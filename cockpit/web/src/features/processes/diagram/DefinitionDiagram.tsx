@@ -594,7 +594,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
       <div className={toolbar !== undefined ? 'dg__toolbar dg__bar' : 'dg__toolbar'}>
         {toolbar}
         <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
-          <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{mode === 'fit' ? t('diagram.fitAt', { percent: String(Math.round(scale * 100)) }) : t('diagram.fit')}</button>
+          <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{mode === 'fit' && Math.round(scale * 100) < 100 ? t('diagram.fitAt', { percent: String(Math.round(scale * 100)) }) : t('diagram.fit')}</button>
           <button type="button" className="hit" aria-pressed={mode === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
         </div>
       </div>
