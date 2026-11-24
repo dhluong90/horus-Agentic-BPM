@@ -108,6 +108,13 @@ def next_free(highest: tuple[int, ...] | None, retired: dict[tuple[int, ...], st
     return label(candidate)
 
 
+def baseline_edits(merge_base: dict[str, str], head: dict[str, str], baseline_open: bool = BASELINE_OPEN) -> list[str]:
+    """V1 baselines edited in place (bytes changed, file kept), which BASELINE_OPEN allows until 1.0."""
+    if not baseline_open:
+        return []
+    return sorted(path for path in head if path in merge_base and head[path] != merge_base[path] and is_baseline(parse(path)))
+
+
 def check(base: dict[str, str], merge_base: dict[str, str], head: dict[str, str],
           retired: dict[str, dict[tuple[int, ...], str]], baseline_open: bool = BASELINE_OPEN) -> list[str]:
     """Each argument maps engine migration paths to blob ids. Returns the failures, one message each."""
@@ -206,14 +213,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     errors = check(base, before, head, retired)
     added = sorted(p for p in head if p not in before)
+    edited = baseline_edits(before, head)
     if errors:
         for error in errors:
             print(f"::error title=Migration order::{error}")
         print(f"check-migration-order: {len(errors)} problem(s) against {args.base}.")
         return 1
+    for path in edited:
+        print(f"check-migration-order: baseline edited in place: {path} (allowed while BASELINE_OPEN)")
     if added:
         print("check-migration-order: added migrations in order: " + ", ".join(added))
-    else:
+    elif not edited:
         print("check-migration-order: no engine migration added or changed.")
     return 0
 

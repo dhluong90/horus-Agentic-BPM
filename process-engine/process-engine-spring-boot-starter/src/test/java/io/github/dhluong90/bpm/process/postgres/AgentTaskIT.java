@@ -572,6 +572,24 @@ class AgentTaskIT {
     }
 
     @Test
+    void PRE_361_control_an_agent_answer_merged_into_the_variables_is_masked_in_the_instance_view() {
+        TestEngine pod = replica("pod-1", assessor(answer(20, "APPROVE")));
+        publishGuardrails(pod);
+        // No result variable: the answer's fields are merged into the instance variables themselves.
+        deploy(pod, definition(" horus:resultVariable=\"assessment\">", ">").getBytes(StandardCharsets.UTF_8));
+        String loan = apply(pod, "LOAN-2027-0907");
+
+        assertThat(pod.async.runNow(claimOne(pod))).contains(StepCompletion.Outcome.ACCEPTED);
+
+        // The engine's state keeps the text; the instance view shows it masked
+        assertThat(TestEngine.jdbc().sql("SELECT variables::text FROM pre_instance WHERE id = ?").param(loan)
+                .query(String.class).single()).contains("079088001234");
+        Map<String, Object> variables = pod.services.instance(loan).variables();
+        assertThat(variables).containsEntry("summary", "***").containsEntry("recommendation", "APPROVE");
+        assertThat(variables.toString()).doesNotContain("079088001234");
+    }
+
+    @Test
     void PRE_063_the_review_task_carries_why_the_answer_was_refused_and_the_masked_answer() {
         // Given the agent recommends approval with a risk score of 85
         TestEngine pod = replica("pod-1", assessor(answer(85, "APPROVE")));

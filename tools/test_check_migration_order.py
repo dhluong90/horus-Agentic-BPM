@@ -244,6 +244,19 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertIn("V2__later.sql: V2 is on main and this change edits it", out)
         self.assertNotIn("V1__baseline.sql: V1 is on main", out)
 
+    def test_an_in_place_baseline_edit_is_logged_with_the_file(self) -> None:
+        repo = self.repo({rule(1, "baseline"): "-- baseline\n"})
+        repo.commit({rule(1, "baseline"): "-- baseline, edited\n"}, "edit the baseline")
+        status, out = repo.run()
+        self.assertEqual(0, status, out)
+        self.assertIn(f"baseline edited in place: {rule(1, 'baseline')} (allowed while BASELINE_OPEN)", out)
+        self.assertNotIn("no engine migration added or changed", out)
+
+    def test_the_release_tag_check_refuses_an_open_baseline(self) -> None:
+        # BASELINE_OPEN on a release commit is enforced by tools/release/check-release-tag.sh (tested in test-release-tag.sh).
+        script = Path(__file__).with_name("release") / "check-release-tag.sh"
+        self.assertIn("BASELINE_OPEN", script.read_text(encoding="utf-8"))
+
     def test_the_baseline_may_not_be_deleted_or_renamed(self) -> None:
         repo = self.repo({rule(1, "baseline"): "-- baseline\n"})
         repo.commit({rule(1, "baseline"): None, rule(1, "renamed"): "-- baseline\n"}, "rename the baseline")
