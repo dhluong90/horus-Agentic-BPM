@@ -570,6 +570,19 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public int countStartArrivals(String tenant, String keyName) {
+        return jdbc.sql("SELECT count(*) FROM pre_start_arrival WHERE tenant_id = ? AND key_name = ?")
+                .params(tenant, keyName).query(Integer.class).single();
+    }
+
+    @Override
+    public int deleteStartArrivalsBefore(Instant cutoff, int limit) {
+        return jdbc.sql("DELETE FROM pre_start_arrival WHERE ctid IN (SELECT ctid FROM pre_start_arrival "
+                        + "WHERE arrived_at < ? ORDER BY arrived_at LIMIT ?)")
+                .params(ts(cutoff), limit).update();
+    }
+
+    @Override
     public java.util.Optional<String> oldestStartArrivalKey(String tenant, String keyName, String eventName) {
         return jdbc.sql("SELECT correlation_key FROM pre_start_arrival WHERE tenant_id = ? AND key_name = ? "
                         + "AND trigger_kind = 'MESSAGE' AND event_name = ? ORDER BY arrived_at, correlation_key LIMIT 1")
