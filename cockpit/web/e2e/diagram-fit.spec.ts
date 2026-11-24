@@ -129,3 +129,18 @@ test('CKP_069_fit_is_refitted_when_the_window_resizes_and_100_percent_pans', asy
   await page.getByRole('button', { name: 'Fit' }).click();
   await expectWholeModel(page, 800);
 });
+
+test('CKP_069_fit_never_scales_a_small_model_past_100_percent_and_shows_the_scale', async ({ page }) => {
+  for (const viewport of VIEWPORTS) {
+    await open(page, '#/processes/kyc-onboarding/2', viewport, 'en');
+    const facts = await page.locator('[data-layout="auto"]').evaluate((svg) => {
+      const box = svg.getBoundingClientRect();
+      const view = svg.getAttribute('viewBox')?.split(' ').map(Number) ?? [0, 0, 0, 0];
+      return { scale: Number(svg.getAttribute('data-scale')), drawnWidth: box.width, width: view[2] ?? 0 };
+    });
+    expect(facts.scale).toBeLessThanOrEqual(1);
+    expect(facts.drawnWidth).toBeLessThanOrEqual(facts.width + 1);
+    const pct = Math.round(facts.scale * 100);
+    await expect(page.getByRole('button', { name: `Fit · ${String(pct)} %` })).toHaveAttribute('aria-pressed', 'true');
+  }
+});

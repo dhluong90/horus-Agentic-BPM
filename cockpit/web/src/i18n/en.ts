@@ -390,6 +390,7 @@ export const en = {
   'diagram.data.object': 'Data object',
   'diagram.data.store': 'Data store',
   'diagram.fit': 'Fit',
+  'diagram.fitAt': 'Fit · {percent} %',
   'diagram.actual': '100 %',
   'diagram.pan': 'Diagram canvas. Use the arrow keys to move around.',
   'diagram.defaultFlow': 'Default flow',

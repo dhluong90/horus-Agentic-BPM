@@ -392,6 +392,7 @@ export const vi: Record<MessageKey, string> = {
   'diagram.data.object': 'Đối tượng dữ liệu',
   'diagram.data.store': 'Kho dữ liệu',
   'diagram.fit': 'Vừa khung',
+  'diagram.fitAt': 'Vừa khung · {percent} %',
   'diagram.actual': '100 %',
   'diagram.pan': 'Khung sơ đồ. Dùng phím mũi tên để di chuyển.',
   'diagram.defaultFlow': 'Luồng mặc định',

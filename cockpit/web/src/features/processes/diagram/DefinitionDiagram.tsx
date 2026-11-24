@@ -436,7 +436,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   reserve?: number;
   fill?: boolean;
   /**
-   * "Fit" shows the whole drawing, even below 100 %, so nothing is cropped on opening (CKP-027). `sharedScale` caps
+   * "Fit" shows the whole drawing, shrinking below 100 % but never growing past it, so nothing is cropped on opening (CKP-027). `sharedScale` caps
    * that scale, and `onFitAll` reports it, so two diagrams side by side can be drawn at the smaller of the two.
    */
   fitAll?: boolean;
@@ -505,7 +505,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   })), [layout, overlay]);
   const bounds = useMemo(() => drawingBounds(layout, collaboration, badgeBoxes), [layout, collaboration, badgeBoxes]);
   const room = canvas === undefined ? undefined : { width: canvas.width - 2, height: canvas.height - 2 };
-  const whole = room !== undefined ? fitScale(bounds, room, undefined, FIT_MIN_SCALE) : MIN_SCALE;
+  const whole = room !== undefined ? fitScale(bounds, room, 1, FIT_MIN_SCALE) : MIN_SCALE;
   const fit = fitAll ? Math.min(whole, sharedScale ?? whole) : whole;
   useEffect(() => {
     if (fitAll && canvas !== undefined) onFitAll?.(whole);
@@ -594,7 +594,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
       <div className={toolbar !== undefined ? 'dg__toolbar dg__bar' : 'dg__toolbar'}>
         {toolbar}
         <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
-          <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
+          <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{mode === 'fit' ? t('diagram.fitAt', { percent: String(Math.round(scale * 100)) }) : t('diagram.fit')}</button>
           <button type="button" className="hit" aria-pressed={mode === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
         </div>
       </div>
