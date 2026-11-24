@@ -1,5 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { supportedLines } from '../src/app/session/versionSupport';
+import { ENGINE_VERSION } from '../src/mocks/engineVersion';
 import { meHa } from '../src/mocks/fixtures';
 import { rememberLocale } from './mockHost';
 import { audienceOf, mockStandalone, standaloneRegistry } from './standaloneHosts';
@@ -89,7 +91,7 @@ test.describe('version skew (CKP-014)', () => {
     await mockStandalone(page, { kyc: { meta: { modules: [{ module: 'rules', engineVersion: '0.1.9', apiVersion: 'v1', features: [] }] } } });
     await page.goto('./#/hosts/kyc/rules');
 
-    await expect(page.getByTestId('version-text')).toHaveText('KYC onboarding runs engine 0.1.9. This cockpit supports 0.2 and 0.3.');
+    await expect(page.getByTestId('version-text')).toHaveText(`KYC onboarding runs engine 0.1.9. This cockpit supports ${supportedLines(ENGINE_VERSION).join(' and ')}.`);
     await expect(page.getByTestId('error-code')).toHaveText('UNSUPPORTED_VERSION');
     await expect(page.getByRole('navigation', { name: 'Cockpit menu' })).toHaveCount(0);
   });

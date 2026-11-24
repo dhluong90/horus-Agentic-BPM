@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import { displayNamesAnswer } from '../src/mocks/displayNames';
+import { ENGINE_VERSION } from '../src/mocks/engineVersion';
 import { meLan } from '../src/mocks/fixtures';
 import { rememberLocale } from './mockHost';
 import { KYC, LOANS, mockStandalone, type HostAnswer } from './standaloneHosts';
@@ -19,7 +20,7 @@ const CORS = {
   'Access-Control-Expose-Headers': 'etag, x-correlation-id, content-disposition',
 };
 const BASE = '/api/bpm/processes/v1';
-const processes = { module: 'processes' as const, engineVersion: '0.3.0', apiVersion: 'v1', features: [], settings: {} };
+const processes = { module: 'processes' as const, engineVersion: ENGINE_VERSION, apiVersion: 'v1', features: [], settings: {} };
 const operator: HostAnswer = {
   meta: { modules: [processes] },
   me: { ...meLan, user: { id: 'tuan', displayName: 'Trần Anh Tuấn' }, permissions: ['processes:read', 'processes:task:work', 'processes:incident:manage'] },

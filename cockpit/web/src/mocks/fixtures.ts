@@ -1,5 +1,6 @@
 import type { BpmMeV1 } from '../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../api/generated/bpm-meta.v1';
+import { ENGINE_VERSION } from './engineVersion';
 
 /**
  * Seed data for the dev server, Vitest and Playwright. It follows the host contract of
@@ -28,7 +29,7 @@ export const metaRulesOnly: BpmMetaV1 = {
 export const metaWithReports: BpmMetaV1 = {
   ...metaRulesOnly,
   modules: [{
-    module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1',
+    module: 'rules', engineVersion: ENGINE_VERSION, apiVersion: 'v1',
     features: ['rules.history-readings', 'rules.simulation-reports', 'rules.templates'],
     settings: { 'authoring.cockpit-drafts': true, 'lifecycle.require-simulation-report': 'card-fee' },
   }],
@@ -38,7 +39,7 @@ export const metaWithReports: BpmMetaV1 = {
 export const metaForJourney: BpmMetaV1 = {
   ...metaRulesOnly,
   modules: [{
-    module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1',
+    module: 'rules', engineVersion: ENGINE_VERSION, apiVersion: 'v1',
     features: ['rules.history-readings', 'rules.simulation-reports', 'rules.templates', 'rules.condition-builder'],
     settings: { 'authoring.cockpit-drafts': true, 'lifecycle.require-simulation-report': 'premium-fees' },
   }],
@@ -47,7 +48,7 @@ export const metaForJourney: BpmMetaV1 = {
 /** A host that turns on the nested And/Or/Not condition builder (PD-076): the feature is off unless the host announces it. */
 export const metaWithBuilder: BpmMetaV1 = {
   ...metaRulesOnly,
-  modules: [{ module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1', features: ['rules.condition-builder'], settings: { 'authoring.cockpit-drafts': true } }],
+  modules: [{ module: 'rules', engineVersion: ENGINE_VERSION, apiVersion: 'v1', features: ['rules.condition-builder'], settings: { 'authoring.cockpit-drafts': true } }],
 };
 
 /** A module name no cockpit of this release knows: what a newer host with a third engine module reports. */
@@ -55,7 +56,7 @@ export const UNKNOWN_MODULE = 'cases';
 
 const rulesModule = { module: 'rules', engineVersion: '0.1.0', apiVersion: 'v1', features: [], settings: { 'authoring.cockpit-drafts': true } } as const;
 const processesModule = { module: 'processes', engineVersion: '0.1.0', apiVersion: 'v1', features: [] } as const;
-const unknownModule = { module: UNKNOWN_MODULE, engineVersion: '0.3.0', apiVersion: 'v1', features: ['cases.read'] } as const;
+const unknownModule = { module: UNKNOWN_MODULE, engineVersion: ENGINE_VERSION, apiVersion: 'v1', features: ['cases.read'] } as const;
 
 /** A newer host: rules, processes and a module this cockpit does not know (cockpit DESIGN 5.2). */
 export const metaWithUnknownModule = {

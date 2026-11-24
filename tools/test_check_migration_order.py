@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location("check_migration_order", Path(__file__).with_name("check-migration-order.py"))
@@ -87,6 +88,11 @@ def process(version: int, name: str = "x") -> str:
 MAIN_WITH_RULE_V10 = {**{rule(n, f"m{n}"): f"-- rule {n}\n" for n in (1, 2, 3, 4, 5, 6, 10)},
                       process(1, "base"): "-- process 1\n", process(2, "claim"): "-- process 2\n",
                       f"{EXAMPLE}/V1__host.sql": "-- host 1\n"}
+
+
+def baseline(is_open: bool):
+    """Pin BASELINE_OPEN for one test, so it does not depend on the value the release commit sets."""
+    return mock.patch.object(check, "BASELINE_OPEN", is_open)
 
 
 class MigrationOrderTest(unittest.TestCase):
@@ -229,6 +235,7 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertIn("V5 is a retired process-engine version", out)
         self.assertIn("highest process-engine version on main: V2; next free number: V3", out)
 
+    @baseline(True)
     def test_the_v1_baseline_may_be_edited_in_place_until_1_0(self) -> None:
         repo = self.repo({rule(1, "baseline"): "-- rule baseline\n", process(1, "baseline"): "-- process baseline\n"})
         repo.commit({rule(1, "baseline"): "-- rule baseline, regenerated\n",
@@ -236,6 +243,7 @@ class MigrationOrderTest(unittest.TestCase):
         status, out = repo.run()
         self.assertEqual(0, status, out)
 
+    @baseline(True)
     def test_editing_the_baseline_does_not_excuse_editing_another_released_migration(self) -> None:
         repo = self.repo({rule(1, "baseline"): "-- baseline\n", rule(2, "later"): "-- two\n"})
         repo.commit({rule(1, "baseline"): "-- baseline, edited\n", rule(2, "later"): "-- two, edited\n"}, "edit both")
@@ -244,6 +252,7 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertIn("V2__later.sql: V2 is on main and this change edits it", out)
         self.assertNotIn("V1__baseline.sql: V1 is on main", out)
 
+    @baseline(True)
     def test_an_in_place_baseline_edit_is_logged_with_the_file(self) -> None:
         repo = self.repo({rule(1, "baseline"): "-- baseline\n"})
         repo.commit({rule(1, "baseline"): "-- baseline, edited\n"}, "edit the baseline")
@@ -251,6 +260,22 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertEqual(0, status, out)
         self.assertIn(f"baseline edited in place: {rule(1, 'baseline')} (allowed while BASELINE_OPEN)", out)
         self.assertNotIn("no engine migration added or changed", out)
+
+    @baseline(False)
+    def test_a_closed_baseline_refuses_an_in_place_edit(self) -> None:
+        repo = self.repo({rule(1, "baseline"): "-- baseline\n"})
+        repo.commit({rule(1, "baseline"): "-- baseline, edited\n"}, "edit the baseline")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
+        self.assertIn("V1__baseline.sql: V1 is on main and this change edits it", out)
+
+    @baseline(False)
+    def test_a_closed_baseline_refuses_a_squash(self) -> None:
+        repo = self.repo()
+        repo.commit({**{rule(n, f"m{n}"): None for n in (1, 2, 3, 4, 5, 6, 10)}, rule(1, "baseline"): "-- squashed\n"},
+                    "squash the Rule Engine")
+        status, out = repo.run()
+        self.assertEqual(1, status, out)
 
     def test_the_release_tag_check_refuses_an_open_baseline(self) -> None:
         # BASELINE_OPEN on a release commit is enforced by tools/release/check-release-tag.sh (tested in test-release-tag.sh).
@@ -276,6 +301,7 @@ class MigrationOrderTest(unittest.TestCase):
         self.assertEqual(1, len(errors), errors)
         self.assertIn("V1 is on main and this change edits it", errors[0])
 
+    @baseline(True)
     def test_a_squash_replaces_every_released_migration_of_an_engine_with_the_baseline(self) -> None:
         repo = self.repo()
         repo.commit({**{rule(n, f"m{n}"): None for n in (1, 2, 3, 4, 5, 6, 10)}, rule(1, "baseline"): "-- squashed\n"},
