@@ -22,6 +22,15 @@ BEGIN
 END;
 $$;
 
+CREATE FUNCTION pre_history_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'pre_history is append-only: % is not allowed', TG_OP
+    USING ERRCODE = '55000';
+END;
+$$;
+
 CREATE FUNCTION pre_migration_history_append_only() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -806,6 +815,10 @@ CREATE TRIGGER pre_definition_history_no_truncate BEFORE TRUNCATE ON pre_definit
 CREATE TRIGGER pre_definition_layout_no_change BEFORE DELETE OR UPDATE ON pre_definition_layout FOR EACH ROW EXECUTE FUNCTION pre_definition_layout_append_only();
 
 CREATE TRIGGER pre_definition_layout_no_truncate BEFORE TRUNCATE ON pre_definition_layout FOR EACH STATEMENT EXECUTE FUNCTION pre_definition_layout_append_only();
+
+CREATE TRIGGER pre_history_no_change BEFORE DELETE OR UPDATE ON pre_history FOR EACH ROW EXECUTE FUNCTION pre_history_append_only();
+
+CREATE TRIGGER pre_history_no_truncate BEFORE TRUNCATE ON pre_history FOR EACH STATEMENT EXECUTE FUNCTION pre_history_append_only();
 
 CREATE TRIGGER pre_migration_history_no_change BEFORE DELETE OR UPDATE ON pre_migration_history FOR EACH ROW EXECUTE FUNCTION pre_migration_history_append_only();
 

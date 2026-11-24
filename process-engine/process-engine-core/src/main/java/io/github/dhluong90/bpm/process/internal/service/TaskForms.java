@@ -221,6 +221,22 @@ public final class TaskForms {
     }
 
     /**
+     * @param schema the form schema
+     * @return the names of the fields the schema marks {@code "mask": true}
+     */
+    static java.util.Set<String> maskedFields(Map<String, Object> schema) {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        if (schema.get("properties") instanceof Map<?, ?> properties) {
+            for (Map.Entry<?, ?> property : properties.entrySet()) {
+                if (property.getValue() instanceof Map<?, ?> p && Boolean.TRUE.equals(p.get("mask"))) {
+                    names.add(String.valueOf(property.getKey()));
+                }
+            }
+        }
+        return names;
+    }
+
+    /**
      * Values for the fields the schema declares, from the instance variables of the same name. A field the schema
      * marks {@code "mask": true} is {@value #MASKED} whenever the variable exists, so the clear value never leaves
      * the engine through the form (TR-SEC-05).

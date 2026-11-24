@@ -83,8 +83,20 @@ class BusinessCalendarPostgresIT {
         engine.calendars.approve(proposed.id(), "Checked against the 2027 holiday notice");
     }
 
+    /** Reads the due time as a task manager: a task is shown to its assignee, claimer or a manager only (PRE-358). */
+    private Instant dueAt(String taskId) {
+        String caller = engine.identity.caller;
+        java.util.Set<String> permissions = engine.identity.permissions;
+        as("bank-a", "supervisor", "processes:task:work", "processes:task:manage");
+        try {
+            return engine.services.task(taskId).dueAt();
+        } finally {
+            engine.identity.as("bank-a", caller, permissions.toArray(String[]::new));
+        }
+    }
+
     private Instant startReview(String businessKey) {
-        return engine.services.task(startReviewTask(businessKey)).dueAt();
+        return dueAt(startReviewTask(businessKey));
     }
 
     /** Starts a credit review for minh of bank-a; returns its task id. */
@@ -118,7 +130,7 @@ class BusinessCalendarPostgresIT {
         // Given a review due Monday 4 Jan 10:00 +07:00
         calendarInForce();
         String firstTask = startReviewTask("LN-2027-000123");
-        Instant first = engine.services.task(firstTask).dueAt();
+        Instant first = dueAt(firstTask);
 
         // When Kim proposes 4 Jan as an extra holiday, cannot approve it herself, and Lan approves it
         as("bank-a", "kim", MANAGER);
@@ -134,7 +146,7 @@ class BusinessCalendarPostgresIT {
         Instant second = startReview("LN-2027-000124");
 
         // Then the first task keeps its due time, and only the new task skips 4 Jan
-        assertThat(engine.services.task(firstTask).dueAt()).isEqualTo(first);
+        assertThat(dueAt(firstTask)).isEqualTo(first);
         assertThat(TestEngine.jdbc().sql("SELECT due_at FROM pre_task WHERE id = ?").param(firstTask)
                 .query(java.sql.Timestamp.class).single().toInstant()).isEqualTo(first);
         assertThat(first).isEqualTo(at("2027-01-04T10:00:00+07:00"));

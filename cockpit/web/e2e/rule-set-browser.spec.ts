@@ -12,8 +12,8 @@ const VIEWPORTS = [
 ] as const;
 
 const WORDS = {
-  en: { importSet: 'Import rule set', importVersion: 'Import new version', export: 'Export', json: 'As JSON', dmn: 'As DMN decision table', created: 'Draft version 3 created', saved: 'Saved card-fee-v1.json', refused: 'Import refused. Nothing was saved.', located: 'card-fee-bad.yaml, row R4, column Balance', reason: 'compares a money amount with a plain number', importedBy: 'Imported by lan from card-fee-v3.yaml', versions: 'Versions' },
-  vi: { importSet: 'Nhập bộ quy tắc', importVersion: 'Nhập phiên bản mới', export: 'Xuất tệp', json: 'Dạng JSON', dmn: 'Dạng bảng quyết định DMN', created: 'Đã tạo bản nháp phiên bản 3', saved: 'Đã lưu card-fee-v1.json', refused: 'Đã từ chối nhập tệp. Không có thay đổi nào được lưu.', located: 'card-fee-bad.yaml, dòng R4, cột Balance', reason: 'so sánh số tiền với một số thường', importedBy: 'lan nhập từ card-fee-v3.yaml', versions: 'Phiên bản' },
+  en: { importSet: 'Import rule set', importVersion: 'Import new version', export: 'Export', json: 'As JSON', dmn: 'As DMN decision table', created: 'Draft version 3 created', saved: 'Saved card-fee-v1.json', refused: 'Import refused. Nothing was saved.', located: 'card-fee-bad.yaml, row R4, column Balance', reason: 'compares a money amount with a plain number', importedBy: 'Imported by Nguyễn Thị Lan from card-fee-v3.yaml', versions: 'Versions' },
+  vi: { importSet: 'Nhập bộ quy tắc', importVersion: 'Nhập phiên bản mới', export: 'Xuất tệp', json: 'Dạng JSON', dmn: 'Dạng bảng quyết định DMN', created: 'Đã tạo bản nháp phiên bản 3', saved: 'Đã lưu card-fee-v1.json', refused: 'Đã từ chối nhập tệp. Không có thay đổi nào được lưu.', located: 'card-fee-bad.yaml, dòng R4, cột Balance', reason: 'so sánh số tiền với một số thường', importedBy: 'Nguyễn Thị Lan nhập từ card-fee-v3.yaml', versions: 'Phiên bản' },
 } as const;
 type Locale = keyof typeof WORDS;
 
@@ -76,7 +76,7 @@ for (const viewport of VIEWPORTS) {
       await axe(page);
 
       // Open card-fee version 1: the rule table, no YAML or JSON, Import and Export above the fold.
-      await table.getByRole('link', { name: 'card-fee' }).click();
+      await table.getByRole('link', { name: 'Card fee', exact: true }).click();
       await page.getByLabel(w.versions, { exact: true }).selectOption('1');
       await expect(page.locator('.rs-head__sub')).toHaveText(/1 ·/);
       await expect(page.getByText(/^50[.,]000[.,]000 VND$/).first()).toBeVisible();

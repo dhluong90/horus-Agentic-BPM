@@ -84,6 +84,11 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [DMN_UNSUPPORTED_ELEMENT](#dmn_unsupported_element) | rules | 0.2.0 |
 | 422 | [EXPRESSION_LANGUAGE_UNSUPPORTED](#expression_language_unsupported) | rules | 0.2.0 |
 | 422 | [BPMN_UNSAFE_XML](#bpmn_unsafe_xml) | processes | M3 |
+| 409 | [MESSAGE_CORRELATION_AMBIGUOUS](#message_correlation_ambiguous) | processes | 0.3.0 |
+| 422 | [STEP_FAILED](#step_failed) | processes | 0.3.0 |
+| 422 | [HANDLER_NOT_REGISTERED](#handler_not_registered) | processes | 0.3.0 |
+| 422 | [CORRELATION_KEY_REQUIRED](#correlation_key_required) | processes | 0.3.0 |
+| 422 | [MESSAGE_NOT_CORRELATED](#message_not_correlated) | processes | 0.3.0 |
 | 428 | [PRECONDITION_REQUIRED](#precondition_required) | both | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
@@ -350,3 +355,18 @@ A BPMN refusal is the same, with `"code":"BPMN_UNSUPPORTED_ELEMENT"` and a BPMN 
 
 ### BPMN_UNSAFE_XML
 `422`. A BPMN import contains a `DOCTYPE`, or exceeds 1 MB, nesting depth 32 or 5,000 elements. The file is refused before any transaction opens. Export the file again without a document type declaration.
+
+### STEP_FAILED
+`422`. A step failed before the instance reached its first wait state, so everything rolled back and no instance exists. `nodeId` names the step and `reason` the cause: `RULE_SET_NOT_FOUND` (publish the rule set first), `INPUT_VARIABLE_MISSING` (a `horus:input` reads a variable the instance lacks: send it in `variables`), `NO_PATH` (no gateway condition held and there is no default flow), or a code your handler returned. Fix the cause and send the same request again.
+
+### HANDLER_NOT_REGISTERED
+`422` with `code` `VALIDATION_FAILED` and a problem `HANDLER_NOT_REGISTERED` for the step, at import, request-approval and approval. The BPMN names a `horus:handler` that no `ServiceTaskHandler` bean of this host returns from `name()`. Register the bean, or correct the name; names are case-sensitive.
+
+### CORRELATION_KEY_REQUIRED
+`422`. A message catch, receive task or message start has no `horus:correlationKey`, so the engine cannot match a message to an instance. At import it is a problem on the element; at run time it is a `STEP_FAILED` with this reason. Add `horus:correlationKey="orderId"`, naming an instance variable.
+
+### MESSAGE_NOT_CORRELATED
+`422`. `POST /messages:correlate` found no token waiting for that name and key, and no definition that starts on the message. Nothing is stored. Check the name and key, and that the instance has reached the catch step; send the message again afterwards.
+
+### MESSAGE_CORRELATION_AMBIGUOUS
+`409`. Two or more tokens wait for the same message name and key, or two definitions start on it. Nothing ran. Make the keys unique per instance.

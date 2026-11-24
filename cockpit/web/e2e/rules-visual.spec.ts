@@ -62,7 +62,8 @@ const SCREENS: readonly Screen[] = [
     scenario: 'rules-author',
     hash: '#/rules/card-fee/2',
     primary: { en: 'Approve and publish', vi: 'Phê duyệt và xuất bản' },
-    ready: async (page) => { await expect(page.locator('.gate__reason')).toBeVisible(); },
+    // Why Approve is off is a tooltip on the disabled button (the sentence is read out by a screen reader).
+    ready: async (page) => { await expect(page.locator('.decision .has-tip[data-tip]')).toBeVisible(); await expect(page.locator('.decision .btn--ok')).toBeDisabled(); },
   },
   {
     name: 'approver-changes',

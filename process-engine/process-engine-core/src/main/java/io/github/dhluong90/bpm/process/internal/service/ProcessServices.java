@@ -132,8 +132,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      *
      * @param instance the instance
      * @param created whether the request created it
+     * @param summaryOnly true when the caller held {@code processes:start} but not {@code processes:read} and the
+     *     instance is an earlier one with the same business key: the instance then carries its id, status and
+     *     business key only, never variables, tokens or tasks (AUD-01)
      */
-    public record Started(ProcessInstance instance, boolean created) {
+    public record Started(ProcessInstance instance, boolean created, boolean summaryOnly) {
+
+        /**
+         * @param instance the instance
+         * @param created whether the request created it
+         */
+        public Started(ProcessInstance instance, boolean created) {
+            this(instance, created, false);
+        }
     }
 
     static final String PERMISSION_DEPLOY = "processes:deploy";
@@ -1865,7 +1876,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 InstanceRow existing = store.findInstanceByBusinessKey(tenant, request.definitionKey(),
                         request.businessKey()).orElse(null);
                 if (existing != null) {
-                    return new Started(read(tenant, existing), false);
+                    return existingStarted(tenant, existing);
                 }
             }
             Instant now = clock.instant();
@@ -1875,13 +1886,27 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             InstanceRow row = new InstanceRow(tenant, instanceId, definition.id(), definition.key(), definition.version(),
                     request.businessKey(), "RUNNING", "{}", 0, 0, caller, now, null);
             if (!store.insertInstance(row)) {
-                return new Started(read(tenant, store.findInstanceByBusinessKey(tenant, request.definitionKey(),
-                        request.businessKey()).orElseThrow()), false);
+                return existingStarted(tenant, store.findInstanceByBusinessKey(tenant, request.definitionKey(),
+                        request.businessKey()).orElseThrow());
             }
             InstanceState state = InstanceState.created(instanceId, tenant, definition.id(), request.businessKey());
             run(definition, row, state, new Command.Start(request.variables(), caller), RunAs.REQUEST);
             return new Started(read(tenant, store.findInstance(tenant, instanceId).orElseThrow()), true);
         }, Views::startedToJson, Views::startedFromJson));
+    }
+
+    /**
+     * The answer to a start whose business key already has an instance (PRE-002). A caller with {@code processes:read}
+     * gets the instance; a caller with {@code processes:start} alone gets its id, status and business key only, so a
+     * guessed business key reads nothing of another case (AUD-01).
+     */
+    private Started existingStarted(String tenant, InstanceRow existing) {
+        if (callers.currentPermissions().contains(PERMISSION_READ)) {
+            return new Started(read(tenant, existing), false);
+        }
+        return new Started(new ProcessInstance(existing.id(), existing.definitionKey(), existing.definitionVersion(),
+                existing.businessKey(), existing.status(), Map.of(), List.of(), List.of(), existing.lockVersion(), null,
+                existing.startedAt(), null), false, true);
     }
 
     @Override
@@ -2104,11 +2129,50 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      *
      * @return the id of the instance the arrival started, or null while the start still waits for the others
      */
+    /**
+     * Installs the bounds of held start arrivals (AUD-10). Called once while the engine is wired, before the first
+     * request.
+     *
+     * @param settings the bounds, or null for the defaults
+     */
+    public void useStartArrivalSettings(StartArrivalSettings settings) {
+        this.startArrivals = settings == null ? StartArrivalSettings.DEFAULTS : settings;
+    }
+
+    /**
+     * Deletes held start arrivals older than {@code parallel-start.arrival-ttl}, in batches, across tenants (AUD-10).
+     *
+     * @return how many arrivals were deleted
+     */
+    public int purgeExpiredStartArrivals() {
+        Instant cutoff = clock.instant().minus(startArrivals.ttl());
+        int total = 0;
+        int deleted;
+        do {
+            deleted = transactions.inTransaction(() -> store.deleteStartArrivalsBefore(cutoff, START_ARRIVAL_PURGE_BATCH));
+            total += deleted;
+        } while (deleted == START_ARRIVAL_PURGE_BATCH);
+        if (total > 0) {
+            LOG.log(System.Logger.Level.INFO, "process.start-arrival.purged rows={0}", total);
+        }
+        return total;
+    }
+
+    private static final int START_ARRIVAL_PURGE_BATCH = 500;
+    private volatile StartArrivalSettings startArrivals = StartArrivalSettings.DEFAULTS;
+
     private String arriveAtParallelStart(String tenant, String caller, StoredDefinition definition,
             io.github.dhluong90.bpm.process.internal.model.bpmn.StartEvent start, String kind, String name, String key,
             Map<String, Object> payload, RunAs as) {
         store.lockDefinitions(tenant, definition.key());
-        store.putStartArrival(tenant, definition.key(), kind, name, key == null ? "" : key, Values.write(payload),
+        String arrivalKey = key == null ? "" : key;
+        if (!store.hasStartArrival(tenant, definition.key(), kind, name, arrivalKey)
+                && store.countStartArrivals(tenant, definition.key()) >= startArrivals.maxPerDefinition()) {
+            // AUD-10: a held arrival replaces the one with its key, so only a new key grows the table.
+            throw new PayloadTooLargeException("Process " + definition.key() + " already holds "
+                    + startArrivals.maxPerDefinition() + " arrivals that wait for the other start events");
+        }
+        store.putStartArrival(tenant, definition.key(), kind, name, arrivalKey, Values.write(payload),
                 clock.instant());
         List<String[]> required = new ArrayList<>();
         String messageName = null;
@@ -4472,6 +4536,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String caller = callerWith(PERMISSION_TASK_WORK);
         return transactions.inTransaction(() -> {
             TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
+            requireTaskVisible(task, caller, taskId);
             InstanceRow row = store.findInstance(tenant, task.instanceId()).orElseThrow();
             return withActions(taskView(task, row), caller, participants(tenant, row));
         });
@@ -4480,9 +4545,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     @Override
     public io.github.dhluong90.bpm.process.api.TaskForm form(String taskId) {
         String tenant = tenant();
-        callerWith(PERMISSION_TASK_WORK);
+        String caller = callerWith(PERMISSION_TASK_WORK);
         return transactions.inTransaction(() -> {
             TaskRow task = store.findTask(tenant, taskId).orElseThrow(() -> new TaskNotFoundException("No task " + taskId));
+            requireTaskVisible(task, caller, taskId);
             InstanceRow row = store.findInstance(tenant, task.instanceId()).orElseThrow();
             TaskForms.Resolved resolved = resolveForm(tenant, row, task).orElseThrow(
                     () -> new io.github.dhluong90.bpm.process.api.FormNotDeclaredException(
@@ -4495,6 +4561,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         task.lockVersion(), null, null, null, TaskForms.link(l.template(), task.id(), row.id()));
             };
         });
+    }
+
+    /**
+     * A task and its form are for the people the task is for: an assignee (user, role or group), the person who
+     * claimed it, and a holder of {@code processes:task:manage}. Anyone else gets the answer for a task that does not
+     * exist, so an id found in a log or an event cannot be probed (AUD-05).
+     */
+    private void requireTaskVisible(TaskRow task, String caller, String taskId) {
+        if (assigned(task.assignee(), caller) || caller.equals(task.claimedBy())
+                || callers.currentPermissions().contains(PERMISSION_TASK_MANAGE)) {
+            return;
+        }
+        throw new TaskNotFoundException("No task " + taskId);
     }
 
     /** What the task's step declares, or empty for a review task and for a step without a form. */
@@ -5694,8 +5773,44 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         t.claimedBy(), t.claimedAt(), t.completedBy()))
                 .toList();
         return new ProcessInstance(row.id(), row.definitionKey(), row.definitionVersion(), row.businessKey(), row.status(),
-                Values.readMap(row.variablesJson()), tokens, tasks, row.lockVersion(), row.startedBy(), row.startedAt(),
+                maskedVariables(tenant, row), tokens, tasks, row.lockVersion(), row.startedBy(), row.startedAt(),
                 row.endedAt());
+    }
+
+    /**
+     * The instance variables with the fields its task forms mark {@code "mask": true} replaced by
+     * {@value TaskForms#MASKED}, so a reader of the instance, and every stored idempotent answer that carries it, sees
+     * what the form shows (AUD-04, TR-SEC-05). A form the host no longer registers marks nothing.
+     */
+    private Map<String, Object> maskedVariables(String tenant, InstanceRow row) {
+        Map<String, Object> variables = Values.readMap(row.variablesJson());
+        if (variables.isEmpty()) {
+            return variables;
+        }
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElse(null);
+        if (definition == null) {
+            return variables;
+        }
+        Map<String, Object> out = new LinkedHashMap<>(variables);
+        for (var node : compiled(definition).process().nodes()) {
+            if (!(node instanceof UserTask task)) {
+                continue;
+            }
+            java.util.Optional<TaskForms.Resolved> resolved;
+            try {
+                resolved = forms.resolve(tenant, task);
+            } catch (TaskForms.FormUnavailableException e) {
+                continue;
+            }
+            if (resolved.orElse(null) instanceof TaskForms.Resolved.Form form) {
+                for (String name : TaskForms.maskedFields(form.schema())) {
+                    if (out.get(name) != null) {
+                        out.put(name, TaskForms.MASKED);
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     private static DefinitionVersion view(StoredDefinition d) {

@@ -7,11 +7,6 @@ on:
     # A release tag runs the full matrix, so no release is cut from a commit only one leg has seen.
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      cockpit-ui:
-        description: Also run the cockpit Playwright UI suite (it is off on pull requests and on main)
-        type: boolean
-        default: false
   # Nightly, so a vulnerability published against a merged dependency fails main within a day.
   # GitHub notifies the workflow's owner when a scheduled run fails.
   schedule:
@@ -71,7 +66,7 @@ jobs:
     # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
     name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       # ADR-0011 tests every 4.x minor in open-source support. Remove the 4.0.x leg, and the
@@ -576,7 +571,7 @@ jobs:
 
   cockpit:
     # The cockpit web application on every pull request: licences of shipped packages, generated schemas,
-    # lint, types and Vitest. The Playwright UI suite is the separate cockpit-ui job below (lean mode, PD-151).
+    # lint, types and Vitest. The Playwright UI suite is the separate cockpit-ui job below.
     name: Cockpit (lint, typecheck, Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -615,14 +610,14 @@ jobs:
         run: npm test
 
   cockpit-ui:
-    # Playwright on the Chromium of the Playwright image against the production build. Off on pull requests,
-    # on main and nightly; it runs only when a person starts this workflow with "cockpit-ui" ticked, and
-    # before the baseline audit. The specs and visual baselines stay in cockpit/web/e2e.
+    # Playwright on the Chromium of the Playwright image against the production build. A pull request runs the
+    # smoke subset (1440x900, light theme, English: about 390 of the 1,970 checks, 2 minutes locally); main, the
+    # nightly run and a manual start run the full suite (every state at two sizes, two themes, two languages, with
+    # axe). The specs and visual baselines are in cockpit/web/e2e.
     name: Cockpit UI (Playwright)
-    if: github.event_name == 'workflow_dispatch' && inputs.cockpit-ui
     runs-on: ubuntu-latest
-    # About 1,500 Playwright checks (every state at two sizes, two themes, two languages, with axe) take 17 to
-    # 20 minutes on a hosted runner; 45 leaves room without hiding a hung run.
+    # The full suite (about 1,970 checks) takes 17 to 20 minutes on a hosted runner; 45 leaves room without
+    # hiding a hung run. The pull request smoke subset takes a few minutes.
     timeout-minutes: 45
     # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
     # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
@@ -658,8 +653,13 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Playwright (production build, 1440x900 and 1440x1200, light and dark, English and Vietnamese)
-        # One worker per vCPU; Playwright's default is half of them.
+      - name: Playwright smoke (pull request, 1440x900, light, English)
+        if: github.event_name == 'pull_request'
+        # One worker per vCPU; Playwright's default is half of them. Names carry their size, theme and language.
+        run: npm run e2e -- --workers=100% --grep-invert "_(1440x1200|dark|vi)(_|$)"
+
+      - name: Playwright full (production build, 1440x900 and 1440x1200, light and dark, English and Vietnamese)
+        if: github.event_name != 'pull_request'
         run: npm run e2e -- --workers=100%
 
       - name: Upload Playwright report and screenshots

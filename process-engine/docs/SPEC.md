@@ -2658,6 +2658,55 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `bank-a limit 50,000,000 -> score 712 under bank-a; bank-b is untouched`.
 - **Test ID:** `PRE_354_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance`, `PRE_354_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time`, `PRE_354_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete` (`DataStoreAndGatewayStartPostgresIT`), `PRE_354_a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance` (`ConformanceSuiteTest`)
 
+### PRE-356 A start with an existing business key shows the earlier instance only to a reader
+- **Traces to:** #572, AUD-01
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `card-issue` instance `APP-1001` was started by `tuan` with the variable `ssn` set. `hoa` holds `processes:start` but not `processes:read`; `an` holds both.
+- **When:** `hoa` and then `an` start `card-issue` with the business key `APP-1001`.
+- **Then:** Both answer `200` and create nothing. For `hoa` the body is `{id, status, created: false}`: no variables, tokens or tasks, and an idempotent replay returns the same short body. For `an` it is the full instance. A start that creates the instance answers `201` as before.
+- **Example:** `hoa: {"id":"01J...","status":"RUNNING","created":false}`.
+- **Test ID:** `PRE_356_control_a_start_caller_without_read_gets_only_id_and_status_for_an_existing_business_key` (`AuditFindingsPostgresIT`), `PRE_356_control_a_start_only_caller_learns_nothing_of_an_existing_application_but_its_id_and_status` (`AuditFindingsRestIT`)
+
+### PRE-357 A field the task form masks is masked in every instance view
+- **Traces to:** #572, AUD-04, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** the form `forms/approve.schema.json` of the step `approve` marks `idNumber` with `"mask": true`; the instance of `loan-review-form` holds `idNumber = 079012345678`.
+- **When:** A reader gets the instance, and a start with an `Idempotency-Key` is replayed.
+- **Then:** `variables.idNumber` is `***` in the instance, in the answer of the start and its stored replay, and in the answer of a completion; other variables are unchanged. The clear value stays in the engine's own state, so the process still runs on it.
+- **Example:** `idNumber: 079012345678 -> ***`.
+- **Test ID:** `PRE_357_control_a_variable_the_form_masks_is_masked_in_the_instance_and_in_the_idempotent_replay` (`AuditFindingsPostgresIT`)
+
+### PRE-358 A task and its form are returned only to who the task is for
+- **Traces to:** #572, AUD-05
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** a task of `loan-review-form` assigned to `role:credit-officer`. `an` holds that role; `kien` holds `processes:task:work` with the role `kyc-analyst`; `ngoc` holds `processes:task:manage`.
+- **When:** Each reads the task and its form.
+- **Then:** `an` (assignee) and `ngoc` (`processes:task:manage`) get them. `kien` gets `404 TASK_NOT_FOUND`, the answer for a task that does not exist, for both reads. The person who claimed the task still reads it after it is handed over.
+- **Example:** `kien GET /tasks/{id} -> 404 TASK_NOT_FOUND`.
+- **Test ID:** `PRE_358_control_a_task_and_its_form_are_returned_to_an_assignee_a_claimer_or_a_task_manager_and_to_nobody_else` (`AuditFindingsPostgresIT`), `PRE_358_control_a_task_is_read_by_its_assignee_and_a_task_manager_and_by_nobody_else` (`AuditFindingsRestIT`)
+
+### PRE-359 The instance history table refuses UPDATE, DELETE and TRUNCATE
+- **Traces to:** #572, AUD-03
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `pre_history` holds the record that `an` completed the credit review.
+- **When:** The application's own database role runs `UPDATE`, `DELETE` or `TRUNCATE` on `pre_history`.
+- **Then:** Each statement fails with SQLSTATE `55000` ("pre_history is append-only") and the row is unchanged. The trigger is part of the V1 baseline.
+- **Example:** `UPDATE pre_history SET actor_id = 'x' -> 55000`.
+- **Test ID:** `PRE_359_control_pre_history_refuses_update_delete_and_truncate` (`AuditFindingsPostgresIT`)
+
+### PRE-360 Held start arrivals expire and one definition holds a bounded number
+- **Traces to:** #572, AUD-10, PD-149
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `account-opening` waits for the message `account-opening-request` and the signal `kyc-cleared`; `parallel-start.arrival-ttl` is 24 hours and `parallel-start.max-arrivals-per-definition` is 3.
+- **When:** (a) Four applications `APP-1` to `APP-4` send the message. (b) `APP-1` sends it again. (c) The clock moves 25 hours and the cleanup runs.
+- **Then:** (a) `APP-4` is refused with `413 PAYLOAD_TOO_LARGE` and nothing is held for it. (b) The repeat replaces the held row, so the count stays 3. (c) The three rows older than the TTL are deleted, across tenants, and a new arrival is held again.
+- **Example:** `APP-4 -> 413; after 25 hours pre_start_arrival is empty`.
+- **Test ID:** `PRE_360_control_a_definition_holds_at_most_the_configured_arrivals_and_a_repeat_does_not_count` (`AuditFindingsPostgresIT`), `PRE_360_control_arrivals_older_than_the_ttl_are_deleted_by_the_cleanup` (`AuditFindingsPostgresIT`)
 ### PRE-370 A migration plan or a calendar change is approved only on the hash the approver reviewed
 - **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-02)
 - **Milestone:** M3

@@ -40,6 +40,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  * @param calls limits of a process that calls another (#92)
  * @param tasks how a user task is completed through a declared form (PRE-031)
+ * @param parallelStart limits of the arrivals a parallel multiple start holds (PD-149, AUD-10)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -67,7 +68,8 @@ public record ProcessEngineProperties(
         @DefaultValue Calls calls,
         @DefaultValue MultiInstance multiInstance,
         @DefaultValue Tasks tasks,
-        @DefaultValue Cursor cursor) {
+        @DefaultValue Cursor cursor,
+        @DefaultValue ParallelStart parallelStart) {
 
     /**
      * The keys that sign list cursors (AUD-13). Supply every key from an environment variable or a secret store,
@@ -117,6 +119,40 @@ public record ProcessEngineProperties(
         @Override
         public String toString() {
             return "Cursor[activeKeyId=" + activeKeyId + ", keys=" + keys.keySet() + "]";
+        }
+    }
+
+    /**
+     * Arrivals held for a process whose start event waits for several messages or signals (PD-149, AUD-10).
+     *
+     * @param arrivalTtl how long an arrival waits for the others before it is deleted, 1 minute to 366 days; default
+     *     24 hours
+     * @param maxArrivalsPerDefinition most arrivals held for one definition of one tenant; a new correlation key past
+     *     it is refused with {@code 413 PAYLOAD_TOO_LARGE}; 1 to 1,000,000, default 10,000
+     * @param cleanupInterval how often expired arrivals are deleted, 1 second to 1 day; default 15 minutes
+     */
+    public record ParallelStart(
+            @DefaultValue("PT24H") Duration arrivalTtl,
+            @DefaultValue("10000") int maxArrivalsPerDefinition,
+            @DefaultValue("PT15M") Duration cleanupInterval) {
+
+        public ParallelStart {
+            try {
+                new io.github.dhluong90.bpm.process.internal.service.StartArrivalSettings(arrivalTtl,
+                        maxArrivalsPerDefinition);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("horus.bpm.processes." + e.getMessage(), e);
+            }
+            if (cleanupInterval == null || cleanupInterval.compareTo(Duration.ofSeconds(1)) < 0
+                    || cleanupInterval.compareTo(Duration.ofDays(1)) > 0) {
+                throw new IllegalArgumentException(
+                        "horus.bpm.processes.parallel-start.cleanup-interval must be 1 second to 1 day");
+            }
+        }
+
+        io.github.dhluong90.bpm.process.internal.service.StartArrivalSettings toSettings() {
+            return new io.github.dhluong90.bpm.process.internal.service.StartArrivalSettings(arrivalTtl,
+                    maxArrivalsPerDefinition);
         }
     }
 

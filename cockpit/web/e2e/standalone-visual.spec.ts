@@ -32,13 +32,13 @@ const STATES: readonly State[] = [
   { name: 'signing-in', hash: '#/rules', holdSignIn: true, ready: async (page) => { await expect(page.locator('[aria-busy="true"]')).toBeVisible(); } },
   { name: 'sign-in-failed', hash: '#/rules', refuseSignIn: true, ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); } },
   { name: 'sign-in-expired', hash: '#/rules', expireSignIn: true, ready: async (page) => { await expect(page.getByRole('alert')).toBeVisible(); } },
-  { name: 'loans-rules', hash: '#/hosts/loans/rules', ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); } },
+  { name: 'loans-rules', hash: '#/hosts/loans/rules', ready: async (page) => { await expect(page.getByRole('link', { name: 'Card fee', exact: true })).toBeVisible(); } },
   {
     name: 'host-picker-open', hash: '#/hosts/loans/rules',
-    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'Card fee', exact: true })).toBeVisible(); },
     after: async (page) => { await page.getByTestId('host-picker').click(); await expect(page.locator('.host-picker__menu')).toBeVisible(); },
   },
-  { name: 'kyc-rules', hash: '#/hosts/kyc/rules', ready: async (page) => { await expect(page.getByRole('link', { name: 'kyc-risk' })).toBeVisible(); } },
+  { name: 'kyc-rules', hash: '#/hosts/kyc/rules', ready: async (page) => { await expect(page.getByRole('link', { name: 'Kyc risk', exact: true })).toBeVisible(); } },
   { name: 'kyc-home', hash: '#/hosts/kyc/home', ready: async (page) => { await expect(page.getByTestId('header-user')).toBeAttached(); } },
   {
     name: 'unsupported-version', hash: '#/hosts/kyc/rules',
@@ -61,22 +61,22 @@ const STATES: readonly State[] = [
   { name: 'tenant-switcher', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS }, ready: async (page) => { await expect(page.getByTestId('tenant-switcher')).toBeVisible(); } },
   {
     name: 'tenant-menu-open', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS },
-    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'Card fee', exact: true })).toBeVisible(); },
     after: async (page) => { await page.getByTestId('tenant-switcher').click(); await expect(page.locator('.tenant-switcher .host-picker__menu')).toBeVisible(); },
   },
   {
     name: 'tenant-switched', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS },
-    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
-    after: async (page) => { await page.getByTestId('tenant-switcher').click(); await page.locator('.tenant-switcher__item').nth(1).click(); await expect(page.getByRole('link', { name: 'kyc-risk' })).toBeVisible(); },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'Card fee', exact: true })).toBeVisible(); },
+    after: async (page) => { await page.getByTestId('tenant-switcher').click(); await page.locator('.tenant-switcher__item').nth(1).click(); await expect(page.getByRole('link', { name: 'Kyc risk', exact: true })).toBeVisible(); },
   },
   {
     name: 'tenant-refused', hash: '#/hosts/loans/rules', loans: { tenants: TENANTS, forgeTenant: 'bank-b' },
-    ready: async (page) => { await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible(); },
+    ready: async (page) => { await expect(page.getByRole('link', { name: 'Card fee', exact: true })).toBeVisible(); },
     after: async (page) => {
       await page.getByTestId('tenant-switcher').click();
       await page.locator('.tenant-switcher__item').nth(1).click();
       await expect(page.getByTestId('tenant-refused')).toBeVisible();
-      await expect(page.getByRole('link', { name: 'card-fee' })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Card fee', exact: true })).toBeVisible();
     },
   },
   { name: 'decision-choose-host', hash: `#/decisions/${DECISION}`, ready: async (page) => { await expect(page.locator('.host-choice')).toBeVisible(); } },
