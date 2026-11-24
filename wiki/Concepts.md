@@ -56,13 +56,15 @@ stateDiagram-v2
   [*] --> DRAFT: import (author)
   DRAFT --> PENDING_APPROVAL: request-publish
   PENDING_APPROVAL --> DRAFT: reject, or withdraw by the requester
+  DRAFT --> DISCARDED: author discards the draft
   PENDING_APPROVAL --> PUBLISHED: approve (a different person)
   PUBLISHED --> RETIRED: a newer version takes over, or retire
   RETIRED --> [*]
+  DISCARDED --> [*]
 ```
 
 - **Effective date.** A published version decides from its `effectiveFrom`. A future date means scheduled.
-- **Four-eyes.** The person who requests a change can never approve it, whatever roles they hold (`403 SELF_APPROVAL_FORBIDDEN`). The same rule covers process definitions, migrations and incident resolutions.
+- **Four-eyes, two layers.** First, roles are separate: authoring and approving are different permissions (`rules:author` and `rules:approve`). A caller without the approve permission gets `403 PERMISSION_DENIED`. Second, a person who holds the approve permission still cannot approve their own work. For rules, the person who requested the publication or authored the version is refused; for process definitions, migrations and incident resolutions, the person who requested the change is refused. Both get `403 SELF_APPROVAL_FORBIDDEN`, whatever other roles they hold.
 - **Reviewed hash.** The approver sends the hash of the content they read (`expectedCanonicalHash` for rules, `expectedDefinitionHash` for processes). If the content changed after review, the approval fails. Without a hash it fails with `CONTENT_HASH_REQUIRED`.
 - **Withdraw and roll back.** The requester can withdraw a request. A rollback is a new version carrying old content, because history is never rewritten. See [[Rule Engine Versioning and Publishing]].
 
@@ -105,7 +107,7 @@ An SPI is a Java interface you implement and register as a Spring bean. The engi
 | Term | Meaning |
 |---|---|
 | Rule set | A named decision, for example `loan-eligibility`, with typed inputs and outputs. The unit that callers evaluate. |
-| Version | An immutable snapshot of a rule set's rules. A version is in one of four states: draft, pending approval, published, retired (see below). At most one version of a rule set is effective per tenant at any instant. |
+| Version | An immutable snapshot of a rule set's rules. A version is in one of five states: draft, pending approval, published, retired, discarded (see below). At most one version of a rule set is effective per tenant at any instant. |
 | Rule | One row of a decision table: a `when` (one condition per input) and a `then` (one value per output). Each row has a stable id such as `R2`. |
 | Hit policy | How the engine combines several matching rows. `first`: the first match in row order wins. `unique`: exactly one row must match, otherwise the decision fails. `collect`: every matching row contributes, and outputs become lists or aggregates. |
 | Expression | A condition or output value written in the expression language. It is data, parsed at publish time into a closed set of operations; it cannot call code. Reference: [[Rule Engine Expression Language]]. |
@@ -113,7 +115,7 @@ An SPI is a Java interface you implement and register as a Spring bean. The engi
 | Decision | One evaluation of a rule set version against one set of inputs. It produces outputs, the matched rule ids and one record in the decision log. |
 | Decision log | The append-only record of every decision: tenant, rule set, version, inputs, matched rules, outputs, caller, clock. It is the audit trail. How-to: [[Rule Engine Decision Log and Audit]]. |
 | Effective date | The `effectiveFrom` instant from which a published version decides. A version with a future date is scheduled and becomes effective without any further action. |
-| Maker-checker | Publishing a version needs two identities: one requests, a different one approves. The engine enforces it; the cockpit only reflects it. |
+| Maker-checker | Publishing a version needs two identities: one requests or authors, a different one approves. The engine enforces it; the cockpit only reflects it. |
 | Simulation | Evaluating a draft version against sample inputs, or against past decisions of the effective version, to see what would change. A simulation never writes to the decision log. |
 | Masking | Marking an input `mask: true` so the decision log stores a keyed hash instead of the value. The hash still allows exact-match search. |
 | Tenant | The isolation boundary. Rule sets, versions and decisions always belong to exactly one tenant; there is no cross-tenant read. |
@@ -125,9 +127,10 @@ An SPI is a Java interface you implement and register as a Spring bean. The engi
 
 | State | Editable | Evaluable | Leaves the state when |
 |---|---|---|---|
-| Draft | Yes | Only by simulation | An author requests publication |
+| Draft | Yes | Only by simulation | An author requests publication, or discards the draft |
 | Pending approval | No | Only by simulation | A second identity approves (to published) or rejects (back to draft) |
 | Published | No | Yes, from its effective date | A later version becomes effective, or an approver retires it (one approver with a reason by default; a host can require a second approver from M3) |
+| Discarded | No | No | Never; an author discarded the draft before it was requested for publication |
 | Retired | No | No, but it still explains the decisions it made | Never; history is not rewritten |
 
 The decision log records the version each decision used, so a retired version can still explain a past decision.

@@ -370,7 +370,7 @@ The endpoint-to-permission table is in [[Rule Engine Decision API]]. To see what
 
 A host on the `dev` profile can run without an identity provider. The example hosts use this configuration:
 
-Rule sets enter through `POST /rule-sets` (or `VersionService` in Java); the engine has no start-up loader for rule set files. The example hosts use this configuration:
+Rule sets enter through `POST /rule-sets` (or `VersionService` in Java); the engine has no start-up loader for rule set files.
 
 ```yaml
 spring.profiles.active: dev
