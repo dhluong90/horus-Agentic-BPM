@@ -39,6 +39,9 @@ export const LOAN_ORIGINATION_BPMN = `${HEAD}
     </bpmn:businessRuleTask>
     <bpmn:exclusiveGateway id="approved" name="Approved?" default="to-decline"/>
     <bpmn:serviceTask id="book-loan" name="Book loan" horus:handler="loans.book"/>
+    <bpmn:boundaryEvent id="book-undo" attachedToRef="book-loan"><bpmn:compensateEventDefinition/></bpmn:boundaryEvent>
+    <bpmn:serviceTask id="reverse-booking" name="Reverse booking" isForCompensation="true" horus:handler="loans.reverseBooking"/>
+    <bpmn:association id="book-undo-link" associationDirection="One" sourceRef="book-undo" targetRef="reverse-booking"/>
     <bpmn:scriptTask id="compute-offer" name="Compute offer terms" horus:resultVariable="offerTerms"><bpmn:script>decision.limit * 12</bpmn:script>
       <bpmn:dataOutputAssociation id="offer-out"><bpmn:sourceRef>offer-result</bpmn:sourceRef><bpmn:targetRef>offer-ref</bpmn:targetRef></bpmn:dataOutputAssociation>
     </bpmn:scriptTask>
@@ -193,6 +196,7 @@ const VI_NAMES: Readonly<Record<string, string>> = {
   'Credit decision': 'Quyết định tín dụng',
   'Approved?': 'Được duyệt?',
   'Book loan': 'Ghi sổ khoản vay',
+  'Reverse booking': 'Đảo bút toán ghi sổ',
   'Send offer': 'Gửi đề nghị',
   'Loan booked': 'Đã ghi sổ',
   'Send decline letter': 'Gửi thư từ chối',

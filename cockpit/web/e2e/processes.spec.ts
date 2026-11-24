@@ -219,6 +219,12 @@ const SCREENS: readonly Screen[] = [
     focal: (page, locale) => page.getByRole('button', { name: new RegExp(locale === 'en' ? 'Book loan.*Undone' : 'Ghi sổ khoản vay.*Đã hoàn tác') }),
   },
   {
+    name: 'instance-undone-helper',
+    hash: `#/instances/${UNDONE_INSTANCE_ID}`,
+    title: T.loan,
+    focal: (page, locale) => page.getByRole('button', { name: new RegExp(locale === 'en' ? 'Reverse booking.*Used to undo' : 'Đảo bút toán ghi sổ.*Dùng để hoàn tác') }),
+  },
+  {
     name: 'instance-incident',
     hash: `#/instances/${INCIDENT_INSTANCE_ID}`,
     title: T.loan,
