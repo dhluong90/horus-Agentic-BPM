@@ -426,10 +426,15 @@ public class ProcessEngineAutoConfiguration {
             LOG.warn("Business calendar changes apply without a second person (horus.bpm.processes.calendar.approval"
                     + "=single, dev profile). Every change records this.");
         }
-        return new Calendars(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
+        Calendars calendars = new Calendars(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
                 clock.getIfUnique(Clock::systemUTC), transactions, store, publisher,
                 Calendars.Approval.valueOf(properties.calendar().approval().name()), properties.idempotencyRetention(),
-                properties.query().maxPageSize());
+                properties.query().maxPageSize(), properties.approval().requireContentHash());
+        java.util.Map<String, byte[]> cursorKeys = properties.cursor().decoded();
+        if (!cursorKeys.isEmpty()) {
+            calendars.useCursorKeys(properties.cursor().activeKeyId(), cursorKeys);
+        }
+        return calendars;
     }
 
     /** The step catalogue: what the host registered, for the modeller (#103, PRE-032). */
@@ -648,7 +653,7 @@ public class ProcessEngineAutoConfiguration {
         return new io.github.dhluong90.bpm.process.internal.service.MigrationExecutions(
                 tenants.getIfUnique(() -> () -> null), callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC),
                 transactions, store, migrationStore, migrations, publisher, properties.migration().toSettings(),
-                properties.idempotencyRetention());
+                properties.idempotencyRetention(), properties.approval().requireContentHash());
     }
 
     /**

@@ -2478,10 +2478,10 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Given:** At bank-a `thu` proposes the execution of the plan loan-origination v1 to v2 at 02:00 and the holiday 1 January 2028 for `vn-banking-hours` at 03:00; `lan` holds `processes:migration:manage` and `processes:calendar:manage`; `dan` holds `processes:read` only; `eve` is at bank-b.
 - **When:** each lists `GET /approvals`; `lan` approves the plan and the change with a wrong hash, then with the `contentHash` of the item; `thu` approves with the right hash.
 - **Then:**
-  - `lan` sees `MIGRATION_PLAN` then `CALENDAR_CHANGE`, oldest first, with `contentHash` (the plan hash; the change hash), `reason` and `approve`, `reject` allowed. A cursor continues across the two kinds. `thu` has no `approve` on either (`SELF_APPROVAL_FORBIDDEN`); she may withdraw her calendar change with `reject`. `dan` sees the calendar change with `PERMISSION_REQUIRED` and no migration plan. `eve` sees nothing.
+  - `lan` sees `MIGRATION_PLAN` then `CALENDAR_CHANGE`, oldest first, with `contentHash` (the plan hash; the change hash), `reason` and `approve`, `reject` allowed. A cursor continues across the two kinds. `thu` has no `approve` on either (`SELF_APPROVAL_FORBIDDEN`); she may withdraw her calendar change with `reject`. `dan`, who holds neither manage permission, sees nothing: not the migration plan and, since AUD-07, not the calendar change either. `eve` sees nothing.
   - A hash other than the item's is `409 CONTENT_CHANGED` and nothing is written; the item stays in the list. With the item's hash both are approved and leave the list. `thu` is `403 SELF_APPROVAL_FORBIDDEN` with the right hash.
 - **Example:** `GET /approvals -> [{kind: MIGRATION_PLAN, contentHash: <planHash>}, {kind: CALENDAR_CHANGE, contentHash: <changeHash>}]; approve with another hash -> 409 CONTENT_CHANGED`
-- **Test IDs:** `PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash`, `PRE_254_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required`, `PRE_254_the_cursor_continues_across_kinds`, `PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing`, `PRE_254_the_proposer_cannot_approve_with_the_right_hash`
+- **Test IDs:** `PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash`, `PRE_346_the_proposer_may_not_approve_and_a_reader_sees_no_calendar_change`, `PRE_254_the_cursor_continues_across_kinds`, `PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing`, `PRE_254_the_proposer_cannot_approve_with_the_right_hash`
 
 ### PRE-330 A complex gateway joins on its activation condition, fires once, absorbs the late token, and splits on its outgoing conditions
 - **Traces to:** `TR-STD-04`, #500
@@ -2657,3 +2657,33 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** (a) Each step receives its own bank's limit as `limit` and its score is written under its own bank; every call to an adapter carries the tenant of the instance and the variable changes nothing. History records `DATA_STORE_READ` and `DATA_STORE_WRITTEN` with the store and the item. A read or write runs in the step transaction; `DataStoreAccess.idempotencyKey()` is the same when the step runs again. (b) The import is `422 VALIDATION_FAILED` with `DATA_STORE_ADAPTER_NOT_REGISTERED`, naming the step and the store, and nothing is stored. (c) The step fails with `DATA_STORE_WRITE_UNSUPPORTED`, or `DATA_STORE_READ_UNSUPPORTED` for a read; any other failure of an adapter is `DATA_STORE_FAILED` with the exception class only, never its message, which may hold a row. A store that returns no value is `DATA_STORE_VALUE_MISSING`. A data store reference that no association names needs no adapter and runs nothing.
 - **Example:** `bank-a limit 50,000,000 -> score 712 under bank-a; bank-b is untouched`.
 - **Test ID:** `PRE_354_a_step_reads_and_writes_its_stores_and_the_adapter_sees_only_the_tenant_of_the_instance`, `PRE_354_a_definition_that_uses_a_store_with_no_adapter_is_refused_at_deploy_time`, `PRE_354_a_store_that_cannot_be_written_stops_the_step_and_the_instance_does_not_complete` (`DataStoreAndGatewayStartPostgresIT`), `PRE_354_a_data_store_association_reads_and_writes_through_the_host_and_only_for_the_tenant_of_the_instance` (`ConformanceSuiteTest`)
+
+### PRE-370 A migration plan or a calendar change is approved only on the hash the approver reviewed
+- **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-02)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a `thu` proposes the execution of the plan loan-review v1 to v2 and the holiday 8 February 2027 for `vn-banking-hours`; `lan` holds `processes:migration:manage` and `processes:calendar:manage`; `horus.bpm.processes.approval.require-content-hash` is at its default `true`.
+- **When:** `lan` sends `:approve` for each with no `expectedPlanHash` or `expectedChangeHash`; then with the hash `000...0` (64 zeros); then with the `contentHash` of the item in `GET /approvals`.
+- **Then:** No hash is `400 CONTENT_HASH_REQUIRED` and another hash is `409 CONTENT_CHANGED`; both write nothing, the plan stays `PROPOSED`, the change stays `PENDING` and no instance moves. With the item's hash both are approved. Only the `dev` profile may set `require-content-hash=false`, and then a missing hash is accepted as before.
+- **Example:** `POST /migrations/{id}:approve {} -> 400 CONTENT_HASH_REQUIRED; {expectedPlanHash: <planHash>} -> 200 APPROVED`
+- **Test IDs:** `PRE_370_a_migration_approval_must_name_the_reviewed_plan_hash`, `PRE_370_a_calendar_change_approval_must_name_the_reviewed_change_hash`
+
+### PRE-371 A list cursor names the key that signed it, so keys rotate and old cursors fail as 400
+- **Traces to:** `TR-SEC-04`, #365 (AUD-13)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The host sets `horus.bpm.processes.cursor.keys` with `k2026` and `k2027` and `cursor.active-key-id=k2027`; a cursor for bank-a's instance list was signed with `k2026`.
+- **When:** The cursor is replayed to a replica that has both keys; to one that dropped `k2026`; to one whose `k2027` has other bytes; a cursor of the format before key ids is replayed; the host sets a key of 8 bytes or an active id that names no key.
+- **Then:** New cursors carry `k2027` and the `k2026` cursor still works while that key is listed. After `k2026` is removed, a cursor of a changed key and a cursor with no key id are `400 QUERY_INVALID`, never `500`. The short key and the unknown active id stop start-up naming the property. With no key configured the engine keeps one in `pre_engine_key` and the key id is derived from its bytes, so replacing that key retires its cursors the same way.
+- **Example:** `cursor ...k2026... with keys {k2027} -> 400 QUERY_INVALID`
+- **Test IDs:** `PRE_371_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `PRE_371_a_cursor_without_a_key_id_or_of_a_changed_key_is_query_invalid`, `PRE_371_a_key_that_is_too_short_or_a_missing_active_key_is_refused`, `PRE_371_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`
+
+### PRE-372 A caller without the calendar manage permission sees no pending calendar change
+- **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-07)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `thu` has a pending calendar change and a proposed migration at bank-a; `ivy` holds `processes:migration:manage` only, `kim` holds `processes:calendar:manage` only, `dan` holds `processes:read` only.
+- **When:** each lists `GET /approvals`.
+- **Then:** `ivy` sees the `MIGRATION_PLAN` only, `kim` the `CALENDAR_CHANGE` only and `dan` neither, as for migration plans.
+- **Example:** `dan GET /approvals -> []`
+- **Test IDs:** `PRE_372_a_caller_without_calendar_manage_sees_no_pending_calendar_change`

@@ -132,6 +132,7 @@ final class TestEngine {
     final Optional<io.github.dhluong90.bpm.process.internal.service.DecisionPort> decisions;
     private final DataSource replicaDataSource;
     private final ProcessEngineTransactions replicaTransactions;
+    private final boolean strictApprovalHashes;
     private final TestClock replicaClock;
     private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator replicaSchemas;
     private final ProcessEventPublisher replicaPublisher;
@@ -168,7 +169,9 @@ final class TestEngine {
         // Engine's tenant-scoped entry point (ADR-0027, #336). Without one, a business rule task is not executable.
         this.decisions = b.decisionPort == null ? Optional.empty() : Optional.of(b.decisionPort.apply(rules));
         this.calendars = new io.github.dhluong90.bpm.process.internal.service.Calendars(() -> id.tenant, id, b.clock,
-                tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval);
+                tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval, EngineDefaults.IDEMPOTENCY_RETENTION,
+                EngineDefaults.MAX_PAGE_SIZE, b.strictApprovalHashes);
+        this.strictApprovalHashes = b.strictApprovalHashes;
         JdbcProcessStore processStore = new JdbcProcessStore(ds);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
                 Map.of(SourceFormat.BPMN_XML, reader),
@@ -287,7 +290,7 @@ final class TestEngine {
                         settings, EngineDefaults.IDEMPOTENCY_RETENTION);
         return new io.github.dhluong90.bpm.process.internal.service.MigrationExecutions(() -> id.tenant, id,
                 replicaClock, replicaTransactions, processStore, migrationStore, plans, replicaPublisher, settings,
-                EngineDefaults.IDEMPOTENCY_RETENTION);
+                EngineDefaults.IDEMPOTENCY_RETENTION, strictApprovalHashes);
     }
 
     /**
@@ -325,6 +328,7 @@ final class TestEngine {
         private boolean autoApprove = true;
         private boolean makerChecker = true;
         private boolean requireContentHash = true;
+        private boolean strictApprovalHashes;
         private boolean warnUnclassified = true;
         private EngineSettings.ResolveApproval resolveApproval = EngineSettings.ResolveApproval.FOUR_EYES;
         private EngineSettings.ApproverRule approverRule = EngineSettings.ApproverRule.MAKERS;
@@ -419,6 +423,12 @@ final class TestEngine {
         }
 
         /** {@code approval.require-content-hash} (PD-139); {@code false} is the dev-profile relaxation. */
+        /** AUD-02: calendar and migration approvals must name the reviewed hash, as with the shipped default. */
+        Builder strictApprovalHashes(boolean value) {
+            strictApprovalHashes = value;
+            return this;
+        }
+
         Builder requireContentHash(boolean value) {
             requireContentHash = value;
             return this;

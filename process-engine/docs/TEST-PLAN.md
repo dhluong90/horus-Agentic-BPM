@@ -237,6 +237,9 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-353 | `PRE_353_*` in `SagaCompensationTest`, `EventSubProcessTest` and `ConformanceSuiteTest` | A compensation event sub-process of several tasks, run in flow order | M3 | `TR-COMP-01` | Done (#499) |
 | PRE-354 | `PRE_354_*` in `DataStoreAndGatewayStartPostgresIT` and `ConformanceSuiteTest` | Integration on PostgreSQL, a data store read and write through the host adapter, per tenant | M3 | `TR-STD-04`, `TR-TEN-01` | Done (#499) |
 | PRE-355 | `PRE_355_*` in `DataStoreAndGatewayStartPostgresIT` and `ConformanceSuiteTest` | Integration on PostgreSQL, a parallel instantiating event-based gateway, two replicas, per tenant | M3 | `TR-STD-04`, `TR-TEN-01` | Done (#499) |
+| PRE-370 | `PRE_370_*` in `MigrationExecutionPostgresIT` and `CalendarChangeIdempotencyPostgresIT` | A migration plan or calendar change is approved only on the reviewed hash (AUD-02) | M3 | `TR-SEC-04` | Done (#573) |
+| PRE-371 | `PRE_371_*` in `CursorKeyRotationTest` and `CursorKeyPropertiesTest` | List cursors name their signing key: rotation, old cursors fail as 400 (AUD-13) | M3 | `TR-SEC-04` | Done (#573) |
+| PRE-372 | `PRE_372_*` in `PendingApprovalsKindsPostgresIT` | A caller without calendar manage sees no pending calendar change (AUD-07) | M3 | `TR-SEC-04` | Done (#573) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

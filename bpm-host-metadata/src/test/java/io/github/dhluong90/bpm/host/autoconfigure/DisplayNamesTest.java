@@ -105,6 +105,32 @@ class DisplayNamesTest {
                         .hasStackTraceContaining("horus.bpm.display-names.default-language"));
     }
 
+    @Test
+    void RLE_222_a_signed_in_account_with_no_engine_permission_cannot_look_up_names() {
+        TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class).withPropertyValues(NAMES)
+                .run(context -> {
+                    MockMvc mvc = TestHosts.mockMvc(context);
+
+                    // Given an account of bank-a that holds no rules or process permission, such as a customer
+                    JwtRequestPostProcessor customer = jwt()
+                            .jwt(token -> token.subject("customer-7").claim("tenant_id", "bank-a"))
+                            .authorities(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
+
+                    // When it asks for the name of the user lan
+                    MvcResult refused = call(mvc, get("/api/bpm/display-names").with(customer).param("users", "lan"));
+
+                    // Then it is 403 PERMISSION_DENIED and no name leaves
+                    assertThat(refused.getResponse().getStatus()).isEqualTo(403);
+                    assertThat(json(refused).path("code").asString()).isEqualTo("PERMISSION_DENIED");
+                    assertThat(refused.getResponse().getContentAsString()).doesNotContain("Trần Thị Lan");
+
+                    // And an account with a permission of an engine still gets the name
+                    JsonNode allowed = json(call(mvc, get("/api/bpm/display-names").with(minh())
+                            .header("Accept-Language", "vi").param("users", "lan")));
+                    assertThat(allowed.path("users").path("lan").asString()).isEqualTo("Trần Thị Lan");
+                });
+    }
+
     private static JwtRequestPostProcessor minh() {
         return jwt().jwt(token -> token.subject("minh").claim("tenant_id", "bank-a"))
                 .authorities(new SimpleGrantedAuthority("rules:read"));

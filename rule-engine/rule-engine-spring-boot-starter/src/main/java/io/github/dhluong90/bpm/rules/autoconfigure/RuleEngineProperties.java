@@ -33,6 +33,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param simulation limits of {@code :simulate}
  * @param explain the plain-language explanation of logged decisions
  * @param classification the reminder about inputs that declare no {@code mask} (PD-146)
+ * @param cursor the keys that sign list cursors (AUD-13)
  * @param templates the rule set templates the host offers new rule sets (PD-112)
  */
 @ConfigurationProperties("horus.bpm.rules")
@@ -48,6 +49,7 @@ public record RuleEngineProperties(
         @DefaultValue Authoring authoring,
         @DefaultValue Approval approval,
         @DefaultValue Masking masking,
+        @DefaultValue Cursor cursor,
         @DefaultValue DecisionLog decisionLog,
         @DefaultValue Simulation simulation,
         @DefaultValue Explain explain,
@@ -117,6 +119,57 @@ public record RuleEngineProperties(
      *     never sampled, so totals are never partial (PD-124). May be lowered or raised up to the ceiling
      */
     public record Simulation(Integer maxInputs, Integer maxHistoryDecisions) {
+    }
+
+    /**
+     * The keys that sign list cursors (RLE-039, AUD-13). Supply every key from an environment variable or a secret
+     * store, never from a file in the repository. When no key is set the engine keeps one random key in
+     * {@code rle_engine_key}, which anyone who can read the database can use to forge a cursor; set keys in
+     * production.
+     *
+     * @param activeKeyId the id of the key that signs new cursors, 1 to 32 letters, digits, {@code _} or {@code -};
+     *     required when {@code keys} is set
+     * @param keys Base64 keys of at least 32 bytes after decoding, by id. To rotate, add a new key, make it active,
+     *     and remove the old one after the cursors it signed are no longer in use; a cursor of a removed key is
+     *     {@code 400 QUERY_INVALID}
+     */
+    public record Cursor(String activeKeyId, Map<String, String> keys) {
+
+        /** Copies the keys; unset is empty. */
+        public Cursor {
+            keys = keys == null ? Map.of() : Map.copyOf(keys);
+        }
+
+        /**
+         * Decodes the keys.
+         *
+         * @return the keys by id, empty when none is configured
+         * @throws IllegalArgumentException naming the property when a key is not Base64 or the active id is missing
+         */
+        public Map<String, byte[]> decoded() {
+            if (keys.isEmpty()) {
+                return Map.of();
+            }
+            if (activeKeyId == null || !keys.containsKey(activeKeyId)) {
+                throw new IllegalArgumentException("horus.bpm.rules.cursor.active-key-id must name one of "
+                        + "horus.bpm.rules.cursor.keys");
+            }
+            Map<String, byte[]> out = new java.util.HashMap<>();
+            keys.forEach((id, value) -> {
+                try {
+                    out.put(id, java.util.Base64.getDecoder().decode(value.strip()));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("horus.bpm.rules.cursor.keys." + id + " is not Base64");
+                }
+            });
+            return out;
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "Cursor[activeKeyId=" + activeKeyId + ", keys=" + keys.keySet() + "]";
+        }
     }
 
     /**

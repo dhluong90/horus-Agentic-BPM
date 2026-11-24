@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.expr.api.Money;
+import io.github.dhluong90.bpm.process.api.ContentChangedException;
+import io.github.dhluong90.bpm.process.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.process.api.DryRunRequiredException;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.process.api.ImportRequest;
@@ -607,5 +609,30 @@ class MigrationExecutionPostgresIT {
         });
         assertThat(count("SELECT count(*) FROM pre_incident")).isZero();
         assertThat(count("SELECT count(*) FROM pre_instance WHERE id = ? AND definition_ver = 1", ended)).isEqualTo(1);
+    }
+
+    @Test
+    void PRE_370_a_migration_approval_must_name_the_reviewed_plan_hash() {
+        // Given a plan of 3 loans proposed by thu, and an engine run with the shipped default approval.require-content-hash
+        MigrationPlan plan = seed("bank-a", 3);
+        MigrationExecution proposal = propose("bank-a", plan);
+        TestEngine strict = TestEngine.replica("pod-strict", clock).strictApprovalHashes(true).build();
+        MigrationExecutions strictExecutions = strict.migrationExecutions(SETTINGS);
+        strict.identity.as("bank-a", "lan", MANAGE, "processes:read");
+
+        // When lan approves without a hash, then with the hash of another plan
+        assertThatThrownBy(() -> strictExecutions.approve(plan.id(), proposal.lockVersion(), null, null))
+                .isInstanceOfSatisfying(ContentHashRequiredException.class,
+                        e -> assertThat(e.code()).isEqualTo("CONTENT_HASH_REQUIRED"));
+        assertThatThrownBy(() -> strictExecutions.approve(plan.id(), proposal.lockVersion(), null, "0".repeat(64)))
+                .isInstanceOf(ContentChangedException.class);
+
+        // Then the plan is still proposed and nothing moved
+        assertThat(planRow(plan.id())).startsWith("PROPOSED:");
+        assertThat(movedTo("bank-a", 2)).isZero();
+
+        // And with the hash lan reviewed it is approved
+        assertThat(strictExecutions.approve(plan.id(), proposal.lockVersion(), null, plan.planHash()).status())
+                .isEqualTo("APPROVED");
     }
 }

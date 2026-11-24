@@ -425,7 +425,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     calendarDecisions.push({ id: calendarChange.id, command, actor: request.user, body });
     if (command === 'approve') {
       if (request.user === calendarChange.proposedBy) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
-      if (body['expectedChangeHash'] !== undefined && body['expectedChangeHash'] !== calendarHash()) return problem(409, 'CONTENT_CHANGED');
+      if (body['expectedChangeHash'] === undefined) return problem(400, 'CONTENT_HASH_REQUIRED');
+      if (body['expectedChangeHash'] !== calendarHash()) return problem(409, 'CONTENT_CHANGED');
     }
     Object.assign(calendarChange, { status: command === 'approve' ? 'APPROVED' : 'REJECTED', decidedBy: request.user, decidedAt: '2026-11-21T03:00:00Z', comment: typeof body['comment'] === 'string' ? body['comment'] : null });
     return json(200, calendarBody());
@@ -451,15 +452,16 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
           deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
         };
       });
-    if (calendarChange?.status === 'PENDING') {
+    // AUD-07: without calendars:manage a caller sees no pending calendar change
+    const manager = request.permissions.includes('processes:calendar:manage');
+    if (calendarChange?.status === 'PENDING' && manager) {
       const self = request.user === calendarChange.proposedBy;
-      const manager = request.permissions.includes('processes:calendar:manage');
       data.push({
         kind: 'CALENDAR_CHANGE', id: calendarChange.id, sourceVersion: null, reason: calendarChange.reason, contentHash: calendarHash(),
         key: calendarChange.calendarKey, name: null, version: calendarChange.baseVersion + 1, definitionHash: null, lockVersion: calendarChange.baseVersion,
         requestedBy: calendarChange.proposedBy, requestedByName: DEMO_NAMES[locale].users[calendarChange.proposedBy] ?? calendarChange.proposedBy, requestedAt: calendarChange.proposedAt,
-        allowedActions: !manager ? [] : [...(self ? [] : ['approve']), 'reject'],
-        deniedActions: !manager ? { approve: 'PERMISSION_REQUIRED', reject: 'PERMISSION_REQUIRED' } : self ? { approve: 'SELF_APPROVAL_FORBIDDEN' } : {},
+        allowedActions: [...(self ? [] : ['approve']), 'reject'],
+        deniedActions: self ? { approve: 'SELF_APPROVAL_FORBIDDEN' } : {},
       });
     }
     data.sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key));

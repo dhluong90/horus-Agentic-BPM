@@ -42,6 +42,7 @@ import io.github.dhluong90.bpm.rules.internal.store.StoredVersion;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -473,28 +474,19 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     /**
-     * The selected decisions of the period, newest first, read page by page from the tenant's own log so an id of
-     * another tenant or rule set is never found; stops once every id is found or the period is read.
+     * The selected decisions of the period, newest first, each read by its id for the caller's tenant, so an id of
+     * another tenant or rule set is never found. The work is bounded by the number of ids, which
+     * {@code simulation.max-inputs} caps, and never by the length of the period (AUD-06).
      */
     private List<DecisionRecord> selectedRows(String tenant, String ruleSet, HistorySimulation period, int most) {
-        Set<String> wanted = new HashSet<>(period.decisionIds());
         List<DecisionRecord> found = new ArrayList<>();
-        DecisionLog.Position after = null;
-        while (!wanted.isEmpty() && found.size() < most) {
-            List<DecisionRecord> page = log.search(tenant, ruleSet, period.from(), period.to(), after, 500,
-                    querySettings.statementTimeout());
-            for (DecisionRecord row : page) {
-                if (wanted.remove(row.id()) && found.size() < most) {
-                    found.add(row);
-                }
-            }
-            if (page.size() < 500) {
-                break;
-            }
-            DecisionRecord last = page.getLast();
-            after = new DecisionLog.Position(last.createdAt(), last.id());
+        for (String id : period.decisionIds()) {
+            log.find(tenant, id).filter(row -> row.ruleSet().equals(ruleSet)
+                    && !row.createdAt().isBefore(period.from()) && row.createdAt().isBefore(period.to()))
+                    .ifPresent(found::add);
         }
-        return found;
+        found.sort(Comparator.comparing(DecisionRecord::createdAt).thenComparing(DecisionRecord::id).reversed());
+        return found.size() > most ? new ArrayList<>(found.subList(0, most)) : found;
     }
 
     private HistorySimulationResult doSimulateHistory(String tenant, String ruleSet, int number,

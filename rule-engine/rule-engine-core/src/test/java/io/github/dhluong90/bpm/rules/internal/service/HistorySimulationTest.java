@@ -57,10 +57,14 @@ class HistorySimulationTest {
     final RuleEngine engine = engines.ruleEngine();
 
     RuleEngines engines(EngineSettings settings) {
+        return engines(settings, stores);
+    }
+
+    RuleEngines engines(EngineSettings settings, io.github.dhluong90.bpm.rules.internal.store.DecisionLog log) {
         return RuleEngines.create(new EngineContext(caller, caller, clock, stores, stores, settings,
                 // A masked input is logged as its keyed fingerprint, so the tenant needs a key (RLE-012).
                 MaskingPolicy.withKey(MaskingKey.of("history-test-key-of-32-bytes-lng".getBytes(StandardCharsets.UTF_8)))),
-                stores, stores, stores);
+                stores, log, stores);
     }
 
     void publish(String tenant, String ruleSet, byte[] document) {
@@ -379,5 +383,46 @@ class HistorySimulationTest {
         assertThat(bounded.ruleEngine().simulateHistory("remittance-screening", 1,
                 HistorySimulation.between(NOV_01, DEC_01))).isEqualTo(result);
         assertThat(stores.decisions).hasSize(5);
+    }
+
+    @Test
+    void RLE_220_a_selection_reads_each_id_by_key_and_never_scans_the_period() {
+        // Given bank-a's 100 November decisions and a log that counts period scans
+        cardFeeWithNovemberHistory();
+        caller.become("bank-a", "pricing-approver", REPLAYER);
+        HistorySimulationResult all = engine.simulateHistory("card-fee", 2, HistorySimulation.between(NOV_01, DEC_01));
+        String newest = all.items().get(0).decisionId();
+        String oldest = all.items().get(99).decisionId();
+        java.util.concurrent.atomic.AtomicInteger scans = new java.util.concurrent.atomic.AtomicInteger();
+        io.github.dhluong90.bpm.rules.internal.store.DecisionLog counting =
+                (io.github.dhluong90.bpm.rules.internal.store.DecisionLog) java.lang.reflect.Proxy.newProxyInstance(
+                        getClass().getClassLoader(),
+                        new Class<?>[] {io.github.dhluong90.bpm.rules.internal.store.DecisionLog.class},
+                        (proxy, method, args) -> {
+                            if (method.getName().startsWith("search")) {
+                                scans.incrementAndGet();
+                            }
+                            try {
+                                return method.invoke(stores, args);
+                            } catch (java.lang.reflect.InvocationTargetException e) {
+                                throw e.getCause();
+                            }
+                        });
+        RuleEngines counted = engines(EngineSettings.defaults(), counting);
+        counted.cursorKeys().load();
+
+        // When two decisions are selected over the whole 31 days
+        HistorySimulationResult chosen = counted.ruleEngine().simulateHistory("card-fee", 2,
+                HistorySimulation.selected(NOV_01, DEC_01, Set.of(oldest, newest)));
+
+        // Then both replay, newest first, and the period was never scanned page by page
+        assertThat(chosen.items()).extracting(HistorySimulationResult.Item::decisionId).containsExactly(newest, oldest);
+        assertThat(scans).hasValue(0);
+
+        // And an id that exists but was logged outside the requested period is not replayed
+        HistorySimulationResult narrow = counted.ruleEngine().simulateHistory("card-fee", 2,
+                HistorySimulation.selected(NOV_01, NOV_01.plus(Duration.ofHours(2)), Set.of(oldest, newest)));
+        assertThat(narrow.items()).extracting(HistorySimulationResult.Item::decisionId).containsExactly(oldest);
+        assertThat(scans).hasValue(0);
     }
 }

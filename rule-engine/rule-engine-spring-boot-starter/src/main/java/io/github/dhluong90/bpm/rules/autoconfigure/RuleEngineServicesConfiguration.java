@@ -36,6 +36,7 @@ import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
 import java.time.Clock;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import javax.sql.DataSource;
@@ -229,7 +230,13 @@ class RuleEngineServicesConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngineInternals internals) {
+    RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngineInternals internals,
+            RuleEngineProperties properties) {
+        // AUD-13: keys from configuration or a secret keep the signing key out of the database.
+        Map<String, byte[]> configured = properties.cursor().decoded();
+        if (!configured.isEmpty()) {
+            internals.engines().cursorKeys().configure(properties.cursor().activeKeyId(), configured);
+        }
         return new RuleEngineCursorKeyInitializer(internals.engines().cursorKeys());
     }
 
