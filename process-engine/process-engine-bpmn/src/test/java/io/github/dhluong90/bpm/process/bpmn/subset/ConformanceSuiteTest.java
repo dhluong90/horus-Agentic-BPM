@@ -15,6 +15,7 @@ import io.github.dhluong90.bpm.process.internal.exec.InstanceState;
 import io.github.dhluong90.bpm.process.internal.exec.InstanceStatus;
 import io.github.dhluong90.bpm.process.internal.exec.ProcessCompiler;
 import io.github.dhluong90.bpm.process.internal.exec.StepResult;
+import io.github.dhluong90.bpm.process.internal.exec.TokenKind;
 import io.github.dhluong90.bpm.process.internal.exec.TokenStatus;
 import io.github.dhluong90.bpm.process.internal.exec.Transition;
 import io.github.dhluong90.bpm.process.internal.expr.V1ExpressionEvaluator;
@@ -295,7 +296,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void ACC_G15_an_inclusive_gateway_takes_every_matching_flow_and_the_join_waits_for_them() throws IOException {
+    void ACC_G16_an_inclusive_gateway_takes_every_matching_flow_and_the_join_waits_for_them() throws IOException {
         Process process = read("inclusive-gateway.bpmn");
 
         Outcome both = run(process, Map.of("amount", 2_500_000, "foreign", true), Map.of());
@@ -317,7 +318,7 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void ACC_G15_a_boundary_timer_that_fires_cancels_the_task_and_takes_the_escalation_path() throws IOException {
+    void ACC_G23_a_boundary_timer_that_fires_cancels_the_task_and_takes_the_escalation_path() throws IOException {
         Outcome out = run(read("boundary-timer.bpmn"), Map.of(), Map.of());
 
         assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
@@ -325,15 +326,57 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void ACC_G15_the_terminate_and_link_file_imports_compiles_and_starts() throws IOException {
+    void ACC_G24_a_link_throw_jumps_to_its_catch_and_a_terminate_end_ends_the_instance_cancelling_the_sibling_token()
+            throws IOException {
         Outcome out = run(read("terminate-and-link.bpmn"), Map.of(), Map.of());
 
-        assertThat(out.visited()).contains("start", "fork");
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.visited()).contains("start", "fork", "link-out", "link-in", "stop");
+        assertThat(out.state().tokens().stream().noneMatch(t -> t.status().live())).isTrue();
     }
 
     @Test
-    void ACC_G21_a_collaboration_of_pools_imports_with_its_flow_elements() throws IOException {
-        assertThat(read("collaboration-pools.bpmn").allFlowElements()).isNotEmpty();
+    void ACC_G21_a_collaboration_keeps_three_pools_and_three_message_flows_and_the_executable_pool_runs()
+            throws IOException {
+        Process order = read("collaboration-pools.bpmn");
+
+        assertThat(order.collaboration().participants()).extracting(p -> p.id())
+                .containsExactly("pool-order", "pool-payment", "pool-auditor");
+        assertThat(order.collaboration().messageFlows()).extracting(m -> m.id())
+                .containsExactly("mf-request", "mf-received", "mf-audit");
+        Outcome out = run(order, Map.of("orderId", "O-1"), Map.of());
+        assertThat(out.visited()).contains("start", "request-payment", "wait-for-payment").doesNotContain("done");
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        assertThat(out.effects()).filteredOn(Effect.CreateSubscription.class::isInstance)
+                .extracting(e -> ((Effect.CreateSubscription) e).name()).contains("payment-received");
+    }
+
+    @Test
+    void ACC_G22_an_ad_hoc_scope_completes_on_its_condition_and_a_complex_gateway_releases_at_two_of_three()
+            throws IOException {
+        CompiledProcess compiled = new ProcessCompiler(BehaviorCatalog.registry(), 500)
+                .compile("D1", read("ad-hoc-and-complex.bpmn"));
+        DefaultExecutionKernel kernel = new DefaultExecutionKernel(compiled, BehaviorCatalog.registry(),
+                new V1ExpressionEvaluator(100), DefaultExecutionKernel.DEFAULT_MAX_INSTANCES, DataStorePort.NONE);
+        Transition started = kernel.apply(InstanceState.created("01JD0000000000000000000497", "bank-a", "D1", "K-497"),
+                new Command.Start(Map.of(), "officer.hoa"), CLOCK);
+        assertThat(started.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        String scope = started.state().tokens().stream().filter(t -> t.kind() == TokenKind.SCOPE
+                && "checks".equals(t.nodeId()) && t.status().live()).findFirst()
+                .orElseThrow().id();
+
+        Transition opened = kernel.apply(started.state(),
+                new Command.StartAdHocActivity(scope, "collect-id", "officer.lan"), CLOCK);
+        Effect.CreateUserTask task = opened.effects().stream().filter(Effect.CreateUserTask.class::isInstance)
+                .map(Effect.CreateUserTask.class::cast).filter(e -> e.nodeId().equals("collect-id")).findFirst()
+                .orElseThrow();
+        Transition done = kernel.apply(opened.state(), new Command.CompleteTask(task.taskId(), task.tokenId(),
+                Map.of("passed", true), "officer.lan"), CLOCK);
+
+        Set<String> visited = new LinkedHashSet<>();
+        collect(done, visited);
+        assertThat(visited).contains("a", "b", "c", "two-of-three", "end");
+        assertThat(done.state().status()).isEqualTo(InstanceStatus.COMPLETED);
     }
 
     @Test
@@ -364,11 +407,25 @@ class ConformanceSuiteTest {
     }
 
     @Test
-    void ACC_G12_an_event_sub_process_subscribes_to_its_message_while_the_scope_is_running() throws IOException {
-        Outcome out = run(read("event-subprocess.bpmn"), Map.of("applicationId", "APP-1"), Map.of());
+    void ACC_G12_a_message_starts_the_event_sub_process_while_the_scope_is_running() throws IOException {
+        CompiledProcess compiled = new ProcessCompiler(BehaviorCatalog.registry(), 500)
+                .compile("D1", read("event-subprocess.bpmn"));
+        DefaultExecutionKernel kernel = new DefaultExecutionKernel(compiled, BehaviorCatalog.registry(),
+                new V1ExpressionEvaluator(100), DefaultExecutionKernel.DEFAULT_MAX_INSTANCES, DataStorePort.NONE);
+        Transition started = kernel.apply(InstanceState.created("01JD0000000000000000000498", "bank-a", "D1", "K-498"),
+                new Command.Start(Map.of("applicationId", "APP-1"), "officer.hoa"), CLOCK);
+        Effect.CreateSubscription sub = started.effects().stream().filter(Effect.CreateSubscription.class::isInstance)
+                .map(Effect.CreateSubscription.class::cast).filter(e -> e.name().equals("applicant-withdrew"))
+                .findFirst().orElseThrow();
 
-        assertThat(out.effects()).filteredOn(Effect.CreateSubscription.class::isInstance)
-                .extracting(e -> ((Effect.CreateSubscription) e).name()).contains("applicant-withdrew");
+        Transition after = kernel.apply(started.state(),
+                new Command.CorrelateMessage(sub.subscriptionId(), "applicant-withdrew", Map.of()), CLOCK);
+
+        Set<String> visited = new LinkedHashSet<>();
+        collect(after, visited);
+        assertThat(visited).contains("withdrawn", "mark", "file-closed");
+        assertThat(visited).doesNotContain("decided");
+        assertThat(after.state().variables()).containsEntry("withdrawnFlag", true);
     }
 
     @Test
@@ -385,14 +442,6 @@ class ConformanceSuiteTest {
                 .extracting(e -> ((Effect.CreateSubscription) e).name()).contains("rate-card-updated");
         assertThat(low.visited()).doesNotContain("rates-changed");
         assertThat(low.state().status()).isEqualTo(InstanceStatus.RUNNING);
-    }
-
-    @Test
-    void ACC_G14_an_ad_hoc_sub_process_and_a_complex_gateway_import_compile_and_run() throws IOException {
-        Outcome out = run(read("ad-hoc-and-complex.bpmn"), Map.of(), Map.of("collect-id", Map.of("passed", true)));
-
-        assertThat(out.visited()).contains("checks");
-        assertThat(out.state().status()).isEqualTo(InstanceStatus.RUNNING);
     }
 
     @Test

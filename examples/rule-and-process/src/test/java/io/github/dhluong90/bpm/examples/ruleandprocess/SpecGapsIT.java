@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -56,11 +57,12 @@ class SpecGapsIT {
         HttpResponse<String> tooMany = post(chain("size-501", 501, 0));
         HttpResponse<String> tooBig = post(chain("size-big", 300, 1_200_000));
 
-        // Then the first is a draft; the others are 422 DEFINITION_TOO_LARGE and nothing is stored
+        // Then the first is a draft; 501 steps is 422 VALIDATION_FAILED, over 1 MiB is 413 PAYLOAD_TOO_LARGE, nothing is stored
         assertThat(exactly.statusCode()).as(exactly.body()).isEqualTo(201);
         assertThat(JSON.readTree(exactly.body()).get("status").stringValue()).isEqualTo("DRAFT");
         assertThat(tooMany.statusCode()).as(tooMany.body()).isEqualTo(422);
-        assertThat(tooMany.body()).contains("500");
+        assertThat(JSON.readTree(tooMany.body()).get("code").stringValue()).isEqualTo("VALIDATION_FAILED");
+        assertThat(tooMany.body()).contains("TOO_MANY_NODES").contains("500");
         assertThat(tooBig.statusCode()).as(tooBig.body()).isEqualTo(413);
         assertThat(JSON.readTree(tooBig.body()).get("code").stringValue()).isEqualTo("PAYLOAD_TOO_LARGE");
         assertThat(get(BASE + "/size-501/versions/1").statusCode()).isEqualTo(404);
@@ -94,24 +96,42 @@ class SpecGapsIT {
     }
 
     @Test
+    @Disabled("PRE-039 is pending: GET ...?include=source does not return the original text yet")
     void PRE_039_import_keeps_source_document_and_fixed_hash() throws Exception {
         // Given a BPMN file with a comment
-        String source = doc("keep-src", "<!-- keep this comment -->"
-                + "<bpmn:startEvent id=\"start\"/><bpmn:endEvent id=\"end\"/>"
-                + "<bpmn:sequenceFlow id=\"f\" sourceRef=\"start\" targetRef=\"end\"/>");
+        String source = keepSourceFile();
 
         // When it is imported and read back with its source
-        JsonNode imported = JSON.readTree(post(source).body());
-        HttpResponse<String> back = get(BASE + "/keep-src/versions/1");
+        post(source);
+        HttpResponse<String> back = get(BASE + "/keep-src/versions/1?include=source");
 
-        // Then the original text comes back byte for byte and the hash does not change between reads
+        // Then the original text comes back byte for byte
         assertThat(back.statusCode()).as(back.body()).isEqualTo(200);
-        JsonNode body = JSON.readTree(back.body());
-        assertThat(body.get("sourceFormat").stringValue()).isEqualTo("BPMN_XML");
-        assertThat(body.get("sourceHash").stringValue()).isEqualTo(sha256(source));
-        assertThat(body.get("definitionHash").stringValue()).isEqualTo(imported.get("definitionHash").stringValue());
-        assertThat(JSON.readTree(get(BASE + "/keep-src/versions/1").body()).get("definitionHash").stringValue())
-                .isEqualTo(imported.get("definitionHash").stringValue());
+        assertThat(JSON.readTree(back.body()).get("source").stringValue()).isEqualTo(source);
+    }
+
+    /** What PRE-039 guarantees today: the format and the hash of the source are kept, the definition hash is stable. */
+    @Test
+    void BPMN_import_records_source_format_and_hash_and_the_definition_hash_is_stable() throws Exception {
+        // Given a BPMN file with a comment
+        String source = keepSourceFile();
+
+        // When it is imported and read twice
+        JsonNode imported = JSON.readTree(post(source).body());
+        JsonNode first = JSON.readTree(get(BASE + "/keep-src/versions/1").body());
+        JsonNode second = JSON.readTree(get(BASE + "/keep-src/versions/1").body());
+
+        // Then format and source hash are recorded, and the definition hash does not change between reads
+        assertThat(first.get("sourceFormat").stringValue()).isEqualTo("BPMN_XML");
+        assertThat(first.get("sourceHash").stringValue()).isEqualTo(sha256(source));
+        assertThat(first.get("definitionHash").stringValue()).isEqualTo(imported.get("definitionHash").stringValue());
+        assertThat(second.get("definitionHash").stringValue()).isEqualTo(first.get("definitionHash").stringValue());
+    }
+
+    private static String keepSourceFile() {
+        return doc("keep-src", "<!-- keep this comment -->"
+                + "<bpmn:startEvent id=\"start\"/><bpmn:endEvent id=\"end\"/>"
+                + "<bpmn:sequenceFlow id=\"f\" sourceRef=\"start\" targetRef=\"end\"/>");
     }
 
     private static String sha256(String text) throws Exception {

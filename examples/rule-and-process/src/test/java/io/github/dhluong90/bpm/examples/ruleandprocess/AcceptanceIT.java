@@ -53,6 +53,17 @@ class AcceptanceIT {
     @LocalServerPort
     int port;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    org.springframework.security.provisioning.InMemoryUserDetailsManager hostUsers;
+
+    /** The demo users split authoring and approving, so a four-eyes test needs one person who holds both. */
+    private void provideAuthorAndApprover(String name) {
+        if (!hostUsers.userExists(name)) {
+            hostUsers.createUser(org.springframework.security.core.userdetails.User.withUsername(name)
+                    .password("{noop}it-pass").roles("PRICING_AUTHOR", "PRICING_APPROVER").build());
+        }
+    }
+
     // ---- E: importing BPMN -----------------------------------------------------------------------------------
 
     @Test
@@ -63,12 +74,12 @@ class AcceptanceIT {
 
         HttpResponse<String> r = send("lan", "POST", PE + "/definitions", xxe, null, "application/xml");
 
-        assertThat(r.statusCode()).as(r.body()).isBetween(400, 422);
+        assertThat(r.statusCode()).as(r.body()).isEqualTo(422);
         assertThat(JSON.readTree(r.body()).get("code").stringValue()).isEqualTo("BPMN_UNSAFE_XML");
     }
 
     @Test
-    void ACC_E2_an_unsupported_element_is_refused_with_its_name_not_accepted_silently() throws Exception {
+    void ACC_E3_an_unsupported_element_is_refused_with_its_name_not_accepted_silently() throws Exception {
         String bpmn = "<?xml version=\"1.0\"?><bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\""
                 + " id=\"d\" targetNamespace=\"urn:t\"><bpmn:process id=\"acc-unsupported\" isExecutable=\"true\">"
                 + "<bpmn:startEvent id=\"start\"/><bpmn:globalTask id=\"do-1\"/><bpmn:endEvent id=\"end\"/>"
@@ -76,8 +87,8 @@ class AcceptanceIT {
 
         HttpResponse<String> r = send("lan", "POST", PE + "/definitions", bpmn, null, "application/xml");
 
-        assertThat(r.statusCode()).as(r.body()).isBetween(400, 422);
-        assertThat(r.body()).contains("globalTask").contains("do-1");
+        assertThat(r.statusCode()).as(r.body()).isEqualTo(422);
+        assertThat(r.body()).contains("BPMN_UNSUPPORTED_ELEMENT").contains("globalTask").contains("do-1");
         assertThat(send("lan", "GET", PE + "/definitions/acc-unsupported/versions/1", null, null, null).statusCode())
                 .isEqualTo(404);
     }
@@ -100,16 +111,17 @@ class AcceptanceIT {
 
     @Test
     void ACC_F14_the_submitter_cannot_complete_the_four_eyes_review_and_the_officer_can() throws Exception {
-        JsonNode started = post("tuan", "/api/cards/applications", "{\"applicationId\":\"ACC-F3\",\"customerId\":\"C-002\"}");
+        JsonNode started = post("hoa", "/api/cards/applications", "{\"applicationId\":\"ACC-F3\",\"customerId\":\"C-002\"}");
         JsonNode instance = get("an", PE + "/instances/" + started.get("instanceId").stringValue());
         String task = PE + "/tasks/" + instance.at("/tasks/0/id").stringValue();
 
-        HttpResponse<String> own = send("tuan", "POST", task + ":claim", "", "\"0\"", "application/json");
+        HttpResponse<String> own = send("hoa", "POST", task + ":claim", "", "\"0\"", "application/json");
         send("an", "POST", task + ":claim", "", "\"0\"", "application/json");
         HttpResponse<String> done = send("an", "POST", task + ":complete", "{\"result\":{\"approved\":true}}", "\"1\"",
                 "application/json");
 
-        assertThat(own.statusCode()).isIn(403, 409);
+        assertThat(own.statusCode()).as(own.body()).isEqualTo(403);
+        assertThat(JSON.readTree(own.body()).get("code").stringValue()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
         assertThat(done.statusCode()).as(done.body()).isEqualTo(200);
         assertThat(get("an", PE + "/instances/" + started.get("instanceId").stringValue()).get("status").stringValue())
                 .isEqualTo("COMPLETED");
@@ -150,24 +162,26 @@ class AcceptanceIT {
     @Test
     void ACC_C7_to_C9_I2_the_requester_cannot_approve_withdraw_returns_to_draft_and_history_names_each_actor()
             throws Exception {
+        provideAuthorAndApprover("ines");
         String v2 = Files.readString(Path.of("src/main/resources/rules/card-fee.yaml"))
                 .replace("then: { fee: \"10000 VND\" }", "then: { fee: \"30000 VND\" }");
-        JsonNode draft = json(send("lan", "POST", RULES + "/versions", v2, null, "application/yaml"), 201);
+        JsonNode draft = json(send("ines", "POST", RULES + "/versions", v2, null, "application/yaml"), 201);
         String v = RULES + "/versions/" + draft.get("version").intValue();
-        JsonNode requested = json(send("lan", "POST", v + ":request-publish", "", null, "application/json"), 200);
+        JsonNode requested = json(send("ines", "POST", v + ":request-publish", "", null, "application/json"), 200);
         String reviewed = "{\"expectedCanonicalHash\":\"" + requested.get("canonicalHash").stringValue() + "\"}";
 
-        HttpResponse<String> self = send("lan", "POST", v + ":approve", reviewed, lock(requested), "application/json");
-        JsonNode withdrawn = json(send("lan", "POST", v + ":withdraw", "{}", lock(requested), "application/json"), 200);
-        JsonNode again = json(send("lan", "POST", v + ":request-publish", "", lock(withdrawn), "application/json"), 200);
+        HttpResponse<String> self = send("ines", "POST", v + ":approve", reviewed, lock(requested), "application/json");
+        JsonNode withdrawn = json(send("ines", "POST", v + ":withdraw", "{}", lock(requested), "application/json"), 200);
+        JsonNode again = json(send("ines", "POST", v + ":request-publish", "", lock(withdrawn), "application/json"), 200);
         String reviewedAgain = "{\"expectedCanonicalHash\":\"" + again.get("canonicalHash").stringValue() + "\"}";
         JsonNode approved = json(send("minh", "POST", v + ":approve", reviewedAgain, lock(again), "application/json"), 200);
 
         assertThat(self.statusCode()).isEqualTo(403);
+        assertThat(JSON.readTree(self.body()).get("code").stringValue()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
         assertThat(withdrawn.get("status").stringValue()).isEqualTo("DRAFT");
         assertThat(approved.get("status").stringValue()).isIn("PUBLISHED", "ACTIVE");
         String history = send("minh", "GET", v + "/history", null, null, null).body();
-        assertThat(history).contains("lan").contains("minh").contains("WITHDRAWN");
+        assertThat(history).contains("ines").contains("minh").contains("WITHDRAWN");
         // The earlier published version is retired by the newer one
         assertThat(json(send("minh", "GET", RULES + "/versions/1", null, null, null), 200).get("status").stringValue())
                 .isEqualTo("RETIRED");
@@ -185,6 +199,14 @@ class AcceptanceIT {
         assertThat(replay.statusCode()).as(replay.body()).isIn(200, 201);
         assertThat(JSON.readTree(replay.body()).get("id").stringValue())
                 .isEqualTo(JSON.readTree(first.body()).get("id").stringValue());
+        long withKey = 0;
+        for (String status : List.of("RUNNING", "COMPLETED")) {
+            JsonNode listed = JSON.readTree(send("an", "GET", PE + "/instances?definitionKey=card-welcome&status="
+                    + status + "&limit=200", null, null, null).body());
+            withKey += java.util.stream.StreamSupport.stream(listed.get("data").spliterator(), false)
+                    .filter(i -> "ACC-I22".equals(i.get("businessKey").stringValue())).count();
+        }
+        assertThat(withKey).isEqualTo(1);
     }
 
     @Test
