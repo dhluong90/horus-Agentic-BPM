@@ -9,6 +9,13 @@ spring:
 
 server:
   port: ${PORT:8080}
+  servlet:
+    session:
+      cookie:
+        # Safe to copy: the session cookie (and XSRF-TOKEN, HostSecurity) only over https and not on cross-site
+        # requests. Browsers accept a secure cookie from http://localhost.
+        secure: true
+        same-site: lax
 
 management:
   endpoints:
