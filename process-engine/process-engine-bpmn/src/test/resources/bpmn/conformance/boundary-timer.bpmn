@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="review-with-timeout" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:userTask id="review" horus:assignee="role:CARD_OFFICER" horus:resultVariable="reviewed"/>
+    <bpmn:boundaryEvent id="overdue" attachedToRef="review" cancelActivity="true"><bpmn:timerEventDefinition><bpmn:timeDuration>PT24H</bpmn:timeDuration></bpmn:timerEventDefinition></bpmn:boundaryEvent>
+    <bpmn:scriptTask id="escalate" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="escalated"><bpmn:script>true</bpmn:script></bpmn:scriptTask>
+    <bpmn:endEvent id="done"/>
+    <bpmn:endEvent id="escalated-end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="review"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="review" targetRef="done"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="overdue" targetRef="escalate"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="escalate" targetRef="escalated-end"/>
+  </bpmn:process>
+</bpmn:definitions>

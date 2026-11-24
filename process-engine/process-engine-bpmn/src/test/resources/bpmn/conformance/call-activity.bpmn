@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="onboard-and-welcome" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:callActivity id="welcome" calledElement="card-welcome">
+      <bpmn:extensionElements><horus:input name="monthlyFee" value="${instance.monthlyFee}"/></bpmn:extensionElements>
+    </bpmn:callActivity>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="welcome"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="welcome" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

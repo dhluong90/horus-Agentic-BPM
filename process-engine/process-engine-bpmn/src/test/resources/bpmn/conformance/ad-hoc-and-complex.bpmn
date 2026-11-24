@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="checks-then-two-of-three" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:adHocSubProcess id="checks" ordering="Parallel">
+      <bpmn:userTask id="collect-id" horus:assignee="role:CARD_OFFICER" horus:resultVariable="idCheck"/>
+      <bpmn:userTask id="screen" horus:assignee="role:BRANCH_SUPERVISOR" horus:resultVariable="screening"/>
+      <bpmn:completionCondition>idCheck.passed == true</bpmn:completionCondition>
+    </bpmn:adHocSubProcess>
+    <bpmn:parallelGateway id="fork"/>
+    <bpmn:scriptTask id="a" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="a"><bpmn:script>1</bpmn:script></bpmn:scriptTask>
+    <bpmn:scriptTask id="b" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="b"><bpmn:script>1</bpmn:script></bpmn:scriptTask>
+    <bpmn:scriptTask id="c" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="c"><bpmn:script>1</bpmn:script></bpmn:scriptTask>
+    <bpmn:complexGateway id="two-of-three"><bpmn:activationCondition>_activationCount &gt;= 2</bpmn:activationCondition></bpmn:complexGateway>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="checks"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="checks" targetRef="fork"/>
+    <bpmn:sequenceFlow id="g1" sourceRef="fork" targetRef="a"/>
+    <bpmn:sequenceFlow id="g2" sourceRef="fork" targetRef="b"/>
+    <bpmn:sequenceFlow id="g3" sourceRef="fork" targetRef="c"/>
+    <bpmn:sequenceFlow id="h1" sourceRef="a" targetRef="two-of-three"/>
+    <bpmn:sequenceFlow id="h2" sourceRef="b" targetRef="two-of-three"/>
+    <bpmn:sequenceFlow id="h3" sourceRef="c" targetRef="two-of-three"/>
+    <bpmn:sequenceFlow id="f9" sourceRef="two-of-three" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

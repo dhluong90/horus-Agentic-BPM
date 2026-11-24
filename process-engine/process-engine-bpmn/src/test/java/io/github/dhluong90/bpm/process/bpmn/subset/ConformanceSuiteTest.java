@@ -76,8 +76,12 @@ class ConformanceSuiteTest {
             for (Effect effect : new ArrayList<>(pending)) {
                 Command next = switch (effect) {
                     case Effect.InvokeService call when handled.add(call.attemptId()) -> new Command.AsyncResult(
-                            call.tokenId(), call.attemptId(), new StepResult.Completed(
-                                    answers.getOrDefault(call.nodeId(), Map.of()), Map.of()));
+                            call.tokenId(), call.attemptId(), answers.getOrDefault(call.nodeId(), Map.of())
+                                    .containsKey("$error")
+                                            ? new StepResult.BusinessError((String) answers.get(call.nodeId())
+                                                    .get("$error"), "refused")
+                                            : new StepResult.Completed(
+                                                    answers.getOrDefault(call.nodeId(), Map.of()), Map.of()));
                     case Effect.CreateUserTask task when handled.add(task.taskId()) -> new Command.CompleteTask(
                             task.taskId(), task.tokenId(), answers.getOrDefault(task.nodeId(), Map.of()), "officer.lan");
                     case Effect.ScheduleJob job when handled.add(job.jobId()) -> new Command.JobDue(job.jobId(),
@@ -291,11 +295,114 @@ class ConformanceSuiteTest {
     }
 
     @Test
+    void ACC_G15_an_inclusive_gateway_takes_every_matching_flow_and_the_join_waits_for_them() throws IOException {
+        Process process = read("inclusive-gateway.bpmn");
+
+        Outcome both = run(process, Map.of("amount", 2_500_000, "foreign", true), Map.of());
+        Outcome none = run(process, Map.of("amount", 10, "foreign", false), Map.of());
+
+        assertThat(both.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(both.visited()).contains("aml", "sanctions", "join", "end").doesNotContain("standard");
+        assertThat(none.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(none.visited()).contains("standard", "join", "end").doesNotContain("aml", "sanctions");
+    }
+
+    @Test
+    void ACC_G20_a_sequential_multi_instance_step_runs_once_per_element_and_collects_in_order() throws IOException {
+        Outcome out = run(read("multi-instance.bpmn"), Map.of("owners", List.of("A", "B")),
+                Map.of("screen", Map.of("flagged", false)));
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.state().variables().get("flags")).isEqualTo(List.of(false, false));
+    }
+
+    @Test
+    void ACC_G15_a_boundary_timer_that_fires_cancels_the_task_and_takes_the_escalation_path() throws IOException {
+        Outcome out = run(read("boundary-timer.bpmn"), Map.of(), Map.of());
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.visited()).contains("review", "overdue", "escalate", "escalated-end").doesNotContain("done");
+    }
+
+    @Test
+    void ACC_G15_the_terminate_and_link_file_imports_compiles_and_starts() throws IOException {
+        Outcome out = run(read("terminate-and-link.bpmn"), Map.of(), Map.of());
+
+        assertThat(out.visited()).contains("start", "fork");
+    }
+
+    @Test
+    void ACC_G21_a_collaboration_of_pools_imports_with_its_flow_elements() throws IOException {
+        assertThat(read("collaboration-pools.bpmn").allFlowElements()).isNotEmpty();
+    }
+
+    @Test
+    void ACC_G10_a_call_activity_starts_the_called_process_with_its_mapped_inputs_and_waits_for_it() throws IOException {
+        Outcome out = run(read("call-activity.bpmn"), Map.of("monthlyFee", 50_000), Map.of());
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        assertThat(out.effects()).filteredOn(Effect.StartChildInstance.class::isInstance).singleElement()
+                .satisfies(e -> {
+                    Effect.StartChildInstance child = (Effect.StartChildInstance) e;
+                    assertThat(child.calledElement()).isEqualTo("card-welcome");
+                    assertThat(child.variables()).containsEntry("monthlyFee", 50_000);
+                });
+        assertThat(out.visited()).doesNotContain("end");
+    }
+
+    @Test
+    void ACC_G11_a_business_error_is_caught_by_the_error_boundary_and_an_escalation_by_its_own_boundary()
+            throws IOException {
+        Process process = read("error-and-escalation.bpmn");
+
+        Outcome refused = run(process, Map.of(), Map.of("credit", Map.of("$error", "CREDIT_REJECTED")));
+        Outcome paid = run(process, Map.of(), Map.of());
+
+        assertThat(refused.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(refused.visited()).contains("credit", "refused").doesNotContain("checks", "paid");
+        assertThat(paid.visited()).contains("credit", "raise-limit", "escalated").doesNotContain("refused");
+    }
+
+    @Test
+    void ACC_G12_an_event_sub_process_subscribes_to_its_message_while_the_scope_is_running() throws IOException {
+        Outcome out = run(read("event-subprocess.bpmn"), Map.of("applicationId", "APP-1"), Map.of());
+
+        assertThat(out.effects()).filteredOn(Effect.CreateSubscription.class::isInstance)
+                .extracting(e -> ((Effect.CreateSubscription) e).name()).contains("applicant-withdrew");
+    }
+
+    @Test
+    void ACC_G13_a_conditional_catch_passes_when_its_condition_holds_and_a_signal_catch_waits_for_its_name()
+            throws IOException {
+        Process process = read("conditional-and-signal.bpmn");
+
+        Outcome high = run(process, Map.of("riskScore", 90), Map.of());
+        Outcome low = run(process, Map.of("riskScore", 10), Map.of());
+
+        assertThat(high.visited()).contains("risk-high", "rates-changed");
+        assertThat(high.state().status()).isEqualTo(InstanceStatus.RUNNING);
+        assertThat(high.effects()).filteredOn(Effect.CreateSubscription.class::isInstance)
+                .extracting(e -> ((Effect.CreateSubscription) e).name()).contains("rate-card-updated");
+        assertThat(low.visited()).doesNotContain("rates-changed");
+        assertThat(low.state().status()).isEqualTo(InstanceStatus.RUNNING);
+    }
+
+    @Test
+    void ACC_G14_an_ad_hoc_sub_process_and_a_complex_gateway_import_compile_and_run() throws IOException {
+        Outcome out = run(read("ad-hoc-and-complex.bpmn"), Map.of(), Map.of("collect-id", Map.of("passed", true)));
+
+        assertThat(out.visited()).contains("checks");
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.RUNNING);
+    }
+
+    @Test
     void PRE_348_every_conformance_file_keeps_its_element_flow_count_and_hash_through_export_and_import() throws IOException {
         for (String file : List.of("data-objects.bpmn", "gateways.bpmn", "parallel-join.bpmn",
                 "sub-process-and-timer.bpmn", "compensation-background.bpmn", "parallel-multiple-start.bpmn",
                 "multiple-throw-and-end.bpmn", "event-gateway-start.bpmn", "event-gateway-parallel-start.bpmn", "compensation-event-subprocess.bpmn",
-                "data-store.bpmn")) {
+                "data-store.bpmn", "inclusive-gateway.bpmn", "multi-instance.bpmn", "terminate-and-link.bpmn",
+                "boundary-timer.bpmn", "collaboration-pools.bpmn", "call-activity.bpmn", "error-and-escalation.bpmn",
+                "event-subprocess.bpmn", "conditional-and-signal.bpmn", "ad-hoc-and-complex.bpmn")) {
             Process source = read(file);
 
             Process again = reader.read(new SubsetBpmnWriter().write(source));

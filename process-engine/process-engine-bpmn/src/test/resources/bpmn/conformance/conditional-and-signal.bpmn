@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:signal id="Sig_rate" name="rate-card-updated"/>
+  <bpmn:process id="watch-risk-and-rates" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:intermediateCatchEvent id="risk-high"><bpmn:conditionalEventDefinition><bpmn:condition>riskScore &gt;= 80</bpmn:condition></bpmn:conditionalEventDefinition></bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="rates-changed"><bpmn:signalEventDefinition signalRef="Sig_rate"/></bpmn:intermediateCatchEvent>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="risk-high"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="risk-high" targetRef="rates-changed"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="rates-changed" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>
