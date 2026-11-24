@@ -69,7 +69,7 @@ export function ApprovalsPage({ engines, pageLimit }: { engines: readonly Engine
       {withdrawing !== undefined ? (
         <WithdrawDialog
           key={itemKey(withdrawing)}
-          request={{ engine: withdrawing.engine, ruleSet: withdrawing.key, version: withdrawing.version, lockVersion: withdrawing.lockVersion }}
+          request={{ engine: withdrawing.engine, ruleSet: withdrawing.key, version: withdrawing.version, lockVersion: withdrawing.lockVersion, displayName: withdrawing.title }}
           onClose={() => { setWithdrawing(undefined); }}
           onDone={(message) => {
             setNotice(message);

@@ -173,9 +173,13 @@ function Dashboard({ pageLimit, me, engines, rules, approver, tasksOn, incidents
       </div>
       {tiles.length > 0 ? <div className="tiles">{tiles.map((tile) => <Tile key={tile.id} tile={tile} />)}</div> : null}
       {tasksCard || approver || chart ? (
-        <div className={approver ? 'home__grid' : 'home__grid home__grid--wide'}>
-          {tasksCard ? <TasksCard tasks={mapLoadable(mine, (data) => data.tasks)} now={now} onRetry={() => { void mineQuery.refetch(); }} /> : null}
-          {chart ? <DecisionsCard hourly={hourly} /> : null}
+        <div className={approver && (tasksCard || chart) ? 'home__grid' : 'home__grid home__grid--wide'}>
+          {tasksCard || chart ? (
+            <div className="home__main">
+              {tasksCard ? <TasksCard tasks={mapLoadable(mine, (data) => data.tasks)} now={now} onRetry={() => { void mineQuery.refetch(); }} /> : null}
+              {chart ? <DecisionsCard hourly={hourly} /> : null}
+            </div>
+          ) : null}
           {approver ? <ApprovalsCard items={toReview} now={now} onRetry={queue.retry} /> : null}
         </div>
       ) : null}

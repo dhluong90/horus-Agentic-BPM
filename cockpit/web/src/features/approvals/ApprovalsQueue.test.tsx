@@ -175,6 +175,9 @@ describe('Approvals queue across both engines (#31)', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
 
     expect(await screen.findByText('Nothing is waiting for your review.')).toBeInTheDocument();
+    // UAT v3 BUG: the toast named the process by its key in words, not by its display name.
+    expect(screen.getByText('Request for Customer onboarding (KYC) version 3 withdrawn')).toBeInTheDocument();
+    expect(screen.queryByText(/Kyc onboarding/)).not.toBeInTheDocument();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ ifMatch: '"3"', body: { reason: 'Wrong form attached' } });
     expect(sent[0]?.key).toMatch(/^[0-9a-f-]{36}$/);

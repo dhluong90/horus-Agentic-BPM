@@ -1,5 +1,5 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRef } from 'react';
+import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import type { DefinitionApproval, TaskAnswer } from '../../../api/processes/processesClient';
 import type { DefinitionSummary, DefinitionVersion, Task } from '../../../api/processes/schemas';
 import { toHostError } from '../../../api/hostError';
@@ -259,4 +259,30 @@ export function useCompleteForm(taskId: string, lockVersion: number) {
       ]);
     },
   });
+}
+
+/** The stored versions below `target`, each with its status; a version that failed to load is left out. */
+export function useEarlierVersions(key: string, target: number): { pending: boolean; versions: DefinitionVersion[] } {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  const numbers = Array.from({ length: Math.max(0, target - 1) }, (_, index) => target - 1 - index);
+  const results = useQueries({
+    queries: numbers.map((version) => ({ queryKey: keys.version(key, version), queryFn: ({ signal }: { signal: AbortSignal }) => client.getVersion(key, version, signal), staleTime: 60_000 })),
+  });
+  return { pending: results.some((result) => result.isPending), versions: results.flatMap((result) => (result.data !== undefined ? [result.data] : [])) };
+}
+
+/**
+ * The versions of one key that have running cases, read from the engine's instance list (every page, so a case on an
+ * old version is not missed). `pending` holds until the last page is in.
+ */
+export function useVersionsWithCases(key: string, pageLimit: number): { pending: boolean; versions: ReadonlySet<number> } {
+  const query = useInstances(key, pageLimit);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = query;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const versions = new Set<number>();
+  for (const page of query.data?.pages ?? []) for (const item of page.data) if (item.status === 'RUNNING' || item.status === 'COMPENSATING') versions.add(item.definitionVersion);
+  return { pending: query.isPending || hasNextPage, versions };
 }

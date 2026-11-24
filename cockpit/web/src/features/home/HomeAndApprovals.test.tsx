@@ -52,6 +52,21 @@ describe('Home (PD-092: content by role)', () => {
     expect(within(waiting).queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it.each(['ready-approver', 'processes-approver'] as const)('UAT_V3_the_awaiting_card_never_sits_beside_an_empty_column_%s', async (scenario) => {
+    setScenario(scenario);
+    open('');
+
+    const waiting = await card(/Awaiting approval/);
+    const grid = waiting.closest('.home__grid');
+    // Two columns only when something fills the left one; with nothing to its left the card takes the whole row.
+    const left = grid?.querySelector(':scope > .home__main');
+    if (left === null || left === undefined) expect(grid).toHaveClass('home__grid--wide');
+    else {
+      expect(grid).not.toHaveClass('home__grid--wide');
+      expect(left.children.length).toBeGreaterThan(0);
+    }
+  });
+
   it('TR_UI_02_the_requests_are_oldest_first_and_the_tile_counts_them', async () => {
     setScenario('ready-approver');
     mockHost.use(http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([ruleItem('card-fee', '2026-11-18T08:30:00Z'), ruleItem('fx-margin', '2026-11-19T01:40:00Z')]))));

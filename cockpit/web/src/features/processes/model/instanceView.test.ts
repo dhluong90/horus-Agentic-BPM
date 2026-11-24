@@ -57,6 +57,29 @@ describe('instance view', () => {
     expect(marks.get('assess')?.kind).toBe('incident');
   });
 
+  it('UAT_V3_the_steps_that_do_the_undoing_are_marked_when_the_engine_reports_the_step_they_undo', () => {
+    // loan-payout: the engine records COMPENSATION_STEP_COMPLETED against reserve, debit and the payout scope.
+    const node = (id: string, type: string, extra: Record<string, unknown> = {}) => ({ id, name: id, type, ...extra });
+    const graph = {
+      nodes: [
+        node('payout', 'subProcess'), node('reserve', 'serviceTask', { parentId: 'payout' }), node('reserve-undo', 'boundaryEvent:compensate', { attachedTo: 'reserve', parentId: 'payout' }),
+        node('release-activity', 'serviceTask:compensation', { parentId: 'payout' }), node('undo-disbursement', 'subProcess', { parentId: 'payout', trigger: 'compensate' }),
+        node('debit', 'serviceTask', { parentId: 'payout' }),
+      ],
+      edges: [{ id: 'reserve-undo-link', source: 'reserve-undo', target: 'release-activity', label: undefined, isDefault: false, isAssociation: true }],
+    };
+    const undo = (compensates: string) => ({ id: compensates, type: 'COMPENSATION_STEP_COMPLETED', nodeId: compensates, actor: null, occurredAt: 'x', kind: 'COMPENSATION', compensates });
+    const marks = nodeMarks(instance, { ...activities, entries: [undo('payout'), undo('reserve')] }, graph);
+    expect(marks.get('reserve')).toEqual({ kind: 'undone' });
+    expect(marks.get('payout')).toEqual({ kind: 'undone' });
+    expect(marks.get('release-activity')).toEqual({ kind: 'undoRan' });
+    expect(marks.get('undo-disbursement')).toEqual({ kind: 'undoRan' });
+    // The engine reported no undo for debit, so nothing is claimed for it.
+    expect(marks.has('debit')).toBe(false);
+    // With no undo reported at all nothing is marked.
+    expect(nodeMarks(instance, activities, graph).has('release-activity')).toBe(false);
+  });
+
   it('CKP_033_undo_entries_and_names_read_as_words', () => {
     const entry = { id: '1', type: 'COMPENSATION_STEP_SCHEDULED', nodeId: null, actor: null, occurredAt: 'x' };
     expect(undoEntryType({ ...entry, kind: 'COMPENSATION' })).toBe('COMPENSATION_STEP_SCHEDULED');

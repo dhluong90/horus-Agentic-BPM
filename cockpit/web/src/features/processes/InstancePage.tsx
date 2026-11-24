@@ -165,6 +165,8 @@ function badgeOf(mark: NodeMark, t: T, progress: LoopProgress | undefined): Step
     }
     case 'undone':
       return { tone: 'undone', icon: '↺', text: t('instance.badge.undone'), label: t('instance.badge.undone') };
+    case 'undoRan':
+      return { tone: 'undone', icon: '↺', text: t('instance.badge.undoRan'), label: t('instance.badge.undoRan') };
     case 'done':
       return { tone: 'done', icon: '✓', text: '', label: t('instance.state.completed') };
   }
@@ -187,7 +189,7 @@ function InstanceDiagram({ instance, graph, activities, load, label, picked, onP
   onPick: (nodeId: string) => void;
 }) {
   const { t } = useI18n();
-  const marks = useMemo(() => nodeMarks(instance, activities), [instance, activities]);
+  const marks = useMemo(() => nodeMarks(instance, activities, graph), [instance, activities, graph]);
   const order = useMemo(() => flowOrder(graph).map((node) => node.id), [graph]);
   const selected = picked ?? firstStep(marks, order);
   const progress = useMemo(() => loopProgress(activities), [activities]);
@@ -384,6 +386,7 @@ function StateLine({ mark, activity }: { mark: NodeMark | undefined; activity: b
   if (mark?.kind === 'incident') return <p className="inspector__state"><span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('instance.state.incident')}</span></p>;
   if (mark?.kind === 'token') return <p className="inspector__state"><span className="badge badge--accent"><span aria-hidden="true">{TOKEN_ICON[mark.status]}</span> {t(TOKEN_KEY[mark.status])}</span></p>;
   if (mark?.kind === 'undone') return <p className="inspector__state"><span className="badge badge--warn"><span aria-hidden="true">↺</span> {t('instance.state.undone')}</span></p>;
+  if (mark?.kind === 'undoRan') return <p className="inspector__state"><span className="badge badge--warn"><span aria-hidden="true">↺</span> {t('instance.state.undoRan')}</span></p>;
   if (mark?.kind === 'done') return <p className="inspector__state"><span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('instance.state.completed')}</span></p>;
   if (activity) return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">•</span> {t('instance.state.passed')}</span></p>;
   return <p className="inspector__state"><span className="badge badge--muted"><span aria-hidden="true">○</span> {t('instance.state.notReached')}</span></p>;

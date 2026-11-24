@@ -1,10 +1,11 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../../App';
 import { currentProcessEngine, resetProcessEngine } from '../../../mocks/handlers';
-import { MIGRATION_PLAN_ID } from '../../../mocks/migrationDemo';
-import { setScenario } from '../../../mocks/node';
+import { MIGRATION_DEFINITIONS, MIGRATION_PLAN_ID } from '../../../mocks/migrationDemo';
+import { mockHost, setScenario } from '../../../mocks/node';
 
 const PLAN = `#/migrations/${MIGRATION_PLAN_ID}`;
 
@@ -254,6 +255,51 @@ describe('planning a migration', () => {
     open('#/processes/kyc-onboarding/3');
     expect(await screen.findByRole('heading', { level: 1 })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Move running cases' })).not.toBeInTheDocument();
+  });
+});
+
+/** The onboarding process as UAT v3 found it: version 2 retired with cases, version 3 a draft, version 4 active. */
+const WITH_DRAFT = MIGRATION_DEFINITIONS.flatMap((d) => (d.key === 'kyc-onboarding' && d.version === 3
+  ? [{ ...d, status: 'DRAFT' as const, effectiveVersion: 2 }, { ...d, version: 4 }] : [d]));
+const runningOn = (version: number) => http.get('*/api/bpm/processes/v1/instances', () => HttpResponse.json({
+  data: [{ id: '01JD4MIGRATE00000000000001', definitionKey: 'kyc-onboarding', definitionVersion: version, businessKey: 'KYC-1', status: 'RUNNING', lockVersion: 1, startedBy: 'lan', startedAt: '2026-11-18T08:00:00Z', endedAt: null }],
+  nextCursor: null, hasNext: false,
+}));
+
+describe('UAT v3: where the cases are now', () => {
+  it('UAT_V3_the_source_defaults_to_the_newest_version_with_running_cases_and_never_offers_a_draft', async () => {
+    resetProcessEngine({ migration: { state: 'none' }, definitions: WITH_DRAFT });
+    setScenario('migration-operator');
+    mockHost.use(runningOn(2));
+    open('#/processes/kyc-onboarding/4/move');
+
+    const from = await screen.findByRole('combobox', { name: 'Cases now on' });
+    expect(from).toHaveDisplayValue('Version 2');
+    expect(within(from).queryByRole('option', { name: 'Version 3' })).not.toBeInTheDocument();
+  });
+
+  it('UAT_V3_a_draft_in_the_link_is_not_taken_as_the_source', async () => {
+    resetProcessEngine({ migration: { state: 'none' }, definitions: WITH_DRAFT });
+    setScenario('migration-operator');
+    mockHost.use(runningOn(2));
+    open('#/processes/kyc-onboarding/4/move?from=3');
+
+    expect(await screen.findByRole('combobox', { name: 'Cases now on' })).toHaveDisplayValue('Version 2');
+  });
+
+  it('UAT_V3_with_no_running_cases_on_an_earlier_version_the_page_says_so_in_both_languages', async () => {
+    resetProcessEngine({ migration: { state: 'none' }, definitions: WITH_DRAFT, noCases: true });
+    setScenario('migration-operator');
+    open('#/processes/kyc-onboarding/4/move');
+    expect(await screen.findByText('There are no running cases on an earlier version to move.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create plan' })).not.toBeInTheDocument();
+  });
+
+  it('UAT_V3_the_empty_state_reads_in_vietnamese', async () => {
+    resetProcessEngine({ migration: { state: 'none' }, definitions: WITH_DRAFT, noCases: true });
+    setScenario('migration-operator');
+    open('#/processes/kyc-onboarding/4/move', 'vi');
+    expect(await screen.findByText('Không có hồ sơ đang chạy ở phiên bản cũ hơn để chuyển.')).toBeInTheDocument();
   });
 });
 
