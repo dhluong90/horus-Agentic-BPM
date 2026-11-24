@@ -29,6 +29,8 @@
 /* The data band is the lowest row: room under it, so the minimap (96 high, 12 from the edge, 6 padding) never covers a data symbol (#499). */
 .dg__frame--clear-map { padding-bottom: 128px; }
 .dg__svg { display: block; margin: 0 auto; }
+/* Fit shows the whole drawing, so the frame never scrolls in it; only 100 % pans. */
+.dg__frame--fit { overflow: hidden; }
 
 .dg-edge path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
 .dg-edge .dg-edge__default { stroke-width: 2; }

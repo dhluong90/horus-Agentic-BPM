@@ -11,8 +11,6 @@ import {
   GATEWAY_HALF,
   layoutGraph,
   MIN_SCALE,
-  READABLE_SCALE,
-  WHOLE_FIT_MIN_SCALE,
   SYMBOL_SIZE,
   symbolCentre,
   CLOSED_CONTAINER_EXTRA,
@@ -26,6 +24,7 @@ import {
 } from '../model/layout';
 import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
+import { badgeBox, drawingBounds, type Box } from '../model/bounds';
 import { placeCollaboration, POOL_HEADER, type CollaborationDrawing } from '../model/collaborationLayout';
 import { Minimap, type View } from './Minimap';
 import { NodeIcon } from './NodeIcon';
@@ -34,18 +33,18 @@ import { NodeIcon } from './NodeIcon';
  * The read-only definition diagram (CKP-069, CKP-070), in its own chunk with dagre so the first screen does not load
  * them (CKP-028). Drawn as SVG with the diagram tokens of the styleguide; agent steps carry the violet that means
  * "agent step" and nothing else. A node type this cockpit does not draw is a dashed box named in words. "Fit" scales
- * the drawing to the canvas, up or down, but never below 100 %, where the smallest text is 12 px. A drawing larger
- * than its canvas at that floor opens centred on the selected step, pans by drag and by the arrow keys, and shows a
- * minimap of the part in view; a case also offers "Whole case", an overview that may draw below the floor.
+ * the box that holds every drawn element (steps, captions, flows, data symbols, pools, badges), with padding, to the
+ * canvas in both axes, and never scrolls. "100 %" draws at full size, opens centred on the selected step, pans by drag
+ * and by the arrow keys, and shows a minimap of the part in view.
  */
 
-type Zoom = 'fit' | 'actual' | 'whole';
+type Zoom = 'fit' | 'actual';
 
 /** How far one arrow key press pans the canvas, in screen pixels; with Shift, three times as far. */
 const PAN_STEP = 80;
 
-/** The least scale "Fit" may reach when it must show the whole drawing: the text is small, and Actual zooms in. */
-const FIT_ALL_MIN_SCALE = 0.2;
+/** The least scale "Fit" may reach: it always shows the whole drawing, and Actual zooms in to read the text. */
+const FIT_MIN_SCALE = 0.1;
 
 /** A status badge on one step of an instance (CKP-017): its tone, icon and words, all decided by the caller. */
 export interface StepBadge {
@@ -111,10 +110,6 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
 const BELOW_CANVAS = 52;
 const MIN_CANVAS_HEIGHT = 240;
 const LABEL_CHAR = 6.8;
-
-function floorOf(withBadges: boolean): number {
-  return withBadges ? READABLE_SCALE : MIN_SCALE;
-}
 
 function path(points: readonly Point[]): string {
   return points.map((p, index) => `${index === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
@@ -450,7 +445,6 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
 }) {
   const { t } = useI18n();
   const marker = useId().replace(/:/g, '');
-  const noteId = useId();
   const withBadges = overlay !== undefined;
   // A sub-process opens by itself when a step inside it carries a badge or is the selected step, so a case never hides
   // where it is; the reader's own choice, made with the control on the box, wins over that.
@@ -479,7 +473,10 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     if (!element) return;
     const measure = () => {
       const top = element.getBoundingClientRect().top + window.scrollY;
-      const height = Math.max(MIN_CANVAS_HEIGHT, window.innerHeight - top - reserve);
+      // The stylesheet may cap the frame lower than the viewport does; Fit must fit what is actually visible.
+      const cap = parseFloat(getComputedStyle(element).maxHeight);
+      const room = Math.max(MIN_CANVAS_HEIGHT, window.innerHeight - top - reserve);
+      const height = Number.isFinite(cap) && !fill ? Math.min(room, cap) : room;
       // Through the CSSOM: the cockpit's CSP allows no inline style attribute.
       if (fill) element.style.height = `${String(height)}px`;
       setCanvas({ width: element.clientWidth, height });
@@ -500,39 +497,43 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     };
   }, [reserve, fill]);
 
-  const whole = canvas !== undefined ? fitScale(layout, canvas, undefined, fitAll ? FIT_ALL_MIN_SCALE : WHOLE_FIT_MIN_SCALE) : MIN_SCALE;
-  // A case draws no smaller than READABLE_SCALE, where its smallest text is 13 px; a definition keeps the 12 px floor.
-  const floor = floorOf(withBadges);
-  const fit = fitAll ? Math.min(whole, sharedScale ?? whole) : canvas !== undefined ? fitScale(layout, canvas, undefined, floor) : floor;
+  // Fit takes the box of everything drawn, not the steps' extent: captions, data symbols, labels, lanes and badges
+  // hang outside it. The room is two pixels short of the frame's inside, so rounding up never makes it scroll.
+  const badgeBoxes = useMemo<Box[]>(() => (overlay === undefined ? [] : layout.nodes.flatMap((node) => {
+    const badge = overlay.badges.get(node.id);
+    return badge === undefined ? [] : [badgeBox(node, badgeWidth(badge))];
+  })), [layout, overlay]);
+  const bounds = useMemo(() => drawingBounds(layout, collaboration, badgeBoxes), [layout, collaboration, badgeBoxes]);
+  const room = canvas === undefined ? undefined : { width: canvas.width - 2, height: canvas.height - 2 };
+  const whole = room !== undefined ? fitScale(bounds, room, undefined, FIT_MIN_SCALE) : MIN_SCALE;
+  const fit = fitAll ? Math.min(whole, sharedScale ?? whole) : whole;
   useEffect(() => {
     if (fitAll && canvas !== undefined) onFitAll?.(whole);
   }, [fitAll, canvas, whole, onFitAll]);
-  // "Whole case" (a case) or "Whole process" (a change) is offered only when the drawing does not fit at the 12 px
-  // floor, so no edge of a change is ever out of reach (#443).
-  const offerWhole = !fitAll && (withBadges || marks !== undefined) && whole < floorOf(withBadges);
-  const mode: Zoom = zoom === 'whole' && !offerWhole ? 'fit' : zoom;
-  const scale = mode === 'fit' ? fit : mode === 'whole' ? whole : MIN_SCALE;
-  const width = Math.ceil(layout.width * scale);
-  const height = Math.ceil(layout.height * scale);
+  const mode: Zoom = zoom;
+  const scale = mode === 'fit' ? fit : MIN_SCALE;
+  const width = Math.floor(bounds.width * scale);
+  const height = Math.floor(bounds.height * scale);
 
   /** Reads which part of the drawing is in view, for the minimap. */
   const readView = useCallback(() => {
     const element = frame.current;
     if (!element) return;
-    const overflows = element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1;
+    // Fit never scrolls; only 100 % pans, and only when the drawing is larger than the frame.
+    const overflows = mode === 'actual' && (element.scrollWidth > element.clientWidth + 1 || element.scrollHeight > element.clientHeight + 1);
     setView(overflows ? {
-      x: element.scrollLeft / scale, y: element.scrollTop / scale,
-      width: Math.min(layout.width, element.clientWidth / scale), height: Math.min(layout.height, element.clientHeight / scale),
+      x: bounds.x + element.scrollLeft / scale, y: bounds.y + element.scrollTop / scale,
+      width: Math.min(bounds.width, element.clientWidth / scale), height: Math.min(bounds.height, element.clientHeight / scale),
     } : undefined);
-  }, [scale, layout]);
+  }, [scale, bounds, mode]);
 
   const centreOn = useCallback((x: number, y: number) => {
     const element = frame.current;
     if (!element) return;
-    element.scrollLeft = Math.max(0, x * scale - element.clientWidth / 2);
-    element.scrollTop = Math.max(0, y * scale - element.clientHeight / 2);
+    element.scrollLeft = Math.max(0, (x - bounds.x) * scale - element.clientWidth / 2);
+    element.scrollTop = Math.max(0, (y - bounds.y) * scale - element.clientHeight / 2);
     readView();
-  }, [scale, readView]);
+  }, [scale, bounds, readView]);
 
   // The step to keep in view: the case's selected step, or the one chosen in a change list.
   const selected = overlay?.selected ?? picked;
@@ -542,17 +543,19 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     const element = frame.current;
     const placed = selected !== undefined ? layout.nodes.find((item) => item.id === selected) : undefined;
     if (!element || canvas === undefined) return;
-    const key = `${mode}:${scale.toFixed(3)}:${String(layout.width)}`;
+    const key = `${mode}:${scale.toFixed(3)}:${String(bounds.width)}`;
     const fresh = centredAt.current !== key;
     centredAt.current = key;
     if (!placed) { readView(); return; }
     const x = placed.x + placed.width / 2;
     const y = placed.y + placed.height / 2;
-    const outOfView = x * scale < element.scrollLeft + 40 || x * scale > element.scrollLeft + element.clientWidth - 40
-      || y * scale < element.scrollTop + 40 || y * scale > element.scrollTop + element.clientHeight - 40;
+    const px = (x - bounds.x) * scale;
+    const py = (y - bounds.y) * scale;
+    const outOfView = px < element.scrollLeft + 40 || px > element.scrollLeft + element.clientWidth - 40
+      || py < element.scrollTop + 40 || py > element.scrollTop + element.clientHeight - 40;
     if (fresh || outOfView) centreOn(x, y);
     else readView();
-  }, [selected, layout, scale, mode, canvas, centreOn, readView]);
+  }, [selected, layout, bounds, scale, mode, canvas, centreOn, readView]);
 
   const drag = useRef<{ x: number; y: number; left: number; top: number } | undefined>(undefined);
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -590,22 +593,17 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
     <div className="dg">
       <div className={toolbar !== undefined ? 'dg__toolbar dg__bar' : 'dg__toolbar'}>
         {toolbar}
-        {mode === 'whole' ? <p className="dg__note" id={noteId}>{withBadges ? t('diagram.wholeNote') : t('diagram.wholeProcessNote')}</p> : null}
         <div className="dg__tools seg seg--small" role="group" aria-label={t('diagram.zoom')}>
           <button type="button" className="hit" aria-pressed={mode === 'fit'} onClick={() => { setZoom('fit'); }}>{t('diagram.fit')}</button>
           <button type="button" className="hit" aria-pressed={mode === 'actual'} onClick={() => { setZoom('actual'); }}>{t('diagram.actual')}</button>
-          {offerWhole ? (
-            <button type="button" className="hit" aria-pressed={mode === 'whole'} aria-describedby={mode === 'whole' ? noteId : undefined}
-              onClick={() => { setZoom('whole'); }}>{withBadges ? t('diagram.whole') : t('diagram.wholeProcess')}</button>
-          ) : null}
         </div>
       </div>
       <div className="dg__stage">
-        <div ref={frame} className={`dg__frame${fill ? ' dg__frame--fill' : ''}${pannable ? ' dg__frame--pannable' : ''}${view !== undefined && layout.data !== undefined ? ' dg__frame--clear-map' : ''}`} onScroll={readView}
+        <div ref={frame} className={`dg__frame${fill ? ' dg__frame--fill' : ''}${mode === 'fit' ? ' dg__frame--fit' : ''}${pannable ? ' dg__frame--pannable' : ''}${view !== undefined && layout.data !== undefined ? ' dg__frame--clear-map' : ''}`} onScroll={readView}
           tabIndex={pannable ? 0 : undefined} role={pannable ? 'region' : undefined} aria-label={pannable ? t('diagram.pan') : undefined}
           onKeyDown={onKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
           <svg className="dg__svg" role="group" aria-label={label} width={width} height={height}
-            viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`} data-layout="auto" data-scale={scale.toFixed(2)}>
+            viewBox={`${String(bounds.x)} ${String(bounds.y)} ${String(bounds.width)} ${String(bounds.height)}`} data-layout="auto" data-scale={scale.toFixed(2)}>
             <defs>
               <marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
                 <path d="M0 0 L10 5 L0 10 z" className="dg-arrow" />
@@ -648,7 +646,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
             ) : null}
           </svg>
         </div>
-        {view !== undefined ? <Minimap layout={layout} view={view} selected={selected} onCentre={centreOn} /> : null}
+        {view !== undefined ? <Minimap layout={layout} bounds={bounds} view={view} selected={selected} onCentre={centreOn} /> : null}
       </div>
     </div>
   );
