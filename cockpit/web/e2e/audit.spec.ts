@@ -67,7 +67,7 @@ interface Screen {
 
 const SCREENS: readonly Screen[] = [
   { name: 'journey-1-sign-in', scenario: 'signed-out', signedOut: true, hash: '#/', focus: (page, l) => page.getByRole('button', { name: l === 'en' ? 'Sign in again' : 'Đăng nhập lại' }) },
-  { name: 'journey-2-rules', scenario: 'rules-auditor', hash: '#/rules', focus: (page) => page.getByRole('link', { name: /card-fee/ }).first() },
+  { name: 'journey-2-rules', scenario: 'rules-auditor', hash: '#/rules', focus: (page) => page.getByRole('link', { name: /Card fee/ }).first() },
   { name: 'explorer-start', scenario: 'rules-auditor', hash: '#/decisions', focus: (page, l) => page.getByRole('button', { name: T[l].show }) },
   { name: 'explorer-list', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=card-fee&month=2026-11', focus: (page) => page.locator('.dlog-table tbody tr').first() },
   { name: 'explorer-none', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=kyc-risk&month=2026-10', focus: (page) => page.locator('.dlog-results .empty-state') },

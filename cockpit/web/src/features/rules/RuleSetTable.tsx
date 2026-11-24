@@ -13,7 +13,7 @@ import { formatDate, formatDateTime } from './model/dates';
  * Rule sets as a table whose rows open the rule set: name in the UI font, status in words, versions as
  * "Version 2", the version in effect, the last change. Used by Home (five most recent) and by Rules.
  */
-export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, emptyAction, dense = false }: {
+export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, emptyAction, dense = false, compact = false }: {
   ruleSets: Loadable<RuleSetSummary[]>;
   limit?: number;
   recentFirst?: boolean;
@@ -21,6 +21,8 @@ export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, 
   emptyAction?: NextAction | undefined;
   /** The list style of the Rules page: an initial disc, the human name alone and one action per row. */
   dense?: boolean;
+  /** Half-width cards (Home): tighter cells, the date without the time, so every column fits in either language. */
+  compact?: boolean;
 }) {
   const { t, locale } = useI18n();
   const retry = useRetryRules();
@@ -31,7 +33,7 @@ export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, 
   const rows = limit === undefined ? ordered : ordered.slice(0, limit);
   const version = (value: number) => t('rules.version', { version: String(value) });
   return (
-    <table className="qtable qtable--links">
+    <table className={compact ? 'qtable qtable--links qtable--compact' : 'qtable qtable--links'}>
       <thead>
         <tr>
           <th scope="col">{t('rulesArea.col.name')}</th>
@@ -65,7 +67,7 @@ export function RuleSetTable({ ruleSets, limit, recentFirst = false, emptyText, 
             <td><StatusBadge status={item.latestStatus} /></td>
             <td className="tnum">{version(item.latestVersion)}</td>
             <td className="tnum">{item.publishedVersion !== null ? version(item.publishedVersion) : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}</td>
-            <td className="tnum muted">{dense ? formatDate(item.lastChangedAt, locale) : formatDateTime(item.lastChangedAt, locale)}</td>
+            <td className="tnum muted" title={compact ? formatDateTime(item.lastChangedAt, locale) : undefined}>{dense || compact ? formatDate(item.lastChangedAt, locale) : formatDateTime(item.lastChangedAt, locale)}</td>
             {dense ? (
               <td className="qtable__action">
                 {item.latestStatus === 'PENDING_APPROVAL' ? (

@@ -90,6 +90,11 @@ const T = {
 } as const;
 
 const caseTitle = (key: string) => ({ en: `Case ${key}`, vi: `Hồ sơ ${key}` });
+/** The step panel is closed when a case opens; open it where a screen is about the panel's contents. */
+const openStepPanel = async (page: Page) => {
+  await page.locator('.instance-panel-toggle[aria-expanded="false"]').click();
+};
+
 const selectStep = (nodeId: string) => async (page: Page) => {
   await page.locator(`[data-node="${nodeId}"]`).click();
 };
@@ -105,7 +110,7 @@ const SCREENS: readonly Screen[] = [
     name: 'processes-list',
     hash: '#/processes',
     title: { en: 'Processes', vi: 'Quy trình' },
-    focal: (page, locale) => page.getByRole('link', { name: T.loan[locale] }),
+    focal: (page, locale) => page.getByRole('link', { name: T.loan[locale], exact: true }),
   },
   {
     name: 'definition-diagram',
@@ -166,41 +171,41 @@ const SCREENS: readonly Screen[] = [
   {
     name: 'instance-waiting',
     hash: `#/instances/${INSTANCE_ID}`,
-    title: caseTitle('APP-1042'),
+    title: T.loan,
     focal: (page, locale) => page.getByRole('link', { name: T.openTask[locale] }),
   },
   {
     name: 'instance-step-completed',
     hash: `#/instances/${INSTANCE_ID}`,
-    title: caseTitle('APP-1042'),
+    title: T.loan,
     prepare: selectStep('capture'),
     focal: (page) => page.locator('.inspector__summary'),
   },
   {
     name: 'instance-timeline',
     hash: `#/instances/${INSTANCE_ID}`,
-    title: caseTitle('APP-1042'),
+    title: T.loan,
     prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
     focal: (page) => page.locator('.timeline tbody tr').first(),
   },
   {
     name: 'instance-undone-timeline',
     hash: `#/instances/${UNDONE_INSTANCE_ID}`,
-    title: caseTitle('APP-1047'),
+    title: T.loan,
     prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
     focal: (page, locale) => page.locator('.timeline tbody tr', { hasText: T.undoFinished[locale] }),
   },
   {
     name: 'instance-undo-stuck-timeline',
     hash: `#/instances/${STUCK_UNDO_INSTANCE_ID}`,
-    title: caseTitle('APP-1049'),
+    title: T.loan,
     prepare: async (page, locale) => { await page.getByRole('tab', { name: T.timeline[locale] }).click(); },
     focal: (page, locale) => page.getByRole('link', { name: T.openIncident[locale] }),
   },
   {
     name: 'undo-opens-its-incident',
     hash: `#/instances/${STUCK_UNDO_INSTANCE_ID}`,
-    title: caseTitle('APP-1049'),
+    title: T.loan,
     prepare: async (page, locale) => {
       await page.getByRole('tab', { name: T.timeline[locale] }).click();
       await page.getByRole('link', { name: T.openIncident[locale] }).click();
@@ -210,46 +215,51 @@ const SCREENS: readonly Screen[] = [
   {
     name: 'instance-undone-diagram',
     hash: `#/instances/${UNDONE_INSTANCE_ID}`,
-    title: caseTitle('APP-1047'),
+    title: T.loan,
     focal: (page, locale) => page.getByRole('button', { name: new RegExp(locale === 'en' ? 'Book loan.*Undone' : 'Ghi sổ khoản vay.*Đã hoàn tác') }),
   },
   {
     name: 'instance-incident',
     hash: `#/instances/${INCIDENT_INSTANCE_ID}`,
-    title: caseTitle('APP-1045'),
+    title: T.loan,
+    prepare: openStepPanel,
     focal: (page, locale) => page.locator('.inspector__incident').getByText(T.incident[locale]),
   },
   {
     name: 'instance-kyc-step',
     hash: `#/instances/${KYC_INSTANCE_ID}`,
-    title: caseTitle('KYC-2207'),
+    title: T.kyc,
     prepare: selectStep('verify-docs'),
     focal: (page) => page.locator('.inspector__summary'),
   },
   {
     name: 'instance-completed',
     hash: `#/instances/${BOOKED_INSTANCE_ID}`,
-    title: caseTitle('APP-1038'),
+    title: T.loan,
+    prepare: openStepPanel,
     focal: (page, locale) => page.getByText(T.pick[locale]),
   },
   {
     name: 'instance-task-not-allowed',
     hash: `#/instances/${INSTANCE_ID}`,
-    title: caseTitle('APP-1042'),
+    title: T.loan,
+    prepare: openStepPanel,
     user: { ...meHoa, permissions: ['rules:read', 'processes:read'] },
-    focal: (page, locale) => page.getByText(T.blocked[locale]),
+    focal: (page, locale) => page.locator('.inspector').getByText(T.blocked[locale]),
   },
   {
     name: 'instance-no-activities',
     hash: `#/instances/${INSTANCE_ID}`,
-    title: caseTitle('APP-1042'),
+    title: T.loan,
+    prepare: openStepPanel,
     seed: { activities: 'missing' },
     focal: (page, locale) => page.getByText(T.noActivityAction[locale]),
   },
   {
     name: 'instance-activities-error',
     hash: `#/instances/${INSTANCE_ID}`,
-    title: caseTitle('APP-1042'),
+    title: T.loan,
+    prepare: openStepPanel,
     seed: { activities: 'failing' },
     focal: (page) => page.locator('.inspector .alert--error'),
   },
@@ -303,14 +313,13 @@ async function diagramFacts(page: Page, nodeId?: string) {
   }, nodeId ?? '');
 }
 
-/** At the default Fit a case draws no text under 12 px, its checks are at least 22 px, and the selected step is in view. */
+/** At the default Fit the whole case is in view, whatever its text size (see diagram-fit.spec.ts); the selected step is among it. */
 async function expectReadableCase(page: Page) {
   const picked = page.locator('[data-layout="auto"] .dg-node--selected');
   const selected = (await picked.count()) > 0 ? await picked.getAttribute('data-node') : null;
   await expect(async () => {
     const facts = await diagramFacts(page, selected ?? undefined);
-    expect(facts.smallest).toBeGreaterThanOrEqual(12);
-    expect(facts.smallestCheck).toBeGreaterThanOrEqual(22);
+    expect(facts.scrolls).toBe(false);
     if (selected !== null) expect(facts.nodeInView).toBe(true);
   }).toPass({ timeout: 5_000 });
 }
@@ -405,9 +414,9 @@ test('CKP_069_the_diagram_chunk_loads_only_when_a_diagram_opens', async ({ page 
   const scripts: string[] = [];
   page.on('request', (request) => { if (request.resourceType() === 'script') scripts.push(new URL(request.url()).pathname); });
   await page.goto('./#/processes');
-  await expect(page.getByRole('link', { name: 'Loan origination' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Loan origination', exact: true })).toBeVisible();
   const before = scripts.length;
-  await page.getByRole('link', { name: 'Loan origination' }).click();
+  await page.getByRole('link', { name: 'Loan origination', exact: true }).click();
   await expect(page.locator('[data-layout="auto"]')).toBeVisible();
   expect(scripts.slice(before).some((path) => /DefinitionDiagram/.test(path))).toBe(true);
 });
@@ -480,7 +489,7 @@ for (const locale of LOCALES) {
     await rememberLocale(page, locale);
     await mockEngines(page, { locale }, { ...meHoa, permissions: ['rules:read', 'processes:read'] });
     await page.goto(`./#/instances/${INSTANCE_ID}`);
-    const reason = page.getByText(T.blocked[locale]);
+    const reason = page.getByText(T.blocked[locale]).first();
     await expect(reason).toBeVisible();
     expect((await reason.boundingBox())?.height ?? 99).toBeLessThanOrEqual(24);
   });
@@ -500,11 +509,12 @@ for (const locale of LOCALES) {
 }
 
 for (const viewport of VIEWPORTS) {
-  test(`CKP_017_a_wide_case_opens_at_the_12px_floor_centred_on_the_current_step_${String(viewport.height)}`, async ({ page }) => {
+  test(`CKP_017_a_wide_case_at_100_percent_draws_12px_text_and_centres_on_the_current_step_${String(viewport.height)}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await mockEngines(page);
     for (const [id, step] of [[KYC_INSTANCE_ID, 'approve'], [INCIDENT_INSTANCE_ID, 'assess-documents']] as const) {
       await page.goto(`./#/instances/${id}`);
+      await page.getByRole('button', { name: '100 %' }).click();
       await expect(page.locator(`[data-node="${step}"]`)).toHaveAttribute('aria-pressed', 'true');
       await expect(async () => {
         const facts = await diagramFacts(page, step);
@@ -515,7 +525,11 @@ for (const viewport of VIEWPORTS) {
         expect((facts.offCentre ?? 99) <= 24 || facts.atStart || facts.atEnd).toBe(true);
       }).toPass({ timeout: 5_000 });
       await expect(page.locator('[data-minimap="true"]')).toBeVisible();
-      // The side panel stays beside the drawing above 1180 px.
+      // The step panel is closed until asked for; once open it stays beside the drawing above 1180 px.
+      // The open state is remembered, so it may already be open for the second case.
+      const closed = page.locator('.instance-panel-toggle[aria-expanded="false"]');
+      if ((await closed.count()) > 0) await closed.click();
+      await expect(page.locator('.instance-panel-toggle')).toHaveAttribute('aria-expanded', 'true');
       const panel = await page.getByRole('complementary', { name: 'Selected step' }).boundingBox();
       const canvas = await page.locator('.dg__frame').boundingBox();
       expect(panel && canvas && panel.x >= canvas.x + canvas.width && Math.round(panel.width) === 360).toBe(true);
@@ -527,6 +541,9 @@ test('CKP_017_a_wide_case_pans_by_keyboard_and_by_drag', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockEngines(page);
   await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
+  // By keyboard, so the canvas's focus ring is the keyboard one.
+  await page.getByRole('button', { name: '100 %' }).focus();
+  await page.keyboard.press('Enter');
   const frame = page.getByRole('region', { name: 'Diagram canvas. Use the arrow keys to move around.' });
   await expect(frame).toBeVisible();
   await expect(page.locator('[data-minimap="true"]')).toBeVisible();
@@ -550,26 +567,29 @@ test('CKP_017_a_wide_case_pans_by_keyboard_and_by_drag', async ({ page }) => {
   await expect.poll(left).toBeLessThan(start);
 });
 
-test('CKP_017_whole_case_is_an_overview_below_the_floor', async ({ page }) => {
+test('CKP_017_fit_shows_the_whole_case_and_100_percent_pans', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockEngines(page);
   await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
-  await page.getByRole('button', { name: 'Whole case' }).click();
-  await expect(page.getByText('Overview of the whole case; text is smaller.')).toBeVisible();
+  await expect(page.locator('[data-layout="auto"]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Whole case' })).toHaveCount(0);
   await expect(async () => {
     const facts = await diagramFacts(page);
     expect(facts.scrolls).toBe(false);
   }).toPass({ timeout: 5_000 });
   await expect(page.locator('[data-minimap="true"]')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Fit' }).click();
+  await page.getByRole('button', { name: '100 %' }).click();
   await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Fit' }).click();
+  await expect(page.locator('[data-minimap="true"]')).toHaveCount(0);
 });
 
 for (const viewport of VIEWPORTS) {
-  test(`CKP_069_diagram_text_is_at_least_12px_at_fit_and_fit_uses_the_canvas_${String(viewport.height)}`, async ({ page }) => {
+  test(`CKP_069_diagram_text_is_at_least_12px_at_100_percent_${String(viewport.height)}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await mockEngines(page);
     await page.goto('./#/processes/loan-origination/3');
+    await page.getByRole('button', { name: '100 %' }).click();
     const svg = page.locator('[data-layout="auto"]');
     await expect(svg).toBeVisible();
     const sizes = await svg.evaluate((element) => {
@@ -586,8 +606,6 @@ for (const viewport of VIEWPORTS) {
     });
     expect(sizes.smallest).toBeGreaterThanOrEqual(12);
     expect(sizes.truncated).toBe(false);
-    // Fit fills the canvas's width, or the drawing scrolls inside it at 100 % rather than shrink its text.
-    expect(sizes.scrolls || sizes.svgWidth >= sizes.frameWidth - 24).toBe(true);
     await expect(page.locator('[data-node="no-documents"]')).toContainText('Timer');
   });
 }

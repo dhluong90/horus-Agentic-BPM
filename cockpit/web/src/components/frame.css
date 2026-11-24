@@ -119,6 +119,10 @@
 .qtable tr.is-selected > * { background: var(--select); }
 .qtable a { color: var(--ink); text-decoration: none; }
 /* Rows that open a rule set: hover tint, pointer, a chevron, and the name link covering the row. */
+.qtable--compact th, .qtable--compact td { padding: 10px 10px; }
+.qtable--compact th:first-child, .qtable--compact td:first-child { padding-left: 16px; }
+.qtable--compact td { white-space: nowrap; }
+.qtable--compact .qtable__chevron { padding-left: 0; padding-right: 12px; width: 24px; }
 .qtable--links tbody tr { position: relative; cursor: pointer; }
 .qtable--links tbody tr:hover > * { background: var(--surface-2); }
 .qtable__link::after { content: ""; position: absolute; inset: 0; }
