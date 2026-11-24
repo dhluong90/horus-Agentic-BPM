@@ -842,7 +842,10 @@ paths:
         a `correlationId` only, never the exception text (`PRE-071`). A request needs a `businessKey` or
         an `Idempotency-Key` (`428 PRECONDITION_REQUIRED` without either), so a retry can never start a second
         instance. An instance that already exists for the business key is returned with `200`; a new one with
-        `201`; a replay of the same `Idempotency-Key` returns the first answer. Permission `processes:start`.
+        `201`; a replay of the same `Idempotency-Key` returns the first answer. For an existing instance a caller
+        with `processes:read` gets the whole instance; a caller with `processes:start` only gets `id`, `status` and
+        `created: false`, never its variables, tokens or tasks (`PRE-356`). Variables a task form marks
+        `"mask": true` are `***` in every answer that carries an instance (`PRE-357`). Permission `processes:start`.
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -856,7 +859,21 @@ paths:
               variables: { applicationId: APP-1002, customerId: C-002 }
       responses:
         '200':
-          $ref: '#/components/responses/Instance'
+          description: >-
+            An instance with the business key already exists: the whole instance for a caller with
+            `processes:read`, otherwise only its `id`, `status` and `created: false`
+          headers:
+            ETag:
+              description: The instance's `lockVersion`, quoted; absent in the short answer.
+              schema: { type: string }
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProcessInstance' }
+                  - { $ref: '#/components/schemas/ExistingInstanceSummary' }
         '201':
           $ref: '#/components/responses/Instance'
         '400': { $ref: '#/components/responses/Problem' }
@@ -874,8 +891,8 @@ paths:
       operationId: getInstance
       summary: Read an instance with its execution tree and tasks
       description: |
-        Variables are returned unmasked in 0.1.0 (masking of declared fields follows with the variable
-        declarations). Permission `processes:read`.
+        A variable that a task form of the definition marks `"mask": true` is returned as `***` (`PRE-357`). The
+        other variables are returned as they are. Permission `processes:read`.
       parameters:
         - name: id
           in: path
@@ -1168,7 +1185,9 @@ paths:
         instance starts with `payload` as its variables and `correlationKey` as its business key (a second message with
         the same key returns the existing instance), and the answer is `STARTED`. When that start event is a parallel
         multiple one, the message is held and the answer is `WAITING` until every other definition of the start has
-        arrived; the last one starts the instance. When two or more tokens wait for the
+        arrived; the last one starts the instance. A held arrival is deleted after `parallel-start.arrival-ttl`, and a
+        definition holds at most `parallel-start.max-arrivals-per-definition` of them: a message with a new key past
+        that is `413 PAYLOAD_TOO_LARGE` (`PRE-360`). When two or more tokens wait for the
         same name and key, or two definitions start on the name, the answer is `409 MESSAGE_CORRELATION_AMBIGUOUS` and
         nothing runs. When nothing waits and nothing starts, the answer is `422 MESSAGE_NOT_CORRELATED` and nothing is
         stored: a message is not buffered. `Idempotency-Key` is required; a replay with the same key and request returns
@@ -1300,7 +1319,9 @@ paths:
         The task, its instance and step, its assignment, claim and completion, and `allowedActions`: what this caller
         may do now (`claim`, `unclaim`, `complete`, and for a holder of `processes:task:manage` `reassign` on an open task or
         `delegate` on a claimed one), from the task status, the caller's assignment, permissions and four eyes. The
-        `ETag` is the task's `lockVersion`, quoted, to send as `If-Match`. Permission `processes:task:work`.
+        `ETag` is the task's `lockVersion`, quoted, to send as `If-Match`. Permission `processes:task:work`, and the
+        caller is an assignee (user, role or group), the claimer, or holds `processes:task:manage`; anyone else gets
+        `404 TASK_NOT_FOUND`, as for a task that does not exist (`PRE-358`).
       parameters:
         - $ref: '#/components/parameters/TaskId'
       responses:
@@ -1321,7 +1342,8 @@ paths:
         object `{currency, amount}`; one root `if`/`then`/`else` for a field required only in some cases), the display
         hints (`order`, `widgets`, `labels` per locale, `readOnly`), and `data`, the values of the instance variables
         the schema declares. A field the schema marks `"mask": true` carries the placeholder `***` in `data` whenever
-        the variable exists: the clear value never leaves the engine through a form (PRE-220). A step that declares a
+        the variable exists: the clear value never leaves the engine through a form (PRE-220). The caller must be an
+        assignee, the claimer or hold `processes:task:manage`, otherwise `404 TASK_NOT_FOUND` (`PRE-358`). A step that declares a
         link to the host's own screen answers `link` instead of `form`, with `{taskId}` and `{instanceId}` replaced;
         such a task is completed by the host's screen with `:complete` as any other. A step that declares no form is
         `404 FORM_NOT_DECLARED`, and so is a registered form the host no longer provides. The `ETag` is the task's
@@ -3204,6 +3226,15 @@ components:
           items: { $ref: '#/components/schemas/DefinitionSummary' }
         nextCursor: { type: [string, 'null'] }
         hasNext: { type: boolean }
+    ExistingInstanceSummary:
+      type: object
+      description: What a caller without `processes:read` learns of an instance that already has the business key
+      required: [id, status, created]
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [RUNNING, COMPLETED, CANCELLED, COMPENSATING, FAILED] }
+        created: { type: boolean, enum: [false] }
     InstanceSummary:
       type: object
       required: [id, definitionKey, definitionVersion, status, lockVersion, startedAt]

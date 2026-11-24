@@ -379,6 +379,8 @@ public class ProcessEngineAutoConfiguration {
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
         // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
         services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        // AUD-10: held start arrivals expire and one definition holds a bounded number.
+        services.useStartArrivalSettings(properties.parallelStart().toSettings());
         // #491: the host's outbox port for the messages a process sends; none when the host sends no messages.
         services.useMessageAdapter(messageAdapter.getIfUnique());
         // #499: the host's data stores, by the id of the BPMN dataStore each serves; two with one name are a wiring error.
@@ -798,11 +800,14 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     ProcessMaintenanceScheduler processEngineMaintenance(ObjectProvider<Clock> clock, NodeStatsRollup rollup,
+            ProcessServices services,
             ObjectProvider<ProcessMaintenanceScheduler.Task> tasks, ProcessEngineProperties properties) {
         ProcessMaintenanceScheduler scheduler = new ProcessMaintenanceScheduler(clock.getIfUnique(Clock::systemUTC));
         if (properties.stats().rollupEnabled()) {
             scheduler.add("node-stats-rollup", properties.stats().rollupInterval(), rollup::run);
         }
+        scheduler.add("start-arrival-cleanup", properties.parallelStart().cleanupInterval(),
+                services::purgeExpiredStartArrivals);
         tasks.orderedStream().forEach(scheduler::add);
         return scheduler;
     }
