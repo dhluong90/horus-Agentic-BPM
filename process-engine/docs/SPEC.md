@@ -399,7 +399,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **When:** Both are imported as drafts, and the published hashing reference (RFC 8785 then SHA-256, `diagram` removed) is run on the file in CI.
 - **Then:** Both drafts carry the same `definitionHash`, equal to the hash computed in CI; the graph diff between them is empty.
 - **Example:** `hash(yaml with diagram) == hash(json reordered, no diagram) == ci_hash(file)`.
-- **Scope today:** The engine reads BPMN XML only; the `process-definition.v1` JSON and YAML reader is `PRE-043`. Until it ships the case runs on a BPMN file with a `BPMNDI` diagram, the same file with its attributes in another order and every box moved, and the file without any diagram, imported by two tenants. The stored definition holds no diagram, all three carry the hash that an independent run of the published reference (diagram removed, RFC 8785, SHA-256) gives for the stored document, a moved diagram is no new version, and a layout saved afterwards leaves the hash alone. The YAML and JSON file cases follow with `PRE-043`.
+- **Scope today:** The engine reads BPMN XML only; no JSON or YAML source format is read. The case runs on a BPMN file with a `BPMNDI` diagram, the same file with its attributes in another order and every box moved, and the file without any diagram, imported by two tenants. The stored definition holds no diagram, all three carry the hash that an independent run of the published reference (diagram removed, RFC 8785, SHA-256) gives for the stored document, a moved diagram is no new version, and a layout saved afterwards leaves the hash alone.
 - **Test ID:** `PRE_024_content_hash_excludes_diagram_and_matches_git`
 
 ### PRE-025 Graph diff lists nodes and edges added, removed and changed
@@ -447,14 +447,14 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 
 ## Definition Size, Notation and BPMN Interchange (ADR-0013)
 
-### PRE-035 Definitions above 500 nodes or 1 MB are rejected
+### PRE-035 Definitions above 500 steps or 1 MiB are rejected
 - **Traces to:** `TR-DEF-05`
 - **Milestone:** M2
 - **Kind:** semantics
-- **Given:** Document A with 500 steps (900 KB); document B with 501 steps; document C of 1.2 MB with 300 steps.
+- **Given:** BPMN document A with 500 steps; document B with 501 steps; document C of 1.2 MB with 300 steps. The defaults are 500 steps (`definitions.max-nodes`) and 1 MiB (`definitions.max-bytes`); a deployment may lower either, never raise it.
 - **When:** Each is imported with `POST /definitions`.
-- **Then:** A creates a draft; B and C return `422 DEFINITION_TOO_LARGE` naming the limit exceeded; no row is written.
-- **Example:** `501 steps -> 422 DEFINITION_TOO_LARGE {limit: max-nodes, value: 501}`.
+- **Then:** A creates a draft; B returns `422 VALIDATION_FAILED` with the problem `TOO_MANY_NODES` naming the count and the limit; C returns `413 PAYLOAD_TOO_LARGE`; no row is written for B or C.
+- **Example:** `501 steps -> 422 VALIDATION_FAILED (TOO_MANY_NODES, at most 500); 1.2 MB -> 413 PAYLOAD_TOO_LARGE`.
 - **Test ID:** `PRE_035_definition_size_limits_enforced`
 
 ### PRE-033 BPMN subset import creates a draft and names every unsupported element
@@ -601,10 +601,10 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-STD-01`, `TR-STD-03`
 - **Milestone:** M2
 - **Kind:** semantics
-- **Given:** `kyc-onboarding.yaml` in Git (with comments) and the RFC 8785 hash the pipeline computed from it; the same definition later read back after a newer schema version file has been added to the build.
+- **Given:** A BPMN file `kyc-onboarding.bpmn` with an XML comment; the same definition later read back after a newer schema version has been added to the build.
 - **When:** It is imported with `POST /api/bpm/processes/v1/definitions`, then read with `GET .../definitions/kyc-onboarding/versions/1?include=source`.
-- **Then:** `pre_definition` has `source_format = YAML`, `source_document` byte for byte equal to the file, `source_hash` of those bytes, and `definition_hash` equal to the pipeline's hash; the response carries the original text; with the newer schema version present, `definition_hash` of version 1 is unchanged and no stored document is re-serialised.
-- **Example:** `import kyc-onboarding.yaml -> source_format YAML, definitionHash = pipeline hash, unchanged after upgrade`.
+- **Then:** `pre_definition` has `source_format = BPMN_XML`, `source_document` byte for byte equal to the file, `source_hash` of those bytes, and a `definition_hash` that a second read returns unchanged; `?include=source` answers the original text as `sourceDocument`, byte for byte; with the newer schema version present, `definition_hash` of version 1 is unchanged and no stored document is re-serialised.
+- **Example:** `import kyc-onboarding.bpmn -> source_format BPMN_XML, sourceHash = SHA-256 of the file, definitionHash unchanged on every read`.
 - **Test ID:** `PRE_039_import_keeps_source_document_and_fixed_hash`
 
 ### PRE-040 A handler's business error opens an incident until error events exist
@@ -631,21 +631,21 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Traces to:** `TR-STD-03`, `TR-DEF-01`
 - **Milestone:** M2
 - **Kind:** semantics
-- **Given:** A definition whose steps have ids `StartEvent_1`, `Activity_0x1y2z3`, `Gateway_kyc.risk` and `end`, and a layout keyed by the same ids; a second definition with step id `1-bad`.
+- **Given:** A BPMN definition whose elements have ids `StartEvent_1`, `Activity_0x1y2z3` and `end`; a second BPMN definition with step id `1-bad`.
 - **When:** Both are imported, the first is approved and an instance runs to `Activity_0x1y2z3`.
-- **Then:** The first is stored with those ids unchanged in `definition_json`, the layout, `pre_token.current_node_id`, `pre_history.node_id` and the graph diff; the second is `422 VALIDATION_FAILED` naming `1-bad`, because an id must start with a letter or underscore.
+- **Then:** The first is stored with those ids unchanged and its BPMN export carries them; the second is `422 VALIDATION_FAILED` naming `1-bad`, because an id must start with a letter or underscore.
 - **Example:** `step id Activity_0x1y2z3 -> stored and shown unchanged; 1-bad -> 422`.
 - **Test ID:** `PRE_042_bpmn_style_step_ids_kept`
 
-### PRE-043 A v1 definition reads into the BPMN model and writes back to the same canonical JSON
+### PRE-043 A BPMN definition reads into the model and writes back to the same canonical JSON
 - **Traces to:** `TR-STD-28`, `TR-STD-03`, `TR-DEF-04`
 - **Milestone:** M2
 - **Kind:** semantics
-- **Given:** `kyc-onboarding.yaml` (v1) with steps `start`, `collect-documents` (`userTask`), `check-risk` (`exclusiveGateway` with branches `high` and `low` and a default), a `saga` block `open-accounts` holding `reserve-funds` and `open-account`, `notify` (`serviceTask`) and `end`, and the RFC 8785 hash computed by the pipeline from the file.
-- **When:** The v1 reader builds the in-memory model, and the canonical writer prints it back.
-- **Then:** The model holds one BPMN `process` with a `startEvent`, a `userTask`, an `exclusiveGateway` with one default flow, a `transaction` subprocess `open-accounts` containing two `serviceTask` nodes, a `serviceTask` and an `endEvent`, every node with its step id; sequence flows carry the derived ids `start__collect-documents`, `check-risk__b0`, `check-risk__b1`, `check-risk__default` and so on; the printed canonical JSON is byte for byte equal to the RFC 8785 form of the document, contains no sequence flow ids, and its SHA-256 equals the pipeline hash.
-- **Example:** `kyc-onboarding.yaml -> model -> canonical JSON; hash before = hash after`.
-- **Test ID:** `PRE_043_v1_definition_round_trips_through_bpmn_model`
+- **Given:** `kyc-onboarding.bpmn` with a `startEvent`, a `userTask` `collect-documents`, an `exclusiveGateway` `check-risk` with two conditional flows and a default flow, a `transaction` subprocess `open-accounts` holding two `serviceTask` nodes, a `serviceTask` `notify` and an `endEvent`.
+- **When:** The BPMN reader builds the in-memory model, and the canonical writer prints it back.
+- **Then:** The model holds one `process` with those nodes, each with its element id and the gateway with one default flow; the printed canonical JSON is the RFC 8785 form of the model, contains no diagram data, and its SHA-256 equals the `definition_hash` the import stored. The importer reads BPMN XML only; a reader for a JSON or YAML source format is not part of the engine.
+- **Example:** `kyc-onboarding.bpmn -> model -> canonical JSON; hash before = hash after`.
+- **Test ID:** `PRE_043_bpmn_definition_round_trips_through_the_model`
 
 ### PRE-044 Joins and compensation are keyed by scope token
 - **Traces to:** `TR-STD-29`, `TR-ASY-03`, `TR-COMP-01`
@@ -698,8 +698,8 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Given:** Definition `card-fee-review` v1 approved (or auto-approved on `dev`), with `sourceHash` and `readerVersion` recorded in `processes.definition.approved.v1` and the approval history row, and one running instance.
 - **When:** (a) The stored `source_document` and `source_hash` are both replaced in the database by a different, internally consistent process. (b) The engine starts with a different BPMN reader version and the same source.
 - **Then:**
-  - (a) Starting or advancing the version is refused. Each affected instance gets an incident naming the integrity check, and one audit entry and one alert are written. The changed process never runs.
-  - (b) The version compiles and runs, and a WARN log line names the definition and both reader versions.
+  - (a) Starting or advancing the version is refused with `500 DEFINITION_INTEGRITY_FAILED` when the stored source does not give its `source_hash`, or its canonical form does not give the stored `definition_hash`; the same check guards export, diff and `?include=source`. One security log entry names the tenant, key and version (never the content). The changed process never runs. Incidents on running instances and an alert are post-1.0.
+  - (b) The version compiles and runs, and a WARN log line names the definition and both reader versions (post-1.0: the reader version is not recorded yet).
 - **Example:** `source swapped with a matching row hash -> refused, incident, audit, alert; reader upgraded -> runs, WARN`.
 - **Test ID:** `PRE_048_kernel_runs_only_the_approved_source`
 
@@ -2478,10 +2478,10 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Given:** At bank-a `thu` proposes the execution of the plan loan-origination v1 to v2 at 02:00 and the holiday 1 January 2028 for `vn-banking-hours` at 03:00; `lan` holds `processes:migration:manage` and `processes:calendar:manage`; `dan` holds `processes:read` only; `eve` is at bank-b.
 - **When:** each lists `GET /approvals`; `lan` approves the plan and the change with a wrong hash, then with the `contentHash` of the item; `thu` approves with the right hash.
 - **Then:**
-  - `lan` sees `MIGRATION_PLAN` then `CALENDAR_CHANGE`, oldest first, with `contentHash` (the plan hash; the change hash), `reason` and `approve`, `reject` allowed. A cursor continues across the two kinds. `thu` has no `approve` on either (`SELF_APPROVAL_FORBIDDEN`); she may withdraw her calendar change with `reject`. `dan` sees the calendar change with `PERMISSION_REQUIRED` and no migration plan. `eve` sees nothing.
+  - `lan` sees `MIGRATION_PLAN` then `CALENDAR_CHANGE`, oldest first, with `contentHash` (the plan hash; the change hash), `reason` and `approve`, `reject` allowed. A cursor continues across the two kinds. `thu` has no `approve` on either (`SELF_APPROVAL_FORBIDDEN`); she may withdraw her calendar change with `reject`. `dan`, who holds neither manage permission, sees nothing: not the migration plan and, since AUD-07, not the calendar change either. `eve` sees nothing.
   - A hash other than the item's is `409 CONTENT_CHANGED` and nothing is written; the item stays in the list. With the item's hash both are approved and leave the list. `thu` is `403 SELF_APPROVAL_FORBIDDEN` with the right hash.
 - **Example:** `GET /approvals -> [{kind: MIGRATION_PLAN, contentHash: <planHash>}, {kind: CALENDAR_CHANGE, contentHash: <changeHash>}]; approve with another hash -> 409 CONTENT_CHANGED`
-- **Test IDs:** `PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash`, `PRE_254_the_proposer_may_not_approve_and_a_reader_sees_calendar_changes_only_with_permission_required`, `PRE_254_the_cursor_continues_across_kinds`, `PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing`, `PRE_254_the_proposer_cannot_approve_with_the_right_hash`
+- **Test IDs:** `PRE_254_a_pending_migration_plan_and_calendar_change_are_listed_oldest_first_with_their_hash`, `PRE_346_the_proposer_may_not_approve_and_a_reader_sees_no_calendar_change`, `PRE_254_the_cursor_continues_across_kinds`, `PRE_254_an_approval_names_the_reviewed_hash_and_another_hash_writes_nothing`, `PRE_254_the_proposer_cannot_approve_with_the_right_hash`
 
 ### PRE-330 A complex gateway joins on its activation condition, fires once, absorbs the late token, and splits on its outgoing conditions
 - **Traces to:** `TR-STD-04`, #500
@@ -2707,3 +2707,32 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** (a) `APP-4` is refused with `413 PAYLOAD_TOO_LARGE` and nothing is held for it. (b) The repeat replaces the held row, so the count stays 3. (c) The three rows older than the TTL are deleted, across tenants, and a new arrival is held again.
 - **Example:** `APP-4 -> 413; after 25 hours pre_start_arrival is empty`.
 - **Test ID:** `PRE_360_control_a_definition_holds_at_most_the_configured_arrivals_and_a_repeat_does_not_count` (`AuditFindingsPostgresIT`), `PRE_360_control_arrivals_older_than_the_ttl_are_deleted_by_the_cleanup` (`AuditFindingsPostgresIT`)
+### PRE-370 A migration plan or a calendar change is approved only on the hash the approver reviewed
+- **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-02)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a `thu` proposes the execution of the plan loan-review v1 to v2 and the holiday 8 February 2027 for `vn-banking-hours`; `lan` holds `processes:migration:manage` and `processes:calendar:manage`; `horus.bpm.processes.approval.require-content-hash` is at its default `true`.
+- **When:** `lan` sends `:approve` for each with no `expectedPlanHash` or `expectedChangeHash`; then with the hash `000...0` (64 zeros); then with the `contentHash` of the item in `GET /approvals`.
+- **Then:** No hash is `400 CONTENT_HASH_REQUIRED` and another hash is `409 CONTENT_CHANGED`; both write nothing, the plan stays `PROPOSED`, the change stays `PENDING` and no instance moves. With the item's hash both are approved. Only the `dev` profile may set `require-content-hash=false`, and then a missing hash is accepted as before.
+- **Example:** `POST /migrations/{id}:approve {} -> 400 CONTENT_HASH_REQUIRED; {expectedPlanHash: <planHash>} -> 200 APPROVED`
+- **Test IDs:** `PRE_370_a_migration_approval_must_name_the_reviewed_plan_hash`, `PRE_370_a_calendar_change_approval_must_name_the_reviewed_change_hash`
+
+### PRE-371 A list cursor names the key that signed it, so keys rotate and old cursors fail as 400
+- **Traces to:** `TR-SEC-04`, #365 (AUD-13)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The host sets `horus.bpm.processes.cursor.keys` with `k2026` and `k2027` and `cursor.active-key-id=k2027`; a cursor for bank-a's instance list was signed with `k2026`.
+- **When:** The cursor is replayed to a replica that has both keys; to one that dropped `k2026`; to one whose `k2027` has other bytes; a cursor of the format before key ids is replayed; the host sets a key of 8 bytes or an active id that names no key.
+- **Then:** New cursors carry `k2027` and the `k2026` cursor still works while that key is listed. After `k2026` is removed, a cursor of a changed key and a cursor with no key id are `400 QUERY_INVALID`, never `500`. The short key and the unknown active id stop start-up naming the property. With no key configured the engine keeps one in `pre_engine_key` and the key id is derived from its bytes, so replacing that key retires its cursors the same way.
+- **Example:** `cursor ...k2026... with keys {k2027} -> 400 QUERY_INVALID`
+- **Test IDs:** `PRE_371_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `PRE_371_a_cursor_without_a_key_id_or_of_a_changed_key_is_query_invalid`, `PRE_371_a_key_that_is_too_short_or_a_missing_active_key_is_refused`, `PRE_371_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`
+
+### PRE-372 A caller without the calendar manage permission sees no pending calendar change
+- **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-07)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `thu` has a pending calendar change and a proposed migration at bank-a; `ivy` holds `processes:migration:manage` only, `kim` holds `processes:calendar:manage` only, `dan` holds `processes:read` only.
+- **When:** each lists `GET /approvals`.
+- **Then:** `ivy` sees the `MIGRATION_PLAN` only, `kim` the `CALENDAR_CHANGE` only and `dan` neither, as for migration plans.
+- **Example:** `dan GET /approvals -> []`
+- **Test IDs:** `PRE_372_a_caller_without_calendar_manage_sees_no_pending_calendar_change`

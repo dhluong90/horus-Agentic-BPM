@@ -87,7 +87,7 @@ const NOW = '2026-11-20T03:15:00Z';
 
 /** One decision on a definition version, as the engine received it. */
 export interface RecordedDecision {
-  action: 'approve' | 'reject';
+  action: 'approve' | 'reject' | 'withdraw';
   key: string;
   version: number;
   by: string;
@@ -351,7 +351,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   }
 
   function lifecycleCommand(request: ProcessRequest, key: string, number: number, command: string, header: (name: string) => string | undefined): ProcessAnswer {
-    if (!request.permissions.includes(command === '/diff' ? 'processes:read' : 'processes:approve')) return problem(403, 'PERMISSION_DENIED');
+    if (!request.permissions.includes(command === '/diff' ? 'processes:read' : command === ':withdraw' ? 'processes:author' : 'processes:approve')) return problem(403, 'PERMISSION_DENIED');
     const found = definitions.find((d) => d.key === key && d.version === number);
     if (!found) return problem(404, 'DEFINITION_NOT_FOUND');
     if (command === '/diff') {
@@ -371,9 +371,16 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     } catch {
       return problem(400, 'INPUT_INVALID');
     }
-    const action = command === ':approve' ? 'approve' : 'reject';
+    const action = command === ':approve' ? 'approve' : command === ':withdraw' ? 'withdraw' : 'reject';
     decisions.push({ action, key, version: number, by: request.user, body, ifMatch, idempotencyKey });
     if (found.status !== 'PENDING_APPROVAL') return problem(409, 'INVALID_STATE');
+    if (action === 'withdraw') {
+      // PRE-052: only the requester, and back to draft with no rejection recorded
+      if (request.user !== (found.requestedBy ?? found.createdBy ?? 'lan')) return problem(403, 'PERMISSION_DENIED');
+      if (ifMatch !== `"${String(found.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT');
+      Object.assign(found, { status: 'DRAFT', decisionComment: null, lockVersion: found.lockVersion + 1, requestedBy: undefined, requestedAt: undefined });
+      return json(200, versionBody(found), { ETag: `"${String(found.lockVersion)}"` });
+    }
     if (request.user === found.requestedBy || request.user === (found.createdBy ?? 'lan')) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
     if (ifMatch !== `"${String(found.lockVersion)}"`) return problem(409, 'VERSION_CONFLICT');
     if (action === 'reject') {
@@ -425,7 +432,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     calendarDecisions.push({ id: calendarChange.id, command, actor: request.user, body });
     if (command === 'approve') {
       if (request.user === calendarChange.proposedBy) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
-      if (body['expectedChangeHash'] !== undefined && body['expectedChangeHash'] !== calendarHash()) return problem(409, 'CONTENT_CHANGED');
+      if (body['expectedChangeHash'] === undefined) return problem(400, 'CONTENT_HASH_REQUIRED');
+      if (body['expectedChangeHash'] !== calendarHash()) return problem(409, 'CONTENT_CHANGED');
     }
     Object.assign(calendarChange, { status: command === 'approve' ? 'APPROVED' : 'REJECTED', decidedBy: request.user, decidedAt: '2026-11-21T03:00:00Z', comment: typeof body['comment'] === 'string' ? body['comment'] : null });
     return json(200, calendarBody());
@@ -443,23 +451,25 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         const requestedBy = d.requestedBy ?? d.createdBy ?? 'lan';
         const self = request.user === requestedBy || request.user === (d.createdBy ?? 'lan');
         const denial = !approver ? 'PERMISSION_REQUIRED' : self ? 'SELF_APPROVAL_FORBIDDEN' : undefined;
+        const mayWithdraw = request.user === requestedBy && request.permissions.includes('processes:author');
         return {
           kind: 'DEFINITION', id: null, sourceVersion: null, reason: null, contentHash: d.definitionHash ?? DEFAULT_HASH,
           key: d.key, name: d.name, version: d.version, definitionHash: d.definitionHash ?? DEFAULT_HASH, lockVersion: d.lockVersion,
           requestedBy, requestedByName: DEMO_NAMES[locale].users[requestedBy] ?? requestedBy, requestedAt: d.requestedAt ?? d.lastChangedAt,
-          allowedActions: denial === undefined ? ['approve', 'reject'] : [],
+          allowedActions: [...(denial === undefined ? ['approve', 'reject'] : []), ...(mayWithdraw ? ['withdraw'] : [])],
           deniedActions: denial === undefined ? {} : { approve: denial, reject: denial },
         };
       });
-    if (calendarChange?.status === 'PENDING') {
+    // AUD-07: without calendars:manage a caller sees no pending calendar change
+    const manager = request.permissions.includes('processes:calendar:manage');
+    if (calendarChange?.status === 'PENDING' && manager) {
       const self = request.user === calendarChange.proposedBy;
-      const manager = request.permissions.includes('processes:calendar:manage');
       data.push({
         kind: 'CALENDAR_CHANGE', id: calendarChange.id, sourceVersion: null, reason: calendarChange.reason, contentHash: calendarHash(),
         key: calendarChange.calendarKey, name: null, version: calendarChange.baseVersion + 1, definitionHash: null, lockVersion: calendarChange.baseVersion,
         requestedBy: calendarChange.proposedBy, requestedByName: DEMO_NAMES[locale].users[calendarChange.proposedBy] ?? calendarChange.proposedBy, requestedAt: calendarChange.proposedAt,
-        allowedActions: !manager ? [] : [...(self ? [] : ['approve']), 'reject'],
-        deniedActions: !manager ? { approve: 'PERMISSION_REQUIRED', reject: 'PERMISSION_REQUIRED' } : self ? { approve: 'SELF_APPROVAL_FORBIDDEN' } : {},
+        allowedActions: [...(self ? [] : ['approve']), 'reject'],
+        deniedActions: self ? { approve: 'SELF_APPROVAL_FORBIDDEN' } : {},
       });
     }
     data.sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.key.localeCompare(b.key));
@@ -578,7 +588,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       const migration = migrations.handle(request, path, url);
       if (migration !== undefined) return migration;
     }
-    const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject)$/.exec(path);
+    const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject|:withdraw)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
     const version = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/export)?$/.exec(path);
     if (request.method === 'GET' && version) {

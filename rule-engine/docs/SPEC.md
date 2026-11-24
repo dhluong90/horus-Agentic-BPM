@@ -1403,3 +1403,34 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
   - Approved, v2 is `PUBLISHED` and is the version in force from 2027-01-01T00:00:00Z, not before. With no date the version takes effect at approval, as before. The date joins the idempotency hash only when named.
 - **Example:** `request-publish {effectiveFrom: 2027-01-01T00:00:00Z} -> 200, GET /approvals shows effectiveFrom; approve -> in force from 2027-01-01`
 - **Test IDs:** `RLE_210_a_requested_effective_date_is_stored_shown_to_the_approver_and_applied`, `RLE_210_a_past_effective_date_is_refused_and_the_draft_stays_a_draft`, `RLE_210_the_effective_date_does_not_change_the_hash_or_the_four_eyes`, `RLE_210_a_date_asked_for_at_request_decides_which_version_is_in_force_and_a_past_date_is_refused`
+
+### RLE-220 A decision replay by ids reads each id by key and never scans the period
+- **Traces to:** `TR-SEC-04`, `TR-PERF-01`, #365 (AUD-06)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `card-fee` v1 with 100 logged November decisions at bank-a, draft v2, and a decision log that counts period scans; `pricing-approver` holds `rules:simulate` and `rules:log:read`.
+- **When:** She replays two chosen ids over 1 November to 1 December, then the same two ids over the first two hours of November.
+- **Then:** Both replay, newest first, with no period scan: the work follows the number of ids (at most `simulation.max-inputs`), not the length of the period. An id of another tenant or rule set, or logged outside the period, is left out as before.
+- **Example:** `decisionIds [oldest, newest], 31 days -> 2 items, 0 scans; first 2 hours -> 1 item`
+- **Test IDs:** `RLE_220_a_selection_reads_each_id_by_key_and_never_scans_the_period`
+
+### RLE-221 A list cursor names the key that signed it, so keys rotate and old cursors fail as 400
+- **Traces to:** `TR-SEC-04`, RLE-039, #365 (AUD-13)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The host sets `horus.bpm.rules.cursor.keys` with `k2026` and `k2027` and `cursor.active-key-id=k2027`; a cursor for bank-a's rule set list was signed with `k2026`.
+- **When:** The cursor is replayed to a replica that has both keys; to one that dropped `k2026`; to one whose `k2027` has other bytes; a cursor of the format before key ids is replayed; the host sets a key of 8 bytes or an active id that names no key.
+- **Then:** New cursors carry `k2027` and the `k2026` cursor still works while that key is listed. After `k2026` is removed, a cursor of a changed key and a cursor with no key id are `400 QUERY_INVALID`, never `500`. The short key and the unknown active id stop start-up. With keys configured the engine neither creates nor reads `rle_engine_key`; with none, the key stays in that table and its id is derived from its bytes.
+- **Example:** `cursor ...k2026... with keys {k2027} -> 400 QUERY_INVALID`
+- **Test IDs:** `RLE_221_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `RLE_221_a_cursor_without_a_key_id_or_signed_with_another_key_of_the_same_id_is_query_invalid`, `RLE_221_a_key_that_is_too_short_or_not_the_active_one_stops_start_up`, `RLE_221_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`
+
+### RLE-222 Display names need a permission of an installed engine
+- **Traces to:** `TR-SEC-04`, RLE-196, #365 (AUD-09)
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `customer-7` of bank-a is signed in and holds no `rules:*` or `processes:*` permission; `minh` holds `rules:read`; the host directory knows `lan` as "Tran Thi Lan".
+- **When:** Each asks `GET /api/bpm/display-names?users=lan`.
+- **Then:** `customer-7` gets `403 PERMISSION_DENIED` and no name; `minh` gets the name.
+- **Example:** `customer-7 -> 403; minh -> {users: {lan: "Tran Thi Lan"}}`
+- **Test IDs:** `RLE_222_a_signed_in_account_with_no_engine_permission_cannot_look_up_names`
+

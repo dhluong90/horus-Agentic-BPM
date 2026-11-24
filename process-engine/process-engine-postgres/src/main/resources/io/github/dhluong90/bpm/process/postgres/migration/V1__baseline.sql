@@ -209,7 +209,7 @@ CREATE TABLE pre_definition_history (
     comment text,
     details jsonb DEFAULT '{}'::jsonb NOT NULL,
     occurred_at timestamp with time zone NOT NULL,
-    CONSTRAINT pre_definition_history_action_check CHECK ((action = ANY (ARRAY['IMPORTED'::text, 'REQUESTED'::text, 'APPROVED'::text, 'REJECTED'::text, 'RETIRED'::text])))
+    CONSTRAINT pre_definition_history_action_check CHECK ((action = ANY (ARRAY['IMPORTED'::text, 'REQUESTED'::text, 'APPROVED'::text, 'REJECTED'::text, 'WITHDRAWN'::text, 'RETIRED'::text])))
 );
 
 CREATE TABLE pre_definition_layout (

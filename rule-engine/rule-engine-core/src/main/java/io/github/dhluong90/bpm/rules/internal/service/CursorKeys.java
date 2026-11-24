@@ -16,7 +16,11 @@ import java.util.Optional;
  * memory: signing and verifying a cursor cost one HMAC and never a database call, a connection or a write.
  *
  * <p>The holder keeps the current key and, after a change, the previous one, so cursors issued just before a
- * rotation still verify for one refresh period. Rotation itself is not offered in this release.
+ * rotation still verify for one refresh period.
+ *
+ * <p>A host that configures keys ({@link #configure}, from {@code horus.bpm.rules.cursor.keys}) keeps them out of the
+ * database: the engine then neither creates nor reads {@code rle_engine_key}. Every cursor names the key that signed
+ * it, so a rotation is adding a key and making it active, and cursors of a key still listed keep verifying (AUD-13).
  */
 public final class CursorKeys {
 
@@ -30,6 +34,7 @@ public final class CursorKeys {
     private final Clock clock;
     private volatile Pair keys;
     private volatile String notReady;
+    private volatile Cursors configured;
 
     private record Pair(Cursors current, byte[] currentKey, Cursors previous) {
     }
@@ -47,6 +52,11 @@ public final class CursorKeys {
      * @throws IllegalStateException naming the table and the rights needed when the key cannot be created or read
      */
     public void load() {
+        Cursors fixed = configured;
+        if (fixed != null) {
+            keys = new Pair(fixed, null, null);
+            return;
+        }
         byte[] candidate = new byte[32];
         RANDOM.nextBytes(candidate);
         byte[] key;
@@ -64,8 +74,22 @@ public final class CursorKeys {
      * thread, never on a request. A missing row keeps the key in memory.
      */
     public void refresh() {
+        if (configured != null) {
+            return;
+        }
         Optional<byte[]> key = transactions.inReadOnlyTransaction(() -> store.findEngineKey(NAME));
         key.ifPresent(this::install);
+    }
+
+    /**
+     * Uses keys the host supplies instead of one in the database. Call before {@link #load()}.
+     *
+     * @param activeKeyId the id of the key that signs new cursors
+     * @param keys every key that verifies, by id, each at least 32 bytes
+     * @throws IllegalArgumentException when the active id names no key, an id is malformed or a key is too short
+     */
+    public void configure(String activeKeyId, java.util.Map<String, byte[]> keys) {
+        this.configured = new Cursors(activeKeyId, keys);
     }
 
     /**
@@ -89,7 +113,7 @@ public final class CursorKeys {
 
     synchronized void install(byte[] key) {
         Pair now = keys;
-        if (now != null && Arrays.equals(now.currentKey(), key)) {
+        if (now != null && now.currentKey() != null && Arrays.equals(now.currentKey(), key)) {
             return;
         }
         keys = new Pair(new Cursors(key), key.clone(), now == null ? null : now.current());

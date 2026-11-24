@@ -183,6 +183,19 @@ public class ProcessController {
     }
 
     /**
+     * The requester takes their own pending version back to draft ({@code processes:author}, PRE-052). Body:
+     * optional {@code reason}. {@code If-Match} and {@code Idempotency-Key} are required.
+     */
+    @PostMapping("/definitions/{key}/versions/{version}:withdraw")
+    public ResponseEntity<byte[]> withdraw(@PathVariable("key") String key, @PathVariable("version") int version,
+            HttpServletRequest http, @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        long lock = requiredLockVersion(ifMatch);
+        return version(definitions.withdraw(DefinitionRef.of(key, version), lock, text(optionalBody(http), "reason"),
+                idempotencyKey));
+    }
+
+    /**
      * Retires an active version ({@code processes:approve}) or withdraws a draft ({@code processes:author}). Body:
      * {@code reason} (required for an active version) and {@code confirmNoVersionInEffect} (PD-101).
      */
@@ -247,10 +260,14 @@ public class ProcessController {
                 Views::pendingApproval), null, null);
     }
 
-    /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash. */
+    /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash, with {@code -source} added when {@code include=source}. */
     @GetMapping("/definitions/{key}/versions/{version}")
     public ResponseEntity<byte[]> definitionVersion(@PathVariable("key") String key,
-            @PathVariable("version") String version) {
+            @PathVariable("version") String version,
+            @RequestParam(value = "include", required = false) String include) {
+        if (include != null && !"source".equals(include)) {
+            throw new InputInvalidException("include must be source");
+        }
         int number;
         try {
             number = Integer.parseInt(version);
@@ -258,9 +275,16 @@ public class ProcessController {
             throw new InputInvalidException("version must be a version number, for example 1");
         }
         DefinitionVersion found = definitions.version(key, number);
+        tools.jackson.databind.node.ObjectNode body = withWarnings(Views.definition(found), found);
+        // PRE-039: the answer with the source is a different body, so it has its own ETag and a cache cannot mix them.
+        String etag = "\"" + found.definitionHash() + (include != null ? "-source" : "") + "\"";
+        if (include != null) {
+            // PRE-039: the original text, byte for byte, as the import stored it.
+            body.put("sourceDocument", definitions.sourceDocument(key, number));
+        }
         return ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON)
-                .header(HttpHeaders.ETAG, "\"" + found.definitionHash() + "\"")
-                .body(bytes(withWarnings(Views.definition(found), found)));
+                .header(HttpHeaders.ETAG, etag)
+                .body(bytes(body));
     }
 
     /**

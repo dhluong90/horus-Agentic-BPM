@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.process.api.CalendarChange;
 import io.github.dhluong90.bpm.process.api.CalendarSummary;
+import io.github.dhluong90.bpm.process.api.ContentChangedException;
+import io.github.dhluong90.bpm.process.api.ContentHashRequiredException;
 import io.github.dhluong90.bpm.process.api.IdempotencyKeyReuseException;
 import io.github.dhluong90.bpm.process.api.Page;
 import io.github.dhluong90.bpm.process.api.PageRequest;
@@ -180,5 +182,32 @@ class CalendarChangeIdempotencyPostgresIT {
                 .isInstanceOf(QueryInvalidException.class);
         assertThatThrownBy(() -> engine.calendars.calendars(new PageRequest(201, null)))
                 .isInstanceOf(QueryInvalidException.class);
+    }
+
+    @Test
+    void PRE_370_a_calendar_change_approval_must_name_the_reviewed_change_hash() {
+        // Given Kim's pending holiday change for vn-banking-hours, and an engine run with the shipped default
+        TestEngine strict = TestEngine.replica("pod-strict", clock).strictApprovalHashes(true).build();
+        engine.identity.as("bank-a", "kim", MANAGER);
+        CalendarChange pending = engine.calendars.propose("vn-banking-hours",
+                BusinessCalendarPostgresIT.vnBankingHours("2027-02-08"), 0, "Tet 2027", "k-1");
+        strict.identity.as("bank-a", "lan", MANAGER);
+
+        // When Lan approves without a hash, then with the hash of another change
+        assertThatThrownBy(() -> strict.calendars.approve(pending.id(), "Checked", "a-1", null))
+                .isInstanceOfSatisfying(ContentHashRequiredException.class,
+                        e -> assertThat(e.code()).isEqualTo("CONTENT_HASH_REQUIRED"));
+        assertThatThrownBy(() -> strict.calendars.approve(pending.id(), "Checked", "a-2", "0".repeat(64)))
+                .isInstanceOf(ContentChangedException.class);
+
+        // Then the change is still pending and no calendar exists
+        assertThat(count("SELECT count(*) FROM pre_calendar_change WHERE tenant_id = 'bank-a' AND status = 'PENDING'"))
+                .isEqualTo(1);
+        assertThat(changedEvents()).isZero();
+
+        // And with the hash she reviewed (the one the change shows as contentHash) it is applied
+        String reviewed = io.github.dhluong90.bpm.process.internal.service.Calendars.changeHash("vn-banking-hours", 0,
+                pending.proposed());
+        assertThat(strict.calendars.approve(pending.id(), "Checked", "a-3", reviewed).status()).isEqualTo("APPROVED");
     }
 }

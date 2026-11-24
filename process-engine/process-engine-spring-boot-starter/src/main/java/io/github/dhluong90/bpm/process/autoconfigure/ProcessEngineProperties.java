@@ -68,7 +68,59 @@ public record ProcessEngineProperties(
         @DefaultValue Calls calls,
         @DefaultValue MultiInstance multiInstance,
         @DefaultValue Tasks tasks,
+        @DefaultValue Cursor cursor,
         @DefaultValue ParallelStart parallelStart) {
+
+    /**
+     * The keys that sign list cursors (AUD-13). Supply every key from an environment variable or a secret store,
+     * never from a file in the repository. When no key is set the engine keeps one random key in
+     * {@code pre_engine_key}, which anyone who can read the database can use to forge a cursor; set keys in
+     * production.
+     *
+     * @param activeKeyId the id of the key that signs new cursors, 1 to 32 letters, digits, {@code _} or {@code -};
+     *     required when {@code keys} is set
+     * @param keys Base64 keys of at least 32 bytes after decoding, by id. To rotate, add a new key, make it active,
+     *     and remove the old one after the cursors it signed are no longer in use; a cursor of a removed key is
+     *     {@code 400 QUERY_INVALID}
+     */
+    public record Cursor(String activeKeyId, java.util.Map<String, String> keys) {
+
+        /** Copies the keys; unset is empty. */
+        public Cursor {
+            keys = keys == null ? java.util.Map.of() : java.util.Map.copyOf(keys);
+        }
+
+        /**
+         * Decodes the keys.
+         *
+         * @return the keys by id, empty when none is configured
+         * @throws IllegalArgumentException naming the property when a key is not Base64 or the active id is missing
+         */
+        public java.util.Map<String, byte[]> decoded() {
+            if (keys.isEmpty()) {
+                return java.util.Map.of();
+            }
+            if (activeKeyId == null || !keys.containsKey(activeKeyId)) {
+                throw new IllegalArgumentException("horus.bpm.processes.cursor.active-key-id must name one of "
+                        + "horus.bpm.processes.cursor.keys");
+            }
+            java.util.Map<String, byte[]> out = new java.util.HashMap<>();
+            keys.forEach((id, value) -> {
+                try {
+                    out.put(id, java.util.Base64.getDecoder().decode(value.strip()));
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("horus.bpm.processes.cursor.keys." + id + " is not Base64");
+                }
+            });
+            return out;
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "Cursor[activeKeyId=" + activeKeyId + ", keys=" + keys.keySet() + "]";
+        }
+    }
 
     /**
      * Arrivals held for a process whose start event waits for several messages or signals (PD-149, AUD-10).
@@ -693,8 +745,9 @@ public record ProcessEngineProperties(
     }
 
     /**
-     * @param requireContentHash an approval of a definition version must name {@code expectedDefinitionHash}, the
-     *     hash of the content the approver reviewed (PD-139, PRE-177); {@code false} is accepted on the {@code dev}
+     * @param requireContentHash an approval of a definition version, a migration plan or a calendar change must name
+     *     {@code expectedDefinitionHash}, {@code expectedPlanHash} or {@code expectedChangeHash}, the hash of the
+     *     content the approver reviewed (PD-139, PRE-177, AUD-02); {@code false} is accepted on the {@code dev}
      *     profile only
      */
     public record Approval(@DefaultValue("true") boolean requireContentHash) {

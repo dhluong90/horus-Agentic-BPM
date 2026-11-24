@@ -28,7 +28,8 @@ info:
     branch on `code`. Request bodies are read bounded: a BPMN document above `definitions.max-bytes` (1 MB) or a
     JSON body above 256 KB is `413 PAYLOAD_TOO_LARGE` before it is read. Lists are keyset pages
     `{data, nextCursor, hasNext}`; pass `nextCursor` back unchanged as `cursor`. Cursors are signed for the tenant and
-    the list that issued them, so an edited, forged or other-tenant cursor is `400 QUERY_INVALID`.
+    the list that issued them and name the key that signed them (`horus.bpm.processes.cursor.keys`, AUD-13), so an
+    edited, forged, other-tenant or removed-key cursor, or one issued before key ids existed, is `400 QUERY_INVALID`.
   license:
     name: PolyForm Noncommercial 1.0.0
     url: https://polyformproject.org/licenses/noncommercial/1.0.0/
@@ -72,8 +73,9 @@ paths:
         `PENDING_APPROVAL` across all keys, including one that is not the latest version of its key, and, since #473,
         every migration plan whose execution is `PROPOSED` and every calendar change that is `PENDING`. `kind` says which
         (`DEFINITION`, `MIGRATION_PLAN`, `CALENDAR_CHANGE`), `id` is the id of the version, plan or change. Migration
-        plans are listed only for a caller holding `processes:migration:manage`; calendar changes and definition
-        versions for any caller holding `processes:read`, with `PERMISSION_REQUIRED` where the caller may not decide.
+        plans are listed only for a caller holding `processes:migration:manage`; calendar changes only for a caller holding
+        `processes:calendar:manage` (AUD-07); definition versions for any caller holding `processes:read`, with
+        `PERMISSION_REQUIRED` where the caller may not decide.
         A proposer never has `approve` (`SELF_APPROVAL_FORBIDDEN`). Permission
         `processes:read`; the answer shows what the caller may do, it does not need `processes:approve`. Ordered by
         `(requestedAt, id)`, keyset-paged with a signed cursor bound to the tenant and this list; at most
@@ -87,7 +89,7 @@ paths:
         `lockVersion` to send as `If-Match` (for a calendar change, the version it was proposed against). Items never
         carry the definition, the source, a calendar's hours or a variable. `reason` is what the proposer wrote.
 
-        `allowedActions` is what the caller may send now, in the order `approve`, `reject`. `deniedActions` gives, for
+        `allowedActions` is what the caller may send now, in the order `approve`, `reject`, `withdraw`. `withdraw` is offered to the requester of a definition version. `deniedActions` gives, for
         `approve` and `reject` only, why the caller may not send one, as a code: `PERMISSION_REQUIRED` (no
         `processes:approve`) or `SELF_APPROVAL_FORBIDDEN` (the caller requested the version, or made it under
         `lifecycle.approver-must-differ-from: makers`; a maker may still reject). An action in `allowedActions` has no
@@ -203,8 +205,10 @@ paths:
       operationId: getDefinitionVersion
       summary: Read one version of a definition
       description: |
-        Status, hashes, approval and lifecycle fields of the version; the source document is not part of the
-        answer. The `ETag` is the definition hash, quoted; the lifecycle commands take the `lockVersion` field as
+        Status, hashes, approval and lifecycle fields of the version. With `include=source` the answer also carries
+        `sourceDocument`, the original imported text exactly as it was posted (PRE-039); the same integrity check as a
+        run applies first, so a stored source that no longer gives its recorded hashes is
+        `500 DEFINITION_INTEGRITY_FAILED` (PRE-048) and any other `include` value is `400 INPUT_INVALID`. The `ETag` is the definition hash, quoted; with `include=source` it is the definition hash followed by `-source`, quoted, because the body differs and a cache must not mix the two; the lifecycle commands take the `lockVersion` field as
         `If-Match`. Another tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
       parameters:
         - name: key
@@ -215,6 +219,11 @@ paths:
           in: path
           required: true
           schema: { type: integer, minimum: 1 }
+        - name: include
+          in: query
+          required: false
+          description: "`source` adds `sourceDocument`, the original imported text"
+          schema: { type: string, enum: [source] }
       responses:
         '200':
           description: The version
@@ -227,6 +236,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
   /definitions/{key}/versions/{version}/history:
     get:
       tags: [lifecycle]
@@ -383,7 +393,7 @@ paths:
       description: |
         `PENDING_APPROVAL` to `DRAFT`; the reason is stored as `decisionComment` and in the history. A missing or
         blank reason is `400 INPUT_INVALID`. The requester cannot reject their own request
-        (`403 SELF_APPROVAL_FORBIDDEN`; withdraw follows). Publishes `processes.definition.rejected.v1`. Permission
+        (`403 SELF_APPROVAL_FORBIDDEN`; the detail points to `:withdraw`). Publishes `processes.definition.rejected.v1`. Permission
         `processes:approve`.
       parameters:
         - $ref: '#/components/parameters/DefinitionKey'
@@ -408,6 +418,41 @@ paths:
         '404': { $ref: '#/components/responses/Problem' }
         '409': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /definitions/{key}/versions/{version}:withdraw:
+    post:
+      tags: [lifecycle]
+      operationId: withdrawDefinition
+      summary: The requester takes a pending version back to draft
+      description: |
+        `PENDING_APPROVAL` to `DRAFT`, only by the identity that requested approval (permission `processes:author` or
+        `processes:deploy`); anyone else is `403 PERMISSION_DENIED`, a version that is not pending is `409 INVALID_STATE`.
+        Unlike `:reject` it records no rejection: the history row is `WITHDRAWN`, `decisionComment` stays empty and the
+        request is cleared. `If-Match` (the `lockVersion`) is required; a stale one is `409 VERSION_CONFLICT`. A replay
+        of the same `Idempotency-Key` returns the first answer and writes nothing. Publishes
+        `processes.definition.withdrawn.v1` (PRE-052).
+      parameters:
+        - $ref: '#/components/parameters/DefinitionKey'
+        - $ref: '#/components/parameters/DefinitionVersionNumber'
+        - $ref: '#/components/parameters/IfMatchDefinition'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+            example: { reason: wrong form attached }
+      responses:
+        '200': { $ref: '#/components/responses/Definition' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /definitions/{key}/versions/{version}:retire:
@@ -1880,8 +1925,10 @@ paths:
         instances in batches of `migration.batch-size`, and `GET /migrations/{id}/execution` shows the progress.
         Publishes `processes.migration.approved.v1` with both people. Permission `processes:migration:manage`.
 
-        The optional body `{"expectedPlanHash": "<64 hex>"}` (PD-139, #473) names the plan the approver reviewed, the
-        `contentHash` of its item in `GET /approvals`; another value is `409 CONTENT_CHANGED` and nothing is written.
+        The body `{"expectedPlanHash": "<64 hex>"}` (PD-139, #473, AUD-02) names the plan the approver reviewed, the
+        `contentHash` of its item in `GET /approvals`. Without it the answer is `400 CONTENT_HASH_REQUIRED`; another
+        value is `409 CONTENT_CHANGED`; nothing is written either way. Only the `dev` profile may relax this with
+        `horus.bpm.processes.approval.require-content-hash=false`.
       parameters:
         - $ref: '#/components/parameters/MigrationId'
         - name: If-Match
@@ -1891,12 +1938,13 @@ paths:
           schema: { type: string, example: '"1"' }
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
               additionalProperties: false
+              required: [expectedPlanHash]
               properties:
                 expectedPlanHash: { type: string, pattern: '^[0-9a-f]{64}$' }
       responses:
@@ -2451,8 +2499,10 @@ paths:
         (`403 SELF_APPROVAL_FORBIDDEN`, and the table refuses it too). A change that is no longer `PENDING` is
         `409 INVALID_STATE`; a calendar that changed since the proposal is `409 VERSION_CONFLICT` and the change stays
         `PENDING`. A change needs no `If-Match`: it cannot be edited, and the calendar version it was proposed against
-        is checked under the lock. The optional body member `expectedChangeHash` (PD-139, #473) names the change the
-        approver reviewed; another value is `409 CONTENT_CHANGED` and nothing is written. A repeat with the same `Idempotency-Key` returns the first answer and writes
+        is checked under the lock. The body member `expectedChangeHash` (PD-139, #473, AUD-02) names the change the
+        approver reviewed, the `contentHash` of its item in `GET /approvals`: without it the answer is
+        `400 CONTENT_HASH_REQUIRED`, another value is `409 CONTENT_CHANGED`, and nothing is written either way (only the
+        `dev` profile may relax this with `horus.bpm.processes.approval.require-content-hash=false`). A repeat with the same `Idempotency-Key` returns the first answer and writes
         nothing. Permission `processes:calendar:manage`.
       parameters:
         - $ref: '#/components/parameters/CalendarChangeId'
@@ -2747,8 +2797,9 @@ components:
           type: string
           pattern: '^[0-9a-f]{64}$'
           description: |
-            On approval only (PD-139, #473): the `contentHash` of the change as `GET /approvals` showed it. Another
-            value is `409 CONTENT_CHANGED` and nothing is written. Optional.
+            On approval only (PD-139, #473, AUD-02): the `contentHash` of the change as `GET /approvals` showed it.
+            Required: a missing value is `400 CONTENT_HASH_REQUIRED` and another value is `409 CONTENT_CHANGED`; nothing
+            is written. Ignored on rejection.
     CalendarChange:
       type: object
       required: [id, calendarKey, status, approval, baseVersion, previous, proposed, reason, proposedBy, proposedAt,
@@ -3197,7 +3248,7 @@ components:
         requestedAt: { type: string, format: date-time }
         allowedActions:
           type: array
-          items: { type: string, enum: [approve, reject] }
+          items: { type: string, enum: [approve, reject, withdraw] }
         deniedActions:
           type: object
           description: For `approve` and `reject` the caller may not send, the reason as a code
@@ -3273,6 +3324,9 @@ components:
         sourceHash:
           type: string
           description: SHA-256 of the stored source document; checked before every compile
+        sourceDocument:
+          type: string
+          description: The original imported text, byte for byte; only with `include=source` (PRE-039)
         nodeCount: { type: integer }
         approvedBy:
           type: [string, 'null']

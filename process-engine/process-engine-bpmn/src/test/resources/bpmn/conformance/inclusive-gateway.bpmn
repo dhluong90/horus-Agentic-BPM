@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="screening-split" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:inclusiveGateway id="split" default="to-standard"/>
+    <bpmn:scriptTask id="aml" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="aml"><bpmn:script>'checked'</bpmn:script></bpmn:scriptTask>
+    <bpmn:scriptTask id="sanctions" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="sanctions"><bpmn:script>'checked'</bpmn:script></bpmn:scriptTask>
+    <bpmn:scriptTask id="standard" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="standard"><bpmn:script>'checked'</bpmn:script></bpmn:scriptTask>
+    <bpmn:inclusiveGateway id="join"/>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="split"/>
+    <bpmn:sequenceFlow id="to-aml" sourceRef="split" targetRef="aml"><bpmn:conditionExpression>amount &gt;= 1000000</bpmn:conditionExpression></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="to-sanctions" sourceRef="split" targetRef="sanctions"><bpmn:conditionExpression>foreign == true</bpmn:conditionExpression></bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="to-standard" sourceRef="split" targetRef="standard"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="aml" targetRef="join"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="sanctions" targetRef="join"/>
+    <bpmn:sequenceFlow id="f7" sourceRef="standard" targetRef="join"/>
+    <bpmn:sequenceFlow id="f8" sourceRef="join" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

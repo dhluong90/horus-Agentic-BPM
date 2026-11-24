@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:error id="Err_credit" name="Credit rejected" errorCode="CREDIT_REJECTED"/>
+  <bpmn:escalation id="Esc_limit" name="Limit review" escalationCode="LIMIT_REVIEW"/>
+  <bpmn:process id="payout-with-error-and-escalation" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="credit" horus:handler="payout.credit"/>
+    <bpmn:boundaryEvent id="credit-failed" attachedToRef="credit"><bpmn:errorEventDefinition errorRef="Err_credit"/></bpmn:boundaryEvent>
+    <bpmn:subProcess id="checks">
+      <bpmn:startEvent id="checks-start"/>
+      <bpmn:intermediateThrowEvent id="raise-limit"><bpmn:escalationEventDefinition escalationRef="Esc_limit"/></bpmn:intermediateThrowEvent>
+      <bpmn:endEvent id="checks-end"/>
+      <bpmn:sequenceFlow id="c1" sourceRef="checks-start" targetRef="raise-limit"/>
+      <bpmn:sequenceFlow id="c2" sourceRef="raise-limit" targetRef="checks-end"/>
+    </bpmn:subProcess>
+    <bpmn:boundaryEvent id="limit-escalated" attachedToRef="checks" cancelActivity="false"><bpmn:escalationEventDefinition escalationRef="Esc_limit"/></bpmn:boundaryEvent>
+    <bpmn:endEvent id="paid"/>
+    <bpmn:endEvent id="refused"/>
+    <bpmn:endEvent id="escalated"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="credit"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="credit" targetRef="checks"/>
+    <bpmn:sequenceFlow id="f3" sourceRef="checks" targetRef="paid"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="credit-failed" targetRef="refused"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="limit-escalated" targetRef="escalated"/>
+  </bpmn:process>
+</bpmn:definitions>

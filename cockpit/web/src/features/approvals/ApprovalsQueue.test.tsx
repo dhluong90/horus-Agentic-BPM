@@ -12,6 +12,8 @@ import { mockHost, setScenario } from '../../mocks/node';
 
 const problem = (status: number, code: string) => HttpResponse.json({ title: code, status, code, correlationId: '01JQUEUE' }, { status, headers: { 'Content-Type': 'application/problem+json' } });
 
+const page = (data: unknown[]) => ({ data, nextCursor: null, hasNext: false });
+
 function open(hash: string) {
   window.location.hash = hash;
   render(<App />);
@@ -141,5 +143,40 @@ describe('Approvals queue across both engines (#31)', () => {
     expect(await queueTitles()).toEqual(['Card fee · Version 2', 'Customer onboarding (KYC) · Version 3', 'Fx margin · Version 2']);
     expect(cursors).toEqual([null, 'page-2']);
     expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
+  });
+
+  it('PRE_052_the_requester_withdraws_a_pending_process_definition_and_the_request_goes_after_the_engine_confirms', async () => {
+    setScenario('processes-requester');
+    let pending = true;
+    const sent: { ifMatch: string | null; key: string | null; body: unknown }[] = [];
+    mockHost.use(
+      http.get('*/api/bpm/rules/v1/approvals', () => HttpResponse.json(page([]))),
+      http.get('*/api/bpm/processes/v1/approvals', () =>
+        HttpResponse.json(page(pending ? [{
+          kind: 'DEFINITION', id: null, sourceVersion: null, reason: null, contentHash: 'a'.repeat(64), key: 'kyc-onboarding', name: 'Customer onboarding (KYC)', version: 3,
+          definitionHash: 'a'.repeat(64), lockVersion: 3, requestedBy: 'lan', requestedAt: '2026-11-18T08:30:00Z',
+          allowedActions: ['withdraw'], deniedActions: { approve: 'SELF_APPROVAL_FORBIDDEN', reject: 'SELF_APPROVAL_FORBIDDEN' },
+        }] : [])),
+      ),
+      http.post('*/api/bpm/processes/v1/definitions/kyc-onboarding/versions/3:withdraw', async ({ request }) => {
+        sent.push({ ifMatch: request.headers.get('If-Match'), key: request.headers.get('Idempotency-Key'), body: await request.json() });
+        pending = false;
+        return HttpResponse.json({
+          id: '01JD0000000000000000000003', key: 'kyc-onboarding', version: 3, status: 'DRAFT', name: 'Customer onboarding (KYC)', definitionHash: 'a'.repeat(64),
+          sourceFormat: 'BPMN_XML', sourceHash: 'a'.repeat(64), nodeCount: 4, createdBy: 'lan', createdAt: '2026-11-18T08:00:00Z', lockVersion: 4,
+        });
+      }),
+    );
+    open('#/approvals');
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    const dialog = screen.getByRole('dialog', { name: /^Withdraw .* version 3\?$/ });
+    await userEvent.type(within(dialog).getByLabelText('Reason (optional)'), 'Wrong form attached');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
+
+    expect(await screen.findByText('Nothing is waiting for your review.')).toBeInTheDocument();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ ifMatch: '"3"', body: { reason: 'Wrong form attached' } });
+    expect(sent[0]?.key).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

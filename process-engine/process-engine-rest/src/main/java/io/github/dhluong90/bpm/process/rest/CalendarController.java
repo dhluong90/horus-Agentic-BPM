@@ -115,7 +115,7 @@ public class CalendarController {
         requireKey(idempotencyKey);
         JsonNode body = body(http, DECISION_FIELDS);
         String comment = text(body, "comment");
-        // PD-139, #473: the change the approver reviewed; optional
+        // PD-139, #473: the change the approver reviewed; required unless approval.require-content-hash=false (dev)
         String expectedChangeHash = text(body, "expectedChangeHash");
         return json(HttpStatus.OK, change(calendars.approve(id, comment, idempotencyKey, expectedChangeHash)), null);
     }

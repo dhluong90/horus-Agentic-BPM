@@ -2,25 +2,54 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { nameOf } from '../../app/names';
 import { toHostError } from '../../api/hostError';
 import { useI18n } from '../../i18n/I18nProvider';
+import { useWithdrawDefinition } from '../processes/api/useProcesses';
 import { useWithdraw, type WithdrawTarget } from './useWithdraw';
 
 /** The engine's default `lifecycle.reason-max-length`; the engine checks the real limit and answers 400 above it. */
 const REASON_MAX = 2000;
 
+/** The request to withdraw, from either engine: a rule set version or a process definition version. */
+export type ProcessWithdrawTarget = WithdrawTarget & { engine: 'processes' };
+export type WithdrawRequest = (WithdrawTarget & { engine?: 'rules' }) | ProcessWithdrawTarget;
+
+const isProcess = (request: WithdrawRequest): request is ProcessWithdrawTarget => request.engine === 'processes';
+
+interface Withdrawal {
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+  send: (reason: string | undefined) => void;
+}
+
 /**
  * Withdraws the user's own request, with an optional reason. The request stays on screen until the engine
- * confirms; a refused withdrawal shows the engine's error.
+ * confirms; a refused withdrawal shows the engine's error. A process definition goes to the Process Engine, a rule set
+ * version to the Rule Engine.
  */
-export function WithdrawDialog({ request, onClose, onDone }: { request: WithdrawTarget; onClose: () => void; onDone: (message: string) => void }) {
+export function WithdrawDialog(props: { request: WithdrawRequest; onClose: () => void; onDone: (message: string) => void }) {
+  const { request, onClose, onDone } = props;
+  return isProcess(request) ? <ProcessWithdrawal request={request} onClose={onClose} onDone={onDone} /> : <RuleWithdrawal request={request} onClose={onClose} onDone={onDone} />;
+}
+
+function RuleWithdrawal({ request, onClose, onDone }: { request: WithdrawTarget; onClose: () => void; onDone: (message: string) => void }) {
+  const { t } = useI18n();
+  const name = { name: nameOf('rule set', request.ruleSet, request), version: String(request.version) };
+  const withdraw = useWithdraw(() => { onDone(t('approvals.withdrawn', name)); });
+  return <WithdrawForm name={name} onClose={onClose} withdrawal={{ isPending: withdraw.isPending, isError: withdraw.isError, error: withdraw.error, send: (reason) => { withdraw.mutate({ version: request, reason }); } }} />;
+}
+
+function ProcessWithdrawal({ request, onClose, onDone }: { request: ProcessWithdrawTarget; onClose: () => void; onDone: (message: string) => void }) {
+  const { t } = useI18n();
+  const name = { name: nameOf('process', request.ruleSet, request), version: String(request.version) };
+  const withdraw = useWithdrawDefinition(() => { onDone(t('approvals.withdrawn', name)); });
+  return <WithdrawForm name={name} onClose={onClose} withdrawal={{ isPending: withdraw.isPending, isError: withdraw.isError, error: withdraw.error, send: (reason) => { withdraw.mutate({ key: request.ruleSet, version: request.version, lockVersion: request.lockVersion, reason }); } }} />;
+}
+
+function WithdrawForm({ name, withdrawal: withdraw, onClose }: { name: { name: string; version: string }; withdrawal: Withdrawal; onClose: () => void }) {
   const { t } = useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
   const reasonId = useId();
   const [reason, setReason] = useState('');
-  const version = request;
-  const name = { name: nameOf('rule set', version.ruleSet, version), version: String(version.version) };
-  const withdraw = useWithdraw(() => {
-    onDone(t('approvals.withdrawn', name));
-  });
 
   // The native dialog gives the focus trap, Escape and focus return.
   useEffect(() => {
@@ -44,7 +73,7 @@ export function WithdrawDialog({ request, onClose, onDone }: { request: Withdraw
           event.preventDefault();
           if (withdraw.isPending) return;
           const text = reason.trim();
-          withdraw.mutate({ version, reason: text === '' ? undefined : text });
+          withdraw.send(text === '' ? undefined : text);
         }}
       >
         <h2 id={`${reasonId}-title`} className="dialog__title">{t('approvals.withdrawTitle', name)}</h2>

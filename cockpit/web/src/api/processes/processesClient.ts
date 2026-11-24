@@ -115,6 +115,8 @@ export interface ProcessesClient {
   approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
   /** rejectDefinition: back to draft with a reason */
   rejectDefinition(key: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<DefinitionVersion>;
+  /** withdrawDefinition: the requester takes a pending version back to draft, with an optional reason (PRE-052) */
+  withdrawDefinition(key: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<DefinitionVersion>;
   /** exportDefinition (format=bpmn): the version's graph as BPMN 2.0 XML; writes nothing */
   exportBpmn(key: string, version: number, signal?: AbortSignal): Promise<string>;
   /** getTask: the task with the actions this caller may take, and the review context of a refused agent answer */
@@ -148,7 +150,7 @@ export interface ProcessesClient {
   /** proposeMigrationExecution: asks a second person to approve moving the instances, with a reason */
   proposeMigration(id: string, reason: string, idempotencyKey: string): Promise<MigrationExecution>;
   /** approveMigrationExecution: as a second person; `lockVersion` is the proposal the approver was shown, `expectedPlanHash` the plan hash of the item they were shown (PD-139) */
-  approveMigration(id: string, lockVersion: number, idempotencyKey: string, expectedPlanHash?: string): Promise<MigrationExecution>;
+  approveMigration(id: string, lockVersion: number, idempotencyKey: string, expectedPlanHash: string): Promise<MigrationExecution>;
   /** listCalendarChanges: the pending changes of the business calendars, newest first (PRE-181) */
   listCalendarChanges(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<CalendarChange>>;
   /** getCalendarChange: one change with its old and new value */
@@ -246,6 +248,10 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async rejectDefinition(key, version, lockVersion, reason, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify({ reason }) };
       return (await call({ method: 'POST', path: `${versionPath(key, version)}:reject`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
+    },
+    async withdrawDefinition(key, version, lockVersion, reason, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) };
+      return (await call({ method: 'POST', path: `${versionPath(key, version)}:withdraw`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
     },
     async exportBpmn(key, version, signal) {
       const answer = await downloadFromHost(fetchImpl, baseUrl, { method: 'GET', path: `${versionPath(key, version)}/export?format=bpmn`, ...withSignal(signal) }, 'application/bpmn+xml');
@@ -348,9 +354,9 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:execute`, headers: { 'Idempotency-Key': idempotencyKey }, body }, migrationExecution)).data;
     },
     async approveMigration(id, lockVersion, idempotencyKey, expectedPlanHash) {
-      // A body only with a plan hash: an approval without one is the approval of a client written before #473.
-      const body = expectedPlanHash === undefined ? {} : { body: { contentType: 'application/json', text: JSON.stringify({ expectedPlanHash }) } };
-      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:approve`, headers: command(lockVersion, idempotencyKey), ...body }, migrationExecution)).data;
+      // The engine refuses an approval that names no reviewed plan hash (AUD-02).
+      const body = { contentType: 'application/json', text: JSON.stringify({ expectedPlanHash }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:approve`, headers: command(lockVersion, idempotencyKey), body }, migrationExecution)).data;
     },
     async listCalendarChanges(request = {}) {
       const query = new URLSearchParams({ status: 'PENDING' });

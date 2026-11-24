@@ -61,7 +61,8 @@ public class MigrationExecutionController {
     public ResponseEntity<byte[]> approve(@PathVariable("id") String id, HttpServletRequest http,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
-        // Optional body {"expectedPlanHash"}: the plan the approver reviewed (PD-139, #473).
+        // Body {"expectedPlanHash"}: the plan the approver reviewed (PD-139, #473); required unless
+        // approval.require-content-hash=false (dev profile only).
         String expectedPlanHash = null;
         byte[] bytes = ProcessController.boundedBody(http, EngineDefaults.MAX_JSON_BODY_BYTES);
         if (bytes.length > 0) {
