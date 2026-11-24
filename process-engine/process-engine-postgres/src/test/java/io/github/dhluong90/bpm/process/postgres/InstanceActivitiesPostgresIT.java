@@ -42,6 +42,8 @@ class InstanceActivitiesPostgresIT {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final String I7 = "I7000000000000000000000007";
+    static final String PAYOUT = "I9000000000000000000000009";
+    static final String RUNNING = "IA00000000000000000000000A";
     static final String OTHER = "I8000000000000000000000008";
     static final String DEFINITION = "DEFA0000000000000000000002";
     static final Instant STARTED = Instant.parse("2027-03-10T08:00:00Z");
@@ -79,6 +81,15 @@ class InstanceActivitiesPostgresIT {
                         ts(STARTED.minus(Duration.ofDays(400))))
                 .update();
         instance(I7, "{\"nationalId\":\"hmac:k1:9f2c\",\"applicant\":\"" + NATIONAL_ID + "\"}", STARTED, ENDED);
+        instance(PAYOUT, "{}", STARTED, ENDED);
+        history(PAYOUT, STARTED, "NODE_ENTERED", "credit-customer", null, null);
+        history(PAYOUT, STARTED.plusSeconds(2), "ERROR_THROWN", "credit-customer", null, null);
+        history(PAYOUT, STARTED.plusSeconds(2), "TOKEN_CANCELLED", "credit-customer", null, null);
+        history(PAYOUT, STARTED.plusSeconds(3), "NODE_ENTERED", "tell-failure", null, null);
+        history(PAYOUT, STARTED.plusSeconds(4), "NODE_COMPLETED", "tell-failure", null, null);
+        history(PAYOUT, ENDED, "INSTANCE_ENDED", null, null, null);
+        instance(RUNNING, "{}", STARTED, null);
+        history(RUNNING, STARTED, "NODE_ENTERED", "approve", null, null);
         instance(OTHER, "{}", STARTED.minus(Duration.ofDays(300)), STARTED.minus(Duration.ofDays(299)));
 
         Instant t = STARTED;
@@ -119,6 +130,23 @@ class InstanceActivitiesPostgresIT {
     }
 
     @Test
+    void PRE_027_step_interrupted_by_an_error_boundary_has_a_final_state_when_the_instance_ends() {
+        // Given a loan payout whose credit step was cancelled by its error boundary, and an instance that then ended
+        InstanceActivities activities = service.activities(PAYOUT, 200);
+
+        // Then no step is left ACTIVE on the ended instance
+        assertThat(activities.nodes()).extracting(InstanceActivities.Node::nodeId, InstanceActivities.Node::state)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("credit-customer", InstanceActivities.State.COMPLETED),
+                        org.assertj.core.groups.Tuple.tuple("tell-failure", InstanceActivities.State.COMPLETED));
+    }
+
+    @Test
+    void PRE_027_step_entered_and_not_left_is_active_while_the_instance_runs() {
+        assertThat(service.activities(RUNNING, 200).nodes()).extracting(InstanceActivities.Node::state)
+                .containsExactly(InstanceActivities.State.ACTIVE);
+    }
+
+    @Test
     void PRE_027_activities_bounded_by_instance_lifetime() {
         InstanceActivities activities = service.activities(I7, 200);
 
@@ -135,7 +163,9 @@ class InstanceActivitiesPostgresIT {
         assertThat(assess.incidentCode()).isEqualTo("AGENT_TIMEOUT");
         assertThat(assess.duration()).as("not completed").isNull();
         InstanceActivities.Node approve = activities.nodes().get(2);
-        assertThat(approve.state()).isEqualTo(InstanceActivities.State.ACTIVE);
+        assertThat(approve.state()).as("entered, never closed, and the instance ended: closed at the end")
+                .isEqualTo(InstanceActivities.State.COMPLETED);
+        assertThat(approve.completedAt()).isEqualTo(ENDED);
         assertThat(approve.attempts()).isEqualTo(1);
         assertThat(activities.entries()).hasSize(9).extracting(InstanceActivities.Entry::occurredAt).isSorted();
         assertThat(activities.hasMore()).isFalse();
@@ -207,6 +237,6 @@ class InstanceActivitiesPostgresIT {
     }
 
     private static Timestamp ts(Instant instant) {
-        return Timestamp.from(instant);
+        return instant == null ? null : Timestamp.from(instant);
     }
 }

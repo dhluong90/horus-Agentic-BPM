@@ -489,6 +489,26 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
+     * Whether the removed hyphen-less key is set in a property file, command line or other explicit source. An
+     * environment variable is not checked: {@code HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE} is the only form an
+     * environment variable can take for both the old key and the current one, so it is read as the current key.
+     */
+    static boolean removedAutoApproveKeySet(Environment environment) {
+        if (environment instanceof org.springframework.core.env.ConfigurableEnvironment configurable) {
+            for (org.springframework.core.env.PropertySource<?> source : configurable.getPropertySources()) {
+                if (source instanceof org.springframework.core.env.SystemEnvironmentPropertySource) {
+                    continue;
+                }
+                if (source.containsProperty(REMOVED_AUTO_APPROVE)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return environment.containsProperty(REMOVED_AUTO_APPROVE);
+    }
+
+    /**
      * Refuses, outside the {@code dev} profile, the relaxations of TR-SEC-11, and the removed auto-approve key on any
      * profile (PRE-022).
      *
@@ -496,7 +516,7 @@ public class ProcessEngineAutoConfiguration {
      * @param properties the bound settings
      */
     static void requireDevOnlyRelaxations(Environment environment, ProcessEngineProperties properties) {
-        if (environment.containsProperty(REMOVED_AUTO_APPROVE)) {
+        if (removedAutoApproveKeySet(environment)) {
             throw new IllegalStateException(REMOVED_AUTO_APPROVE + " was removed; use "
                     + "horus.bpm.processes.definitions.auto-approve, which is accepted only when the dev profile is "
                     + "active on its own (PRE-022). Remove the old key whatever its value.");

@@ -84,7 +84,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
     public enum State {
         /** Entered and not left since. */
         ACTIVE,
-        /** Left after its last entry. */
+        /** Left after its last entry: completed, or interrupted by a boundary event or the end of its scope. */
         COMPLETED,
         /** Holds an open incident. */
         INCIDENT

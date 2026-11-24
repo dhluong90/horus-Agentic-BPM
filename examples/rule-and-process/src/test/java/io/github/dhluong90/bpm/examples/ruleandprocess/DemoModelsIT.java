@@ -270,6 +270,10 @@ class DemoModelsIT {
         assertThat(undos).as("newest first: the event sub-process of the payout, the debit, then the hold")
                 .containsExactly("payout", "debit", "reserve");
         assertThat(activities).contains("COMPENSATED", "tell-failure").doesNotContain("tell-success");
+        for (JsonNode node : JSON.readTree(activities).get("nodes")) {
+            assertThat(node.get("state").stringValue()).as("step " + node.get("nodeId") + " of an ended instance")
+                    .isNotEqualTo("ACTIVE");
+        }
     }
 
     @Test

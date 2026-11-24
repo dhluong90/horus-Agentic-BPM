@@ -130,7 +130,7 @@ The service steps these models call are registered by the host in [`DemoStepHand
 At start-up the log shows, in order: the host's own migration, the Rule Engine schema (`rle_schema_history`), the Process Engine schema (`pre_schema_history`), every demo model imported as version 1 `ACTIVE` for `bank-a` (the line shown is the first), and the `card-fee` rule set published by two seed identities (one requests, the other approves).
 
 ```
-Rule Engine schema at version 2 (2 migration(s) applied)
+Rule Engine schema at version 1 (1 migration(s) applied)
 Process Engine schema at version 1 (1 migration(s) applied)
 Process definition card-fee-review v1 ACTIVE for tenant bank-a from classpath:processes/card-fee-review.bpmn (hash 3fa54143...)
 Rule set card-fee v1 PUBLISHED (requested by seed-author, approved by seed-approver)

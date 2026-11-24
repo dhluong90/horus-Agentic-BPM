@@ -82,7 +82,7 @@ public final class InstanceActivityService {
                     Comparator.nullsLast(Comparator.naturalOrder())).thenComparing(ProcessQueryStore.NodeActivityRow::nodeId));
             List<InstanceActivities.Node> nodes = new ArrayList<>();
             for (ProcessQueryStore.NodeActivityRow row : rows) {
-                nodes.add(node(row, incidents.remove(row.nodeId())));
+                nodes.add(node(row, incidents.remove(row.nodeId()), instance.endedAt()));
             }
             for (ProcessStore.IncidentRow incident : incidents.values()) {
                 // An incident on a step with no history row in the window is still shown on its step.
@@ -172,15 +172,26 @@ public final class InstanceActivityService {
         return out;
     }
 
-    private static InstanceActivities.Node node(ProcessQueryStore.NodeActivityRow row, ProcessStore.IncidentRow incident) {
+    /**
+     * One step as the timeline shows it. A step with an open incident is {@code INCIDENT}. On an ended instance every
+     * other step is {@code COMPLETED}: the instance has no live token, so a step whose history has no closing row (a
+     * scope that only appears in the undo events, for one) is closed at the instance's end instead of staying ACTIVE.
+     */
+    private static InstanceActivities.Node node(ProcessQueryStore.NodeActivityRow row, ProcessStore.IncidentRow incident,
+            Instant instanceEnd) {
         boolean left = row.lastCompletedAt() != null
                 && (row.lastEnteredAt() == null || !row.lastCompletedAt().isBefore(row.lastEnteredAt()));
+        Instant completedAt = row.lastCompletedAt();
+        if (!left && instanceEnd != null && incident == null) {
+            left = true;
+            completedAt = instanceEnd;
+        }
         InstanceActivities.State state = incident != null ? InstanceActivities.State.INCIDENT
                 : left ? InstanceActivities.State.COMPLETED : InstanceActivities.State.ACTIVE;
         Duration duration = left && row.firstEnteredAt() != null
-                ? Duration.between(row.firstEnteredAt(), row.lastCompletedAt()) : null;
+                ? Duration.between(row.firstEnteredAt(), completedAt) : null;
         int attempts = (int) Math.max(row.entries(), row.attemptIds());
-        return new InstanceActivities.Node(row.nodeId(), state, row.firstEnteredAt(), row.lastCompletedAt(), duration,
+        return new InstanceActivities.Node(row.nodeId(), state, row.firstEnteredAt(), completedAt, duration,
                 attempts, row.lastActor(), incident == null ? null : incident.errorCode(),
                 incident == null ? null : incident.createdAt());
     }

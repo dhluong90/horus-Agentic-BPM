@@ -70,7 +70,7 @@ public interface ProcessQueryStore {
      * @param nodeId the step
      * @param firstEnteredAt its first {@code NODE_ENTERED}, or null
      * @param lastEnteredAt its last {@code NODE_ENTERED}, or null
-     * @param lastCompletedAt its last {@code NODE_COMPLETED}, or null
+     * @param lastCompletedAt its last {@code NODE_COMPLETED} or {@code TOKEN_CANCELLED} (a step interrupted by a boundary event), or null
      * @param entries its {@code NODE_ENTERED} count
      * @param attemptIds its distinct attempt ids
      * @param lastActor the last non-null actor of its entries, or null

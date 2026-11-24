@@ -462,7 +462,7 @@ final class ProcessListQueries {
             "SELECT node_id, "
                     + "min(occurred_at) FILTER (WHERE event_type = 'NODE_ENTERED') AS first_entered_at, "
                     + "max(occurred_at) FILTER (WHERE event_type = 'NODE_ENTERED') AS last_entered_at, "
-                    + "max(occurred_at) FILTER (WHERE event_type = 'NODE_COMPLETED') AS last_completed_at, "
+                    + "max(occurred_at) FILTER (WHERE event_type IN ('NODE_COMPLETED', 'TOKEN_CANCELLED')) AS last_completed_at, "
                     + "count(*) FILTER (WHERE event_type = 'NODE_ENTERED') AS entries, "
                     + "count(DISTINCT attempt_id) AS attempt_ids, "
                     + "(array_agg(actor_id ORDER BY occurred_at DESC, id DESC) FILTER (WHERE actor_id IS NOT NULL))[1] "

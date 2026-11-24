@@ -54,6 +54,21 @@ class DevOnlyRelaxationTest {
     }
 
     @Test
+    void PRE_022_environment_variable_sets_the_current_auto_approve_key() {
+        // HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE also matches the removed hyphen-less key, so it must not trip the guard
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("dev");
+        environment.getPropertySources().addFirst(new org.springframework.core.env.SystemEnvironmentPropertySource(
+                "systemEnvironment", new java.util.HashMap<String, Object>(java.util.Map.of(
+                        "HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE", "false"))));
+        ProcessEngineProperties properties = org.springframework.boot.context.properties.bind.Binder.get(environment)
+                .bindOrCreate("horus.bpm.processes", ProcessEngineProperties.class);
+        assertThat(properties.definitions().autoApprove()).isFalse();
+        assertThatCode(() -> ProcessEngineAutoConfiguration.requireDevOnlyRelaxations(environment, properties))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     void PRE_114_single_person_calendar_changes_are_refused_outside_dev() {
         // PD-131: four eyes is the default; single is accepted only when dev is active on its own
         String property = "horus.bpm.processes.calendar.approval";
