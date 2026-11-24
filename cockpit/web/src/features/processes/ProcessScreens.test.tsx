@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../../App';
@@ -261,6 +261,9 @@ describe('#499 data objects and data stores', () => {
       setScenario('processes-reviewer');
       open('#/processes/loan-origination/3');
       const diagram = await screen.findByRole('group', { name: /Diagram of Loan origination/ });
+      // Fit shows the whole drawing and never scrolls; the minimap belongs to 100 %, where it pans.
+      expect(document.querySelector('[data-minimap]')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '100 %' }));
       await waitFor(() => { expect(document.querySelector('[data-minimap]')).not.toBeNull(); });
       expect(diagram.closest('.dg__frame')).toHaveClass('dg__frame--clear-map');
     } finally {

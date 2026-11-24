@@ -313,14 +313,13 @@ async function diagramFacts(page: Page, nodeId?: string) {
   }, nodeId ?? '');
 }
 
-/** At the default Fit a case draws no text under 12 px, its checks are at least 22 px, and the selected step is in view. */
+/** At the default Fit the whole case is in view, whatever its text size (see diagram-fit.spec.ts); the selected step is among it. */
 async function expectReadableCase(page: Page) {
   const picked = page.locator('[data-layout="auto"] .dg-node--selected');
   const selected = (await picked.count()) > 0 ? await picked.getAttribute('data-node') : null;
   await expect(async () => {
     const facts = await diagramFacts(page, selected ?? undefined);
-    expect(facts.smallest).toBeGreaterThanOrEqual(12);
-    expect(facts.smallestCheck).toBeGreaterThanOrEqual(22);
+    expect(facts.scrolls).toBe(false);
     if (selected !== null) expect(facts.nodeInView).toBe(true);
   }).toPass({ timeout: 5_000 });
 }
@@ -510,11 +509,12 @@ for (const locale of LOCALES) {
 }
 
 for (const viewport of VIEWPORTS) {
-  test(`CKP_017_a_wide_case_opens_at_the_12px_floor_centred_on_the_current_step_${String(viewport.height)}`, async ({ page }) => {
+  test(`CKP_017_a_wide_case_at_100_percent_draws_12px_text_and_centres_on_the_current_step_${String(viewport.height)}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await mockEngines(page);
     for (const [id, step] of [[KYC_INSTANCE_ID, 'approve'], [INCIDENT_INSTANCE_ID, 'assess-documents']] as const) {
       await page.goto(`./#/instances/${id}`);
+      await page.getByRole('button', { name: '100 %' }).click();
       await expect(page.locator(`[data-node="${step}"]`)).toHaveAttribute('aria-pressed', 'true');
       await expect(async () => {
         const facts = await diagramFacts(page, step);
@@ -541,6 +541,9 @@ test('CKP_017_a_wide_case_pans_by_keyboard_and_by_drag', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockEngines(page);
   await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
+  // By keyboard, so the canvas's focus ring is the keyboard one.
+  await page.getByRole('button', { name: '100 %' }).focus();
+  await page.keyboard.press('Enter');
   const frame = page.getByRole('region', { name: 'Diagram canvas. Use the arrow keys to move around.' });
   await expect(frame).toBeVisible();
   await expect(page.locator('[data-minimap="true"]')).toBeVisible();
@@ -564,26 +567,29 @@ test('CKP_017_a_wide_case_pans_by_keyboard_and_by_drag', async ({ page }) => {
   await expect.poll(left).toBeLessThan(start);
 });
 
-test('CKP_017_whole_case_is_an_overview_below_the_floor', async ({ page }) => {
+test('CKP_017_fit_shows_the_whole_case_and_100_percent_pans', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockEngines(page);
   await page.goto(`./#/instances/${KYC_INSTANCE_ID}`);
-  await page.getByRole('button', { name: 'Whole case' }).click();
-  await expect(page.getByText('Overview of the whole case; text is smaller.')).toBeVisible();
+  await expect(page.locator('[data-layout="auto"]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Whole case' })).toHaveCount(0);
   await expect(async () => {
     const facts = await diagramFacts(page);
     expect(facts.scrolls).toBe(false);
   }).toPass({ timeout: 5_000 });
   await expect(page.locator('[data-minimap="true"]')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Fit' }).click();
+  await page.getByRole('button', { name: '100 %' }).click();
   await expect(page.locator('[data-minimap="true"]')).toBeVisible();
+  await page.getByRole('button', { name: 'Fit' }).click();
+  await expect(page.locator('[data-minimap="true"]')).toHaveCount(0);
 });
 
 for (const viewport of VIEWPORTS) {
-  test(`CKP_069_diagram_text_is_at_least_12px_at_fit_and_fit_uses_the_canvas_${String(viewport.height)}`, async ({ page }) => {
+  test(`CKP_069_diagram_text_is_at_least_12px_at_100_percent_${String(viewport.height)}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await mockEngines(page);
     await page.goto('./#/processes/loan-origination/3');
+    await page.getByRole('button', { name: '100 %' }).click();
     const svg = page.locator('[data-layout="auto"]');
     await expect(svg).toBeVisible();
     const sizes = await svg.evaluate((element) => {
@@ -600,8 +606,6 @@ for (const viewport of VIEWPORTS) {
     });
     expect(sizes.smallest).toBeGreaterThanOrEqual(12);
     expect(sizes.truncated).toBe(false);
-    // Fit fills the canvas's width, or the drawing scrolls inside it at 100 % rather than shrink its text.
-    expect(sizes.scrolls || sizes.svgWidth >= sizes.frameWidth - 24).toBe(true);
     await expect(page.locator('[data-node="no-documents"]')).toContainText('Timer');
   });
 }

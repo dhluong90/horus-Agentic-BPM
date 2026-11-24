@@ -54,6 +54,12 @@ export function placeCollaboration(layout: Layout, graph: DiagramGraph): Collabo
 
   const nodes = layout.nodes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }));
   const edges = layout.edges.map((e) => ({ ...e, points: e.points.map(shift), labelAt: e.labelAt === undefined ? undefined : shift(e.labelAt) }));
+  // Data symbols and their associations move with the steps they hang under.
+  const data = layout.data === undefined ? undefined : {
+    items: layout.data.items.map((item) => ({ ...item, x: item.x + dx, y: item.y + dy })),
+    links: layout.data.links.map((link) => ({ ...link, points: link.points.map(shift) })),
+  };
+  const dataBottom = data === undefined ? 0 : Math.max(0, ...data.items.map((item) => item.y + item.height + item.lines.length * 15 + 24));
   const frameX = MARGIN;
   const pool: PlacedBox | undefined = framed
     ? { id: pools[selfIndex]?.id ?? '', label: pools[selfIndex]?.name ?? graph.name ?? '', x: frameX, y: top, width: frameWidth, height: frameHeight }
@@ -91,6 +97,7 @@ export function placeCollaboration(layout: Layout, graph: DiagramGraph): Collabo
     flows.push({ id: flow.id, label, points, labelAt: { x: (here.x + there.x) / 2, y: (here.y + there.y) / 2 } });
   }
 
-  const bottom = Math.max(top + frameHeight, ...blackBoxes.map((b) => b.y + b.height)) + MARGIN;
-  return { layout: { ...layout, nodes, edges, width: frameWidth + 2 * MARGIN, height: bottom }, pool, lanes, blackBoxes, flows };
+  const bottom = Math.max(top + frameHeight, dataBottom, ...blackBoxes.map((b) => b.y + b.height)) + MARGIN;
+  const width = Math.max(frameWidth + 2 * MARGIN, data === undefined ? 0 : Math.max(...data.items.map((item) => item.x + item.width)) + MARGIN);
+  return { layout: { ...layout, nodes, edges, width, height: bottom, ...(data !== undefined ? { data } : {}) }, pool, lanes, blackBoxes, flows };
 }

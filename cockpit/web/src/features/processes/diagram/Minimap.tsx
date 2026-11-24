@@ -1,4 +1,5 @@
 import type { MouseEvent } from 'react';
+import type { Box } from '../model/bounds';
 import { SYMBOL_SIZE, symbolCentre, type Layout } from '../model/layout';
 
 /** The part of the drawing in view, in drawing units. */
@@ -12,17 +13,17 @@ const MAP_MAX_HEIGHT = 96;
  * canvas. Clicking a point centres the view there; the same panning is available by keyboard on the canvas, so the
  * map itself is decoration for assistive technology.
  */
-export function Minimap({ layout, view, selected, onCentre }: { layout: Layout; view: View; selected: string | undefined; onCentre: (x: number, y: number) => void }) {
-  const ratio = Math.min(MAP_WIDTH / layout.width, MAP_MAX_HEIGHT / layout.height);
-  const width = Math.round(layout.width * ratio);
-  const height = Math.round(layout.height * ratio);
+export function Minimap({ layout, bounds, view, selected, onCentre }: { layout: Layout; bounds: Box; view: View; selected: string | undefined; onCentre: (x: number, y: number) => void }) {
+  const ratio = Math.min(MAP_WIDTH / bounds.width, MAP_MAX_HEIGHT / bounds.height);
+  const width = Math.round(bounds.width * ratio);
+  const height = Math.round(bounds.height * ratio);
   const centre = (event: MouseEvent<SVGSVGElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
-    onCentre((event.clientX - box.left) / ratio, (event.clientY - box.top) / ratio);
+    onCentre(bounds.x + (event.clientX - box.left) / ratio, bounds.y + (event.clientY - box.top) / ratio);
   };
   return (
     <div className="dg__minimap" aria-hidden="true" data-minimap="true">
-      <svg width={width} height={height} viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`} onClick={centre}>
+      <svg width={width} height={height} viewBox={`${String(bounds.x)} ${String(bounds.y)} ${String(bounds.width)} ${String(bounds.height)}`} onClick={centre}>
         {layout.edges.map((edge) => (
           <polyline key={edge.id} className="dg__minimap-edge" points={edge.points.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join(' ')} />
         ))}

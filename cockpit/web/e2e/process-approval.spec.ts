@@ -25,7 +25,7 @@ const T = {
   en: {
     approve: 'Approve change', reject: 'Reject', review: 'Review change', processes: 'Processes', comment: 'Comment', signIn: 'Sign in again',
     self: 'You requested this change, so someone else approves it.', waiting: 'Waiting for a second person to approve.',
-    tooLarge: 'Too large to approve here', tooLargeLine: 'Too large to approve here: the change list is cut off.', whole: 'Whole process',
+    tooLarge: 'Too large to approve here', tooLargeLine: 'Too large to approve here: the change list is cut off.',
     changed: 'This version changed after you opened it. Check the changes again before you decide.',
     done: 'Approved. In effect from', rejected: 'Rejected. Version 3 is a draft again.', first: 'First version: nothing in effect to compare.',
     removedStep: 'Wait one day', inEffect: 'In effect · version 2', kyc: 'Customer onboarding (KYC)', card: 'Card dispute',
@@ -33,7 +33,7 @@ const T = {
   vi: {
     approve: 'Duyệt thay đổi', reject: 'Từ chối', review: 'Xem thay đổi', processes: 'Quy trình', comment: 'Ghi chú', signIn: 'Đăng nhập lại',
     self: 'Bạn đã gửi duyệt thay đổi này, nên người khác sẽ duyệt.', waiting: 'Đang chờ người thứ hai duyệt.',
-    tooLarge: 'Quá lớn để duyệt tại đây', tooLargeLine: 'Quá lớn để duyệt tại đây: danh sách thay đổi bị cắt.', whole: 'Cả quy trình',
+    tooLarge: 'Quá lớn để duyệt tại đây', tooLargeLine: 'Quá lớn để duyệt tại đây: danh sách thay đổi bị cắt.',
     changed: 'Phiên bản này đã thay đổi sau khi bạn mở. Hãy kiểm tra lại trước khi quyết định.',
     done: 'Đã duyệt. Áp dụng từ', rejected: 'Đã từ chối. Phiên bản 3 trở lại bản nháp.', first: 'Phiên bản đầu tiên: chưa có phiên bản đang áp dụng để so sánh.',
     removedStep: 'Chờ một ngày', inEffect: 'Đang áp dụng · phiên bản 2', kyc: 'Mở khách hàng mới (KYC)', card: 'Khiếu nại thẻ',
@@ -86,11 +86,6 @@ const SCREENS: readonly Screen[] = [
     name: 'approval-truncated', scenario: 'processes-approver', hash: PENDING, seed: { truncatedDiff: true },
     // The reason is said once, beside Approve in the dock (#443).
     focus: (page, l) => dock(page, l).getByText(T[l].tooLargeLine, { exact: true }), action: approveButton,
-  },
-  {
-    name: 'approval-whole-process', scenario: 'processes-approver', hash: PENDING,
-    prepare: async (page, l) => { await page.getByRole('button', { name: T[l].whole }).click(); },
-    focus: (page) => page.locator('.dg__note'), action: approveButton,
   },
   {
     name: 'approval-content-changed', scenario: 'processes-approver', hash: PENDING,
