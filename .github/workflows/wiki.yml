@@ -10,13 +10,18 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - name: Sync wiki/ to the GitHub wiki
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          if ! git clone --quiet "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki; then
+          # The token travels in an HTTP header for this process only: it is not in the clone URL, the remote or the log.
+          auth="Authorization: Basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          if ! git -c "http.extraheader=${auth}" clone --quiet "https://github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki; then
             echo "::warning::Wiki not initialised. Create the first page once in the GitHub UI, then re-run this workflow."; exit 0; fi
           rsync -a --delete --exclude .git wiki/ /tmp/wiki/
           cd /tmp/wiki
@@ -24,4 +29,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then echo "wiki already up to date"; else
-            git commit -m "docs(wiki): sync from ${GITHUB_SHA::7}"; git push; fi
+            git commit -m "docs(wiki): sync from ${GITHUB_SHA::7}"; git -c "http.extraheader=${auth}" push; fi

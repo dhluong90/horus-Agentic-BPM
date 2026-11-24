@@ -5,13 +5,25 @@
 - [[Licensing and commercial use|Licensing-and-Commercial-Use]]
 
 **Get started**
-- [[Rule Engine in 30 minutes|Getting-Started]]
+- [[Your own service: a process and a decision|Getting-Started-Your-Own-Service]]
+- [[Run the example host (Rule Engine in 30 minutes)|Getting-Started]]
 
 **Concepts**
 - [[Concepts]]
 - [[Principles]]
 - [[Architecture]]
 - [[Configuration and extension points|Configuration-and-Extension-Points]]
+
+**Developer guides**
+- [[All guides|Guides]]
+- [[Embedding in Spring Boot|Guide-Embedding-in-Spring-Boot]]
+- [[Modelling in BPMN|Guide-Modelling-BPMN]]
+- [[Task handlers and forms|Guide-Task-Handlers-and-Forms]]
+- [[Messages, signals and timers|Guide-Messages-Signals-and-Timers]]
+- [[Errors and compensation|Guide-Errors-and-Compensation]]
+- [[Decisions from processes|Guide-Decisions-from-Processes]]
+- [[REST API and OpenAPI|Guide-REST-API-and-OpenAPI]]
+- [[Testing|Guide-Testing]]
 
 **Rule Engine**
 - [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]]
@@ -38,6 +50,7 @@
 - [[Host metadata and permissions|Host-Metadata-and-Permissions]]
 
 **Reference**
+- [[Troubleshooting]]
 - [[Common error codes|Common-Error-Codes]]
 - [[Technical requirements|Technical-Requirements]]
 

@@ -71,7 +71,7 @@ Not sure? Read [[Compare and choose|Compare-and-Choose]]. It sets this project a
 | You are | Your question | Read |
 |---|---|---|
 | Evaluating or choosing an architecture | Does it fit, what does it replace, what does it not do? | [[Compare and choose|Compare-and-Choose]], [[Architecture]], [[Feature status|Feature-Status]] |
-| A developer adding it to a service | How do I get a first decision from my code? | [[Getting Started]], [[Rule Engine Decision API]], [[Rule Engine Configuration]] |
+| A developer adding it to a service | How do I get a first process and decision running? | [[Getting Started: your own service|Getting-Started-Your-Own-Service]], [[Developer guides|Guides]], [[Troubleshooting]] |
 | A rule author or business analyst | How do I change a rule and get it approved? | [[Rule Engine Authoring Decision Tables]], [[Rule Engine Versioning and Publishing]], [[Cockpit]] |
 | Designing AI agent steps | How is agent output checked, and who reviews it? | [[Guarded agent steps|Guarded-Agent-Steps]], [[Process Engine Overview]] |
 | An operator | What runs in my service, and what fails how? | [[Architecture]] sections 8 and 9, [[Cockpit]] |

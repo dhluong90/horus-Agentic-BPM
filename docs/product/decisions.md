@@ -4,7 +4,7 @@
 |---|---|
 | Type | Reference (decision record) |
 | Owner area | Product |
-| Last reviewed | 2026-11-23 |
+| Last reviewed | 2026-11-24 |
 
 This log records every product decision about the engines: scope, milestones, priorities, product rules and the acceptance of architecture decisions that change what ships. The product manager writes the question and a recommendation first; the product owner decides (PD-001). Since 2026-11-19 the product manager also decides business and use-case questions under delegated authority, while the product owner keeps release dates, licensing and commercial terms and can overrule any entry (PD-073). Every decision follows the principle "generic by design" (PD-074). A decision is never applied to the roadmap, the feature map, a PRD or a SPEC before its status here is Decided.
 
@@ -173,6 +173,7 @@ Architecture decisions keep their own records in [`../adr/`](../adr/). When an A
 | [PD-149](#pd-149-10-is-one-baseline-release-with-bpmn-common-executable) | 1.0 is one baseline release with BPMN Common Executable | Decided (product owner, 2026-11-23); supersedes PD-057 and PD-062 stage plan |
 | [PD-150](#pd-150-process-models-are-imported-a-built-in-modeller-comes-after-10) | Process models are imported; a built-in modeller comes after 1.0 | Decided (product owner, 2026-11-23) |
 | [PD-151](#pd-151-lean-engineering-until-the-baseline) | Lean engineering until the baseline | Decided (product owner, 2026-11-23); defers #113 |
+| [PD-152](#pd-152-documentation-is-developer-focused-and-four-open-issues-are-settled) | Documentation is developer-focused, and four open issues are settled | Decided (product owner, 2026-11-24); closes #89, completes #119 |
 
 ---
 
@@ -4183,3 +4184,23 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Consequences.**
 - Nothing is closed by this decision.
+
+### PD-152 Documentation is developer-focused, and four open issues are settled
+
+| Field | Value |
+|---|---|
+| Date | 2026-11-24 |
+| Question | How do #89, #119, #365 and #117 close out before 1.0? |
+| Raised by | Product owner |
+| Decision | Product owner decision (2026-11-24). |
+
+**Decision.**
+- #89 is closed as obsolete.
+- #119 is completed as a developer-focused wiki: written for a developer adopting the Process Engine and the Rule Engine for the first time, with concepts, a first-run path, guides and troubleshooting. Public publishing and versioned docs move to #475, after 1.0.
+- #365: the team runs the security audit now, and the product owner reviews the result.
+- #117: the product owner accepts it after the audit and the tests pass.
+
+**Consequences.**
+- The wiki and the generated site are organised around the developer journey: concepts, getting started, guides, troubleshooting.
+- Publishing under `/1.0/` with `latest`, and the version switcher, wait for #475.
+- Nothing ships as a release from this decision (PD-148 still applies).
