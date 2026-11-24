@@ -4205,7 +4205,7 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 - Publishing under `/1.0/` with `latest`, and the version switcher, wait for #475.
 - Nothing ships as a release from this decision (PD-148 still applies).
 
-### PD-149 Accept INF-04 (plain JSON process variables) for 1.0
+### PD-153 Accept INF-04 (plain JSON process variables) for 1.0
 
 | Field | Value |
 |---|---|
@@ -4216,7 +4216,7 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Decision.** Process variables (`pre_instance.variables_json`) are stored as plain JSON in the database, with no application-level encryption. Protection relies on database and disk encryption at rest, plus operational discipline: guidance to keep secrets out of variables, mark sensitive fields `mask:true`, or store them outside and keep only a reference.
 
-Application-level encryption of variables is a post-1.0 roadmap item (issue #<post-1.0-issue>).
+Application-level encryption of variables is a post-1.0 roadmap item (issue #594).
 
 **Consequences.**
 - The threat model is updated to record acceptance for 1.0.
