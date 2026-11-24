@@ -91,6 +91,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 422 | [MESSAGE_NOT_CORRELATED](#message_not_correlated) | processes | 0.3.0 |
 | 428 | [PRECONDITION_REQUIRED](#precondition_required) | both | M1 |
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
+| 429 | [START_ARRIVALS_FULL](#start_arrivals_full) | processes | 1.0 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
 | 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
 
@@ -140,6 +141,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### RATE_LIMITED
 `429` with `Retry-After`. The Rule Engine returns it for the masked-input search past `masking.search.max-per-minute` searches per caller per minute (default 30); the refusal is audited. Otherwise it is returned only when the host configures a rate limiter. Wait the given seconds and retry.
+
+### START_ARRIVALS_FULL
+`429` with `Retry-After`. A process that starts on several messages or signals already holds `parallel-start.max-arrivals-per-definition` arrivals (default 10,000) that wait for the others, and this message has a new correlation key. Nothing is held for it. `Retry-After` is the seconds until a held arrival expires (`parallel-start.arrival-ttl`, default 24 hours); a repeat of a held key is never refused.
 
 ### INTERNAL_ERROR
 `500`. Unexpected failure. The body carries only the fixed `detail` text and the `correlationId`, never a stack trace, class name, SQL or table name. Give the `correlationId` to the host's operators: the server log has the same id with the cause. Send `X-Correlation-Id` with your request to choose the id yourself.

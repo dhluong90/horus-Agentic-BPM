@@ -2219,8 +2219,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!store.hasStartArrival(tenant, definition.key(), kind, name, arrivalKey)
                 && store.countStartArrivals(tenant, definition.key()) >= startArrivals.maxPerDefinition()) {
             // AUD-10: a held arrival replaces the one with its key, so only a new key grows the table.
-            throw new PayloadTooLargeException("Process " + definition.key() + " already holds "
-                    + startArrivals.maxPerDefinition() + " arrivals that wait for the other start events");
+            throw new io.github.dhluong90.bpm.process.api.StartArrivalsFullException("Process " + definition.key()
+                    + " already holds " + startArrivals.maxPerDefinition()
+                    + " arrivals that wait for the other start events; retry when one has expired",
+                    startArrivals.ttl().toSeconds());
         }
         store.putStartArrival(tenant, definition.key(), kind, name, arrivalKey, Values.write(payload),
                 clock.instant());
@@ -5835,7 +5837,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     /**
      * The instance variables with the fields its task forms mark {@code "mask": true} replaced by
-     * {@value TaskForms#MASKED}, so a reader of the instance, and every stored idempotent answer that carries it, sees
+     * {@value TaskForms#MASKED}, at any depth, and the output fields of its agent steps that the output schema marks
+     * {@code "mask": true}, so a reader of the instance, and every stored idempotent answer that carries it, sees
      * what the form shows (AUD-04, TR-SEC-05). A form the host no longer registers marks nothing.
      */
     private Map<String, Object> maskedVariables(String tenant, InstanceRow row) {
@@ -5849,6 +5852,21 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         Map<String, Object> out = new LinkedHashMap<>(variables);
         for (var node : compiled(definition).process().nodes()) {
+            if (node instanceof ServiceTask service
+                    && service.extensions().first(AgentTaskSpec.class).orElse(null) instanceof AgentTaskSpec agent
+                    && agent.outputSchema() != null) {
+                // The agent's answer is merged into the variables, or kept whole under the step's result variable.
+                Map<String, Object> schema = Values.readMap(agent.outputSchema());
+                String target = service.extensions()
+                        .first(io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable.class)
+                        .map(io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable::name).orElse(null);
+                if (target == null) {
+                    out = TaskForms.maskVariables(schema, out);
+                } else if (out.get(target) != null) {
+                    out.put(target, TaskForms.maskValue(schema, out.get(target)));
+                }
+                continue;
+            }
             if (!(node instanceof UserTask task)) {
                 continue;
             }
@@ -5859,11 +5877,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 continue;
             }
             if (resolved.orElse(null) instanceof TaskForms.Resolved.Form form) {
-                for (String name : TaskForms.maskedFields(form.schema())) {
-                    if (out.get(name) != null) {
-                        out.put(name, TaskForms.MASKED);
-                    }
-                }
+                out = TaskForms.maskVariables(form.schema(), out);
             }
         }
         return out;

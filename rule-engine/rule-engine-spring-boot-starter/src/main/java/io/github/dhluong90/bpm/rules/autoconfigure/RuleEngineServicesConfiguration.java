@@ -228,6 +228,21 @@ class RuleEngineServicesConfiguration {
         return internals.engines().decisionLog();
     }
 
+    /**
+     * Warns once at start-up when no cursor key is configured, because the engine then signs list cursors with a key
+     * kept in the database (AUD-13).
+     *
+     * @param log where the warning goes
+     * @param configured the configured keys, empty when none
+     */
+    static void warnWhenNoCursorKeys(org.apache.commons.logging.Log log, Map<String, byte[]> configured) {
+        if (configured.isEmpty()) {
+            log.warn("No cursor keys configured (horus.bpm.rules.cursor.keys and cursor.active-key-id): "
+                    + "list cursors are signed with a key stored in rle_engine_key, which anyone who can read the "
+                    + "database can use. Set the keys from a secret for production.");
+        }
+    }
+
     @Bean
     @ConditionalOnMissingBean
     RuleEngineCursorKeyInitializer ruleEngineCursorKeyInitializer(RuleEngineInternals internals,
@@ -237,6 +252,8 @@ class RuleEngineServicesConfiguration {
         if (!configured.isEmpty()) {
             internals.engines().cursorKeys().configure(properties.cursor().activeKeyId(), configured);
         }
+        warnWhenNoCursorKeys(org.apache.commons.logging.LogFactory.getLog(RuleEngineServicesConfiguration.class),
+                configured);
         return new RuleEngineCursorKeyInitializer(internals.engines().cursorKeys());
     }
 

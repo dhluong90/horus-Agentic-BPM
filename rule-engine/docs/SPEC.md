@@ -1404,6 +1404,16 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Example:** `request-publish {effectiveFrom: 2027-01-01T00:00:00Z} -> 200, GET /approvals shows effectiveFrom; approve -> in force from 2027-01-01`
 - **Test IDs:** `RLE_210_a_requested_effective_date_is_stored_shown_to_the_approver_and_applied`, `RLE_210_a_past_effective_date_is_refused_and_the_draft_stays_a_draft`, `RLE_210_the_effective_date_does_not_change_the_hash_or_the_four_eyes`, `RLE_210_a_date_asked_for_at_request_decides_which_version_is_in_force_and_a_past_date_is_refused`
 
+### RLE-211 The decision log refuses UPDATE, DELETE and TRUNCATE in the database
+- **Traces to:** #365, AUD-03, `TR-OBS-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `rle_decision` holds a `card-fee` decision of `bank-a` in `rle_decision_2027_01` and a straggler of March 2027 in `rle_decision_default`.
+- **When:** (a) The application's database role runs `UPDATE`, `DELETE` or `TRUNCATE` on `rle_decision` or on a monthly partition, and `UPDATE` or `TRUNCATE` on the default partition. (b) The clock reaches March and the partition job creates `rle_decision_2027_03`. (c) Retention drops `rle_decision_2027_01`.
+- **Then:** (a) Each statement fails with SQLSTATE `55000` ("rle_decision is append-only") and the rows are unchanged. (b) The job still moves the straggler out of the default partition, the only `DELETE` the database allows on the log, and the new partition refuses `DELETE` and `TRUNCATE` as well: a row trigger on the parent is cloned onto each partition at `ATTACH`, and the job adds the `TRUNCATE` trigger of each partition it creates. (c) Retention by `DROP TABLE` of a whole month works as before and is recorded in `rle_decision_log_drop`. The triggers are part of the V1 baseline. **Limit:** `DELETE` on `rle_decision_default` stays allowed because the roll-over needs it, so a role that can `DELETE` there can erase rows that fall outside every monthly partition (a straggler not yet moved); the control does not cover that table. A table owner can also drop a trigger. The application runs with a role that does not own the tables (wiki, Multi-Tenancy and Security).
+- **Example:** `UPDATE rle_decision SET outcome = 'X' -> 55000; DELETE FROM rle_decision_default -> allowed`.
+- **Test ID:** `RLE_211_control_the_decision_log_refuses_update_delete_and_truncate_and_the_roll_over_still_works` (`DecisionLogPartitionMaintenanceIT`)
+
 ### RLE-220 A decision replay by ids reads each id by key and never scans the period
 - **Traces to:** `TR-SEC-04`, `TR-PERF-01`, #365 (AUD-06)
 - **Milestone:** M3
@@ -1422,7 +1432,7 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **When:** The cursor is replayed to a replica that has both keys; to one that dropped `k2026`; to one whose `k2027` has other bytes; a cursor of the format before key ids is replayed; the host sets a key of 8 bytes or an active id that names no key.
 - **Then:** New cursors carry `k2027` and the `k2026` cursor still works while that key is listed. After `k2026` is removed, a cursor of a changed key and a cursor with no key id are `400 QUERY_INVALID`, never `500`. The short key and the unknown active id stop start-up. With keys configured the engine neither creates nor reads `rle_engine_key`; with none, the key stays in that table and its id is derived from its bytes.
 - **Example:** `cursor ...k2026... with keys {k2027} -> 400 QUERY_INVALID`
-- **Test IDs:** `RLE_221_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `RLE_221_a_cursor_without_a_key_id_or_signed_with_another_key_of_the_same_id_is_query_invalid`, `RLE_221_a_key_that_is_too_short_or_not_the_active_one_stops_start_up`, `RLE_221_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`
+- **Test IDs:** `RLE_221_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `RLE_221_a_cursor_without_a_key_id_or_signed_with_another_key_of_the_same_id_is_query_invalid`, `RLE_221_a_key_that_is_too_short_or_not_the_active_one_stops_start_up`, `RLE_221_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`, `RLE_221_a_start_without_cursor_keys_logs_a_warning_that_names_the_properties`
 
 ### RLE-222 Display names need a permission of an installed engine
 - **Traces to:** `TR-SEC-04`, RLE-196, #365 (AUD-09)

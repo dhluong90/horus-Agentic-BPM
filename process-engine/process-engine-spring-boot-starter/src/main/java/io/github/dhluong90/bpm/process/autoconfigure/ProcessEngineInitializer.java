@@ -47,6 +47,21 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
         this.summariseUnclassified = summariseUnclassified;
     }
 
+    /**
+     * Warns once at start-up when no cursor key is configured, because the engine then signs list cursors with a key
+     * kept in the database (AUD-13).
+     *
+     * @param log where the warning goes
+     * @param cursorKeys the configured keys, empty when none
+     */
+    static void warnWhenNoCursorKeys(org.apache.commons.logging.Log log, java.util.Map<String, byte[]> cursorKeys) {
+        if (cursorKeys.isEmpty()) {
+            log.warn("No cursor keys configured (horus.bpm.processes.cursor.keys and cursor.active-key-id): "
+                    + "list cursors are signed with a key stored in pre_engine_key, which anyone who can read the "
+                    + "database can use. Set the keys from a secret for production.");
+        }
+    }
+
     @Override
     public void afterSingletonsInstantiated() {
         if (properties.migrateOnStart()) {
@@ -60,6 +75,7 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
         if (!cursorKeys.isEmpty()) {
             services.useCursorKeys(properties.cursor().activeKeyId(), cursorKeys);
         }
+        warnWhenNoCursorKeys(LOG, cursorKeys);
         services.loadCursorKey();
         for (String tenant : properties.definitions().startupTenants()) {
             for (String location : properties.definitions().locations()) {

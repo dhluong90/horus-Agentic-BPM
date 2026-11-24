@@ -335,5 +335,8 @@ public final class DecisionLogPartitions {
         jdbc.sql("ALTER TABLE rle_decision ATTACH PARTITION " + name
                         + " FOR VALUES FROM ('" + lower + "') TO ('" + upper + "')")
                 .update();
+        // AUD-03: the row trigger of the parent was cloned onto the partition by ATTACH; a statement trigger is not.
+        jdbc.sql("CREATE TRIGGER " + name + "_no_truncate BEFORE TRUNCATE ON " + name
+                + " FOR EACH STATEMENT EXECUTE FUNCTION rle_decision_append_only()").update();
     }
 }

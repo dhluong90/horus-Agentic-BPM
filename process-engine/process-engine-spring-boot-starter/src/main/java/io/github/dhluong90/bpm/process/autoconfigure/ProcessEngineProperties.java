@@ -128,7 +128,7 @@ public record ProcessEngineProperties(
      * @param arrivalTtl how long an arrival waits for the others before it is deleted, 1 minute to 366 days; default
      *     24 hours
      * @param maxArrivalsPerDefinition most arrivals held for one definition of one tenant; a new correlation key past
-     *     it is refused with {@code 413 PAYLOAD_TOO_LARGE}; 1 to 1,000,000, default 10,000
+     *     it is refused with {@code 429 START_ARRIVALS_FULL} and a {@code Retry-After} header; 1 to 1,000,000, default 10,000
      * @param cleanupInterval how often expired arrivals are deleted, 1 second to 1 day; default 15 minutes
      */
     public record ParallelStart(

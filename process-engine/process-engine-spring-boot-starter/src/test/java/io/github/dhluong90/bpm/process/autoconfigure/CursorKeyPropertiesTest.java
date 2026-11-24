@@ -24,4 +24,25 @@ class CursorKeyPropertiesTest {
         assertThatThrownBy(() -> new ProcessEngineProperties.Cursor("k1", Map.of("k1", "not base64!")).decoded())
                 .hasMessageContaining("horus.bpm.processes.cursor.keys.k1");
     }
+
+    @Test
+    void PRE_371_a_start_without_cursor_keys_logs_a_warning_that_names_the_properties() {
+        java.util.List<String> warnings = new java.util.ArrayList<>();
+        org.apache.commons.logging.Log log = (org.apache.commons.logging.Log) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[] {org.apache.commons.logging.Log.class},
+                (proxy, method, args) -> {
+                    if (method.getName().equals("warn")) {
+                        warnings.add(String.valueOf(args[0]));
+                    }
+                    return method.getReturnType() == boolean.class ? Boolean.FALSE : null;
+                });
+
+        ProcessEngineInitializer.warnWhenNoCursorKeys(log, Map.of());
+        assertThat(warnings).singleElement().asString().contains("cursor.keys").contains("cursor.active-key-id")
+                .contains("pre_engine_key");
+
+        warnings.clear();
+        ProcessEngineInitializer.warnWhenNoCursorKeys(log, Map.of("k2027", new byte[32]));
+        assertThat(warnings).isEmpty();
+    }
 }

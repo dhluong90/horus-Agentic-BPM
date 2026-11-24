@@ -2704,9 +2704,20 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Kind:** control
 - **Given:** `account-opening` waits for the message `account-opening-request` and the signal `kyc-cleared`; `parallel-start.arrival-ttl` is 24 hours and `parallel-start.max-arrivals-per-definition` is 3.
 - **When:** (a) Four applications `APP-1` to `APP-4` send the message. (b) `APP-1` sends it again. (c) The clock moves 25 hours and the cleanup runs.
-- **Then:** (a) `APP-4` is refused with `413 PAYLOAD_TOO_LARGE` and nothing is held for it. (b) The repeat replaces the held row, so the count stays 3. (c) The three rows older than the TTL are deleted, across tenants, and a new arrival is held again.
-- **Example:** `APP-4 -> 413; after 25 hours pre_start_arrival is empty`.
-- **Test ID:** `PRE_360_control_a_definition_holds_at_most_the_configured_arrivals_and_a_repeat_does_not_count` (`AuditFindingsPostgresIT`), `PRE_360_control_arrivals_older_than_the_ttl_are_deleted_by_the_cleanup` (`AuditFindingsPostgresIT`)
+- **Then:** (a) `APP-4` is refused with `429 START_ARRIVALS_FULL` and a `Retry-After` header of 86,400 seconds (the TTL), and nothing is held for it. (b) The repeat replaces the held row, so the count stays 3. (c) The three rows older than the TTL are deleted, across tenants, and a new arrival is held again.
+- **Example:** `APP-4 -> 429 Retry-After: 86400; after 25 hours pre_start_arrival is empty`.
+- **Test ID:** `PRE_360_control_a_definition_holds_at_most_the_configured_arrivals_and_a_repeat_does_not_count` (`AuditFindingsPostgresIT`), `PRE_360_control_a_full_start_backlog_answers_429_with_retry_after_and_a_problem_code` (`ProcessRestErrorMatrixTest`), `PRE_360_control_arrivals_older_than_the_ttl_are_deleted_by_the_cleanup` (`AuditFindingsPostgresIT`)
+
+### PRE-361 A field an agent step masks is masked in every instance view, at any depth
+- **Traces to:** #365, AUD-04, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `loan-agent-assessment` has an agent step `assess-documents` with the result variable `assessment`; its `outputSchema` marks `summary` with `"mask": true`. A schema may also mark `applicant.nationalId` and the `nationalId` of each item of `guarantors`. The instance holds `assessment = {riskScore: 42, summary: "salary slip shows 38,000,000 VND", applicant: {name: "Tran Thi Mai", nationalId: "079012345678"}, guarantors: [{name: "Le Van An", nationalId: "079099887766"}]}`. A step with no result variable merges its output fields into the instance variables, and the same schema applies to them.
+- **When:** A reader gets the instance, and a start with an `Idempotency-Key` is replayed.
+- **Then:** `assessment.summary`, `assessment.applicant.nationalId` and `assessment.guarantors[0].nationalId` are `***` in the instance, in the answer of the start and in its stored replay; `riskScore`, `applicant.name` and `guarantors[0].name` are unchanged. A masked field that is null stays null. The clear values stay in the engine's own state. A form's prefilled data masks nested fields the same way.
+- **Example:** `assessment.applicant.nationalId: 079012345678 -> ***`.
+- **Test ID:** `PRE_361_control_a_field_an_agent_step_masks_is_masked_in_the_instance_and_the_replay_at_any_depth` (`AuditFindingsPostgresIT`), `PRE_361_control_an_accepted_agent_answer_is_masked_in_the_instance_view_by_its_output_schema` (`AgentTaskIT`), `PRE_361_control_a_masked_field_is_masked_inside_an_object_and_in_every_item_of_a_list` (`TaskFormsMaskTest`)
+
 ### PRE-370 A migration plan or a calendar change is approved only on the hash the approver reviewed
 - **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-02)
 - **Milestone:** M3
@@ -2725,7 +2736,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **When:** The cursor is replayed to a replica that has both keys; to one that dropped `k2026`; to one whose `k2027` has other bytes; a cursor of the format before key ids is replayed; the host sets a key of 8 bytes or an active id that names no key.
 - **Then:** New cursors carry `k2027` and the `k2026` cursor still works while that key is listed. After `k2026` is removed, a cursor of a changed key and a cursor with no key id are `400 QUERY_INVALID`, never `500`. The short key and the unknown active id stop start-up naming the property. With no key configured the engine keeps one in `pre_engine_key` and the key id is derived from its bytes, so replacing that key retires its cursors the same way.
 - **Example:** `cursor ...k2026... with keys {k2027} -> 400 QUERY_INVALID`
-- **Test IDs:** `PRE_371_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `PRE_371_a_cursor_without_a_key_id_or_of_a_changed_key_is_query_invalid`, `PRE_371_a_key_that_is_too_short_or_a_missing_active_key_is_refused`, `PRE_371_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`
+- **Test IDs:** `PRE_371_a_cursor_names_its_key_and_a_rotation_keeps_the_cursors_of_the_key_still_listed`, `PRE_371_a_cursor_without_a_key_id_or_of_a_changed_key_is_query_invalid`, `PRE_371_a_key_that_is_too_short_or_a_missing_active_key_is_refused`, `PRE_371_configured_keys_are_decoded_and_a_wrong_setting_names_the_property`, `PRE_371_a_start_without_cursor_keys_logs_a_warning_that_names_the_properties`
 
 ### PRE-372 A caller without the calendar manage permission sees no pending calendar change
 - **Traces to:** `TR-SEC-04`, PD-139, #365 (AUD-07)

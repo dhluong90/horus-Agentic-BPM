@@ -241,7 +241,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-357 | `PRE_357_*` in `AuditFindingsPostgresIT` | Integration on PostgreSQL, masked form fields in the instance view and replay | M3 | `TR-SEC-05` | Done (#572) |
 | PRE-358 | `PRE_358_*` in `AuditFindingsPostgresIT` and `AuditFindingsRestIT` | Integration on PostgreSQL, task and form visibility | M3 | `TR-SEC-05` | Done (#572) |
 | PRE-359 | `PRE_359_*` in `AuditFindingsPostgresIT` | Integration on PostgreSQL, append-only history | M3 | `TR-SEC-05` | Done (#572) |
-| PRE-360 | `PRE_360_*` in `AuditFindingsPostgresIT` | Integration on PostgreSQL, start arrival TTL and cap | M3 | `TR-STD-04` | Done (#572) |
+| PRE-360 | `PRE_360_*` in `AuditFindingsPostgresIT` and `ProcessRestErrorMatrixTest` | Integration on PostgreSQL, start arrival TTL and cap; 429 with Retry-After | M3 | `TR-STD-04` | Done (#572, #365) |
+| PRE-361 | `PRE_361_*` in `AuditFindingsPostgresIT`, `AgentTaskIT` and `TaskFormsMaskTest` | Integration on PostgreSQL, agent and nested masked fields in the instance view and form | M3 | `TR-SEC-05` | Done (#365) |
 | PRE-370 | `PRE_370_*` in `MigrationExecutionPostgresIT` and `CalendarChangeIdempotencyPostgresIT` | A migration plan or calendar change is approved only on the reviewed hash (AUD-02) | M3 | `TR-SEC-04` | Done (#573) |
 | PRE-371 | `PRE_371_*` in `CursorKeyRotationTest` and `CursorKeyPropertiesTest` | List cursors name their signing key: rotation, old cursors fail as 400 (AUD-13) | M3 | `TR-SEC-04` | Done (#573) |
 | PRE-372 | `PRE_372_*` in `PendingApprovalsKindsPostgresIT` | A caller without calendar manage sees no pending calendar change (AUD-07) | M3 | `TR-SEC-04` | Done (#573) |
