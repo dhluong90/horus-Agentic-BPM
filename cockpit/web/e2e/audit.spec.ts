@@ -129,8 +129,6 @@ for (const screen of SCREENS) {
       for (const locale of LOCALES) {
         const file = `audit-${screen.name}-${String(viewport.width)}x${String(viewport.height)}-${theme}-${locale}.png`;
         test(`CKP_071_075_visual_${screen.name}_${String(viewport.width)}x${String(viewport.height)}_${theme}_${locale}`, async ({ page }) => {
-          // Known product bug #581: with an error showing, the Export evidence action is cut by the fold at 1440x900.
-          test.fixme((screen.name === 'export-too-large' || screen.name === 'export-forbidden') && viewport.height === 900, '#581');
           const violations = cspViolations(page);
           await page.clock.setFixedTime(NOW);
           await page.setViewportSize(viewport);

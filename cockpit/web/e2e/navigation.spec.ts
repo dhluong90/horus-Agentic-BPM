@@ -118,8 +118,6 @@ for (const screen of SCREENS) {
       for (const locale of LOCALES) {
         const file = `nav-${screen.name}-${viewport.width}x${viewport.height}-${theme}-${locale}.png`;
         test(`TR_UI_03_visual_${screen.name}_${viewport.width}x${viewport.height}_${theme}_${locale}`, async ({ page }) => {
-          // Known product bug #579: the recent rule sets table on the author's Home runs past the page edge in Vietnamese.
-          test.fixme(screen.name === 'home-author' && locale === 'vi', '#579');
           await openScreen(page, screen, viewport, theme, locale);
 
           // At 1440x900 the menu, the title and the primary action are on screen without scrolling.
