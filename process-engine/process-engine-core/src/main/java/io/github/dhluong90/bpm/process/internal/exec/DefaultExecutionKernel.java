@@ -372,7 +372,7 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
 
     private void cancel(Command.Cancel cancel, WorkingContext ctx) {
         Token root = ctx.tree().root().orElseThrow(() -> new ExecutionException("INVALID_STATE", null, "Not started"));
-        ctx.cancelSubtree(root);
+        ctx.cancelSubtree(root, io.github.dhluong90.bpm.process.api.CancelCause.INSTANCE_CANCELLED);
         ctx.status(InstanceStatus.CANCELLED);
         Map<String, Object> details = new java.util.LinkedHashMap<>();
         details.put("status", "CANCELLED");

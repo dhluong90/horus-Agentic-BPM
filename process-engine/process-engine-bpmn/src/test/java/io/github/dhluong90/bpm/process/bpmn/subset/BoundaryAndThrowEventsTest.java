@@ -267,6 +267,11 @@ class BoundaryAndThrowEventsTest {
         return t.history().stream().filter(h -> h.type().equals(type)).map(HistoryEntry::nodeId).toList();
     }
 
+    /** The {@code cause} of every {@code TOKEN_CANCELLED} entry of a transition, so a step reads CANCELLED or TERMINATED for the right reason. */
+    private static List<Object> cancelCauses(Transition t) {
+        return t.history().stream().filter(h -> h.type().equals("TOKEN_CANCELLED")).map(h -> h.details().get("cause")).toList();
+    }
+
     @Test
     void PRE_280_an_interrupting_timer_boundary_cancels_the_task_and_runs_its_own_flow() {
         // Given a claim review with a four-hour timer boundary that interrupts, started at 03:00 UTC
@@ -292,6 +297,7 @@ class BoundaryAndThrowEventsTest {
                 .orElseThrow();
         assertThat(boundary.details()).containsEntry("boundaryId", "overdue").containsEntry("attachedTo", "review")
                 .containsEntry("interrupting", true);
+        assertThat(cancelCauses(fired)).isNotEmpty().containsOnly("BOUNDARY");
 
         // And a completion of the cancelled task is refused, so the officer cannot answer a task that is gone
         assertThatThrownBy(() -> kernel.apply(fired.state(), new Command.CompleteTask(task.activityInstanceId(),
@@ -500,6 +506,7 @@ class BoundaryAndThrowEventsTest {
         assertThat(ended.state().tokens()).noneMatch(t -> t.status().live());
         assertThat(ended.state().status()).isEqualTo(InstanceStatus.COMPLETED);
         assertThat(ended.history()).extracting(HistoryEntry::type).contains("TERMINATED");
+        assertThat(cancelCauses(ended)).isNotEmpty().containsOnly("TERMINATE_END");
     }
 
     @Test

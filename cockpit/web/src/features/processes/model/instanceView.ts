@@ -21,8 +21,9 @@ export type NodeMark =
   | { kind: 'incident'; code: string }
   | { kind: 'token'; status: LiveStatus; count: number }
   | { kind: 'undone' }
-  | { kind: 'cancelled' }
-  | { kind: 'terminated' }
+  /** `cause` is the engine's reason code, or null when the engine did not record one. */
+  | { kind: 'cancelled'; cause: string | null }
+  | { kind: 'terminated'; cause: string | null }
   /** The step that does the undoing (a compensation activity or compensation event sub-process) has run for a step the engine reports undone. */
   | { kind: 'undoRan' }
   | { kind: 'done' };
@@ -54,8 +55,8 @@ export function nodeMarks(instance: ProcessInstance, activities: InstanceActivit
   for (const node of activities?.nodes ?? []) {
     if (marks.has(node.nodeId)) continue;
     if (node.state === 'COMPLETED') marks.set(node.nodeId, { kind: 'done' });
-    else if (node.state === 'CANCELLED') marks.set(node.nodeId, { kind: 'cancelled' });
-    else if (node.state === 'TERMINATED') marks.set(node.nodeId, { kind: 'terminated' });
+    else if (node.state === 'CANCELLED') marks.set(node.nodeId, { kind: 'cancelled', cause: node.cause ?? null });
+    else if (node.state === 'TERMINATED') marks.set(node.nodeId, { kind: 'terminated', cause: node.cause ?? null });
   }
   return marks;
 }
@@ -120,6 +121,25 @@ const ENTRY_TYPES = [
   'DATA_OBJECT_WRITTEN',
 ] as const;
 type EntryType = (typeof ENTRY_TYPES)[number];
+
+/** The engine's reason codes for a step that was cut off, each with its words; a code this version does not know has none. */
+const CAUSE_KEY: Record<string, MessageKey> = {
+  BOUNDARY: 'instance.cause.BOUNDARY',
+  EVENT_GATEWAY: 'instance.cause.EVENT_GATEWAY',
+  INTERRUPTING_EVENT_SUBPROCESS: 'instance.cause.INTERRUPTING_EVENT_SUBPROCESS',
+  MULTIPLE_EVENT: 'instance.cause.MULTIPLE_EVENT',
+  MULTI_INSTANCE_COMPLETED: 'instance.cause.MULTI_INSTANCE_COMPLETED',
+  TERMINATE_END: 'instance.cause.TERMINATE_END',
+  ADHOC_CANCEL: 'instance.cause.ADHOC_CANCEL',
+  INSTANCE_CANCELLED: 'instance.cause.INSTANCE_CANCELLED',
+  COMPENSATION: 'instance.cause.COMPENSATION',
+  TRANSACTION_CANCEL: 'instance.cause.TRANSACTION_CANCEL',
+};
+
+/** The words for the engine's reason code, or undefined for no code or one this cockpit does not know. */
+export function causeKey(cause: string | null): MessageKey | undefined {
+  return cause === null ? undefined : CAUSE_KEY[cause];
+}
 
 /** A history entry in words; an entry type this cockpit does not know reads "Recorded by the engine", never its code. */
 export function entryKey(type: string): MessageKey {

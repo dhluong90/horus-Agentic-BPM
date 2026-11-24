@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
+import io.github.dhluong90.bpm.process.api.CancelCause;
 import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
@@ -90,7 +91,7 @@ public final class InstanceActivityService {
             for (ProcessStore.IncidentRow incident : incidents.values()) {
                 // An incident on a step with no history row in the window is still shown on its step.
                 nodes.add(new InstanceActivities.Node(incident.nodeId(), InstanceActivities.State.INCIDENT, null, null,
-                        null, 0, null, incident.errorCode(), incident.createdAt()));
+                        null, 0, null, incident.errorCode(), incident.createdAt(), null));
             }
             List<InstanceActivities.Entry> entries = new ArrayList<>(
                     queries.historyEntries(tenant, instanceId, from, to, limit + 1));
@@ -182,7 +183,8 @@ public final class InstanceActivityService {
 
     /**
      * One step as the timeline shows it. A step with an open incident is {@code INCIDENT}. Otherwise the last closing
-     * event decides: {@code NODE_COMPLETED} is {@code COMPLETED}, {@code TOKEN_CANCELLED} is {@code CANCELLED}. A step
+     * event decides: {@code NODE_COMPLETED} is {@code COMPLETED}; {@code TOKEN_CANCELLED} is {@code CANCELLED}, or
+     * {@code TERMINATED} when its {@code cause} is a terminate end, an ad-hoc cancel, an instance cancel or an undo. A step
      * entered and not closed is {@code ACTIVE} while the instance runs; once the instance has ended it is
      * {@code TERMINATED} when the instance ended terminated or cancelled, and {@code COMPLETED} when it ended normally
      * (a history gap, logged). A compensated step keeps its state; the undo is reported in the compensation block.
@@ -194,11 +196,19 @@ public final class InstanceActivityService {
         Instant endedAt = instance.endedAt();
         Instant leftAt = closed ? row.lastClosedAt() : null;
         InstanceActivities.State state;
+        String cause = null;
         if (incident != null) {
             state = InstanceActivities.State.INCIDENT;
         } else if (closed) {
-            state = "TOKEN_CANCELLED".equals(row.lastClosedType()) ? InstanceActivities.State.CANCELLED
-                    : InstanceActivities.State.COMPLETED;
+            if ("TOKEN_CANCELLED".equals(row.lastClosedType())) {
+                // The cause decides: an event that interrupted the step is CANCELLED, a terminate, a cancel or an
+                // undo is TERMINATED. An entry written before the cause existed reads as CANCELLED, with no reason.
+                cause = row.lastClosedCause();
+                state = CancelCause.of(cause).filter(CancelCause::terminating).isPresent()
+                        ? InstanceActivities.State.TERMINATED : InstanceActivities.State.CANCELLED;
+            } else {
+                state = InstanceActivities.State.COMPLETED;
+            }
         } else if (endedAt == null) {
             state = InstanceActivities.State.ACTIVE;
         } else {
@@ -218,7 +228,7 @@ public final class InstanceActivityService {
         int attempts = (int) Math.max(row.entries(), row.attemptIds());
         return new InstanceActivities.Node(row.nodeId(), state, row.firstEnteredAt(), completedAt, duration,
                 attempts, row.lastActor(), incident == null ? null : incident.errorCode(),
-                incident == null ? null : incident.createdAt());
+                incident == null ? null : incident.createdAt(), cause);
     }
 
     private String tenant() {

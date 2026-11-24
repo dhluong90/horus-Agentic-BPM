@@ -614,6 +614,11 @@ public class ProcessController {
             } else {
                 item.put("actor", node.actor());
             }
+            if (node.cause() == null) {
+                item.putNull("cause");
+            } else {
+                item.put("cause", node.cause());
+            }
             if (node.incidentCode() == null) {
                 item.putNull("incident");
             } else {

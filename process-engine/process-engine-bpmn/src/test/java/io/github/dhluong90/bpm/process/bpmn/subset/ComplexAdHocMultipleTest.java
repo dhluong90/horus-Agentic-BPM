@@ -230,6 +230,11 @@ class ComplexAdHocMultipleTest {
                 .isEmpty();
     }
 
+    /** The {@code cause} of every {@code TOKEN_CANCELLED} entry of a transition, so a step reads CANCELLED or TERMINATED for the right reason. */
+    private static List<Object> cancelCauses(Transition t) {
+        return t.history().stream().filter(h -> h.type().equals("TOKEN_CANCELLED")).map(h -> h.details().get("cause")).toList();
+    }
+
     @Test
     void PRE_331_with_parallel_ordering_the_condition_cancels_the_remaining_activities_and_the_flow_goes_on() {
         // Given the officer has started the identity check and the sanctions screening side by side
@@ -246,6 +251,7 @@ class ComplexAdHocMultipleTest {
         assertThat(effects(done, Effect.CancelUserTask.class)).extracting(Effect.CancelUserTask::taskId)
                 .containsExactly(sanctions.activityInstanceId());
         assertThat(at(done.state(), "screen-sanctions").get(0).status()).isEqualTo(TokenStatus.CANCELLED);
+        assertThat(cancelCauses(done)).isNotEmpty().containsOnly("ADHOC_CANCEL");
         assertThat(open(done.state(), "open-account").status()).isEqualTo(TokenStatus.WAITING_USER);
     }
 
@@ -330,6 +336,7 @@ class ComplexAdHocMultipleTest {
         assertThat(effects(fired, Effect.DeleteSubscription.class)).extracting(Effect.DeleteSubscription::subscriptionId)
                 .contains(waits.stream().filter(w -> w.kind().equals("SIGNAL")).findFirst().orElseThrow()
                         .subscriptionId());
+        assertThat(cancelCauses(fired)).isNotEmpty().containsOnly("MULTIPLE_EVENT");
     }
 
     @Test
@@ -409,6 +416,8 @@ class ComplexAdHocMultipleTest {
 
         assertThat(effects(fired, Effect.CancelUserTask.class)).hasSize(1);
         assertThat(effects(fired, Effect.DeleteSubscription.class)).hasSize(1);
+        // The user task is cut off by the event sub-process; the other wait of the multiple start is dropped as a multiple event
+        assertThat(cancelCauses(fired)).contains("INTERRUPTING_EVENT_SUBPROCESS").containsOnly("INTERRUPTING_EVENT_SUBPROCESS", "MULTIPLE_EVENT");
         assertThat(effects(fired, Effect.InvokeService.class)).extracting(Effect.InvokeService::target)
                 .containsExactly("close-file");
         assertThat(fired.history().stream().filter(h -> h.type().equals("EVENT_SUBPROCESS_STARTED")).findFirst()

@@ -3459,7 +3459,7 @@ components:
           description: One item per step the instance entered, in the order it first entered them
           items:
             type: object
-            required: [nodeId, state, enteredAt, completedAt, durationMs, attempts, actor, incident]
+            required: [nodeId, state, enteredAt, completedAt, durationMs, attempts, actor, incident, cause]
             properties:
               nodeId: { type: string }
               state:
@@ -3467,11 +3467,22 @@ components:
                 enum: [ACTIVE, COMPLETED, CANCELLED, TERMINATED, INCIDENT]
                 description: >-
                   `ACTIVE`: entered and not left since; `COMPLETED`: its last closing event is a completion (also a step
-                  of a normally ended instance with no closing row); `CANCELLED`: left by an error, message or timer
-                  boundary or an interrupting event sub-process; `TERMINATED`: still open when its instance ended
-                  cancelled or failed, with no closing row; `INCIDENT`: holds an open incident. `CANCELLED` and
-                  `TERMINATED` were added after the first three values, so a client must tolerate a value it does not
-                  know. A compensated step keeps its state; the undo is in `compensations`.
+                  of a normally ended instance with no closing row); `CANCELLED`: interrupted by an event, that is a
+                  boundary event, a rival catch of an event-based gateway or an interrupting event sub-process, or
+                  cancelled before causes were recorded; `TERMINATED`: ended by a terminate end event, an ad-hoc
+                  cancel, an instance cancel or an undo, or still open when its instance ended cancelled or failed with
+                  no closing row; `INCIDENT`: holds an open incident. `CANCELLED` and `TERMINATED` were added after the
+                  first three values, so a client must tolerate a value it does not know. A compensated step keeps its
+                  state; the undo is in `compensations`.
+              cause:
+                type: [string, 'null']
+                description: >-
+                  Why a `CANCELLED` or `TERMINATED` step was cut off, as recorded when it happened: `BOUNDARY`,
+                  `EVENT_GATEWAY`, `INTERRUPTING_EVENT_SUBPROCESS`, `MULTIPLE_EVENT`, `MULTI_INSTANCE_COMPLETED`
+                  (state `CANCELLED`); `TERMINATE_END`, `ADHOC_CANCEL`, `INSTANCE_CANCELLED`, `COMPENSATION`,
+                  `TRANSACTION_CANCEL` (state `TERMINATED`). Null for any other step, for a step cancelled before
+                  causes were recorded, and for a step left open when the instance ended. A client must tolerate a
+                  value it does not know.
               enteredAt: { type: [string, 'null'], format: date-time, description: First entry }
               completedAt: { type: [string, 'null'], format: date-time, description: Last completion }
               durationMs:

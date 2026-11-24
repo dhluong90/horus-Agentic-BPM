@@ -69,7 +69,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         return ProcessListQueries.NODE_ACTIVITIES.list(jdbc, List.of(tenant, instanceId, ts(from), ts(to)),
                 (rs, row) -> new NodeActivityRow(rs.getString("node_id"), instant(rs, "first_entered_at"),
                         instant(rs, "last_entered_at"), instant(rs, "last_closed_at"), rs.getString("last_closed_type"),
-                        rs.getLong("entries"),
+                        rs.getString("last_closed_cause"), rs.getLong("entries"),
                         rs.getLong("attempt_ids"), rs.getString("last_actor")));
     }
 

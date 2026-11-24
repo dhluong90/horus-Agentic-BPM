@@ -45,6 +45,13 @@ class InstanceActivitiesPostgresIT {
     static final String I7 = "I7000000000000000000000007";
     static final String PAYOUT = "I9000000000000000000000009";
     static final String CUT_OFF = "IB00000000000000000000000B";
+    static final String CAUSES = "IC00000000000000000000000C";
+    /** One step per cancel cause, in the order the engine can write them, and the state each must read. */
+    static final java.util.Map<String, InstanceActivities.State> CAUSE_STATES = java.util.Map.of(
+            "BOUNDARY", InstanceActivities.State.CANCELLED, "EVENT_GATEWAY", InstanceActivities.State.CANCELLED,
+            "INTERRUPTING_EVENT_SUBPROCESS", InstanceActivities.State.CANCELLED,
+            "TERMINATE_END", InstanceActivities.State.TERMINATED, "ADHOC_CANCEL", InstanceActivities.State.TERMINATED,
+            "INSTANCE_CANCELLED", InstanceActivities.State.TERMINATED);
     static final String RUNNING = "IA00000000000000000000000A";
     static final String OTHER = "I8000000000000000000000008";
     static final String DEFINITION = "DEFA0000000000000000000002";
@@ -86,7 +93,7 @@ class InstanceActivitiesPostgresIT {
         instance(PAYOUT, "{}", STARTED, ENDED);
         history(PAYOUT, STARTED, "NODE_ENTERED", "credit-customer", null, null);
         history(PAYOUT, STARTED.plusSeconds(2), "ERROR_THROWN", "credit-customer", null, null);
-        history(PAYOUT, STARTED.plusSeconds(2), "TOKEN_CANCELLED", "credit-customer", null, null);
+        cancelled(PAYOUT, STARTED.plusSeconds(2), "credit-customer", "BOUNDARY");
         history(PAYOUT, STARTED.plusSeconds(3), "NODE_ENTERED", "tell-failure", null, null);
         history(PAYOUT, STARTED.plusSeconds(4), "NODE_COMPLETED", "tell-failure", null, null);
         history(PAYOUT, ENDED, "INSTANCE_ENDED", null, null, null);
@@ -95,6 +102,17 @@ class InstanceActivitiesPostgresIT {
         history(CUT_OFF, STARTED.plusSeconds(1), "NODE_COMPLETED", "debit-account", null, null);
         history(CUT_OFF, STARTED.plusSeconds(2), "NODE_ENTERED", "credit-customer", null, null);
         history(CUT_OFF, ENDED, "INSTANCE_ENDED", null, null, null);
+        instance(CAUSES, "{}", STARTED, ENDED);
+        int step = 0;
+        for (String cause : CAUSE_STATES.keySet()) {
+            history(CAUSES, STARTED.plusSeconds(++step), "NODE_ENTERED", "step-" + cause, null, null);
+            cancelled(CAUSES, STARTED.plusSeconds(++step), "step-" + cause, cause);
+        }
+        // A row written before causes existed, and one with a cause this version does not know
+        history(CAUSES, STARTED.plusSeconds(30), "NODE_ENTERED", "step-legacy", null, null);
+        history(CAUSES, STARTED.plusSeconds(31), "TOKEN_CANCELLED", "step-legacy", null, null);
+        history(CAUSES, STARTED.plusSeconds(32), "NODE_ENTERED", "step-future", null, null);
+        cancelled(CAUSES, STARTED.plusSeconds(33), "step-future", "SOME_FUTURE_CAUSE");
         instance(RUNNING, "{}", STARTED, null);
         history(RUNNING, STARTED, "NODE_ENTERED", "approve", null, null);
         instance(OTHER, "{}", STARTED.minus(Duration.ofDays(300)), STARTED.minus(Duration.ofDays(299)));
@@ -145,6 +163,27 @@ class InstanceActivitiesPostgresIT {
         assertThat(activities.nodes()).extracting(InstanceActivities.Node::nodeId, InstanceActivities.Node::state)
                 .containsExactly(tuple("credit-customer", InstanceActivities.State.CANCELLED),
                         tuple("tell-failure", InstanceActivities.State.COMPLETED));
+    }
+
+    @Test
+    void PRE_027_cancelled_or_terminated_follows_the_cause_recorded_on_the_closing_row() {
+        // Given steps cut off by a boundary, an event gateway, an interrupting event sub-process, a terminate end, an
+        // ad-hoc cancel and an instance cancel, a step cancelled before causes were recorded, and one with a new cause
+        InstanceActivities activities = service.activities(CAUSES, 200);
+
+        // Then an event that interrupted a step reads CANCELLED and a terminate, ad-hoc or instance cancel reads
+        // TERMINATED, each carrying its cause
+        for (var entry : CAUSE_STATES.entrySet()) {
+            InstanceActivities.Node node = activities.nodes().stream()
+                    .filter(n -> n.nodeId().equals("step-" + entry.getKey())).findFirst().orElseThrow();
+            assertThat(node.state()).as(entry.getKey()).isEqualTo(entry.getValue());
+            assertThat(node.cause()).isEqualTo(entry.getKey());
+        }
+        // And an old row without a cause, and a cause this version does not know, read a neutral CANCELLED
+        assertThat(activities.nodes()).filteredOn(n -> n.nodeId().equals("step-legacy") || n.nodeId().equals("step-future"))
+                .extracting(InstanceActivities.Node::state).containsOnly(InstanceActivities.State.CANCELLED);
+        assertThat(activities.nodes()).filteredOn(n -> n.nodeId().equals("step-legacy"))
+                .extracting(InstanceActivities.Node::cause).containsExactly((String) null);
     }
 
     @Test
@@ -256,6 +295,14 @@ class InstanceActivitiesPostgresIT {
                         + "attempt_id, actor_id, details) VALUES ('bank-a', ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)")
                 .params(ts(at), "H" + "%025d".formatted(seq), instance, DEFINITION, type, node, attempt, actor,
                         "{\"nationalId\":\"hmac:k1:9f2c\"}")
+                .update();
+    }
+
+    private static void cancelled(String instance, Instant at, String node, String cause) {
+        seq++;
+        jdbc.sql("INSERT INTO pre_history (tenant_id, occurred_at, id, instance_id, definition_id, event_type, node_id, "
+                        + "details) VALUES ('bank-a', ?, ?, ?, ?, 'TOKEN_CANCELLED', ?, ?::jsonb)")
+                .params(ts(at), "H" + "%025d".formatted(seq), instance, DEFINITION, node, "{\"cause\":\"" + cause + "\"}")
                 .update();
     }
 

@@ -89,9 +89,9 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
         ACTIVE,
         /** Its last closing event is {@code NODE_COMPLETED}; also a step of a normally ended instance with no closing row. */
         COMPLETED,
-        /** Left by an error, message or timer boundary or an interrupting event sub-process ({@code TOKEN_CANCELLED}). */
+        /** Interrupted by an event: a boundary, an event-gateway rival or an interrupting event sub-process ({@code TOKEN_CANCELLED}). */
         CANCELLED,
-        /** Still open when its instance ended terminated or cancelled, with no closing row. */
+        /** Ended by a terminate end, an ad-hoc or instance cancel or an undo ({@code TOKEN_CANCELLED} with that cause), or still open when its instance ended cancelled or failed. */
         TERMINATED,
         /** Holds an open incident. */
         INCIDENT
@@ -109,9 +109,11 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      * @param actor the last identity that acted on it, or null for engine steps
      * @param incidentCode the error code of its open incident, or null
      * @param incidentAt when that incident opened, or null
+     * @param cause for a cancelled or terminated step, the {@link CancelCause} name recorded when it was cut off; null
+     *     for any other step, for a step cancelled before causes were recorded, and for one left open at the end
      */
     public record Node(String nodeId, State state, Instant enteredAt, Instant completedAt, Duration duration,
-            int attempts, String actor, String incidentCode, Instant incidentAt) {
+            int attempts, String actor, String incidentCode, Instant incidentAt, String cause) {
 
         public Node {
             Objects.requireNonNull(nodeId, "nodeId");

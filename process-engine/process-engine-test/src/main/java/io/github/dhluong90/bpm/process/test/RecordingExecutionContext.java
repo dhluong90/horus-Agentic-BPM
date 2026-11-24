@@ -217,7 +217,7 @@ public final class RecordingExecutionContext implements ExecutionContext {
     }
 
     @Override
-    public void cancelSubtree(Token scope) {
+    public void cancelSubtree(Token scope, io.github.dhluong90.bpm.process.api.CancelCause cause) {
         for (Token t : tree().children(scope.id())) {
             update(t.withStatus(TokenStatus.CANCELLED));
         }

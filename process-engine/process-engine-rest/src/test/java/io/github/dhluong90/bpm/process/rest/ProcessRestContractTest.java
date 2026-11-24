@@ -565,7 +565,7 @@ class ProcessRestContractTest {
             }
             var verify = new io.github.dhluong90.bpm.process.api.InstanceActivities.Node("verify-docs",
                     io.github.dhluong90.bpm.process.api.InstanceActivities.State.COMPLETED, NOW, NOW.plusSeconds(190),
-                    java.time.Duration.ofSeconds(190), 2, "svc-kyc", null, null);
+                    java.time.Duration.ofSeconds(190), 2, "svc-kyc", null, null, null);
             var entry = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry("01JD0000000000000000000099",
                     "NODE_ENTERED", "verify-docs", null, NOW);
             var scripted = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(

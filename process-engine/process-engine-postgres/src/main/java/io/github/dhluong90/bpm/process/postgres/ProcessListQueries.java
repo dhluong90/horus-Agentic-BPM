@@ -465,6 +465,8 @@ final class ProcessListQueries {
                     + "max(occurred_at) FILTER (WHERE event_type IN ('NODE_COMPLETED', 'TOKEN_CANCELLED')) AS last_closed_at, "
                     + "(array_agg(event_type ORDER BY occurred_at DESC, id DESC) "
                     + "FILTER (WHERE event_type IN ('NODE_COMPLETED', 'TOKEN_CANCELLED')))[1] AS last_closed_type, "
+                    + "(array_agg(details ->> 'cause' ORDER BY occurred_at DESC, id DESC) "
+                    + "FILTER (WHERE event_type IN ('NODE_COMPLETED', 'TOKEN_CANCELLED')))[1] AS last_closed_cause, "
                     + "count(*) FILTER (WHERE event_type = 'NODE_ENTERED') AS entries, "
                     + "count(DISTINCT attempt_id) AS attempt_ids, "
                     + "(array_agg(actor_id ORDER BY occurred_at DESC, id DESC) FILTER (WHERE actor_id IS NOT NULL))[1] "

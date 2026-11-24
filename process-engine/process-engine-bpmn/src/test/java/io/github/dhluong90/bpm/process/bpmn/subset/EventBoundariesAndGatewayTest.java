@@ -301,6 +301,11 @@ class EventBoundariesAndGatewayTest {
         assertThat(done.state().status()).isEqualTo(InstanceStatus.COMPLETED);
     }
 
+    /** The {@code cause} of every {@code TOKEN_CANCELLED} entry of a transition, so a step reads CANCELLED or TERMINATED for the right reason. */
+    private static List<Object> cancelCauses(Transition t) {
+        return t.history().stream().filter(h -> h.type().equals("TOKEN_CANCELLED")).map(h -> h.details().get("cause")).toList();
+    }
+
     @Test
     void PRE_293_an_event_based_gateway_runs_the_first_event_and_cancels_the_others_with_their_subscriptions_and_timers() {
         // Given an order waiting on the payment message, two hours, or a freeze signal
@@ -324,6 +329,7 @@ class EventBoundariesAndGatewayTest {
         HistoryEntry resolved = history(won, "EVENT_GATEWAY_RESOLVED").get(0);
         assertThat(resolved.details()).containsEntry("gatewayId", "gw").containsEntry("winner", "paid");
         assertThat(List.copyOf((List<String>) resolved.details().get("cancelled"))).containsExactlyInAnyOrder("two-hours", "frozen");
+        assertThat(cancelCauses(won)).hasSize(2).containsOnly("EVENT_GATEWAY");
 
         // And the timer that was already due is refused when its job still arrives: the instance has moved on
         assertThatThrownBy(() -> kernel.apply(won.state(), new Command.JobDue(timer.jobId(), timer.tokenId(),
@@ -350,6 +356,7 @@ class EventBoundariesAndGatewayTest {
         assertThat(cancelled.state().status()).isEqualTo(InstanceStatus.CANCELLED);
         assertThat(effects(cancelled, Effect.CancelJob.class)).hasSize(1);
         assertThat(effects(cancelled, Effect.DeleteSubscription.class)).hasSize(2);
+        assertThat(cancelCauses(cancelled)).isNotEmpty().containsOnly("INSTANCE_CANCELLED");
     }
 
     @Test

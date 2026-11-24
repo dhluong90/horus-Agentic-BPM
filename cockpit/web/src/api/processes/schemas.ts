@@ -321,6 +321,8 @@ export const nodeActivity = z
     durationMs: z.number().int().min(0).nullable(),
     attempts: z.number().int().min(0),
     actor: z.string().nullable(),
+    /** Why a cancelled or terminated step was cut off (the engine's cause code); absent on older engines and on any other step. */
+    cause: z.string().nullable().optional(),
     incident: z.object({ code: z.string(), openedAt: z.string() }).loose().nullable(),
   })
   .loose();
