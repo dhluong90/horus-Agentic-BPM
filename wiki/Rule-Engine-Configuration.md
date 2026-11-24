@@ -19,9 +19,6 @@ All names are under `horus.bpm.rules.`. Table names are fixed (`rle_*`, Flyway h
 |---|---|---|---|
 | `enabled` | `true` | Built | Register the engine beans. The engine needs exactly one `DataSource` in the host (or one marked `@Primary`); without it the starter stays inactive and logs a warning |
 | `migrate-on-start` | `true` | Built | Run the engine's Flyway migrations at start-up with the host `DataSource`; `false` for hosts that run migrations in a separate job |
-| `definitions` | unset | 0.1 (M1) | Resource pattern of YAML rule sets to load as drafts at start-up |
-| `definitions-tenant` | `default` | 0.1 (M1) | Tenant that owns rule sets loaded from `definitions`. A document may override it with a top-level `tenant:` field; multi-tenant hosts load per-tenant files or use the import endpoint |
-| `definitions-auto-publish` | `false` | 0.1 (M1) | Publish loaded drafts without maker-checker. Refused unless the `dev` profile is active |
 | `rest.enabled` | `true` | 0.1 (M1) | Expose the REST API |
 | `rest.base-path` | `/api/bpm/rules/v1` | 0.1 (M1) | Base path of the REST API. Keep the version segment when you change it; the cockpit reads the same value |
 | `rest.cors.allowed-origins` | empty | Built as the host-wide `horus.bpm.rest.cors.allowed-origins` | Exact origins allowed to call the engine API from a browser, needed only for a standalone cockpit on another origin. Empty (the default) sends no CORS header, so a browser refuses every cross-origin call. See [Standalone cockpit settings](#standalone-cockpit-settings) |
@@ -371,14 +368,12 @@ The endpoint-to-permission table is in [[Rule Engine Decision API]]. To see what
 
 ## Local development
 
-This section describes Rule Engine 0.1. A host on the `dev` profile can run without an identity provider. The example hosts use this configuration:
+A host on the `dev` profile can run without an identity provider. The example hosts use this configuration:
+
+Rule sets enter through `POST /rule-sets` (or `VersionService` in Java); the engine has no start-up loader for rule set files.
 
 ```yaml
 spring.profiles.active: dev
-horus.bpm.rules:
-  definitions: classpath:rules/*.yaml
-  definitions-tenant: dev
-  definitions-auto-publish: true          # dev profile only
 horus.bpm.tenancy.dev-tenant: dev         # dev profile only; every call without a tenant runs as tenant dev
 ```
 ```java
@@ -390,7 +385,7 @@ UserDetailsService devUsers(PasswordEncoder enc) {
     User.withUsername("checker").password(enc.encode("checker")).authorities("rules:read", "rules:approve").build());
 }
 ```
-With HTTP basic enabled, `curl -u dev:dev ...` holds `rules:evaluate` and runs as tenant `dev`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses to start with `definitions-auto-publish: true`, `maker-checker.enabled: false` or any `tenancy.dev-tenant` value.
+With HTTP basic enabled, `curl -u dev:dev ...` holds `rules:evaluate` and runs as tenant `dev`. Maker-checker still applies: `dev` requests publication and `checker` approves. Outside the `dev` profile the starter refuses to start with `maker-checker.enabled: false` or any `tenancy.dev-tenant` value.
 
 ## Standalone cockpit settings
 

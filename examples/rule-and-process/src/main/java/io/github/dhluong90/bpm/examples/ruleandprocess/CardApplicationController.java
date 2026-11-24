@@ -4,10 +4,25 @@ import io.github.dhluong90.bpm.process.api.ProcessException;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.StepFailedException;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.web.ErrorResponse;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,7 +37,32 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/cards/applications")
 class CardApplicationController {
 
-    record Submit(String applicationId, String customerId) {
+    /** Who may submit: the teller role, or a token that carries the permission itself (see application.yml). */
+    static final String SUBMIT_ROLE = "ROLE_TELLER";
+    static final String SUBMIT_PERMISSION = "processes:start";
+
+    private static final Log LOG = LogFactory.getLog(CardApplicationController.class);
+
+    record Submit(@NotBlank @Size(max = 64) String applicationId, @NotBlank @Size(max = 64) String customerId) {
+    }
+
+    /** Thrown when the caller holds neither the teller role nor the start permission. */
+    static final class SubmitNotAllowed extends RuntimeException {
+        SubmitNotAllowed() {
+            super("not allowed", null, false, false);
+        }
+    }
+
+    static boolean maySubmit(Authentication caller) {
+        if (caller == null || !caller.isAuthenticated()) {
+            return false;
+        }
+        for (GrantedAuthority authority : caller.getAuthorities()) {
+            if (SUBMIT_ROLE.equals(authority.getAuthority()) || SUBMIT_PERMISSION.equals(authority.getAuthority())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private final CardApplicationService service;
@@ -36,8 +76,11 @@ class CardApplicationController {
     }
 
     @PostMapping
-    ResponseEntity<Map<String, Object>> submit(@RequestBody Submit body,
+    ResponseEntity<Map<String, Object>> submit(@Valid @RequestBody Submit body, Authentication caller,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+        if (!maySubmit(caller)) {
+            throw new SubmitNotAllowed();
+        }
         ProcessInstance instance = service.submit(body.applicationId(), body.customerId(), idempotencyKey);
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of("applicationId", body.applicationId(),
                 "instanceId", instance.id(), "instanceStatus", instance.status()));
@@ -66,8 +109,56 @@ class CardApplicationController {
                 .body(body);
     }
 
+    @ExceptionHandler(SubmitNotAllowed.class)
+    ResponseEntity<Map<String, Object>> notAllowed() {
+        return problem(HttpStatus.FORBIDDEN, "PERMISSION_DENIED", "You may not use card applications.");
+    }
+
+    @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
+    ResponseEntity<Map<String, Object>> invalid() {
+        return problem(HttpStatus.BAD_REQUEST, "INPUT_INVALID",
+                "applicationId and customerId are required, at most 64 characters each.");
+    }
+
+    /** Anything else is logged with a correlation id; the caller gets the id, never the exception message. */
+    @ExceptionHandler(Exception.class)
+    ResponseEntity<Map<String, Object>> unexpected(Exception e) throws Exception {
+        if (e instanceof AccessDeniedException || e instanceof AuthenticationException) {
+            throw e; // the security layer owns 401 and 403
+        }
+        if (e instanceof ErrorResponse framework) {
+            // Spring's own errors (405, 415, missing header and so on) keep their status and headers.
+            HttpStatus status = HttpStatus.valueOf(framework.getStatusCode().value());
+            return ResponseEntity.status(status).headers(framework.getHeaders())
+                    .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                    .body(problemBody(status, "REQUEST_REJECTED", status.getReasonPhrase() + "."));
+        }
+        String correlationId = UUID.randomUUID().toString();
+        LOG.error("Unexpected error, correlationId " + correlationId, e);
+        ResponseEntity<Map<String, Object>> response = problem(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
+                "The request failed. Quote the correlation id to the operator.");
+        response.getBody().put("correlationId", correlationId);
+        return response;
+    }
+
+    private static Map<String, Object> problemBody(HttpStatus status, String code, String detail) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", status.value());
+        body.put("code", code);
+        body.put("detail", detail);
+        return body;
+    }
+
+    private static ResponseEntity<Map<String, Object>> problem(HttpStatus status, String code, String detail) {
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problemBody(status, code, detail));
+    }
+
     @GetMapping("/{id}")
-    ResponseEntity<Map<String, Object>> get(@PathVariable("id") String id) {
+    ResponseEntity<Map<String, Object>> get(@PathVariable("id") String id, Authentication caller) {
+        if (!maySubmit(caller)) {
+            throw new SubmitNotAllowed();
+        }
         return jdbc.sql("SELECT application_id, customer_id, status, fee_currency, fee_minor FROM card_application "
                         + "WHERE tenant_id = ? AND application_id = ?")
                 .params(tenants.currentTenantId(), id)

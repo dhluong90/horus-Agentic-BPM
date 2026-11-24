@@ -526,6 +526,12 @@ public class ProcessController {
             ProcessServices.Started started = services.startDetailed(start);
             instance = started.instance();
             created = started.created();
+            if (started.summaryOnly()) {
+                // AUD-01: a caller without processes:read learns that the business key is taken, and nothing else.
+                ObjectNode summary = EngineJson.NODES.objectNode();
+                summary.put("id", instance.id()).put("status", instance.status()).put("created", false);
+                return json(HttpStatus.OK, summary, null, BASE + "/instances/" + instance.id());
+            }
         } else {
             instance = engine.start(start);
         }
