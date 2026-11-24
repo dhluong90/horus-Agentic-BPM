@@ -88,8 +88,9 @@ public interface ExecutionContext {
      * ended, or that was held back by a join, is left as it is or marked {@code CANCELLED}.
      *
      * @param token the token
+     * @param cause why, recorded on the history entry
      */
-    default void cancelToken(Token token) {
+    default void cancelToken(Token token, io.github.dhluong90.bpm.process.api.CancelCause cause) {
         throw new UnsupportedOperationException("cancelToken");
     }
 
@@ -97,8 +98,9 @@ public interface ExecutionContext {
      * Cancels a scope token and everything under it: tokens, tasks, jobs and subscriptions.
      *
      * @param scope the scope token
+     * @param cause why, recorded on the history entry of every flow token cancelled
      */
-    void cancelSubtree(Token scope);
+    void cancelSubtree(Token scope, io.github.dhluong90.bpm.process.api.CancelCause cause);
 
     /**
      * Enters a {@code saga} block (#67, ADR-0020): a {@code SCOPE} token for the block under the arriving token's

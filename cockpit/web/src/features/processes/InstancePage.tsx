@@ -27,6 +27,7 @@ import {
   firstStep,
   incidentKey,
   isProblemEntry,
+  causeKey,
   loopProgress,
   nodeMarks,
   routingWords,
@@ -167,6 +168,10 @@ function badgeOf(mark: NodeMark, t: T, progress: LoopProgress | undefined): Step
       return { tone: 'undone', icon: '↺', text: t('instance.badge.undone'), label: t('instance.badge.undone'), hint: t('instance.hint.undone') };
     case 'undoRan':
       return { tone: 'helper', icon: '↺', text: t('instance.badge.undoRan'), label: t('instance.badge.undoRan'), hint: t('instance.hint.undoRan') };
+    case 'cancelled':
+      return { tone: 'cancelled', icon: '⊘', text: t('instance.badge.cancelled'), label: t('instance.state.cancelled'), ...hintOf(causeText(mark, t)) };
+    case 'terminated':
+      return { tone: 'terminated', icon: '■', text: t('instance.badge.terminated'), label: t('instance.state.terminated'), ...hintOf(causeText(mark, t)) };
     case 'done':
       return { tone: 'done', icon: '✓', text: '', label: t('instance.state.completed') };
   }
@@ -381,12 +386,30 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
   return <div><dt>{term}</dt><dd className="tnum">{children}</dd></div>;
 }
 
+/** Why a step reads cancelled or terminated: the recorded cause, else (terminated only) the case ended, else nothing. */
+function causeText(mark: Extract<NodeMark, { kind: 'cancelled' | 'terminated' }>, t: T): string | undefined {
+  const key = causeKey(mark.cause);
+  if (key !== undefined) return t(key);
+  return mark.kind === 'terminated' && mark.cause === null ? t('instance.cause.CASE_ENDED') : undefined;
+}
+
+function hintOf(text: string | undefined): { hint?: string } {
+  return text === undefined ? {} : { hint: text };
+}
+
+function reasonOf(mark: Extract<NodeMark, { kind: 'cancelled' | 'terminated' }>, t: T) {
+  const text = causeText(mark, t);
+  return text === undefined ? null : <span className="muted inspector__reason"> {text}</span>;
+}
+
 function StateLine({ mark, activity }: { mark: NodeMark | undefined; activity: boolean }) {
   const { t } = useI18n();
   if (mark?.kind === 'incident') return <p className="inspector__state"><span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('instance.state.incident')}</span></p>;
   if (mark?.kind === 'token') return <p className="inspector__state"><span className="badge badge--accent"><span aria-hidden="true">{TOKEN_ICON[mark.status]}</span> {t(TOKEN_KEY[mark.status])}</span></p>;
   if (mark?.kind === 'undone') return <p className="inspector__state"><span className="badge badge--warn" title={t('instance.hint.undone')}><span aria-hidden="true">↺</span> {t('instance.state.undone')}</span></p>;
   if (mark?.kind === 'undoRan') return <p className="inspector__state"><span className="badge badge--neutral" title={t('instance.hint.undoRan')}><span aria-hidden="true">↺</span> {t('instance.state.undoRan')}</span></p>;
+  if (mark?.kind === 'cancelled') return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">⊘</span> {t('instance.state.cancelled')}</span>{reasonOf(mark, t)}</p>;
+  if (mark?.kind === 'terminated') return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">■</span> {t('instance.state.terminated')}</span>{reasonOf(mark, t)}</p>;
   if (mark?.kind === 'done') return <p className="inspector__state"><span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('instance.state.completed')}</span></p>;
   if (activity) return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">•</span> {t('instance.state.passed')}</span></p>;
   return <p className="inspector__state"><span className="badge badge--muted"><span aria-hidden="true">○</span> {t('instance.state.notReached')}</span></p>;

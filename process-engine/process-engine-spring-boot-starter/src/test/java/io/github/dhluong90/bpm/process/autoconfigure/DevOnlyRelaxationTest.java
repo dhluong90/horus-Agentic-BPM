@@ -4,7 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.SimpleCommandLinePropertySource;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 /** PRE-022: auto-approval of imported definitions is accepted only on the dev profile on its own. */
@@ -51,6 +59,63 @@ class DevOnlyRelaxationTest {
                 .doesNotThrowAnyException();
         assertThatCode(() -> startUp(new String[] {"prod"}, "horus.bpm.processes.maker-checker.enabled", "true"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    void PRE_022_environment_variable_sets_the_current_auto_approve_key() {
+        // HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE is also the environment form of the removed key; it is read as the current key
+        MockEnvironment environment = withSource(new SystemEnvironmentPropertySource("systemEnvironment",
+                new HashMap<String, Object>(Map.of("HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE", "false"))));
+        environment.setActiveProfiles("dev");
+        ProcessEngineProperties properties = Binder.get(environment).bindOrCreate("horus.bpm.processes",
+                ProcessEngineProperties.class);
+        assertThat(properties.definitions().autoApprove()).isFalse();
+        assertThatCode(() -> ProcessEngineAutoConfiguration.requireDevOnlyRelaxations(environment, properties))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void PRE_022_every_removed_key_is_refused_from_a_property_file_the_command_line_and_an_environment_variable() {
+        // Given each removed key in REMOVED_KEYS, set in each kind of source
+        for (String removed : ProcessEngineAutoConfiguration.REMOVED_KEYS.keySet()) {
+            String upper = removed.toUpperCase(Locale.ROOT);
+            Map<String, PropertySource<?>> sources = Map.of(
+                    "property file", new MapPropertySource("application.properties", Map.of(removed, "false")),
+                    "command line", new SimpleCommandLinePropertySource("--" + removed + "=false"),
+                    "environment variable, as written", new SystemEnvironmentPropertySource("systemEnvironment",
+                            new HashMap<String, Object>(Map.of(removed, "false"))),
+                    "environment variable, upper case", new SystemEnvironmentPropertySource("systemEnvironment",
+                            new HashMap<String, Object>(Map.of(upper, "false"))));
+            sources.forEach((kind, source) -> {
+                MockEnvironment environment = withSource(source);
+                environment.setActiveProfiles("dev");
+                // Then it is refused, naming the key and its replacement
+                ProcessEngineProperties properties = Binder.get(new MockEnvironment()).bindOrCreate(
+                        "horus.bpm.processes", ProcessEngineProperties.class);
+                assertThatThrownBy(() -> ProcessEngineAutoConfiguration.requireDevOnlyRelaxations(environment, properties))
+                        .as(removed + " in " + kind).isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining(removed + " was removed")
+                        .hasMessageContaining(ProcessEngineAutoConfiguration.REMOVED_KEYS.get(removed));
+            });
+        }
+    }
+
+    @Test
+    void PRE_022_only_the_environment_form_shared_with_the_current_key_is_exempt() {
+        // The shared form is not reported; any other spelling of the removed key is
+        MockEnvironment shared = withSource(new SystemEnvironmentPropertySource("systemEnvironment",
+                new HashMap<String, Object>(Map.of("HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE", "true"))));
+        assertThat(ProcessEngineAutoConfiguration.removedKeysSet(shared)).isEmpty();
+        MockEnvironment dotted = withSource(new SystemEnvironmentPropertySource("systemEnvironment",
+                new HashMap<String, Object>(Map.of("HORUS.BPM.PROCESSES.DEFINITIONS-AUTO-APPROVE", "true"))));
+        assertThat(ProcessEngineAutoConfiguration.removedKeysSet(dotted))
+                .containsExactly("horus.bpm.processes.definitions-auto-approve");
+    }
+
+    private static MockEnvironment withSource(PropertySource<?> source) {
+        MockEnvironment environment = new MockEnvironment();
+        environment.getPropertySources().addFirst(source);
+        return environment;
     }
 
     @Test

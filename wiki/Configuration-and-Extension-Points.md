@@ -29,6 +29,16 @@ A use case you do not configure stays off or uses its documented default.
 | Controls stay on | Maker-checker, the audit trail, idempotency, tenant isolation, masking and fail-closed guardrails can be tightened, never switched off outside the `dev` profile. A setting that relaxes a control is off by default, logged when used and shown in `/api/bpm/meta`: the emergency single-approver path exists only when you turn it on, and every use is logged |
 | No business values in engine code | Currencies, tiers, fee codes, reason codes, roles, languages, calendars and SLA periods come from your definitions, configuration or beans. Examples and seed data may use banking data; the engine core does not |
 
+## Setting a property from an environment variable
+
+Spring's relaxed binding maps an environment variable to a property: upper case, dots and hyphens become underscores. `horus.bpm.processes.definitions.auto-approve` is `HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE`:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE=false java -jar host.jar
+```
+
+A removed key stays refused from every source: a property file, the command line and an environment variable. The one exception is the environment variable `HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE`, which is the environment form of both the removed key `horus.bpm.processes.definitions-auto-approve` and the current key, so it is read as the current key. Any other spelling of the removed key as an environment variable is refused. A relaxation that is only for `dev` (such as `auto-approve=true`) still stops start-up on any other profile.
+
 ## Extension points
 
 Each is an interface with an engine default. Declare a bean of the same type and the engine uses yours; you do not exclude any auto-configuration.

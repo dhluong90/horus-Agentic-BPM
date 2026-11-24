@@ -491,6 +491,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Then:** The plan scans only the 2027-03 and 2027-04 partitions; the response lists per node entered and completed times, duration, attempts, actor and incident, with `nationalId` masked; a second call with the returned `ETag` gets `304`.
 - **Example:** `I7 activities -> 2 partitions scanned of 18; 304 on repeat`.
 - **Test ID:** `PRE_027_activities_bounded_by_instance_lifetime`
+- **Also:** Every `TOKEN_CANCELLED` entry carries `details.cause`. A step whose last closing entry is `TOKEN_CANCELLED` reads `CANCELLED` for `BOUNDARY`, `EVENT_GATEWAY`, `INTERRUPTING_EVENT_SUBPROCESS`, `MULTIPLE_EVENT` and `MULTI_INSTANCE_COMPLETED` (an event or a finished loop cut it off), and `TERMINATED` for `TERMINATE_END`, `ADHOC_CANCEL`, `INSTANCE_CANCELLED`, `COMPENSATION` and `TRANSACTION_CANCEL`. An entry with no cause, or one this version does not know, reads `CANCELLED` with `cause: null`. A step still open when its instance ended cancelled or failed reads `TERMINATED` with `cause: null`. The activity carries the cause. Tests: `PRE_027_cancelled_or_terminated_follows_the_cause_recorded_on_the_closing_row`, and one assertion per cause in the kernel tests of the boundary, terminate end, event gateway, ad-hoc, multiple event and event sub-process paths.
 
 ### PRE-028 Live counts per node come from the token index, never from history
 - **Traces to:** `TR-PERF-09`

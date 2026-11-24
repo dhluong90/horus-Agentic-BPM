@@ -310,7 +310,7 @@ final class Loops {
                 ctx.effect(new Effect.CancelChildInstance(flow.id(), flow.activityInstanceId()));
             }
         }
-        ctx.cancelSubtree(instance);
+        ctx.cancelSubtree(instance, io.github.dhluong90.bpm.process.api.CancelCause.MULTI_INSTANCE_COMPLETED);
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------------

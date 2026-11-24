@@ -70,13 +70,15 @@ public interface ProcessQueryStore {
      * @param nodeId the step
      * @param firstEnteredAt its first {@code NODE_ENTERED}, or null
      * @param lastEnteredAt its last {@code NODE_ENTERED}, or null
-     * @param lastCompletedAt its last {@code NODE_COMPLETED}, or null
+     * @param lastClosedAt its last closing event, {@code NODE_COMPLETED} or {@code TOKEN_CANCELLED}, or null
+     * @param lastClosedType the type of that closing event, or null
+     * @param lastClosedCause the {@code details.cause} of that closing event ({@code CancelCause}), or null
      * @param entries its {@code NODE_ENTERED} count
      * @param attemptIds its distinct attempt ids
      * @param lastActor the last non-null actor of its entries, or null
      */
-    record NodeActivityRow(String nodeId, Instant firstEnteredAt, Instant lastEnteredAt, Instant lastCompletedAt,
-            long entries, long attemptIds, String lastActor) {
+    record NodeActivityRow(String nodeId, Instant firstEnteredAt, Instant lastEnteredAt, Instant lastClosedAt,
+            String lastClosedType, String lastClosedCause, long entries, long attemptIds, String lastActor) {
     }
 
     /**

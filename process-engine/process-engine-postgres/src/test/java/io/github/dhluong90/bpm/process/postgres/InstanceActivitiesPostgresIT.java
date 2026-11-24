@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
 
 import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
@@ -42,6 +43,16 @@ class InstanceActivitiesPostgresIT {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
 
     static final String I7 = "I7000000000000000000000007";
+    static final String PAYOUT = "I9000000000000000000000009";
+    static final String CUT_OFF = "IB00000000000000000000000B";
+    static final String CAUSES = "IC00000000000000000000000C";
+    /** One step per cancel cause, in the order the engine can write them, and the state each must read. */
+    static final java.util.Map<String, InstanceActivities.State> CAUSE_STATES = java.util.Map.of(
+            "BOUNDARY", InstanceActivities.State.CANCELLED, "EVENT_GATEWAY", InstanceActivities.State.CANCELLED,
+            "INTERRUPTING_EVENT_SUBPROCESS", InstanceActivities.State.CANCELLED,
+            "TERMINATE_END", InstanceActivities.State.TERMINATED, "ADHOC_CANCEL", InstanceActivities.State.TERMINATED,
+            "INSTANCE_CANCELLED", InstanceActivities.State.TERMINATED);
+    static final String RUNNING = "IA00000000000000000000000A";
     static final String OTHER = "I8000000000000000000000008";
     static final String DEFINITION = "DEFA0000000000000000000002";
     static final Instant STARTED = Instant.parse("2027-03-10T08:00:00Z");
@@ -79,6 +90,31 @@ class InstanceActivitiesPostgresIT {
                         ts(STARTED.minus(Duration.ofDays(400))))
                 .update();
         instance(I7, "{\"nationalId\":\"hmac:k1:9f2c\",\"applicant\":\"" + NATIONAL_ID + "\"}", STARTED, ENDED);
+        instance(PAYOUT, "{}", STARTED, ENDED);
+        history(PAYOUT, STARTED, "NODE_ENTERED", "credit-customer", null, null);
+        history(PAYOUT, STARTED.plusSeconds(2), "ERROR_THROWN", "credit-customer", null, null);
+        cancelled(PAYOUT, STARTED.plusSeconds(2), "credit-customer", "BOUNDARY");
+        history(PAYOUT, STARTED.plusSeconds(3), "NODE_ENTERED", "tell-failure", null, null);
+        history(PAYOUT, STARTED.plusSeconds(4), "NODE_COMPLETED", "tell-failure", null, null);
+        history(PAYOUT, ENDED, "INSTANCE_ENDED", null, null, null);
+        instance(CUT_OFF, "{}", STARTED, ENDED, "CANCELLED");
+        history(CUT_OFF, STARTED, "NODE_ENTERED", "debit-account", null, null);
+        history(CUT_OFF, STARTED.plusSeconds(1), "NODE_COMPLETED", "debit-account", null, null);
+        history(CUT_OFF, STARTED.plusSeconds(2), "NODE_ENTERED", "credit-customer", null, null);
+        history(CUT_OFF, ENDED, "INSTANCE_ENDED", null, null, null);
+        instance(CAUSES, "{}", STARTED, ENDED);
+        int step = 0;
+        for (String cause : CAUSE_STATES.keySet()) {
+            history(CAUSES, STARTED.plusSeconds(++step), "NODE_ENTERED", "step-" + cause, null, null);
+            cancelled(CAUSES, STARTED.plusSeconds(++step), "step-" + cause, cause);
+        }
+        // A row written before causes existed, and one with a cause this version does not know
+        history(CAUSES, STARTED.plusSeconds(30), "NODE_ENTERED", "step-legacy", null, null);
+        history(CAUSES, STARTED.plusSeconds(31), "TOKEN_CANCELLED", "step-legacy", null, null);
+        history(CAUSES, STARTED.plusSeconds(32), "NODE_ENTERED", "step-future", null, null);
+        cancelled(CAUSES, STARTED.plusSeconds(33), "step-future", "SOME_FUTURE_CAUSE");
+        instance(RUNNING, "{}", STARTED, null);
+        history(RUNNING, STARTED, "NODE_ENTERED", "approve", null, null);
         instance(OTHER, "{}", STARTED.minus(Duration.ofDays(300)), STARTED.minus(Duration.ofDays(299)));
 
         Instant t = STARTED;
@@ -119,6 +155,56 @@ class InstanceActivitiesPostgresIT {
     }
 
     @Test
+    void PRE_027_step_cut_off_by_an_error_boundary_is_cancelled_not_completed() {
+        // Given a loan payout whose credit step was cancelled by its error boundary, and an instance that then ended
+        InstanceActivities activities = service.activities(PAYOUT, 200);
+
+        // Then the credit step reads CANCELLED and the step that ran to its end reads COMPLETED
+        assertThat(activities.nodes()).extracting(InstanceActivities.Node::nodeId, InstanceActivities.Node::state)
+                .containsExactly(tuple("credit-customer", InstanceActivities.State.CANCELLED),
+                        tuple("tell-failure", InstanceActivities.State.COMPLETED));
+    }
+
+    @Test
+    void PRE_027_cancelled_or_terminated_follows_the_cause_recorded_on_the_closing_row() {
+        // Given steps cut off by a boundary, an event gateway, an interrupting event sub-process, a terminate end, an
+        // ad-hoc cancel and an instance cancel, a step cancelled before causes were recorded, and one with a new cause
+        InstanceActivities activities = service.activities(CAUSES, 200);
+
+        // Then an event that interrupted a step reads CANCELLED and a terminate, ad-hoc or instance cancel reads
+        // TERMINATED, each carrying its cause
+        for (var entry : CAUSE_STATES.entrySet()) {
+            InstanceActivities.Node node = activities.nodes().stream()
+                    .filter(n -> n.nodeId().equals("step-" + entry.getKey())).findFirst().orElseThrow();
+            assertThat(node.state()).as(entry.getKey()).isEqualTo(entry.getValue());
+            assertThat(node.cause()).isEqualTo(entry.getKey());
+        }
+        // And an old row without a cause, and a cause this version does not know, read a neutral CANCELLED
+        assertThat(activities.nodes()).filteredOn(n -> n.nodeId().equals("step-legacy") || n.nodeId().equals("step-future"))
+                .extracting(InstanceActivities.Node::state).containsOnly(InstanceActivities.State.CANCELLED);
+        assertThat(activities.nodes()).filteredOn(n -> n.nodeId().equals("step-legacy"))
+                .extracting(InstanceActivities.Node::cause).containsExactly((String) null);
+    }
+
+    @Test
+    void PRE_027_step_open_when_the_instance_was_cancelled_is_terminated() {
+        // Given a transfer cancelled while its credit step was open
+        InstanceActivities activities = service.activities(CUT_OFF, 200);
+
+        // Then the finished debit is COMPLETED and the open credit is TERMINATED, closed at the instance's end
+        assertThat(activities.nodes()).extracting(InstanceActivities.Node::nodeId, InstanceActivities.Node::state)
+                .containsExactly(tuple("debit-account", InstanceActivities.State.COMPLETED),
+                        tuple("credit-customer", InstanceActivities.State.TERMINATED));
+        assertThat(activities.nodes().get(1).completedAt()).isEqualTo(ENDED);
+    }
+
+    @Test
+    void PRE_027_step_entered_and_not_left_is_active_while_the_instance_runs() {
+        assertThat(service.activities(RUNNING, 200).nodes()).extracting(InstanceActivities.Node::state)
+                .containsExactly(InstanceActivities.State.ACTIVE);
+    }
+
+    @Test
     void PRE_027_activities_bounded_by_instance_lifetime() {
         InstanceActivities activities = service.activities(I7, 200);
 
@@ -135,7 +221,9 @@ class InstanceActivitiesPostgresIT {
         assertThat(assess.incidentCode()).isEqualTo("AGENT_TIMEOUT");
         assertThat(assess.duration()).as("not completed").isNull();
         InstanceActivities.Node approve = activities.nodes().get(2);
-        assertThat(approve.state()).isEqualTo(InstanceActivities.State.ACTIVE);
+        assertThat(approve.state()).as("entered, never closed, and the instance ended: closed at the end")
+                .isEqualTo(InstanceActivities.State.COMPLETED);
+        assertThat(approve.completedAt()).isEqualTo(ENDED);
         assertThat(approve.attempts()).isEqualTo(1);
         assertThat(activities.entries()).hasSize(9).extracting(InstanceActivities.Entry::occurredAt).isSorted();
         assertThat(activities.hasMore()).isFalse();
@@ -189,9 +277,13 @@ class InstanceActivitiesPostgresIT {
     }
 
     private static void instance(String id, String variables, Instant started, Instant ended) {
+        instance(id, variables, started, ended, "COMPLETED");
+    }
+
+    private static void instance(String id, String variables, Instant started, Instant ended, String status) {
         jdbc.sql("INSERT INTO pre_instance (tenant_id, id, definition_id, definition_key, definition_ver, status, "
                         + "variables, started_by, started_at, ended_at) VALUES ('bank-a', ?, ?, 'kyc-onboarding', 2, "
-                        + "'COMPLETED', ?::jsonb, 'svc-kyc', ?, ?)")
+                        + "'COMPLETED', ?::jsonb, 'svc-kyc', ?, ?)".replace("'COMPLETED'", "'" + status + "'"))
                 .params(id, DEFINITION, variables, ts(started), ts(ended)).update();
     }
 
@@ -206,7 +298,15 @@ class InstanceActivitiesPostgresIT {
                 .update();
     }
 
+    private static void cancelled(String instance, Instant at, String node, String cause) {
+        seq++;
+        jdbc.sql("INSERT INTO pre_history (tenant_id, occurred_at, id, instance_id, definition_id, event_type, node_id, "
+                        + "details) VALUES ('bank-a', ?, ?, ?, ?, 'TOKEN_CANCELLED', ?, ?::jsonb)")
+                .params(ts(at), "H" + "%025d".formatted(seq), instance, DEFINITION, node, "{\"cause\":\"" + cause + "\"}")
+                .update();
+    }
+
     private static Timestamp ts(Instant instant) {
-        return Timestamp.from(instant);
+        return instant == null ? null : Timestamp.from(instant);
     }
 }

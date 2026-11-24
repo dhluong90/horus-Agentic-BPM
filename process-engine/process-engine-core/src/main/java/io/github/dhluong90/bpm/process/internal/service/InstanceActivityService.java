@@ -1,10 +1,12 @@
 package io.github.dhluong90.bpm.process.internal.service;
 
+import io.github.dhluong90.bpm.process.api.CancelCause;
 import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
 import io.github.dhluong90.bpm.process.api.PermissionDeniedException;
 import io.github.dhluong90.bpm.process.api.QueryInvalidException;
 import io.github.dhluong90.bpm.process.api.UnauthenticatedException;
+import io.github.dhluong90.bpm.process.internal.exec.InstanceStatus;
 import io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
 import io.github.dhluong90.bpm.process.internal.store.TransactionRunner;
@@ -26,6 +28,8 @@ import java.util.Objects;
  * only; thread-safe.
  */
 public final class InstanceActivityService {
+
+    private static final System.Logger LOG = System.getLogger(InstanceActivityService.class.getName());
 
     static final String PERMISSION_READ = "processes:read";
 
@@ -82,12 +86,12 @@ public final class InstanceActivityService {
                     Comparator.nullsLast(Comparator.naturalOrder())).thenComparing(ProcessQueryStore.NodeActivityRow::nodeId));
             List<InstanceActivities.Node> nodes = new ArrayList<>();
             for (ProcessQueryStore.NodeActivityRow row : rows) {
-                nodes.add(node(row, incidents.remove(row.nodeId())));
+                nodes.add(node(row, incidents.remove(row.nodeId()), instance));
             }
             for (ProcessStore.IncidentRow incident : incidents.values()) {
                 // An incident on a step with no history row in the window is still shown on its step.
                 nodes.add(new InstanceActivities.Node(incident.nodeId(), InstanceActivities.State.INCIDENT, null, null,
-                        null, 0, null, incident.errorCode(), incident.createdAt()));
+                        null, 0, null, incident.errorCode(), incident.createdAt(), null));
             }
             List<InstanceActivities.Entry> entries = new ArrayList<>(
                     queries.historyEntries(tenant, instanceId, from, to, limit + 1));
@@ -172,17 +176,59 @@ public final class InstanceActivityService {
         return out;
     }
 
-    private static InstanceActivities.Node node(ProcessQueryStore.NodeActivityRow row, ProcessStore.IncidentRow incident) {
-        boolean left = row.lastCompletedAt() != null
-                && (row.lastEnteredAt() == null || !row.lastCompletedAt().isBefore(row.lastEnteredAt()));
-        InstanceActivities.State state = incident != null ? InstanceActivities.State.INCIDENT
-                : left ? InstanceActivities.State.COMPLETED : InstanceActivities.State.ACTIVE;
+    /** An instance that ended any way other than completing (cancelled or failed). */
+    private static boolean abnormalEnd(ProcessStore.InstanceRow instance) {
+        return !InstanceStatus.COMPLETED.name().equals(instance.status());
+    }
+
+    /**
+     * One step as the timeline shows it. A step with an open incident is {@code INCIDENT}. Otherwise the last closing
+     * event decides: {@code NODE_COMPLETED} is {@code COMPLETED}; {@code TOKEN_CANCELLED} is {@code CANCELLED}, or
+     * {@code TERMINATED} when its {@code cause} is a terminate end, an ad-hoc cancel, an instance cancel or an undo. A step
+     * entered and not closed is {@code ACTIVE} while the instance runs; once the instance has ended it is
+     * {@code TERMINATED} when the instance ended terminated or cancelled, and {@code COMPLETED} when it ended normally
+     * (a history gap, logged). A compensated step keeps its state; the undo is reported in the compensation block.
+     */
+    private static InstanceActivities.Node node(ProcessQueryStore.NodeActivityRow row, ProcessStore.IncidentRow incident,
+            ProcessStore.InstanceRow instance) {
+        boolean closed = row.lastClosedAt() != null
+                && (row.lastEnteredAt() == null || !row.lastClosedAt().isBefore(row.lastEnteredAt()));
+        Instant endedAt = instance.endedAt();
+        Instant leftAt = closed ? row.lastClosedAt() : null;
+        InstanceActivities.State state;
+        String cause = null;
+        if (incident != null) {
+            state = InstanceActivities.State.INCIDENT;
+        } else if (closed) {
+            if ("TOKEN_CANCELLED".equals(row.lastClosedType())) {
+                // The cause decides: an event that interrupted the step is CANCELLED, a terminate, a cancel or an
+                // undo is TERMINATED. An entry written before the cause existed reads as CANCELLED, with no reason.
+                cause = row.lastClosedCause();
+                state = CancelCause.of(cause).filter(CancelCause::terminating).isPresent()
+                        ? InstanceActivities.State.TERMINATED : InstanceActivities.State.CANCELLED;
+            } else {
+                state = InstanceActivities.State.COMPLETED;
+            }
+        } else if (endedAt == null) {
+            state = InstanceActivities.State.ACTIVE;
+        } else {
+            leftAt = endedAt;
+            if (abnormalEnd(instance)) {
+                state = InstanceActivities.State.TERMINATED;
+            } else {
+                state = InstanceActivities.State.COMPLETED;
+                LOG.log(System.Logger.Level.WARNING, "process.history.gap instance={0} node={1}: the instance ended "
+                        + "normally but the step has no closing event", instance.id(), row.nodeId());
+            }
+        }
+        boolean left = leftAt != null && state != InstanceActivities.State.INCIDENT;
+        Instant completedAt = left ? leftAt : null;
         Duration duration = left && row.firstEnteredAt() != null
-                ? Duration.between(row.firstEnteredAt(), row.lastCompletedAt()) : null;
+                ? Duration.between(row.firstEnteredAt(), completedAt) : null;
         int attempts = (int) Math.max(row.entries(), row.attemptIds());
-        return new InstanceActivities.Node(row.nodeId(), state, row.firstEnteredAt(), row.lastCompletedAt(), duration,
+        return new InstanceActivities.Node(row.nodeId(), state, row.firstEnteredAt(), completedAt, duration,
                 attempts, row.lastActor(), incident == null ? null : incident.errorCode(),
-                incident == null ? null : incident.createdAt());
+                incident == null ? null : incident.createdAt(), cause);
     }
 
     private String tenant() {

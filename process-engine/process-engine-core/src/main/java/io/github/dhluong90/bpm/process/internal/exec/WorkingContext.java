@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.internal.exec;
 
+import io.github.dhluong90.bpm.process.api.CancelCause;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
@@ -447,7 +448,7 @@ final class WorkingContext implements ExecutionContext {
             if (met) {
                 history("AD_HOC_CONDITION_MET", scope, Map.of("running", running.size()));
                 if (node.cancelRemainingInstances()) {
-                    running.forEach(t -> cancelTree(t, null));
+                    running.forEach(t -> cancelTree(t, null, CancelCause.ADHOC_CANCEL));
                     done = true;
                 } else {
                     Map<String, Object> locals = new LinkedHashMap<>(scope.locals());
@@ -611,7 +612,7 @@ final class WorkingContext implements ExecutionContext {
         for (Token live : tree().all()) {
             if (live.kind() == TokenKind.FLOW && live.status().live()) {
                 // The failing step's own job already failed for good; it is kept as it is for the record.
-                cancelFlow(live, !live.id().equals(failing.id()));
+                cancelFlow(live, !live.id().equals(failing.id()), CancelCause.COMPENSATION);
             }
         }
         status = InstanceStatus.COMPENSATING;
@@ -667,7 +668,7 @@ final class WorkingContext implements ExecutionContext {
     private void startResumable(Token thrower, Token scope, String cause, String target) {
         for (Token child : tree().children(scope.id())) {
             if (child.status().live() && !child.id().equals(thrower.id())) {
-                cancelTree(child, null);
+                cancelTree(child, null, "CANCEL".equals(cause) ? CancelCause.TRANSACTION_CANCEL : CancelCause.COMPENSATION);
             }
         }
         update(new Token(thrower.id(), thrower.kind(), TokenStatus.WAITING_EVENT, thrower.scopeTokenId(),
@@ -686,7 +687,7 @@ final class WorkingContext implements ExecutionContext {
     }
 
     /** Cancels one live flow token with the task, job or timer it waits on. */
-    private void cancelFlow(Token child, boolean cancelWork) {
+    private void cancelFlow(Token child, boolean cancelWork, CancelCause cause) {
         update(child.withStatus(TokenStatus.CANCELLED));
         if (cancelWork && child.status() == TokenStatus.WAITING_USER && child.activityInstanceId() != null) {
             effect(new Effect.CancelUserTask(child.activityInstanceId()));
@@ -701,23 +702,23 @@ final class WorkingContext implements ExecutionContext {
             // CANCELLED and discards the result (DN-10). The activity instance of a waiting timer is its job.
             effect(new Effect.CancelJob(child.activityInstanceId()));
         }
-        history("TOKEN_CANCELLED", child, Map.of());
+        history("TOKEN_CANCELLED", child, Map.of("cause", cause.name()));
     }
 
     @Override
-    public void cancelToken(Token token) {
+    public void cancelToken(Token token, CancelCause cause) {
         if (token.status().live()) {
-            cancelFlow(token, true);
+            cancelFlow(token, true, cause);
         } else if (token.status() == TokenStatus.JOINED) {
             update(token.withStatus(TokenStatus.CANCELLED));
         }
     }
 
     @Override
-    public void cancelSubtree(Token scope) {
+    public void cancelSubtree(Token scope, CancelCause cause) {
         for (Token child : tree().children(scope.id())) {
             if (child.kind() != TokenKind.FLOW) {
-                cancelSubtree(child);
+                cancelSubtree(child, cause);
             } else if (child.status().live()) {
                 update(child.withStatus(TokenStatus.CANCELLED));
                 if (child.status() == TokenStatus.WAITING_USER && child.activityInstanceId() != null) {
@@ -735,7 +736,7 @@ final class WorkingContext implements ExecutionContext {
                 if (child.status() == TokenStatus.WAITING_EVENT && child.activityInstanceId() != null) {
                     effect(new Effect.DeleteSubscription(child.activityInstanceId()));
                 }
-                history("TOKEN_CANCELLED", child, Map.of());
+                history("TOKEN_CANCELLED", child, Map.of("cause", cause.name()));
             }
         }
         update(scope.withStatus(TokenStatus.CANCELLED));
@@ -792,7 +793,7 @@ final class WorkingContext implements ExecutionContext {
             if (other.kind() == TokenKind.FLOW && other.status().live() && !other.id().equals(winner.id())
                     && targets.contains(other.nodeId())
                     && java.util.Objects.equals(other.scopeTokenId(), winner.scopeTokenId())) {
-                cancelTree(other, null);
+                cancelTree(other, null, CancelCause.EVENT_GATEWAY);
                 disarmBoundaries(other.nodeId(), other.scopeTokenId(), null);
                 lost.add(other.nodeId());
             }
@@ -805,12 +806,12 @@ final class WorkingContext implements ExecutionContext {
     }
 
     /** Cancels a token and everything under it, with the work each waits on. */
-    private int cancelTree(Token token, String exceptWorkOf) {
+    private int cancelTree(Token token, String exceptWorkOf, CancelCause cause) {
         int cancelled = 0;
         if (token.kind() != TokenKind.FLOW) {
             for (Token child : tree().children(token.id())) {
                 if (child.status().live()) {
-                    cancelled += cancelTree(child, exceptWorkOf);
+                    cancelled += cancelTree(child, exceptWorkOf, cause);
                 }
             }
             update(token.withStatus(TokenStatus.CANCELLED));
@@ -830,7 +831,7 @@ final class WorkingContext implements ExecutionContext {
             effect(new Effect.DeleteSubscription(token.activityInstanceId()));
         }
         if (!listener) {
-            history("TOKEN_CANCELLED", token, Map.of());
+            history("TOKEN_CANCELLED", token, Map.of("cause", cause.name()));
         }
         return 1;
     }
@@ -844,7 +845,7 @@ final class WorkingContext implements ExecutionContext {
 
     /** Cancels a host activity: its tree, and the timers of its other boundaries. */
     private void interrupt(Token host, String exceptWorkOf, String exceptBoundaryToken) {
-        cancelTree(host, exceptWorkOf);
+        cancelTree(host, exceptWorkOf, CancelCause.BOUNDARY);
         disarmBoundaries(host.nodeId(), host.scopeTokenId(), exceptBoundaryToken);
     }
 
@@ -1048,7 +1049,7 @@ final class WorkingContext implements ExecutionContext {
         if (interrupting) {
             // The other work of the scope is cancelled with its tasks, jobs, called children and waits; the scope stays.
             for (Token child : tree().live(scope.id())) {
-                cancelTree(child, exceptWorkOf);
+                cancelTree(child, exceptWorkOf, CancelCause.INTERRUPTING_EVENT_SUBPROCESS);
             }
         }
         Token inner = createToken(TokenKind.SCOPE, esp.id(), scope.id());
@@ -1068,7 +1069,7 @@ final class WorkingContext implements ExecutionContext {
         Token scope = tree().get(token.scopeTokenId()).orElseThrow();
         for (Token other : tree().children(scope.id())) {
             if (!other.id().equals(token.id()) && other.status().live()) {
-                cancelled += cancelTree(other, null);
+                cancelled += cancelTree(other, null, CancelCause.TERMINATE_END);
             }
         }
         history("TERMINATED", token, Map.of("scopeTokenId", scope.id(), "cancelled", cancelled));

@@ -308,7 +308,8 @@ export const instanceSummary = z
 export type InstanceSummary = z.infer<typeof instanceSummary>;
 export const instanceSummaryPage = page(instanceSummary);
 
-export const ACTIVITY_STATES = ['ACTIVE', 'COMPLETED', 'INCIDENT'] as const;
+/** `CANCELLED` and `TERMINATED` were added after the first three; `nodeActivity.state` stays a string so a newer value never fails a page. */
+export const ACTIVITY_STATES = ['ACTIVE', 'COMPLETED', 'CANCELLED', 'TERMINATED', 'INCIDENT'] as const;
 
 /** What happened at one step (getInstanceActivities, PRE-027): every figure is the engine's, never the browser's. */
 export const nodeActivity = z
@@ -320,6 +321,8 @@ export const nodeActivity = z
     durationMs: z.number().int().min(0).nullable(),
     attempts: z.number().int().min(0),
     actor: z.string().nullable(),
+    /** Why a cancelled or terminated step was cut off (the engine's cause code); absent on older engines and on any other step. */
+    cause: z.string().nullable().optional(),
     incident: z.object({ code: z.string(), openedAt: z.string() }).loose().nullable(),
   })
   .loose();

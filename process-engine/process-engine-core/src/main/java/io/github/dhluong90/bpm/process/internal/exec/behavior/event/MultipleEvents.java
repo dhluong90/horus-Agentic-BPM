@@ -67,8 +67,8 @@ final class MultipleEvents {
         }
         @Override public void update(Token token) { real.update(token); }
         @Override public void complete(Token token) { real.complete(token); }
-        @Override public void cancelToken(Token token) { real.cancelToken(token); }
-        @Override public void cancelSubtree(Token scope) { real.cancelSubtree(scope); }
+        @Override public void cancelToken(Token token, io.github.dhluong90.bpm.process.api.CancelCause cause) { real.cancelToken(token, cause); }
+        @Override public void cancelSubtree(Token scope, io.github.dhluong90.bpm.process.api.CancelCause cause) { real.cancelSubtree(scope, cause); }
         @Override public void enterScope(Token token, FlowNode block) { real.enterScope(token, block); }
         @Override public void compensate(Token failing, String cause) { real.compensate(failing, cause); }
         @Override public boolean throwError(Token source, String code, boolean fromStep) {
@@ -179,7 +179,7 @@ final class MultipleEvents {
         private void occurred(N node, Token token, Fired fired, ExecutionContext ctx) {
             List<Token> siblings = group(token, ctx);
             if (!parallel(node)) {
-                siblings.forEach(ctx::cancelToken);
+                siblings.forEach(sibling -> ctx.cancelToken(sibling, io.github.dhluong90.bpm.process.api.CancelCause.MULTIPLE_EVENT));
                 leave(node, token, fired, ctx);
                 return;
             }

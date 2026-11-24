@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { InstanceActivities, ProcessInstance } from '../../../api/processes/schemas';
-import { routingWords, assigneeWords, scopeState, undoEntryType, wordsOf, durationParts, entryKey, firstStep, incidentKey, nodeMarks } from './instanceView';
+import { routingWords, assigneeWords, scopeState, undoEntryType, wordsOf, durationParts, entryKey, firstStep, incidentKey, nodeMarks, causeKey } from './instanceView';
+import { en } from '../../../i18n/en';
+import { vi } from '../../../i18n/vi';
 
 const instance: ProcessInstance = {
   id: 'I7', definitionKey: 'kyc-onboarding', definitionVersion: 2, businessKey: 'KYC-2207', status: 'RUNNING', lockVersion: 1, startedBy: 'svc-kyc', startedAt: '2026-11-20T01:00:00Z',
@@ -42,6 +44,42 @@ describe('instance view', () => {
     expect(entryKey('NODE_COMPLETED')).toBe('instance.entry.NODE_COMPLETED');
     expect(entryKey('SOMETHING_NEW')).toBe('instance.entry.other');
     expect(incidentKey('NOT_KNOWN')).toBe('instance.incident.other');
+  });
+
+  it('PRE_027_a_cancelled_step_and_a_terminated_step_are_not_marked_completed', () => {
+    const ended: InstanceActivities = {
+      ...activities,
+      nodes: [
+        { nodeId: 'credit', state: 'CANCELLED', enteredAt: 'x', completedAt: 'y', durationMs: 2_000, attempts: 1, actor: null, incident: null },
+        { nodeId: 'notify', state: 'TERMINATED', enteredAt: 'x', completedAt: 'y', durationMs: 2_000, attempts: 1, actor: null, incident: null },
+        { nodeId: 'debit', state: 'COMPLETED', enteredAt: 'x', completedAt: 'y', durationMs: 1_000, attempts: 1, actor: null, incident: null },
+      ],
+    };
+    const marks = nodeMarks({ ...instance, tokens: [] }, ended);
+    expect(marks.get('credit')).toEqual({ kind: 'cancelled', cause: null });
+    expect(marks.get('notify')).toEqual({ kind: 'terminated', cause: null });
+    expect(marks.get('debit')).toEqual({ kind: 'done' });
+  });
+
+  it('PRE_027_a_cancelled_or_terminated_step_carries_its_cause_and_the_cause_has_words', () => {
+    const causes: [string, 'CANCELLED' | 'TERMINATED'][] = [
+      ['BOUNDARY', 'CANCELLED'], ['EVENT_GATEWAY', 'CANCELLED'], ['INTERRUPTING_EVENT_SUBPROCESS', 'CANCELLED'],
+      ['TERMINATE_END', 'TERMINATED'], ['ADHOC_CANCEL', 'TERMINATED'], ['INSTANCE_CANCELLED', 'TERMINATED'],
+    ];
+    const ended: InstanceActivities = {
+      ...activities,
+      nodes: causes.map(([cause, state]) => ({ nodeId: cause, state, cause, enteredAt: 'x', completedAt: 'y', durationMs: 1_000, attempts: 1, actor: null, incident: null })),
+    };
+    const marks = nodeMarks({ ...instance, tokens: [] }, ended);
+    for (const [cause, state] of causes) {
+      expect(marks.get(cause)).toEqual({ kind: state === 'CANCELLED' ? 'cancelled' : 'terminated', cause });
+      expect(causeKey(cause)).toBe(`instance.cause.${cause}`);
+      expect(en[`instance.cause.${cause}` as keyof typeof en]).toBeTruthy();
+      expect(vi[`instance.cause.${cause}` as keyof typeof vi]).toBeTruthy();
+    }
+    // An old row has no cause and a newer engine may send one this cockpit does not know: neither shows a code
+    expect(causeKey(null)).toBeUndefined();
+    expect(causeKey('SOME_FUTURE_CAUSE')).toBeUndefined();
   });
 
   it('CKP_033_an_undone_step_is_marked_unless_it_holds_an_incident', () => {

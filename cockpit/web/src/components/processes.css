@@ -272,6 +272,8 @@
 .dg-badge--incident text { fill: var(--bad); }
 .dg-badge--undone rect { fill: var(--warn-soft); stroke: var(--warn-fill); stroke-width: 1; }
 .dg-badge--undone text { fill: var(--warn); }
+.dg-badge--cancelled rect, .dg-badge--terminated rect { fill: var(--surface-3); stroke: var(--line-strong); stroke-width: 1; }
+.dg-badge--cancelled text, .dg-badge--terminated text { fill: var(--ink-2); }
 .dg-badge--helper rect { fill: var(--surface-3); stroke: var(--line-strong); stroke-width: 1; }
 .dg-badge--helper text { fill: var(--ink-2); }
 .dg-badge--undone, .dg-badge--helper { pointer-events: bounding-box; }
