@@ -76,6 +76,7 @@ public final class Calendars implements CalendarService, PendingApprovalSource {
     private final Approval approval;
     private final Duration idempotencyRetention;
     private final int maxPageSize;
+    private final boolean requireContentHash;
     private volatile Cursors cursors;
 
     /**
@@ -107,6 +108,27 @@ public final class Calendars implements CalendarService, PendingApprovalSource {
     public Calendars(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
             CalendarStore store, ProcessEventPublisher publisher, Approval approval, Duration idempotencyRetention,
             int maxPageSize) {
+        this(tenants, callers, clock, transactions, store, publisher, approval, idempotencyRetention, maxPageSize,
+                false);
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transaction runner on the host's transaction manager
+     * @param store calendar storage
+     * @param publisher event publisher, called in the approving transaction
+     * @param approval four eyes or, in the dev profile only, single
+     * @param idempotencyRetention how long an idempotency record answers replays
+     * @param maxPageSize the most items of a list page ({@code query.max-page-size})
+     * @param requireContentHash {@code approval.require-content-hash}: an approval must name
+     *     {@code expectedChangeHash}
+     */
+    public Calendars(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            CalendarStore store, ProcessEventPublisher publisher, Approval approval, Duration idempotencyRetention,
+            int maxPageSize, boolean requireContentHash) {
+        this.requireContentHash = requireContentHash;
         this.idempotencyRetention = Objects.requireNonNull(idempotencyRetention);
         this.maxPageSize = maxPageSize;
         this.tenants = Objects.requireNonNull(tenants);
@@ -210,6 +232,11 @@ public final class Calendars implements CalendarService, PendingApprovalSource {
         String tenant = tenant();
         String caller = caller(PERMISSION_MANAGE);
         String note = text(comment, "comment", false);
+        // AUD-02: an approval names the change it reviewed, refused before anything is read when missing.
+        if (expectedChangeHash == null && requireContentHash) {
+            throw new io.github.dhluong90.bpm.process.api.ContentHashRequiredException("expectedChangeHash",
+                    "contentHash of the change");
+        }
         if (expectedChangeHash != null && !expectedChangeHash.matches("[0-9a-f]{64}")) {
             throw new InputInvalidException("expectedChangeHash must be 64 lower-case hexadecimal characters, the "
                     + "contentHash of the change as the approvals list shows it");
@@ -270,6 +297,10 @@ public final class Calendars implements CalendarService, PendingApprovalSource {
     @Override
     public List<io.github.dhluong90.bpm.process.api.PendingApproval> pending(String tenant, String caller,
             java.util.Set<String> held, Instant afterAt, String afterId, int limit) {
+        // AUD-07: a caller without calendars:manage sees no pending change, as for migration plans.
+        if (!held.contains(PERMISSION_MANAGE)) {
+            return List.of();
+        }
         return store.pendingChangesOldestFirst(tenant, afterAt, afterId, limit).stream().map(c -> {
             List<String> allowed = new ArrayList<>(2);
             Map<String, String> denied = new LinkedHashMap<>(2);
@@ -385,6 +416,16 @@ public final class Calendars implements CalendarService, PendingApprovalSource {
             throw new QueryInvalidException("limit must be 1 to " + maxPageSize + " (query.max-page-size)");
         }
         return limit;
+    }
+
+    /**
+     * Uses cursor keys the host supplies instead of one in {@code pre_engine_key} (AUD-13).
+     *
+     * @param activeKeyId the id of the key that signs new cursors
+     * @param keys every key that verifies, by id, each at least 32 bytes
+     */
+    public void useCursorKeys(String activeKeyId, java.util.Map<String, byte[]> keys) {
+        cursors = new Cursors(activeKeyId, keys);
     }
 
     private Cursors cursors() {

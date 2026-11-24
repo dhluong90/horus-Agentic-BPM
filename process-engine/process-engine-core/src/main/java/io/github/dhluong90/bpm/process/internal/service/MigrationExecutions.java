@@ -61,6 +61,7 @@ public final class MigrationExecutions implements MigrationExecutionService, Pen
     private final ProcessEventPublisher publisher;
     private final MigrationSettings settings;
     private final IdempotentCalls idempotency;
+    private final boolean requireContentHash;
 
     /**
      * @param tenants tenant resolver
@@ -77,6 +78,28 @@ public final class MigrationExecutions implements MigrationExecutionService, Pen
     public MigrationExecutions(TenantResolver tenants, CallerResolver callers, Clock clock,
             TransactionRunner transactions, ProcessStore definitions, MigrationStore store, Migrations migrations,
             ProcessEventPublisher publisher, MigrationSettings settings, Duration idempotencyRetention) {
+        this(tenants, callers, clock, transactions, definitions, store, migrations, publisher, settings,
+                idempotencyRetention, false);
+    }
+
+    /**
+     * @param tenants tenant resolver
+     * @param callers caller resolver
+     * @param clock engine clock
+     * @param transactions transactions on the host's transaction manager
+     * @param definitions the definition store, also for idempotency records
+     * @param store migration storage
+     * @param migrations the plans, whose dry run a proposal and an approval repeat
+     * @param publisher event publisher
+     * @param settings migration settings
+     * @param idempotencyRetention how long an idempotency record answers replays
+     * @param requireContentHash {@code approval.require-content-hash}: an approval must name {@code expectedPlanHash}
+     */
+    public MigrationExecutions(TenantResolver tenants, CallerResolver callers, Clock clock,
+            TransactionRunner transactions, ProcessStore definitions, MigrationStore store, Migrations migrations,
+            ProcessEventPublisher publisher, MigrationSettings settings, Duration idempotencyRetention,
+            boolean requireContentHash) {
+        this.requireContentHash = requireContentHash;
         this.tenants = Objects.requireNonNull(tenants, "tenants");
         this.callers = Objects.requireNonNull(callers, "callers");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -152,6 +175,11 @@ public final class MigrationExecutions implements MigrationExecutionService, Pen
             String expectedPlanHash) {
         String tenant = tenant();
         String caller = caller(Migrations.PERMISSION_MANAGE);
+        // AUD-02: an approval names the plan it reviewed, refused before anything is read when missing.
+        if (expectedPlanHash == null && requireContentHash) {
+            throw new io.github.dhluong90.bpm.process.api.ContentHashRequiredException("expectedPlanHash",
+                    "contentHash of the plan");
+        }
         if (expectedPlanHash != null && !expectedPlanHash.matches("[0-9a-f]{64}")) {
             throw new InputInvalidException("expectedPlanHash must be 64 lower-case hexadecimal characters, the "
                     + "contentHash of the plan as the approvals list shows it");

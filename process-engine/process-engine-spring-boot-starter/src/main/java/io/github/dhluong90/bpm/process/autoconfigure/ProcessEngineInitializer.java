@@ -55,6 +55,11 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
                     + " migration(s) applied)");
         }
         // The list cursor key, in its own short transaction outside any request (pre_engine_key).
+        // AUD-13: keys from configuration or a secret keep the signing key out of the database.
+        java.util.Map<String, byte[]> cursorKeys = properties.cursor().decoded();
+        if (!cursorKeys.isEmpty()) {
+            services.useCursorKeys(properties.cursor().activeKeyId(), cursorKeys);
+        }
         services.loadCursorKey();
         for (String tenant : properties.definitions().startupTenants()) {
             for (String location : properties.definitions().locations()) {

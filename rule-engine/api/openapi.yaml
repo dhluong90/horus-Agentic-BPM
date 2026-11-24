@@ -43,6 +43,8 @@ paths:
         the answer shows what the caller may do, it does not need `rules:approve`. Ordered by `(requestedAt, id)`,
         keyset-paged with a signed cursor bound to the tenant and this list; at most `query.max-page-size` (200) per
         page, 50 by default. A cursor from another list, another tenant or an edited one is `400 QUERY_INVALID`.
+        A cursor names the key that signed it (`horus.bpm.rules.cursor.keys`, AUD-13): one of a removed key, or issued
+        before key ids existed, is `400 QUERY_INVALID` too.
 
         Each item has what a reviewer needs to open the version and to decide on exactly the content that was
         reviewed (`RLE-084`, PD-139): the `canonicalHash` to send back as `expectedCanonicalHash` and the
@@ -3820,7 +3822,8 @@ components:
             not a decision of the caller's tenant and this rule set in the period is left out of the answer and
             not reported, so the request cannot probe other tenants. More ids than `simulation.max-inputs` is
             `400 QUERY_INVALID`. Masked inputs are handled as for a period: a decision with a masked value is
-            listed with `maskedInputs` and is not replayed.
+            listed with `maskedInputs` and is not replayed. Each id is read by its key, so the work is bounded by the
+            number of ids and never by the length of the period (AUD-06).
     HistorySimulationResult:
       type: object
       required: [ruleSet, version, status, from, to, decisionCount, replayedCount, changedCount, notReplayableCount,

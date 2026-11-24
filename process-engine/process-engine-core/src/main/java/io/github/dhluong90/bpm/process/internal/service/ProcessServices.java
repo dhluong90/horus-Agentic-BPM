@@ -241,6 +241,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final BusinessCalendar calendar;
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
+    private volatile boolean configuredCursors;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
     /** The host's task forms (PRE-031); none until the starter installs them, so no declared form is accepted. */
     private volatile TaskForms forms = TaskForms.NONE;
@@ -1558,10 +1559,27 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     /**
+     * Uses cursor keys the host supplies, so the engine neither creates nor reads one in {@code pre_engine_key}
+     * (AUD-13). Every cursor names the key that signed it; a cursor of a key not listed here is
+     * {@code 400 QUERY_INVALID}.
+     *
+     * @param activeKeyId the id of the key that signs new cursors
+     * @param keys every key that verifies, by id, each at least 32 bytes
+     * @throws IllegalArgumentException when the active id names no key, an id is malformed or a key is too short
+     */
+    public void useCursorKeys(String activeKeyId, java.util.Map<String, byte[]> keys) {
+        cursors = new Cursors(activeKeyId, keys);
+        configuredCursors = true;
+    }
+
+    /**
      * Creates or reads the cursor key in its own short transaction. The starter calls it once at start-up, after the
      * migrations; a list call that finds no key loads it the same way.
      */
     public void loadCursorKey() {
+        if (configuredCursors) {
+            return;
+        }
         byte[] candidate = new byte[32];
         RANDOM.nextBytes(candidate);
         byte[] key;
