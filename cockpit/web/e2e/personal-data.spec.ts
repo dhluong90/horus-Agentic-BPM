@@ -40,7 +40,7 @@ async function openReview(page: Page, viewport: { width: number; height: number 
   await mockHost(page, 'ready-approver');
   await routeEngine(page, personalDataDemo(), meMinh.user.id, meMinh.permissions);
   await page.goto('./#/rules/customer-screening/2');
-  await expect(page.getByRole('heading', { level: 1, name: /customer-screening/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: /Customer screening/ })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await expect(page.locator('.masking-flag').first()).toBeAttached();
   await expect(page.getByRole('checkbox')).toBeVisible();
@@ -53,7 +53,7 @@ async function openDraft(page: Page, viewport: { width: number; height: number }
   const seed = personalDataDemo().map((v) => (v.ruleSet === 'customer-screening' && v.version === 2 ? { ...v, status: 'DRAFT' as const, requestedBy: null, requestedAt: null, createdBy: meLan.user.id } : v));
   await routeEngine(page, seed, meLan.user.id, [...meLan.permissions, 'rules:evaluate']);
   await page.goto('./#/rules/customer-screening/2');
-  await expect(page.getByRole('heading', { level: 1, name: /customer-screening/ })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: /Customer screening/ })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await expect(page.locator('.pii-warning')).toBeVisible();
 }
