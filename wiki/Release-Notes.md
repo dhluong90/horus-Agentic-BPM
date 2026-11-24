@@ -174,6 +174,10 @@ An hourly rollup keeps counts and median and 95th percentile durations per step 
 
 Every multi-row read of the Rule Engine store is registered with a declared bound, and CI checks each plan on PostgreSQL 14 and 18, including the partitions a decision log search reads (#368). No query's result changes.
 
+- **Agent output masked in the instance view (#365, PRE-361).** Fields an agent step marks `mask: true`, and nested or array fields of a form or agent schema, show as `***` in the instance, its idempotent replay and the task form, not only in history. No migration.
+- **A full parallel-start backlog answers 429 (#365, PRE-360).** The arrival cap now returns `429 START_ARRIVALS_FULL` with a `Retry-After` header instead of `413 PAYLOAD_TOO_LARGE`. No migration.
+- **Decision log refuses edits in the database (#365, RLE-211).** `rle_decision` rejects `UPDATE`, `TRUNCATE` and `DELETE` (except on the default partition the roll-over empties); retention by dropping a month is unchanged. In the V1 baseline.
+
 ## 0.2.0
 
 Released 21 Nov 2026. Still a 0.x release, so it makes no compatibility promise; the changes below need a code change in a host that uses the moved types.

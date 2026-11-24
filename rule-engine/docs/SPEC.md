@@ -1403,3 +1403,13 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
   - Approved, v2 is `PUBLISHED` and is the version in force from 2027-01-01T00:00:00Z, not before. With no date the version takes effect at approval, as before. The date joins the idempotency hash only when named.
 - **Example:** `request-publish {effectiveFrom: 2027-01-01T00:00:00Z} -> 200, GET /approvals shows effectiveFrom; approve -> in force from 2027-01-01`
 - **Test IDs:** `RLE_210_a_requested_effective_date_is_stored_shown_to_the_approver_and_applied`, `RLE_210_a_past_effective_date_is_refused_and_the_draft_stays_a_draft`, `RLE_210_the_effective_date_does_not_change_the_hash_or_the_four_eyes`, `RLE_210_a_date_asked_for_at_request_decides_which_version_is_in_force_and_a_past_date_is_refused`
+
+### RLE-211 The decision log refuses UPDATE, DELETE and TRUNCATE in the database
+- **Traces to:** #365, AUD-03, `TR-OBS-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `rle_decision` holds a `card-fee` decision of `bank-a` in `rle_decision_2027_01` and a straggler of March 2027 in `rle_decision_default`.
+- **When:** (a) The application's database role runs `UPDATE`, `DELETE` or `TRUNCATE` on `rle_decision` or on a monthly partition, and `UPDATE` or `TRUNCATE` on the default partition. (b) The clock reaches March and the partition job creates `rle_decision_2027_03`. (c) Retention drops `rle_decision_2027_01`.
+- **Then:** (a) Each statement fails with SQLSTATE `55000` ("rle_decision is append-only") and the rows are unchanged. (b) The job still moves the straggler out of the default partition, the only `DELETE` the database allows on the log, and the new partition refuses `DELETE` and `TRUNCATE` as well: a row trigger on the parent is cloned onto each partition at `ATTACH`, and the job adds the `TRUNCATE` trigger of each partition it creates. (c) Retention by `DROP TABLE` of a whole month works as before and is recorded in `rle_decision_log_drop`. The triggers are part of the V1 baseline. A table owner can still drop a trigger, so the application runs with a role that does not own the tables (wiki, Multi-Tenancy and Security).
+- **Example:** `UPDATE rle_decision SET outcome = 'X' -> 55000; DELETE FROM rle_decision_default -> allowed`.
+- **Test ID:** `RLE_211_control_the_decision_log_refuses_update_delete_and_truncate_and_the_roll_over_still_works` (`DecisionLogPartitionMaintenanceIT`)

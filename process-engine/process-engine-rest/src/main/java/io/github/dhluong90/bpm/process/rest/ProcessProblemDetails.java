@@ -48,6 +48,7 @@ public class ProcessProblemDetails {
             Map.entry("SELF_APPROVAL_FORBIDDEN", HttpStatus.FORBIDDEN),
             Map.entry("TENANT_NOT_ALLOWED", HttpStatus.FORBIDDEN),
             Map.entry("PAYLOAD_TOO_LARGE", HttpStatus.valueOf(413)),
+            Map.entry("START_ARRIVALS_FULL", HttpStatus.TOO_MANY_REQUESTS),
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.valueOf(428)),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("EVENT_LISTENER_FAILED", HttpStatus.INTERNAL_SERVER_ERROR),
@@ -169,6 +170,9 @@ public class ProcessProblemDetails {
         ResponseEntity.BodyBuilder response = ResponseEntity.status(status).contentType(PROBLEM);
         if ("IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             response.header("Retry-After", "1");
+        }
+        if (e instanceof io.github.dhluong90.bpm.process.api.StartArrivalsFullException full) {
+            response.header("Retry-After", Long.toString(full.retryAfterSeconds()));
         }
         return response.body(EngineJson.JSON.writeValueAsString(body).getBytes(StandardCharsets.UTF_8));
     }

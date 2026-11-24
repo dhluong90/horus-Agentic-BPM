@@ -300,6 +300,47 @@ class DecisionLogPartitionMaintenanceIT {
                 .isTrue();
     }
 
+    @Test
+    void RLE_211_control_the_decision_log_refuses_update_delete_and_truncate_and_the_roll_over_still_works() {
+        // Given a decision in the January 2027 partition, one in February, and a straggler of March in the default
+        DataSource db = migratedDatabase();
+        DecisionLogPartitions partitions = partitions(db);
+        partitions.ensureAhead(Instant.parse("2027-01-26T00:00:00Z"), SEVEN_DAYS);
+        JdbcClient jdbc = JdbcClient.create(db);
+        insertDecision(jdbc, "bank-a", "01KDQ0000000000000000A2101", "2027-01-05T00:00:00Z");
+        insertDecision(jdbc, "bank-a", "01KDQ0000000000000000A2102", "2027-03-15T00:00:00Z");
+        assertThat(partitionOf(jdbc, "01KDQ0000000000000000A2102")).isEqualTo("rle_decision_default");
+
+        // When SQL runs UPDATE, DELETE or TRUNCATE on the parent or on a monthly partition, Then each is refused
+        for (String sql : List.of("UPDATE rle_decision SET outcome = 'TAMPERED'",
+                "UPDATE rle_decision_2027_01 SET outcome = 'TAMPERED'",
+                "UPDATE rle_decision_default SET outcome = 'TAMPERED'",
+                "DELETE FROM rle_decision", "DELETE FROM rle_decision_2027_01",
+                "TRUNCATE rle_decision", "TRUNCATE rle_decision_2027_01", "TRUNCATE rle_decision_default")) {
+            assertThatThrownBy(() -> jdbc.sql(sql).update()).as(sql).isInstanceOf(DataAccessException.class)
+                    .hasMessageContaining("rle_decision is append-only");
+        }
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision WHERE outcome = 'OK'").query(Long.class).single())
+                .isEqualTo(2L);
+
+        // When the clock reaches March, Then the roll-over still moves the straggler out of the default partition
+        List<String> created = partitions.ensureAhead(Instant.parse("2027-02-25T00:00:00Z"), Duration.ofDays(40));
+        assertThat(created).contains("rle_decision_2027_03");
+        assertThat(partitionOf(jdbc, "01KDQ0000000000000000A2102")).isEqualTo("rle_decision_2027_03");
+        assertThat(partitions.defaultRows()).isZero();
+
+        // And a partition created by the roll-over refuses a change and a TRUNCATE too
+        assertThatThrownBy(() -> jdbc.sql("DELETE FROM rle_decision_2027_03").update())
+                .hasMessageContaining("rle_decision is append-only");
+        assertThatThrownBy(() -> jdbc.sql("TRUNCATE rle_decision_2027_03").update())
+                .hasMessageContaining("rle_decision is append-only");
+
+        // And retention by DROP of a whole old month still works
+        List<DecisionLogPartitions.Dropped> dropped =
+                partitions.dropExpired(Instant.parse("2028-02-03T00:00:00Z"), Period.ofMonths(12));
+        assertThat(dropped).extracting(DecisionLogPartitions.Dropped::partition).contains("rle_decision_2027_01");
+    }
+
     private static DecisionLogPartitions partitions(DataSource db) {
         return new DecisionLogPartitions(db, new RuleEngineTransactions(new DataSourceTransactionManager(db)));
     }

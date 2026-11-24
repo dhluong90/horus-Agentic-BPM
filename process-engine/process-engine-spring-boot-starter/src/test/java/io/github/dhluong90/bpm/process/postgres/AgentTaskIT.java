@@ -477,8 +477,9 @@ class AgentTaskIT {
         assertThat(calls.get(0).inputs()).isEqualTo(Map.of("applicationId", "LOAN-2027-0902",
                 "requestedAmount", 250_000_000L));
         assertThat(tokenOn(pod, loan)).isEqualTo("underwrite:WAITING_USER");
+        // PRE-361: the instance view shows the masked summary; the engine keeps the clear text for the process
         assertThat(pod.services.instance(loan).variables()).containsEntry("assessment",
-                Map.of("riskScore", 20L, "recommendation", "APPROVE", "summary", SUMMARY));
+                Map.of("riskScore", 20L, "recommendation", "APPROVE", "summary", "***"));
         assertThat(detail(loan, "ASYNC_RESULT_ACCEPTED", "ruleIds")).isEqualTo("[\"R3\"]");
     }
 
@@ -550,7 +551,24 @@ class AgentTaskIT {
         assertThat(detail(loan, "ASYNC_RESULT_ACCEPTED", "guardrailDecisionId")).isNotBlank();
         assertThat(TestEngine.jdbc().sql("SELECT count(*) FROM pre_history WHERE instance_id = ? "
                 + "AND details::text LIKE '%079088001234%'").param(loan).query(Integer.class).single()).isZero();
-        assertThat(pod.services.instance(loan).variables().get("assessment").toString()).contains("079088001234");
+        // PRE-361: the step result is in the engine's state, and the instance view masks it
+        assertThat(TestEngine.jdbc().sql("SELECT variables::text FROM pre_instance WHERE id = ?").param(loan)
+                .query(String.class).single()).contains("079088001234");
+        assertThat(pod.services.instance(loan).variables().get("assessment").toString())
+                .doesNotContain("079088001234").contains("summary=***");
+    }
+
+    @Test
+    void PRE_361_control_an_accepted_agent_answer_is_masked_in_the_instance_view_by_its_output_schema() {
+        TestEngine pod = replica("pod-1", assessor(answer(20, "APPROVE")));
+        publishGuardrails(pod);
+        deploy(pod);
+        String loan = apply(pod, "LOAN-2027-0906");
+
+        assertThat(pod.async.runNow(claimOne(pod))).contains(StepCompletion.Outcome.ACCEPTED);
+
+        assertThat(pod.services.instance(loan).variables().get("assessment"))
+                .isEqualTo(Map.of("riskScore", 20L, "recommendation", "APPROVE", "summary", "***"));
     }
 
     @Test

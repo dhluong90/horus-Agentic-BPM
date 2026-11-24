@@ -102,6 +102,20 @@ class ProcessRestErrorMatrixTest {
     }
 
     @Test
+    void PRE_360_control_a_full_start_backlog_answers_429_with_retry_after_and_a_problem_code() throws Exception {
+        fake.failure = () -> new io.github.dhluong90.bpm.process.api.StartArrivalsFullException(
+                "Process account-opening already holds 3 arrivals that wait for the other start events", 86_400);
+
+        MockHttpServletResponse response = perform(get(BASE + "/instances/" + INSTANCE));
+
+        assertThat(response.getStatus()).isEqualTo(429);
+        assertThat(response.getHeader("Retry-After")).isEqualTo("86400");
+        JsonNode problem = json(response);
+        assertThat(problem.get("code").stringValue()).isEqualTo("START_ARRIVALS_FULL");
+        assertThat(problem.get("status").intValue()).isEqualTo(429);
+    }
+
+    @Test
     void TR_SEC_08_an_unexpected_failure_is_500_INTERNAL_with_a_correlation_id_only() throws Exception {
         fake.failure = () -> new IllegalStateException(
                 "ERROR: duplicate key value violates unique constraint SELECT * FROM pre_instance WHERE tenant_id = 'bank-a'");

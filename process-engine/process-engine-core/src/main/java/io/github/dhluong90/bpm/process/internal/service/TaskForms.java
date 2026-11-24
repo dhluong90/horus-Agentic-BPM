@@ -220,20 +220,58 @@ public final class TaskForms {
         }
     }
 
+    /** Deepest object or array level {@link #maskValue} follows; a level below it is masked whole. */
+    private static final int MASK_MAX_DEPTH = 16;
+
     /**
-     * @param schema the form schema
-     * @return the names of the fields the schema marks {@code "mask": true}
+     * The value with every part its schema marks {@code "mask": true} replaced by {@value #MASKED}, at any depth: a
+     * nested object property, and the items of an array. A masked part that is null stays null. What the schema does
+     * not describe is kept, and a value nested deeper than {@value #MASK_MAX_DEPTH} levels is masked whole, because
+     * the schema walk stops there (AUD-04, TR-SEC-05).
+     *
+     * @param schema the schema of the value, or null
+     * @param value the value
+     * @return a masked copy; the input is not changed
      */
-    static java.util.Set<String> maskedFields(Map<String, Object> schema) {
-        java.util.Set<String> names = new java.util.LinkedHashSet<>();
-        if (schema.get("properties") instanceof Map<?, ?> properties) {
-            for (Map.Entry<?, ?> property : properties.entrySet()) {
-                if (property.getValue() instanceof Map<?, ?> p && Boolean.TRUE.equals(p.get("mask"))) {
-                    names.add(String.valueOf(property.getKey()));
-                }
-            }
+    static Object maskValue(Object schema, Object value) {
+        return maskValue(schema, value, 0);
+    }
+
+    private static Object maskValue(Object schema, Object value, int depth) {
+        if (value == null || !(schema instanceof Map<?, ?> node)) {
+            return value;
         }
-        return names;
+        if (Boolean.TRUE.equals(node.get("mask")) || depth > MASK_MAX_DEPTH) {
+            return MASKED;
+        }
+        if (value instanceof Map<?, ?> map && node.get("properties") instanceof Map<?, ?> properties) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                out.put(String.valueOf(entry.getKey()),
+                        maskValue(properties.get(entry.getKey()), entry.getValue(), depth + 1));
+            }
+            return out;
+        }
+        if (value instanceof java.util.Collection<?> items && node.get("items") instanceof Map<?, ?> itemSchema) {
+            List<Object> out = new java.util.ArrayList<>();
+            for (Object item : items) {
+                out.add(maskValue(itemSchema, item, depth + 1));
+            }
+            return out;
+        }
+        return value;
+    }
+
+    /**
+     * The variables with the parts the schema marks {@code "mask": true} masked, at any depth.
+     *
+     * @param schema the schema of an object whose properties are variables
+     * @param variables the variables
+     * @return a masked copy
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> maskVariables(Map<String, Object> schema, Map<String, Object> variables) {
+        return (Map<String, Object>) maskValue(schema, variables);
     }
 
     /**
@@ -255,8 +293,7 @@ public final class TaskForms {
             if (!variables.containsKey(name) || variables.get(name) == null) {
                 continue;
             }
-            boolean masked = property.getValue() instanceof Map<?, ?> p && Boolean.TRUE.equals(p.get("mask"));
-            data.put(name, masked ? MASKED : variables.get(name));
+            data.put(name, maskValue(property.getValue(), variables.get(name)));
         }
         return data;
     }

@@ -1111,6 +1111,7 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /async-steps/{jobId}:complete:
     post:
@@ -1187,7 +1188,7 @@ paths:
         multiple one, the message is held and the answer is `WAITING` until every other definition of the start has
         arrived; the last one starts the instance. A held arrival is deleted after `parallel-start.arrival-ttl`, and a
         definition holds at most `parallel-start.max-arrivals-per-definition` of them: a message with a new key past
-        that is `413 PAYLOAD_TOO_LARGE` (`PRE-360`). When two or more tokens wait for the
+        that is `429 START_ARRIVALS_FULL` with a `Retry-After` header, the seconds until a held arrival expires (`PRE-360`). When two or more tokens wait for the
         same name and key, or two definitions start on the name, the answer is `409 MESSAGE_CORRELATION_AMBIGUOUS` and
         nothing runs. When nothing waits and nothing starts, the answer is `422 MESSAGE_NOT_CORRELATED` and nothing is
         stored: a message is not buffered. `Idempotency-Key` is required; a replay with the same key and request returns
@@ -1216,6 +1217,7 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '428': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
   /tasks:
     get:
@@ -2667,7 +2669,7 @@ components:
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `422` is
+        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `429` is `START_ARRIVALS_FULL`, with a `Retry-After` header. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
@@ -3986,7 +3988,7 @@ components:
           enum: [INPUT_INVALID, QUERY_INVALID, ROLE_FAN_OUT_EXCEEDED, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, FORM_NOT_DECLARED, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
-            IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
+            IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, START_ARRIVALS_FULL, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
             PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,

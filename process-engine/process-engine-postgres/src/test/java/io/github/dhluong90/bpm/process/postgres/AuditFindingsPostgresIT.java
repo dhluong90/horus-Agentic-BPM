@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.process.api.ImportRequest;
 import io.github.dhluong90.bpm.process.api.MessageService.MessageDelivery;
-import io.github.dhluong90.bpm.process.api.PayloadTooLargeException;
+import io.github.dhluong90.bpm.process.api.StartArrivalsFullException;
 import io.github.dhluong90.bpm.process.api.ProcessInstance;
 import io.github.dhluong90.bpm.process.api.SourceFormat;
 import io.github.dhluong90.bpm.process.api.StartRequest;
 import io.github.dhluong90.bpm.process.api.TaskNotFoundException;
+import io.github.dhluong90.bpm.process.internal.service.DecisionOutcome;
+import io.github.dhluong90.bpm.process.internal.service.DecisionSignature;
 import io.github.dhluong90.bpm.process.internal.service.ProcessServices;
 import io.github.dhluong90.bpm.process.internal.service.StartArrivalSettings;
 import io.github.dhluong90.bpm.process.spi.FormRegistry;
@@ -165,6 +167,71 @@ class AuditFindingsPostgresIT {
                 .isZero();
     }
 
+    @Test
+    void PRE_361_control_a_field_an_agent_step_masks_is_masked_in_the_instance_and_the_replay_at_any_depth() {
+        engine.close();
+        TestEngine.reset();
+        engine = TestEngine.replica("pod-1", clock).forms(registry()).agents(new DocumentAssessor())
+                .decisionPort(rules -> new GuardrailPort()).build();
+        jdbc = TestEngine.jdbc();
+        engine.identity.as("bank-a", "pipeline", "processes:deploy");
+        engine.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML,
+                TestEngine.resource("/bpmn/loan-agent-assessment.bpmn"), null));
+        as("an", Set.of("credit-officer"), OFFICER);
+        Map<String, Object> variables = Map.of("applicationId", "APP-1006", "amount", 250_000_000,
+                "assessment", Map.of("riskScore", 42, "summary", "salary slip shows 38,000,000 VND"));
+
+        ProcessInstance started = engine.services.start(
+                new StartRequest("loan-agent-assessment", "APP-1006", variables, "an-agent-1"));
+
+        assertThat(started.variables().get("assessment")).isEqualTo(Map.of("riskScore", 42L, "summary", "***"));
+        ProcessInstance read = engine.services.instance(started.id());
+        assertThat(read.variables().get("assessment")).isEqualTo(Map.of("riskScore", 42L, "summary", "***"));
+        ProcessInstance replay = engine.services.start(
+                new StartRequest("loan-agent-assessment", "APP-1006", variables, "an-agent-1"));
+        assertThat(replay.variables().toString()).doesNotContain("38,000,000");
+        assertThat(engine.services.start(new StartRequest("loan-agent-assessment", "APP-1006", variables, "an-agent-1"))
+                .variables().get("assessment")).isEqualTo(read.variables().get("assessment"));
+        // the engine keeps the clear value for the process itself
+        assertThat(jdbc.sql("SELECT variables::text FROM pre_instance WHERE id = ?").param(started.id())
+                .query(String.class).single()).contains("38,000,000");
+    }
+
+    /** Describes the guardrail rule set the agent definitions name; the steps never run in these tests. */
+    private static final class GuardrailPort implements io.github.dhluong90.bpm.process.internal.service.DecisionPort {
+        @Override
+        public DecisionOutcome evaluate(String tenantId,
+                io.github.dhluong90.bpm.process.internal.service.DecisionCaller caller, String decisionRef,
+                Map<String, Object> inputs, java.time.Instant evaluationTime, String idempotencyKey,
+                String correlationId) {
+            throw new UnsupportedOperationException("the test never evaluates a rule set");
+        }
+
+        @Override
+        public List<String> ruleSets(String tenantId, java.time.Instant at) {
+            return List.of("agent-output-guardrails");
+        }
+
+        @Override
+        public DecisionSignature signature(String tenantId, String decisionRef, java.time.Instant at) {
+            return new DecisionSignature.Found(decisionRef, 2, "FIRST", Map.of("riskScore", "integer", "recommendation", "string", "summary", "string"),
+                    Map.of("allow", "boolean", "reasons", "list<string>"), true);
+        }
+    }
+
+    private static final class DocumentAssessor implements io.github.dhluong90.bpm.process.spi.AgentAdapter {
+        @Override
+        public String name() {
+            return "documents.assess";
+        }
+
+        @Override
+        public io.github.dhluong90.bpm.process.spi.AdapterResult execute(
+                io.github.dhluong90.bpm.process.spi.AgentInvocation invocation) {
+            throw new UnsupportedOperationException("the test never runs the agent");
+        }
+    }
+
     private void importAccountOpening() {
         engine.identity.as("bank-a", "pipeline", "processes:deploy");
         engine.services.importDefinition(new ImportRequest(SourceFormat.BPMN_XML, """
@@ -207,7 +274,8 @@ class AuditFindingsPostgresIT {
         for (String application : List.of("APP-1", "APP-2", "APP-3")) {
             assertThat(request(application).outcome()).isEqualTo(MessageDelivery.Outcome.WAITING);
         }
-        assertThatThrownBy(() -> request("APP-4")).isInstanceOf(PayloadTooLargeException.class);
+        assertThatThrownBy(() -> request("APP-4")).isInstanceOf(StartArrivalsFullException.class)
+                .satisfies(e -> assertThat(((StartArrivalsFullException) e).retryAfterSeconds()).isEqualTo(86_400));
         assertThat(arrivals()).isEqualTo(3);
 
         clock.advance(Duration.ofSeconds(1));

@@ -241,7 +241,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-357 | `PRE_357_*` in `AuditFindingsPostgresIT` | Integration on PostgreSQL, masked form fields in the instance view and replay | M3 | `TR-SEC-05` | Done (#572) |
 | PRE-358 | `PRE_358_*` in `AuditFindingsPostgresIT` and `AuditFindingsRestIT` | Integration on PostgreSQL, task and form visibility | M3 | `TR-SEC-05` | Done (#572) |
 | PRE-359 | `PRE_359_*` in `AuditFindingsPostgresIT` | Integration on PostgreSQL, append-only history | M3 | `TR-SEC-05` | Done (#572) |
-| PRE-360 | `PRE_360_*` in `AuditFindingsPostgresIT` | Integration on PostgreSQL, start arrival TTL and cap | M3 | `TR-STD-04` | Done (#572) |
+| PRE-360 | `PRE_360_*` in `AuditFindingsPostgresIT` and `ProcessRestErrorMatrixTest` | Integration on PostgreSQL, start arrival TTL and cap; 429 with Retry-After | M3 | `TR-STD-04` | Done (#572, #365) |
+| PRE-361 | `PRE_361_*` in `AuditFindingsPostgresIT`, `AgentTaskIT` and `TaskFormsMaskTest` | Integration on PostgreSQL, agent and nested masked fields in the instance view and form | M3 | `TR-SEC-05` | Done (#365) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

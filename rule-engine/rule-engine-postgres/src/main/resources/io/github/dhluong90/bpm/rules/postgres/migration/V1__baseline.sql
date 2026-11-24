@@ -13,6 +13,22 @@ BEGIN
 END;
 $$;
 
+-- AUD-03: the decision log is append-only. UPDATE is always refused. DELETE is refused except on the default
+-- partition, which the monthly roll-over empties by moving a month's stragglers into its new partition. TRUNCATE is
+-- always refused. Retention drops a whole monthly partition, which fires no row trigger. A table owner can still drop
+-- the triggers: run the application with a role that does not own the tables (rule-engine/docs/THREAT-MODEL.md).
+CREATE FUNCTION rle_decision_append_only() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' AND TG_TABLE_NAME = 'rle_decision_default' THEN
+    RETURN OLD;
+  END IF;
+  RAISE EXCEPTION 'rle_decision is append-only: % on % is not allowed', TG_OP, TG_TABLE_NAME
+    USING ERRCODE = '55000';
+END;
+$$;
+
 CREATE FUNCTION rle_decision_log_drop_append_only() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -384,6 +400,14 @@ ALTER INDEX idx_rle_decision_correlation ATTACH PARTITION rle_decision_default_c
 ALTER INDEX rle_decision_pkey ATTACH PARTITION rle_decision_default_pkey;
 
 ALTER INDEX idx_rle_decision_lookup ATTACH PARTITION rle_decision_default_tenant_id_rule_set_name_created_at_out_idx;
+
+-- A row trigger on the partitioned parent is cloned onto every partition when it is attached, including the monthly
+-- ones that DecisionLogPartitions creates later. A statement trigger is not cloned: it is added per partition there.
+CREATE TRIGGER rle_decision_no_change BEFORE DELETE OR UPDATE ON rle_decision FOR EACH ROW EXECUTE FUNCTION rle_decision_append_only();
+
+CREATE TRIGGER rle_decision_no_truncate BEFORE TRUNCATE ON rle_decision FOR EACH STATEMENT EXECUTE FUNCTION rle_decision_append_only();
+
+CREATE TRIGGER rle_decision_default_no_truncate BEFORE TRUNCATE ON rle_decision_default FOR EACH STATEMENT EXECUTE FUNCTION rle_decision_append_only();
 
 CREATE TRIGGER rle_decision_log_drop_no_change BEFORE DELETE OR UPDATE ON rle_decision_log_drop FOR EACH ROW EXECUTE FUNCTION rle_decision_log_drop_append_only();
 
