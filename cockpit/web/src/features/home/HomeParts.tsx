@@ -205,7 +205,7 @@ export function RecentCard({ ruleSets }: { ruleSets: ReturnType<typeof useEveryR
         <h2 id="home-recent" className="card__title">{t('home.recentRuleSets')}</h2>
         <a className="link-action" href={formatRoute({ name: 'rule-sets' })}>{t('home.allRuleSets')} <span aria-hidden="true">→</span></a>
       </div>
-      <RuleSetTable ruleSets={ruleSets} limit={5} recentFirst emptyText={t('rulesArea.empty')} />
+      <RuleSetTable ruleSets={ruleSets} limit={5} recentFirst compact emptyText={t('rulesArea.empty')} />
     </article>
   );
 }

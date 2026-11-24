@@ -87,7 +87,7 @@ export const CAPTION_GAP = 10;
 const CAPTION_LINE = 17;
 export const EVENT_RADIUS = 20;
 export const GATEWAY_HALF = 24;
-/** Boundary events (#489): the first sits this far in from the left of its activity, the next ones this far apart, and a flow drops this far under the symbol before it runs on. */
+/** Boundary events (#489): the first sits this far in from the right of its activity (clear of the type label at the left), the next ones this far apart, and a flow drops this far under the symbol before it runs on. */
 const BOUNDARY_INSET = 24;
 const BOUNDARY_STEP = 44;
 const BOUNDARY_DROP = 14;
@@ -259,7 +259,7 @@ function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: 
     if (host === undefined) continue;
     const index = placedPerHost.get(host.id) ?? 0;
     placedPerHost.set(host.id, index + 1);
-    const centreX = host.x + BOUNDARY_INSET + index * BOUNDARY_STEP;
+    const centreX = host.x + host.width - BOUNDARY_INSET - index * BOUNDARY_STEP;
     const centreY = host.y + host.height;
     const shape = shapeOf(node.type);
     nodes.push({ ...node, shape, width: SYMBOL_SIZE, height: SYMBOL_SIZE, lines: [], typeLines: [], x: centreX - SYMBOL_SIZE / 2, y: centreY - SYMBOL_SIZE / 2 });

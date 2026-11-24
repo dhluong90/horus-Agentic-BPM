@@ -95,8 +95,6 @@ for (const screen of SCREENS) {
       for (const locale of LOCALES) {
         const file = `readings-${screen.name}-${viewport.width}x${viewport.height}-${theme}-${locale}.png`;
         test(`CKP_076_079_visual_${screen.name}_${viewport.width}x${viewport.height}_${theme}_${locale}`, async ({ page }) => {
-          // Known product bug #582: the simulation result runs past the fold at 1440x900 beside the decision card.
-          test.fixme(screen.name === 'simulate-result' && viewport.height === 900, '#582');
           const violations = cspViolations(page);
           await page.setViewportSize(viewport);
           await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });

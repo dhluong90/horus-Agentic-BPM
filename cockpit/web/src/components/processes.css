@@ -29,6 +29,8 @@
 /* The data band is the lowest row: room under it, so the minimap (96 high, 12 from the edge, 6 padding) never covers a data symbol (#499). */
 .dg__frame--clear-map { padding-bottom: 128px; }
 .dg__svg { display: block; margin: 0 auto; }
+/* Fit shows the whole drawing, so the frame never scrolls in it; only 100 % pans. */
+.dg__frame--fit { overflow: hidden; }
 
 .dg-edge path { fill: none; stroke: var(--edge); stroke-width: 1.5; }
 .dg-edge .dg-edge__default { stroke-width: 2; }
@@ -281,6 +283,8 @@
 .instance-grid--wide { grid-template-columns: minmax(0, 1fr); }
 .instance-grid--wide .inspector, .inspector[hidden] { display: none; }
 .instance-grid__canvas { min-width: 0; }
+/* The case page keeps the tiles row and its Open the task action on screen below the diagram: the diagram takes what is left. */
+.instance-grid__canvas .dg__frame { max-height: max(240px, calc(100vh - var(--topbar-h) - 350px)); }
 .instance-panel-toggle { margin-right: auto; }
 .case-tiles { display: flex; align-items: stretch; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
 .case-tile { display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-m, 10px); background: var(--surface-2, var(--surface)); }

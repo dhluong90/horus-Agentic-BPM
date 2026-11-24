@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="Msg_withdrawn" name="applicant-withdrew"/>
+  <bpmn:process id="application-with-withdrawal" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:userTask id="assess" horus:assignee="role:CARD_OFFICER" horus:resultVariable="assessment"/>
+    <bpmn:endEvent id="decided"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="assess"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="assess" targetRef="decided"/>
+    <bpmn:subProcess id="withdrawal" triggeredByEvent="true">
+      <bpmn:startEvent id="withdrawn" horus:correlationKey="applicationId"><bpmn:messageEventDefinition messageRef="Msg_withdrawn"/></bpmn:startEvent>
+      <bpmn:scriptTask id="mark" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="withdrawnFlag"><bpmn:script>true</bpmn:script></bpmn:scriptTask>
+      <bpmn:endEvent id="file-closed"/>
+      <bpmn:sequenceFlow id="w1" sourceRef="withdrawn" targetRef="mark"/>
+      <bpmn:sequenceFlow id="w2" sourceRef="mark" targetRef="file-closed"/>
+    </bpmn:subProcess>
+  </bpmn:process>
+</bpmn:definitions>

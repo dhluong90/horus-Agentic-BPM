@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="owner-screening" isExecutable="true">
+    <bpmn:startEvent id="start"/>
+    <bpmn:serviceTask id="screen" horus:handler="sanctions-screen" horus:resultVariable="screen">
+      <bpmn:extensionElements><horus:input name="party" value="${instance.owner}"/></bpmn:extensionElements>
+      <bpmn:multiInstanceLoopCharacteristics isSequential="true" horus:collection="owners" horus:elementVariable="owner" horus:outputCollection="flags" horus:outputElement="screen.flagged"/>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="screen"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="screen" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>
