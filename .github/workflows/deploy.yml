@@ -84,6 +84,7 @@ jobs:
       - name: Settings in .env, throwaway secret files, masked in the log
         run: |
           cp .env.example .env
+          sed -i 's/^SPRING_PROFILES_ACTIVE=.*/SPRING_PROFILES_ACTIVE=dev/' .env
           deploy/create-secrets.sh
           for f in secrets/*; do echo "::add-mask::$(cat "$f")"; done
           git check-ignore -q .env

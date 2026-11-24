@@ -147,6 +147,76 @@ jobs:
             echo "| \`${ARTIFACT_NAME}\` | ${ARTIFACT_ID} | \`${ARTIFACT_DIGEST}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  image-scan:
+    # INF-06: the container images of the examples are built from deploy/docker/Dockerfile and scanned by Grype
+    # (operating system packages and Java libraries) with the repository's .grype.yaml. A high or critical
+    # finding fails the run, so it blocks the release. Same gates as the deploy workflow (deploy/scan-image.sh).
+    name: Image vulnerability scan (${{ matrix.example }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [rule-engine-only, rule-and-process, guarded-agent-process]
+    env:
+      GRYPE_VERSION: "0.122.1"
+      # SHA-256 of grype_0.122.1_linux_amd64.tar.gz, from the signed checksum file of that release.
+      GRYPE_SHA256: "f1ba7e2917ee1395618de20a98da0aa7c0fb1788927797651047c50502a37538"
+      IMAGE: horus-bpm/${{ matrix.example }}:release-scan # pin-exempt: built in this job from deploy/docker/Dockerfile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Throwaway secret files, masked in the log
+        run: |
+          deploy/create-secrets.sh
+          for f in secrets/*; do echo "::add-mask::$(cat "$f")"; done
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/amd64
+          build-args: EXAMPLE=${{ matrix.example }}
+          tags: ${{ env.IMAGE }}
+          load: true
+          push: false
+          provenance: false
+
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Install Grype (signature and pinned checksum verified)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}"
+          tarball="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          sums="grype_${GRYPE_VERSION}_checksums.txt"
+          curl -sSfL -O "$base/$tarball" -O "$base/$sums" -O "$base/$sums.sigstore.json"
+          cosign verify-blob "$sums" --bundle "$sums.sigstore.json" \
+            --certificate-identity "https://github.com/anchore/grype/.github/workflows/release.yaml@refs/heads/main" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          grep " ${tarball}\$" "$sums" | sha256sum -c -
+          echo "${GRYPE_SHA256}  ${tarball}" | sha256sum -c -
+          tar -xzf "$tarball" grype
+          echo "GRYPE=$RUNNER_TEMP/grype" >> "$GITHUB_ENV"
+
+      - name: Image gates, no secrets in layers and no high or critical vulnerability
+        run: deploy/scan-image.sh "$IMAGE"
+
+      - name: Upload the image scan report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-image-scan-${{ matrix.example }}
+          path: target/grype-image-*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
   attest:
     # TR-SEC-06: signed statements, kept by GitHub, of which commit and workflow built each staged jar and
     # POM (SLSA build provenance), and which bill of materials describes the jars (CycloneDX). Keyless:
@@ -206,7 +276,7 @@ jobs:
     # pinned action. The assets go to a draft, which is published only after every upload is verified.
     name: GitHub Release (tag runs only)
     # Never without the attestations: a failed attest job leaves no Release.
-    needs: [release-dry-run, attest]
+    needs: [release-dry-run, attest, image-scan]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15

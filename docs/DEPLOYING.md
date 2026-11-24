@@ -45,9 +45,12 @@ The image is built for the architecture of your machine, `linux/amd64` or `linux
 git clone https://github.com/dhluong90/horus-Agentic-BPM.git
 cd horus-Agentic-BPM
 cp .env.example .env
+sed -i.bak 's/^SPRING_PROFILES_ACTIVE=.*/SPRING_PROFILES_ACTIVE=dev/' .env && rm .env.bak
 deploy/create-secrets.sh
 docker compose up --build --wait
 ```
+
+The `sed` line turns on the `dev` profile (demo users) for your own machine; `.env.example` leaves it empty.
 
 `deploy/create-secrets.sh` writes three random passwords, one file each, and never prints them:
 
@@ -101,7 +104,7 @@ curl -s 127.0.0.1:8080/actuator/health
 
 ## 3. Sign in
 
-`.env.example` starts the host on the `dev` profile, which turns on demo users with the password in `secrets/demo_password`. The `dev` profile is for your own machine only; see [Run without demo users](#run-without-demo-users).
+The quick start sets the `dev` profile in `.env`, which turns on demo users with the password in `secrets/demo_password`. The `dev` profile is for your own machine only; see [Run without demo users](#run-without-demo-users).
 
 | User | Role | Engine permissions |
 |---|---|---|
@@ -383,7 +386,7 @@ Settings live in `.env` ([`.env.example`](../.env.example) documents each one); 
 
 | Variable in `.env` | Default | Meaning |
 |---|---|---|
-| `SPRING_PROFILES_ACTIVE` | `dev` in `.env.example` | `dev` turns on the demo users. Empty: no demo users |
+| `SPRING_PROFILES_ACTIVE` | empty in `.env.example` | `dev` turns on the demo users (set it for local evaluation). Empty: no demo users |
 | `HORUS_EXAMPLE` | `rule-engine-only` | Example host to build, a folder under `examples/` |
 | `HORUS_HTTP_PORT` | `8080` | Port on 127.0.0.1 that serves the host |
 
@@ -426,6 +429,10 @@ services:
 ```
 
 The host refuses to start with an issuer and no audience, and refuses the `dev` profile with an issuer that is not on this machine.
+
+## Rate limits and account lockout
+
+The host applies no rate limit and no account lockout. They belong to the layer in front of it: your gateway or reverse proxy limits request rates per client and per route, and your identity provider limits sign-in attempts and locks accounts after repeated failures. The engines' own limits (page size, per-caller masked-input search) protect the engines, not the sign-in. The demo users of the `dev` profile have no lockout either, which is one more reason to keep that profile on your own machine.
 
 ## Day-to-day commands
 
