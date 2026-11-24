@@ -169,7 +169,8 @@ public final class Views {
     }
 
     static String startedToJson(ProcessServices.Started started) {
-        ObjectNode o = EngineJson.NODES.objectNode().put("created", started.created());
+        ObjectNode o = EngineJson.NODES.objectNode().put("created", started.created())
+                .put("summaryOnly", started.summaryOnly());
         o.set("instance", instance(started.instance()));
         return EngineJson.JSON.writeValueAsString(o);
     }
@@ -177,7 +178,7 @@ public final class Views {
     static ProcessServices.Started startedFromJson(String json) {
         JsonNode n = EngineJson.JSON.readTree(json);
         return new ProcessServices.Started(instanceFromJson(EngineJson.JSON.writeValueAsString(n.get("instance"))),
-                n.get("created").booleanValue());
+                n.get("created").booleanValue(), n.has("summaryOnly") && n.get("summaryOnly").booleanValue());
     }
 
     /**
