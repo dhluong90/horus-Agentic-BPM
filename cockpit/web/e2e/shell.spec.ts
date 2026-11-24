@@ -30,7 +30,7 @@ test.describe('embedded cockpit, case A', () => {
 
     const header = page.getByTestId('session-header');
     await expect(header.getByTestId('header-host')).toHaveText('Retail banking');
-    await expect(header.getByTestId('header-tenant')).toHaveText('bank-a');
+    await expect(header.getByTestId('header-tenant')).toHaveText('Sao Mai retail');
     await expect(header.getByTestId('header-user')).toHaveText('Nguyễn Thị Lan');
     expect(calls[0]).toBe('/cockpit-hosts.json');
     expect([...calls.slice(1, 3)].sort()).toEqual(['/api/bpm/me', '/api/bpm/meta']);
@@ -111,7 +111,7 @@ test.describe('tolerant reading of /me', () => {
     const menu = await menuFor(page, 'me-unknown-permission');
 
     await expect(page.getByRole('alert')).toHaveCount(0);
-    await expect(page.getByTestId('session-header').getByTestId('header-tenant')).toHaveText('bank-a');
+    await expect(page.getByTestId('session-header').getByTestId('header-tenant')).toHaveText('Sao Mai retail');
     // rules:read and rules:author still open the rule areas; the dropped name adds nothing, Decisions included.
     expect(menu.map((item) => item.split('\n')[0])).toEqual(expect.arrayContaining(['Home', 'Rules', 'Approvals']));
     expect(menu.map((item) => item.split('\n')[0])).not.toContain('Decisions');

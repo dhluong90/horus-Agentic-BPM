@@ -192,7 +192,7 @@ test('QA_import_twice_in_one_session', async ({ page }) => {
     const chooser = page.waitForEvent('filechooser', { timeout: 5000 });
     await page.getByRole('button', { name: 'Import rule set' }).click();
     await (await chooser).setFiles({ name: `${n}.yaml`, mimeType: 'application/yaml', buffer: Buffer.from(doc(n)) });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText(n);
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(n.replace('-', ' ').replace(/^./, (c) => c.toUpperCase()));
     await expect(page.locator('.rs-head__sub')).toHaveText(/^Version 1 · draft/);
     await page.getByRole('navigation', { name: /breadcrumb|Breadcrumb|Bạn đang ở/i }).getByRole('link', { name: 'Rules' }).click();
     await expect(page.getByRole('button', { name: 'Import rule set' })).toBeEnabled();
@@ -220,10 +220,10 @@ test('QA_query_invalid_on_a_later_page_offers_retry_and_reloads_from_the_first_p
         await route.fulfill({ status: 400, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400, code: 'QUERY_INVALID', detail: 'cursor was not issued by this list', correlationId: '01JQA2' }) });
         return;
       }
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'zz-last', latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: null, hasNext: false }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'zz-last', displayName: 'Zz last', latestVersion: 1, latestStatus: 'DRAFT', publishedVersion: null, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: null, hasNext: false }) });
       return;
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'card-fee', latestVersion: 2, latestStatus: 'PENDING_APPROVAL', publishedVersion: 1, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: 'c2', hasNext: true }) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ ruleSet: 'card-fee', displayName: 'Card fee', latestVersion: 2, latestStatus: 'PENDING_APPROVAL', publishedVersion: 1, lastChangedAt: '2026-11-18T09:00:00Z' }], nextCursor: 'c2', hasNext: true }) });
   });
   await page.goto('./#/rules');
   await page.reload();
