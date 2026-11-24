@@ -581,6 +581,14 @@ body:has(.edit-dock) .toast-host { bottom: 96px; }
 .sim__side--base { padding-top: 10px; border-top: 1px solid var(--line); }
 .sim__label { margin: 0; color: var(--muted); font: var(--type-caption); font-weight: 600; }
 .sim__again { align-self: flex-start; }
+/* Beside the decision card the result must stay above the fold: the sample button and the reading style share one row,
+   and the result block spends no more space than its sentences need. */
+.sim .sim__head { flex-wrap: nowrap; align-items: center; gap: 8px; }
+.sim .sim__again { min-height: 32px; padding-inline: 8px; white-space: nowrap; }
+.sim .reading-style button { padding-inline: 8px; }
+.try.sim { gap: 8px; }
+.sim__result { gap: 6px; padding: 10px 12px; }
+.sim__side--base { padding-top: 6px; }
 
 /* ---------- Simulation of a draft (CKP-004): samples, paste, results; one view at a time ---------- */
 .simrun { display: flex; flex-direction: column; gap: var(--space-4, 16px); padding: var(--card-pad, 20px); }

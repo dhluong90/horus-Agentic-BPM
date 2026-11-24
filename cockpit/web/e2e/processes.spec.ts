@@ -331,8 +331,6 @@ for (const screen of SCREENS) {
       for (const locale of LOCALES) {
         const file = `proc-${screen.name}-${String(viewport.width)}x${String(viewport.height)}-${theme}-${locale}.png`;
         test(`TR_UI_03_visual_${screen.name}_${String(viewport.width)}x${String(viewport.height)}_${theme}_${locale}`, async ({ page }) => {
-          // Known product bug #580: the case page's "Open the task" action is cut by the fold at 1440x900.
-          test.fixme(screen.name === 'instance-waiting' && viewport.height === 900, '#580');
           await openScreen(page, screen, viewport, theme, locale);
           const focal = screen.focal(page, locale);
           await expect(focal).toBeVisible();
