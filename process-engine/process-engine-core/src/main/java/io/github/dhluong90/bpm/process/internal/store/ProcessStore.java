@@ -516,6 +516,26 @@ public interface ProcessStore {
         throw new UnsupportedOperationException("a parallel multiple start needs a store that holds arrivals");
     }
 
+    /** @return how many arrivals the tenant holds for the definition key */
+    default int countStartArrivals(String tenant, String keyName) {
+        return 0;
+    }
+
+    /** @return whether the arrival of that kind, event and key is held */
+    default boolean hasStartArrival(String tenant, String keyName, String kind, String eventName,
+            String correlationKey) {
+        return startArrival(tenant, keyName, kind, eventName, correlationKey).isPresent();
+    }
+
+    /**
+     * Deletes held arrivals older than the cutoff, across tenants, at most {@code limit} of them.
+     *
+     * @return how many were deleted
+     */
+    default int deleteStartArrivalsBefore(Instant cutoff, int limit) {
+        return 0;
+    }
+
     /** @return the payload JSON of the held arrival, or empty */
     default java.util.Optional<String> startArrival(String tenant, String keyName, String kind, String eventName,
             String correlationKey) {

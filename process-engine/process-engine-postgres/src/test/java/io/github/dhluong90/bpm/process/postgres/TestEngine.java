@@ -614,7 +614,7 @@ final class TestEngine {
         // The append-only triggers of pre_definition_history refuse TRUNCATE; the test superuser switches ordinary
         // triggers off for this one statement batch, on one connection.
         jdbc().sql("SET session_replication_role = replica; "
-                + "TRUNCATE pre_signal, pre_event_subscription, pre_compensation_stack, pre_node_stats_hourly, pre_engine_watermark, pre_migration_instance, pre_migration_history, pre_migration, pre_definition_layout, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
+                + "TRUNCATE pre_signal, pre_start_arrival, pre_event_subscription, pre_compensation_stack, pre_node_stats_hourly, pre_engine_watermark, pre_migration_instance, pre_migration_history, pre_migration, pre_definition_layout, pre_calendar_change, pre_holiday, pre_calendar, pre_step_result, pre_agent_replay_case, pre_agent_replay, pre_incident, pre_timer, pre_history, "
                 + "pre_task, pre_token, pre_instance, pre_idempotency, "
                 + "pre_definition_history, pre_definition CASCADE; "
                 + "SET session_replication_role = origin").update();
