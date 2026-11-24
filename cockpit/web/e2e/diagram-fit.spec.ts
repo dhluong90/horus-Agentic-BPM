@@ -141,6 +141,6 @@ test('CKP_069_fit_never_scales_a_small_model_past_100_percent_and_shows_the_scal
     expect(facts.scale).toBeLessThanOrEqual(1);
     expect(facts.drawnWidth).toBeLessThanOrEqual(facts.width + 1);
     const pct = Math.round(facts.scale * 100);
-    await expect(page.getByRole('button', { name: `Fit · ${String(pct)} %` })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: pct < 100 ? `Fit · ${String(pct)} %` : 'Fit', exact: true })).toHaveAttribute('aria-pressed', 'true');
   }
 });
