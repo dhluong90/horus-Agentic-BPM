@@ -21,12 +21,10 @@
 .tile__label { grid-area: label; margin-top: 2px; font: var(--type-body); color: var(--ink); }
 .tile__note { grid-area: note; font: var(--type-caption); color: var(--ink-2); }
 
-.home__grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); grid-template-areas: "tasks approvals" "chart approvals"; gap: var(--gap); align-items: start; }
-.home__grid--wide { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tasks" "chart"; }
-.home__tasks { grid-area: tasks; }
-.home__chart { grid-area: chart; }
-.home__approvals { grid-area: approvals; }
-.home__grid > .card { gap: 0; }
+.home__grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.home__grid--wide { grid-template-columns: minmax(0, 1fr); }
+.home__main { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; }
+.home__grid .card { gap: 0; }
 .home__grid .card__head { min-height: 40px; padding-bottom: 6px; }
 .card__sub { font: var(--type-caption); color: var(--muted); }
 
@@ -63,7 +61,7 @@
 .home__more--single { grid-template-columns: minmax(0, 1fr); }
 
 @media (max-width: 1100px) {
-  .home__grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tasks" "approvals" "chart"; }
+  .home__grid { grid-template-columns: minmax(0, 1fr); }
   .home__more { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {

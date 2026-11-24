@@ -19,6 +19,8 @@ describe('withdraw and start from an earlier version (#502)', () => {
     await user.type(within(dialog).getByLabelText(/Reason/), 'Fee needs another look');
     await user.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
     expect(await screen.findByText('Request for Card fee version 2 withdrawn')).toBeInTheDocument();
+    expect(screen.getByText('Request for Card fee version 2 withdrawn')).toBeVisible();
+    expect(screen.getByText('Request for Card fee version 2 withdrawn').closest('.toast')).not.toBeNull();
     await waitFor(() => { expect(screen.getByRole('button', { name: 'Request publish' })).toBeEnabled(); });
     expect(screen.queryByRole('button', { name: /Withdraw/ })).not.toBeInTheDocument();
   });

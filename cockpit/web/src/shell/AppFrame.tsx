@@ -141,7 +141,7 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
     case 'process':
       return <DefinitionPage definitionKey={route.key} version={route.version} lens={route.lens} pageLimit={pageLimit} />;
     case 'migrate':
-      return <MigrationBuilder definitionKey={route.key} target={route.version} from={route.from} />;
+      return <MigrationBuilder definitionKey={route.key} target={route.version} from={route.from} pageLimit={pageLimit} />;
     case 'migration':
       return <MigrationPage migrationId={route.migrationId} pageLimit={pageLimit} />;
     case 'calendar-changes':

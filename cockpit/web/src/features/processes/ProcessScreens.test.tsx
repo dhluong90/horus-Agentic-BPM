@@ -26,7 +26,7 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Loan origination' })).toBeInTheDocument();
     expect(screen.getByText('Version 3, laid out automatically')).toBeInTheDocument();
-    const diagram = await screen.findByRole('group', { name: 'Diagram of Loan origination, 14 steps' });
+    const diagram = await screen.findByRole('group', { name: 'Diagram of Loan origination, 16 steps' });
     expect(diagram).toHaveAttribute('data-layout', 'auto');
     expect(within(diagram).getByRole('img', { name: 'Assess documents, Agent task' })).toBeInTheDocument();
     expect(within(diagram).getByRole('img', { name: 'Capture application, Person task' })).toBeInTheDocument();
@@ -36,10 +36,10 @@ describe('CKP-069 and CKP-070 definition diagram', () => {
     expect(within(crumbs).getByText('Loan origination')).toBeInTheDocument();
     expect(within(crumbs).queryByText('loan-origination')).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('tab', { name: 'Steps (14)' }));
+    await userEvent.click(screen.getByRole('tab', { name: 'Steps (16)' }));
     const steps = within(screen.getByRole('list', { name: 'Steps in flow order' })).getAllByRole('listitem');
     expect(steps[0]).toHaveTextContent('Application receivedStart');
-    expect(steps).toHaveLength(14);
+    expect(steps).toHaveLength(16);
   });
 
   it('CKP_BOUNDARY_a_boundary_event_is_drawn_on_its_step_and_named_in_words', async () => {
@@ -248,7 +248,7 @@ describe('#499 data objects and data stores', () => {
     expect(links.filter((d) => d === 'read')).toHaveLength(3);
     // A symbol takes no focus and no click: the diagram stays read only, and steps are still counted without them.
     for (const symbol of diagram.querySelectorAll('[data-data]')) expect(symbol).not.toHaveAttribute('tabindex');
-    expect(diagram).toHaveAttribute('aria-label', 'Diagram of Loan origination, 14 steps');
+    expect(diagram).toHaveAttribute('aria-label', 'Diagram of Loan origination, 16 steps');
   });
 
   it('CKP_499_a_diagram_with_data_symbols_keeps_room_under_them_for_the_minimap', async () => {
@@ -309,6 +309,9 @@ describe('CKP-033 and CKP-049 undo steps in the timeline', () => {
     const diagram = await screen.findByRole('group', { name: 'Diagram of Case APP-1047' });
     expect(await within(diagram).findByRole('button', { name: 'Book loan Service task, Undone' })).toBeInTheDocument();
     expect(within(diagram).getByRole('button', { name: /^Credit decision .*Undone$/ })).toBeInTheDocument();
+    // The step that ran to undo is named by its role, not by a second outcome.
+    expect(within(diagram).getByRole('button', { name: /^Reverse booking .*Used to undo$/ })).toBeInTheDocument();
+    expect(within(diagram).queryByText('Undo ran')).not.toBeInTheDocument();
   });
 
   it('CKP_049_a_failed_undo_reads_calmly_and_never_says_the_case_was_put_right', async () => {

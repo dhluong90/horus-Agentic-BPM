@@ -48,12 +48,14 @@ const FIT_MIN_SCALE = 0.1;
 
 /** A status badge on one step of an instance (CKP-017): its tone, icon and words, all decided by the caller. */
 export interface StepBadge {
-  tone: 'token' | 'incident' | 'undone' | 'cancelled' | 'terminated' | 'done' | 'warn';
+  tone: 'token' | 'incident' | 'undone' | 'helper' | 'cancelled' | 'terminated' | 'done' | 'warn';
   icon: string;
   /** Drawn on the badge; empty for a done mark, which is an icon only. */
   text: string;
   /** Read by assistive technology with the step's name. */
   label: string;
+  /** Said on hover: what the mark means. */
+  hint?: string;
 }
 
 /** What the instance view adds to the diagram: badges, the selected step and how to select one. */
@@ -99,6 +101,7 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
   const y = node.y - BADGE_HEIGHT - 4;
   return (
     <g className={`dg-badge dg-badge--${badge.tone}`} aria-hidden="true">
+      {badge.hint !== undefined ? <title>{badge.hint}</title> : null}
       <rect x={x} y={y} width={width} height={BADGE_HEIGHT} rx={BADGE_HEIGHT / 2} />
       <text x={x + 10} y={y + 14}>{badge.icon}</text>
       <text x={x + 24} y={y + 14}>{badge.text}</text>

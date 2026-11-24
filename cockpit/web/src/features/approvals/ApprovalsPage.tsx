@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { usePersonName } from '../../app/people';
 import { formatRoute } from '../../app/route';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../components/PageParts';
@@ -7,6 +7,7 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { useProcessesSession } from '../processes/api/processesContext';
 import { useRulesSession } from '../rules/api/rulesContext';
 import { StatusPill } from '../rules/components/StatusPill';
+import { Toast } from '../rules/components/Toast';
 import { formatDateTime } from '../rules/model/dates';
 import { denialMessage, inView, itemKey, itemTitle, kindLabel, reviewRoute, type ApprovalItem, type Engine, type QueueView } from './queue';
 import { useApprovalQueue, type ApprovalQueue } from './useApprovalQueue';
@@ -30,6 +31,7 @@ export function ApprovalsPage({ engines, pageLimit }: { engines: readonly Engine
   const [selected, setSelected] = useState<string | undefined>(undefined);
   const [withdrawing, setWithdrawing] = useState<ApprovalItem | undefined>(undefined);
   const [notice, setNotice] = useState('');
+  const closeNotice = useCallback(() => { setNotice(''); }, []);
   const { state } = queue;
   const items = state.status === 'ready' ? state.items : [];
   const view: QueueView = chosen ?? (approver && (items.some((item) => inView(item, 'review')) || !items.some((item) => inView(item, 'mine'))) ? 'review' : 'mine');
@@ -46,7 +48,6 @@ export function ApprovalsPage({ engines, pageLimit }: { engines: readonly Engine
         subtitle={approver ? t('approvals.subtitle') : t('approvals.subtitleAuthor')}
         action={next !== undefined ? <a className="btn btn--primary" href={formatRoute(reviewRoute(next))}>{t('approvals.reviewNext')}</a> : undefined}
       />
-      <p className="sr-only" role="status" aria-live="polite">{notice}</p>
       {state.status === 'ready' && state.failed.length > 0 ? <Incomplete failed={state.failed} onRetry={queue.retry} /> : null}
       <div className="queue">
         <div className="queue__list">
@@ -69,7 +70,7 @@ export function ApprovalsPage({ engines, pageLimit }: { engines: readonly Engine
       {withdrawing !== undefined ? (
         <WithdrawDialog
           key={itemKey(withdrawing)}
-          request={{ engine: withdrawing.engine, ruleSet: withdrawing.key, version: withdrawing.version, lockVersion: withdrawing.lockVersion }}
+          request={{ engine: withdrawing.engine, ruleSet: withdrawing.key, version: withdrawing.version, lockVersion: withdrawing.lockVersion, displayName: withdrawing.title }}
           onClose={() => { setWithdrawing(undefined); }}
           onDone={(message) => {
             setNotice(message);
@@ -77,6 +78,7 @@ export function ApprovalsPage({ engines, pageLimit }: { engines: readonly Engine
           }}
         />
       ) : null}
+      <Toast text={notice === '' ? undefined : notice} onClose={closeNotice} />
     </section>
   );
 }

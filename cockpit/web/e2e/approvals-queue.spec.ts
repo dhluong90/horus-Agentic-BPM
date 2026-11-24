@@ -23,7 +23,7 @@ const NOW = new Date('2026-11-21T03:00:00Z');
 
 const T = {
   en: {
-    signIn: 'Sign in again', menu: 'Cockpit menu', approvals: 'Approvals', reviewNext: 'Review next', review: 'Review', reviewAndApprove: 'Review and approve',
+    withdraw: 'Withdraw', withdrawn: 'Request for Customer onboarding (KYC) version 3 withdrawn', signIn: 'Sign in again', menu: 'Cockpit menu', approvals: 'Approvals', reviewNext: 'Review next', review: 'Review', reviewAndApprove: 'Review and approve',
     approve: 'Approve', kyc: 'Customer onboarding (KYC) · Version 3', card: 'Card fee · Version 2', self: 'You made this change, so someone else approves it.',
     empty: 'Nothing is waiting for your review.', error: 'The service could not answer. Try again.', partial: 'Process changes could not be read. This list may be incomplete.',
     forbidden: 'You do not have access to approvals on this service.', decision: 'Your decision', ruleApprove: 'Approve and publish', processApprove: 'Approve change',
@@ -33,7 +33,7 @@ const T = {
     refused: 'You cannot approve a change you wrote or requested.', loading: 'Loading', waiting: '2 waiting',
   },
   vi: {
-    signIn: 'Đăng nhập lại', menu: 'Menu Cockpit', approvals: 'Phê duyệt', reviewNext: 'Xem xét tiếp', review: 'Xem xét', reviewAndApprove: 'Xem xét và phê duyệt',
+    withdraw: 'Rút lại', withdrawn: 'Đã rút lại yêu cầu cho Mở khách hàng mới (KYC) phiên bản 3', signIn: 'Đăng nhập lại', menu: 'Menu Cockpit', approvals: 'Phê duyệt', reviewNext: 'Xem xét tiếp', review: 'Xem xét', reviewAndApprove: 'Xem xét và phê duyệt',
     approve: 'Phê duyệt', kyc: 'Mở khách hàng mới (KYC) · Phiên bản 3', card: 'Card fee · Phiên bản 2', self: 'Bạn đã tạo thay đổi này, nên người khác sẽ phê duyệt.',
     empty: 'Không có yêu cầu nào chờ bạn xem xét.', error: 'Dịch vụ chưa trả lời được. Hãy thử lại.', partial: 'Không đọc được thay đổi quy trình. Danh sách có thể chưa đủ.',
     forbidden: 'Bạn không có quyền xem phê duyệt trên dịch vụ này.', decision: 'Quyết định của bạn', ruleApprove: 'Phê duyệt và xuất bản', processApprove: 'Duyệt thay đổi',
@@ -94,6 +94,16 @@ const SCREENS: readonly Screen[] = [
     name: 'queue-requester-blocked', scenario: 'processes-requester', hash: '#/approvals',
     prepare: async (page, l) => { await card(page, T[l].kyc).click(); },
     focus: (page, l) => preview(page, T[l].kyc).getByText(T[l].self), action: (page, l) => preview(page, T[l].kyc).getByRole('button', { name: T[l].approve }),
+  },
+  {
+    // Withdraw gives a visible confirmation: the toast, not a line only a screen reader hears.
+    name: 'queue-withdrawn-toast', scenario: 'processes-requester', hash: '#/approvals',
+    prepare: async (page, l) => {
+      await card(page, T[l].kyc).click();
+      await preview(page, T[l].kyc).getByRole('button', { name: T[l].withdraw }).click();
+      await page.getByRole('dialog').getByRole('button', { name: T[l].withdraw }).click();
+    },
+    focus: (page, l) => page.locator('.toast').getByText(T[l].withdrawn),
   },
   {
     name: 'queue-empty', scenario: 'processes-approver', hash: '#/approvals',

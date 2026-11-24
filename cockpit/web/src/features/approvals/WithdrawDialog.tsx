@@ -41,7 +41,8 @@ function RuleWithdrawal({ request, onClose, onDone }: { request: WithdrawTarget;
 function ProcessWithdrawal({ request, onClose, onDone }: { request: ProcessWithdrawTarget; onClose: () => void; onDone: (message: string) => void }) {
   const { t } = useI18n();
   const name = { name: nameOf('process', request.ruleSet, request), version: String(request.version) };
-  const withdraw = useWithdrawDefinition(() => { onDone(t('approvals.withdrawn', name)); });
+  // The engine's answer names the version as stored, so the toast uses the process's display name, never its key.
+  const withdraw = useWithdrawDefinition((stored) => { onDone(t('approvals.withdrawn', { ...name, name: stored.name ?? name.name })); });
   return <WithdrawForm name={name} onClose={onClose} withdrawal={{ isPending: withdraw.isPending, isError: withdraw.isError, error: withdraw.error, send: (reason) => { withdraw.mutate({ key: request.ruleSet, version: request.version, lockVersion: request.lockVersion, reason }); } }} />;
 }
 
