@@ -242,6 +242,9 @@ describe('Approvals', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
 
     expect(await screen.findByText('You have no requests waiting.')).toBeInTheDocument();
+    // The confirmation is visible text in the toast, not a screen-reader-only line.
+    expect(screen.getByText('Request for Card fee version 2 withdrawn')).toBeVisible();
+    expect(screen.getByText('Request for Card fee version 2 withdrawn').closest('.toast')).not.toBeNull();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ ifMatch: '"1"', body: { reason: 'Wrong fee for GOLD' } });
