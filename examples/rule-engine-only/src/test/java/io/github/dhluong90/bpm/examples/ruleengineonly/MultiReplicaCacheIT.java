@@ -47,6 +47,13 @@ class MultiReplicaCacheIT {
             new PostgreSQLContainer(TestImages.postgres())
                     .withNetwork(NETWORK).withNetworkAliases("pg");
 
+    /**
+     * Where the copies listen and where the test calls them. A copy on the wildcard address and an unrelated
+     * program on 127.0.0.1 can hold the same port number; a call to localhost then reaches that program and the
+     * test sees its 400 or 401. Bound to the loopback address, the operating system hands out a port that is free there.
+     */
+    private static final String LOOPBACK = "127.0.0.1";
+
     private static final AtomicInteger DATABASES = new AtomicInteger();
 
     @Test
@@ -132,7 +139,7 @@ class MultiReplicaCacheIT {
                 "--spring.datasource.url=" + url,
                 "--spring.datasource.username=" + POSTGRES.getUsername(),
                 "--spring.datasource.password=" + POSTGRES.getPassword(),
-                "--server.port=0"));
+                "--server.address=" + LOOPBACK, "--server.port=0"));
         args.addAll(TestTokens.arguments());
         args.addAll(List.of(extra));
         return new SpringApplicationBuilder(RuleEngineOnlyApplication.class).run(args.toArray(String[]::new));
@@ -140,22 +147,28 @@ class MultiReplicaCacheIT {
 
     private static void publish(ConfigurableApplicationContext copy, byte[] yaml, int version) throws Exception {
         String path = version == 1 ? "/rule-sets" : "/rule-sets/card-fee/versions";
-        assertThat(send(copy, "alice", path, yaml, "application/yaml").statusCode()).isEqualTo(201);
+        expectStatus(send(copy, "alice", path, yaml, "application/yaml"), 201);
         HttpResponse<String> requested = send(copy, "alice",
                 "/rule-sets/card-fee/versions/" + version + ":request-publish", null, null);
-        assertThat(requested.statusCode()).isEqualTo(200);
+        expectStatus(requested, 200);
         String etag = requested.headers().firstValue("ETag").orElseThrow();
         String reviewed = JSON.readTree(requested.body()).path("canonicalHash").asString();
-        assertThat(send(copy, "bob", "/rule-sets/card-fee/versions/" + version + ":approve",
+        expectStatus(send(copy, "bob", "/rule-sets/card-fee/versions/" + version + ":approve",
                 ("{\"expectedCanonicalHash\":\"" + reviewed + "\"}").getBytes(StandardCharsets.UTF_8),
-                "application/json", etag).statusCode()).isEqualTo(200);
+                "application/json", etag), 200);
     }
 
     private static int evaluatedVersion(ConfigurableApplicationContext copy) throws Exception {
         HttpResponse<String> response = send(copy, "teller", "/decisions/card-fee:evaluate",
                 "{\"inputs\":{\"tier\":\"SILVER\",\"txCount\":1}}".getBytes(StandardCharsets.UTF_8), "application/json");
-        assertThat(response.statusCode()).isEqualTo(200);
+        expectStatus(response, 200);
         return JSON.readTree(response.body()).path("version").asInt();
+    }
+
+    private static void expectStatus(HttpResponse<String> response, int status) {
+        assertThat(response.statusCode())
+                .as("%s %s answered %s", response.request().method(), response.uri(), response.body())
+                .isEqualTo(status);
     }
 
     /** Evaluates every 100 ms until the copy serves the version; returns System.nanoTime() of that request. */
@@ -190,7 +203,7 @@ class MultiReplicaCacheIT {
 
     private static HttpResponse<String> send(ConfigurableApplicationContext copy, String user, String path,
             byte[] body, String contentType, String ifMatch) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://" + LOOPBACK + ":"
                         + copy.getEnvironment().getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearer(user))
                 .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
