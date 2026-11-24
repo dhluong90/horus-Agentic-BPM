@@ -88,6 +88,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # Same Maven repository cache as the verify job in ci.yml (#171), so a run does not download
+      # everything from Maven Central. Download retries for 429 and 5xx are set in .mvn/maven.config.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-guide-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-guide-
+            maven-${{ runner.os }}-
+            setup-java-${{ runner.os }}-x64-maven-
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
