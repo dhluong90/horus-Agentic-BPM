@@ -183,6 +183,46 @@ class DefinitionLifecycleIT {
     }
 
     @Test
+    void PRE_052_a_withdrawn_then_requested_again_version_needs_a_fresh_approval_on_fresh_values() throws Exception {
+        // Given lan requested, withdrew and requested again: the lock version is now 3, the old one was 1
+        JsonNode draft = importKyc("Review identity documents, requested twice", 201);
+        String v = BASE + "/kyc-onboarding/versions/" + draft.get("version").intValue();
+        String hash = draft.get("definitionHash").stringValue();
+        json(send("lan", "POST", v + ":request-approval", "", "\"0\"", "application/json"), 200);
+        json(send("lan", "POST", v + ":withdraw", "{}", "\"1\"", "application/json"), 200);
+        // When minh approves the withdrawn draft, it is refused
+        assertThat(json(send("minh", "POST", v + ":approve", reviewed(hash), "\"2\"", "application/json"), 409)
+                .get("code").stringValue()).isEqualTo("INVALID_STATE");
+        JsonNode again = json(send("lan", "POST", v + ":request-approval", "", "\"2\"", "application/json"), 200);
+        assertThat(again.get("lockVersion").intValue()).isEqualTo(3);
+
+        // When the approval carries the lock version of the first request, or a hash that is not the stored one
+        HttpResponse<String> staleLock = send("minh", "POST", v + ":approve", reviewed(hash), "\"1\"",
+                "application/json");
+        HttpResponse<String> staleHash = send("minh", "POST", v + ":approve", reviewed("0".repeat(64)), "\"3\"",
+                "application/json");
+        HttpResponse<String> requesterWithFresh = send("lan", "POST", v + ":approve", reviewed(hash), "\"3\"",
+                "application/json");
+
+        // Then each is refused and the version stays pending, the requester included, fresh values or not
+        assertThat(json(staleLock, 409).get("code").stringValue()).isEqualTo("VERSION_CONFLICT");
+        assertThat(staleHash.statusCode()).isEqualTo(409);
+        assertThat(json(requesterWithFresh, 403).get("code").stringValue()).isEqualTo("SELF_APPROVAL_FORBIDDEN");
+        assertThat(json(get("minh", v), 200).get("status").stringValue()).isEqualTo("PENDING_APPROVAL");
+
+        // When a second person approves with the fresh lock version and hash
+        JsonNode approved = json(send("minh", "POST", v + ":approve", reviewed(hash), "\"3\"", "application/json"),
+                200);
+
+        // Then it is active, approved by minh, and the history shows the second request before the approval
+        assertThat(approved.get("status").stringValue()).isEqualTo("ACTIVE");
+        assertThat(approved.get("approvedBy").stringValue()).isEqualTo("minh");
+        JsonNode history = json(get("minh", v + "/history"), 200).get("items");
+        assertThat(history).extracting(h -> h.get("action").stringValue() + " " + h.get("actor").stringValue())
+                .containsExactly("IMPORTED lan", "REQUESTED lan", "WITHDRAWN lan", "REQUESTED lan", "APPROVED minh");
+    }
+
+    @Test
     void PRE_039_the_original_imported_text_is_served_byte_for_byte_with_include_source() throws Exception {
         // Given a BPMN file with CRLF line ends, a comment with Vietnamese text and no trailing newline
         String original = resource().replace("\r\n", "\n").replace("\n", "\r\n").replaceFirst("(<\\?xml[^>]*\\?>)",
@@ -198,6 +238,11 @@ class DefinitionLifecycleIT {
                 .isEqualTo(original.getBytes(StandardCharsets.UTF_8));
         assertThat(read.get("sourceHash").stringValue()).isEqualTo(sha256(original));
         assertThat(json(get("lan", v), 200).get("sourceDocument")).isNull();
+        // And the two bodies carry different ETags, so a cache cannot answer one with the other
+        String plainTag = get("lan", v).headers().firstValue("ETag").orElseThrow();
+        String sourceTag = get("lan", v + "?include=source").headers().firstValue("ETag").orElseThrow();
+        assertThat(sourceTag).isNotEqualTo(plainTag).isEqualTo(plainTag.substring(0, plainTag.length() - 1)
+                + "-source\"");
         assertThat(json(get("lan", v + "?include=secrets"), 400).get("code").stringValue()).isEqualTo("INPUT_INVALID");
     }
 

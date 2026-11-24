@@ -260,7 +260,7 @@ public class ProcessController {
                 Views::pendingApproval), null, null);
     }
 
-    /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash. */
+    /** Reads one version of a definition ({@code processes:read}); the {@code ETag} is its definition hash, with {@code -source} added when {@code include=source}. */
     @GetMapping("/definitions/{key}/versions/{version}")
     public ResponseEntity<byte[]> definitionVersion(@PathVariable("key") String key,
             @PathVariable("version") String version,
@@ -276,12 +276,14 @@ public class ProcessController {
         }
         DefinitionVersion found = definitions.version(key, number);
         tools.jackson.databind.node.ObjectNode body = withWarnings(Views.definition(found), found);
+        // PRE-039: the answer with the source is a different body, so it has its own ETag and a cache cannot mix them.
+        String etag = "\"" + found.definitionHash() + (include != null ? "-source" : "") + "\"";
         if (include != null) {
             // PRE-039: the original text, byte for byte, as the import stored it.
             body.put("sourceDocument", definitions.sourceDocument(key, number));
         }
         return ResponseEntity.status(HttpStatus.OK).contentType(MediaType.APPLICATION_JSON)
-                .header(HttpHeaders.ETAG, "\"" + found.definitionHash() + "\"")
+                .header(HttpHeaders.ETAG, etag)
                 .body(bytes(body));
     }
 

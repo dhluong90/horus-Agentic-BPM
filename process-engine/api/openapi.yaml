@@ -206,7 +206,7 @@ paths:
         Status, hashes, approval and lifecycle fields of the version. With `include=source` the answer also carries
         `sourceDocument`, the original imported text exactly as it was posted (PRE-039); the same integrity check as a
         run applies first, so a stored source that no longer gives its recorded hashes is
-        `500 DEFINITION_INTEGRITY_FAILED` (PRE-048) and any other `include` value is `400 INPUT_INVALID`. The `ETag` is the definition hash, quoted; the lifecycle commands take the `lockVersion` field as
+        `500 DEFINITION_INTEGRITY_FAILED` (PRE-048) and any other `include` value is `400 INPUT_INVALID`. The `ETag` is the definition hash, quoted; with `include=source` it is the definition hash followed by `-source`, quoted, because the body differs and a cache must not mix the two; the lifecycle commands take the `lockVersion` field as
         `If-Match`. Another tenant's version is `404 DEFINITION_NOT_FOUND`. Permission `processes:read`.
       parameters:
         - name: key

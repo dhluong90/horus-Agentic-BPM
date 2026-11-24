@@ -90,6 +90,51 @@ class DefinitionIntegrityPostgresIT {
     }
 
     @Test
+    void PRE_048_the_refusal_writes_one_security_log_entry_with_tenant_key_version_and_no_content() {
+        java.util.logging.Logger logger = java.util.logging.Logger.getLogger(
+                "io.github.dhluong90.bpm.process.internal.service.ProcessServices");
+        List<java.util.logging.LogRecord> records = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.logging.Handler capture = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord record) {
+                records.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        logger.addHandler(capture);
+        java.util.logging.Level before = logger.getLevel();
+        logger.setLevel(java.util.logging.Level.ALL);
+        try {
+            jdbc.sql("UPDATE pre_definition SET source_document = replace(source_document, 'Credit review', "
+                    + "'Skip credit review') WHERE tenant_id = 'bank-a'").update();
+
+            assertThatThrownBy(() -> engine.services.start(new StartRequest("loan-review-form", "APP-4", Map.of(),
+                    null))).isInstanceOf(DefinitionIntegrityException.class);
+        } finally {
+            logger.removeHandler(capture);
+            logger.setLevel(before);
+        }
+
+        assertThat(records).hasSize(1);
+        java.util.logging.LogRecord entry = records.get(0);
+        String line = new java.text.MessageFormat(entry.getMessage()).format(entry.getParameters());
+        assertThat(entry.getLevel()).isEqualTo(java.util.logging.Level.SEVERE);
+        assertThat(line).startsWith("process.definition.integrity-failed tenant=bank-a key=loan-review-form "
+                + "version=1: ");
+        assertThat(line).doesNotContain("Skip credit review").doesNotContain("Credit review")
+                .doesNotContain("<bpmn").doesNotContain("<?xml");
+        assertThat(java.util.Arrays.stream(entry.getParameters()).map(String::valueOf).toList())
+                .allSatisfy(p -> assertThat(p.length()).isLessThan(200));
+    }
+
+    @Test
     void PRE_048_an_untouched_definition_still_starts() {
         assertThat(engine.services.start(new StartRequest("loan-review-form", "APP-3", Map.of(), null)).status())
                 .isEqualTo("RUNNING");
