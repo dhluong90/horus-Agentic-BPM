@@ -4,7 +4,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,5 +73,30 @@ class CardApplicationControllerTest {
                 .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
                 .andExpect(jsonPath("$.correlationId").isNotEmpty())
                 .andExpect(content().string(Matchers.not(Matchers.containsString("db.internal"))));
+    }
+
+    @Test
+    void reading_an_application_without_the_teller_role_or_start_permission_is_403_and_not_queried() throws Exception {
+        JdbcClient jdbc = mock(JdbcClient.class);
+        MockMvc own = MockMvcBuilders.standaloneSetup(
+                new CardApplicationController(service, jdbc, mock(TenantResolver.class))).build();
+        own.perform(get("/api/cards/applications/A-1").principal(caller("ROLE_AUDITOR")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PERMISSION_DENIED"));
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
+    void a_wrong_method_keeps_its_405_status() throws Exception {
+        mvc.perform(put("/api/cards/applications").principal(caller("ROLE_TELLER"))
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isMethodNotAllowed());
+    }
+
+    @Test
+    void an_unsupported_media_type_keeps_its_415_status() throws Exception {
+        mvc.perform(post("/api/cards/applications").principal(caller("ROLE_TELLER"))
+                        .contentType(MediaType.TEXT_PLAIN).content(BODY))
+                .andExpect(status().isUnsupportedMediaType());
     }
 }

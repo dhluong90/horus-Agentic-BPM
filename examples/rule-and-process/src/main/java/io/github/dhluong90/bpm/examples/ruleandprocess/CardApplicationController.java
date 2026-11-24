@@ -17,8 +17,11 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -108,7 +111,7 @@ class CardApplicationController {
 
     @ExceptionHandler(SubmitNotAllowed.class)
     ResponseEntity<Map<String, Object>> notAllowed() {
-        return problem(HttpStatus.FORBIDDEN, "PERMISSION_DENIED", "You may not submit card applications.");
+        return problem(HttpStatus.FORBIDDEN, "PERMISSION_DENIED", "You may not use card applications.");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})
@@ -119,7 +122,17 @@ class CardApplicationController {
 
     /** Anything else is logged with a correlation id; the caller gets the id, never the exception message. */
     @ExceptionHandler(Exception.class)
-    ResponseEntity<Map<String, Object>> unexpected(Exception e) {
+    ResponseEntity<Map<String, Object>> unexpected(Exception e) throws Exception {
+        if (e instanceof AccessDeniedException || e instanceof AuthenticationException) {
+            throw e; // the security layer owns 401 and 403
+        }
+        if (e instanceof ErrorResponse framework) {
+            // Spring's own errors (405, 415, missing header and so on) keep their status and headers.
+            HttpStatus status = HttpStatus.valueOf(framework.getStatusCode().value());
+            return ResponseEntity.status(status).headers(framework.getHeaders())
+                    .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                    .body(problemBody(status, "REQUEST_REJECTED", status.getReasonPhrase() + "."));
+        }
         String correlationId = UUID.randomUUID().toString();
         LOG.error("Unexpected error, correlationId " + correlationId, e);
         ResponseEntity<Map<String, Object>> response = problem(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
@@ -128,16 +141,24 @@ class CardApplicationController {
         return response;
     }
 
-    private static ResponseEntity<Map<String, Object>> problem(HttpStatus status, String code, String detail) {
+    private static Map<String, Object> problemBody(HttpStatus status, String code, String detail) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", status.value());
         body.put("code", code);
         body.put("detail", detail);
-        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON).body(body);
+        return body;
+    }
+
+    private static ResponseEntity<Map<String, Object>> problem(HttpStatus status, String code, String detail) {
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problemBody(status, code, detail));
     }
 
     @GetMapping("/{id}")
-    ResponseEntity<Map<String, Object>> get(@PathVariable("id") String id) {
+    ResponseEntity<Map<String, Object>> get(@PathVariable("id") String id, Authentication caller) {
+        if (!maySubmit(caller)) {
+            throw new SubmitNotAllowed();
+        }
         return jdbc.sql("SELECT application_id, customer_id, status, fee_currency, fee_minor FROM card_application "
                         + "WHERE tenant_id = ? AND application_id = ?")
                 .params(tenants.currentTenantId(), id)
