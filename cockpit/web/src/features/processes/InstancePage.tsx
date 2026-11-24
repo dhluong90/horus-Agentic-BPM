@@ -165,6 +165,10 @@ function badgeOf(mark: NodeMark, t: T, progress: LoopProgress | undefined): Step
     }
     case 'undone':
       return { tone: 'undone', icon: '↺', text: t('instance.badge.undone'), label: t('instance.badge.undone') };
+    case 'cancelled':
+      return { tone: 'cancelled', icon: '⊘', text: t('instance.badge.cancelled'), label: t('instance.state.cancelled') };
+    case 'terminated':
+      return { tone: 'terminated', icon: '■', text: t('instance.badge.terminated'), label: t('instance.state.terminated') };
     case 'done':
       return { tone: 'done', icon: '✓', text: '', label: t('instance.state.completed') };
   }
@@ -384,6 +388,8 @@ function StateLine({ mark, activity }: { mark: NodeMark | undefined; activity: b
   if (mark?.kind === 'incident') return <p className="inspector__state"><span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('instance.state.incident')}</span></p>;
   if (mark?.kind === 'token') return <p className="inspector__state"><span className="badge badge--accent"><span aria-hidden="true">{TOKEN_ICON[mark.status]}</span> {t(TOKEN_KEY[mark.status])}</span></p>;
   if (mark?.kind === 'undone') return <p className="inspector__state"><span className="badge badge--warn"><span aria-hidden="true">↺</span> {t('instance.state.undone')}</span></p>;
+  if (mark?.kind === 'cancelled') return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">⊘</span> {t('instance.state.cancelled')}</span></p>;
+  if (mark?.kind === 'terminated') return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">■</span> {t('instance.state.terminated')}</span></p>;
   if (mark?.kind === 'done') return <p className="inspector__state"><span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('instance.state.completed')}</span></p>;
   if (activity) return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">•</span> {t('instance.state.passed')}</span></p>;
   return <p className="inspector__state"><span className="badge badge--muted"><span aria-hidden="true">○</span> {t('instance.state.notReached')}</span></p>;

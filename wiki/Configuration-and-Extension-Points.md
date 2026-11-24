@@ -37,7 +37,7 @@ Spring's relaxed binding maps an environment variable to a property: upper case,
 SPRING_PROFILES_ACTIVE=dev HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE=false java -jar host.jar
 ```
 
-The removed key `horus.bpm.processes.definitions-auto-approve` is refused when it is set in a property file or on the command line. An environment variable cannot tell the two keys apart, so it is always read as the current key. A relaxation that is only for `dev` (such as `auto-approve=true`) still stops start-up on any other profile.
+A removed key stays refused from every source: a property file, the command line and an environment variable. The one exception is the environment variable `HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE`, which is the environment form of both the removed key `horus.bpm.processes.definitions-auto-approve` and the current key, so it is read as the current key. Any other spelling of the removed key as an environment variable is refused. A relaxation that is only for `dev` (such as `auto-approve=true`) still stops start-up on any other profile.
 
 ## Extension points
 

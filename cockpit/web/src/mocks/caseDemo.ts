@@ -30,7 +30,7 @@ export interface DemoCase {
 
 interface Step {
   nodeId: string;
-  state: 'ACTIVE' | 'COMPLETED' | 'INCIDENT';
+  state: 'ACTIVE' | 'COMPLETED' | 'CANCELLED' | 'TERMINATED' | 'INCIDENT';
   enteredAt: string;
   completedAt?: string;
   durationMs?: number;

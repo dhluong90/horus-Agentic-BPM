@@ -3464,8 +3464,14 @@ components:
               nodeId: { type: string }
               state:
                 type: string
-                enum: [ACTIVE, COMPLETED, INCIDENT]
-                description: '`ACTIVE`: entered and not left since; `COMPLETED`: left after its last entry; `INCIDENT`: holds an open incident'
+                enum: [ACTIVE, COMPLETED, CANCELLED, TERMINATED, INCIDENT]
+                description: >-
+                  `ACTIVE`: entered and not left since; `COMPLETED`: its last closing event is a completion (also a step
+                  of a normally ended instance with no closing row); `CANCELLED`: left by an error, message or timer
+                  boundary or an interrupting event sub-process; `TERMINATED`: still open when its instance ended
+                  cancelled or failed, with no closing row; `INCIDENT`: holds an open incident. `CANCELLED` and
+                  `TERMINATED` were added after the first three values, so a client must tolerate a value it does not
+                  know. A compensated step keeps its state; the undo is in `compensations`.
               enteredAt: { type: [string, 'null'], format: date-time, description: First entry }
               completedAt: { type: [string, 'null'], format: date-time, description: Last completion }
               durationMs:

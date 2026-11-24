@@ -80,12 +80,19 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
         }
     }
 
-    /** Where a step stands: entered and not yet left, left, or holding an open incident. */
+    /**
+     * Where a step stands. A client must tolerate a value it does not know: {@code CANCELLED} and {@code TERMINATED}
+     * were added after {@code ACTIVE}, {@code COMPLETED} and {@code INCIDENT}.
+     */
     public enum State {
         /** Entered and not left since. */
         ACTIVE,
-        /** Left after its last entry: completed, or interrupted by a boundary event or the end of its scope. */
+        /** Its last closing event is {@code NODE_COMPLETED}; also a step of a normally ended instance with no closing row. */
         COMPLETED,
+        /** Left by an error, message or timer boundary or an interrupting event sub-process ({@code TOKEN_CANCELLED}). */
+        CANCELLED,
+        /** Still open when its instance ended terminated or cancelled, with no closing row. */
+        TERMINATED,
         /** Holds an open incident. */
         INCIDENT
     }

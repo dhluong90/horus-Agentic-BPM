@@ -44,6 +44,21 @@ describe('instance view', () => {
     expect(incidentKey('NOT_KNOWN')).toBe('instance.incident.other');
   });
 
+  it('PRE_027_a_cancelled_step_and_a_terminated_step_are_not_marked_completed', () => {
+    const ended: InstanceActivities = {
+      ...activities,
+      nodes: [
+        { nodeId: 'credit', state: 'CANCELLED', enteredAt: 'x', completedAt: 'y', durationMs: 2_000, attempts: 1, actor: null, incident: null },
+        { nodeId: 'notify', state: 'TERMINATED', enteredAt: 'x', completedAt: 'y', durationMs: 2_000, attempts: 1, actor: null, incident: null },
+        { nodeId: 'debit', state: 'COMPLETED', enteredAt: 'x', completedAt: 'y', durationMs: 1_000, attempts: 1, actor: null, incident: null },
+      ],
+    };
+    const marks = nodeMarks({ ...instance, tokens: [] }, ended);
+    expect(marks.get('credit')).toEqual({ kind: 'cancelled' });
+    expect(marks.get('notify')).toEqual({ kind: 'terminated' });
+    expect(marks.get('debit')).toEqual({ kind: 'done' });
+  });
+
   it('CKP_033_an_undone_step_is_marked_unless_it_holds_an_incident', () => {
     const undone: InstanceActivities = {
       ...activities,

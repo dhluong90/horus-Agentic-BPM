@@ -48,7 +48,7 @@ const FIT_MIN_SCALE = 0.1;
 
 /** A status badge on one step of an instance (CKP-017): its tone, icon and words, all decided by the caller. */
 export interface StepBadge {
-  tone: 'token' | 'incident' | 'undone' | 'done' | 'warn';
+  tone: 'token' | 'incident' | 'undone' | 'cancelled' | 'terminated' | 'done' | 'warn';
   icon: string;
   /** Drawn on the badge; empty for a done mark, which is an icon only. */
   text: string;

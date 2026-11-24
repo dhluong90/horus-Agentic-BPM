@@ -21,9 +21,11 @@ export type NodeMark =
   | { kind: 'incident'; code: string }
   | { kind: 'token'; status: LiveStatus; count: number }
   | { kind: 'undone' }
+  | { kind: 'cancelled' }
+  | { kind: 'terminated' }
   | { kind: 'done' };
 
-/** The marks of every step: an open incident first, then where tokens wait, then undone steps, then completed ones. */
+/** The marks of every step: an open incident first, then where tokens wait, then undone steps, then cancelled, terminated and completed ones. */
 export function nodeMarks(instance: ProcessInstance, activities: InstanceActivities | undefined): Map<string, NodeMark> {
   const marks = new Map<string, NodeMark>();
   for (const node of activities?.nodes ?? []) {
@@ -40,7 +42,10 @@ export function nodeMarks(instance: ProcessInstance, activities: InstanceActivit
     }
   }
   for (const node of activities?.nodes ?? []) {
-    if (!marks.has(node.nodeId) && node.state === 'COMPLETED') marks.set(node.nodeId, { kind: 'done' });
+    if (marks.has(node.nodeId)) continue;
+    if (node.state === 'COMPLETED') marks.set(node.nodeId, { kind: 'done' });
+    else if (node.state === 'CANCELLED') marks.set(node.nodeId, { kind: 'cancelled' });
+    else if (node.state === 'TERMINATED') marks.set(node.nodeId, { kind: 'terminated' });
   }
   return marks;
 }

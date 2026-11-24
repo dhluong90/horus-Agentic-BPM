@@ -3,12 +3,14 @@ package io.github.dhluong90.bpm.host.autoconfigure;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.dhluong90.bpm.host.spi.ModuleDescriptor;
+import java.util.HashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /** When the endpoints are registered, and the start-up checks on host settings. */
 class HostMetadataAutoConfigurationTest {
@@ -52,6 +54,20 @@ class HostMetadataAutoConfigurationTest {
                 .withPropertyValues("horus.bpm.host-id=" + "x".repeat(41))
                 .run(context -> assertThat(context).hasFailed().getFailure().rootCause()
                         .hasMessageContaining("horus.bpm.host-id must be 1 to 40 characters"));
+    }
+
+    @Test
+    void the_removed_header_mode_set_as_an_environment_variable_stops_the_start_up() {
+        for (String variable : new String[] {"HORUS_BPM_TENANCY_RESOLVER", "HORUS_BPM_TENANCY_TRUSTED_GATEWAY"}) {
+            TestHosts.runner().withUserConfiguration(TestHosts.RulesWithoutMapping.class)
+                    .withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                            new SystemEnvironmentPropertySource("systemEnvironment",
+                                    new HashMap<String, Object>(Map.of(variable, "header:X-Tenant-Id")))))
+                    .withPropertyValues("spring.profiles.active=dev")
+                    .run(context -> assertThat(context).as(variable).hasFailed().getFailure().rootCause()
+                            .hasMessageContaining("is no longer supported: the engines take the tenant only from the "
+                                    + "authenticated principal (PD-079)"));
+        }
     }
 
     @Test

@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -270,10 +271,13 @@ class DemoModelsIT {
         assertThat(undos).as("newest first: the event sub-process of the payout, the debit, then the hold")
                 .containsExactly("payout", "debit", "reserve");
         assertThat(activities).contains("COMPENSATED", "tell-failure").doesNotContain("tell-success");
+        Map<String, String> states = new HashMap<>();
         for (JsonNode node : JSON.readTree(activities).get("nodes")) {
-            assertThat(node.get("state").stringValue()).as("step " + node.get("nodeId") + " of an ended instance")
-                    .isNotEqualTo("ACTIVE");
+            states.put(node.get("nodeId").stringValue(), node.get("state").stringValue());
         }
+        assertThat(states).as("the credit step was cut off by its error boundary; the message after it ran")
+                .containsEntry("credit-customer", "CANCELLED").containsEntry("tell-failure", "COMPLETED")
+                .doesNotContainValue("ACTIVE");
     }
 
     @Test

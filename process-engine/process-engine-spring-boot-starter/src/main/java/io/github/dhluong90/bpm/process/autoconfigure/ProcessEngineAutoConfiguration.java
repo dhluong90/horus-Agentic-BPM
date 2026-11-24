@@ -69,8 +69,10 @@ import io.github.dhluong90.bpm.process.spi.ProcessEventPublisher;
 import io.github.dhluong90.bpm.process.spi.ServiceTaskHandler;
 import io.github.dhluong90.bpm.process.spi.TenantResolver;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import javax.sql.DataSource;
@@ -89,7 +91,10 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -489,23 +494,55 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
-     * Whether the removed hyphen-less key is set in a property file, command line or other explicit source. An
-     * environment variable is not checked: {@code HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE} is the only form an
-     * environment variable can take for both the old key and the current one, so it is read as the current key.
+     * Every removed key beside the current key that replaced it. A removed key stays refused from every source (property
+     * file, command line, environment variable); add the next removal here and it is covered everywhere.
      */
-    static boolean removedAutoApproveKeySet(Environment environment) {
-        if (environment instanceof org.springframework.core.env.ConfigurableEnvironment configurable) {
-            for (org.springframework.core.env.PropertySource<?> source : configurable.getPropertySources()) {
-                if (source instanceof org.springframework.core.env.SystemEnvironmentPropertySource) {
-                    continue;
-                }
-                if (source.containsProperty(REMOVED_AUTO_APPROVE)) {
-                    return true;
-                }
+    static final Map<String, String> REMOVED_KEYS = Map.of(REMOVED_AUTO_APPROVE,
+            "horus.bpm.processes.definitions.auto-approve");
+
+    /**
+     * The removed keys that are set. A key in a property file or on the command line is refused as written. An
+     * environment variable is refused when its name is a form of the removed key, such as
+     * {@code horus.bpm.processes.definitions-auto-approve} or {@code HORUS.BPM.PROCESSES.DEFINITIONS-AUTO-APPROVE}. The one
+     * exception is the name that is also the environment form of the current key: the removed key and its replacement
+     * both reduce to {@code HORUS_BPM_PROCESSES_DEFINITIONS_AUTO_APPROVE}, so that exact name is read as the current key.
+     *
+     * @param environment the environment
+     * @return the removed keys found, in the table's order
+     */
+    static List<String> removedKeysSet(Environment environment) {
+        List<String> found = new ArrayList<>();
+        for (Map.Entry<String, String> removed : REMOVED_KEYS.entrySet()) {
+            if (removedKeySet(environment, removed.getKey(), removed.getValue())) {
+                found.add(removed.getKey());
             }
-            return false;
         }
-        return environment.containsProperty(REMOVED_AUTO_APPROVE);
+        return found;
+    }
+
+    private static boolean removedKeySet(Environment environment, String removed, String current) {
+        if (!(environment instanceof ConfigurableEnvironment configurable)) {
+            return environment.containsProperty(removed);
+        }
+        for (PropertySource<?> source : configurable.getPropertySources()) {
+            if (source instanceof SystemEnvironmentPropertySource env && env.getSource() instanceof Map<?, ?> vars) {
+                String shared = environmentForm(removed);
+                boolean collides = shared.equals(environmentForm(current));
+                for (Object name : vars.keySet()) {
+                    String variable = String.valueOf(name);
+                    if (environmentForm(variable).equals(shared) && !(collides && variable.equals(shared))) {
+                        return true;
+                    }
+                }
+            } else if (source.containsProperty(removed)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String environmentForm(String name) {
+        return name.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');
     }
 
     /**
@@ -516,10 +553,11 @@ public class ProcessEngineAutoConfiguration {
      * @param properties the bound settings
      */
     static void requireDevOnlyRelaxations(Environment environment, ProcessEngineProperties properties) {
-        if (removedAutoApproveKeySet(environment)) {
-            throw new IllegalStateException(REMOVED_AUTO_APPROVE + " was removed; use "
-                    + "horus.bpm.processes.definitions.auto-approve, which is accepted only when the dev profile is "
-                    + "active on its own (PRE-022). Remove the old key whatever its value.");
+        List<String> removed = removedKeysSet(environment);
+        if (!removed.isEmpty()) {
+            throw new IllegalStateException(removed.get(0) + " was removed; use " + REMOVED_KEYS.get(removed.get(0))
+                    + ", which is accepted only when the dev profile is active on its own (PRE-022). Remove the old "
+                    + "key whatever its value.");
         }
         if (properties.definitions().autoApprove()) {
             requireDevProfileOnly(environment, "horus.bpm.processes.definitions.auto-approve");

@@ -2,6 +2,7 @@ package io.github.dhluong90.bpm.process.postgres;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.groups.Tuple.tuple;
 
 import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.api.InstanceNotFoundException;
@@ -43,6 +44,7 @@ class InstanceActivitiesPostgresIT {
 
     static final String I7 = "I7000000000000000000000007";
     static final String PAYOUT = "I9000000000000000000000009";
+    static final String CUT_OFF = "IB00000000000000000000000B";
     static final String RUNNING = "IA00000000000000000000000A";
     static final String OTHER = "I8000000000000000000000008";
     static final String DEFINITION = "DEFA0000000000000000000002";
@@ -88,6 +90,11 @@ class InstanceActivitiesPostgresIT {
         history(PAYOUT, STARTED.plusSeconds(3), "NODE_ENTERED", "tell-failure", null, null);
         history(PAYOUT, STARTED.plusSeconds(4), "NODE_COMPLETED", "tell-failure", null, null);
         history(PAYOUT, ENDED, "INSTANCE_ENDED", null, null, null);
+        instance(CUT_OFF, "{}", STARTED, ENDED, "CANCELLED");
+        history(CUT_OFF, STARTED, "NODE_ENTERED", "debit-account", null, null);
+        history(CUT_OFF, STARTED.plusSeconds(1), "NODE_COMPLETED", "debit-account", null, null);
+        history(CUT_OFF, STARTED.plusSeconds(2), "NODE_ENTERED", "credit-customer", null, null);
+        history(CUT_OFF, ENDED, "INSTANCE_ENDED", null, null, null);
         instance(RUNNING, "{}", STARTED, null);
         history(RUNNING, STARTED, "NODE_ENTERED", "approve", null, null);
         instance(OTHER, "{}", STARTED.minus(Duration.ofDays(300)), STARTED.minus(Duration.ofDays(299)));
@@ -130,14 +137,26 @@ class InstanceActivitiesPostgresIT {
     }
 
     @Test
-    void PRE_027_step_interrupted_by_an_error_boundary_has_a_final_state_when_the_instance_ends() {
+    void PRE_027_step_cut_off_by_an_error_boundary_is_cancelled_not_completed() {
         // Given a loan payout whose credit step was cancelled by its error boundary, and an instance that then ended
         InstanceActivities activities = service.activities(PAYOUT, 200);
 
-        // Then no step is left ACTIVE on the ended instance
+        // Then the credit step reads CANCELLED and the step that ran to its end reads COMPLETED
         assertThat(activities.nodes()).extracting(InstanceActivities.Node::nodeId, InstanceActivities.Node::state)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("credit-customer", InstanceActivities.State.COMPLETED),
-                        org.assertj.core.groups.Tuple.tuple("tell-failure", InstanceActivities.State.COMPLETED));
+                .containsExactly(tuple("credit-customer", InstanceActivities.State.CANCELLED),
+                        tuple("tell-failure", InstanceActivities.State.COMPLETED));
+    }
+
+    @Test
+    void PRE_027_step_open_when_the_instance_was_cancelled_is_terminated() {
+        // Given a transfer cancelled while its credit step was open
+        InstanceActivities activities = service.activities(CUT_OFF, 200);
+
+        // Then the finished debit is COMPLETED and the open credit is TERMINATED, closed at the instance's end
+        assertThat(activities.nodes()).extracting(InstanceActivities.Node::nodeId, InstanceActivities.Node::state)
+                .containsExactly(tuple("debit-account", InstanceActivities.State.COMPLETED),
+                        tuple("credit-customer", InstanceActivities.State.TERMINATED));
+        assertThat(activities.nodes().get(1).completedAt()).isEqualTo(ENDED);
     }
 
     @Test
@@ -219,9 +238,13 @@ class InstanceActivitiesPostgresIT {
     }
 
     private static void instance(String id, String variables, Instant started, Instant ended) {
+        instance(id, variables, started, ended, "COMPLETED");
+    }
+
+    private static void instance(String id, String variables, Instant started, Instant ended, String status) {
         jdbc.sql("INSERT INTO pre_instance (tenant_id, id, definition_id, definition_key, definition_ver, status, "
                         + "variables, started_by, started_at, ended_at) VALUES ('bank-a', ?, ?, 'kyc-onboarding', 2, "
-                        + "'COMPLETED', ?::jsonb, 'svc-kyc', ?, ?)")
+                        + "'COMPLETED', ?::jsonb, 'svc-kyc', ?, ?)".replace("'COMPLETED'", "'" + status + "'"))
                 .params(id, DEFINITION, variables, ts(started), ts(ended)).update();
     }
 

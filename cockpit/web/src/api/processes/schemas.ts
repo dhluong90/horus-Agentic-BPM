@@ -308,7 +308,8 @@ export const instanceSummary = z
 export type InstanceSummary = z.infer<typeof instanceSummary>;
 export const instanceSummaryPage = page(instanceSummary);
 
-export const ACTIVITY_STATES = ['ACTIVE', 'COMPLETED', 'INCIDENT'] as const;
+/** `CANCELLED` and `TERMINATED` were added after the first three; `nodeActivity.state` stays a string so a newer value never fails a page. */
+export const ACTIVITY_STATES = ['ACTIVE', 'COMPLETED', 'CANCELLED', 'TERMINATED', 'INCIDENT'] as const;
 
 /** What happened at one step (getInstanceActivities, PRE-027): every figure is the engine's, never the browser's. */
 export const nodeActivity = z
