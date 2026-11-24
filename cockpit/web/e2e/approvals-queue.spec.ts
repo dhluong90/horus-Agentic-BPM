@@ -24,7 +24,7 @@ const NOW = new Date('2026-11-21T03:00:00Z');
 const T = {
   en: {
     signIn: 'Sign in again', menu: 'Cockpit menu', approvals: 'Approvals', reviewNext: 'Review next', review: 'Review', reviewAndApprove: 'Review and approve',
-    approve: 'Approve', kyc: 'Customer onboarding (KYC) · Version 3', card: 'card-fee · Version 2', self: 'You made this change, so someone else approves it.',
+    approve: 'Approve', kyc: 'Customer onboarding (KYC) · Version 3', card: 'Card fee · Version 2', self: 'You made this change, so someone else approves it.',
     empty: 'Nothing is waiting for your review.', error: 'The service could not answer. Try again.', partial: 'Process changes could not be read. This list may be incomplete.',
     forbidden: 'You do not have access to approvals on this service.', decision: 'Your decision', ruleApprove: 'Approve and publish', processApprove: 'Approve change',
     showCurrent: 'Show the current changes',
@@ -34,7 +34,7 @@ const T = {
   },
   vi: {
     signIn: 'Đăng nhập lại', menu: 'Menu Cockpit', approvals: 'Phê duyệt', reviewNext: 'Xem xét tiếp', review: 'Xem xét', reviewAndApprove: 'Xem xét và phê duyệt',
-    approve: 'Phê duyệt', kyc: 'Mở khách hàng mới (KYC) · Phiên bản 3', card: 'card-fee · Phiên bản 2', self: 'Bạn đã tạo thay đổi này, nên người khác sẽ phê duyệt.',
+    approve: 'Phê duyệt', kyc: 'Mở khách hàng mới (KYC) · Phiên bản 3', card: 'Card fee · Phiên bản 2', self: 'Bạn đã tạo thay đổi này, nên người khác sẽ phê duyệt.',
     empty: 'Không có yêu cầu nào chờ bạn xem xét.', error: 'Dịch vụ chưa trả lời được. Hãy thử lại.', partial: 'Không đọc được thay đổi quy trình. Danh sách có thể chưa đủ.',
     forbidden: 'Bạn không có quyền xem phê duyệt trên dịch vụ này.', decision: 'Quyết định của bạn', ruleApprove: 'Phê duyệt và xuất bản', processApprove: 'Duyệt thay đổi',
     showCurrent: 'Hiện các thay đổi hiện tại',
@@ -61,6 +61,7 @@ const problem = (status: number, code: string) => ({ status, contentType: 'appli
 const answer = (route: Route, status: number, code: string) => route.fulfill(problem(status, code));
 const preview = (page: Page, name: string) => page.getByRole('article', { name });
 const card = (page: Page, name: string) => page.getByRole('button', { name: new RegExp(`^${name.replace(/[()]/g, '\\$&')}`) });
+const homeApprove = (page: Page, l: Locale) => page.getByRole('link', { name: new RegExp(`^${T[l].approve} ${T[l].card}`) });
 const dock = (page: Page, l: Locale) => page.getByRole('region', { name: T[l].decision });
 
 interface Screen {
@@ -80,7 +81,8 @@ const SCREENS: readonly Screen[] = [
   { name: 'journey-1-sign-in', scenario: 'signed-out', signedOut: true, hash: '#/', focus: (page, l) => page.getByRole('button', { name: T[l].signIn }) },
   {
     name: 'journey-2-home', scenario: 'processes-approver', hash: '#/',
-    focus: (page, l) => preview(page, T[l].card).getByRole('link', { name: T[l].waiting }), action: (page, l) => preview(page, T[l].card).getByRole('link', { name: T[l].review, exact: true }),
+    // Home lists each waiting change with its own Approve button, named for the change.
+    focus: (page, l) => homeApprove(page, l), action: (page, l) => homeApprove(page, l),
   },
   { name: 'journey-3-approvals', scenario: 'processes-approver', hash: '#/approvals', focus: (page, l) => preview(page, T[l].card), action: (page, l) => page.getByRole('link', { name: T[l].reviewNext }) },
   {

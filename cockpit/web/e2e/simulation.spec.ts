@@ -186,7 +186,7 @@ for (const viewport of VIEWPORTS) {
         await expect(page.getByRole('table').getByText('card-fee')).toBeVisible();
         await shot('2-rules');
 
-        await page.getByRole('table').getByText('card-fee').click();
+        await page.getByRole('table').getByRole('link', { name: 'Card fee', exact: true }).click();
         await page.locator('#version-picker').selectOption('2');
         await expect(page.locator('.dt tbody tr').first()).toBeVisible();
         await shot('3-draft');

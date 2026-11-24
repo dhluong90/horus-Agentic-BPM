@@ -63,7 +63,7 @@ const STATES: readonly State[] = [
     scenario: 'rules-author',
     seed: draftSeed,
     hash: '#/rules',
-    ready: async (page) => { await expect(page.getByRole('link', { name: /card-fee/ }).first()).toBeVisible(); },
+    ready: async (page) => { await expect(page.getByRole('link', { name: /Card fee/ }).first()).toBeVisible(); },
   },
   {
     name: 'journey-2-published-version',

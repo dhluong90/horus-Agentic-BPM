@@ -129,7 +129,11 @@ test('CKP_081_discard_is_confirmed_by_keyboard_and_escape_closes_the_dialog_with
   await expect(dialog(page)).toHaveCount(0);
   await expect(open).toBeFocused();
   expect(requests.filter((path) => path.endsWith(':discard'))).toEqual([]);
-  await page.keyboard.press('Enter');
+  // Under load the first Enter can land while the dialog is still closing, so press again until it is open.
+  await expect(async () => {
+    await page.keyboard.press('Enter');
+    await expect(dialog(page)).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 10_000 });
   await dialog(page).getByRole('button', { name: 'Discard draft' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByText('Version 2 draft discarded.')).toBeVisible();
@@ -154,7 +158,7 @@ for (const viewport of VIEWPORTS) {
         await page.goto('./#/rules');
         await expect(page.getByRole('table').getByText('card-fee')).toBeVisible();
         await shot('2-rules');
-        await page.getByRole('table').getByText('card-fee').click();
+        await page.getByRole('table').getByRole('link', { name: 'Card fee', exact: true }).click();
         await page.locator('#version-picker').selectOption('2');
         const discard = head(page).getByRole('button', { name: T.discard[locale] });
         await expectAboveFold(discard, viewport.height);

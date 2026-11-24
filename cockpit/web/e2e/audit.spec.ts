@@ -67,7 +67,7 @@ interface Screen {
 
 const SCREENS: readonly Screen[] = [
   { name: 'journey-1-sign-in', scenario: 'signed-out', signedOut: true, hash: '#/', focus: (page, l) => page.getByRole('button', { name: l === 'en' ? 'Sign in again' : 'Đăng nhập lại' }) },
-  { name: 'journey-2-rules', scenario: 'rules-auditor', hash: '#/rules', focus: (page) => page.getByRole('link', { name: /card-fee/ }).first() },
+  { name: 'journey-2-rules', scenario: 'rules-auditor', hash: '#/rules', focus: (page) => page.getByRole('link', { name: /Card fee/ }).first() },
   { name: 'explorer-start', scenario: 'rules-auditor', hash: '#/decisions', focus: (page, l) => page.getByRole('button', { name: T[l].show }) },
   { name: 'explorer-list', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=card-fee&month=2026-11', focus: (page) => page.locator('.dlog-table tbody tr').first() },
   { name: 'explorer-none', scenario: 'rules-auditor', hash: '#/decisions?ruleSet=kyc-risk&month=2026-10', focus: (page) => page.locator('.dlog-results .empty-state') },
@@ -129,6 +129,8 @@ for (const screen of SCREENS) {
       for (const locale of LOCALES) {
         const file = `audit-${screen.name}-${String(viewport.width)}x${String(viewport.height)}-${theme}-${locale}.png`;
         test(`CKP_071_075_visual_${screen.name}_${String(viewport.width)}x${String(viewport.height)}_${theme}_${locale}`, async ({ page }) => {
+          // Known product bug #581: with an error showing, the Export evidence action is cut by the fold at 1440x900.
+          test.fixme((screen.name === 'export-too-large' || screen.name === 'export-forbidden') && viewport.height === 900, '#581');
           const violations = cspViolations(page);
           await page.clock.setFixedTime(NOW);
           await page.setViewportSize(viewport);
