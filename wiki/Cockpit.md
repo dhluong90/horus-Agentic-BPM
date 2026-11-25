@@ -42,7 +42,7 @@ sequenceDiagram
     B->>H: GET /bpm/cockpit/cockpit-hosts.json
     H-->>B: one host, baseUrl "", auth mode host-session
     B->>H: GET /api/bpm/meta and /api/bpm/me with the session cookie
-    H-->>B: engines and versions; user, tenant and permissions
+    H-->>B: engines and versions, then user, tenant and permissions
     Note over B: Header shows service, tenant and user. A problem answer shows its code and correlationId instead.
 ```
 

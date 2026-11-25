@@ -16,7 +16,12 @@ const pages = walk(dist).filter((f) => f.endsWith('.html'));
 for (const file of pages) {
   const pagePath = base + file.slice(dist.length + 1).replace(/\\/g, '/');
   const html = readFileSync(file, 'utf8');
-  for (const [, , raw] of html.matchAll(/<(?:a|link|script|img|source|iframe)\b[^>]*?\s(?:href|src)="([^"]*)"/g).map((m) => [m[0], m[1], m[1]])) {
+  // href and src, plus every candidate URL in srcset and imagesrcset, and poster: a missing 2x variant is only requested on a retina screen.
+  const urls = [...html.matchAll(/<(?:a|link|script|img|source|iframe|video|audio)\b[^>]*?\s(?:href|src|poster)="([^"]*)"/g)].map((m) => m[1]);
+  for (const m of html.matchAll(/<(?:img|source|link)\b[^>]*?\s(?:srcset|imagesrcset)="([^"]*)"/g)) {
+    for (const candidate of m[1].split(',')) { const u = candidate.trim().split(/\s+/)[0]; if (u) urls.push(u); }
+  }
+  for (const raw of urls) {
     const url = raw.replace(/&amp;/g, '&');
     if (url === '' || url.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url)) continue; // anchors and external links are not this check's business
     checked += 1;
