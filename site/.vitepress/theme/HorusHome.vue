@@ -45,16 +45,17 @@ const src = (id, w) => withBase(`/images/home/${id}-${w}.webp`);
 const dims = (s) => ({ w: s.wide ? 1400 : s.w1 || 700, h: s.h1 });
 const srcset = (s) => `${src(s.id, s.w1 || 700)} ${s.w1 || 700}w, ${src(s.id, s.w2)} ${s.w2}w`;
 
+// The hero crop runs from the start event to the risk route. Every WebP is named by its real width; the 1579 px one is the 2x capture.
 const heroSrc = (w) => withBase(`/images/home/loan-hero-crop-${w}w.webp`);
-const heroSet = [700, 1030, 1400].map((w) => `${heroSrc(w)} ${w}w`).join(', ');
-const heroAlt = 'A retail loan origination process drawn in the cockpit: the application is validated, an AI agent does KYC and AML screening, a credit risk decision is graded, a risk route sends the case to a decline, a referral or automatic approval, and approval goes to a manager or a committee.';
+const heroSet = [790, 1184, 1579].map((w) => `${heroSrc(w)} ${w}w`).join(', ');
+const heroAlt = 'Part of a loan origination process in the cockpit: an application is submitted, validated, screened by an AI agent for KYC and AML, graded for credit risk, and a risk route sends the case on to a decline, a referral or automatic approval.';
 
-// Two short screen recordings. Both are 16:10, so the width and height attributes reserve the box before any byte loads.
+// Two short screen recordings, cropped to the used area. The width and height attributes reserve the box before any byte loads.
 const videos = {
-  loan: { id: 'loan-flow', w: 1280, h: 800, eyebrow: 'A loan application', title: 'A loan application, end to end',
-    text: 'The application is screened by an AI agent, graded, routed by risk and approved by the right person.',
-    label: 'Screen recording of a loan application moving through the cockpit, from submission to approval.' },
-  rule: { id: 'rule-flow-v2', w: 1440, h: 900, eyebrow: 'Maker-checker', title: 'Change a rule, simulate, approve',
+  loan: { id: 'loan-flow', w: 1280, h: 740, eyebrow: 'Process', title: 'A loan application, end to end',
+    text: 'An AI agent screens the application, a person reviews it in the cockpit, and it is routed by risk. In this demo the proposal and approval steps are sent through the API.',
+    label: 'Screen recording of a loan application in the cockpit: an AI agent screens it, a person reviews the agent answer, and the case follows the diagram. The proposal and approval steps are sent through the API in this demo.' },
+  rule: { id: 'rule-flow-v2', w: 1440, h: 854, eyebrow: 'Maker-checker', title: 'Change a rule, simulate, approve',
     text: 'A maker edits a rule and simulates it. A second person reviews the change and approves it.',
     label: 'Screen recording of a rule change: edit a decision table, simulate it against the live version, then a second user approves.' }
 };
@@ -84,8 +85,15 @@ const features = [
 const frames = ref([]);
 const scrolls = ref({});
 let watcher;
-const measure = () => { frames.value.forEach((el) => { if (el) scrolls.value[el.dataset.shot] = el.scrollWidth > el.clientWidth + 1; }); };
-onMounted(() => { measure(); watcher = new ResizeObserver(measure); frames.value.forEach((el) => el && watcher.observe(el)); });
+// The hero diagram is shown at a readable size, so at phone width it scrolls sideways inside its frame, with a cue until the first swipe.
+const heroFrame = ref(null);
+const heroScrolls = ref(false);
+const heroMoved = ref(false);
+const measure = () => {
+  frames.value.forEach((el) => { if (el) scrolls.value[el.dataset.shot] = el.scrollWidth > el.clientWidth + 1; });
+  if (heroFrame.value) heroScrolls.value = heroFrame.value.scrollWidth > heroFrame.value.clientWidth + 1;
+};
+onMounted(() => { measure(); watcher = new ResizeObserver(measure); frames.value.forEach((el) => el && watcher.observe(el)); if (heroFrame.value) watcher.observe(heroFrame.value); });
 onBeforeUnmount(() => watcher && watcher.disconnect());
 </script>
 
@@ -105,9 +113,12 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
               </div>
               <p class="small">Java 21 or 25. Spring Boot. PostgreSQL. No cluster.</p>
             </div>
-            <figure class="canvas-card hero-fig">
-              <img :src="heroSrc(1400)" :srcset="heroSet" sizes="(max-width: 1100px) calc(100vw - 64px), 700px" width="1400" height="753" :alt="heroAlt" fetchpriority="high" decoding="async" />
-            </figure>
+            <div class="hero-wrap">
+              <figure ref="heroFrame" class="canvas-card hero-fig" :tabindex="heroScrolls ? 0 : undefined" :role="heroScrolls ? 'group' : undefined" :aria-label="heroScrolls ? 'Loan process diagram. Scroll sideways to see all of it.' : undefined" @scroll.passive="heroMoved = true">
+                <img :src="heroSrc(1579)" :srcset="heroSet" sizes="(max-width: 640px) 790px, (max-width: 1279px) min(880px, calc(100vw - 64px)), 812px" width="1579" height="1365" :alt="heroAlt" fetchpriority="high" decoding="async" />
+              </figure>
+              <span v-if="heroScrolls && !heroMoved" class="hero-cue" aria-hidden="true">Swipe to see more</span>
+            </div>
           </div>
         </div>
       </section>
@@ -130,7 +141,7 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
         <div class="wrap wide">
           <div class="sec-head center"><p class="eyebrow">See it run</p><h2>The cockpit, embedded in your service.</h2></div>
           <figure class="vid">
-              <video :ref="(el) => el && !clips.includes(el) && clips.push(el)" autoplay muted loop playsinline preload="metadata" :poster="vposter(videos.loan)" :width="videos.loan.w" :height="videos.loan.h" :aria-label="videos.loan.label">
+              <video :ref="(el) => el && !clips.includes(el) && clips.push(el)" autoplay muted loop playsinline preload="metadata" :poster="vposter(videos.loan)" :width="videos.loan.w" :height="videos.loan.h" :style="{ aspectRatio: `${videos.loan.w} / ${videos.loan.h}` }" :aria-label="videos.loan.label">
                 <source :src="vsrc(videos.loan, 'webm')" type="video/webm" />
                 <source :src="vsrc(videos.loan, 'mp4')" type="video/mp4" />
               </video>
@@ -140,7 +151,7 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
             <template v-for="(s, i) in shots" :key="s.id">
             <template v-if="s.id === 'approver-review'">
             <figure class="vid">
-              <video :ref="(el) => el && !clips.includes(el) && clips.push(el)" autoplay muted loop playsinline preload="metadata" :poster="vposter(videos.rule)" :width="videos.rule.w" :height="videos.rule.h" :aria-label="videos.rule.label">
+              <video :ref="(el) => el && !clips.includes(el) && clips.push(el)" autoplay muted loop playsinline preload="metadata" :poster="vposter(videos.rule)" :width="videos.rule.w" :height="videos.rule.h" :style="{ aspectRatio: `${videos.rule.w} / ${videos.rule.h}` }" :aria-label="videos.rule.label">
                 <source :src="vsrc(videos.rule, 'webm')" type="video/webm" />
                 <source :src="vsrc(videos.rule, 'mp4')" type="video/mp4" />
               </video>
