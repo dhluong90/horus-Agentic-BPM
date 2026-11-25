@@ -310,7 +310,7 @@ These parts of a file are accepted and never executed. They do not change the de
 
 | Part | What the engine does |
 |---|---|
-| Diagram interchange (`bpmndi`) | Never executed, and not part of the definition hash. Since 0.3.0 the import stores the shapes of the steps and the waypoints of the flows as layout revision 1 of the new version (see [[Process Engine API]], layout), so the cockpit opens it as drawn. A shape of something that is not a step, or a coordinate outside the layout schema, is dropped. The BPMN export writes a layout of its own |
+| Diagram interchange (`bpmndi`) | Never executed, and not part of the definition hash. Since 0.3.0 the import stores the shapes of the steps and the waypoints of the flows as layout revision 1 of the new version (see [[Process Engine API]], layout). The cockpit still lays the diagram out automatically and does not draw the stored positions. A shape of something that is not a step, or a coordinate outside the layout schema, is dropped. The BPMN export writes a layout of its own |
 | `documentation` | Skipped |
 | Extensions of other vendors | Skipped. The BPMN export leaves them out |
 | `textAnnotation` and its `text` | Kept as a note on the diagram. The BPMN export writes it back |
