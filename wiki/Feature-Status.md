@@ -1,6 +1,6 @@
 # Feature status
 
-Release candidate: the Rule Engine, the Process Engine and the Cockpit have passed acceptance testing, and the 1.0 release is pending final acceptance. [[Release Notes]] list what each tagged version shipped.
+Release candidate: the Rule Engine, the Process Engine and the Cockpit are feature complete, and final acceptance by the product owner is pending. [[Release Notes]] list what each tagged version shipped.
 
 The state of each feature, its milestone and its specification are kept in one place, the [feature map](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/feature-map.md). This page does not copy it, so the two cannot disagree.
 
@@ -46,4 +46,3 @@ Dates are targets, not commitments. The [[Roadmap]] owns them.
 | Asynchronous decision log (`decision-log.mode: async`) | Not built; the log is written in your transaction |
 | Built-in shadow mode for agent steps | Planned for 1.1; [[Agent Shadow Mode|Agent-Shadow-Mode]] shows the pattern to use now |
 | DMN conformance levels 2 and 3 | After 1.0 |
-| Masking of process instance variables | Not built |
