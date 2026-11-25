@@ -2,7 +2,7 @@
 
 The engines are generic by design ([[Principles]] 13): nothing in them is specific to one bank, product or country. Every business behaviour is optional and configurable per host or tenant, with a safe default. You shape the engines to your business with four tools, and you upgrade them by changing a version number. Decision record: ADR-0024.
 
-Design preview: describes the 0.1 target for the Rule Engine and the 0.2 target for the Process Engine.
+Each setting below is built unless its row says otherwise; [[Rule Engine Configuration]] lists every property and its status.
 
 ![Configuration and extension points](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/extension-points.svg)
 
@@ -68,20 +68,20 @@ Properties per engine: [[Rule Engine Configuration]]; the Process Engine list ar
 
 Where businesses differ, the engines offer a setting with a safe default instead of one fixed behaviour.
 
-| Choice | Default | Other option | From |
+| Choice | Default | Other option | Status |
 |---|---|---|---|
-| Who may edit rule drafts in the cockpit, per environment | Cockpit editing on | Off, for hosts that keep production changes in Git | M1 |
-| How the cockpit reads a row | Plain-language sentence | Condition shorthand; your own sentence patterns per language | M1 |
-| Where the cockpit opens | By the user's permissions | A landing area the host sets | M1 |
-| Where the tenant comes from | The authenticated principal | Your own `TenantResolver` bean | M1 |
-| Which claims name the caller's groups and display name | `groups`; `name`, then `preferred_username` | `horus.bpm.security.groups-claim` and `horus.bpm.security.display-name-claims` for Entra ID, ADFS or another identity provider ([[Host Metadata and Permissions]]) | M1 |
-| Which `401` challenge clients get | `Bearer` | `horus.bpm.security.challenge`, sent alike by the endpoints and by the host's chain through the registered `BpmProblemAuthenticationEntryPoint` | M1 |
+| Who may edit rule drafts in the cockpit, per environment | Cockpit editing on | Off, for hosts that keep production changes in Git | Built |
+| How the cockpit reads a row | Plain-language sentence | Condition shorthand; your own sentence patterns per language | Not built |
+| Where the cockpit opens | By the user's permissions | A landing area the host sets | Built |
+| Where the tenant comes from | The authenticated principal | Your own `TenantResolver` bean | Built |
+| Which claims name the caller's groups and display name | `groups`; `name`, then `preferred_username` | `horus.bpm.security.groups-claim` and `horus.bpm.security.display-name-claims` for Entra ID, ADFS or another identity provider ([[Host Metadata and Permissions]]) | Built |
+| Which `401` challenge clients get | `Bearer` | `horus.bpm.security.challenge`, sent alike by the endpoints and by the host's chain through the registered `BpmProblemAuthenticationEntryPoint` | Built |
 | How errors in an expression behave | `strict` for rule sets, `spec` for imported DMN models | Set per model in a new, approved version; guardrails fail closed in every mode | 1.1 (target) |
-| How the decision log is written | In your transaction | Asynchronous, through an outbox, for high-volume paths | M2 |
-| Evidence before a publication request | Not required | A stored simulation report, per rule set | M3 |
-| Retiring a live rule version by hand | One approver with a reason | A second approver confirms (`four-eyes`) | M3 |
-| Nested condition editing | Hidden | An optional builder lens | M3 |
-| Removing a tenant's data | No purge | A governed purge after export | 1.1 (target) |
+| How the decision log is written | In your transaction | Asynchronous, through an outbox, for high-volume paths | Not built |
+| Evidence before a publication request | Not required | A stored simulation report, per rule set | Built |
+| Retiring a live rule version by hand | One approver with a reason | A second approver confirms (`four-eyes`) | Built |
+| Nested condition editing | Hidden | An optional builder lens | Built |
+| Removing a tenant's data | No purge | A governed purge after export | Not built |
 
 ## Why not a fork or a script hook
 

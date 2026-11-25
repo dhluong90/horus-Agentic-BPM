@@ -2,7 +2,7 @@
 
 Decision tables and approval processes that run as a library inside your Spring Boot service, in its PostgreSQL transaction. Business users change rules, the engine enforces a second approver, and AI agent output must pass your deterministic rules before the process continues.
 
-**Status: design preview.** Nothing is released yet, and the API may change until 1.0. The first release, Rule Engine 0.1 with Cockpit 0.1, targets 15 January 2027. The state of each feature: [[Feature status|Feature-Status]].
+**Status: release candidate.** The engines and the cockpit have passed acceptance testing, and the 1.0 release is pending final acceptance. The API may change until 1.0. The state of each feature: [[Feature status|Feature-Status]].
 
 **Licence:** Licensed under the PolyForm Noncommercial License 1.0.0. For any other use, contact HORUS. See [[Licensing and commercial use|Licensing-and-Commercial-Use]].
 
@@ -60,8 +60,8 @@ The decision, its inputs and the matched row are written to the decision log in 
 | Build Java 21 or 25 services on Spring Boot 4.x (3.5.x supported until 1.0) with PostgreSQL 14 or later (15 or later from 1.0) | Run on another language, framework or database before 1.0 |
 | Need business rules that product, risk or compliance staff change under four-eyes approval with effective dates | Need full BPMN 2.0 execution or DMN with FEEL before the staged releases after 1.0, CMMN, or a general-purpose diagram tool |
 | Need approval flows, human task queues with SLAs, and compensating service steps inside one service | Want one central orchestration platform shared by many teams and run by a platform team |
-| Want AI agents to take process steps, but only within rules your compliance team can read | Need cross-process message correlation (planned after 1.0) or durable execution of arbitrary code across many services |
-| Must keep the decision log and process history in your own database, in your own transactions | Need something you can run in production now: nothing is released yet |
+| Want AI agents to take process steps, but only within rules your compliance team can read | Need durable execution of arbitrary code across many services |
+| Must keep the decision log and process history in your own database, in your own transactions | Need a product with production references: this is a release candidate, pending final acceptance |
 | Serve several businesses or tenants whose rules, roles and calendars differ, and want settings rather than a fork | Need an engine that ships one industry's business rules built in |
 
 Not sure? Read [[Compare and choose|Compare-and-Choose]]. It sets this project against Camunda 8, the Camunda 7 forks, Flowable, Drools and Kogito, Temporal and hand-coded rules, including where each of them is the better choice.

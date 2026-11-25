@@ -2,7 +2,7 @@
 
 This page owns the contribution process. `CONTRIBUTING.md` in the repository is the short form that GitHub shows when you open a pull request; when the two differ, this page wins and `CONTRIBUTING.md` is fixed.
 
-Until the first release the maintainers drive the roadmap; issues and small pull requests are welcome.
+Until the 1.0 release the maintainers drive the roadmap; issues and small pull requests are welcome.
 
 ## 1. Open an issue first
 
@@ -92,3 +92,7 @@ Grype matches Java packages by GitHub advisory and package URL; NVD CPE matching
 ## Releases
 
 Every module shares one project version, released under one tag `vX.Y.Z` (PD-087); see [[Technical Stack]]. What shipped is recorded in [[Release Notes]].
+
+## The documentation site
+
+The site is built from `wiki/` and published at https://dhluong90.github.io/horus-Agentic-BPM/ by `.github/workflows/docs-site.yml`: a push to `main` that changes the wiki or `site/` deploys it to GitHub Pages after the build, origin check and axe pass; pull requests only build.

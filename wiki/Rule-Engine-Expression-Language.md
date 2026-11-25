@@ -2,8 +2,6 @@
 
 Reference for the language used in `when` conditions and `then` outputs of a decision table. The language is parsed at publication time into a typed evaluation tree (ADR-0003).
 
-Design preview: describes the 0.1 target.
-
 ## Guarantees
 
 | Property | Statement |
@@ -115,7 +113,7 @@ A `when` entry is a boolean expression. A `then` entry is an expression whose ty
 | Date | `daysBetween(d1, d2)`, `monthsBetween(d1, d2)`, `addDays(d, n)`, `yearOf(d)`, `monthOf(d)` |
 | Money | `amount(m)`, `currency(m)`, `money(amount, 'VND')` |
 
-In 0.2.0 the engine evaluates `round` and `daysBetween`; the other functions are planned. An unknown function is refused at import.
+The engine evaluates only `round` and `daysBetween`; the other functions in this table are planned and are not registered. An unknown function is refused at import.
 
 ## Host functions
 
