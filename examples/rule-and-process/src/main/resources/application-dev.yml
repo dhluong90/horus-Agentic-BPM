@@ -9,6 +9,9 @@ horus:
       assess-overdue: PT1M   # card-dispute, the officer's reminder
       two-hours: PT1M        # payment-review, the wait for the payment
       cooling-off: PT1M      # sub-process-and-timer, the cooling-off wait
+      manager-sla: PT20S     # loan-origination, the 4-hour escalation of the manager approval
+      committee-sla: PT40S   # loan-origination, the 1-day escalation of the committee approval
+      offer-expired: PT60S   # loan-origination, the 7-day validity of the offer
   bpm:
     tenancy:
       dev-tenant: bank-a
@@ -28,6 +31,10 @@ horus:
           ROLE_AUDITOR: [rules:read, rules:log:read]
           ROLE_TELLER: [rules:evaluate]
           ROLE_CARD_OFFICER: [rules:evaluate]
+          ROLE_COMPLIANCE_REVIEWER: [rules:evaluate]
+          ROLE_CREDIT_ANALYST: [rules:evaluate]
+          ROLE_CREDIT_MANAGER: [rules:evaluate]
+          ROLE_CREDIT_COMMITTEE: [rules:evaluate]
     processes:
       authoring:
         cockpit-drafts: true
@@ -43,6 +50,12 @@ horus:
           ROLE_DISPUTES_OFFICER: [processes:read, processes:task:work]
           ROLE_DISPUTES_SENIOR: [processes:read, processes:task:work]
           ROLE_OPS: [processes:read, processes:task:work]
+          # loan-origination (imported by DevLoanOriginationSeeder, not listed under locations below). The rule steps
+          # run as the caller, so each of these roles may also evaluate rules.
+          ROLE_COMPLIANCE_REVIEWER: [processes:read, processes:task:work]
+          ROLE_CREDIT_ANALYST: [processes:read, processes:task:work]
+          ROLE_CREDIT_MANAGER: [processes:read, processes:task:work]
+          ROLE_CREDIT_COMMITTEE: [processes:read, processes:task:work]
       definitions:
         # Seed the sample process for the demo tenant and activate it without approval (dev profile only).
         startup-tenants: [bank-a]
