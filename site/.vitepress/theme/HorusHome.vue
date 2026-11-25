@@ -45,26 +45,10 @@ const src = (id, w) => withBase(`/images/home/${id}-${w}.webp`);
 const dims = (s) => ({ w: s.wide ? 1400 : s.w1 || 700, h: s.h1 });
 const srcset = (s) => `${src(s.id, s.w1 || 700)} ${s.w1 || 700}w, ${src(s.id, s.w2)} ${s.w2}w`;
 
-const compare = [
-  ['How it runs', 'A library in your Spring Boot service', 'A remote cluster, with a search index'],
-  ['Where state lives', 'Your PostgreSQL, in your transactions', "The engine's own store, plus exported history"],
-  ['Change approval', 'Second approver enforced by the engine', 'Built by you around the modeller'],
-  ['Decision log', 'Append-only, same transaction as your write', 'Decision instances in Operate and Optimize'],
-  ['AI agent output', 'Schema and rule check before the process continues', 'Guardrails are built by you around the agent'],
-  ['Import', 'Camunda Modeler and bpmn.io files', 'Native'],
-  ['Licence', 'Source-available, free for noncommercial use', 'Source-available, non-production only; production needs an Enterprise agreement']
-];
-const camundaBetter = [
-  ['Track record.', 'Camunda has years of production use and a large community. We have no published production references yet.'],
-  ['Scale.', 'Camunda partitions work across a cluster. We scale by adding replicas of your service on one PostgreSQL, and we have not published benchmark results.'],
-  ['Languages.', 'Camunda has job workers in several languages. We are Java and Spring Boot, with a REST API for the rest.'],
-  ['Ready-made pieces.', 'Camunda ships connectors and a graphical modeller. We have neither: you model in Camunda Modeler or bpmn.io, and write the adapters to your own systems.'],
-  ['Licence.', 'We are source-available, not open source. Commercial use needs a licence from us.']
-];
 const features = [
   ['i-flow', 'Every executable BPMN 2.0 element', 'Gateways, events, compensation and sub-processes, imported and run.'],
   ['i-table', 'DMN decision tables', 'Import and export DMN 1.2 to 1.5 tables.'],
-  ['i-import', 'Import from your modeller', 'Bring in Camunda Modeler or bpmn.io files as they are.'],
+  ['i-import', 'Import from your modeller', 'Import BPMN 2.0 files from standard modelers as they are.'],
   ['i-users', 'Maker-checker', 'Requesters cannot approve their own changes. The engine refuses.'],
   ['i-log', 'Append-only audit', 'Decision log, tenant switches and approvals, with no edit path.'],
   ['i-agent', 'Guarded AI agents', 'Schema check, then your rules, then a human if needed.'],
@@ -165,36 +149,7 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
         </div>
       </section>
 
-      <section id="compare">
-        <div class="wrap">
-          <div class="sec-head"><p class="eyebrow">Compare</p><h2>Why not just Camunda?</h2><p class="lead">Camunda is excellent. Here is when we fit better.</p></div>
-          <p class="lead" style="margin:-24px 0 36px;max-width:70ch">Camunda is the mature, broad choice. If you are building a central orchestration platform for many teams, with a platform team to run it, choose Camunda. We are built for a narrower job: governed change inside one Java service.</p>
-          <div class="cmp">
-            <table>
-              <thead><tr><th scope="col"><span class="vh">Topic</span></th><th scope="col" class="us">HORUS Agentic BPM</th><th scope="col">Camunda 8</th></tr></thead>
-              <tbody>
-                <tr v-for="r in compare" :key="r[0]">
-                  <th scope="row">{{ r[0] }}</th>
-                  <td class="us" data-l="HORUS Agentic BPM">{{ r[1] }}</td>
-                  <td data-l="Camunda 8">{{ r[2] }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="fit">
-            <div class="card">
-              <h3>Where Camunda is the better fit today</h3>
-              <ul><li v-for="c in camundaBetter" :key="c[0]"><b>{{ c[0] }}</b> {{ c[1] }}</li></ul>
-            </div>
-            <div class="card pick">
-              <h3>Pick HORUS Agentic BPM if</h3>
-              <p>your services are Java on PostgreSQL, business teams change rules under approval, an auditor asks who approved what, and you do not want to run another cluster for workflow.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="tint">
+      <section>
         <div class="wrap wide">
           <div class="sec-head center"><p class="eyebrow">Features</p><h2>What is in the box</h2></div>
           <div class="features">
@@ -205,7 +160,7 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
         </div>
       </section>
 
-      <section id="quick-start">
+      <section id="quick-start" class="tint">
         <div class="wrap">
           <div class="sec-head center"><p class="eyebrow">Quick start</p><h2>From clone to a governed decision.</h2><p class="lead">Under thirty minutes. Needs Docker with Compose v2, git, curl and jq.</p></div>
           <div class="steps">
@@ -236,7 +191,7 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
         </div>
       </section>
 
-      <section class="tint">
+      <section>
         <div class="wrap">
           <p class="arch-s">The engines are libraries in your Spring Boot service. All state lives in your PostgreSQL, in your transactions.</p>
           <figure class="arch" style="margin:0 auto" role="img" aria-label="Your Spring Boot service contains the Rule Engine, Process Engine and Cockpit files. It talks to your PostgreSQL in one transaction. Your identity provider sits outside and signs users in. Your adapters, such as core banking and an AI model, are called after the commit.">

@@ -8,7 +8,7 @@ const popular = [
   ['Import a BPMN file', 'Process-Engine-Importing-BPMN'],
   ['Author a decision table', 'Rule-Engine-Authoring-Decision-Tables'],
   ['Guarded agent steps', 'Guarded-Agent-Steps'],
-  ['Compare and choose', 'Compare-and-Choose']
+  ['When to use it', 'When-to-Use']
 ];
 const cards = [
   ['i-rocket', 'Get started', 'Run the example host and your first decision.', 'Getting-Started'],

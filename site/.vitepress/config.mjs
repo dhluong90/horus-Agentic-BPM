@@ -25,7 +25,6 @@ export default withMermaid({
     logo: { src: '/logo.svg', alt: '' },
     nav: [
       { text: 'Docs', link: '/docs/' },
-      { text: 'Compare', link: '/Compare-and-Choose' },
       { text: 'Cockpit', link: '/Cockpit' },
       { text: 'Release notes', link: '/Release-Notes' }
     ],

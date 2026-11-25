@@ -4,8 +4,8 @@ Short answers with links to the page that owns the detail.
 
 ## Positioning
 
-**Why not Drools, Camunda or Flowable?**
-They are mature products with a far larger scope. HORUS Agentic BPM is for teams that need decision tables and approval flows inside their own service, with a footprint they control, and that want AI agents as process participants with deterministic guardrails. The trade-offs are in [[Principles]].
+**Who is HORUS Agentic BPM for?**
+It is for teams that need decision tables and approval flows inside their own service, with a footprint they control, and that want AI agents as process participants with deterministic guardrails. The trade-offs are in [[Principles]].
 
 **What does "agentic" mean here?**
 Classic BPM assigns steps to people and systems. Here an AI agent can take a step too, through an `agentTask`: it receives bounded inputs, must return output that matches a JSON Schema, that output is checked by a rule set, and a human approves when the rules say so. The engine never embeds or calls a model; the host registers an adapter. See [[Concepts]] and [[Process Engine Overview]].
