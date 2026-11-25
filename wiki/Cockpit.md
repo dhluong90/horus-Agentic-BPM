@@ -1,8 +1,8 @@
 # How to use the cockpit
 
-Embed the cockpit in your service or host it standalone, then perform the operator tasks it offers: edit rule drafts, review and approve rule versions, simulate, read the decision log, and (from 0.2) edit tables in a grid and operate processes on their diagrams from one inbox.
+Embed the cockpit in your service or host it standalone, then perform the operator tasks it offers: edit rule drafts, review and approve rule versions, simulate, read the decision log, and edit tables in a grid and operate processes on their diagrams from one inbox.
 
-Design preview: Rule Engine screens and the host registry describe the Cockpit 0.1 target (M1, 15 Jan 2027). The grid editor, diagrams, merged inbox, tenant switcher and Process Engine screens describe the Cockpit 0.2 target (M2, 26 Mar 2027). Process approval screens and the modeller describe the M3 target (21 May 2027). Scope per version is owned by the [[Roadmap]].
+Screens for Rules, Approvals, Decisions, Processes, Tasks, Incidents, the host registry, the tenant switcher and the merged inbox are built. Not built: a graphical process modeller, and live counts and a duration heatmap on diagrams. Release candidate: the 1.0 release is pending final acceptance.
 
 ## What it is
 
@@ -28,7 +28,7 @@ Add the starter next to the engine starter:
 
 The starter serves the cockpit at `/bpm/cockpit` behind your service's own sign-in. It adds no authentication of its own: protect the path with your Spring Security configuration as you do any other page. As a second line, the starter answers `401` with no file to a request that reaches it without a signed-in user.
 
-Open `http://localhost:8080/bpm/cockpit` and sign in. Expected in Cockpit 0.1 (first build): the header shows your service, your tenant and your name; the page lists the engines the service runs and what you may do. Rules lists the rule sets of your tenant.
+Open `http://localhost:8080/bpm/cockpit` and sign in. The header shows your service, your tenant and your name; the page lists the engines the service runs and what you may do. Rules lists the rule sets of your tenant.
 
 ```mermaid
 sequenceDiagram
@@ -88,14 +88,14 @@ An embedded cockpit also works when your web application signs users in with a s
 
 A link into a screen always opens that screen. Otherwise the cockpit opens on Home, whose content follows the user's role: an approver sees the requests waiting for them first, an author their own drafts and requests, anyone else the recently changed rule sets. The host property `horus.bpm.cockpit.landing`, read from `/api/bpm/meta` as `cockpit.landing`, is `home` by default and can be set to `rules` or `approvals`; `decisions` arrives with 0.2.0.
 
-| User | Cockpit 0.1 opens on |
+| User | The cockpit opens on |
 |---|---|
 | Approver (`rules:approve` or `processes:approve`) | Approvals: one queue of pending rule and process changes, migration plans and calendar changes (the Processes page lists the calendar changes) |
 | Author (`rules:author`) | Approvals, filtered to the user's own requests |
 | Auditor or support (`rules:log:read` only) | Decisions |
 | Anyone else | Rule sets |
 
-From 0.2 the process diagram is the default landing area, but only on a host that runs the Process Engine. A host that runs only the Rule Engine never opens on an empty diagram.
+The process diagram is the default landing area, but only on a host that runs the Process Engine. A host that runs only the Rule Engine never opens on an empty diagram.
 
 ## Host it standalone
 
@@ -136,7 +136,7 @@ A sample `cockpit-hosts.json`:
 | Sign-in | Once per page load: authorization code with PKCE (`S256`), `state` and `nonce`. The sign-in request names every service's scope; each service's token is then requested with its own scope, so a token works at one service only |
 | Tokens | In memory only, never in `localStorage`, `sessionStorage` or a cookie. A reload signs in again through the identity provider's session. A token is renewed a minute before it expires |
 | Address | The service comes first in the address: `#/hosts/loans/rules`. Choosing another service in the top bar opens the same area there and shows only that service's data |
-| Versions | A cockpit release supports its own engine minor and the one before; Cockpit 0.3 works with engines 0.2 and 0.3. A service outside that range shows its engine version and the supported versions, and no screens |
+| Versions | A cockpit release supports its own engine minor and the one before; for example Cockpit 0.3 works with engines 0.2 and 0.3. A service outside that range shows its engine version and the supported versions, and no screens |
 | Errors | A service that refuses `/api/bpm/me` shows the error code and the reference for that service; the other services stay usable |
 | Token renewal | A renewal the identity provider answers with a server error or `429` keeps the session: that service reads as unreachable and the next request tries again. Only a refused refresh token ends the session |
 | Tenant | With `horus.bpm.tenancy.switching.enabled: true` on the service and more than one tenant in the token's `allowed_tenants` claim, a tenant switcher sits beside the service in the top bar and lists only those tenants. Choosing one reloads that service's screens for it. A tenant the service refuses (`403 TENANT_NOT_ALLOWED`) brings you back to your own tenant with one sentence and the reference. With switching off, or one tenant, there is no switcher |
@@ -148,7 +148,7 @@ Each host answers two endpoints the cockpit reads after sign-in:
 | `/api/bpm/meta` | Engine and API versions, supported features | Hide screens the host cannot serve. The cockpit supports the current and the previous engine minor version |
 | `/api/bpm/me` | Tenant, user, permissions | Hide screens the user has no permission for |
 
-In Cockpit 0.1 you work with one host at a time and switch between hosts from the registry. From 0.2, choose **All services** on Tasks or Incidents to merge the list across every host you can reach (see Tasks and Incidents below).
+You work with one host at a time and switch between hosts from the registry. Choose **All services** on Tasks or Incidents to merge the list across every host you can reach (see Tasks and Incidents below).
 
 ![Standalone cockpit federating several hosts with one OIDC sign-in](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-federation.svg)
 
@@ -157,11 +157,11 @@ In Cockpit 0.1 you work with one host at a time and switch between hosts from th
 | 1 | The browser loads the cockpit archive and the host registry from your static web server |
 | 2 | The cockpit signs in once at your identity provider: authorization code with PKCE, as a public client. It holds no client secret |
 | 3 | For each host it calls `/api/bpm/meta` and `/api/bpm/me` with the same bearer token |
-| 4 | It calls the rules and, from 0.2, processes APIs of the selected host. Each host must allow the cockpit origin in CORS |
+| 4 | It calls the rules and processes APIs of the selected host. Each host must allow the cockpit origin in CORS |
 | 5 | Each host validates the token itself |
 | 6 | Each host reads only its own PostgreSQL. No data is copied to a central store |
 
-## Rule Engine tasks (Cockpit 0.1)
+## Rule Engine tasks
 
 | Task | Screen | What you do | What you see |
 |---|---|---|---|
@@ -179,7 +179,7 @@ In Cockpit 0.1 you work with one host at a time and switch between hosts from th
 | Bring back a retired version | Editor | Export the retired version, then import the file as a new draft | A new draft with the retired version's rules, which goes through approval like any draft |
 | Copy a rule set to another tenant | Editor | Export it under one tenant, then import the file under the other tenant | A new draft in the other tenant; the two copies then change independently |
 
-Authoring in 0.1 is by cell and row editing in the cockpit, a CSV round trip, or YAML or JSON import; see [[Rule Engine Authoring Decision Tables]]. Creating a new rule set is done by import.
+Authoring is by cell and row editing in the cockpit, a CSV round trip, or YAML or JSON import; see [[Rule Engine Authoring Decision Tables]]. Creating a new rule set is done by import.
 
 ### Import and export a file
 
@@ -191,7 +191,7 @@ Authoring in 0.1 is by cell and row editing in the cockpit, a CSV round trip, or
 
 Every import carries an `Idempotency-Key`, so a double click creates one version. A file the engine refuses creates nothing: the cockpit says "Import refused. Nothing was saved." and names the file, the row, the column and the reason, for example "card-fee-bad.yaml, row R4, column Balance: compares a money amount with a plain number". A version imported on the page shows "Imported by lan from card-fee-v3.yaml" in its details. An export the engine refuses, such as a DMN export of a version with no decision table form, is shown the same way. YAML export arrives when the engine offers it. Import and export stay available when the host turns cockpit editing off.
 
-Readings are plain-language sentences by default. The host can choose the shorthand style instead, and can override or extend the sentence patterns per language. If the 8 Jan 2027 checkpoint fails, Cockpit 0.1 ships the shorthand style only and sentences follow in 0.2.
+Readings are plain-language sentences by default. The host can choose the shorthand style instead, and can override or extend the sentence patterns per language.
 
 A host that keeps production rule changes in Git can turn off cockpit editing per environment; it is on by default. Imports, approvals and reading still work. The property is `horus.bpm.rules.authoring.cockpit-drafts` ([[Rule Engine Configuration]]).
 
@@ -216,11 +216,11 @@ A host that keeps production rule changes in Git can turn off cockpit editing pe
 | SLA | The Overdue filter of the task queue (PD-024) |
 | Tenant switcher | If your token lists more than one allowed tenant, switch between them. The host accepts only a tenant in that list. Each screen shows one tenant; no screen combines tenants |
 
-Live counts of active tokens and incidents on each step of a definition diagram are planned for 0.2 and move to M3 if the 5 Mar 2027 checkpoint fails.
+Live counts of active tokens and incidents on each step of a definition diagram are not built.
 
 ![Where the diagram, token and heatmap overlays get their data](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/cockpit-diagram-overlay.svg)
 
-The counts come from an index on the live tokens, never from a query over history. The heatmap (M3) reads an hourly rollup that the engine's scheduler fills a few minutes behind real time. Nothing is copied out of your service; for longer analysis, send the engine events to your own data warehouse.
+The counts come from an index on the live tokens, never from a query over history. The planned heatmap (not built) would read an hourly rollup that the engine's scheduler fills a few minutes behind real time. Nothing is copied out of your service; for longer analysis, send the engine events to your own data warehouse.
 
 Who may reassign, and why a reason is required, is decided in [PD-110](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/decisions.md#pd-110-reassigning-a-task-needs-a-reason-and-the-manage-permission). Reassigning a role or group task needs the host's `AssigneeDirectory` (see [[Configuration and Extension Points]]); without it every such reassignment is refused.
 
@@ -234,23 +234,23 @@ Process definitions follow the same governed lifecycle as rule sets: draft, pend
 
 | Part | When | What it means for you |
 |---|---|---|
-| Engine | M2, 26 Mar 2027 | Deploying a definition creates a draft. A second identity approves it through the REST API or your own tooling. A definition imported from Git also arrives as a draft, and its source hash shows which committed file in Git it was imported from; the engine runs only the approved canonical form, checked against its hash. A host can turn off draft creation from the cockpit per environment (on by default). Only the `dev` profile may approve automatically |
+| Engine | Built | Deploying a definition creates a draft. A second identity approves it through the REST API or your own tooling. A definition imported from Git also arrives as a draft, and its source hash shows which committed file in Git it was imported from; the engine runs only the approved canonical form, checked against its hash. A host can turn off draft creation from the cockpit per environment (on by default). Only the `dev` profile may approve automatically |
 | Approval screens | Available now, from Processes | A key whose latest version waits for approval shows **Review change**. The version opens on **Changes**: the engine's diff from the version in effect (`GET .../diff`) drawn on the proposed diagram (added and changed steps and links) or on the diagram in effect (removed ones), one at a time, each mark in colour with its sign, and listed in words beside it: `Assignee › Role: CREDIT_OFFICER → SENIOR_CREDIT_OFFICER`, money with separators. Choosing an entry shows it on the diagram that draws it. The decision stays docked below. **Approve change** sends the content hash you first saw on the page (`expectedDefinitionHash`) with the version's lock version; if the content moves on while you read, Approve waits until you confirm you checked it again. The person who requested or imported the version sees Approve disabled with one line saying why, and no Reject. A change list cut off at 1,000 values is too large to approve here: Approve is disabled with the reason and nothing is sent; Reject, with a reason, still works. A `409 CONTENT_CHANGED` is never retried: reload the changes first |
-| Modeller | M3, 21 May 2027 | Change a process on a canvas that offers only the steps your host has registered. The engine validates on save, and the result is a draft that needs approval. If the M3 checkpoint fails, the modeller moves to 1.1 |
+| Modeller | Not built | Planned: change a process on a canvas that offers only the steps your host has registered. The engine validates on save, and the result is a draft that needs approval. |
 
 Moving a box on a diagram changes only the layout. It needs no approval; see principle 6 in [[Principles]].
 
-## Added in M3 (21 May 2027)
+## Also in the cockpit
 
 | Task | What you see |
 |---|---|
 | Replay history through a draft | Choose "Replay last N decisions" in Simulation; count and breakdown of changed outcomes |
-| Edit business calendars | Working hours and holidays per tenant. Moves after 1.0 if the M3 checkpoint fails |
-| Instance migration | Create a plan, map renamed steps, run the dry run, execute in batches with progress; the plan shows as two diagrams side by side with the mapped steps. Until M3, engineers run migrations through the REST API |
+| Edit business calendars | Working hours and holidays per tenant. |
+| Instance migration | Create a plan, map renamed steps, run the dry run, execute in batches with progress; the plan shows as two diagrams side by side with the mapped steps. |
 | Read a stored simulation report | The report attached to a publication request, in the dossier. A host can require a report before a request is accepted, per rule set; off by default |
-| Confirm a retirement | Only when the host sets the retirement approval mode to `four-eyes`: a second `rules:approve` holder confirms a retire request, never the requester. The version keeps serving until then. Moves to 1.1 if the M3 checkpoint fails |
-| Edit nested conditions | An optional condition builder lens for And, Or and Not groups in one row, off by default; the host turns it on. Moves after 1.0 if the M3 checkpoint fails |
-| See where processes slow down | A heatmap on the definition diagram: counts, incidents and p50 and p95 durations per step for a chosen window. Moves after 1.0 if the M3 checkpoint fails |
+| Confirm a retirement | Only when the host sets the retirement approval mode to `four-eyes`: a second `rules:approve` holder confirms a retire request, never the requester. The version keeps serving until then. |
+| Edit nested conditions | An optional condition builder lens for And, Or and Not groups in one row, off by default; the host turns it on. |
+| See where processes slow down (not built) | A heatmap on the definition diagram: counts, incidents and p50 and p95 durations per step for a chosen window. |
 
 ## Troubleshooting
 

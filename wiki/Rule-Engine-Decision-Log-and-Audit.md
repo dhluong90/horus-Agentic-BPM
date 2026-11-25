@@ -2,8 +2,6 @@
 
 Find, explain and protect the record of every decision. The decision log is the audit trail that risk, compliance and customer service read.
 
-Design preview: describes the 0.1 target.
-
 ## Before you start
 
 - Reading the log requires `rules:log:read` ([[Rule Engine Configuration]]).

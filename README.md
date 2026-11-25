@@ -6,16 +6,16 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 
 ![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
-> Status: pre-release. No artifact is published yet. The first release, 0.1.0, is planned for Sun 22 Nov 2026 as a GitHub Release with jars, checksums and a bill of materials; Maven Central follows once the namespace is registered. The wiki describes the 0.1 target, which is wider than the first release.
+> Status: release candidate. The engines and the cockpit have passed acceptance testing; the 1.0 release is pending final acceptance, and the API may change until then.
 
-**What the first release contains** ([roadmap](docs/product/roadmap.md#first-release-010-reviewed-20-nov-shipped-by-22-nov-2026)):
+**What it contains** ([roadmap](docs/product/roadmap.md)):
 
-- Rule Engine: import a rule set from YAML, approval by a second person (self-approval refused), evaluation in your transaction with the `first` hit policy (`unique` and `collect` too, if they meet the same release checks), one decision log row per evaluation, tenant isolation and idempotency keys.
-- The host metadata and permissions API (`/api/bpm/meta`, `/api/bpm/me`), the embedded cockpit shell and the Spring Boot starter.
-- An example host that runs with Docker Compose.
-- A first BPMN and DMN subset, if it passes the same release checks: BPMN 2.0 XML import of start, service, business rule and user tasks, exclusive gateways and end events, and DMN 1.5 decision table import and export with a FEEL subset. Anything outside the subset is refused by name. The Process Engine is a preview in 0.1.0: outside the `dev` profile an imported process stays a draft, activation happens only through the development auto-approve setting, and there is no task claim step yet. Running imported processes, and storing their state in your database, are in the first release only if they meet the same checks; otherwise import ships alone and execution follows. This is not a conformance claim; conformance test pass rates are published as they are measured.
+- Rule Engine: decision tables from YAML, JSON, CSV or DMN, a second approver (self-approval refused), effective dates, simulation and replay of past decisions, evaluation in your transaction, a decision log with masking, tenant isolation and idempotency keys.
+- Process Engine: BPMN 2.0 import, execution and export; user, service, business rule and agent steps with output checks; timers, messages, signals, compensation and migration; approval of definitions by a second person.
+- Cockpit: rule editing and approval, decision log, process diagrams, tasks, incidents and a merged inbox across services, embedded in your service or hosted standalone.
+- Spring Boot starters and example hosts that run with Docker Compose.
 
-Not in the first release: simulation, masking, effective dates and replay, cache refresh across replicas, the full Cockpit 0.1 screens and standalone sign-in. They follow in 0.2.0, planned for 15 Jan 2027. 1.0 (May 2027) is the release with a frozen API.
+Not built: application-level encryption of process variables (#594), connectors to outside systems, client libraries beyond Java, a graphical process modeller, an asynchronous decision log, and a built-in shadow mode for agent steps. See [Feature status](../../wiki/Feature-Status).
 
 Requirements: Java 21 or 25, PostgreSQL 14 or later (15 or later from 1.0), and Spring Boot 4.x or 3.5.x ([ADR-0011](docs/adr/0011-spring-boot-4-baseline.md)).
 
@@ -59,7 +59,7 @@ The decision, its inputs and the matched row are written to the decision log in 
 
 | Module | What it does | Artifact |
 |---|---|---|
-| [`rule-engine/`](rule-engine/) | Decision tables (`first`; `unique` and `collect` in the first release if they meet the release checks), versioned rule sets with maker-checker and effective dates, a safe expression language, decision API, append-only decision log, simulation | `io.github.dhluong90.bpm:rule-engine-spring-boot-starter` |
+| [`rule-engine/`](rule-engine/) | Decision tables (`first`, `unique` and `collect`), versioned rule sets with maker-checker and effective dates, a safe expression language, decision API, append-only decision log, simulation | `io.github.dhluong90.bpm:rule-engine-spring-boot-starter` |
 | [`process-engine/`](process-engine/) | Versioned process definitions with user, service and agent tasks, gateways and timers; human task queues with SLA and escalation; idempotent starts, saga compensation, instance migration | `io.github.dhluong90.bpm:process-engine-spring-boot-starter` |
 | [`cockpit/`](cockpit/) | React dashboard for both engines, served by the host or hosted standalone as static assets | `io.github.dhluong90.bpm:cockpit-spring-boot-starter` |
 | [`examples/`](examples/) | Minimal host services showing each engine alone and both together | |
