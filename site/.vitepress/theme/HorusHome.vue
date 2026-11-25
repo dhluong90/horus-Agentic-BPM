@@ -17,30 +17,30 @@ const pillars = [
 
 // Real captures of the 1.0 cockpit. w1 x h1 is the 1x size; w2 the 2x width.
 const shots = [
-  { id: 'process', h1: 430, w2: 1400, eyebrow: 'BPMN diagram', title: 'Every executable element, on the diagram.',
-    text: 'Sub-processes, boundary events and compensation, drawn from the BPMN file you import.',
-    alt: 'The Loan payout process drawn as a BPMN diagram in the cockpit, with a sub-process, service tasks and an undo path.' },
-  { id: 'timeline', h1: 438, w2: 1400, eyebrow: 'Instance timeline', title: 'See each step, and what was undone.',
+  { id: 'process', h1: 377, w2: 1030, eyebrow: 'BPMN diagram', title: 'Every executable element, on the diagram.',
+    text: 'Boundary events and compensation, drawn from the BPMN file you import.',
+    alt: 'The Loan payout process drawn as a BPMN diagram in the cockpit, with service tasks, a boundary event and an undo path.' },
+  { id: 'timeline', wide: true, h1: 622, w2: 1400, eyebrow: 'Instance timeline', title: 'See each step, and what was undone.',
     text: 'A finished instance shows its steps, and which ones compensation undid.',
     alt: 'A process instance in the cockpit. Two service tasks are marked Undone, and their undo steps are marked Used to undo.' },
-  { id: 'rule-editor', h1: 438, w2: 1400, eyebrow: 'Rule Engine', title: 'Edit a decision table in plain words.',
+  { id: 'rule-editor', wide: true, h1: 640, w2: 1400, eyebrow: 'Rule Engine', title: 'Edit a decision table in plain words.',
     text: 'Each rule reads back as a sentence. Publish without a code release.',
-    alt: 'The decision table editor. Rows R1 to R4 each show a sentence such as "Rule R3 applies when tier is Gold".' },
-  { id: 'try-it', h1: 437, w2: 1400, eyebrow: 'Try it and simulate', title: 'Try the live rules. Simulate a draft.',
+    alt: 'The decision table editor. Rows R1 to R5 each show a sentence such as "Rule R3 applies when tier is Gold".' },
+  { id: 'try-it', w1: 360, h1: 597, w2: 720, tall: true, eyebrow: 'Try it and simulate', title: 'Try the live rules. Simulate a draft.',
     text: 'Try it runs the version in effect on sample values. Simulate compares a draft with the live version before anyone approves.',
     alt: 'A decision table with row R3 highlighted as matched for a Gold tier input.' },
-  { id: 'approver-review', h1: 438, w2: 1380, eyebrow: 'Maker-checker', title: 'The approver reads the change in plain words.',
+  { id: 'approver-review', wide: true, h1: 688, w2: 1400, eyebrow: 'Maker-checker', title: 'The approver reads the change in plain words.',
     text: 'The current version sits beside the proposed one. The fee changes from 30,000 VND to 25,000 VND.',
     alt: 'Version 4 of a fee table beside the version in force, with the changed fee marked, and the Approve and publish and Reject buttons.' },
-  { id: 'self-approval', h1: 438, w2: 1400, eyebrow: 'Four eyes', title: 'You cannot approve your own change.',
+  { id: 'self-approval', wide: true, h1: 666, w2: 1400, eyebrow: 'Four eyes', title: 'You cannot approve your own change.',
     text: 'The requester sees Approve disabled. If a call gets through, the engine refuses with a 403.',
     alt: 'The same review screen for the requester. The Approve and publish button is disabled with the note "You requested this. Another approver decides."' },
-  { id: 'decision-log', h1: 438, w2: 1400, eyebrow: 'Decision log', title: 'Every decision, explained and kept.',
+  { id: 'decision-log', h1: 318, w2: 1400, eyebrow: 'Decision log', title: 'Every decision, explained and recorded.',
     text: 'The log is append-only. There is no edit path.',
     alt: 'A logged card-fee decision. The text says rule R3 of version 3 matched because tier is GOLD, with the result of a 30,000 VND fee.' }
 ];
 const src = (id, w) => withBase(`/images/home/${id}-${w}.webp`);
-const srcset = (s) => `${src(s.id, 700)} 700w, ${src(s.id, 1400)} ${s.w2}w`;
+const srcset = (s) => `${src(s.id, s.w1 || 700)} ${s.w1 || 700}w, ${src(s.id, s.w2)} ${s.w2}w`;
 
 const compare = [
   ['How it runs', 'A library in your Spring Boot service', 'A remote cluster, with a search index'],
@@ -143,9 +143,9 @@ const features = [
         <div class="wrap wide">
           <div class="sec-head center"><p class="eyebrow">See it run</p><h2>The cockpit, embedded in your service.</h2></div>
           <div class="show">
-            <div v-for="(s, i) in shots" :key="s.id" class="row" :class="{ flip: i % 2 === 1 }">
-              <figure class="shot">
-                <img :src="src(s.id, 700)" :srcset="srcset(s)" sizes="(max-width: 1100px) 100vw, 700px" width="700" :height="s.h1" :alt="s.alt" loading="lazy" decoding="async" />
+            <div v-for="(s, i) in shots" :key="s.id" class="row" :class="{ flip: i % 2 === 1 && !s.wide, tall: s.tall, wide: s.wide }">
+              <figure class="shot" :tabindex="s.tall ? undefined : 0" :role="s.tall ? undefined : 'group'" :aria-label="s.tall ? undefined : s.eyebrow">
+                <img :src="src(s.id, s.wide ? 1400 : s.w1 || 700)" :srcset="srcset(s)" :sizes="s.tall ? '360px' : s.wide ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 1100px) 100vw, 700px'" :width="s.wide ? 1400 : s.w1 || 700" :height="s.h1" :alt="s.alt" loading="lazy" decoding="async" />
               </figure>
               <div><p class="eyebrow">{{ s.eyebrow }}</p><h3>{{ s.title }}</h3><p>{{ s.text }}</p></div>
             </div>
@@ -216,7 +216,8 @@ HASH=$(curl -s -u hoa:$P $H/rule-sets/card-fee/versions/1 | jq -r .canonicalHash
 curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
   -H 'If-Match: "1"' -H 'Content-Type: application/json' \
   -d '{"expectedCanonicalHash":"'$HASH'"}'</code></pre>
-              <p>The approval is refused, because hoa made the request: <code class="i">403 SELF_APPROVAL_FORBIDDEN</code>. Sign in to the cockpit at <code class="i">http://127.0.0.1:8080/bpm/cockpit</code> as <code class="i">minh</code> (password in <code class="i">secrets/demo_password</code>) and approve it there.</p></div></div>
+              <p>The approval is refused, because hoa made the request: <code class="i">403 SELF_APPROVAL_FORBIDDEN</code>. Open the cockpit below and sign in as <code class="i">minh</code> (password in <code class="i">secrets/demo_password</code>). Approve it there.</p>
+<pre tabindex="0" aria-label="Cockpit address" style="margin-top:12px"><code>127.0.0.1:8080/bpm/cockpit</code></pre></div></div>
           </div>
           <p class="then"><a :href="withBase('/Getting-Started')">Read the full Getting Started guide</a></p>
           <p class="warn">Local evaluation only. Demo users and plain HTTP are not for production.</p>
@@ -225,9 +226,9 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
 
       <section class="tint">
         <div class="wrap">
-          <p class="arch-s">The engines are libraries inside your Spring Boot service: they keep all state in your PostgreSQL, run in your transactions, and the cockpit is static files your service serves.</p>
+          <p class="arch-s">The engines are libraries in your Spring Boot service. All state lives in your PostgreSQL, in your transactions.</p>
           <figure class="arch" style="margin:0 auto" role="img" aria-label="Your Spring Boot service contains the Rule Engine, Process Engine and Cockpit files. It talks to your PostgreSQL in one transaction. Your identity provider sits outside and signs users in. Your adapters, such as core banking and an AI model, are called after the commit.">
-            <svg viewBox="0 0 900 340" aria-hidden="true">
+            <svg class="arch-wide" viewBox="0 0 900 340" aria-hidden="true">
               <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 1l9 4-9 4z" fill="currentColor" style="color:var(--edge)" /></marker></defs>
               <g text-anchor="middle">
                 <rect class="nd" x="150" y="30" width="400" height="230" rx="16" />
@@ -246,6 +247,28 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
                 <text class="tx3" x="350" y="334" font-size="13.5">Your identity provider: sign-in and tenant</text>
                 <path class="ed" d="M560 240H650" stroke-dasharray="5 4" marker-end="url(#a2)" />
                 <text class="tx3" x="780" y="236" font-size="13.5">Your adapters: core banking,</text><text class="tx3" x="780" y="254" font-size="13.5">AI model, after commit</text>
+              </g>
+            </svg>
+            <svg class="arch-narrow" viewBox="0 0 340 540" aria-hidden="true">
+              <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 1l9 4-9 4z" fill="currentColor" style="color:var(--edge)" /></marker></defs>
+              <g text-anchor="middle" font-size="14">
+                <rect class="nd" x="10" y="10" width="320" height="56" rx="12" />
+                <text class="tx" x="170" y="34" font-weight="650">Your identity provider</text><text class="tx2" x="170" y="54">sign-in and tenant</text>
+                <path class="ed" d="M170 66V94" marker-end="url(#a3)" />
+                <rect class="nd" x="10" y="96" width="320" height="210" rx="14" />
+                <text class="tx" x="170" y="124" font-weight="650">Your Spring Boot service</text>
+                <rect class="chip" x="30" y="140" width="280" height="36" rx="9" /><text class="chiptx" x="170" y="163" font-weight="500">Rule Engine</text>
+                <rect class="chip" x="30" y="184" width="280" height="36" rx="9" /><text class="chiptx" x="170" y="207" font-weight="500">Process Engine</text>
+                <rect class="chip" x="30" y="228" width="280" height="36" rx="9" /><text class="chiptx" x="170" y="251" font-weight="500">Cockpit files</text>
+                <text class="tx2" x="170" y="290">Libraries, not a server. No cluster.</text>
+                <path d="M170 306V354" style="stroke:var(--primary-fill)" stroke-width="2.5" fill="none" marker-start="url(#a3)" marker-end="url(#a3)" />
+                <text class="chiptx" x="186" y="335" text-anchor="start" font-weight="600">your transaction</text>
+                <rect class="nd" x="10" y="356" width="320" height="70" rx="14" />
+                <text class="tx" x="170" y="386" font-weight="650">Your PostgreSQL</text><text class="tx2" x="170" y="408">rle_ and pre_ tables</text>
+                <path class="ed" d="M170 426V468" stroke-dasharray="5 4" marker-end="url(#a3)" />
+                <text class="tx3" x="186" y="452" text-anchor="start">after commit</text>
+                <rect class="nd" x="10" y="470" width="320" height="60" rx="12" />
+                <text class="tx" x="170" y="495" font-weight="650">Your adapters</text><text class="tx2" x="170" y="516">core banking, AI model</text>
               </g>
             </svg>
           </figure>

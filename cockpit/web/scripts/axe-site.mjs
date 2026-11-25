@@ -1,3 +1,4 @@
+/* global document, window */
 // Accessibility check of the built documentation site (CKP-065 "Readable"). Serves site/.generated/.vitepress/dist,
 // opens a page with a diagram and code blocks at 1440x900 and 1440x1200 in light and dark, and fails when the
 // Mermaid diagram is not drawn, a code block has no copy button, or axe-core reports a serious or critical violation.

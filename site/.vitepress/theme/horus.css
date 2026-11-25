@@ -287,3 +287,18 @@
 .hx .dhero .bigsearch kbd{color:var(--muted)}
 .hx .dcard p{margin:6px 0 0}
 .hx .dcard .go{display:inline-block}
+
+.hx .arch .arch-narrow{display:none;max-width:360px;margin:0 auto}
+.hx .row.tall .shot{max-width:360px;justify-self:center}
+@media (max-width:640px){
+.hx .arch .arch-wide{display:none}
+.hx .arch .arch-narrow{display:block}
+.hx code.i{overflow-wrap:anywhere}
+}
+.hx .row.wide,.hx .row.wide.flip{grid-template-columns:1fr;gap:28px}
+.hx .row.wide .shot{order:0}
+.hx .row.wide p{max-width:70ch}
+@media (max-width:640px){
+.hx .row:not(.tall) .shot{overflow-x:auto}
+.hx .row:not(.tall) .shot img{width:auto;min-width:760px;max-width:none}
+}
