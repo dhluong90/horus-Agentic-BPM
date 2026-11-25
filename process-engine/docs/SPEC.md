@@ -2748,3 +2748,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** `ivy` sees the `MIGRATION_PLAN` only, `kim` the `CALENDAR_CHANGE` only and `dan` neither, as for migration plans.
 - **Example:** `dan GET /approvals -> []`
 - **Test IDs:** `PRE_372_a_caller_without_calendar_manage_sees_no_pending_calendar_change`
+
+### PRE-373 The default flow of an activity is taken only when no conditional outgoing flow of it holds; flows without a condition are always taken
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A credit check `grade` (a service task) with `default="to-review"` and three outgoing flows: `to-approve` with the condition `score >= 700`, `to-review` (the default) to `manual-review`, and `to-audit` with no condition to `audit`.
+- **When:** `grade` completes with `score = 720`, and in a second run with `score = 640`.
+- **Then:** At 720 the flows `to-approve` and `to-audit` are taken and `manual-review` does not run. At 640 no condition holds, so `to-review` and `to-audit` are taken. A flow without a condition never counts as a condition that held. The `default` attribute of every task, sub-process and call activity is read on import and written on export; a default that is not an outgoing flow of the activity is refused as `DEFAULT_FLOW_INVALID`, and one that has a condition as `DEFAULT_FLOW_HAS_CONDITION`.
+- **Example:** `score = 720` -> `auto-approve` and `audit`; `score = 640` -> `manual-review` and `audit`.
+- **Test ID:** `PRE_373_a_matching_conditional_flow_suppresses_the_default_flow_of_an_activity`, `PRE_373_the_default_flow_of_an_activity_is_taken_when_no_conditional_flow_matches` (`ActivityDefaultFlowAndTerminateTest`)
+
+### PRE-374 A terminate end reached from an error boundary ends the instance with every other branch, whether it waits, sits at a join or has a step still to run
+- **Traces to:** `TR-STD-04`, #493
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan preparation that forks into `register-collateral`, with an error boundary `collateral-flagged` on `COLLATERAL_FLAGGED` leading to a terminate end, and a valuation branch; the valuation is an open user task, a call in flight, a local step not yet run, or already waiting at the parallel join.
+- **When:** The registry answers `COLLATERAL_FLAGGED` for application LA-2026-000454.
+- **Then:** The valuation token is cancelled with its work item or job, the token at the join is cancelled, no token is live, the instance is `COMPLETED` and no offer is sent. A local step that has not yet run when the terminate happens is skipped in the same call, so the call does not fail with `INVALID_STATE` and the instance is not left `RUNNING`.
+- **Example:** Collateral flagged -> `end-fraud`, the valuation never runs, instance `COMPLETED`.
+- **Test ID:** `PRE_374_a_terminate_end_reached_from_an_error_boundary_ends_the_instance_while_the_join_waits`, `PRE_374_a_job_in_flight_in_another_branch_is_cancelled_by_the_terminate`, `PRE_374_a_terminate_end_reached_from_an_error_boundary_ends_the_instance_when_the_other_branch_already_waits_at_the_join` (`ActivityDefaultFlowAndTerminateTest`), `PRE_374_a_terminate_reached_from_an_error_boundary_ends_the_instance_and_the_sibling_local_step_never_runs` (`BoundaryEventsPostgresIT`)
+
+### PRE-375 A sequence flow condition reads a field of the result a rule task stored
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A rule task `determine-authority` with `resultVariable="authority"` whose flows are `to-manager` (condition `authority.approvalTier == 'MANAGER'`) and `to-committee` (the default flow).
+- **When:** The rule answers `approvalTier = MANAGER`, and in a second run `COMMITTEE`.
+- **Then:** `MANAGER` opens the manager approval task only; `COMMITTEE` opens the committee task only.
+- **Example:** `authority.approvalTier == 'MANAGER'` -> `approve-manager` open, `approve-committee` absent.
+- **Test ID:** `PRE_375_a_sequence_flow_condition_reads_a_field_of_the_rule_task_result`, `PRE_375_the_default_flow_of_a_rule_task_leads_to_the_committee_when_the_tier_is_not_manager` (`ActivityDefaultFlowAndTerminateTest`)
+
+### PRE-376 Several tasks may lead to one end event: each boundary path reaches it without closing the task it sits on
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Two approval user tasks, `approve-manager` (non-interrupting timer of 4 hours) and `approve-committee` (non-interrupting timer of 1 day), whose boundary flows go to the one end event `escalated`.
+- **When:** The timer of the open task fires, then the approver completes the task.
+- **Then:** `escalated` is reached, the task stays open and the instance `RUNNING`; completing the task completes the instance.
+- **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
+- **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)

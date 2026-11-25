@@ -5246,6 +5246,59 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         };
     }
 
+    /** A command to apply, or a local step whose handler runs when its turn comes (never both). */
+    private record Queued(Command command, Effect.InvokeService call) {
+    }
+
+    /** @return whether the token of a local call still waits on that very attempt, so its handler may run */
+    private static boolean waitsOnLocalCall(InstanceState state, Effect.InvokeService call) {
+        return state.status() == InstanceStatus.RUNNING && state.tokens().stream().anyMatch(t ->
+                t.id().equals(call.tokenId()) && t.status() == TokenStatus.WAITING_ASYNC
+                        && call.attemptId().equals(t.activityInstanceId()));
+    }
+
+    /** Runs the handler or decision of a local step in this transaction and returns its result (PRE-040, PRE-071). */
+    private io.github.dhluong90.bpm.process.internal.exec.StepResult invokeLocal(InstanceState state,
+            Effect.InvokeService call, RunAs as, List<HistoryEntry> history) {
+        DecisionCaller decisionCaller = switch (as) {
+            case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
+                    callers.currentCallerId());
+            case RunAs.EngineWork w -> new DecisionCaller.Engine(w.actor());
+        };
+        if (call.kind() == ServiceKind.DECISION) {
+            // A request's tenant must be the instance's; the decision adapter checks it again.
+            // Engine work has no caller: the tenant it fires for must be the instance's. Defence
+            // in depth only: the row was locked with the job's tenant, so the two are equal; the
+            // real control is the instance tenant passed explicitly to the decision port.
+            String allowed = switch (as) {
+                case RunAs.CallerRequest r -> tenants.currentTenantId();
+                case RunAs.EngineWork w -> w.tenantId();
+            };
+            if (!state.tenantId().equals(allowed)) {
+                throw new TenantNotAllowedException("The caller's tenant is not the instance's tenant");
+            }
+        }
+        long invokedAt = System.nanoTime();
+        io.github.dhluong90.bpm.process.internal.exec.StepResult result;
+        try {
+            result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
+                    decisionCaller, clock.instant());
+        } catch (RuntimeException e) {
+            // PRE-071 rolls the step back by propagating the handler's exception; PRE-084 still
+            // reports it, at once, as the one failed step of the result it would have carried.
+            metrics.stepApplied("ASYNC_RESULT", "FAILED",
+                    Duration.ofNanos(System.nanoTime() - invokedAt));
+            throw e;
+        }
+        if (call.kind() == ServiceKind.DECISION
+                && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
+            history.add(new HistoryEntry("DECISION_EVALUATED", call.nodeId(), call.tokenId(),
+                    call.attemptId(), null, clock.instant(),
+                    Map.of("ruleSet", call.target(), "decisionId", String.valueOf(c.output().get("decisionId")))));
+        }
+        return result;
+    }
+
     /**
      * One {@code processes.step.completed.v1} per node completed by a transition, inside the transaction of the step
      * (PRE-085). {@code durationMs} runs from the token's entry at the node to now: from the entry recorded in the same
@@ -5312,8 +5365,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         List<Effect.BroadcastSignal> broadcasts = new ArrayList<>();
         // #491: subscriptions of tokens that began to wait for a message, and the messages steps send.
         List<Effect.CreateSubscription> subscriptions = new ArrayList<>();
-        Deque<Command> queue = new ArrayDeque<>();
-        queue.add(first);
+        Deque<Queued> queue = new ArrayDeque<>();
+        queue.add(new Queued(first, null));
         int applied = 0;
         try {
             while (!queue.isEmpty()) {
@@ -5322,7 +5375,17 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     throw new ExecutionException("STEP_LIMIT", null, "More than " + EngineDefaults.MAX_COMMANDS_PER_CALL
                             + " steps in one call; the process loops without a wait state");
                 }
-                Command command = queue.poll();
+                Queued item = queue.poll();
+                Command command = item.command();
+                if (item.call() != null) {
+                    Effect.InvokeService call = item.call();
+                    if (!waitsOnLocalCall(state, call)) {
+                        // The branch ended while the call waited its turn: nothing to run, nothing to apply.
+                        continue;
+                    }
+                    command = new Command.AsyncResult(call.tokenId(), call.attemptId(),
+                            invokeLocal(state, call, as, history));
+                }
                 long appliedAt = System.nanoTime();
                 Transition t;
                 try {
@@ -5391,45 +5454,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 store.deleteSubscription(state.tenantId(), gone.subscriptionId());
                         case Effect.CreateSubscription subscription -> subscriptions.add(subscription);
                         case Effect.ThrowMessage message -> sendMessage(state, message);
-                        case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL -> {
-                            DecisionCaller decisionCaller = switch (as) {
-                                case RunAs.CallerRequest r -> new DecisionCaller.Request(tenants.currentTenantId(),
-                                        callers.currentCallerId());
-                                case RunAs.EngineWork w -> new DecisionCaller.Engine(w.actor());
-                            };
-                            if (call.kind() == ServiceKind.DECISION) {
-                                // A request's tenant must be the instance's; the decision adapter checks it again.
-                                // Engine work has no caller: the tenant it fires for must be the instance's. Defence
-                                // in depth only: the row was locked with the job's tenant, so the two are equal; the
-                                // real control is the instance tenant passed explicitly to the decision port.
-                                String allowed = switch (as) {
-                                    case RunAs.CallerRequest r -> tenants.currentTenantId();
-                                    case RunAs.EngineWork w -> w.tenantId();
-                                };
-                                if (!state.tenantId().equals(allowed)) {
-                                    throw new TenantNotAllowedException("The caller's tenant is not the instance's tenant");
-                                }
-                            }
-                            long invokedAt = System.nanoTime();
-                            io.github.dhluong90.bpm.process.internal.exec.StepResult result;
-                            try {
-                                result = invoker.invoke(state.tenantId(), state.instanceId(), state.businessKey(), call,
-                                        decisionCaller, clock.instant());
-                            } catch (RuntimeException e) {
-                                // PRE-071 rolls the step back by propagating the handler's exception; PRE-084 still
-                                // reports it, at once, as the one failed step of the result it would have carried.
-                                metrics.stepApplied("ASYNC_RESULT", "FAILED",
-                                        Duration.ofNanos(System.nanoTime() - invokedAt));
-                                throw e;
-                            }
-                            if (call.kind() == ServiceKind.DECISION
-                                    && result instanceof io.github.dhluong90.bpm.process.internal.exec.StepResult.Completed c) {
-                                history.add(new HistoryEntry("DECISION_EVALUATED", call.nodeId(), call.tokenId(),
-                                        call.attemptId(), null, clock.instant(),
-                                        Map.of("ruleSet", call.target(), "decisionId", String.valueOf(c.output().get("decisionId")))));
-                            }
-                            queue.add(new Command.AsyncResult(call.tokenId(), call.attemptId(), result));
-                        }
+                        case Effect.InvokeService call when call.mode() == ExecutionMode.SYNC_LOCAL ->
+                                // The handler runs when its turn comes, not now: an earlier step of this call may end
+                                // the branch first (a terminate end, an interrupting boundary), and then it never runs.
+                                queue.add(new Queued(null, call));
                         case Effect.InvokeService call when call.mode() == ExecutionMode.ASYNC
                                 && call.kind() == ServiceKind.HANDLER -> {
                             // TX of the step: the token waits and a durable job is stored; nothing is called here.
