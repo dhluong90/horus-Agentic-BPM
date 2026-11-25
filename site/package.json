@@ -8,7 +8,7 @@
     "prepare-content": "node prepare.mjs",
     "build": "node prepare.mjs && vitepress build .generated",
     "check": "node prepare.mjs --check",
-    "test": "node --test test/prepare.test.mjs"
+    "test": "node --test test/prepare.test.mjs test/check-links.test.mjs test/mermaid.test.mjs"
   },
   "devDependencies": {
     "mermaid": "^11.17.2",

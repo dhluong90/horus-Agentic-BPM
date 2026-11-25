@@ -10,7 +10,7 @@ sequenceDiagram
   participant I as Instance at a receive task
   B->>API: POST /messages:correlate (name, key, Idempotency-Key)
   API->>I: the one token waiting for that name and key
-  I-->>API: continues; payload fields become variables
+  I-->>API: continues, and payload fields become variables
   API-->>B: 200 DELIVERED
 ```
 

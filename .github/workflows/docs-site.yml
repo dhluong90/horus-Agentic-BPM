@@ -1,11 +1,17 @@
 name: Docs site
-# Builds the documentation site from wiki/ and runs the Getting Started guide. It builds only; it publishes nothing.
+# Builds the documentation site from wiki/ and runs the Getting Started guide. On push to main and on manual runs it also publishes the site to GitHub Pages.
 on:
+  push:
+    branches: [main]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
   pull_request:
     paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  # One build for every check and for Pages: the site is built with the project Pages base, and that build is checked and deployed.
+  SITE_BASE: /horus-Agentic-BPM/
 concurrency:
   group: docs-site-${{ github.ref }}
   cancel-in-progress: true
@@ -36,6 +42,8 @@ jobs:
       - name: Build (a broken wiki link, an unlisted page or a page that does not build fails)
         working-directory: site
         run: npm run build
+      - name: Every internal link and asset resolves under the base path
+        run: node site/check-links.mjs
       - name: No request to another origin, no analytics
         run: |
           set -euo pipefail
@@ -50,6 +58,12 @@ jobs:
           name: docs-site
           path: site/.generated/.vitepress/dist
           retention-days: 7
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          path: site/.generated/.vitepress/dist
 
   accessibility:
     # CKP-065 "Readable": the Mermaid diagram is drawn, code blocks have a copy button and axe-core reports no
@@ -64,7 +78,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Build the site
+      - name: Build the site (same base path as the deployed build)
         working-directory: site
         run: npm ci && npm run build
       - name: Install the cockpit's test tools
@@ -110,3 +124,23 @@ jobs:
       - name: Host log
         if: ${{ failure() }}
         run: tail -n 80 host.log || true
+
+  deploy:
+    # Publishes only from main (push or manual run), and only after the build, the link and origin checks and axe pass. The Pages artifact is the build those checks ran on.
+    name: Deploy to GitHub Pages
+    needs: [site, accessibility]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -23,6 +23,7 @@ function large(key: string, name: string, file: string): DemoDefinition {
 }
 const LARGE = [
   large('loan-payout', 'Loan payout', 'loan-payout.bpmn'),
+  large('loan-origination-showcase', 'Loan origination (showcase)', 'loan-origination.bpmn'),
   large('order-payment-pools', 'Order payment (collaboration)', 'order-payment-pools.bpmn'),
   large('data-objects', 'Data objects', 'conformance/data-objects.bpmn'),
   large('data-store', 'Data store', 'conformance/data-store.bpmn'),

@@ -175,6 +175,18 @@ rm decision.json
 
 More errors are in [[Common Error Codes]].
 
+## Run the loan origination showcase
+
+The example host `examples/rule-and-process`, started with the `dev` profile, also carries `loan-origination`: an AI agent screens the customer behind a guardrail, credit grades the risk, a four-eyes approval escalates on a timer, the offer is prepared in parallel, and a failed pay-out is undone newest first. Three scenarios run from the start payload alone:
+
+| Scenario | Start with | What you see |
+|---|---|---|
+| Automatic approval | `RETAIL_PERSONAL`, 250 million VND | Priced, offered, and after the customer's `offer-accepted` message, disbursed with no human task |
+| PEP hit | `simulatePepHit: true`, SME, 900 million VND | A four-eyes compliance review, a credit proposal, a manager approval that escalates after 20 seconds and stays open |
+| Ledger rejection | `simulateLedgerFailure: true`, then accept | The booking is reversed, then the limit is released; the case ends with no incident |
+
+Two rules. Every demo switch (`simulatePepHit`, `simulateFraud`, `simulateCollateralFraud`, `simulateLedgerFailure`, `simulateDebtGroup`) must be in the start payload; leave none out. The SLA timers are wall-clock, with no business calendar, and the `dev` profile shortens them to seconds. The commands are in the example's [README](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/README.md).
+
 ## Next
 
 - Change the table without a deployment: [[Rule Engine Versioning and Publishing]].

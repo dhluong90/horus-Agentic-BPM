@@ -166,7 +166,7 @@ class BureauScoreHandler implements ServiceTaskHandler {
 
 ## 4. Model the process
 
-Save as `src/main/resources/processes/loan-application.bpmn`. You can draw it in Camunda Modeler instead and add the `horus:` attributes ([[Guide: modelling in BPMN|Guide-Modelling-BPMN]]):
+Save as `src/main/resources/processes/loan-application.bpmn`. You can draw it in a standard BPMN modeler instead and add the `horus:` attributes ([[Guide: modelling in BPMN|Guide-Modelling-BPMN]]):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>

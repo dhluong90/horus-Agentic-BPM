@@ -1,6 +1,6 @@
 # Process Engine: import a BPMN file
 
-This guide shows how to import a BPMN 2.0 file into the Process Engine, which elements 0.1.0 accepts, and how the engine refuses the rest. The Process Engine is a preview in 0.1.0 ([[Release Notes]]): outside the `dev` profile an imported process stays a draft and cannot start.
+This guide shows how to import a BPMN 2.0 file into the Process Engine, which elements the engine accepts, and how it refuses the rest. Outside the `dev` profile an imported process stays a draft until a second person approves it.
 
 ## Before you start
 
@@ -67,7 +67,7 @@ The root element must declare the namespaces, and the process must be executable
   <bpmn:process id="card-fee-review" name="Card application fee review" isExecutable="true">
 ```
 
-### Supported in 0.1.0
+### Basic elements
 
 | BPMN element | Required | Optional | Example |
 |---|---|---|---|
@@ -310,7 +310,7 @@ These parts of a file are accepted and never executed. They do not change the de
 
 | Part | What the engine does |
 |---|---|
-| Diagram interchange (`bpmndi`) | Never executed, and not part of the definition hash. Since 0.3.0 the import stores the shapes of the steps and the waypoints of the flows as layout revision 1 of the new version (see [[Process Engine API]], layout), so the cockpit opens it as drawn. A shape of something that is not a step, or a coordinate outside the layout schema, is dropped. The BPMN export writes a layout of its own |
+| Diagram interchange (`bpmndi`) | Never executed, and not part of the definition hash. Since 0.3.0 the import stores the shapes of the steps and the waypoints of the flows as layout revision 1 of the new version (see [[Process Engine API]], layout). The cockpit still lays the diagram out automatically and does not draw the stored positions. A shape of something that is not a step, or a coordinate outside the layout schema, is dropped. The BPMN export writes a layout of its own |
 | `documentation` | Skipped |
 | Extensions of other vendors | Skipped. The BPMN export leaves them out |
 | `textAnnotation` and its `text` | Kept as a note on the diagram. The BPMN export writes it back |
@@ -369,11 +369,11 @@ These are refused:
 | Structure | a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |
 
-An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
+An attribute or extension element from another modeler's namespace, such as a vendor `class` attribute on a service task, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
 
 ### A CMMN file
 
-The list is `unsupportedElements`, the same field and item shape the Rule Engine uses for a DMN file, so a client reads both engines with one parser. A successful import of a file with vendor attributes, such as `camunda:class`, answers `201` with a `warnings` list in the same item form (`FOREIGN_EXTENSION_IGNORED`, the attribute, the element id and the line): the stored source keeps them and the engine does not read them.
+The list is `unsupportedElements`, the same field and item shape the Rule Engine uses for a DMN file, so a client reads both engines with one parser. A successful import of a file with vendor attributes answers `201` with a `warnings` list in the same item form (`FOREIGN_EXTENSION_IGNORED`, the attribute, the element id and the line): the stored source keeps them and the engine does not read them.
 
 A file whose root element is in a CMMN namespace, such as `http://www.omg.org/spec/CMMN/20151109/MODEL`, is refused as `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line`. The reader stops at the root element, so no other part of the file is checked. A root in any other unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` with the problem code `NOT_BPMN`.
 
@@ -447,7 +447,7 @@ All codes are on [[Common Error Codes]].
 
 ## Outside the `dev` profile
 
-The same import works, and the answer has `"status":"DRAFT"`. In 0.1.0 nothing can approve a process draft, so it cannot start. Use the preview on `dev` for evaluation. The approval flow for process definitions comes in a later release ([[Roadmap]]).
+The same import works, and the answer has `"status":"DRAFT"`. A second person approves the draft through the API or the cockpit (Processes, **Review change**); the draft then becomes active. On `dev`, `horus.bpm.processes.definitions.auto-approve` skips the approval for evaluation.
 
 ## Pools, lanes and message flows
 

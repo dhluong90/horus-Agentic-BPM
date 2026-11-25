@@ -1,5 +1,7 @@
 package io.github.dhluong90.bpm.process.internal.json;
 
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.BoundaryEvent;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ErrorEventDefinition;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.EscalationEventDefinition;
@@ -527,9 +529,14 @@ public final class CanonicalProcessWriter {
                 inputs.forEach(i -> in.put(i.name(), i.value()));
             }
             node.extensions().first(ResultVariable.class).ifPresent(r -> step.put("resultVariable", r.name()));
-            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity a
+            if (node instanceof Activity a
                     && a.activity().isForCompensation()) {
                 step.put("forCompensation", true);
+            }
+            // PRE-373: only when declared, so the hash of an activity without a default flow is unchanged. Written
+            // as the flow id: two flows may lead to one target, and the hash must tell which of them is the default.
+            if (node instanceof Activity a && a.activity().defaultFlow() != null) {
+                step.put("defaultFlow", a.activity().defaultFlow());
             }
             boolean ends = node instanceof IntermediateThrowEvent t && (t.eventDefinitions().isEmpty()
                     || t.eventDefinitions().get(0) instanceof LinkEventDefinition);
@@ -544,11 +551,11 @@ public final class CanonicalProcessWriter {
                 }
             }
             // #496: only when declared, so the hash of a step that does not repeat is unchanged.
-            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity
+            if (node instanceof Activity activity
                     && activity.activity().loopCharacteristics() != null) {
                 writeLoop(step.putObject("loop"), activity.activity().loopCharacteristics());
             }
-            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
+            if (node instanceof Activity activity) {
                 writeDataAssociations(step, activity.activity());
             }
             if (!(node instanceof ExclusiveGateway) && !(node instanceof InclusiveGateway)
@@ -588,7 +595,7 @@ public final class CanonicalProcessWriter {
     }
 
     private static void writeDataAssociations(ObjectNode step,
-            io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes a) {
+            ActivityAttributes a) {
         if (a.ioSpecification() == null && a.dataInputAssociations().isEmpty() && a.dataOutputAssociations().isEmpty()) {
             return;
         }

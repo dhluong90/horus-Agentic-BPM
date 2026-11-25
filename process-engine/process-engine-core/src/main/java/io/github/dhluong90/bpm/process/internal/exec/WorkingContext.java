@@ -332,17 +332,21 @@ final class WorkingContext implements ExecutionContext {
         }
         String defaultFlow = defaultFlowOf(from);
         List<SequenceFlow> selected = new ArrayList<>();
+        boolean conditionHeld = false;
         for (SequenceFlow flow : outgoing) {
             if (flow.id().equals(defaultFlow)) {
                 continue;
             }
             Expression condition = flow.conditionExpression();
-            if (condition == null || condition.text() == null || condition.text().isBlank()
-                    || Boolean.TRUE.equals(test(condition, token, flow))) {
+            if (condition == null || condition.text() == null || condition.text().isBlank()) {
+                // An uncontrolled flow is always taken; it does not count as a condition that held (PRE-373).
                 selected.add(flow);
+            } else if (Boolean.TRUE.equals(test(condition, token, flow))) {
+                selected.add(flow);
+                conditionHeld = true;
             }
         }
-        if (selected.isEmpty() && defaultFlow != null) {
+        if (!conditionHeld && defaultFlow != null) {
             selected.add(process.flow(defaultFlow).orElseThrow());
         }
         if (selected.isEmpty()) {

@@ -106,6 +106,7 @@ The `dev` profile imports every BPMN file under `src/main/resources/processes` f
 | Card application with a rule set and a four-eyes review | `card-fee-review` |
 | Transaction with compensation and cancel | `fund-transfer` |
 | Live undo: compensation boundaries and a compensation event sub-process, chosen by a start variable | `loan-payout` |
+| Showcase: agent with guardrail, four rule sets, four-eyes approval, parallel work, compensation | `loan-origination` (imported by the dev seeder, see below) |
 | Complex gateway, two of three sign-offs | `payment-approval` |
 | User task with a declared form | `credit-review-form` (the form is `src/main/resources/forms/credit-review.form.json`) |
 | Ad-hoc sub-process, call activity, terminate end | `customer-onboarding` (calls `card-welcome`) |
@@ -135,6 +136,41 @@ Process Engine schema at version 1 (1 migration(s) applied)
 Process definition card-fee-review v1 ACTIVE for tenant bank-a from classpath:processes/card-fee-review.bpmn (hash 3fa54143...)
 Rule set card-fee v1 PUBLISHED (requested by seed-author, approved by seed-approver)
 ```
+
+### Showcase: loan origination, three scenarios
+
+`loan-origination` is the larger model: 30 steps plus a disbursement sub-process, five lanes and a customer pool. An AI agent screens KYC and AML behind a guardrail rule set, credit grades the risk, a four-eyes approval escalates on an SLA timer, the offer is prepared in parallel with collateral registration, the customer's reply or a timer decides the next step, and a failed pay-out reverses the booking newest first. Its four rule sets (`kyc-loan-guardrails`, `credit-risk-grade`, `approval-authority`, `loan-pricing`) are in [`rules/`](src/main/resources/rules), its steps in [`LoanOriginationSteps`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/LoanOriginationSteps.java). On the `dev` profile [`DevLoanOriginationSeeder`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/DevLoanOriginationSeeder.java) publishes the rule sets (one identity requests, another approves) and then imports the process, because a process whose guardrail rule set is not published is refused.
+
+Two things to know before a demo:
+
+- **Every demo switch must be in the start payload.** `simulatePepHit`, `simulateFraud`, `simulateCollateralFraud`, `simulateLedgerFailure` (booleans) and `simulateDebtGroup` (1 to 5) are read as start variables, and a variable that is missing is not treated as false. Send all five, with only the one you want turned on. The `start` function below does this.
+- **The SLA timers are wall-clock.** There is no business calendar, so a real 4-hour or 1-day SLA would also run overnight and at weekends. The `dev` profile shortens them: `manager-sla` `PT20S`, `committee-sla` `PT40S` and `offer-expired` `PT60S` (`horus.demo.timers.<event id>` in `application-dev.yml`). A real host would model working hours itself.
+
+`P` is `HORUS_DEMO_PASSWORD`. `tuan` starts the case, `hung` reviews the KYC guardrail and sends the customer's reply, `an` writes the credit proposal and `hoa` approves.
+
+```bash
+P=...   # HORUS_DEMO_PASSWORD
+API=localhost:8080/api/bpm/processes/v1
+# start <application id> <product family> <secured> <amount in minor units>; turn a switch on with PEP=true, COLLATERAL=true, LEDGER=true
+start() {
+  curl -s -u tuan:$P -H 'Content-Type: application/json' -H "Idempotency-Key: start-$1" \
+    -d "{\"definitionKey\":\"loan-origination\",\"businessKey\":\"$1\",\"variables\":{\"applicationId\":\"$1\",
+    \"customerId\":\"CUS-100245\",\"productFamily\":\"$2\",\"secured\":$3,\"amountMinor\":$4,\"currency\":\"VND\",
+    \"tenorMonths\":36,\"channel\":\"DIGITAL\",\"simulatePepHit\":${PEP:-false},\"simulateFraud\":false,
+    \"simulateCollateralFraud\":${COLLATERAL:-false},\"simulateLedgerFailure\":${LEDGER:-false},
+    \"simulateDebtGroup\":1}}" $API/instances
+}
+accept() {  # the customer accepts the offer: $1 application id
+  curl -s -u hung:$P -H 'Content-Type: application/json' -H "Idempotency-Key: accept-$1" \
+    -d "{\"messageName\":\"offer-accepted\",\"correlationKey\":\"$1\",\"payload\":{}}" $API/messages:correlate
+}
+```
+
+1. **Automatic approval, then disbursement.** `start LA-1 RETAIL_PERSONAL false 250000000`. The case grades B (rule R5), is priced P2, prepares the offer and collateral in parallel, and waits for the customer. `accept LA-1` books the loan, pays it out and ends with the disbursed notice. If nobody accepts, the offer timer ends the case after one minute.
+2. **PEP hit, guardrail review, slow approval.** `PEP=true start LA-2 SME_TERM true 900000000`. The guardrail refuses the agent's answer and opens a four-eyes task for `hung`. After it is completed, `an` writes the credit proposal, the authority matrix asks a manager, and after 20 seconds the escalation notice is sent while the approval task stays open. `an` cannot approve their own proposal (`403 SELF_APPROVAL_FORBIDDEN`); `hoa` can. Above 3 billion VND the committee approves instead.
+3. **Ledger rejection.** `LEDGER=true start LA-3 RETAIL_PERSONAL false 180000000`, then `accept LA-3`. The pay-out is rejected and the compensation runs newest first: the booking is reversed, then the limit is released, the customer is told, and no incident stays open. `GET $API/instances/{id}/activities` shows the order.
+
+A fourth switch shows a terminate end: `COLLATERAL=true start LA-4 RETAIL_SECURED true 250000000` ends the whole case at once while the parallel preparation runs. [`LoanOriginationIT`](src/test/java/io/github/dhluong90/bpm/examples/ruleandprocess/LoanOriginationIT.java) runs all of these. The stored drawing (five lanes, customer pool) is for the Camunda Modeler and bpmn.io; the cockpit lays out its own view and does not read the stored positions yet.
 
 ### Live demo paths: error, compensation, timers
 

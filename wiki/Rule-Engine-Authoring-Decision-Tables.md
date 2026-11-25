@@ -2,8 +2,6 @@
 
 Write a rule set as a YAML (or JSON) document, validate it, and load it into the engine. The same structure is what the cockpit grid editor edits from Cockpit 0.2.
 
-Design preview: describes the 0.1 target.
-
 ## Before you start
 
 - You know the terms rule set, rule, hit policy and version: [[Concepts]].
@@ -170,7 +168,7 @@ To validate without saving: `POST /api/bpm/rules/v1/rule-sets/card-fee/versions/
 | Files at start-up | Rule sets live in Git next to the service | Set `horus.bpm.rules.definitions: classpath:rules/**/*.yaml`. Files load as drafts; publish them as in [[Rule Engine Versioning and Publishing]] |
 | Import by API | A business user or a pipeline proposes a change | `POST /api/bpm/rules/v1/rule-sets` (first version) or `POST /api/bpm/rules/v1/rule-sets/card-fee/versions` (next version) with the YAML as the body and `Content-Type: application/yaml` creates a new draft. Available now; see [[Rule Engine Decision API]] |
 | Export | Review or back up a version | `GET /api/bpm/rules/v1/rule-sets/card-fee/versions/2/export` returns this document |
-| Cockpit grid editor | Interactive editing | Cockpit 0.2 target; see [[Cockpit]] |
+| Cockpit grid editor | Interactive editing | Built; see [[Cockpit]] |
 
 Endpoint details, headers and error codes are in [[Rule Engine Decision API]].
 

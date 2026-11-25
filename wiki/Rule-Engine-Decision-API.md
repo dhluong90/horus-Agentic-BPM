@@ -1,8 +1,8 @@
 # Decision API
 
-Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use. _Design preview: the contract is reviewed here before the code exists._
+Reference for the two Rule Engine surfaces: the in-process Java API and the optional REST API under `/api/bpm/rules/v1` that the cockpit and remote callers use.
 
-## Available in 0.1.0-SNAPSHOT
+## Available on main
 
 These operations are built and tested; their contract file is [`rule-engine/api/openapi.yaml`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/rule-engine/api/openapi.yaml). Everything else on this page is still a design preview.
 
@@ -298,6 +298,6 @@ A host that wants tamper evidence for approvals relays these events to a store o
 
 Envelope, as members next to the payload fields above: `eventId` (the outbox row id, a ULID), `eventType`, `occurredAt`, `tenantId`, `correlationId` (the command's `X-Correlation-Id`), `causationId` (the causing command or event, or null), `producer` (`rule-engine/<version>`) and `schemaVersion` (`1`). Each type has a JSON schema in `rule-engine/api/schema/<eventType>.schema.json`. Changes are additive within a `.v1` type. Events go through the host's `RuleEventPublisher` inside the same transaction as the state change.
 
-## Performance targets (0.1)
+## Performance targets
 
 In-process evaluation of a 200-row `first` table: p99 under 100 us after warm-up (`TR-PERF-01`). The transactional decision log adds exactly one `INSERT` (`TR-PERF-03`). REST `:evaluate` p99 target: 10 ms in the same data centre. Targets, not measurements, until the M1 benchmarks publish.
