@@ -3,6 +3,7 @@ package io.github.dhluong90.bpm.process.internal.service;
 import io.github.dhluong90.bpm.process.api.GraphDiff;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalProcessWriter;
 import io.github.dhluong90.bpm.process.internal.json.Values;
+import io.github.dhluong90.bpm.process.internal.model.bpmn.Activity;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.ExclusiveGateway;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowElement;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode;
@@ -174,6 +175,8 @@ public final class GraphDiffs {
                 // The following steps are links, compared as edges; a branch keeps its condition.
                 copy.remove("next");
                 copy.remove("default");
+                // An activity's default flow is compared as the kind of its edge, like a gateway's.
+                copy.remove("defaultFlow");
                 JsonNode branches = copy.get("branches");
                 if (branches instanceof ArrayNode array) {
                     for (JsonNode branch : array) {
@@ -202,6 +205,7 @@ public final class GraphDiffs {
                     case ExclusiveGateway g -> "branch[" + (branchIndex.merge(g.id(), 1, Integer::sum) - 1) + "]";
                     case InclusiveGateway g when flow.id().equals(g.defaultFlow()) -> DEFAULT;
                     case InclusiveGateway g -> "branch[" + (branchIndex.merge(g.id(), 1, Integer::sum) - 1) + "]";
+                    case Activity a when flow.id().equals(a.activity().defaultFlow()) -> DEFAULT;
                     case ParallelGateway g when outgoing(flows, g.id()) > 1 -> FORK;
                     case null, default -> NEXT;
                 };

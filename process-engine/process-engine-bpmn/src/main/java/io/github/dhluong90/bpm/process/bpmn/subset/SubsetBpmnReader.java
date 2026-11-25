@@ -959,6 +959,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     continue;
                 }
                 behaviourAttributes();
+                String activityDefault = attr("default");
                 lastLoop = null;
                 lastIo = null;
                 lastIn = new ArrayList<>();
@@ -1088,8 +1089,24 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     lastLoop = null;
                 }
                 attachData(elements, before);
+                attachDefaultFlow(elements, before, activityDefault);
             }
             return own;
+        }
+
+        /**
+         * The {@code default} attribute of the activity just read: the flow it takes when no other outgoing flow of
+         * its has a true condition. Gateways read their own; any other element has none.
+         */
+        private void attachDefaultFlow(List<FlowElement> elements, int before, String defaultFlow) {
+            if (defaultFlow != null && !defaultFlow.isBlank() && elements.size() > before
+                    && elements.get(elements.size() - 1) instanceof Activity activity) {
+                ActivityAttributes a = activity.activity();
+                elements.set(elements.size() - 1, withAttributes(activity, new ActivityAttributes(a.isForCompensation(),
+                        a.startQuantity(), a.completionQuantity(), defaultFlow, a.ioSpecification(),
+                        a.dataInputAssociations(), a.dataOutputAssociations(), a.resources(),
+                        a.loopCharacteristics())));
+            }
         }
 
         /** #499: the data of the activity being read; put on it by {@link #attachData}. */
