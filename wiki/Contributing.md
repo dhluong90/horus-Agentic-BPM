@@ -92,3 +92,7 @@ Grype matches Java packages by GitHub advisory and package URL; NVD CPE matching
 ## Releases
 
 Every module shares one project version, released under one tag `vX.Y.Z` (PD-087); see [[Technical Stack]]. What shipped is recorded in [[Release Notes]].
+
+## The documentation site
+
+The site is built from `wiki/` and published at https://dhluong90.github.io/horus-Agentic-BPM/ by `.github/workflows/docs-site.yml`: a push to `main` that changes the wiki or `site/` deploys it to GitHub Pages after the build, origin check and axe pass; pull requests only build.
