@@ -65,7 +65,7 @@
         <horus:input name="simulateDebtGroup" value="${instance.simulateDebtGroup}"/>
       </bpmn:extensionElements>
     </bpmn:serviceTask>
-    <bpmn:serviceTask id="kyc-aml-screening" name="KYC and AML screening (AI agent)" horus:type="agentTask" horus:agent="kyc.screen" horus:timeout="PT30S" horus:resultVariable="kyc">
+    <bpmn:serviceTask id="kyc-aml-screening" name="KYC and AML screening (AI agent)" horus:type="agentTask" horus:agent="kyc.screen" horus:timeout="PT30S" horus:resultVariable="kyc" default="f-kyc-ok">
       <bpmn:extensionElements>
         <horus:input name="applicationId" value="${instance.applicationId}"/>
         <horus:input name="customerId" value="${instance.customerId}"/>
@@ -102,17 +102,17 @@
     </bpmn:businessRuleTask>
     <bpmn:exclusiveGateway id="g-grade" name="Risk route" default="f-grade-decline"/>
     <bpmn:userTask id="prepare-proposal" name="Prepare the credit proposal (maker)" horus:assignee="role:CREDIT_ANALYST" horus:resultVariable="proposal"/>
-    <bpmn:businessRuleTask id="determine-authority" name="Find who may approve" horus:ruleSet="approval-authority" horus:resultVariable="authority">
+    <bpmn:businessRuleTask id="determine-authority" name="Find who may approve" horus:ruleSet="approval-authority" horus:resultVariable="authority" default="f-authority-committee">
       <bpmn:extensionElements>
         <horus:input name="amountMinor" value="${instance.proposal.amountMinor}"/>
         <horus:input name="riskGrade" value="${instance.scoring.riskGrade}"/>
       </bpmn:extensionElements>
     </bpmn:businessRuleTask>
-    <bpmn:userTask id="approve-manager" name="Approve (credit manager, four eyes)" horus:assignee="role:CREDIT_MANAGER" horus:fourEyes="true" horus:resultVariable="approval"/>
+    <bpmn:userTask id="approve-manager" name="Approve (credit manager, four eyes)" horus:assignee="role:CREDIT_MANAGER" horus:fourEyes="true" horus:resultVariable="approval" default="f-mgr-reject"/>
     <bpmn:boundaryEvent id="manager-sla" name="4 hours" attachedToRef="approve-manager" cancelActivity="false">
       <bpmn:timerEventDefinition><bpmn:timeDuration>PT4H</bpmn:timeDuration></bpmn:timerEventDefinition>
     </bpmn:boundaryEvent>
-    <bpmn:userTask id="approve-committee" name="Approve (credit committee, four eyes)" horus:assignee="role:CREDIT_COMMITTEE" horus:fourEyes="true" horus:resultVariable="approval"/>
+    <bpmn:userTask id="approve-committee" name="Approve (credit committee, four eyes)" horus:assignee="role:CREDIT_COMMITTEE" horus:fourEyes="true" horus:resultVariable="approval" default="f-com-reject"/>
     <bpmn:boundaryEvent id="committee-sla" name="1 day" attachedToRef="approve-committee" cancelActivity="false">
       <bpmn:timerEventDefinition><bpmn:timeDuration>P1D</bpmn:timeDuration></bpmn:timerEventDefinition>
     </bpmn:boundaryEvent>
@@ -178,9 +178,7 @@
     <bpmn:sequenceFlow id="f-kyc-fail" name="sanctions or identity failed" sourceRef="kyc-aml-screening" targetRef="end-declined">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">kyc.kycStatus == 'FAIL' and kyc.fraudFlag == false</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="f-kyc-ok" name="clear or reviewed" sourceRef="kyc-aml-screening" targetRef="score-credit">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">kyc.kycStatus != 'FAIL' and kyc.fraudFlag == false</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-kyc-ok" name="clear or reviewed" sourceRef="kyc-aml-screening" targetRef="score-credit"/>
     <bpmn:sequenceFlow id="f3" sourceRef="score-credit" targetRef="g-grade"/>
     <bpmn:sequenceFlow id="f-grade-auto" name="AUTO" sourceRef="g-grade" targetRef="price-loan">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">scoring.route == 'AUTO'</bpmn:conditionExpression>
@@ -193,21 +191,15 @@
     <bpmn:sequenceFlow id="f-authority-manager" name="manager" sourceRef="determine-authority" targetRef="approve-manager">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">authority.approvalTier == 'MANAGER'</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="f-authority-committee" name="committee" sourceRef="determine-authority" targetRef="approve-committee">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">authority.approvalTier != 'MANAGER'</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-authority-committee" name="committee" sourceRef="determine-authority" targetRef="approve-committee"/>
     <bpmn:sequenceFlow id="f-mgr-ok" name="approved" sourceRef="approve-manager" targetRef="price-loan">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision == 'APPROVED'</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="f-mgr-reject" name="rejected" sourceRef="approve-manager" targetRef="end-declined">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision != 'APPROVED'</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-mgr-reject" name="rejected" sourceRef="approve-manager" targetRef="end-declined"/>
     <bpmn:sequenceFlow id="f-com-ok" name="approved" sourceRef="approve-committee" targetRef="price-loan">
       <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision == 'APPROVED'</bpmn:conditionExpression>
     </bpmn:sequenceFlow>
-    <bpmn:sequenceFlow id="f-com-reject" name="rejected" sourceRef="approve-committee" targetRef="end-declined">
-      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision != 'APPROVED'</bpmn:conditionExpression>
-    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-com-reject" name="rejected" sourceRef="approve-committee" targetRef="end-declined"/>
     <bpmn:sequenceFlow id="f-mgr-sla" sourceRef="manager-sla" targetRef="end-escalated"/>
     <bpmn:sequenceFlow id="f-com-sla" sourceRef="committee-sla" targetRef="end-escalated"/>
     <bpmn:sequenceFlow id="f5" sourceRef="price-loan" targetRef="fork"/>

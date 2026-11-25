@@ -289,7 +289,7 @@ class LoanOriginationIT {
     }
 
     private List<String> messagesOf(String applicationId) {
-        return jdbc.sql("SELECT event_type FROM event_outbox WHERE business_key = ?").param(applicationId)
+        return jdbc.sql("SELECT event_type FROM event_outbox WHERE business_key = ? AND event_type LIKE 'message.%'").param(applicationId)
                 .query(String.class).list();
     }
 
