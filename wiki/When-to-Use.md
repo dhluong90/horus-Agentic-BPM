@@ -24,7 +24,7 @@ HORUS Agentic BPM is a release candidate: the 1.0 release is pending final accep
 | You need full DMN with FEEL or DMN conformance levels 2 and 3, a graphical BPMN 2.0 modeller, or CMMN | These are not built, or come after 1.0. CMMN is never supported. See [[Feature status|Feature-Status]] and [[Roadmap]] |
 | You run one central orchestration platform for many teams and systems, with a platform team to operate it | HORUS Agentic BPM is built for governed change inside one service, not for a shared platform |
 | You orchestrate long-running work across many services written in several languages | Not the target. The engines are Java libraries with a REST API for the rest |
-| Your stack is not Java and Spring Boot, or your database is not PostgreSQL | Not supported before 1.0 |
+| Your stack is not Java and Spring Boot, or your database is not PostgreSQL | Not supported. The engines are Java libraries for Spring Boot and PostgreSQL |
 | Your rules need inference: chaining, pattern matching over many facts, or complex event processing | The Rule Engine evaluates decision tables. It does not infer |
 | You have a handful of rules that change once a year and no audit duty | Rules written in your code are simpler |
 | Your licence policy accepts only OSI-approved open source licences | The project is source-available under PolyForm Noncommercial 1.0.0, not open source. Commercial use needs a commercial licence. See [[Licensing and commercial use|Licensing-and-Commercial-Use]] |

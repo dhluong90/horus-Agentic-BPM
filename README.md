@@ -4,6 +4,8 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 
 **Documentation: the [project wiki](../../wiki)** (source in [`wiki/`](wiki/)). A searchable site is built from it with `cd site && npm ci && npm run build` ([`site/README.md`](site/README.md)). First run in 30 minutes: [Getting Started](../../wiki/Getting-Started).
 
+![A loan application in the cockpit: an AI agent screens it, a person reviews the agent answer, and the case follows the diagram. In this demo the proposal and approval steps are sent through the API, with four-eyes enforced by the engine.](docs/media/loan-flow.gif)
+
 ![System context](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/system-context.svg)
 
 > Status: release candidate. The engines and the cockpit have passed acceptance testing; the 1.0 release is pending final acceptance, and the API may change until then.
