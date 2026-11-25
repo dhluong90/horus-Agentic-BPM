@@ -9,11 +9,15 @@ import { chromium } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
 const root = fileURLToPath(new URL('../../../site/.generated/.vitepress/dist', import.meta.url));
+// SITE_BASE is the path the site is built for and served under (default: the root). Paths outside it are 404.
+const base = (process.env.SITE_BASE || '/').replace(/\/?$/, '/');
 const pages = ['/Getting-Started', '/Agent-Shadow-Mode'];
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.woff2': 'font/woff2' };
 
 const server = createServer(async (req, res) => {
-  const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname)).replace(/^(\.\.[/\\])+/, '');
+  const requested = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  if (!requested.startsWith(base)) { res.writeHead(404).end(); return; }
+  const path = normalize('/' + requested.slice(base.length)).replace(/^(\.\.[/\\])+/, '');
   for (const file of [path, `${path}.html`, join(path, 'index.html')]) {
     try {
       const body = await readFile(join(root, file));
@@ -36,7 +40,7 @@ for (const scheme of ['light', 'dark']) {
       const page = await context.newPage();
       const foreign = [];
       page.on('request', (r) => { if (!r.url().startsWith(origin)) foreign.push(r.url()); });
-      await page.goto(origin + path, { waitUntil: 'networkidle' });
+      await page.goto(origin + base.slice(0, -1) + path, { waitUntil: 'networkidle' });
       const label = `${path} 1440x${height} ${scheme}`;
       runs += 1;
       try {
