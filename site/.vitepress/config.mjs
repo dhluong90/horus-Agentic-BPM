@@ -35,5 +35,6 @@ export default withMermaid({
     docFooter: { prev: 'Previous page', next: 'Next page' },
     outline: { level: [2, 3], label: 'On this page' }
   },
-  mermaid: { theme: 'neutral' }
+  // A diagram that fails to parse must not append Mermaid's error panel to the page body (the footer): the build-time test catches it instead.
+  mermaid: { theme: 'neutral', suppressErrorRendering: true }
 });

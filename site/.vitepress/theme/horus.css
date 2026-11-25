@@ -302,3 +302,8 @@
 .hx .row:not(.tall) .shot{overflow-x:auto}
 .hx .row:not(.tall) .shot img{width:auto;min-width:760px;max-width:none}
 }
+
+/* Screenshots are pictures: no pointer or text cursor, no drag ghost. A frame that scrolls sideways gets a quiet focus ring. */
+.hx .shot img { cursor: default; -webkit-user-drag: none; user-select: none; }
+.hx .shot:focus { outline: none; }
+.hx .shot:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 3px; border-radius: var(--r-xl); }

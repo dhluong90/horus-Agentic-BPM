@@ -1,4 +1,5 @@
 <script setup>
+import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { withBase } from 'vitepress';
 import HxIcons from './HxIcons.vue';
 import HxFooter from './HxFooter.vue';
@@ -23,16 +24,16 @@ const shots = [
   { id: 'timeline', wide: true, h1: 622, w2: 1400, eyebrow: 'Instance timeline', title: 'See each step, and what was undone.',
     text: 'A finished instance shows its steps, and which ones compensation undid.',
     alt: 'A process instance in the cockpit. Two service tasks are marked Undone, and their undo steps are marked Used to undo.' },
-  { id: 'rule-editor', wide: true, h1: 640, w2: 1400, eyebrow: 'Rule Engine', title: 'Edit a decision table in plain words.',
+  { id: 'rule-editor', wide: true, h1: 641, w2: 1400, eyebrow: 'Rule Engine', title: 'Edit a decision table in plain words.',
     text: 'Each rule reads back as a sentence. Publish without a code release.',
     alt: 'The decision table editor. Rows R1 to R5 each show a sentence such as "Rule R3 applies when tier is Gold".' },
-  { id: 'try-it', w1: 360, h1: 597, w2: 720, tall: true, eyebrow: 'Try it and simulate', title: 'Try the live rules. Simulate a draft.',
+  { id: 'try-it', w1: 360, h1: 528, w2: 720, tall: true, eyebrow: 'Try it and simulate', title: 'Try the live rules. Simulate a draft.',
     text: 'Try it runs the version in effect on sample values. Simulate compares a draft with the live version before anyone approves.',
     alt: 'A decision table with row R3 highlighted as matched for a Gold tier input.' },
-  { id: 'approver-review', wide: true, h1: 688, w2: 1400, eyebrow: 'Maker-checker', title: 'The approver reads the change in plain words.',
+  { id: 'approver-review', wide: true, h1: 608, w2: 1400, eyebrow: 'Maker-checker', title: 'The approver reads the change in plain words.',
     text: 'The current version sits beside the proposed one. The fee changes from 30,000 VND to 25,000 VND.',
     alt: 'Version 4 of a fee table beside the version in force, with the changed fee marked, and the Approve and publish and Reject buttons.' },
-  { id: 'self-approval', wide: true, h1: 666, w2: 1400, eyebrow: 'Four eyes', title: 'You cannot approve your own change.',
+  { id: 'self-approval', wide: true, h1: 587, w2: 1400, eyebrow: 'Four eyes', title: 'You cannot approve your own change.',
     text: 'The requester sees Approve disabled. If a call gets through, the engine refuses with a 403.',
     alt: 'The same review screen for the requester. The Approve and publish button is disabled with the note "You requested this. Another approver decides."' },
   { id: 'decision-log', h1: 318, w2: 1400, eyebrow: 'Decision log', title: 'Every decision, explained and recorded.',
@@ -40,6 +41,8 @@ const shots = [
     alt: 'A logged card-fee decision. The text says rule R3 of version 3 matched because tier is GOLD, with the result of a 30,000 VND fee.' }
 ];
 const src = (id, w) => withBase(`/images/home/${id}-${w}.webp`);
+// The width and height of the file `src` points at, so the browser reserves the real ratio before (or without) the image.
+const dims = (s) => ({ w: s.wide ? 1400 : s.w1 || 700, h: s.h1 });
 const srcset = (s) => `${src(s.id, s.w1 || 700)} ${s.w1 || 700}w, ${src(s.id, s.w2)} ${s.w2}w`;
 
 const compare = [
@@ -68,6 +71,15 @@ const features = [
   ['i-layers', 'Multi-tenancy', 'Tenant is the first key of every index.'],
   ['i-clock', 'Task queues and SLAs', 'Business-hours SLAs, escalation and compensation of earlier steps.']
 ];
+
+// A screenshot frame is a picture, not a control. It is keyboard-focusable only while it really scrolls sideways
+// (a phone-width viewport), so that a keyboard user can pan it; otherwise it has no tab stop and no focus ring.
+const frames = ref([]);
+const scrolls = ref({});
+let watcher;
+const measure = () => { frames.value.forEach((el) => { if (el) scrolls.value[el.dataset.shot] = el.scrollWidth > el.clientWidth + 1; }); };
+onMounted(() => { measure(); watcher = new ResizeObserver(measure); frames.value.forEach((el) => el && watcher.observe(el)); });
+onBeforeUnmount(() => watcher && watcher.disconnect());
 </script>
 
 <template>
@@ -144,8 +156,8 @@ const features = [
           <div class="sec-head center"><p class="eyebrow">See it run</p><h2>The cockpit, embedded in your service.</h2></div>
           <div class="show">
             <div v-for="(s, i) in shots" :key="s.id" class="row" :class="{ flip: i % 2 === 1 && !s.wide, tall: s.tall, wide: s.wide }">
-              <figure class="shot" :tabindex="s.tall ? undefined : 0" :role="s.tall ? undefined : 'group'" :aria-label="s.tall ? undefined : s.eyebrow">
-                <img :src="src(s.id, s.wide ? 1400 : s.w1 || 700)" :srcset="srcset(s)" :sizes="s.tall ? '360px' : s.wide ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 1100px) 100vw, 700px'" :width="s.wide ? 1400 : s.w1 || 700" :height="s.h1" :alt="s.alt" loading="lazy" decoding="async" />
+              <figure class="shot" ref="frames" :data-shot="s.id" :tabindex="scrolls[s.id] ? 0 : undefined" :role="scrolls[s.id] ? 'group' : undefined" :aria-label="scrolls[s.id] ? `Screenshot: ${s.eyebrow}. Scroll sideways to see all of it.` : undefined">
+                <img :src="src(s.id, s.wide ? 1400 : s.w1 || 700)" :srcset="srcset(s)" :sizes="s.tall ? '360px' : s.wide ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 1100px) 100vw, 700px'" :width="s.wide ? 1400 : s.w1 || 700" :height="s.h1" :alt="s.alt" :style="{ aspectRatio: `${dims(s).w} / ${dims(s).h}` }" decoding="async" />
               </figure>
               <div><p class="eyebrow">{{ s.eyebrow }}</p><h3>{{ s.title }}</h3><p>{{ s.text }}</p></div>
             </div>
