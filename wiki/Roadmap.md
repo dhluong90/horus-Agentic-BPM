@@ -1,6 +1,6 @@
 # Roadmap
 
-Design preview: nothing is released. Dates are targets, not commitments; [[Release Notes]] state what shipped.
+Release candidate: the 1.0 release is pending final acceptance. The milestones below are the plan the product was built to; dates are targets, not commitments. [[Release Notes]] state what shipped and [[Feature status|Feature-Status]] states what is built today.
 
 This page is the short public view. The full plan, with the features in each milestone, the release gates and the assumptions that could change it, is the [product roadmap](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/roadmap.md).
 

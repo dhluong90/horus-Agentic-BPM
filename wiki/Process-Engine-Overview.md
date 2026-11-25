@@ -4,7 +4,7 @@ This page explains what the Process Engine does, which guarantees it gives for h
 
 ![Process instance states](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/process-instance-states.svg)
 
-## Scope of the first release
+## Scope
 | Area | Content |
 |---|---|
 | Definitions | JSON/YAML, versioned; running instances pin their version |
@@ -240,7 +240,7 @@ Steps with the same id map implicitly; renamed steps need an explicit mapping; r
 
 The engine never embeds a model and never calls the network itself (`TR-AGT-03`, `TR-EMB-05`). An agent has the same obligations as a service: bounded inputs, a schema for outputs, a timeout, an audit record.
 
-## Permissions (preview)
+## Permissions
 
 | Permission | Grants |
 |---|---|

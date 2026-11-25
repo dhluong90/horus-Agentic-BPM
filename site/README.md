@@ -16,13 +16,17 @@ Expected: `32 pages, 11 sidebar groups`, then `build complete`. Open the result 
 
 `npm test` runs the generator's tests. `npm run check` checks the wiki without writing files.
 
+## Homepage and docs home
+
+The homepage (`/`) and the docs home (`/docs/`) are site-owned, not wiki pages: the front matter in [`content/`](content) picks the Vue layouts in [`.vitepress/theme/`](.vitepress/theme) (`HorusHome.vue`, `HorusDocsHome.vue`), styled by `horus.css`. Images are in [`public/images/home/`](public/images/home), WebP at 1x and 2x, from real captures of the cockpit. The wiki's own Home page is at `/Home`. The generator also writes `llms.txt`. The site is built for the project Pages path `/horus-Agentic-BPM/`; set `SITE_BASE` to change it.
+
 ## What the generator does
 
 [`prepare.mjs`](prepare.mjs) copies each wiki page into `.generated/`, turns `[[Page]]` and `[[Text|Page]]` links into site links, and copies the images so that no page loads anything from another origin. The sidebar follows [`wiki/_Sidebar.md`](../wiki/_Sidebar.md). The build fails on an unknown link target, a page missing from the sidebar, or a page listed twice.
 
 Search is built into the site and runs in the browser. There are no cookies and no analytics; the CI job fails if the built pages load a script, style or image from another origin.
 
-Set `SITE_BASE` to build for a sub-path, for example `SITE_BASE=/1.0/ npm run build`.
+Set `SITE_BASE` to build for another path, for example `SITE_BASE=/ npm run build` (the axe check reads the same variable).
 
 ## CI
 
