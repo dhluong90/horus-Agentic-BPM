@@ -1,6 +1,9 @@
 name: Docs site
-# Builds the documentation site from wiki/ and runs the Getting Started guide. It builds only; it publishes nothing.
+# Builds the documentation site from wiki/ and runs the Getting Started guide. On push to main and on manual runs it also publishes the site to GitHub Pages.
 on:
+  push:
+    branches: [main]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
   pull_request:
     paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
   workflow_dispatch:
@@ -50,6 +53,18 @@ jobs:
           name: docs-site
           path: site/.generated/.vitepress/dist
           retention-days: 7
+      - name: Rebuild for project Pages (base path /horus-Agentic-BPM/)
+        if: ${{ github.event_name != 'pull_request' }}
+        working-directory: site
+        env:
+          SITE_BASE: /horus-Agentic-BPM/
+        run: npm run build
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+        if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          path: site/.generated/.vitepress/dist
 
   accessibility:
     # CKP-065 "Readable": the Mermaid diagram is drawn, code blocks have a copy button and axe-core reports no
@@ -110,3 +125,23 @@ jobs:
       - name: Host log
         if: ${{ failure() }}
         run: tail -n 80 host.log || true
+
+  deploy:
+    # Publishes only from main (push or manual run), and only after the build, the origin check and axe pass.
+    name: Deploy to GitHub Pages
+    needs: [site, accessibility]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
