@@ -35,9 +35,9 @@ horus:
     rules:
       decision-log:
         # How long decisions are kept: the bank's choice, in whole months, at least 12 (P12M). Monthly partitions
-        # older than this are dropped and each drop is recorded in rle_decision_log_drop. Never on by default: left empty (or keep-forever),
-        # every decision is kept, nothing is dropped and start-up warns.
-        retention: ${HORUS_DECISION_LOG_RETENTION:}
+        # older than this are dropped and each drop is recorded in rle_decision_log_drop. Required from 1.0: the example keeps everything (keep-forever) unless set;
+        # a bank picks its own period.
+        retention: ${HORUS_DECISION_LOG_RETENTION:keep-forever}
       enabled: true
       security:
         # The host's roles mapped to engine permissions, listed by GET /api/bpm/me.

@@ -76,7 +76,7 @@ mvn -B -pl examples/rule-and-process -am package -DskipTests
 
 # 4. Start it with the demo users, on http://localhost:8080
 SPRING_PROFILES_ACTIVE=dev HORUS_DEMO_PASSWORD=demo-pass HORUS_DB_PASSWORD=change-me \
-  java -jar examples/rule-and-process/target/example-rule-and-process-0.3.0-SNAPSHOT.jar
+  java -jar examples/rule-and-process/target/example-rule-and-process-1.0.0.jar
 ```
 
 Open `http://localhost:8080/` and sign in as one of the demo users below; the browser lands on the cockpit. Stop with Ctrl-C, and remove the database with `docker rm -f horus-pe-pg`.

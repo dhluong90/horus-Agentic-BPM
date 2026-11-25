@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { BpmMeV1 } from '../../api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../../api/generated/bpm-meta.v1';
+import { ENGINE_VERSION } from '../../mocks/engineVersion';
 import { switchableTenants, tenantFetch, tenantLabel, type TenantRefusal } from './tenantFetch';
 
-const meta = (switching: boolean): BpmMetaV1 => ({ schemaVersion: 1, modules: [{ module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1', features: [] }], tenancy: { switching }, limits: { maxPageSize: 200 } });
+const meta = (switching: boolean): BpmMetaV1 => ({ schemaVersion: 1, modules: [{ module: 'rules', engineVersion: ENGINE_VERSION, apiVersion: 'v1', features: [] }], tenancy: { switching }, limits: { maxPageSize: 200 } });
 const me = (current: string, allowed: string[]): BpmMeV1 => ({ schemaVersion: 1, user: { id: 'lan' }, tenant: { current, allowed }, permissions: ['rules:read'] });
 
 describe('tenant switching (CKP-022)', () => {

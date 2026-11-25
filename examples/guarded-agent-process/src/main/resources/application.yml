@@ -28,9 +28,9 @@ horus:
     host-id: guarded-agent-process
     rules:
       decision-log:
-        # How long decisions are kept, in whole months, at least 12. Left empty, every decision is kept and start-up
-        # warns; see README.md.
-        retention: ${HORUS_DECISION_LOG_RETENTION:}
+        # How long decisions are kept, in whole months, at least 12. Required from 1.0; the example keeps everything
+        # (keep-forever) unless set; see README.md.
+        retention: ${HORUS_DECISION_LOG_RETENTION:keep-forever}
       security:
         role-permissions:
           # The agent step's guardrail is evaluated in the result transaction as the engine; nobody evaluates it.

@@ -1,6 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import type { BpmMeV1 } from '../src/api/generated/bpm-me.v1';
 import type { BpmMetaV1 } from '../src/api/generated/bpm-meta.v1';
+import { ENGINE_VERSION } from '../src/mocks/engineVersion';
 import { meLan } from '../src/mocks/fixtures';
 import { createFakeEngine, demoSeed } from '../src/mocks/ruleEngine';
 import { CONTENT_SECURITY_POLICY } from '../security-headers';
@@ -69,7 +70,7 @@ export interface StandaloneRecord {
 const meta = (hostId: string, extra: Partial<BpmMetaV1> = {}): BpmMetaV1 => ({
   schemaVersion: 1,
   hostId,
-  modules: [{ module: 'rules', engineVersion: '0.3.0', apiVersion: 'v1', features: [], settings: { 'authoring.cockpit-drafts': true } }],
+  modules: [{ module: 'rules', engineVersion: ENGINE_VERSION, apiVersion: 'v1', features: [], settings: { 'authoring.cockpit-drafts': true } }],
   tenancy: { switching: false },
   limits: { maxPageSize: 200 },
   ...extra,

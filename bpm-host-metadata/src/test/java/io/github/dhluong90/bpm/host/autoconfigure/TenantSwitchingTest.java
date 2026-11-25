@@ -104,7 +104,7 @@ class TenantSwitchingTest {
     static class ProcessesOnly {
         @org.springframework.context.annotation.Bean
         io.github.dhluong90.bpm.host.spi.ModuleDescriptor processEngineModuleDescriptor() {
-            return new io.github.dhluong90.bpm.host.spi.ModuleDescriptor("processes", "0.3.0", "v1", List.of(),
+            return new io.github.dhluong90.bpm.host.spi.ModuleDescriptor("processes", "1.0.0", "v1", List.of(),
                     java.util.Map.of(), List.of("processes:read"), java.util.Map.of());
         }
     }

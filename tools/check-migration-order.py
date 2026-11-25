@@ -38,7 +38,7 @@ ENGINES = ("rule-engine", "process-engine")
 MIGRATION = re.compile(r"^(?P<engine>rule-engine|process-engine)/(?:.+/)?migration/(?P<file>V(?P<version>\d+(?:[._]\d+)*)__[^/]+\.sql)$")
 RETIRED_FILE = Path(__file__).with_name("migration-retired-versions.txt")
 # Until the 1.0 release the V1 baseline of each engine may be edited in place (#479). Set to False when 1.0 is cut.
-BASELINE_OPEN = True
+BASELINE_OPEN = False
 BASELINE_FILE = "V1__baseline.sql"
 
 
@@ -108,16 +108,20 @@ def next_free(highest: tuple[int, ...] | None, retired: dict[tuple[int, ...], st
     return label(candidate)
 
 
-def baseline_edits(merge_base: dict[str, str], head: dict[str, str], baseline_open: bool = BASELINE_OPEN) -> list[str]:
+def baseline_edits(merge_base: dict[str, str], head: dict[str, str], baseline_open: bool | None = None) -> list[str]:
     """V1 baselines edited in place (bytes changed, file kept), which BASELINE_OPEN allows until 1.0."""
+    if baseline_open is None:
+        baseline_open = BASELINE_OPEN  # read at call time so a test can pin the flag
     if not baseline_open:
         return []
     return sorted(path for path in head if path in merge_base and head[path] != merge_base[path] and is_baseline(parse(path)))
 
 
 def check(base: dict[str, str], merge_base: dict[str, str], head: dict[str, str],
-          retired: dict[str, dict[tuple[int, ...], str]], baseline_open: bool = BASELINE_OPEN) -> list[str]:
+          retired: dict[str, dict[tuple[int, ...], str]], baseline_open: bool | None = None) -> list[str]:
     """Each argument maps engine migration paths to blob ids. Returns the failures, one message each."""
+    if baseline_open is None:
+        baseline_open = BASELINE_OPEN  # read at call time so a test can pin the flag
     errors: list[str] = []
     added = sorted(path for path in head if path not in merge_base)
     changed = sorted(path for path in merge_base if path not in head or head[path] != merge_base[path])

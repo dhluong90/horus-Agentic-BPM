@@ -8,6 +8,7 @@ import type { BpmMetaV1 } from '../../api/generated/bpm-meta.v1';
 import { FederationProvider, type FederatedHost } from '../../app/federation/federation';
 import { useRoute } from '../../app/route';
 import { I18nProvider } from '../../i18n/I18nProvider';
+import { ENGINE_VERSION } from '../../mocks/engineVersion';
 import { HostScope } from './HostScope';
 import { MergedInboxPage } from './MergedInboxPage';
 import { MergedIncidentsPage } from './MergedIncidentsPage';
@@ -35,7 +36,7 @@ function fakeHost(id: string, label: string, answer: Answer, permissions = ['pro
     return Promise.resolve(answer(entry));
   }) as unknown as typeof fetch;
   const me: BpmMeV1 = { schemaVersion: 1, user: { id: 'tuan', displayName: 'Tuan' }, tenant: { current: 'bank-a', allowed: ['bank-a'] }, permissions };
-  const meta = { schemaVersion: 1, hostId: id, modules: [{ module: 'processes', engineVersion: '0.3.0', apiVersion: 'v1', features: [], settings: {} }], tenancy: { switching: false }, limits: { maxPageSize: 200 } } as BpmMetaV1;
+  const meta = { schemaVersion: 1, hostId: id, modules: [{ module: 'processes', engineVersion: ENGINE_VERSION, apiVersion: 'v1', features: [], settings: {} }], tenancy: { switching: false }, limits: { maxPageSize: 200 } } as BpmMetaV1;
   return { host: { state: 'ready', id, label, baseUrl: `https://${id}.test`, me, meta, fetchImpl }, asked };
 }
 
