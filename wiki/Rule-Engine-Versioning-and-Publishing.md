@@ -2,8 +2,6 @@
 
 Change rules without a deployment while the engine enforces maker-checker and keeps every version.
 
-Design preview: describes the 0.1 target.
-
 ## Before you start
 
 - States and the meaning of maker-checker: [[Concepts]].

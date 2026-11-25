@@ -2,8 +2,6 @@
 
 Short answers with links to the page that owns the detail.
 
-Design preview: answers describe the 0.1 target unless they say otherwise.
-
 ## Positioning
 
 **Why not Drools, Camunda or Flowable?**
@@ -21,19 +19,19 @@ Yes. That is principle 13, generic by design. Every business behaviour is option
 ## Behaviour
 
 **Can business users change rules without a deployment?**
-Yes. In Cockpit 0.1 (M1) they edit the cells and rows of a draft in the cockpit, or export the rows to a spreadsheet (CSV), edit them and import the file back as a draft. Then they simulate, request publication, a second person approves, and the version becomes effective on its date. A grid editor with templates follows in Cockpit 0.2 (M2). A host that keeps production rule changes in Git can turn off cockpit editing per environment. Steps: [[Rule Engine Versioning and Publishing]].
+Yes. They edit the cells and rows of a draft in the cockpit grid, or export the rows to a spreadsheet (CSV), edit them and import the file back as a draft. Then they simulate, request publication, a second person approves, and the version becomes effective on its date. A host that keeps production rule changes in Git can turn off cockpit editing per environment. Steps: [[Rule Engine Versioning and Publishing]].
 
 **Does retiring a live rule version need a second approver?**
-Not by default. One holder of `rules:approve` retires it with a mandatory reason, because a retirement only stops behaviour and nothing is deleted. From M3 a host can require a second approver for retirement by setting; the version keeps serving until a second identity confirms. See [[Rule Engine Configuration]].
+Not by default. One holder of `rules:approve` retires it with a mandatory reason, because a retirement only stops behaviour and nothing is deleted. A host can require a second approver for retirement by setting; the version keeps serving until a second identity confirms. See [[Rule Engine Configuration]].
 
 **Is evaluation deterministic?**
 Yes. Same version, inputs and clock give the same outputs, and the decision log records all three (TR-DET-01, TR-DET-05 in [[Technical Requirements]]).
 
 **Does it read DMN or BPMN files?**
-Not in 0.1. BPMN 2.0 and DMN are the models behind the engines' own JSON (principle 9), and support arrives in stages. M3 (21 May 2027) imports BPMN for process definitions; BPMN export and DMN decision-table import are also planned for M3 and may move after 1.0 if the M3 checkpoint fails. An element the release cannot execute is refused, and the error names it. The releases after 1.0 (1.1 to 1.3, dates not yet set) extend execution to full BPMN 2.0.2 and DMN 1.5 Conformance Level 3, each with a published list of deviations. Choreography and conversation diagrams are kept untouched with a warning, not executed. CMMN is never supported. See [[Roadmap]].
+Yes, in part. BPMN 2.0 files import, run and export, and DMN decision tables import and export; BPMN 2.0 and DMN are the models behind the engines' own JSON (principle 9). An element the engine cannot execute is refused, and the error names it. DMN conformance levels 2 and 3 come after 1.0, with no dates set, with a published list of deviations. Choreography and conversation diagrams are kept untouched with a warning, not executed. CMMN is never supported. See [[Roadmap]].
 
 **Is the expression language FEEL?**
-Not yet. Rule Engine 0.1 uses its own typed expression language, which follows FEEL's rules for missing values (null) from M1. A FEEL engine built in this project arrives on the standards track after 1.0. See [[Rule Engine Expression Language]].
+Not fully. The Rule Engine uses its own typed expression language, which follows FEEL's rules for missing values (null). Process conditions and scripts and DMN decision tables accept FEEL, a subset in tables. The full FEEL language is not built. See [[Rule Engine Expression Language]].
 
 **Which databases?**
 See [[Technical Stack]]. The storage layer sits behind a small SPI so that others can follow.

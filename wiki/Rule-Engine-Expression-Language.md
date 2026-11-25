@@ -2,8 +2,6 @@
 
 Reference for the language used in `when` conditions and `then` outputs of a decision table. The language is parsed at publication time into a typed evaluation tree (ADR-0003).
 
-Design preview: describes the 0.1 target.
-
 ## Guarantees
 
 | Property | Statement |

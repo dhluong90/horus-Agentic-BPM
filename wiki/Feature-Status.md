@@ -1,6 +1,6 @@
 # Feature status
 
-Nothing is released yet. The Rule Engine, the Process Engine and the Cockpit are specified in this wiki and in the module specifications; no version is tagged.
+Release candidate: the Rule Engine, the Process Engine and the Cockpit have passed acceptance testing, and the 1.0 release is pending final acceptance. [[Release Notes]] list what each tagged version shipped.
 
 The state of each feature, its milestone and its specification are kept in one place, the [feature map](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/product/feature-map.md). This page does not copy it, so the two cannot disagree.
 
@@ -33,6 +33,17 @@ Dates are targets, not commitments. The [[Roadmap]] owns them.
 |---|---|
 | specified | At least one numbered specification statement covers the feature |
 | spec gap | In scope for a milestone; the specification statement is not written yet |
-| design preview | Described, but on no milestone before 1.0 |
+| design preview | Described, but not scheduled before 1.0 |
 
-Once a version is tagged, [[Release Notes]] state what shipped and this page links each released feature there.
+## Not built yet
+
+| Item | State |
+|---|---|
+| Application-level encryption of process variables (#594) | After 1.0 |
+| Connectors to outside systems, and client libraries (SDKs) beyond Java | Not started |
+| Graphical process modeller in the cockpit | Not built. Import models from a standard modeller; the cockpit draws them read only |
+| Live counts and a duration heatmap on the process diagram | Not built |
+| Asynchronous decision log (`decision-log.mode: async`) | Not built; the log is written in your transaction |
+| Built-in shadow mode for agent steps | Planned for 1.1; [[Agent Shadow Mode|Agent-Shadow-Mode]] shows the pattern to use now |
+| DMN conformance levels 2 and 3 | After 1.0 |
+| Masking of process instance variables | Not built |

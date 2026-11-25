@@ -2,7 +2,7 @@
 
 Thirteen rules that decide trade-offs. A proposal that conflicts with one either changes, or amends the principle through an ADR in `docs/adr/`.
 
-Design preview: the principles are in force now; the behaviour they describe is the 0.1 target.
+The principles are in force.
 
 | # | Principle | Therefore |
 |---|---|---|

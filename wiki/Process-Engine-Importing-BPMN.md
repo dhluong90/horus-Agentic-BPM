@@ -1,6 +1,6 @@
 # Process Engine: import a BPMN file
 
-This guide shows how to import a BPMN 2.0 file into the Process Engine, which elements 0.1.0 accepts, and how the engine refuses the rest. The Process Engine is a preview in 0.1.0 ([[Release Notes]]): outside the `dev` profile an imported process stays a draft and cannot start.
+This guide shows how to import a BPMN 2.0 file into the Process Engine, which elements the engine accepts, and how it refuses the rest. Outside the `dev` profile an imported process stays a draft until a second person approves it.
 
 ## Before you start
 
@@ -67,7 +67,7 @@ The root element must declare the namespaces, and the process must be executable
   <bpmn:process id="card-fee-review" name="Card application fee review" isExecutable="true">
 ```
 
-### Supported in 0.1.0
+### Basic elements
 
 | BPMN element | Required | Optional | Example |
 |---|---|---|---|
@@ -447,7 +447,7 @@ All codes are on [[Common Error Codes]].
 
 ## Outside the `dev` profile
 
-The same import works, and the answer has `"status":"DRAFT"`. In 0.1.0 nothing can approve a process draft, so it cannot start. Use the preview on `dev` for evaluation. The approval flow for process definitions comes in a later release ([[Roadmap]]).
+The same import works, and the answer has `"status":"DRAFT"`. A second person approves the draft through the API or the cockpit (Processes, **Review change**); the draft then becomes active. On `dev`, `horus.bpm.processes.definitions.auto-approve` skips the approval for evaluation.
 
 ## Pools, lanes and message flows
 
