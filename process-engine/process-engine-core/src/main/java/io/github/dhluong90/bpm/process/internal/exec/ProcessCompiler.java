@@ -360,17 +360,18 @@ public final class ProcessCompiler {
      */
     private static void complexAndMultipleProblems(FlowNode node, List<SequenceFlow> out, Map<String, FlowNode> nodes,
             Map<String, String> containerOf, List<SequenceFlow> flows, Process process, List<DefinitionProblem> problems) {
-        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity
+        if (node instanceof Activity activity
                 && activity.activity().defaultFlow() != null) {
             // A default flow of an activity is taken when no other conditional outgoing flow holds (PRE-373).
             String defaultFlow = activity.activity().defaultFlow();
             if (out.stream().noneMatch(f -> f.id().equals(defaultFlow))) {
                 problems.add(DefinitionProblem.of("DEFAULT_FLOW_INVALID", "The default flow " + defaultFlow
-                        + " is not an outgoing flow of the activity", node.id()));
+                        + " is not an outgoing flow of the activity " + node.id(), node.id()));
             }
             out.stream().filter(f -> f.id().equals(defaultFlow) && f.conditionExpression() != null)
                     .forEach(f -> problems.add(DefinitionProblem.of("DEFAULT_FLOW_HAS_CONDITION",
-                            "A default flow has no condition in BPMN; remove it or the default", f.id())));
+                            "The default flow " + f.id() + " of " + node.id()
+                                    + " has a condition; remove it or the default", node.id())));
         }
         if (node instanceof ComplexGateway gateway) {
             if (gateway.defaultFlow() != null && out.stream().noneMatch(f -> f.id().equals(gateway.defaultFlow()))) {

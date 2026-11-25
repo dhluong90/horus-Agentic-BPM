@@ -246,7 +246,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-370 | `PRE_370_*` in `MigrationExecutionPostgresIT` and `CalendarChangeIdempotencyPostgresIT` | A migration plan or calendar change is approved only on the reviewed hash (AUD-02) | M3 | `TR-SEC-04` | Done (#573) |
 | PRE-371 | `PRE_371_*` in `CursorKeyRotationTest` and `CursorKeyPropertiesTest` | List cursors name their signing key: rotation, old cursors fail as 400 (AUD-13) | M3 | `TR-SEC-04` | Done (#573) |
 | PRE-372 | `PRE_372_*` in `PendingApprovalsKindsPostgresIT` | A caller without calendar manage sees no pending calendar change (AUD-07) | M3 | `TR-SEC-04` | Done (#573) |
-| PRE-373 | `PRE_373_*` in `ActivityDefaultFlowAndTerminateTest` | The default flow of an activity is taken only when no conditional flow holds | M3 | `TR-STD-04` | Done |
+| PRE-373 | `PRE_373_*` in `ActivityDefaultFlowAndTerminateTest` and `ActivityDefaultFlowDefinitionTest` | The default flow of an activity is taken only when no conditional flow holds | M3 | `TR-STD-04` | Done |
 | PRE-374 | `PRE_374_*` in `ActivityDefaultFlowAndTerminateTest` and `BoundaryEventsPostgresIT` | A terminate reached from an error boundary ends the instance with every other branch | M3 | `TR-STD-04` | Done |
 | PRE-375 | `PRE_375_*` in `ActivityDefaultFlowAndTerminateTest` | A flow condition reads a field of a rule task result | M3 | `TR-STD-04` | Done |
 | PRE-376 | `PRE_376_*` in `ActivityDefaultFlowAndTerminateTest` | Two boundary paths share one end event | M3 | `TR-STD-04` | Done |

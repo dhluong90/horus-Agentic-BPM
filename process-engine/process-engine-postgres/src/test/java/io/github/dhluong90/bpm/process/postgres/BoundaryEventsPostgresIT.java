@@ -28,6 +28,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 class BoundaryEventsPostgresIT {
 
     private static final String[] PIPELINE = {"processes:deploy", "processes:start", "processes:read"};
+    private static final String[] OPERATOR = {"processes:incident:manage", "processes:read"};
     private static final Instant T0 = Instant.parse("2027-03-01T02:00:00Z");
 
     private static final String KYC_CHECK = """
@@ -235,5 +236,74 @@ class BoundaryEventsPostgresIT {
         assertThat(count("SELECT count(*) FROM pre_history WHERE instance_id = ? AND event_type = 'TERMINATED'",
                 loan.id())).isEqualTo(1);
         assertThat(valuations.get()).isZero();
+        // And the history says the valuation was skipped because its branch ended, so an operator can tell
+        assertThat(text("SELECT node_id || ':' || event_type FROM pre_history WHERE instance_id = ? AND event_type = "
+                + "'STEP_SKIPPED'", loan.id())).isEqualTo("valuation:STEP_SKIPPED");
+    }
+
+    /** The valuation comes first in the fork, so it runs; the terminate then ends the instance as COMPLETED. */
+    private static final String PREPARATION_VALUATION_FIRST = PREPARATION
+            .replace("""
+                    <bpmn:sequenceFlow id="b" sourceRef="fork" targetRef="register-collateral"/>
+                    <bpmn:sequenceFlow id="c" sourceRef="fork" targetRef="valuation"/>
+                    """, """
+                    <bpmn:sequenceFlow id="b" sourceRef="fork" targetRef="valuation"/>
+                    <bpmn:sequenceFlow id="c" sourceRef="fork" targetRef="register-collateral"/>
+                    """);
+
+    @Test
+    void PRE_374_a_sibling_local_step_queued_before_the_terminate_runs_once_and_the_instance_still_completes() {
+        // Given the valuation is queued before the registration that will flag the collateral
+        assertThat(PREPARATION_VALUATION_FIRST).isNotEqualTo(PREPARATION);
+        java.util.concurrent.atomic.AtomicInteger valuations = new java.util.concurrent.atomic.AtomicInteger();
+        engine.close();
+        engine = TestEngine.replica("pod-2", clock).handlers(
+                handler("register-collateral", call -> new HandlerResult.BusinessError("INSUFFICIENT_FUNDS",
+                        "collateral LA-2027-000455 is double pledged")),
+                handler("valuate", call -> {
+                    valuations.incrementAndGet();
+                    return new HandlerResult.Completed(Map.of("value", 1L));
+                })).build();
+        deploy("loan-preparation", PREPARATION_VALUATION_FIRST);
+
+        // When the application starts and the registry flags the collateral
+        ProcessInstance loan = start("loan-preparation", "LA-2027-000455");
+
+        // Then the valuation ran once (only steps behind the terminate are skipped), the instance is COMPLETED and
+        // nothing was skipped
+        assertThat(valuations.get()).isOne();
+        assertThat(engine.services.instance(loan.id()).status()).isEqualTo("COMPLETED");
+        assertThat(count("SELECT count(*) FROM pre_history WHERE instance_id = ? AND event_type = 'STEP_SKIPPED'",
+                loan.id())).isZero();
+    }
+
+    @Test
+    void PRE_374_a_retried_local_step_runs_under_its_new_attempt_and_the_instance_goes_on() {
+        // Given a registration that answers a business error no boundary catches, so its step opens an incident
+        java.util.concurrent.atomic.AtomicInteger registrations = new java.util.concurrent.atomic.AtomicInteger();
+        engine.close();
+        engine = TestEngine.replica("pod-2", clock).handlers(
+                handler("register-collateral", call -> registrations.incrementAndGet() == 1
+                        ? new HandlerResult.BusinessError("REGISTRY_DOWN", "collateral registry unreachable")
+                        : new HandlerResult.Completed(Map.of())),
+                handler("valuate", call -> new HandlerResult.Completed(Map.of("value", 1L)))).build();
+        deploy("loan-preparation", PREPARATION);
+        ProcessInstance loan = start("loan-preparation", "LA-2027-000456");
+        assertThat(engine.services.instance(loan.id()).status()).isEqualTo("RUNNING");
+        String incident = text("SELECT id FROM pre_incident WHERE instance_id = ?", loan.id());
+        long lock = count("SELECT lock_version FROM pre_incident WHERE id = ?", incident);
+        String firstAttempt = text("SELECT activity_instance_id FROM pre_token WHERE instance_id = ? AND "
+                + "current_node_id = 'register-collateral'", loan.id());
+
+        // When an operator retries it
+        engine.identity.as("bank-a", "ops.lan", OPERATOR);
+        engine.services.retry(incident, lock, "Registry is back", "retry-456");
+
+        // Then the handler ran again under a new attempt, which the call accepted, and the instance completed
+        assertThat(registrations.get()).isEqualTo(2);
+        assertThat(firstAttempt).isNotBlank();
+        assertThat(count("SELECT count(*) FROM pre_history WHERE instance_id = ? AND event_type = 'STEP_SKIPPED'",
+                loan.id())).isZero();
+        assertThat(engine.services.instance(loan.id()).status()).isEqualTo("COMPLETED");
     }
 }

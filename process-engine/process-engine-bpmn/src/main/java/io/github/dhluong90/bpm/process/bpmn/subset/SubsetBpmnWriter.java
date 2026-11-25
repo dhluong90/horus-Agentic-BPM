@@ -477,7 +477,7 @@ public final class SubsetBpmnWriter {
             default -> throw new IllegalArgumentException("Element " + node.id() + " ("
                     + node.getClass().getSimpleName() + ") is outside the exportable subset");
         }
-        if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.Activity activity) {
+        if (node instanceof Activity activity) {
             attributes.append(optional("default", activity.activity().defaultFlow()));
         }
         node.extensions().first(ResultVariable.class).ifPresent(r -> attributes.append(optional("horus:resultVariable",

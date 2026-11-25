@@ -5250,7 +5250,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private record Queued(Command command, Effect.InvokeService call) {
     }
 
-    /** @return whether the token of a local call still waits on that very attempt, so its handler may run */
+    /**
+     * @return whether the token of a local call still waits on that very attempt, so its handler may run. The attempt
+     *         id is compared, not only the token: a retry gives the token a new attempt, so a call of the replaced
+     *         attempt that is still queued finds another id here and is skipped.
+     */
     private static boolean waitsOnLocalCall(InstanceState state, Effect.InvokeService call) {
         return state.status() == InstanceStatus.RUNNING && state.tokens().stream().anyMatch(t ->
                 t.id().equals(call.tokenId()) && t.status() == TokenStatus.WAITING_ASYNC
@@ -5380,7 +5384,10 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 if (item.call() != null) {
                     Effect.InvokeService call = item.call();
                     if (!waitsOnLocalCall(state, call)) {
-                        // The branch ended while the call waited its turn: nothing to run, nothing to apply.
+                        // The branch ended while the call waited its turn: nothing to run, nothing to apply, but the
+                        // trail says so, so an operator sees that the handler was not called (PRE-374).
+                        history.add(new HistoryEntry("STEP_SKIPPED", call.nodeId(), call.tokenId(), call.attemptId(),
+                                null, clock.instant(), Map.of("reason", "branch ended")));
                         continue;
                     }
                     command = new Command.AsyncResult(call.tokenId(), call.attemptId(),
