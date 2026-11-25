@@ -1,0 +1,47 @@
+# Credit risk grade of a loan application: the grade, the route (AUTO, REFER or DECLINE) and the exposure cap.
+# Illustrative thresholds, not any bank's policy. Debt groups 1 to 5 are the CIC groups of Circular 11/2021/TT-NHNN.
+schemaVersion: 1
+ruleSet: credit-risk-grade
+description: Credit risk grade and route of a retail or SME loan
+hitPolicy: first
+
+inputs:
+  - { name: worstDebtGroup12m, type: integer, description: worst CIC debt group in the last 12 months }
+  - { name: scorecardScore,    type: integer, description: "internal scorecard from 300 to 850" }
+  - { name: dsrPercent,        type: integer, description: debt service ratio including the new instalment }
+  - { name: amountMinor,       type: integer, description: requested amount in VND }
+
+outputs:
+  - { name: riskGrade,        type: string }
+  - { name: route,            type: string }
+  - { name: maxExposureMinor, type: integer }
+  - { name: reason,           type: string }
+
+rules:
+  - id: R1
+    when: { worstDebtGroup12m: ">= 3" }
+    then: { riskGrade: "'E'", route: "'DECLINE'", maxExposureMinor: "0", reason: "'CIC_DEBT_GROUP_3_PLUS'" }
+  - id: R2
+    when: { dsrPercent: "> 70" }
+    then: { riskGrade: "'E'", route: "'DECLINE'", maxExposureMinor: "0", reason: "'DSR_ABOVE_70'" }
+  - id: R3
+    when: { worstDebtGroup12m: "== 1", scorecardScore: ">= 750", dsrPercent: "<= 40", amountMinor: "<= 1000000000" }
+    then: { riskGrade: "'A'", route: "'AUTO'", maxExposureMinor: "20000000000", reason: "'R3'" }
+  - id: R4
+    when: { worstDebtGroup12m: "== 1", scorecardScore: ">= 750", dsrPercent: "<= 40", amountMinor: "> 1000000000" }
+    then: { riskGrade: "'A'", route: "'REFER'", maxExposureMinor: "20000000000", reason: "'AMOUNT_ABOVE_AUTO'" }
+  - id: R5
+    when: { worstDebtGroup12m: "== 1", scorecardScore: ">= 700", dsrPercent: "<= 50", amountMinor: "<= 300000000" }
+    then: { riskGrade: "'B'", route: "'AUTO'", maxExposureMinor: "5000000000", reason: "'R5'" }
+  - id: R6
+    when: { worstDebtGroup12m: "== 1", scorecardScore: ">= 700", dsrPercent: "<= 50", amountMinor: "> 300000000" }
+    then: { riskGrade: "'B'", route: "'REFER'", maxExposureMinor: "5000000000", reason: "'AMOUNT_ABOVE_AUTO'" }
+  - id: R7
+    when: { worstDebtGroup12m: "<= 2", scorecardScore: ">= 650", dsrPercent: "<= 60" }
+    then: { riskGrade: "'C'", route: "'REFER'", maxExposureMinor: "2000000000", reason: "'R7'" }
+  - id: R8
+    when: { scorecardScore: ">= 580" }
+    then: { riskGrade: "'D'", route: "'REFER'", maxExposureMinor: "500000000", reason: "'R8'" }
+  - id: R9
+    when: {}
+    then: { riskGrade: "'E'", route: "'DECLINE'", maxExposureMinor: "0", reason: "'SCORE_BELOW_580'" }

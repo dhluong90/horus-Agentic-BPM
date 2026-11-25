@@ -1,0 +1,58 @@
+# Loan pricing by product family and risk grade: the pricing tier, the fixed rate of the first 12 months, the floating
+# margin after that and the arrangement fee. The last row is a fail-closed safety net: a grade E never reaches pricing.
+# Illustrative figures, not any bank's policy.
+schemaVersion: 1
+ruleSet: loan-pricing
+description: Loan pricing tier, rates and fee by product family and risk grade
+hitPolicy: first
+
+inputs:
+  - { name: productFamily, type: string }
+  - { name: riskGrade,     type: string }
+
+outputs:
+  - { name: pricingTier,       type: string }
+  - { name: fixedRatePct,      type: decimal }
+  - { name: floatingMarginPct, type: decimal }
+  - { name: feePct,            type: decimal }
+
+rules:
+  - id: P1
+    when: { productFamily: "== 'RETAIL_PERSONAL'", riskGrade: "== 'A'" }
+    then: { pricingTier: "'P1'", fixedRatePct: "13.0", floatingMarginPct: "6.0", feePct: "1.0" }
+  - id: P2
+    when: { productFamily: "== 'RETAIL_PERSONAL'", riskGrade: "== 'B'" }
+    then: { pricingTier: "'P2'", fixedRatePct: "15.0", floatingMarginPct: "7.0", feePct: "1.0" }
+  - id: P3
+    when: { productFamily: "== 'RETAIL_PERSONAL'", riskGrade: "== 'C'" }
+    then: { pricingTier: "'P3'", fixedRatePct: "17.5", floatingMarginPct: "8.0", feePct: "1.5" }
+  - id: P4
+    when: { productFamily: "== 'RETAIL_PERSONAL'", riskGrade: "== 'D'" }
+    then: { pricingTier: "'P4'", fixedRatePct: "20.0", floatingMarginPct: "9.0", feePct: "2.0" }
+  - id: P5
+    when: { productFamily: "== 'RETAIL_SECURED'", riskGrade: "== 'A'" }
+    then: { pricingTier: "'P1'", fixedRatePct: "8.8", floatingMarginPct: "3.3", feePct: "0.5" }
+  - id: P6
+    when: { productFamily: "== 'RETAIL_SECURED'", riskGrade: "== 'B'" }
+    then: { pricingTier: "'P2'", fixedRatePct: "9.6", floatingMarginPct: "3.6", feePct: "0.5" }
+  - id: P7
+    when: { productFamily: "== 'RETAIL_SECURED'", riskGrade: "== 'C'" }
+    then: { pricingTier: "'P3'", fixedRatePct: "10.8", floatingMarginPct: "4.2", feePct: "0.7" }
+  - id: P8
+    when: { productFamily: "== 'RETAIL_SECURED'", riskGrade: "== 'D'" }
+    then: { pricingTier: "'P4'", fixedRatePct: "12.5", floatingMarginPct: "5.0", feePct: "1.0" }
+  - id: P9
+    when: { productFamily: "== 'SME_TERM'", riskGrade: "== 'A'" }
+    then: { pricingTier: "'P1'", fixedRatePct: "8.5", floatingMarginPct: "3.5", feePct: "0.5" }
+  - id: P10
+    when: { productFamily: "== 'SME_TERM'", riskGrade: "== 'B'" }
+    then: { pricingTier: "'P2'", fixedRatePct: "9.2", floatingMarginPct: "3.8", feePct: "0.6" }
+  - id: P11
+    when: { productFamily: "== 'SME_TERM'", riskGrade: "== 'C'" }
+    then: { pricingTier: "'P3'", fixedRatePct: "10.5", floatingMarginPct: "4.5", feePct: "0.8" }
+  - id: P12
+    when: { productFamily: "== 'SME_TERM'", riskGrade: "== 'D'" }
+    then: { pricingTier: "'P4'", fixedRatePct: "12.0", floatingMarginPct: "5.5", feePct: "1.0" }
+  - id: P99
+    when: {}
+    then: { pricingTier: "'NONE'", fixedRatePct: "null", floatingMarginPct: "null", feePct: "null" }

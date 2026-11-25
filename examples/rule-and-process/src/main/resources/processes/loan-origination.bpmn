@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Loan origination for retail and SME loans, end to end. A bank with five lanes and a customer pool. An AI agent screens
+     KYC and AML, a guardrail rule set checks its answer, and any hit opens a four-eyes review; a confirmed fraud flag ends
+     the whole case at once, even while the parallel preparation runs. A rule set grades the credit risk (AUTO, REFER or
+     DECLINE), a second says who may approve, a third prices the loan. A referred case goes to a credit analyst (maker) and
+     then to a four-eyes approver; a timer boundary on each approval task sends an escalation notice after 4 hours (manager)
+     or 1 day (committee) while the task stays open. Offer letter and collateral are prepared in parallel, the offer goes to
+     the customer, and an event gateway waits for the customer's acceptance or seven days. Disbursement is a sub-process
+     that reserves the credit limit and books the loan; if the pay-out is rejected by the ledger (start with
+     simulateLedgerFailure = true) the booking is reversed, then the limit released, newest first.
+     Start it with applicationId, customerId, productFamily (RETAIL_PERSONAL, RETAIL_SECURED or SME_TERM), secured,
+     amountMinor, currency, tenorMonths and channel. Demo switches: simulatePepHit, simulateFraud,
+     simulateCollateralFraud, simulateLedgerFailure, simulateDebtGroup. The SLA and expiry timers are wall-clock time, not
+     business hours; the dev profile shortens them (application-dev.yml). Figures are illustrative, not any bank's policy.
+     The customer's replies arrive through POST /messages:correlate; the engine never listens for them. -->
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"
+                  id="Definitions_loan-origination"
+                  targetNamespace="urn:horus-bpm:examples"
+                  expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="Msg_application" name="loan-application"/>
+  <bpmn:message id="Msg_offer" name="offer-issued"/>
+  <bpmn:message id="Msg_accepted" name="offer-accepted"/>
+  <bpmn:message id="Msg_declined" name="loan-declined"/>
+  <bpmn:message id="Msg_escalated" name="approval-escalated"/>
+  <bpmn:message id="Msg_disbursed" name="loan-disbursed"/>
+  <bpmn:message id="Msg_closed" name="loan-closed-unpaid"/>
+  <bpmn:error id="Err_collateral" name="Collateral flagged" errorCode="COLLATERAL_FRAUD_FLAG"/>
+  <bpmn:error id="Err_ledger" name="Ledger rejected" errorCode="LEDGER_REJECTED"/>
+  <bpmn:collaboration id="loan-origination-collaboration">
+    <bpmn:participant id="pool-customer" name="Customer"/>
+    <bpmn:participant id="pool-bank" name="Bank" processRef="loan-origination"/>
+    <bpmn:messageFlow id="mf-application" name="Application" sourceRef="pool-customer" targetRef="start" messageRef="Msg_application"/>
+    <bpmn:messageFlow id="mf-offer" name="Offer letter" sourceRef="send-offer" targetRef="pool-customer" messageRef="Msg_offer"/>
+    <bpmn:messageFlow id="mf-accept" name="Customer accepts" sourceRef="pool-customer" targetRef="offer-accepted" messageRef="Msg_accepted"/>
+  </bpmn:collaboration>
+  <bpmn:process id="loan-origination" name="Loan origination" isExecutable="true">
+    <bpmn:laneSet id="lanes">
+      <bpmn:lane id="lane-channel" name="Customer channel">
+        <bpmn:flowNodeRef>start</bpmn:flowNodeRef><bpmn:flowNodeRef>validate-application</bpmn:flowNodeRef><bpmn:flowNodeRef>send-offer</bpmn:flowNodeRef><bpmn:flowNodeRef>g-offer</bpmn:flowNodeRef><bpmn:flowNodeRef>offer-accepted</bpmn:flowNodeRef><bpmn:flowNodeRef>offer-expired</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="lane-operations" name="Operations">
+        <bpmn:flowNodeRef>kyc-aml-screening</bpmn:flowNodeRef><bpmn:flowNodeRef>end-fraud</bpmn:flowNodeRef><bpmn:flowNodeRef>fork</bpmn:flowNodeRef><bpmn:flowNodeRef>register-collateral</bpmn:flowNodeRef><bpmn:flowNodeRef>collateral-flagged</bpmn:flowNodeRef><bpmn:flowNodeRef>prepare-offer</bpmn:flowNodeRef><bpmn:flowNodeRef>join</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="lane-credit" name="Credit">
+        <bpmn:flowNodeRef>score-credit</bpmn:flowNodeRef><bpmn:flowNodeRef>g-grade</bpmn:flowNodeRef><bpmn:flowNodeRef>prepare-proposal</bpmn:flowNodeRef><bpmn:flowNodeRef>determine-authority</bpmn:flowNodeRef><bpmn:flowNodeRef>price-loan</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="lane-approver" name="Approver">
+        <bpmn:flowNodeRef>approve-manager</bpmn:flowNodeRef><bpmn:flowNodeRef>manager-sla</bpmn:flowNodeRef><bpmn:flowNodeRef>approve-committee</bpmn:flowNodeRef><bpmn:flowNodeRef>committee-sla</bpmn:flowNodeRef><bpmn:flowNodeRef>end-escalated</bpmn:flowNodeRef><bpmn:flowNodeRef>end-declined</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="lane-core" name="Core banking">
+        <bpmn:flowNodeRef>disbursement</bpmn:flowNodeRef><bpmn:flowNodeRef>pay-out</bpmn:flowNodeRef><bpmn:flowNodeRef>ledger-failed</bpmn:flowNodeRef><bpmn:flowNodeRef>undo-disbursement</bpmn:flowNodeRef><bpmn:flowNodeRef>end-disbursed</bpmn:flowNodeRef><bpmn:flowNodeRef>end-failed</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="start" name="Application submitted"/>
+    <bpmn:serviceTask id="validate-application" name="Validate the application and pull the CIC report" horus:handler="loan.validate" horus:resultVariable="bureau">
+      <bpmn:extensionElements>
+        <horus:input name="customerId" value="${instance.customerId}"/>
+        <horus:input name="productFamily" value="${instance.productFamily}"/>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+        <horus:input name="simulateDebtGroup" value="${instance.simulateDebtGroup}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="kyc-aml-screening" name="KYC and AML screening (AI agent)" horus:type="agentTask" horus:agent="kyc.screen" horus:timeout="PT30S" horus:resultVariable="kyc">
+      <bpmn:extensionElements>
+        <horus:input name="applicationId" value="${instance.applicationId}"/>
+        <horus:input name="customerId" value="${instance.customerId}"/>
+        <horus:input name="simulatePepHit" value="${instance.simulatePepHit}"/>
+        <horus:input name="simulateFraud" value="${instance.simulateFraud}"/>
+        <horus:outputSchema>{
+          "type": "object",
+          "required": ["kycStatus", "idConfidence", "nameMatches", "tamperingSuspected", "sanctionsHit", "pepHit", "adverseMedia", "fraudFlag"],
+          "additionalProperties": false,
+          "properties": {
+            "kycStatus": {"type": "string", "enum": ["PASS", "REVIEW", "FAIL"]},
+            "idConfidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "nameMatches": {"type": "boolean"},
+            "tamperingSuspected": {"type": "boolean"},
+            "sanctionsHit": {"type": "boolean"},
+            "pepHit": {"type": "boolean"},
+            "adverseMedia": {"type": "boolean"},
+            "fraudFlag": {"type": "boolean"},
+            "summary": {"type": "string", "maxLength": 500, "mask": true}
+          }
+        }</horus:outputSchema>
+        <horus:guardrail decision="kyc-loan-guardrails" onViolation="route-to-human" reviewer="role:COMPLIANCE_REVIEWER"/>
+        <horus:retry max="2"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="end-fraud" name="Fraud flag: stop everything"><bpmn:terminateEventDefinition/></bpmn:endEvent>
+    <bpmn:businessRuleTask id="score-credit" name="Grade the credit risk" horus:ruleSet="credit-risk-grade" horus:resultVariable="scoring">
+      <bpmn:extensionElements>
+        <horus:input name="worstDebtGroup12m" value="${instance.bureau.worstDebtGroup12m}"/>
+        <horus:input name="scorecardScore" value="${instance.bureau.scorecardScore}"/>
+        <horus:input name="dsrPercent" value="${instance.bureau.dsrPercent}"/>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:exclusiveGateway id="g-grade" name="Risk route" default="f-grade-decline"/>
+    <bpmn:userTask id="prepare-proposal" name="Prepare the credit proposal (maker)" horus:assignee="role:CREDIT_ANALYST" horus:resultVariable="proposal"/>
+    <bpmn:businessRuleTask id="determine-authority" name="Find who may approve" horus:ruleSet="approval-authority" horus:resultVariable="authority">
+      <bpmn:extensionElements>
+        <horus:input name="amountMinor" value="${instance.proposal.amountMinor}"/>
+        <horus:input name="riskGrade" value="${instance.scoring.riskGrade}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:userTask id="approve-manager" name="Approve (credit manager, four eyes)" horus:assignee="role:CREDIT_MANAGER" horus:fourEyes="true" horus:resultVariable="approval"/>
+    <bpmn:boundaryEvent id="manager-sla" name="4 hours" attachedToRef="approve-manager" cancelActivity="false">
+      <bpmn:timerEventDefinition><bpmn:timeDuration>PT4H</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:userTask id="approve-committee" name="Approve (credit committee, four eyes)" horus:assignee="role:CREDIT_COMMITTEE" horus:fourEyes="true" horus:resultVariable="approval"/>
+    <bpmn:boundaryEvent id="committee-sla" name="1 day" attachedToRef="approve-committee" cancelActivity="false">
+      <bpmn:timerEventDefinition><bpmn:timeDuration>P1D</bpmn:timeDuration></bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:endEvent id="end-escalated" name="Escalation notice sent" horus:correlationKey="applicationId"><bpmn:messageEventDefinition messageRef="Msg_escalated"/></bpmn:endEvent>
+    <bpmn:endEvent id="end-declined" name="Declined, customer told" horus:correlationKey="applicationId"><bpmn:messageEventDefinition messageRef="Msg_declined"/></bpmn:endEvent>
+    <bpmn:businessRuleTask id="price-loan" name="Price the loan" horus:ruleSet="loan-pricing" horus:resultVariable="pricing">
+      <bpmn:extensionElements>
+        <horus:input name="productFamily" value="${instance.productFamily}"/>
+        <horus:input name="riskGrade" value="${instance.scoring.riskGrade}"/>
+      </bpmn:extensionElements>
+    </bpmn:businessRuleTask>
+    <bpmn:parallelGateway id="fork" name="Prepare in parallel"/>
+    <bpmn:serviceTask id="prepare-offer" name="Prepare the offer letter" horus:handler="offer.prepare" horus:resultVariable="offer">
+      <bpmn:extensionElements>
+        <horus:input name="applicationId" value="${instance.applicationId}"/>
+        <horus:input name="amountMinor" value="${instance.amountMinor}"/>
+        <horus:input name="feePct" value="${instance.pricing.feePct}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="register-collateral" name="Register the collateral" horus:handler="collateral.register" horus:resultVariable="collateral">
+      <bpmn:extensionElements>
+        <horus:input name="secured" value="${instance.secured}"/>
+        <horus:input name="simulateCollateralFraud" value="${instance.simulateCollateralFraud}"/>
+      </bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="collateral-flagged" name="Collateral flagged" attachedToRef="register-collateral">
+      <bpmn:errorEventDefinition errorRef="Err_collateral"/>
+    </bpmn:boundaryEvent>
+    <bpmn:parallelGateway id="join" name="All prepared"/>
+    <bpmn:sendTask id="send-offer" name="Send the offer to the customer" messageRef="Msg_offer" horus:correlationKey="applicationId"/>
+    <bpmn:eventBasedGateway id="g-offer" name="Accepted or expired"/>
+    <bpmn:intermediateCatchEvent id="offer-accepted" name="Customer accepts" horus:correlationKey="applicationId"><bpmn:messageEventDefinition messageRef="Msg_accepted"/></bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="offer-expired" name="Offer expires (7 days)"><bpmn:timerEventDefinition><bpmn:timeDuration>P7D</bpmn:timeDuration></bpmn:timerEventDefinition></bpmn:intermediateCatchEvent>
+    <bpmn:subProcess id="disbursement" name="Disbursement">
+      <bpmn:startEvent id="disb-start"/>
+      <bpmn:serviceTask id="reserve-limit" name="Reserve the credit limit" horus:handler="limit.reserve" horus:resultVariable="reservation"/>
+      <bpmn:boundaryEvent id="reserve-undo" attachedToRef="reserve-limit" cancelActivity="false"><bpmn:compensateEventDefinition/></bpmn:boundaryEvent>
+      <bpmn:serviceTask id="release-limit-activity" name="Release the limit" isForCompensation="true" horus:handler="limit.release"/>
+      <bpmn:association id="reserve-undo-link" associationDirection="One" sourceRef="reserve-undo" targetRef="release-limit-activity"/>
+      <bpmn:serviceTask id="book-loan" name="Book the loan" horus:handler="loan.book" horus:resultVariable="booking">
+        <bpmn:extensionElements><horus:input name="amountMinor" value="${instance.amountMinor}"/></bpmn:extensionElements>
+      </bpmn:serviceTask>
+      <bpmn:boundaryEvent id="book-undo" attachedToRef="book-loan" cancelActivity="false"><bpmn:compensateEventDefinition/></bpmn:boundaryEvent>
+      <bpmn:serviceTask id="reverse-booking-activity" name="Reverse the booking" isForCompensation="true" horus:handler="loan.reverse"/>
+      <bpmn:association id="book-undo-link" associationDirection="One" sourceRef="book-undo" targetRef="reverse-booking-activity"/>
+      <bpmn:endEvent id="disb-end"/>
+      <bpmn:sequenceFlow id="d1" sourceRef="disb-start" targetRef="reserve-limit"/>
+      <bpmn:sequenceFlow id="d2" sourceRef="reserve-limit" targetRef="book-loan"/>
+      <bpmn:sequenceFlow id="d3" sourceRef="book-loan" targetRef="disb-end"/>
+    </bpmn:subProcess>
+    <bpmn:serviceTask id="pay-out" name="Pay out to the customer account" horus:handler="loan.payout">
+      <bpmn:extensionElements><horus:input name="simulateLedgerFailure" value="${instance.simulateLedgerFailure}"/></bpmn:extensionElements>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="ledger-failed" name="Ledger rejected" attachedToRef="pay-out"><bpmn:errorEventDefinition errorRef="Err_ledger"/></bpmn:boundaryEvent>
+    <bpmn:intermediateThrowEvent id="undo-disbursement" name="Undo the disbursement"><bpmn:compensateEventDefinition/></bpmn:intermediateThrowEvent>
+    <bpmn:endEvent id="end-failed" name="Closed without payout" horus:correlationKey="applicationId"><bpmn:messageEventDefinition messageRef="Msg_closed"/></bpmn:endEvent>
+    <bpmn:endEvent id="end-disbursed" name="Disbursed" horus:correlationKey="applicationId"><bpmn:messageEventDefinition messageRef="Msg_disbursed"/></bpmn:endEvent>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="validate-application"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="validate-application" targetRef="kyc-aml-screening"/>
+    <bpmn:sequenceFlow id="f-fraud" name="fraud flag" sourceRef="kyc-aml-screening" targetRef="end-fraud">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">kyc.fraudFlag == true</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-kyc-fail" name="sanctions or identity failed" sourceRef="kyc-aml-screening" targetRef="end-declined">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">kyc.kycStatus == 'FAIL' and kyc.fraudFlag == false</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-kyc-ok" name="clear or reviewed" sourceRef="kyc-aml-screening" targetRef="score-credit">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">kyc.kycStatus != 'FAIL' and kyc.fraudFlag == false</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f3" sourceRef="score-credit" targetRef="g-grade"/>
+    <bpmn:sequenceFlow id="f-grade-auto" name="AUTO" sourceRef="g-grade" targetRef="price-loan">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">scoring.route == 'AUTO'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-grade-refer" name="REFER" sourceRef="g-grade" targetRef="prepare-proposal">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">scoring.route == 'REFER'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-grade-decline" name="DECLINE" sourceRef="g-grade" targetRef="end-declined"/>
+    <bpmn:sequenceFlow id="f4" sourceRef="prepare-proposal" targetRef="determine-authority"/>
+    <bpmn:sequenceFlow id="f-authority-manager" name="manager" sourceRef="determine-authority" targetRef="approve-manager">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">authority.approvalTier == 'MANAGER'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-authority-committee" name="committee" sourceRef="determine-authority" targetRef="approve-committee">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">authority.approvalTier != 'MANAGER'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-mgr-ok" name="approved" sourceRef="approve-manager" targetRef="price-loan">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision == 'APPROVED'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-mgr-reject" name="rejected" sourceRef="approve-manager" targetRef="end-declined">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision != 'APPROVED'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-com-ok" name="approved" sourceRef="approve-committee" targetRef="price-loan">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision == 'APPROVED'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-com-reject" name="rejected" sourceRef="approve-committee" targetRef="end-declined">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression" language="urn:horus-bpm:expr:v1">approval.decision != 'APPROVED'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="f-mgr-sla" sourceRef="manager-sla" targetRef="end-escalated"/>
+    <bpmn:sequenceFlow id="f-com-sla" sourceRef="committee-sla" targetRef="end-escalated"/>
+    <bpmn:sequenceFlow id="f5" sourceRef="price-loan" targetRef="fork"/>
+    <bpmn:sequenceFlow id="f6" sourceRef="fork" targetRef="register-collateral"/>
+    <bpmn:sequenceFlow id="f7" sourceRef="fork" targetRef="prepare-offer"/>
+    <bpmn:sequenceFlow id="f8" sourceRef="register-collateral" targetRef="join"/>
+    <bpmn:sequenceFlow id="f9" sourceRef="prepare-offer" targetRef="join"/>
+    <bpmn:sequenceFlow id="f-collateral" sourceRef="collateral-flagged" targetRef="end-fraud"/>
+    <bpmn:sequenceFlow id="f10" sourceRef="join" targetRef="send-offer"/>
+    <bpmn:sequenceFlow id="f11" sourceRef="send-offer" targetRef="g-offer"/>
+    <bpmn:sequenceFlow id="f12" sourceRef="g-offer" targetRef="offer-accepted"/>
+    <bpmn:sequenceFlow id="f13" sourceRef="g-offer" targetRef="offer-expired"/>
+    <bpmn:sequenceFlow id="f14" sourceRef="offer-accepted" targetRef="disbursement"/>
+    <bpmn:sequenceFlow id="f15" sourceRef="offer-expired" targetRef="end-failed"/>
+    <bpmn:sequenceFlow id="f16" sourceRef="disbursement" targetRef="pay-out"/>
+    <bpmn:sequenceFlow id="f17" sourceRef="pay-out" targetRef="end-disbursed"/>
+    <bpmn:sequenceFlow id="f18" sourceRef="ledger-failed" targetRef="undo-disbursement"/>
+    <bpmn:sequenceFlow id="f19" sourceRef="undo-disbursement" targetRef="end-failed"/>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_loan-origination">
+    <bpmndi:BPMNPlane id="Plane_loan-origination" bpmnElement="loan-origination-collaboration">
+      <bpmndi:BPMNShape id="pool-customer_di" bpmnElement="pool-customer" isHorizontal="true"><dc:Bounds x="160" y="30" width="2990" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="pool-bank_di" bpmnElement="pool-bank" isHorizontal="true"><dc:Bounds x="160" y="120" width="2990" height="1040"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-channel_di" bpmnElement="lane-channel" isHorizontal="true"><dc:Bounds x="190" y="120" width="2960" height="150"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-operations_di" bpmnElement="lane-operations" isHorizontal="true"><dc:Bounds x="190" y="270" width="2960" height="220"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-credit_di" bpmnElement="lane-credit" isHorizontal="true"><dc:Bounds x="190" y="490" width="2960" height="150"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-approver_di" bpmnElement="lane-approver" isHorizontal="true"><dc:Bounds x="190" y="640" width="2960" height="240"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="lane-core_di" bpmnElement="lane-core" isHorizontal="true"><dc:Bounds x="190" y="880" width="2960" height="280"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="start_di" bpmnElement="start"><dc:Bounds x="232" y="177" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="validate-application_di" bpmnElement="validate-application"><dc:Bounds x="320" y="155" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="kyc-aml-screening_di" bpmnElement="kyc-aml-screening"><dc:Bounds x="490" y="360" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-fraud_di" bpmnElement="end-fraud"><dc:Bounds x="1482" y="317" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="score-credit_di" bpmnElement="score-credit"><dc:Bounds x="650" y="520" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="g-grade_di" bpmnElement="g-grade"><dc:Bounds x="815" y="535" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="prepare-proposal_di" bpmnElement="prepare-proposal"><dc:Bounds x="940" y="520" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="determine-authority_di" bpmnElement="determine-authority"><dc:Bounds x="1090" y="520" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="approve-manager_di" bpmnElement="approve-manager"><dc:Bounds x="1260" y="660" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="manager-sla_di" bpmnElement="manager-sla"><dc:Bounds x="1342" y="682" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="approve-committee_di" bpmnElement="approve-committee"><dc:Bounds x="1260" y="770" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="committee-sla_di" bpmnElement="committee-sla"><dc:Bounds x="1342" y="792" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-escalated_di" bpmnElement="end-escalated"><dc:Bounds x="1472" y="737" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-declined_di" bpmnElement="end-declined"><dc:Bounds x="982" y="737" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="price-loan_di" bpmnElement="price-loan"><dc:Bounds x="1570" y="520" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="fork_di" bpmnElement="fork"><dc:Bounds x="1735" y="345" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="register-collateral_di" bpmnElement="register-collateral"><dc:Bounds x="1850" y="295" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="collateral-flagged_di" bpmnElement="collateral-flagged"><dc:Bounds x="1882" y="277" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="prepare-offer_di" bpmnElement="prepare-offer"><dc:Bounds x="1850" y="395" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="join_di" bpmnElement="join"><dc:Bounds x="2015" y="345" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="send-offer_di" bpmnElement="send-offer"><dc:Bounds x="1990" y="155" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="g-offer_di" bpmnElement="g-offer"><dc:Bounds x="2145" y="170" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="offer-accepted_di" bpmnElement="offer-accepted"><dc:Bounds x="2282" y="222" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="offer-expired_di" bpmnElement="offer-expired"><dc:Bounds x="2282" y="132" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="disbursement_di" bpmnElement="disbursement" isExpanded="true"><dc:Bounds x="2380" y="900" width="400" height="230"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="disb-start_di" bpmnElement="disb-start"><dc:Bounds x="2397" y="947" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reserve-limit_di" bpmnElement="reserve-limit"><dc:Bounds x="2450" y="925" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reserve-undo_di" bpmnElement="reserve-undo"><dc:Bounds x="2482" y="987" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="release-limit-activity_di" bpmnElement="release-limit-activity"><dc:Bounds x="2450" y="1035" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="book-loan_di" bpmnElement="book-loan"><dc:Bounds x="2590" y="925" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="book-undo_di" bpmnElement="book-undo"><dc:Bounds x="2622" y="987" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="reverse-booking-activity_di" bpmnElement="reverse-booking-activity"><dc:Bounds x="2590" y="1035" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="disb-end_di" bpmnElement="disb-end"><dc:Bounds x="2727" y="947" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="pay-out_di" bpmnElement="pay-out"><dc:Bounds x="2830" y="925" width="100" height="80"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="ledger-failed_di" bpmnElement="ledger-failed"><dc:Bounds x="2862" y="987" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="undo-disbursement_di" bpmnElement="undo-disbursement"><dc:Bounds x="2862" y="1062" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-failed_di" bpmnElement="end-failed"><dc:Bounds x="2992" y="1062" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="end-disbursed_di" bpmnElement="end-disbursed"><dc:Bounds x="2992" y="947" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="f1_di" bpmnElement="f1"><di:waypoint x="268" y="195"/><di:waypoint x="320" y="195"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f2_di" bpmnElement="f2"><di:waypoint x="370" y="235"/><di:waypoint x="370" y="400"/><di:waypoint x="490" y="400"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-fraud_di" bpmnElement="f-fraud"><di:waypoint x="540" y="360"/><di:waypoint x="540" y="335"/><di:waypoint x="1482" y="335"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-kyc-fail_di" bpmnElement="f-kyc-fail"><di:waypoint x="560" y="440"/><di:waypoint x="560" y="755"/><di:waypoint x="982" y="755"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-kyc-ok_di" bpmnElement="f-kyc-ok"><di:waypoint x="590" y="400"/><di:waypoint x="700" y="400"/><di:waypoint x="700" y="520"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f3_di" bpmnElement="f3"><di:waypoint x="750" y="560"/><di:waypoint x="815" y="560"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-grade-auto_di" bpmnElement="f-grade-auto"><di:waypoint x="840" y="535"/><di:waypoint x="840" y="505"/><di:waypoint x="1620" y="505"/><di:waypoint x="1620" y="520"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-grade-refer_di" bpmnElement="f-grade-refer"><di:waypoint x="865" y="560"/><di:waypoint x="940" y="560"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-grade-decline_di" bpmnElement="f-grade-decline"><di:waypoint x="840" y="585"/><di:waypoint x="840" y="755"/><di:waypoint x="982" y="755"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f4_di" bpmnElement="f4"><di:waypoint x="1040" y="560"/><di:waypoint x="1090" y="560"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-authority-manager_di" bpmnElement="f-authority-manager"><di:waypoint x="1140" y="600"/><di:waypoint x="1140" y="700"/><di:waypoint x="1260" y="700"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-authority-committee_di" bpmnElement="f-authority-committee"><di:waypoint x="1140" y="700"/><di:waypoint x="1140" y="810"/><di:waypoint x="1260" y="810"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-mgr-ok_di" bpmnElement="f-mgr-ok"><di:waypoint x="1310" y="660"/><di:waypoint x="1310" y="625"/><di:waypoint x="1620" y="625"/><di:waypoint x="1620" y="600"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-mgr-reject_di" bpmnElement="f-mgr-reject"><di:waypoint x="1300" y="740"/><di:waypoint x="1300" y="755"/><di:waypoint x="1018" y="755"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-com-ok_di" bpmnElement="f-com-ok"><di:waypoint x="1310" y="850"/><di:waypoint x="1310" y="865"/><di:waypoint x="1620" y="865"/><di:waypoint x="1620" y="600"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-com-reject_di" bpmnElement="f-com-reject"><di:waypoint x="1300" y="770"/><di:waypoint x="1300" y="755"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-mgr-sla_di" bpmnElement="f-mgr-sla"><di:waypoint x="1378" y="700"/><di:waypoint x="1490" y="700"/><di:waypoint x="1490" y="737"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-com-sla_di" bpmnElement="f-com-sla"><di:waypoint x="1378" y="810"/><di:waypoint x="1490" y="810"/><di:waypoint x="1490" y="773"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f5_di" bpmnElement="f5"><di:waypoint x="1670" y="560"/><di:waypoint x="1760" y="560"/><di:waypoint x="1760" y="395"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f6_di" bpmnElement="f6"><di:waypoint x="1785" y="370"/><di:waypoint x="1820" y="370"/><di:waypoint x="1820" y="335"/><di:waypoint x="1850" y="335"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f7_di" bpmnElement="f7"><di:waypoint x="1820" y="370"/><di:waypoint x="1820" y="435"/><di:waypoint x="1850" y="435"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f8_di" bpmnElement="f8"><di:waypoint x="1950" y="335"/><di:waypoint x="1985" y="335"/><di:waypoint x="1985" y="370"/><di:waypoint x="2015" y="370"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f9_di" bpmnElement="f9"><di:waypoint x="1950" y="435"/><di:waypoint x="1985" y="435"/><di:waypoint x="1985" y="370"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f-collateral_di" bpmnElement="f-collateral"><di:waypoint x="1900" y="277"/><di:waypoint x="1500" y="277"/><di:waypoint x="1500" y="317"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f10_di" bpmnElement="f10"><di:waypoint x="2040" y="345"/><di:waypoint x="2040" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f11_di" bpmnElement="f11"><di:waypoint x="2090" y="195"/><di:waypoint x="2145" y="195"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f12_di" bpmnElement="f12"><di:waypoint x="2195" y="195"/><di:waypoint x="2250" y="195"/><di:waypoint x="2250" y="150"/><di:waypoint x="2282" y="150"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f13_di" bpmnElement="f13"><di:waypoint x="2250" y="195"/><di:waypoint x="2250" y="240"/><di:waypoint x="2282" y="240"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f14_di" bpmnElement="f14"><di:waypoint x="2300" y="258"/><di:waypoint x="2300" y="1015"/><di:waypoint x="2380" y="1015"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f15_di" bpmnElement="f15"><di:waypoint x="2318" y="150"/><di:waypoint x="3100" y="150"/><di:waypoint x="3100" y="1080"/><di:waypoint x="3028" y="1080"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f16_di" bpmnElement="f16"><di:waypoint x="2780" y="965"/><di:waypoint x="2830" y="965"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f17_di" bpmnElement="f17"><di:waypoint x="2930" y="965"/><di:waypoint x="2992" y="965"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f18_di" bpmnElement="f18"><di:waypoint x="2880" y="1023"/><di:waypoint x="2880" y="1062"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="f19_di" bpmnElement="f19"><di:waypoint x="2898" y="1080"/><di:waypoint x="2992" y="1080"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="d1_di" bpmnElement="d1"><di:waypoint x="2433" y="965"/><di:waypoint x="2450" y="965"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="d2_di" bpmnElement="d2"><di:waypoint x="2550" y="965"/><di:waypoint x="2590" y="965"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="d3_di" bpmnElement="d3"><di:waypoint x="2690" y="965"/><di:waypoint x="2727" y="965"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="reserve-undo-link_di" bpmnElement="reserve-undo-link"><di:waypoint x="2500" y="1023"/><di:waypoint x="2500" y="1035"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="book-undo-link_di" bpmnElement="book-undo-link"><di:waypoint x="2640" y="1023"/><di:waypoint x="2640" y="1035"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="mf-application_di" bpmnElement="mf-application"><di:waypoint x="250" y="80"/><di:waypoint x="250" y="177"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="mf-offer_di" bpmnElement="mf-offer"><di:waypoint x="2040" y="155"/><di:waypoint x="2040" y="80"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="mf-accept_di" bpmnElement="mf-accept"><di:waypoint x="2340" y="80"/><di:waypoint x="2340" y="240"/><di:waypoint x="2318" y="240"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

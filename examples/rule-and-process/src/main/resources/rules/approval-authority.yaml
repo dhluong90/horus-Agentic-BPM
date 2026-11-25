@@ -1,0 +1,34 @@
+# Who may approve a loan: the delegated authority by amount and risk grade. Rows are read in order, so each amount
+# band is a ceiling. Illustrative, not any bank's policy.
+schemaVersion: 1
+ruleSet: approval-authority
+description: Approval tier and approver title by amount and risk grade
+hitPolicy: first
+
+inputs:
+  - { name: amountMinor, type: integer, description: proposed amount in VND }
+  - { name: riskGrade,   type: string }
+
+outputs:
+  - { name: approvalTier,  type: string }
+  - { name: approverTitle, type: string }
+
+rules:
+  - id: A1
+    when: { amountMinor: "<= 500000000", riskGrade: "in ['A', 'B']" }
+    then: { approvalTier: "'MANAGER'", approverTitle: "'Branch Credit Manager'" }
+  - id: A2
+    when: { amountMinor: "<= 500000000", riskGrade: "in ['C', 'D']" }
+    then: { approvalTier: "'MANAGER'", approverTitle: "'Regional Credit Manager'" }
+  - id: A3
+    when: { amountMinor: "<= 2000000000", riskGrade: "in ['A', 'B']" }
+    then: { approvalTier: "'MANAGER'", approverTitle: "'Regional Credit Manager'" }
+  - id: A4
+    when: { amountMinor: "<= 2000000000", riskGrade: "in ['C', 'D']" }
+    then: { approvalTier: "'COMMITTEE'", approverTitle: "'Regional Credit Committee'" }
+  - id: A5
+    when: { amountMinor: "<= 10000000000" }
+    then: { approvalTier: "'COMMITTEE'", approverTitle: "'Regional Credit Committee'" }
+  - id: A6
+    when: {}
+    then: { approvalTier: "'COMMITTEE'", approverTitle: "'Head Office Credit Committee'" }

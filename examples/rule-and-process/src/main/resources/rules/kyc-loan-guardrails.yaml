@@ -1,0 +1,48 @@
+# Guardrail on the KYC and AML screening agent of a loan application. The agent never clears a sanctions or PEP hit
+# alone: any signal, or a low identity confidence, refuses its answer and opens a four-eyes review. The agent's free-text
+# summary is declared as an input no rule reads.
+schemaVersion: 1
+ruleSet: kyc-loan-guardrails
+description: Guardrails on the KYC and AML answer of the loan screening agent
+hitPolicy: first
+
+inputs:
+  - { name: kycStatus,          type: string }
+  - { name: idConfidence,       type: decimal }
+  - { name: nameMatches,        type: boolean }
+  - { name: tamperingSuspected, type: boolean }
+  - { name: sanctionsHit,       type: boolean }
+  - { name: pepHit,             type: boolean }
+  - { name: adverseMedia,       type: boolean }
+  - { name: fraudFlag,          type: boolean }
+  - { name: summary,            type: string }
+
+outputs:
+  - { name: allow,   type: boolean }
+  - { name: reasons, type: string }
+
+rules:
+  - id: R1
+    when: { fraudFlag: "== true" }
+    then: { allow: "false", reasons: "'FRAUD_SUSPECTED'" }
+  - id: R2
+    when: { sanctionsHit: "== true" }
+    then: { allow: "false", reasons: "'SANCTIONS_HIT'" }
+  - id: R3
+    when: { tamperingSuspected: "== true" }
+    then: { allow: "false", reasons: "'TAMPERING_SUSPECTED'" }
+  - id: R4
+    when: { nameMatches: "== false" }
+    then: { allow: "false", reasons: "'NAME_MISMATCH'" }
+  - id: R5
+    when: { pepHit: "== true" }
+    then: { allow: "false", reasons: "'PEP_MATCH'" }
+  - id: R6
+    when: { adverseMedia: "== true" }
+    then: { allow: "false", reasons: "'ADVERSE_MEDIA'" }
+  - id: R7
+    when: { idConfidence: "< 0.85" }
+    then: { allow: "false", reasons: "'LOW_CONFIDENCE'" }
+  - id: R9
+    when: {}
+    then: { allow: "true", reasons: "''" }

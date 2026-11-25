@@ -173,14 +173,14 @@ class HostSecurityConfiguration {
             users.add(User.withUsername("minh").password(encoded).roles("PRICING_APPROVER", "PROCESS_APPROVER").build());
             users.add(User.withUsername("tuan").password(encoded).roles("TELLER").build());
             users.add(User.withUsername("an").password(encoded).roles("CARD_OFFICER", "KYC_OFFICER", "DISPUTES_OFFICER",
-                    "PAYMENT_OFFICER", "PRICING_OFFICER").build());
+                    "PAYMENT_OFFICER", "PRICING_OFFICER", "CREDIT_ANALYST", "CREDIT_MANAGER").build());
             // A branch supervisor holds both roles and may cancel: the four-eyes review refuses her on her own applications.
             users.add(User.withUsername("hoa").password(encoded).roles("TELLER", "CARD_OFFICER", "BRANCH_SUPERVISOR",
-                    "DISPUTES_SENIOR").build());
+                    "DISPUTES_SENIOR", "CREDIT_MANAGER", "CREDIT_COMMITTEE").build());
             // Operations runs live cases: correlates messages, broadcasts signals, migrates instances and proposes
             // calendars. hoa is the second holder of migration and calendar approval.
             users.add(User.withUsername("hung").password(encoded).roles("OPERATIONS_OFFICER", "OPS", "AML_OFFICER",
-                    "SANCTIONS_OFFICER").build());
+                    "SANCTIONS_OFFICER", "COMPLIANCE_REVIEWER").build());
             // The auditor reads rules, processes and the decision log, and changes nothing.
             users.add(User.withUsername("quynh").password(encoded).roles("AUDITOR").build());
         }
