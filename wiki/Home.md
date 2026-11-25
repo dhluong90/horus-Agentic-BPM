@@ -64,13 +64,13 @@ The decision, its inputs and the matched row are written to the decision log in 
 | Must keep the decision log and process history in your own database, in your own transactions | Need a product with production references: this is a release candidate, pending final acceptance |
 | Serve several businesses or tenants whose rules, roles and calendars differ, and want settings rather than a fork | Need an engine that ships one industry's business rules built in |
 
-Not sure? Read [[Compare and choose|Compare-and-Choose]]. It sets this project against Camunda 8, the Camunda 7 forks, Flowable, Drools and Kogito, Temporal and hand-coded rules, including where each of them is the better choice.
+Not sure? Read [[When to use it|When-to-Use]]. It lists the situations where HORUS Agentic BPM fits and where it does not.
 
 ## Start here
 
 | You are | Your question | Read |
 |---|---|---|
-| Evaluating or choosing an architecture | Does it fit, what does it replace, what does it not do? | [[Compare and choose|Compare-and-Choose]], [[Architecture]], [[Feature status|Feature-Status]] |
+| Evaluating or choosing an architecture | Does it fit, what does it replace, what does it not do? | [[When to use it|When-to-Use]], [[Architecture]], [[Feature status|Feature-Status]] |
 | A developer adding it to a service | How do I get a first process and decision running? | [[Getting Started: your own service|Getting-Started-Your-Own-Service]], [[Developer guides|Guides]], [[Troubleshooting]] |
 | A rule author or business analyst | How do I change a rule and get it approved? | [[Rule Engine Authoring Decision Tables]], [[Rule Engine Versioning and Publishing]], [[Cockpit]] |
 | Designing AI agent steps | How is agent output checked, and who reviews it? | [[Guarded agent steps|Guarded-Agent-Steps]], [[Process Engine Overview]] |

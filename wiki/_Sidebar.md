@@ -1,7 +1,7 @@
 **[[Home]]**
 
 **Evaluate**
-- [[Compare and choose|Compare-and-Choose]]
+- [[When to use it|When-to-Use]]
 - [[Licensing and commercial use|Licensing-and-Commercial-Use]]
 
 **Get started**

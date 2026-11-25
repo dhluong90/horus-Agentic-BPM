@@ -369,11 +369,11 @@ These are refused:
 | Structure | a lane set inside a sub-process. More than one `process` is refused as `PROCESS_NOT_IN_COLLABORATION` unless a collaboration points to each one |
 | Conditions and scripts | a `conditionExpression` or `scriptFormat` in a language other than `urn:horus-bpm:expr:v1` or FEEL, with the problem code `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED` naming the language (XPath, JavaScript and the others are `not planned`) |
 
-An attribute or extension element of another vendor, such as `camunda:class`, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
+An attribute or extension element from another modeler's namespace, such as a vendor `class` attribute on a service task, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
 
 ### A CMMN file
 
-The list is `unsupportedElements`, the same field and item shape the Rule Engine uses for a DMN file, so a client reads both engines with one parser. A successful import of a file with vendor attributes, such as `camunda:class`, answers `201` with a `warnings` list in the same item form (`FOREIGN_EXTENSION_IGNORED`, the attribute, the element id and the line): the stored source keeps them and the engine does not read them.
+The list is `unsupportedElements`, the same field and item shape the Rule Engine uses for a DMN file, so a client reads both engines with one parser. A successful import of a file with vendor attributes answers `201` with a `warnings` list in the same item form (`FOREIGN_EXTENSION_IGNORED`, the attribute, the element id and the line): the stored source keeps them and the engine does not read them.
 
 A file whose root element is in a CMMN namespace, such as `http://www.omg.org/spec/CMMN/20151109/MODEL`, is refused as `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line`. The reader stops at the root element, so no other part of the file is checked. A root in any other unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` with the problem code `NOT_BPMN`.
 

@@ -18,7 +18,6 @@ const repo = 'https://github.com/dhluong90/horus-Agentic-BPM';
             <li><a :href="withBase('/Concepts')">Concepts</a></li>
             <li><a :href="withBase('/Architecture')">Architecture</a></li>
             <li><a :href="withBase('/Guides')">Developer guides</a></li>
-            <li><a :href="withBase('/Compare-and-Choose')">Compare and choose</a></li>
           </ul>
         </nav>
         <nav aria-label="Project">

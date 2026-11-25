@@ -1,10 +1,10 @@
 # Guide: modelling in BPMN
 
-Draw the process in Camunda Modeler or bpmn.io, add a few `horus:` attributes, and import the file. The engine runs what the file says; there is no built-in modeller before 1.0.
+Draw the process in a standard BPMN 2.0 modeler, add a few `horus:` attributes, and import the file. The engine runs what the file says; there is no built-in modeller before 1.0.
 
 ## Draw and import
 
-1. Draw the process in Camunda Modeler (BPMN diagram, not Camunda 7 or 8 flavour) and keep `isExecutable="true"` on the process.
+1. Draw the process in a standard BPMN 2.0 modeler (a plain BPMN diagram, not a vendor-specific flavour) and keep `isExecutable="true"` on the process.
 2. Declare the namespace `xmlns:horus="urn:horus-bpm:bpmn:extensions:v1"` and set `expressionLanguage="urn:horus-bpm:expr:v1"` on `definitions`.
 3. Import it: `POST /api/bpm/processes/v1/definitions` with `Content-Type: application/xml`, or list it in `definitions.locations` for start-up. File limits are 1 MB and 500 steps.
 
@@ -32,6 +32,6 @@ The engine executes the elements listed in the [standards compliance table](http
 
 ## Models to copy
 
-More than twenty working models, each with a header comment, are in [`examples/rule-and-process/src/main/resources/processes`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/rule-and-process/src/main/resources/processes). They open in Camunda Modeler with their diagram.
+More than twenty working models, each with a header comment, are in [`examples/rule-and-process/src/main/resources/processes`](https://github.com/dhluong90/horus-Agentic-BPM/tree/main/examples/rule-and-process/src/main/resources/processes). They open in a standard BPMN modeler with their diagram.
 
 If the import refuses your file, read the `problems` list in the answer: each has a `code` and the `elementId` to fix ([[Troubleshooting]]).
