@@ -2,7 +2,7 @@
 
 This page owns the contribution process. `CONTRIBUTING.md` in the repository is the short form that GitHub shows when you open a pull request; when the two differ, this page wins and `CONTRIBUTING.md` is fixed.
 
-Until the first release the maintainers drive the roadmap; issues and small pull requests are welcome.
+Until the 1.0 release the maintainers drive the roadmap; issues and small pull requests are welcome.
 
 ## 1. Open an issue first
 
