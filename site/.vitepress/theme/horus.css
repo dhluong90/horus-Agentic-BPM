@@ -282,3 +282,13 @@
 .hx .shot img { cursor: default; -webkit-user-drag: none; user-select: none; }
 .hx .shot:focus { outline: none; }
 .hx .shot:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 3px; border-radius: var(--r-xl); }
+.hx .hero-fig{margin:0}
+.hx .hero-fig img{display:block;width:100%;height:auto;aspect-ratio:1400 / 753}
+.hx .vid{margin:0 auto 112px;max-width:1040px}
+.hx .show .vid{margin-bottom:0}
+.hx .vid video{display:block;width:100%;height:auto;aspect-ratio:16 / 10;background:var(--mint);border:1px solid var(--line);border-radius:var(--r-xl);box-shadow:var(--sh-3)}
+.hx .vid figcaption{display:grid;gap:6px;margin-top:20px;text-align:center}
+.hx .vid figcaption strong{font:700 24px/1.25 var(--font-ui);letter-spacing:-.015em;color:var(--ink)}
+.hx .vid figcaption span:last-child{font-size:17px;line-height:1.6;color:var(--ink-2);max-width:60ch;margin:0 auto}
+@media (max-width:1100px){.hx .vid{margin-bottom:72px}}
+@media (max-width:640px){.hx .vid{margin-bottom:56px}.hx .vid figcaption strong{font-size:21px}}

@@ -16,7 +16,7 @@ const pillars = [
   { icon: 'i-table', title: 'Rules your business edits', lead: 'Author, test, approve and publish decision tables in the cockpit. No code release.', ticks: [] }
 ];
 
-// Real captures of the 1.0 cockpit. w1 x h1 is the 1x size; w2 the 2x width.
+// Real captures of the cockpit. w1 x h1 is the 1x size; w2 the 2x width.
 const shots = [
   { id: 'process', h1: 377, w2: 1030, eyebrow: 'BPMN diagram', title: 'Every executable element, on the diagram.',
     text: 'Boundary events and compensation, from the BPMN you import, laid out automatically.',
@@ -44,6 +44,29 @@ const src = (id, w) => withBase(`/images/home/${id}-${w}.webp`);
 // The width and height of the file `src` points at, so the browser reserves the real ratio before (or without) the image.
 const dims = (s) => ({ w: s.wide ? 1400 : s.w1 || 700, h: s.h1 });
 const srcset = (s) => `${src(s.id, s.w1 || 700)} ${s.w1 || 700}w, ${src(s.id, s.w2)} ${s.w2}w`;
+
+const heroSrc = (w) => withBase(`/images/home/loan-hero-crop-${w}w.webp`);
+const heroSet = [700, 1030, 1400].map((w) => `${heroSrc(w)} ${w}w`).join(', ');
+const heroAlt = 'A retail loan origination process drawn in the cockpit: the application is validated, an AI agent does KYC and AML screening, a credit risk decision is graded, a risk route sends the case to a decline, a referral or automatic approval, and approval goes to a manager or a committee.';
+
+// Two short screen recordings. Both are 16:10, so the width and height attributes reserve the box before any byte loads.
+const videos = {
+  loan: { id: 'loan-flow', w: 1280, h: 800, eyebrow: 'A loan application', title: 'A loan application, end to end',
+    text: 'The application is screened by an AI agent, graded, routed by risk and approved by the right person.',
+    label: 'Screen recording of a loan application moving through the cockpit, from submission to approval.' },
+  rule: { id: 'rule-flow-v2', w: 1440, h: 900, eyebrow: 'Maker-checker', title: 'Change a rule, simulate, approve',
+    text: 'A maker edits a rule and simulates it. A second person reviews the change and approves it.',
+    label: 'Screen recording of a rule change: edit a decision table, simulate it against the live version, then a second user approves.' }
+};
+const vsrc = (v, ext) => withBase(`/images/home/${v.id}.${ext}`);
+const vposter = (v) => withBase(`/images/home/${v.id}-poster.webp`);
+
+// With prefers-reduced-motion the videos do not play by themselves: the poster stays and the browser's play control appears.
+const clips = ref([]);
+onMounted(() => {
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  clips.value.forEach((v) => { if (v) { v.removeAttribute('autoplay'); v.pause(); v.currentTime = 0; v.controls = true; } });
+});
 
 const features = [
   ['i-flow', 'Every executable BPMN 2.0 element', 'Gateways, events, compensation and sub-processes, imported and run.'],
@@ -82,41 +105,9 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
               </div>
               <p class="small">Java 21 or 25. Spring Boot. PostgreSQL. No cluster.</p>
             </div>
-            <div class="canvas-card" role="img" aria-label="A rule change process: draft, request approval, second approver check, publish on the effective date. A rejection returns to draft.">
-              <div class="canvas-top"><span>Processes /</span><b>Rule change</b><span class="live"><span class="dotlive"></span>Running</span></div>
-              <svg viewBox="0 0 596 330" aria-hidden="true">
-                <defs>
-                  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0 1l9 4-9 4z" fill="currentColor" style="color:var(--edge)" /></marker>
-                  <filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9" /></filter>
-                  <filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0E2F29" flood-opacity=".14" /></filter>
-                </defs>
-                <g class="ed" marker-end="url(#ah)">
-                  <path d="M40 160H62" /><path d="M162 160H192" /><path d="M292 160H306" /><path d="M364 160H428" /><path d="M528 160H554" />
-                  <path d="M336 188V270H112V190" stroke-dasharray="5 4" />
-                </g>
-                <circle cx="336" cy="160" r="38" style="fill:var(--glow)" opacity=".38" filter="url(#gl)" />
-                <g class="nd">
-                  <circle cx="26" cy="160" r="14" filter="url(#sh)" />
-                  <rect x="62" y="130" width="100" height="60" rx="10" filter="url(#sh)" />
-                  <rect x="192" y="130" width="100" height="60" rx="10" filter="url(#sh)" />
-                  <rect x="428" y="130" width="100" height="60" rx="10" filter="url(#sh)" />
-                  <path d="M336 130l30 30-30 30-30-30z" style="stroke:var(--token);stroke-width:2.4" filter="url(#sh)" />
-                  <circle cx="568" cy="160" r="14" style="stroke-width:3.5" filter="url(#sh)" />
-                </g>
-                <path d="M329 160l5 5 9-10" fill="none" style="stroke:var(--token)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
-                <g class="tx" font-size="13.5" text-anchor="middle" font-weight="500">
-                  <text x="112" y="157">Draft the</text><text x="112" y="175">change</text>
-                  <text x="242" y="157">Request</text><text x="242" y="175">approval</text>
-                  <text x="478" y="157">Publish on</text><text x="478" y="175">effective date</text>
-                </g>
-                <g class="tx2" font-size="12" text-anchor="middle"><text x="396" y="150">Approved</text><text x="224" y="262">Rejected: back to draft</text></g>
-                <g>
-                  <rect x="228" y="48" width="216" height="34" rx="17" style="fill:var(--accent-soft);stroke:var(--primary-fill)" />
-                  <text x="336" y="70" text-anchor="middle" font-size="13.5" font-weight="600" style="fill:var(--teal)">Requester cannot approve</text>
-                  <path d="M336 82V120" style="stroke:var(--primary-fill)" stroke-width="1.5" stroke-dasharray="3 3" />
-                </g>
-              </svg>
-            </div>
+            <figure class="canvas-card hero-fig">
+              <img :src="heroSrc(1400)" :srcset="heroSet" sizes="(max-width: 1100px) calc(100vw - 64px), 700px" width="1400" height="753" :alt="heroAlt" fetchpriority="high" decoding="async" />
+            </figure>
           </div>
         </div>
       </section>
@@ -138,13 +129,31 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
       <section id="see" class="tint">
         <div class="wrap wide">
           <div class="sec-head center"><p class="eyebrow">See it run</p><h2>The cockpit, embedded in your service.</h2></div>
+          <figure class="vid">
+              <video :ref="(el) => el && !clips.includes(el) && clips.push(el)" autoplay muted loop playsinline preload="metadata" :poster="vposter(videos.loan)" :width="videos.loan.w" :height="videos.loan.h" :aria-label="videos.loan.label">
+                <source :src="vsrc(videos.loan, 'webm')" type="video/webm" />
+                <source :src="vsrc(videos.loan, 'mp4')" type="video/mp4" />
+              </video>
+              <figcaption><span class="eyebrow">{{ videos.loan.eyebrow }}</span><strong>{{ videos.loan.title }}</strong><span>{{ videos.loan.text }}</span></figcaption>
+            </figure>
           <div class="show">
-            <div v-for="(s, i) in shots" :key="s.id" class="row" :class="{ flip: i % 2 === 1 && !s.wide, tall: s.tall, wide: s.wide }">
+            <template v-for="(s, i) in shots" :key="s.id">
+            <template v-if="s.id === 'approver-review'">
+            <figure class="vid">
+              <video :ref="(el) => el && !clips.includes(el) && clips.push(el)" autoplay muted loop playsinline preload="metadata" :poster="vposter(videos.rule)" :width="videos.rule.w" :height="videos.rule.h" :aria-label="videos.rule.label">
+                <source :src="vsrc(videos.rule, 'webm')" type="video/webm" />
+                <source :src="vsrc(videos.rule, 'mp4')" type="video/mp4" />
+              </video>
+              <figcaption><span class="eyebrow">{{ videos.rule.eyebrow }}</span><strong>{{ videos.rule.title }}</strong><span>{{ videos.rule.text }}</span></figcaption>
+            </figure>
+            </template>
+            <div class="row" :class="{ flip: i % 2 === 1 && !s.wide, tall: s.tall, wide: s.wide }">
               <figure class="shot" ref="frames" :data-shot="s.id" :tabindex="scrolls[s.id] ? 0 : undefined" :role="scrolls[s.id] ? 'group' : undefined" :aria-label="scrolls[s.id] ? `Screenshot: ${s.eyebrow}. Scroll sideways to see all of it.` : undefined">
                 <img :src="src(s.id, s.wide ? 1400 : s.w1 || 700)" :srcset="srcset(s)" :sizes="s.tall ? '360px' : s.wide ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 1100px) 100vw, 700px'" :width="s.wide ? 1400 : s.w1 || 700" :height="s.h1" :alt="s.alt" :style="{ aspectRatio: `${dims(s).w} / ${dims(s).h}` }" decoding="async" />
               </figure>
               <div><p class="eyebrow">{{ s.eyebrow }}</p><h3>{{ s.title }}</h3><p>{{ s.text }}</p></div>
             </div>
+            </template>
           </div>
         </div>
       </section>
