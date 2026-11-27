@@ -99,6 +99,13 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
 // At phone width a picture is small, so a tap (or Enter) opens it at full size in a modal dialog. The native <dialog>
 // traps focus, closes on Escape and returns focus to the picture that opened it; the full-size picture scrolls inside it.
 const phone = ref(false);
+// The words of the picture viewer follow the reader's language (English by default).
+const words = {
+  en: { open: 'Open full size', close: 'Close', dialog: 'Full-size picture', scroll: 'Scroll to see all of it.' },
+  vi: { open: 'Mở kích thước đầy đủ', close: 'Đóng', dialog: 'Ảnh kích thước đầy đủ', scroll: 'Cuộn để xem toàn bộ.' }
+};
+const text = ref(words.en);
+onMounted(() => { text.value = /^vi\b/i.test(document.documentElement.lang || navigator.language || '') ? words.vi : words.en; });
 let query;
 const syncPhone = () => { phone.value = query.matches; };
 onMounted(() => { query = window.matchMedia('(max-width: 640px)'); syncPhone(); query.addEventListener('change', syncPhone); });
@@ -112,7 +119,7 @@ const zoom = async (src, alt) => {
   dialog.value.showModal();
   closeButton.value.focus();
 };
-const zoomAttrs = (src, alt) => (phone.value ? { type: 'button', 'aria-haspopup': 'dialog', 'aria-label': `Open full size: ${alt}`, onClick: () => zoom(src, alt) } : {});
+const zoomAttrs = (src, alt) => (phone.value ? { type: 'button', 'aria-haspopup': 'dialog', 'aria-label': `${text.value.open}: ${alt}`, onClick: () => zoom(src, alt) } : {});
 </script>
 
 <template>
@@ -294,9 +301,9 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
         </div>
       </section>
     </main>
-    <dialog ref="dialog" class="zoom-dialog" aria-label="Full-size picture">
-      <button ref="closeButton" type="button" class="zoom-close" @click="dialog.close()">Close</button>
-      <div class="zoom-scroll" tabindex="0" role="group" :aria-label="zoomed.alt + ' Scroll to see all of it.'">
+    <dialog ref="dialog" class="zoom-dialog" :aria-label="text.dialog">
+      <button ref="closeButton" type="button" class="zoom-close" @click="dialog.close()">{{ text.close }}</button>
+      <div class="zoom-scroll" tabindex="0" role="group" :aria-label="`${zoomed.alt} ${text.scroll}`">
         <img :src="zoomed.src" :alt="zoomed.alt" />
       </div>
     </dialog>

@@ -34,11 +34,11 @@ describe('CKP-021 a task is completed through its declared form', () => {
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
-    // The format check passes; the engine refuses a rejection without a reason and names the field.
+    // The form's own `if`/`then` makes a rejection need a reason, so the screen says so before sending (#623).
     const reason = within(form).getByLabelText(/^Reason/);
     await waitFor(() => { expect(reason).toHaveAttribute('aria-invalid', 'true'); });
     expect(within(form).getByText('Fill in this field.')).toBeInTheDocument();
-    expect(await within(dock()).findByText('The engine refused the form. Correct the fields marked above.')).toBeInTheDocument();
+    expect(await within(dock()).findByText(/Check 1 field/)).toBeInTheDocument();
     expect(completions()).toHaveLength(0);
 
     await userEvent.type(reason, 'Income is not verified');

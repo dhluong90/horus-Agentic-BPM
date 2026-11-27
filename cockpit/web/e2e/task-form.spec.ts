@@ -57,7 +57,6 @@ async function refuse(page: Page, locale: Locale) {
   await page.getByRole('radio', { name: T.reject[locale] }).check();
   await page.getByLabel(T.date[locale]).fill(T.dateText[locale]);
   await page.getByRole('button', { name: T.complete[locale] }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.locator('.field__error').first()).toBeVisible();
 }
 
